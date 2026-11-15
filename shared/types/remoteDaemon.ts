@@ -230,6 +230,8 @@ export interface RemoteDaemonHostSettings {
   clients: RemoteDaemonClientRecord[];
   mobilePush: RemoteMobilePushSettings;
   access?: RemoteDaemonHostAccess;
+  /** This computer's own HTTPS address (a reverse proxy in front of Pane); linked computers reach it there. */
+  publicUrl?: string;
 }
 
 export type RemoteMobilePlatform = 'ios' | 'android';
@@ -380,6 +382,8 @@ export interface RemotePaneConnectionState {
   activeProfileId: string | null;
   activeProfileLabel: string | null;
   activeBaseUrl: string | null;
+  /** The route the active computer is on (`ComputerRoute.id`): the dot on its pill. */
+  activeRouteId?: string | null;
   lastError: string | null;
   lastSeenAt: string | null;
   /** The latest connection checklist, while a connect the user started runs, failed or warns. */
@@ -798,6 +802,8 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
   if (access) {
     hostSettings.access = access;
   }
+  const publicUrl = readOptionalString(host.publicUrl)?.trim();
+  if (publicUrl) hostSettings.publicUrl = publicUrl;
 
   const normalized: RemoteDaemonConfig = {
     host: hostSettings,

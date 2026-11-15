@@ -1,4 +1,5 @@
 import type { AppConfig } from '../types/config';
+import { allRouteProfiles } from '../../../shared/types/remoteComputers';
 import { isRemotePaneCommand, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { PaneWorkspaceHostController, WorkspaceHostStatus } from '../daemon/workspaceHost';
 import { describeMachine, execOnMachine, readMachineFile, writeMachineFile } from '../services/workspaceMachine';
@@ -58,7 +59,7 @@ const setAccessRequestSchema = boundary.object({
 });
 
 interface WorkspaceCommandConfig {
-  getConfig(): Pick<AppConfig, 'preferredShell' | 'workspaces' | 'remoteDaemon'>;
+  getConfig(): Pick<AppConfig, 'preferredShell' | 'workspaces' | 'remoteDaemon' | 'machineId'>;
   updateConfigWith(update: (current: Pick<AppConfig, 'workspaces'>) => Pick<AppConfig, 'workspaces'>): Promise<object>;
 }
 
@@ -123,6 +124,7 @@ export function registerWorkspaceCommands(
       visibility: access.visibility === 'tailnet' ? 'tailnet' : 'owner',
       passwordProtected: access.passwordProtected,
       paneVersion,
+      machineId: configManager.getConfig().machineId,
     };
   };
   // Describe answers clients admitted by visibility and password checks.
@@ -147,8 +149,8 @@ export function registerWorkspaceCommands(
         'Pair the glasses again from the Pane phone app: Settings › Glasses › Pair glasses.',
       );
     }
-    const { profiles } = normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client;
-    const result = await vouchForGlasses({ label: device.label, phoneId: device.phoneId }, { ...discovery, savedSecrets: savedWorkspaceSecrets(profiles) });
+    const { computers } = normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client;
+    const result = await vouchForGlasses({ label: device.label, phoneId: device.phoneId }, { ...discovery, savedSecrets: savedWorkspaceSecrets(allRouteProfiles(computers)) });
     console.info(`[Pane glasses] vouched for ${device.label}: ${result.code ? 'made a pairing code' : 'no computer to add'}${result.skipped.length ? `; skipped ${result.skipped.map((entry) => `${entry.name} (${entry.reason})`).join(', ')}` : ''}`);
     return result;
   });

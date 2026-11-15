@@ -221,15 +221,13 @@ describe('remote daemon IPC', () => {
     await expect(updateClientState?.({}, {
       activeProfileId: 'profile-1',
       mode: 'remote',
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       success: true,
       data: {
-        profiles: [{
+        computers: [{
           id: 'profile-1',
           label: 'Mac mini',
-          baseUrl: 'http://127.0.0.1:42137',
-          token: 'secret-token',
-          transport: 'http+sse',
+          routes: [expect.objectContaining({ baseUrl: 'http://127.0.0.1:42137', token: 'secret-token' })],
         }],
         activeProfileId: 'profile-1',
         mode: 'remote',
@@ -247,13 +245,12 @@ describe('remote daemon IPC', () => {
           mobilePush: { registrations: [], attentionSequence: 0, panelStates: {} },
         },
         client: {
-          profiles: [{
+          computers: [{
             id: 'profile-1',
             label: 'Mac mini',
-            baseUrl: 'http://127.0.0.1:42137',
-            token: 'secret-token',
-            transport: 'http+sse',
+            routes: [{ id: 'public:http://127.0.0.1:42137', kind: 'public', source: 'manual', baseUrl: 'http://127.0.0.1:42137', token: 'secret-token' }],
           }],
+          profiles: [],
           activeProfileId: 'profile-1',
           mode: 'remote',
         },
@@ -509,7 +506,7 @@ describe('remote daemon IPC', () => {
         connected: false,
       },
     });
-    expect(configManager.getConfig().remoteDaemon?.client.profiles[0]).toMatchObject({
+    expect(configManager.getConfig().remoteDaemon?.client.computers.flatMap((computer) => computer.routes.map((route) => ({ ...route, id: computer.id, label: computer.label })))[0]).toMatchObject({
       label: 'WSL',
       tunnel: {
         kind: 'tailscale',
@@ -565,9 +562,9 @@ describe('remote daemon IPC', () => {
     expect(configManager.getConfig().remoteDaemon?.client).toMatchObject({
       activeProfileId: null,
       mode: 'local',
-      profiles: [{
+      computers: [{
         label: 'WSL',
-        baseUrl: 'https://parsa-sl7.taila5e94c.ts.net',
+        routes: [{ kind: 'tailscale', baseUrl: 'https://parsa-sl7.taila5e94c.ts.net' }],
       }],
     });
   });
@@ -606,8 +603,8 @@ describe('remote daemon IPC', () => {
     expect(firstResponse.success).toBe(true);
     expect(secondResponse.success).toBe(true);
     expect(secondResponse.data?.profile?.id).toBe(firstResponse.data?.profile?.id);
-    expect(configManager.getConfig().remoteDaemon?.client.profiles).toHaveLength(1);
-    expect(configManager.getConfig().remoteDaemon?.client.profiles[0]).toMatchObject({
+    expect(configManager.getConfig().remoteDaemon?.client.computers).toHaveLength(1);
+    expect(configManager.getConfig().remoteDaemon?.client.computers.flatMap((computer) => computer.routes.map((route) => ({ ...route, id: computer.id, label: computer.label })))[0]).toMatchObject({
       id: firstResponse.data?.profile?.id,
       label: 'PARSA-SL7 Pane daemon',
       baseUrl: 'https://parsa-sl7.taila5e94c.ts.net',
@@ -735,10 +732,10 @@ describe('remote daemon IPC', () => {
 
     const deleteProfile = ipcMain.handlers.get('remote-daemon:delete-connection-profile');
 
-    await expect(deleteProfile?.({}, 'profile-1')).resolves.toEqual({
+    await expect(deleteProfile?.({}, 'profile-1')).resolves.toMatchObject({
       success: true,
       data: {
-        profiles: [],
+        computers: [],
         activeProfileId: null,
         mode: 'local',
       },
@@ -786,15 +783,13 @@ describe('remote daemon IPC', () => {
 
     const deleteProfile = ipcMain.handlers.get('remote-daemon:delete-connection-profile');
 
-    await expect(deleteProfile?.({}, 'profile-2')).resolves.toEqual({
+    await expect(deleteProfile?.({}, 'profile-2')).resolves.toMatchObject({
       success: true,
       data: {
-        profiles: [{
+        computers: [{
           id: 'profile-1',
           label: 'Workstation',
-          baseUrl: 'http://127.0.0.1:42137',
-          token: 'secret-token',
-          transport: 'http+sse',
+          routes: [expect.objectContaining({ baseUrl: 'http://127.0.0.1:42137', token: 'secret-token' })],
         }],
         activeProfileId: 'profile-1',
         mode: 'remote',
@@ -841,15 +836,13 @@ describe('remote daemon IPC', () => {
     await expect(updateClientState?.({}, {
       activeProfileId: null,
       mode: 'local',
-    })).resolves.toEqual({
+    })).resolves.toMatchObject({
       success: true,
       data: {
-        profiles: [{
+        computers: [{
           id: 'profile-1',
           label: 'Workstation',
-          baseUrl: 'http://127.0.0.1:42137',
-          token: 'secret-token',
-          transport: 'http+sse',
+          routes: [expect.objectContaining({ baseUrl: 'http://127.0.0.1:42137', token: 'secret-token' })],
         }],
         activeProfileId: null,
         mode: 'local',
@@ -924,7 +917,7 @@ describe('remote daemon IPC', () => {
     });
     expect(configManager.getConfig().remoteDaemon?.host.clients).toHaveLength(1);
     expectConnectionCodeAuthenticates(configManager, response.data?.connectionCode);
-    expect(configManager.getConfig().remoteDaemon?.client.profiles).toHaveLength(0);
+    expect(configManager.getConfig().remoteDaemon?.client.computers).toHaveLength(0);
   });
 
   it('refuses to hand out a code when the 443 forward cannot be confirmed', async () => {
@@ -1151,13 +1144,12 @@ describe('remote daemon IPC', () => {
           mobilePush: { registrations: [], attentionSequence: 0, panelStates: {} },
         },
         client: {
-          profiles: [{
+          computers: [{
             id: 'profile-1',
             label: 'Mac mini',
-            baseUrl: 'http://127.0.0.1:42137',
-            token: 'secret-token',
-            transport: 'http+sse',
+            routes: [{ id: 'public:http://127.0.0.1:42137', kind: 'public', source: 'manual', baseUrl: 'http://127.0.0.1:42137', token: 'secret-token' }],
           }],
+          profiles: [],
           activeProfileId: null,
           mode: 'local',
         },

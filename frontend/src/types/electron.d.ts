@@ -76,7 +76,7 @@ import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpa
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
-import type { RelayStatus } from '../../../shared/types/relay';
+import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../../shared/types/relay';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
 import type {
@@ -580,7 +580,9 @@ interface ElectronAPI {
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;
     onRelayStatusChanged: (callback: (status: RelayStatus) => void) => () => void;
-    onRelayPaired: (callback: (event: { clientId: string; label: string }) => void) => () => void;
+    onRelayPaired: (callback: (event: RelayPairedEvent) => void) => () => void;
+    onRelayLinkOpened: (callback: (event: RelayLinkOpenedEvent) => void) => () => void;
+    onSshRouteProgress: (callback: (progress: { host: string; step: 'connecting' | 'checking-node' | 'installing' | 'starting' | 'linked' | 'failed'; message: string }) => void) => () => void;
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
     /** A phone or another window saved settings on this host; refetch the config. */
     onRemoteSettingsChanged: (callback: () => void) => () => void;

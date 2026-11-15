@@ -178,7 +178,13 @@ export async function discoverTailnetMachines({ readStatus, probe, savedSecrets,
     if (!result) return isMine ? [{ ...base, state: 'unreachable' }] : [];
     switch (result.kind) {
       case 'described':
-        return [{ ...base, state: 'available', visibility: result.description.visibility, paneVersion: result.description.paneVersion }];
+        return [{
+          ...base,
+          state: 'available',
+          visibility: result.description.visibility,
+          paneVersion: result.description.paneVersion,
+          ...(result.description.machineId ? { machineId: result.description.machineId } : {}),
+        }];
       case 'password-required':
         return [{ ...base, state: 'password-required' }];
       case 'outdated':
@@ -299,6 +305,7 @@ const descriptionSchema = boundary.object({
   visibility: boundary.enumeration('owner', 'tailnet'),
   passwordProtected: boundary.boolean,
   paneVersion: boundary.string,
+  machineId: boundary.optional(boundary.string),
 });
 
 /**

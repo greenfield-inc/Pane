@@ -180,6 +180,24 @@ export function routeProfile(computer: RemoteComputer, route: ComputerRoute): Re
   return profile;
 }
 
+/**
+ * Saves a connection profile (a connection code, a self-test pair) as one route of the computer
+ * with its id, or as a new computer.
+ */
+export function saveProfileRoute(computers: readonly RemoteComputer[], profile: RemotePaneConnectionProfile, source: ComputerRouteSource = 'manual'): RemoteComputer[] {
+  const route = routeFromProfile(profile, source);
+  const existing = computers.find((computer) => computer.id === profile.id);
+  if (!existing) return [...computers, { id: profile.id, label: profile.label, routes: [route] }];
+  return computers.map((computer) => (computer === existing
+    ? { ...computer, label: profile.label, routes: withRoutes(computer.routes.filter((candidate) => candidate.kind !== route.kind || candidate.id === route.id), [route]) }
+    : computer));
+}
+
+/** Every route of every computer, each as a connection profile. */
+export function allRouteProfiles(computers: readonly RemoteComputer[]): RemotePaneConnectionProfile[] {
+  return computers.flatMap((computer) => computer.routes.map((route) => routeProfile(computer, route)));
+}
+
 /** The route a computer is tried on first: its first. */
 export function primaryProfile(computer: RemoteComputer): RemotePaneConnectionProfile {
   return routeProfile(computer, computer.routes[0]);

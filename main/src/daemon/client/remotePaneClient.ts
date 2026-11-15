@@ -3,6 +3,7 @@ import { pinnedServerIdentity } from '../relay/keyPinning';
 import { DirectPath } from '../relay/directPath';
 import { findPaneDirect } from '../relay/paneDirect';
 import { RELAY_CLIENT_COMMANDS } from '../../../../shared/types/relay';
+import { applyRoutesReport, decodeComputerRoutesReport, primaryProfile, routeProfile, type ComputerRoute, type ComputerRouteKind, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
 import { EventEmitter } from 'events';
 import { lookup as defaultLookup, Resolver } from 'dns';
 import http, { type IncomingMessage, type RequestOptions } from 'http';
@@ -60,6 +61,17 @@ interface RemoteConnectionStateMetadata {
   hostVersion?: string;
   /** The host's install id from its ready event; absent before ready and from older hosts. */
   hostMachineId?: string;
+  /** What the host reported about itself on its ready event: its install id and routes. Older hosts omit it. */
+  hostRoutes?: ComputerRoutesReport;
+  /** The route the connection is on (`ComputerRoute.id`); absent for a connection with one route. */
+  routeId?: string;
+}
+
+/** One way to reach the host: a computer's route as a connection profile, nearest first. */
+export interface RemoteRouteCandidate {
+  routeId: string;
+  kind: ComputerRouteKind;
+  profile: RemotePaneConnectionProfile;
 }
 
 interface RemotePaneClientOptions {
@@ -86,6 +98,18 @@ interface RemotePaneClientOptions {
   onResyncRequired?: () => void | Promise<void>;
   /** Resolves the host's name before the Tailscale fallback; the system resolver unless a test fakes it. */
   dnsLookup?: LookupFunction;
+  /**
+   * The computer's routes, nearest first (D-51). The client connects on the first that answers,
+   * moves to the next when one drops, and moves back when a nearer one answers again. Absent: the
+   * profile is the only route.
+   */
+  routes?: RemoteRouteCandidate[];
+  /** Readies a route before it is dialed: a Tailscale address looked up, an SSH tunnel opened. */
+  prepareRoute?: (route: RemoteRouteCandidate) => Promise<RemotePaneConnectionProfile>;
+  /** How often a nearer route is checked while a farther one carries the connection. */
+  routeRecheckMs?: number;
+  /** With another route to move to, how long without any event before the stream counts as dropped. */
+  failoverStaleTimeoutMs?: number;
 }
 
 interface RemotePaneClientConnectOptions {
@@ -122,6 +146,8 @@ interface RemoteReadyEventPayload {
   /** The host runs a write once per request id and answers a repeat with the first answer. Older hosts omit it. */
   deduplicatesRequestIds?: boolean;
   machineId?: string;
+  /** `ComputerRoutesReport`, decoded where it is used. */
+  computer?: JsonValue;
 }
 
 const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
@@ -148,6 +174,7 @@ const remoteReadyEventSchema: BoundarySchema<RemoteReadyEventPayload> = boundary
   paneVersion: boundary.optional(boundary.string),
   deduplicatesRequestIds: boundary.optional(boundary.boolean),
   machineId: boundary.optional(boundary.string),
+  computer: boundary.optional(boundary.json),
 });
 const remoteHeartbeatSchema: BoundarySchema<RemoteDaemonHeartbeatPayload> = boundary.object({
   timestamp: boundary.nonEmptyString,
@@ -173,6 +200,16 @@ const REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS = 300_000;
 /** Answers that mean the request was cut off, not refused; only these are retried. */
 const INTERRUPTION_CODES = new Set(['ERR_REMOTE_TRANSPORT', 'ERR_REMOTE_DELIVERY_UNKNOWN', 'ERR_REMOTE_STALE_RESPONSE']);
 const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
+/**
+ * With another route to move to, a stream silent this long counts as dropped: the host sends a
+ * heartbeat every 5 s, so this is one missed heartbeat and margin. Moving routes then fits in the
+ * 10 s before the "Can't reach" banner shows.
+ */
+const ROUTE_FAILOVER_STALE_TIMEOUT_MS = 8_000;
+/** How long one route gets to answer before the next is tried. */
+const ROUTE_ATTEMPT_TIMEOUT_MS = 4_000;
+/** While a farther route carries the connection, how often the nearer ones are checked. */
+const ROUTE_RECHECK_MS = 60_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
 const REMOTE_DAEMON_RESTORE_TIMEOUT_MS = 30_000;
 const REMOTE_DAEMON_REQUEST_TIMEOUT_MS = 15_000;
@@ -207,7 +244,16 @@ type RemoteRequestOptions = RequestOptions & {
 };
 
 export class RemotePaneClient {
-  private readonly normalizedBaseUrl: URL;
+  private normalizedBaseUrl: URL;
+  /** The route the connection uses now, as prepared for dialing. */
+  private currentProfile: RemotePaneConnectionProfile;
+  private routes: RemoteRouteCandidate[];
+  private routeIndex = 0;
+  private readonly prepareRoute?: (route: RemoteRouteCandidate) => Promise<RemotePaneConnectionProfile>;
+  private readonly routeRecheckMs: number;
+  private readonly failoverStaleTimeoutMs: number;
+  private routeRecheckTimer: NodeJS.Timeout | null = null;
+  private recheckingRoutes = false;
   private readonly eventSink: PaneEventSink;
   private readonly machineId?: string;
   private readonly initialHandshakeTimeoutMs: number;
@@ -256,10 +302,15 @@ export class RemotePaneClient {
   );
 
   constructor(
-    readonly profile: RemotePaneConnectionProfile,
+    profile: RemotePaneConnectionProfile,
     options: RemotePaneClientOptions = {},
   ) {
+    this.currentProfile = profile;
     this.normalizedBaseUrl = normalizeBaseUrl(profile.baseUrl);
+    this.routes = options.routes?.length ? options.routes : [{ routeId: '', kind: profile.relay ? 'relay' : 'public', profile }];
+    this.prepareRoute = options.prepareRoute;
+    this.routeRecheckMs = options.routeRecheckMs ?? ROUTE_RECHECK_MS;
+    this.failoverStaleTimeoutMs = options.failoverStaleTimeoutMs ?? ROUTE_FAILOVER_STALE_TIMEOUT_MS;
     this.eventSink = options.eventSink ?? noopPaneEventSink;
     this.machineId = options.machineId;
     this.initialHandshakeTimeoutMs = options.initialHandshakeTimeoutMs
@@ -274,10 +325,144 @@ export class RemotePaneClient {
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.onResyncRequired = options.onResyncRequired;
     this.dnsLookup = options.dnsLookup ?? defaultLookup;
-    const directBin = profile.relay ? findPaneDirect() : null;
-    this.direct = profile.relay && directBin
-      ? new DirectPath({ bin: directBin, baseUrl: this.normalizedBaseUrl, fingerprint: profile.relay.fingerprint, label: profile.label, log: (line) => console.log(line) })
+    // The direct QUIC path rides on the relay route only.
+    const relayRoute = this.routes.find((route) => route.kind === 'relay' && route.profile.relay);
+    const directBin = relayRoute ? findPaneDirect() : null;
+    this.direct = relayRoute?.profile.relay && directBin
+      ? new DirectPath({
+          bin: directBin,
+          baseUrl: normalizeBaseUrl(relayRoute.profile.baseUrl),
+          fingerprint: relayRoute.profile.relay.fingerprint,
+          label: profile.label,
+          log: (line) => console.log(line),
+          // The client already knows the relay failed: move at once instead of waiting out the heartbeat.
+          onRelayFailed: () => this.dropRelayStream(),
+        })
       : null;
+  }
+
+  /** The route in use, in the shape requests take. */
+  get profile(): RemotePaneConnectionProfile {
+    return this.currentProfile;
+  }
+
+  /** The route the connection is on; empty for a connection with one route. */
+  get routeId(): string {
+    return this.routes[this.routeIndex]?.routeId ?? '';
+  }
+
+  private onRelayRoute(): boolean {
+    return this.routes[this.routeIndex]?.kind === 'relay';
+  }
+
+  /** Readies route `index` and makes it the one requests use. */
+  private async useRoute(index: number): Promise<void> {
+    const route = this.routes[index];
+    const prepared = this.prepareRoute ? await this.prepareRoute(route) : route.profile;
+    this.routeIndex = index;
+    this.currentProfile = prepared;
+    this.normalizedBaseUrl = normalizeBaseUrl(prepared.baseUrl);
+  }
+
+  /** Route indexes to try: nearest first, with the one that just failed last. */
+  private routeOrder(failedRouteId?: string): number[] {
+    const order = this.routes.map((_route, index) => index);
+    if (!failedRouteId || this.routes.length < 2) return order;
+    return [...order.filter((index) => this.routes[index].routeId !== failedRouteId), ...order.filter((index) => this.routes[index].routeId === failedRouteId)];
+  }
+
+  /** Opens the event stream on the first route that answers. */
+  private async openOnRoutes(isReconnect: boolean, resolveOnReady = false, failedRouteId?: string): Promise<void> {
+    const order = this.routeOrder(failedRouteId);
+    let lastError: unknown = new Error('No route to the host');
+    for (const [position, index] of order.entries()) {
+      const final = position === order.length - 1;
+      try {
+        await this.useRoute(index);
+      } catch (error) {
+        lastError = error;
+        if (final) throw error;
+        continue;
+      }
+      if (this.closedByClient || this.suspended) return;
+      try {
+        await this.openEventStream(isReconnect, resolveOnReady, final ? undefined : ROUTE_ATTEMPT_TIMEOUT_MS, final);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (final || this.closedByClient || this.recoveryStopped) throw error;
+        console.info(`[Pane remote daemon] ${this.currentProfile.label}: route ${this.routes[index].kind} did not answer (${getErrorMessage(error, 'unknown error')}); trying the next`);
+      }
+    }
+    throw lastError;
+  }
+
+  /** The relay failed a probe the direct path passed: drop the stream so it reopens over the direct path or the next route now. */
+  private dropRelayStream(): void {
+    if (!this.onRelayRoute() || this.status !== 'connected') return;
+    this.handleUnexpectedDisconnect('The relay stopped answering', true);
+  }
+
+  /**
+   * Checks the routes nearer than the one in use and moves to the first that answers. Runs every
+   * minute while on a farther route, and when the network or the app wakes.
+   */
+  async recheckNearerRoutes(): Promise<void> {
+    if (this.recheckingRoutes || this.routeIndex === 0 || this.status !== 'connected' || this.closedByClient || this.suspended) return;
+    this.recheckingRoutes = true;
+    try {
+      for (let index = 0; index < this.routeIndex; index += 1) {
+        const route = this.routes[index];
+        let prepared: RemotePaneConnectionProfile;
+        try {
+          prepared = this.prepareRoute ? await this.prepareRoute(route) : route.profile;
+        } catch {
+          continue;
+        }
+        const health = await this.checkHealthAt(prepared, ROUTE_ATTEMPT_TIMEOUT_MS);
+        if (health.kind !== 'running' || this.status !== 'connected' || this.closedByClient) continue;
+        console.info(`[Pane remote daemon] ${this.currentProfile.label}: moving back to ${route.kind}`);
+        await this.moveToRoute(index);
+        return;
+      }
+    } finally {
+      this.recheckingRoutes = false;
+    }
+  }
+
+  /** Reopens the stream on route `index` now, the way a reconnect does; on failure the usual recovery takes over. */
+  private async moveToRoute(index: number): Promise<void> {
+    const previous = this.routes[this.routeIndex]?.routeId;
+    this.streamGeneration += 1;
+    this.clearHeartbeatStaleTimer();
+    this.eventResponse?.destroy();
+    this.eventRequest?.destroy();
+    this.eventResponse = null;
+    this.eventRequest = null;
+    this.eventParser.reset();
+    this.armDeadline();
+    try {
+      await this.useRoute(index);
+      await this.openEventStream(true, false, ROUTE_ATTEMPT_TIMEOUT_MS, false);
+    } catch {
+      // The nearer route answered its check but not the stream: carry on over the others.
+      if (this.closedByClient) return;
+      const failed = this.routes[index]?.routeId ?? previous;
+      await this.openOnRoutes(true, false, failed).catch((error) => {
+        this.scheduleReconnect(getErrorMessage(error, 'Remote host unavailable'), failed);
+      });
+    }
+  }
+
+  private armRouteRecheck(): void {
+    this.clearRouteRecheck();
+    if (this.routeIndex === 0 || this.closedByClient) return;
+    this.routeRecheckTimer = setInterval(() => void this.recheckNearerRoutes(), this.routeRecheckMs);
+  }
+
+  private clearRouteRecheck(): void {
+    if (this.routeRecheckTimer) clearInterval(this.routeRecheckTimer);
+    this.routeRecheckTimer = null;
   }
 
   /** A codeless profile without a password relies on Tailscale identity alone. */
@@ -285,15 +470,20 @@ export class RemotePaneClient {
     return this.profile.token ? { Authorization: `Bearer ${this.profile.token}` } : {};
   }
 
-  isSameProfile(profile: RemotePaneConnectionProfile): boolean {
-    return (
-      this.profile.id === profile.id &&
-      // A codeless profile's address is looked up at connect, so the saved one may differ.
-      (profile.tailnetMachine
-        ? this.profile.tailnetMachine === profile.tailnetMachine
-        : this.profile.baseUrl === profile.baseUrl) &&
-      this.profile.token === profile.token
-    );
+  /**
+   * Takes the computer's routes as saved now (reordered, or with routes it reported). False when
+   * the route in use is gone or changed, so the connection must be made again.
+   */
+  adoptRoutes(routes: readonly RemoteRouteCandidate[]): boolean {
+    const current = this.routes[this.routeIndex];
+    const index = routes.findIndex((route) => route.routeId === current.routeId && route.profile.id === current.profile.id
+      && route.profile.token === current.profile.token
+      && (route.profile.tailnetMachine ? route.profile.tailnetMachine === current.profile.tailnetMachine : route.profile.baseUrl === current.profile.baseUrl));
+    if (index < 0) return false;
+    this.routes = [...routes];
+    this.routeIndex = index;
+    if (this.status === 'connected') this.armRouteRecheck();
+    return true;
   }
 
   async connect(options: RemotePaneClientConnectOptions = {}): Promise<void> {
@@ -302,7 +492,7 @@ export class RemotePaneClient {
     this.recovery.reset();
     this.armDeadline();
     try {
-      await this.openEventStream(false, options.resolveOnReady);
+      await this.openOnRoutes(false, options.resolveOnReady);
     } catch (error) {
       const message = getErrorMessage(error, 'Failed to connect to remote daemon event stream');
       if (options.retryOnInitialFailure ?? true) {
@@ -321,7 +511,7 @@ export class RemotePaneClient {
     this.clearReconnectTimer();
     if (this.recoveryStopped) { this.recovery.reset(); this.recoveryStopped = false; }
     this.armDeadline();
-    try { await this.openEventStream(true); }
+    try { await this.openOnRoutes(true); }
     catch (error) { this.scheduleReconnect(getErrorMessage(error, 'Remote host unavailable')); }
   }
 
@@ -333,6 +523,7 @@ export class RemotePaneClient {
     for (const waiter of [...this.statusWaiters]) waiter();
     this.clearReconnectTimer();
     this.clearHeartbeatStaleTimer();
+    this.clearRouteRecheck();
     this.eventParser.reset();
 
     if (this.eventResponse && !this.eventResponse.destroyed) {
@@ -419,9 +610,13 @@ export class RemotePaneClient {
    * host that answered; a timeout or failed lookup means the host itself was not reached.
    */
   async checkHealth(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<HostHealthCheck> {
-    const endpoint = new URL('health', this.normalizedBaseUrl);
+    return this.checkHealthAt(this.currentProfile, timeoutMs);
+  }
+
+  private async checkHealthAt(profile: RemotePaneConnectionProfile, timeoutMs: number): Promise<HostHealthCheck> {
+    const endpoint = new URL('health', normalizeBaseUrl(profile.baseUrl));
     const startedAt = Date.now();
-    const result = await this.timedGet(endpoint, {}, timeoutMs);
+    const result = await this.timedGet(endpoint, {}, timeoutMs, profile);
     const elapsedMs = Date.now() - startedAt;
     if ('statusCode' in result) {
       return PROXY_BACKEND_DOWN_STATUSES.has(result.statusCode)
@@ -446,9 +641,10 @@ export class RemotePaneClient {
     endpoint: URL,
     headers: http.OutgoingHttpHeaders,
     timeoutMs: number,
+    profile: RemotePaneConnectionProfile = this.currentProfile,
   ): Promise<{ statusCode: number } | { code: string | undefined; message: string }> {
     return new Promise((resolve) => {
-      const request = createRequest(endpoint, this.buildRequestOptions(endpoint, { method: 'GET', headers }), (response) => {
+      const request = createRequest(endpoint, this.buildRequestOptions(endpoint, { method: 'GET', headers }, profile), (response) => {
         response.resume();
         resolve({ statusCode: response.statusCode ?? 0 });
       });
@@ -469,6 +665,7 @@ export class RemotePaneClient {
     this.streamGeneration += 1;
     this.clearReconnectTimer();
     this.clearHeartbeatStaleTimer();
+    this.clearRouteRecheck();
     this.eventParser.reset();
     this.eventResponse?.destroy();
     this.eventRequest?.destroy();
@@ -484,7 +681,8 @@ export class RemotePaneClient {
     if (this.recoveryStopped) return;
     if (!this.recovery.remainingMs) { this.expireRecovery(); return; }
     this.armDeadline();
-    void this.openEventStream(true).catch((error) => {
+    // Waking may have changed networks: nearest route first.
+    void this.openOnRoutes(true).catch((error) => {
       this.scheduleReconnect(getErrorMessage(error, 'Failed to reconnect to remote daemon event stream'));
     });
   }
@@ -616,7 +814,7 @@ export class RemotePaneClient {
     return payload.result;
   }
 
-  private async openEventStream(isReconnect: boolean, resolveOnReady = false): Promise<void> {
+  private async openEventStream(isReconnect: boolean, resolveOnReady = false, handshakeTimeoutMs?: number, final = true): Promise<void> {
     this.clearReconnectTimer();
     const generation = ++this.streamGeneration;
     this.failedRequestsInARow = 0;
@@ -679,7 +877,8 @@ export class RemotePaneClient {
           rejectBeforeReady(message, true);
         }, Math.min(timeoutMs, this.recovery.remainingMs));
       };
-      armTimeout(this.initialHandshakeTimeoutMs, `Timed out waiting for remote daemon ready event after ${this.initialHandshakeTimeoutMs}ms`);
+      const handshakeMs = Math.min(handshakeTimeoutMs ?? this.initialHandshakeTimeoutMs, this.initialHandshakeTimeoutMs);
+      armTimeout(handshakeMs, `Timed out waiting for remote daemon ready event after ${handshakeMs}ms`);
 
       const headers: http.OutgoingHttpHeaders = {
         ...this.authorizationHeader(),
@@ -698,7 +897,8 @@ export class RemotePaneClient {
             const message = extractRemoteErrorMessage(body)
               ?? `Remote daemon event stream failed with status ${response.statusCode ?? 'unknown'}`;
             rejectBeforeReady(message, true);
-            if (response.statusCode === 401 || response.statusCode === 403) {
+            // One route refusing the credential leaves the others to try.
+            if (final && (response.statusCode === 401 || response.statusCode === 403)) {
               this.stopRecovery('The host rejected your credentials. Open connection settings to sign in again.');
             }
           } catch (error) {
@@ -728,14 +928,20 @@ export class RemotePaneClient {
               this.markRemoteSeen();
               armTimeout(this.restoreTimeoutMs, `Workspace restoration timed out after ${this.restoreTimeoutMs}ms`);
               if (resolveOnReady && !settled) { settled = true; resolve(); }
-              this.reportStatus('restoring', 'host ready', null, { hostVersion: readyPayload.paneVersion, hostMachineId: readyPayload.machineId });
+              const hostRoutes = decodeComputerRoutesReport(readyPayload.computer);
+              this.reportStatus('restoring', 'host ready', null, {
+                hostVersion: readyPayload.paneVersion,
+                hostMachineId: readyPayload.machineId,
+                ...(hostRoutes ? { hostRoutes } : {}),
+              });
               void Promise.resolve().then(() => this.onResyncRequired?.()).then(() => {
                 if (!isStale()) {
                   clearHandshakeTimer();
                   this.clearDeadline();
                   this.recovery.reset();
                   this.reportStatus('connected', 'workspace restored');
-                  void this.refreshDirectPath();
+                  this.armRouteRecheck();
+                  if (this.onRelayRoute()) void this.refreshDirectPath();
                 }
                 if (!settled) { settled = true; resolve(); }
               }, error => {
@@ -824,16 +1030,16 @@ export class RemotePaneClient {
     }
   }
 
-  private buildRequestOptions(endpoint: URL, options: RequestOptions): RemoteRequestOptions {
-    const lookup = createTailscaleFallbackLookup(this.profile, endpoint, this.dnsLookup);
+  private buildRequestOptions(endpoint: URL, options: RequestOptions, profile: RemotePaneConnectionProfile = this.currentProfile): RemoteRequestOptions {
+    const lookup = createTailscaleFallbackLookup(profile, endpoint, this.dnsLookup);
     const requestOptions: RemoteRequestOptions = { ...options };
     if (lookup) {
       requestOptions.lookup = lookup;
     }
     if (endpoint.protocol === 'https:') {
       requestOptions.servername = endpoint.hostname;
-      if (this.profile.relay) requestOptions.checkServerIdentity = pinnedServerIdentity(this.profile.relay.fingerprint, this.profile.label);
-      if (this.direct) requestOptions.agent = this.direct.agent();
+      if (profile.relay) requestOptions.checkServerIdentity = pinnedServerIdentity(profile.relay.fingerprint, profile.label);
+      if (this.direct && profile === this.currentProfile && this.onRelayRoute()) requestOptions.agent = this.direct.agent();
     }
     return requestOptions;
   }
@@ -847,6 +1053,8 @@ export class RemotePaneClient {
 
   private handleUnexpectedDisconnect(message: string, destroyStream: boolean): void {
     this.streamGeneration += 1;
+    const failedRouteId = this.routes.length > 1 ? this.routeId : undefined;
+    this.clearRouteRecheck();
     // A host that de-duplicates gets the in-flight input resent with its id, then the queued input in order.
     if (!this.deduplicatesRequestIds) this.inputQueue.cancel(new Error(message));
     const activeResponse = this.eventResponse;
@@ -871,6 +1079,15 @@ export class RemotePaneClient {
       return;
     }
 
+    // Another route may carry it at once; the backoff starts only when none does.
+    if (failedRouteId !== undefined) {
+      this.reportStatus('reconnecting', `${message}; trying the other routes`, message);
+      this.armDeadline();
+      void this.openOnRoutes(true, false, failedRouteId).catch((error) => {
+        this.scheduleReconnect(getErrorMessage(error, message), failedRouteId);
+      });
+      return;
+    }
     this.scheduleReconnect(message);
   }
 
@@ -899,7 +1116,7 @@ export class RemotePaneClient {
     this.reportStatus('error', message, message);
   }
 
-  private scheduleReconnect(message: string): void {
+  private scheduleReconnect(message: string, failedRouteId?: string): void {
     if (this.closedByClient || this.suspended || this.recoveryStopped || this.reconnectTimer) return;
     this.armDeadline();
     const delay = this.recovery.nextDelay();
@@ -908,8 +1125,8 @@ export class RemotePaneClient {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.recovery.remainingMs) { this.expireRecovery(); return; }
-      void this.openEventStream(true).catch(error => {
-        this.scheduleReconnect(getErrorMessage(error, 'Failed to reconnect to remote daemon event stream'));
+      void this.openOnRoutes(true, false, failedRouteId).catch(error => {
+        this.scheduleReconnect(getErrorMessage(error, 'Failed to reconnect to remote daemon event stream'), failedRouteId);
       });
     }, delay);
   }
@@ -919,11 +1136,12 @@ export class RemotePaneClient {
     status: RemotePaneConnectionStatus,
     reason: string,
     errorMessage: string | null = null,
-    host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId'> = {},
+    host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes'> = {},
   ): void {
-    console.info(`[Pane remote daemon] ${this.profile.label}: ${status} (${reason})`);
+    const route = this.routes[this.routeIndex];
+    console.info(`[Pane remote daemon] ${this.profile.label}: ${status}${this.routes.length > 1 ? ` on ${route.kind}` : ''} (${reason})`);
     this.status = status;
-    this.onConnectionStateChange?.(status, errorMessage, { lastSeenAt: this.lastSeenAt, ...host });
+    this.onConnectionStateChange?.(status, errorMessage, { lastSeenAt: this.lastSeenAt, ...host, ...(route?.routeId ? { routeId: route.routeId } : {}) });
     for (const waiter of [...this.statusWaiters]) waiter();
   }
 
@@ -938,12 +1156,13 @@ export class RemotePaneClient {
     this.lastSeenAt = timestamp;
     this.clearHeartbeatStaleTimer();
     if (!this.closedByClient && !this.suspended) {
+      const staleMs = this.routes.length > 1 ? Math.min(this.failoverStaleTimeoutMs, this.heartbeatStaleTimeoutMs) : this.heartbeatStaleTimeoutMs;
       this.heartbeatStaleTimer = setTimeout(() => {
         this.handleUnexpectedDisconnect(
-          `Remote daemon heartbeat timed out after ${this.heartbeatStaleTimeoutMs}ms`,
+          `Remote daemon heartbeat timed out after ${staleMs}ms`,
           true,
         );
-      }, this.heartbeatStaleTimeoutMs);
+      }, staleMs);
     }
     return timestamp;
   }
@@ -970,6 +1189,8 @@ interface RemotePaneClientControllerOptions {
   freshBoot?: boolean;
   /** Passed to each RemotePaneClient; see its `dnsLookup`. */
   dnsLookup?: LookupFunction;
+  /** Opens the SSH tunnel of an SSH route and resolves the local address to dial. */
+  prepareSshRoute?: (route: ComputerRoute) => Promise<string>;
 }
 
 const defaultCheckDependencies: ConnectionCheckDependencies = {
@@ -995,6 +1216,7 @@ export class RemotePaneClientController extends EventEmitter {
   private rendererEventSink: PaneEventSink = noopPaneEventSink;
   private analyticsManager: Pick<AnalyticsManager, 'track'> | undefined;
   private resolveTailnetMachineUrl: ((machine: TailnetMachineRef) => Promise<string>) | undefined;
+  private prepareSshRoute: ((route: ComputerRoute) => Promise<string>) | undefined;
   private activeClient: RemotePaneClient | null = null;
   private rendererIds: () => number[] = () => [];
   private restoreSequence = 0;
@@ -1049,6 +1271,7 @@ export class RemotePaneClientController extends EventEmitter {
     this.rendererEventSink = options.rendererEventSink;
     this.analyticsManager = options.analyticsManager;
     this.resolveTailnetMachineUrl = options.resolveTailnetMachineUrl;
+    this.prepareSshRoute = options.prepareSshRoute;
     this.appVersion = options.appVersion;
     this.checkDependencies = { ...defaultCheckDependencies, ...options.checkDependencies };
     this.dnsLookup = options.dnsLookup;
@@ -1157,7 +1380,7 @@ export class RemotePaneClientController extends EventEmitter {
     profile: RemotePaneConnectionProfile,
     options: { recheck?: boolean } = {},
   ): Promise<RemotePaneConnectionState> {
-    const sameProfile = this.activeClient?.isSameProfile(profile) === true;
+    const sameProfile = this.activeClient?.profile.id === profile.id && this.activeClient.adoptRoutes(this.routesFor(profile));
     if (sameProfile && this.state.status === 'connected' && !options.recheck) {
       // Choosing the connected host again closes a card left by a failed switch to another host.
       if (this.check && this.check.outcome !== 'running') {
@@ -1236,6 +1459,8 @@ export class RemotePaneClientController extends EventEmitter {
 
   /** Retries a reconnecting host at once, instead of waiting out the backoff, when `reason` suggests it is back. */
   retryIfReconnecting(reason: string): void {
+    // A network change or the app coming back may bring a nearer route back.
+    if (this.state.status === 'connected') { void this.activeClient?.recheckNearerRoutes(); return; }
     if (this.state.status !== 'reconnecting') return;
     console.info(`[Pane remote daemon] retrying now: ${reason}`);
     void this.activeClient?.retryNow();
@@ -1303,7 +1528,8 @@ export class RemotePaneClientController extends EventEmitter {
       return;
     }
 
-    const activeProfile = remoteConfig.client.profiles.find((profile) => profile.id === activeProfileId);
+    const activeComputer = remoteConfig.client.computers.find((computer) => computer.id === activeProfileId);
+    const activeProfile = activeComputer ? primaryProfile(activeComputer) : undefined;
     if (!activeProfile) {
       await this.disconnectActiveClient();
       this.setConnectionState({
@@ -1318,7 +1544,7 @@ export class RemotePaneClientController extends EventEmitter {
       return;
     }
 
-    if (this.activeClient?.isSameProfile(activeProfile)) {
+    if (this.activeClient?.profile.id === activeProfile.id && this.activeClient.adoptRoutes(this.routesFor(activeProfile))) {
       this.setConnectionState({
         ...this.state,
         mode: 'remote',
@@ -1352,13 +1578,55 @@ export class RemotePaneClientController extends EventEmitter {
     }
   }
 
+  /** The saved computer's routes, nearest first; a profile that is no saved computer is its own one route. */
+  routesFor(profile: RemotePaneConnectionProfile): RemoteRouteCandidate[] {
+    const computers = this.configManager ? normalizeRemoteDaemonConfig(this.configManager.getConfig().remoteDaemon).client.computers : [];
+    const computer = computers.find((candidate) => candidate.id === profile.id);
+    if (!computer?.routes.length) return [{ routeId: '', kind: profile.relay ? 'relay' : 'public', profile }];
+    return computer.routes.map((route) => ({ routeId: route.id, kind: route.kind, profile: routeProfile(computer, route) }));
+  }
+
+  /** A Tailscale route's address is looked up again; an SSH route's tunnel is opened. */
+  async prepareRoute(route: RemoteRouteCandidate): Promise<RemotePaneConnectionProfile> {
+    const machine = tailnetMachineRef(route.profile);
+    if (machine && this.resolveTailnetMachineUrl) return { ...route.profile, baseUrl: await this.resolveTailnetMachineUrl(machine) };
+    if (route.kind === 'ssh') {
+      const saved = this.configManager
+        ? normalizeRemoteDaemonConfig(this.configManager.getConfig().remoteDaemon).client.computers
+          .find((computer) => computer.id === route.profile.id)?.routes.find((candidate) => candidate.id === route.routeId)
+        : undefined;
+      if (saved && this.prepareSshRoute) return { ...route.profile, baseUrl: await this.prepareSshRoute(saved) };
+    }
+    return route.profile;
+  }
+
+  /** Saves what a host said about itself: its install id, OS and the routes it can be reached on. */
+  async saveRoutesReport(computerId: string, routeId: string | undefined, report: ComputerRoutesReport): Promise<void> {
+    if (!this.configManager) return;
+    try {
+      await this.configManager.updateConfigWith((current) => {
+        const remote = normalizeRemoteDaemonConfig(current.remoteDaemon);
+        const computer = remote.client.computers.find((candidate) => candidate.id === computerId);
+        const via = computer?.routes.find((route) => route.id === routeId) ?? computer?.routes[0];
+        if (!computer || !via) return {};
+        const { computers } = applyRoutesReport(remote.client.computers, computerId, via, report);
+        if (JSON.stringify(computers) === JSON.stringify(remote.client.computers)) return {};
+        return { remoteDaemon: { ...remote, client: { ...remote.client, computers } } };
+      });
+    } catch (error) {
+      console.warn(`[Pane remote daemon] could not save the routes ${report.name} reported: ${getErrorMessage(error, 'unknown error')}`);
+    }
+  }
+
   private async connectProfile(
     savedProfile: RemotePaneConnectionProfile,
     options: RemotePaneClientConnectOptions,
   ): Promise<void> {
     const generation = ++this.connectionGeneration;
     await this.disconnectActiveClient();
-    const machine = tailnetMachineRef(savedProfile);
+    const routes = this.routesFor(savedProfile);
+    // With one route, a Tailscale machine that cannot be found is the error; with more, the next route is tried.
+    const machine = routes.length === 1 ? tailnetMachineRef(savedProfile) : null;
     let profile = savedProfile;
     if (machine && this.resolveTailnetMachineUrl) {
       try {
@@ -1396,6 +1664,9 @@ export class RemotePaneClientController extends EventEmitter {
     let hostChanged = options.resolveOnReady === true;
     const client = new RemotePaneClient(profile, {
       dnsLookup: this.dnsLookup,
+      routes: routes.length === 1 ? [{ ...routes[0], profile }] : routes,
+      // One route was looked up above, as before computers; several are each readied when tried.
+      prepareRoute: routes.length > 1 ? (route) => this.prepareRoute(route) : undefined,
       eventSink: {
         send: (channel, ...args) => {
           if (this.activeClient !== client) return;
@@ -1433,12 +1704,14 @@ export class RemotePaneClientController extends EventEmitter {
             client_kind: 'desktop',
           });
         }
+        if (metadata?.hostRoutes) void this.saveRoutesReport(savedProfile.id, metadata.routeId, metadata.hostRoutes);
         this.setConnectionState({
           mode: 'remote',
           status,
           activeProfileId: profile.id,
           activeProfileLabel: profile.label,
-          activeBaseUrl: profile.baseUrl,
+          activeBaseUrl: client.profile.baseUrl,
+          activeRouteId: metadata?.routeId ?? null,
           updateIntent: status === 'connected' ? null : this.state.updateIntent,
           lastError: errorMessage ?? null,
           lastSeenAt: metadata?.lastSeenAt ?? this.getLastSeenAtForProfile(profile.id, status),

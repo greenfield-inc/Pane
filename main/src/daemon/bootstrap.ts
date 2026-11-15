@@ -43,6 +43,8 @@ import { PaneWorkspaceHostController } from './workspaceHost';
 import { runRemoteSetupCommand } from './remote-setup-command';
 import { RemoteHostTailnetMonitor } from './remoteHostTailnet';
 import { registerWorkspaceCommands } from '../ipc/workspace';
+import { registerComputerCommands } from './computerCommands';
+import { WORKSPACE_HTTPS_PORT } from './workspacePort';
 import { getMobilePushSender } from './mobilePushSender';
 import { createFanoutEventSink, noopPaneEventSink, type PaneEventSink } from '../core/eventSink';
 import {
@@ -545,6 +547,13 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       return null;
     })
     : null;
+  registerComputerCommands(commandRegistry, configManager, {
+    relay: () => relayHost?.service.computerInfo(),
+    tailnet: () => {
+      const tailnet = workspaceHost.getTailnet();
+      return tailnet && workspaceHost.getAccess().visibility !== 'off' ? { dnsName: tailnet.dnsName, machineName: tailnet.machineName, port: WORKSPACE_HTTPS_PORT } : null;
+    },
+  });
   if (relayHost) {
     powerMonitor.on('suspend', () => relayHost.suspend());
     powerMonitor.on('resume', () => relayHost.resume());

@@ -124,6 +124,8 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'session-import:',
   'sessions:',
   'ssh-hosts:',
+  'ssh:route-',
+  'computers:',
   'terminal:',
   'usage:',
   'voice:',

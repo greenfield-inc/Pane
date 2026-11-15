@@ -1,5 +1,6 @@
 import os from 'os';
-import { RemotePaneClient } from '../daemon/client/remotePaneClient';
+import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/remotePaneClient';
+import { primaryProfile, routeProfile, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import type { ConfigManager } from './configManager';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../shared/paneError';
@@ -27,6 +28,11 @@ export interface MachineConnectionsDeps {
   /** Runs a command on this computer, as its own command registry does. */
   invokeLocal: (channel: string, args: PaneCommandValue[]) => Promise<PaneCommandValue>;
   createClient?: CreateMachineClient;
+  /** Readies a route before it is dialed, and saves what a computer reports about itself; the remote client controller's. */
+  routes?: {
+    prepare(route: RemoteRouteCandidate): Promise<RemotePaneConnectionProfile>;
+    saveReport(computerId: string, routeId: string | undefined, report: ComputerRoutesReport): Promise<void>;
+  };
 }
 
 interface RemoteMachine {
@@ -166,42 +172,48 @@ export class MachineConnections {
     return machine.client.invoke(channel, args);
   }
 
-  /** One connection per saved profile; a changed address or credential reconnects. */
+  /** One connection per saved computer; a changed route or credential reconnects. */
   private refresh(): void {
-    const profiles = this.deps.configManager.getConfig().remoteDaemon?.client.profiles ?? [];
-    const wanted = new Map(profiles.map(profile => [profile.id, profile]));
+    const computers = this.deps.configManager.getConfig().remoteDaemon?.client.computers ?? [];
+    const wanted = new Map(computers.map(computer => [computer.id, computer]));
     let changed = false;
     for (const [id, machine] of this.machines) {
-      const profile = wanted.get(id);
-      if (profile && connectionKey(profile) === machine.key) {
-        if (machine.state.label !== profile.label) { machine.state.label = profile.label; changed = true; }
+      const computer = wanted.get(id);
+      if (computer && connectionKey(computer) === machine.key) {
+        if (machine.state.label !== computer.label) { machine.state.label = computer.label; changed = true; }
         continue;
       }
       this.machines.delete(id);
       void this.close(machine);
       changed = true;
     }
-    for (const [id, profile] of wanted) {
-      if (this.machines.has(id)) continue;
-      this.open(profile);
+    for (const [id, computer] of wanted) {
+      if (this.machines.has(id) || !computer.routes.length) continue;
+      this.open(computer);
       changed = true;
     }
     if (changed) this.emitMachines();
   }
 
-  private open(profile: RemotePaneConnectionProfile): void {
+  private open(computer: RemoteComputer): void {
+    const profile = primaryProfile(computer);
     const id = profile.id;
     const isCurrent = (): boolean => this.machines.get(id) === machine;
+    const routes = computer.routes.map((route) => ({ routeId: route.id, kind: route.kind, profile: routeProfile(computer, route) }));
     const machine: RemoteMachine = {
-      key: connectionKey(profile),
+      key: connectionKey(computer),
       profile,
       retryTimer: null,
       state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null },
       client: this.createClient(profile, {
         machineId: this.deps.configManager.getConfig().machineId,
+        routes,
+        prepareRoute: (route) => this.deps.routes?.prepare(route) ?? Promise.resolve(route.profile),
         eventSink: { send: (channel, ...args) => { if (isCurrent() && isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: id, channel, args }); } },
         onConnectionStateChange: (status, _error, metadata) => {
           if (!isCurrent()) return;
+          if (metadata?.hostRoutes) void this.deps.routes?.saveReport(id, metadata.routeId, metadata.hostRoutes);
+          if (metadata?.routeId && machine.state.routeId !== metadata.routeId) { machine.state.routeId = metadata.routeId; this.emitMachines(); }
           this.updateStatus(machine, status, metadata?.hostMachineId);
           if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {
@@ -333,6 +345,6 @@ function unknownMachine(machineId: string): PaneError {
     'Read the machine list again with machines:list and use one of its ids.');
 }
 
-function connectionKey(profile: RemotePaneConnectionProfile): string {
-  return `${profile.baseUrl}\n${profile.token}`;
+function connectionKey(computer: RemoteComputer): string {
+  return computer.routes.map((route) => `${route.id}\n${route.baseUrl}\n${route.token}`).join('\n');
 }

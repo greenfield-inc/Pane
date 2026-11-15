@@ -484,6 +484,60 @@ describe('RemotePaneClient', () => {
   });
 });
 
+describe('RemotePaneClient routes (D-51)', () => {
+  const routeProfile = (baseUrl: string) => ({ id: 'mac', label: 'Mac', baseUrl, token: 'link-token', transport: 'http+sse' as const });
+
+  it('moves to the next route when the one in use goes silent, without an error, and back once it answers', async () => {
+    const near = await createTestRemoteServer();
+    const far = await createTestRemoteServer();
+    activeServers.push(near, far);
+    near.setHeartbeatInterval(20);
+    far.setHeartbeatInterval(20);
+    const statuses: string[] = [];
+    const client = new RemotePaneClient(routeProfile(near.baseUrl), {
+      routes: [
+        { routeId: 'tailscale:near', kind: 'tailscale', profile: routeProfile(near.baseUrl) },
+        { routeId: 'relay:far', kind: 'relay', profile: routeProfile(far.baseUrl) },
+      ],
+      // Scaled: the 8 s silence limit and the 60 s recheck.
+      failoverStaleTimeoutMs: 100,
+      heartbeatStaleTimeoutMs: 5_000,
+      routeRecheckMs: 100,
+      onConnectionStateChange: (status) => statuses.push(status),
+    });
+    await client.connect();
+    expect(client.routeId).toBe('tailscale:near');
+
+    // Tailscale blocked: the stream goes quiet and the address stops serving.
+    near.setHeartbeatInterval(0);
+    near.setEventsReady(false);
+    await waitFor(() => client.routeId === 'relay:far' && statuses.at(-1) === 'connected', 2_000);
+    expect(statuses).not.toContain('error');
+    expect(client.profile.baseUrl).toBe(far.baseUrl);
+
+    near.setEventsReady(true);
+    near.setHeartbeatInterval(20);
+    await waitFor(() => client.routeId === 'tailscale:near' && statuses.at(-1) === 'connected', 2_000);
+    await client.disconnect();
+  });
+
+  it('connects on the next route when the nearest does not answer', async () => {
+    const near = await createTestRemoteServer();
+    const far = await createTestRemoteServer();
+    activeServers.push(near, far);
+    near.setEventsReady(false);
+    const client = new RemotePaneClient(routeProfile(near.baseUrl), {
+      routes: [
+        { routeId: 'lan:near', kind: 'lan', profile: routeProfile(near.baseUrl) },
+        { routeId: 'relay:far', kind: 'relay', profile: routeProfile(far.baseUrl) },
+      ],
+    });
+    await client.connect({ retryOnInitialFailure: false });
+    expect(client.routeId).toBe('relay:far');
+    await client.disconnect();
+  });
+});
+
 describe('RemotePaneClient writes through a drop', () => {
   const profileFor = (server: TestRemoteServer, id: string) => ({ id, label: 'host', baseUrl: server.baseUrl, token: 'secret-token', transport: 'http+sse' as const });
 

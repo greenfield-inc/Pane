@@ -59,6 +59,8 @@ export interface WorkspaceMachineDescription {
   visibility: Exclude<WorkspaceVisibility, 'off'>;
   passwordProtected: boolean;
   paneVersion: string;
+  /** Its install id (`AppConfig.machineId`), so a client joins it to the same computer's other routes. Older Panes omit it. */
+  machineId?: string;
 }
 
 export type TailnetMachineState =
@@ -89,7 +91,9 @@ export interface TailnetMachine {
   state: TailnetMachineState;
   visibility?: Exclude<WorkspaceVisibility, 'off'>;
   paneVersion?: string;
-  /** A saved connection exists for this machine. */
+  /** Its install id, from its description. */
+  machineId?: string;
+  /** The saved computer this machine is. */
   profileId?: string;
 }
 

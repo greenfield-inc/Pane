@@ -156,7 +156,7 @@ export class NotifyService {
       machineId: deps.configManager.getConfig().machineId,
       secrets: deps.secrets,
       sessionOf: deps.sessionOf,
-      savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.profiles ?? []).map(profile => profile.id),
+      savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.computers ?? []).map(computer => computer.id),
       projectOf: deps.projectOf,
       store: deps.store,
       askerGone: (item) => this.askerGone(item),
