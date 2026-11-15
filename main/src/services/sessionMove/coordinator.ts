@@ -372,11 +372,31 @@ export class MoveCoordinator {
     return { ...job.progress };
   }
 
-  status({ sessionId, recheck }: StatusRequest): SessionMoveProgress | null {
-    const job = this.jobs.get(sessionId);
+  async status({ sessionId, recheck }: StatusRequest): Promise<SessionMoveProgress | null> {
+    const job = this.jobs.get(sessionId) ?? await this.recoverFrozen(sessionId);
     if (!job) return null;
     if (recheck && job.progress.phase === 'confirming') void this.confirm(job).catch(() => undefined);
     return { ...job.progress, waiting: [...job.progress.waiting], steps: job.progress.steps.map(step => ({ ...step })) };
+  }
+
+  /**
+   * A Session still frozen as Moving after Pane restarted mid-move: the target may run it, so it
+   * stays frozen, and the dialog can ask the target again (Check again) to retire it here.
+   */
+  private async recoverFrozen(sessionId: string): Promise<SourceJob | undefined> {
+    const record = await this.manager().get({ sessionId }).catch(() => undefined);
+    if (record?.move?.state !== 'moving') return undefined;
+    const job: SourceJob = {
+      record, peer: resolvePeer(record.move.machine, this.services.configManager), paneIds: [record.internalSessionId, ...this.memberPaneIds(record)],
+      tabs: this.tabsOf(record), stopNow: false, cancelled: false, scripts: [], outDir: path.join(getAppDirectory(), 'moves-out', record.move.moveId), lastHeard: Date.now(),
+      progress: {
+        moveId: record.move.moveId, sessionId, sessionName: record.name, target: record.move.machine, phase: 'confirming', waiting: [], stoppedTabs: 0, totalTabs: 0,
+        steps: steps().map(step => ({ ...step, state: step.id === 'start' ? 'running' : 'done' })), frozen: true, updatedAt: new Date().toISOString(),
+        error: { message: `${record.move.machine} hasn't confirmed the move yet.`, next: `The Session stays paused here so it never runs twice. Check again, or open it on ${record.move.machine}.` },
+      },
+    };
+    this.jobs.set(sessionId, job);
+    return job;
   }
 
   stopNow({ sessionId }: SessionRequest): SessionMoveProgress {

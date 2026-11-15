@@ -67,6 +67,8 @@ export interface TargetStatus {
 
 interface Job {
   status: TargetStatus;
+  /** When the source last wrote a chunk; a move left receiving this long without one is dropped. */
+  lastWriteAt: number;
   manifest?: MoveManifest;
   map?: PathMap;
   /** Undo steps for everything this move made here, run in reverse on failure. */
@@ -78,6 +80,8 @@ interface Job {
 }
 
 const POSIX = new Set(['darwin', 'linux']);
+/** How long a move may sit half-received with no new chunk before the target drops it. */
+const RECEIVE_IDLE_MS = 10 * 60_000;
 
 /** What failed and the next step, for the source's dialog. */
 interface MoveFailure {
@@ -147,8 +151,22 @@ export class MoveImporter {
   private readonly jobs = new Map<string, Job>();
   readonly receiver: MoveReceiver;
 
-  constructor(private readonly services: AppServices, private readonly registry: PaneCommandRegistry, root = path.join(getAppDirectory(), 'moves')) {
+  constructor(private readonly services: AppServices, private readonly registry: PaneCommandRegistry, private readonly root = path.join(getAppDirectory(), 'moves')) {
     this.receiver = new MoveReceiver(root);
+    // Staging left by a move that was under way when Pane quit can't be finished: it goes.
+    fs.rmSync(root, { recursive: true, force: true });
+    setInterval(() => void this.dropAbandoned(), RECEIVE_IDLE_MS / 4).unref();
+  }
+
+  /** A source that stopped sending (contact lost mid-send) never comes back for this move; its staging goes. */
+  private async dropAbandoned(now = Date.now()): Promise<void> {
+    for (const job of this.jobs.values()) {
+      if (job.status.stage === 'receiving' && now - job.lastWriteAt > RECEIVE_IDLE_MS) {
+        console.warn(`[SessionMove] Move ${job.status.moveId} stopped arriving; its staging folder was removed.`);
+        await this.receiver.remove(job.status.moveId).catch(() => undefined);
+        job.status = { ...job.status, stage: 'aborted', error: { message: 'The other machine stopped sending this move.', next: 'Start the move again.' } };
+      }
+    }
   }
 
   private refuseTeammate(): void {
@@ -324,17 +342,26 @@ export class MoveImporter {
   async write(parsed: WriteRequest): Promise<WriteResult> {
     this.refuseTeammate();
     if (!this.jobs.has(parsed.moveId)) {
-      this.jobs.set(parsed.moveId, { status: { moveId: parsed.moveId, stage: 'receiving', panesDone: 0, panesTotal: 0 }, cleanup: [], conversations: [], tabs: [] });
+      this.jobs.set(parsed.moveId, { status: { moveId: parsed.moveId, stage: 'receiving', panesDone: 0, panesTotal: 0 }, lastWriteAt: Date.now(), cleanup: [], conversations: [], tabs: [] });
     }
     const job = this.job(parsed.moveId);
+    job.lastWriteAt = Date.now();
     if (job.status.stage !== 'receiving') throw new PaneError('ERR_MOVE_STAGE', `Move ${parsed.moveId} is past receiving (${job.status.stage}).`, 'Start the move again.');
     return this.receiver.write(parsed);
   }
 
-  status(moveId: string): TargetStatus {
+  async status(moveId: string): Promise<TargetStatus> {
     const job = this.jobs.get(moveId);
-    // A target that restarted mid-move has nothing of it: say so, so the source can decide.
-    return job ? { ...job.status } : { moveId, stage: 'aborted', panesDone: 0, panesTotal: 0, error: { message: 'This machine has no record of the move (Pane may have restarted).', next: 'Start the move again.' } };
+    if (job) return { ...job.status };
+    // Pane restarted since: a Session this move started here says so in its moved.json.
+    for (const session of (await this.services.orchestrationSessionManager?.list())?.sessions ?? []) {
+      if (session.move?.state === 'arriving') continue;
+      const record = await fs.promises.readFile(path.join(sessionWorkspacePath(session.id), 'moved.json'), 'utf8').catch(() => '');
+      if (decodeOptionalBoundary(record ? JSON.parse(record) : null, boundary.object({ moveId: boundary.string }))?.moveId === moveId) {
+        return { moveId, stage: 'started', panesDone: 0, panesTotal: 0, resumed: 0, failedTabs: [] };
+      }
+    }
+    return { moveId, stage: 'aborted', panesDone: 0, panesTotal: 0, error: { message: 'This machine has no record of the move (Pane may have restarted).', next: 'Start the move again.' } };
   }
 
   // ── Build ──────────────────────────────────────────────────────────────
