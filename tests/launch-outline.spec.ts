@@ -126,6 +126,23 @@ test('Enter pressed before the app loads sends the message once the chat is read
   expect(await sends()).toHaveLength(1);
 });
 
+test('an IME composition open when the chat mounts finishes in the first box, then its text moves once', async ({ page }) => {
+  const release = await holdApp(page);
+  await installElectronApiMock(page, fixture);
+  await page.goto('/', { waitUntil: 'commit' });
+  await expect(launchBox(page)).toBeFocused();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.imeSetComposition', { text: 'にほ', selectionStart: 2, selectionEnd: 2 });
+  release();
+  await expect(chatBox(page)).toBeAttached();
+  // Still composing: the first box keeps the composition.
+  await expect(launchBox(page)).toHaveValue('にほ');
+  await cdp.send('Input.insertText', { text: '日本' });
+  await expect(chatBox(page)).toHaveValue('日本');
+  await expect(chatBox(page)).toBeFocused();
+  await expect(page.locator('#pane-launch-outline')).toHaveCount(0);
+});
+
 test('a launch onto Home draws no message box, and the outline gives way to the app', async ({ page }) => {
   const release = await holdApp(page);
   await installElectronApiMock(page, { ...fixture, launchChat: undefined });

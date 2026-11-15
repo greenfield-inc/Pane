@@ -150,6 +150,9 @@
             event.preventDefault();
             input.dataset.send = 'pending';
           });
+          // An IME composition finishes here before the chat takes the text (src/utils/launchOutline.ts).
+          input.addEventListener('compositionstart', () => { input.dataset.composing = 'true'; });
+          input.addEventListener('compositionend', () => { delete input.dataset.composing; });
           // Grows with its text as the chat's box does (react-textarea-autosize), up to the CSS max-height.
           input.addEventListener('input', () => {
             input.style.height = 'auto';

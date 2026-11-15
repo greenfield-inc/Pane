@@ -371,9 +371,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends once (D-62).
   const launchSend = useRef(false);
-  useLayoutEffect(() => {
-    const draft = takeLaunchDraft(panelId);
-    if (!draft) return;
+  useLayoutEffect(() => takeLaunchDraft(panelId, draft => {
     viewer.setDraft(draft.text);
     runtime.thread.composer.setText(draft.text);
     launchSend.current = draft.send;
@@ -383,7 +381,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     input.value = draft.text;
     input.focus({ preventScroll: true });
     input.setSelectionRange(draft.selectionStart, draft.selectionEnd);
-  }, [panelId, runtime, viewer]);
+  }), [panelId, runtime, viewer]);
   useEffect(() => {
     if (!launchSend.current || sendDisabled) return;
     launchSend.current = false;

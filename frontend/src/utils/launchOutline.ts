@@ -20,6 +20,8 @@ const CHAT_WAIT_MS = 10_000;
 
 /** Text typed into the box before the person went elsewhere, waiting for that chat to mount. */
 let held: { panelId: string; draft: LaunchDraft } | null = null;
+/** A mounted chat waiting for an IME composition in the box to end. */
+let waiting: (() => void) | null = null;
 
 const outline = () => document.getElementById('pane-launch-outline');
 const launchBox = () => outline()?.querySelector<HTMLTextAreaElement>('textarea[data-launch-composer]') ?? null;
@@ -62,6 +64,11 @@ function remove(root: HTMLElement): void {
 
 /** The launch chat is not opening now: the outline goes, and its text waits for that chat. */
 export function dropLaunchOutline(): void {
+  // The chat is already there: it takes the text now.
+  if (waiting) {
+    waiting();
+    return;
+  }
   const root = outline();
   if (!root) return;
   const box = launchBox();
@@ -73,25 +80,43 @@ export function dropLaunchOutline(): void {
 }
 
 /**
- * The chat tab `panelId` is mounting: its share of the launch outline, if any. Read in a layout
- * effect, so the outline goes in the same frame the chat's box first paints.
+ * The chat tab `panelId` is mounting: `apply` gets its share of the launch outline, if any. Called
+ * from a layout effect, so the outline goes in the same frame the chat's box first paints. An IME
+ * composition in the box finishes there first: the text moves when it ends. Returns a cleanup for
+ * a tab that unmounts before then.
  */
-export function takeLaunchDraft(panelId: string): LaunchDraft | null {
+export function takeLaunchDraft(panelId: string, apply: (draft: LaunchDraft) => void): () => void {
   const root = outline();
   const box = launchBox();
   if (root && box?.dataset.launchComposer === panelId) {
-    const draft = {
-      text: box.value,
-      selectionStart: box.selectionStart,
-      selectionEnd: box.selectionEnd,
-      focused: document.activeElement === box,
-      send: box.dataset.send === 'pending' && !!box.value.trim(),
+    const handOver = () => {
+      waiting = null;
+      apply({
+        text: box.value,
+        selectionStart: box.selectionStart,
+        selectionEnd: box.selectionEnd,
+        focused: document.activeElement === box,
+        send: box.dataset.send === 'pending' && !!box.value.trim(),
+      });
+      remove(root);
     };
-    remove(root);
-    return draft;
+    if (box.dataset.composing !== 'true') {
+      handOver();
+      return () => undefined;
+    }
+    // After the input method's own handler (index.html), so the text is final.
+    const later = () => queueMicrotask(() => { if (waiting === handOver) handOver(); });
+    waiting = handOver;
+    box.addEventListener('compositionend', later, { once: true });
+    return () => {
+      if (waiting === handOver) waiting = null;
+      box.removeEventListener('compositionend', later);
+    };
   }
-  if (held?.panelId !== panelId) return null;
-  const { draft } = held;
-  held = null;
-  return draft;
+  if (held?.panelId === panelId) {
+    const { draft } = held;
+    held = null;
+    apply(draft);
+  }
+  return () => undefined;
 }
