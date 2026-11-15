@@ -254,7 +254,7 @@ export class NotifyService {
       const session = this.deps.sessionRecord?.(entry.sessionId);
       // The status file's needs_you, never its JSON: the question's why, its options and files.
       // Tidied when the question is an old paragraph (P8); a report recorded before the check stays as sent.
-      const card = workerCard(entry.report?.summary, question, { quietly: true, summaryPath: entry.report?.summaryPath });
+      const card = workerCard(entry.report?.summary, question, { quietly: true, summaryPath: entry.report?.summaryPath, choices: entry.report?.choices, questions: entry.report?.questions });
       // D-81: the worker's status file, which its report named, opens beside the card.
       const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
       const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);

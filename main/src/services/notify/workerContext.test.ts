@@ -125,3 +125,60 @@ describe("a worker's .html --summary-file", () => {
     expect(card.context).toBeUndefined();
   });
 });
+
+describe("a blocked report's own buttons (--choices, --questions)", () => {
+  const choices = [{ label: 'Invoice id', detail: 'Ids are stable', recommended: true }, { label: 'Invoice number', detail: 'Numbers can be reissued' }];
+  const status = JSON.stringify({ needs_you: { why: 'The PDF name depends on it.', questions: [{ q: 'Id or number?', options: ['Number (recommended)', 'Id'] }], files: ['/w/options.html'] } });
+
+  it('are the card buttons, before any needs_you options, which still give the subtitle and files', () => {
+    const card = workerCard(status, 'Q-3: Use the invoice id in the PDF filename?', { choices });
+    expect(card.choices).toEqual(choices);
+    expect(card.questions).toBeUndefined();
+    expect(card.context).toContain('The PDF name depends on it.');
+    expect(card.links).toEqual([{ label: 'options.html', path: '/w/options.html' }]);
+  });
+
+  it('give each of several questions its own buttons', () => {
+    const questions = [
+      { title: 'Filename key?', choices: [{ label: 'Id', recommended: true }, { label: 'Number' }] },
+      { title: 'Zip them?', why: 'Large batches', choices: [{ label: 'Yes', recommended: true }, { label: 'No' }] },
+    ];
+    const card = workerCard(undefined, 'Q-4: Two choices for the invoice export', { questions });
+    expect(card.questions).toEqual(questions);
+    expect(card.choices).toBeUndefined();
+  });
+
+  it('are still checked like any card: two recommended options are refused', () => {
+    const two = [{ label: 'A', recommended: true }, { label: 'B', recommended: true }];
+    expect(() => workerCard(undefined, 'Q-5: Which one?', { choices: two })).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_RECOMMENDED' }));
+  });
+});
+
+describe('a blocked question with its options packed into the text', () => {
+  const packed = 'Q-3: Use the invoice id or number in the PDF filename? (Invoice id (recommended) / Invoice number)';
+
+  it('is refused with the fix when nothing else gives it buttons', () => {
+    expect(() => workerCard(undefined, packed)).toThrow(expect.objectContaining({
+      code: 'ERR_REPORT_PACKED_OPTIONS',
+      message: 'The question ends with its options in brackets, (Invoice id (recommended) / Invoice number), but the report gives no buttons for them, so the person would get a card with nothing to press. Nothing was shown to the person.',
+      next: expect.stringContaining('--choices'),
+    }));
+    expect(() => workerCard('Invoice PDFs', 'Ship it? (Yes / No)')).toThrow(expect.objectContaining({ code: 'ERR_REPORT_PACKED_OPTIONS' }));
+  });
+
+  it('is accepted when --choices or the needs_you block gives the buttons', () => {
+    expect(workerCard(undefined, packed, { choices: [{ label: 'Invoice id', recommended: true }, { label: 'Invoice number' }] }).choices).toHaveLength(2);
+    const status = JSON.stringify({ needs_you: { questions: [{ q: 'Id or number?', options: ['Invoice id (recommended)', 'Invoice number'] }] } });
+    expect(workerCard(status, packed).choices).toHaveLength(2);
+  });
+
+  it('leaves an open question, or brackets that are not an option list, alone', () => {
+    expect(workerCard(undefined, 'Q-6: Which staging project should the backfill use?').choices).toBeUndefined();
+    expect(() => workerCard(undefined, 'Q-7: Should the CLI (and the MCP tool) refuse it?')).not.toThrow();
+    expect(() => workerCard(undefined, 'Q-8: Keep the and/or wording (iOS/Android)?')).not.toThrow();
+  });
+
+  it('keeps a report recorded before the check as it was sent', () => {
+    expect(workerCard(undefined, packed, { quietly: true }).title).toBe(packed);
+  });
+});

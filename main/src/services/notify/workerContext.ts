@@ -1,6 +1,7 @@
 import path from 'path';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
+import { PaneError } from '../../../../shared/paneError';
 import { admitCard, type AdmittedCard } from './cardAdmit';
 
 /** The longest context a card carries; cards clamp it to a few lines with Show more. */
@@ -216,13 +217,51 @@ export function workerReportCard(summary: string | undefined, question: string):
 }
 
 /**
- * A worker's question card as Pane posts it: built from its report, tidied when the question is an
- * old paragraph, and checked. Throws the check's refusal (a PaneError); `quietly` keeps a card that
- * fails as it was sent instead, for reports recorded before the check existed.
+ * A question whose text ends with its options in brackets, "(A / B)" or "(A (recommended) / B)".
+ * Each option may hold one bracketed note; a slash needs a space either side, so "(iOS/Android)" is prose.
  */
-export function workerCard(summary: string | undefined, question: string, options: { quietly?: boolean; summaryPath?: string } = {}): StatusCard & { title: string; asSent?: AdmittedCard['asSent']; warnings: string[] } {
+const PACKED_OPTIONS = /\((?:[^()]|\([^()]*\))*?\s\/\s(?:[^()]|\([^()]*\))*\)\s*[.?!]?\s*$/u;
+
+function packedOptionsError(question: string): PaneError {
+  const list = PACKED_OPTIONS.exec(question)?.[0].trim() ?? '';
+  return new PaneError(
+    'ERR_REPORT_PACKED_OPTIONS',
+    `The question ends with its options in brackets, ${list}, but the report gives no buttons for them, so the person would get a card with nothing to press. Nothing was shown to the person.`,
+    'Give the options as buttons: runpane report --state blocked --question \'Q-3: Use the invoice id?\' '
+      + '--choices \'[{"label":"Invoice id","recommended":true},{"label":"Invoice number"}]\' (or --questions for several), '
+      + 'or pass your status file as --summary-file with the options in needs_you.questions[].options. Drop the bracketed list from --question.',
+  );
+}
+
+/** A blocked report's own buttons, `--choices` or `--questions`: they come before a status file's needs_you. */
+export interface WorkerCardOptions {
+  /** Keep a card that fails the check as it was sent, for reports recorded before the check existed. */
+  quietly?: boolean;
+  summaryPath?: string;
+  choices?: NotifyChoice[];
+  questions?: NotifySubQuestion[];
+}
+
+/**
+ * A worker's question card as Pane posts it: built from its report, tidied when the question is an
+ * old paragraph, and checked. Its buttons are the report's `--choices` or `--questions`, else its
+ * status file's needs_you options. Throws the check's refusal (a PaneError), and refuses a question
+ * that packs its options into the text with no buttons for them; `quietly` keeps such a card as it
+ * was sent instead, for reports recorded before the checks existed.
+ */
+export function workerCard(summary: string | undefined, question: string, options: WorkerCardOptions = {}): StatusCard & { title: string; asSent?: AdmittedCard['asSent']; warnings: string[] } {
   // An .html passed as --summary-file is the card's Summary page, never its subtitle.
   const card = options.summaryPath && /\.html?$/iu.test(options.summaryPath) ? {} : workerReportCard(summary, question);
+  if (options.questions?.length) {
+    card.questions = options.questions;
+    delete card.choices;
+  } else if (options.choices?.length) {
+    card.choices = options.choices;
+    delete card.questions;
+  }
+  if (!card.choices?.length && !card.questions?.length && PACKED_OPTIONS.test(question)) {
+    if (!options.quietly) throw packedOptionsError(question);
+  }
   const fields = { title: question, context: card.context, choices: card.choices, questions: card.questions, links: card.links };
   let admitted: AdmittedCard;
   try {

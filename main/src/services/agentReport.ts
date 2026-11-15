@@ -1,6 +1,8 @@
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { JsonObject, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { TerminalAgentReport, TerminalAgentReportState, ToolPanel } from '../../../shared/types/panels';
+import type { NotifyChoice, NotifySubQuestion } from '../../../shared/types/notify';
+import { agentReportOptionFields } from './workspaceJournalSchema';
 
 /**
  * Worker reports (`runpane report`): a worker's structured hand-back of its
@@ -27,6 +29,8 @@ export interface AgentReportInput {
   summary?: string;
   summaryPath?: string;
   question?: string;
+  choices?: NotifyChoice[];
+  questions?: NotifySubQuestion[];
 }
 
 const agentReportSchema = boundary.object({
@@ -37,6 +41,7 @@ const agentReportSchema = boundary.object({
   summaryTruncated: boundary.optional(boundary.literal(true)),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  ...agentReportOptionFields,
   reportedAt: boundary.nonEmptyString,
 });
 
@@ -56,6 +61,9 @@ export function normalizeAgentReport(input: AgentReportInput, reportedAt: string
   if (input.state === 'blocked' && !question) {
     throw new Error('A blocked report needs a question: pass --question "<what you need answered>"');
   }
+  if (input.state !== 'blocked' && (input.choices !== undefined || input.questions !== undefined)) {
+    throw new Error('choices and questions go only with state blocked: they are the buttons on its question card');
+  }
   const summaryPath = input.summaryPath?.trim();
   if (summaryPath !== undefined && summaryPath.length > MAX_SUMMARY_PATH_LENGTH) {
     throw new Error('summaryPath is too long');
@@ -72,6 +80,8 @@ export function normalizeAgentReport(input: AgentReportInput, reportedAt: string
   }
   if (summaryPath) report.summaryPath = summaryPath;
   if (question) report.question = question.length > MAX_QUESTION_LENGTH ? `${question.slice(0, MAX_QUESTION_LENGTH - 1)}…` : question;
+  if (input.questions?.length) report.questions = input.questions;
+  else if (input.choices?.length) report.choices = input.choices;
   return report;
 }
 

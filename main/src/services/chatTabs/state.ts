@@ -1,5 +1,6 @@
 import { pausedMarkSchema } from '../../../../shared/types/autoPause';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../shared/validation/boundaryDecoder';
+import { agentReportOptionFields } from '../workspaceJournalSchema';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import type { ToolPanelState } from '../../../../shared/types/panels';
 
@@ -8,6 +9,7 @@ const report = boundary.object({
   state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
   pr: boundary.optional(boundary.number), head: boundary.optional(boundary.string), summary: boundary.optional(boundary.string),
   summaryTruncated: boundary.optional(boundary.literal(true)), summaryPath: boundary.optional(boundary.string), question: boundary.optional(boundary.string),
+  ...agentReportOptionFields,
   reportedAt: boundary.string,
 });
 const schema: BoundarySchema<ChatPanelState> = boundary.object({
