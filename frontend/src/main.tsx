@@ -13,6 +13,8 @@ async function bootstrapDesktop(): Promise<void> {
 
 bootstrapDesktop().catch(error => {
   console.error('Failed to bootstrap the Pane desktop renderer.', error);
+  // Nothing will replace the launch outline (index.html), so it goes.
+  document.getElementById('pane-launch-outline')?.remove();
   window.electronAPI?.diagnostics?.rendererFatal({
     kind: 'error',
     message: error instanceof Error ? error.message : String(error),
