@@ -153,7 +153,15 @@ async fn issue(state: &State, acme: &Acme) -> Result<CertifiedKey, Error> {
         }
         let status = order.poll_ready(&RetryPolicy::default()).await?;
         if status != OrderStatus::Ready {
-            return Err(format!("order is {status:?}").into());
+            // The CA's reason for each refused name, as in "west.relay.D: API error: ...".
+            let mut why = Vec::new();
+            let mut authorizations = order.authorizations();
+            while let Some(Ok(authz)) = authorizations.next().await {
+                for problem in authz.challenges.iter().filter_map(|c| c.error.as_ref()) {
+                    why.push(format!("{}: {problem}", authz.identifier()));
+                }
+            }
+            return Err(format!("order is {status:?} ({})", why.join("; ")).into());
         }
         let key = order.finalize().await?;
         let chain = order.poll_certificate(&RetryPolicy::default()).await?;
