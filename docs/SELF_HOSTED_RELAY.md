@@ -97,10 +97,10 @@ dig @203.0.113.10 relay.example.com A
 
 ## Point Pane at it
 
-On each computer: **Settings › Remote Access › More › Relay address**, enter
+On each computer: **Settings › Remote Access › Phones and glasses › Relay address**, enter
 `us.relay.relay.example.com` (or `host:port`). The computer reconnects
 through your relay, gets a certificate for `<id>.relay.example.com`, and new
-QR codes use your domain. Phones already paired through Pane's servers need a
+QR codes and links use your domain. Phones already paired through Pane's servers need a
 new scan.
 
 ## Alerts

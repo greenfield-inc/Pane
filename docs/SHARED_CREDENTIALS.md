@@ -17,10 +17,10 @@ values stay in each host's keychain or secret file rather than `config.json`.
 
 ## How keys travel
 
-Hosts never contact each other on their own. A device that has more than one host saved, whether found over Tailscale, paired with a code or paired by [QR code](QR_PAIRING.md), carries the keys between them:
+Hosts never contact each other on their own. A device that has more than one host saved, whether found over Tailscale, paired with a code, or paired by a [QR code or one-time link](QR_PAIRING.md), carries the keys between them:
 
 - **The iPhone app** syncs whenever it opens or returns to the foreground, after you save a key from the phone, and when a host reports that its settings changed. It relays the keys and keeps no copy.
-- **A desktop with another host saved** syncs when it starts, when a key changes on it, and when a saved host reports a change. Computers on your Tailscale login are saved the first time you switch to them, from the sidebar's machine menu or Settings → Remote Access → Switch to. To pair with a code instead, create a connection code on the other host (Settings → Remote Access → More → Set Up Host) and paste it under Settings → Remote Access → Switch to → Add a machine.
+- **A desktop with another host saved** syncs when it starts, when a key changes on it, and when a saved host reports a change. Computers on your Tailscale login are saved the first time you switch to them, from the sidebar's machine menu or Settings › Remote Access › Computers. To link another computer, use Settings › Remote Access › Add a device › Computer. To pair with a code instead, create a connection code on the other host (Settings › Remote Access › Tailscale › Set Up Host) and paste it under Settings › Remote Access › Tailscale › Paste a connection code.
 
 Sharing chains: if your Mac is paired with your Windows PC and the Windows PC with a Linux server, a key set on the Mac reaches the Linux server once both syncs have run.
 
@@ -46,4 +46,4 @@ Keys are never written to logs or events. They are stored in each host's `config
 
 ## Stop sharing
 
-Remove the host from the device, or unpair it. On a host, revoke it under Settings → Remote Access → Set Up This Machine → Host status. On a desktop, open the machine's details (i) in Settings → Remote Access and choose Forget. On the phone, remove the host. The keys already copied to each host stay there until you remove them, and removing a key on one host removes it from the others on the next sync.
+Remove the host from the device, or unpair it. On a host, revoke it under Settings › Remote Access › Tailscale › Set Up Host (the Set Up This Machine page) › Host status. On a desktop, expand the computer's row in Settings › Remote Access › Computers and choose Unlink from all your computers, or Forget. On the phone, remove the host. The keys already copied to each host stay there until you remove them, and removing a key on one host removes it from the others on the next sync.
