@@ -229,6 +229,22 @@ defaults. Tests import `start()` from the script and drive the phases with
 `forceDown()` and `forceUp()`; see `scripts/flapping-link-proxy.test.mjs`, run
 by `pnpm test:flapping-proxy`.
 
+### Testing a Session move on one computer
+
+A Session move normally reaches the other machine over Tailscale. To move one
+between two isolated dev instances on one computer, give each its own
+`PANE_DIR` and `HOME` (see [Running a dev build safely](#running-a-dev-build-safely)),
+and start the source with `PANE_MOVE_TEST_PEERS`, a JSON list naming the
+target and its Pane folder:
+
+```bash
+PANE_MOVE_TEST_PEERS='[{"name":"robert-b","paneDir":"/tmp/pane-b/pane"}]' PANE_DIR=/tmp/pane-a/pane HOME=/tmp/pane-a/Users/alice pnpm dev
+```
+
+The target then appears in **Move to machine…**, and the move reaches it
+through its daemon socket under that folder, never the network. Packaged
+builds ignore the variable.
+
 ## Code Style
 
 - TypeScript throughout; no explicit `any` (use a specific type, or `unknown`

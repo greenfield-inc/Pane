@@ -1444,7 +1444,7 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
   return 0;
 }
 
-/** The conversation id a new Session's agent tab records, which it resumes when first opened. */
+/** The conversation id a new Session's agent tab records, which it starts on. */
 async function sessionResumeId(remote: ReturnType<typeof workspaceTarget>, created: ReturnType<typeof runpaneSessionResultSchema.decode>): Promise<string | undefined> {
   if (!created.internalSessionId || !created.panelId) return undefined;
   const listed = await invokeRemoteDaemon(remote, 'runpane:panels:list', [{ paneId: created.internalSessionId }], panelListResultSchema);

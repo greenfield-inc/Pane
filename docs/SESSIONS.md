@@ -398,35 +398,93 @@ replace an unrelated selection.
 ### Move a Session to another machine
 
 Right-click a Session, or use its ⋯ button, and choose **Move to machine…** to
-continue it on another machine. The dialog lists your Tailscale machines
-running Pane, except the one the Session is on, and your teammates' machines
-running Pane, shown with the owner's login after the name. A teammate's machine
-is a target only when its owner set Who can connect to Everyone on tailnet.
-Machines Pane can't reach, or that accept only their owner, are shown disabled
-with the reason. If none can be reached, it says so:
-open Pane on the other machine, or sign in to Tailscale. While you view a host
-connected with a pairing code rather than over Tailscale, the item is disabled,
-because Pane can't tell which machine that is. In All machines, the same item
-is in each Session's menu and moves the Session from its own machine, without
-switching to it; it is disabled, with the reason, while that machine isn't
-connected or was paired with a code. Choosing a machine
-sends the Session's agent a prompt to hand the Session off with
-[`runpane handoff`](RUNPANE_WORKSPACES.md#hand-a-task-to-another-machine) and
-the `handoff` skill.
+carry the whole Session to another of your machines: every Pane on its branch
+with its uncommitted work, every tab and its conversation, and the Session
+folder. It carries on there from where it is now, with the same Session, Pane
+and tab IDs.
 
-The agent writes a handoff note, and handoff creates a Session on that machine
-with the same name (numbered "<name> 2" if the name is taken), goal and agent.
-Its next action is to read the note, which handoff saved in that machine's
-`~/.pane/handoffs/`. When the new Session uses the same agent, the conversation
-moves too: its agent session's files are copied to that machine, and the new
-Session resumes that conversation when you first open it. Check that it shows
-the last message, and if that is unclear, ask it what it was last working on.
-With a different agent, or `--note-only`, only the note moves and the new
-Session starts fresh from it. Like every Session, it waits for your first
-message: switch to that machine, open the Session, and send "continue". The
-Session folder and its Panes stay where they are, and the original Session is
-not archived; archive it from the same menu when you are done with it, which
-also archives its Panes on this machine.
+The dialog lists your Tailscale machines running Pane, except the one the
+Session is on. Your teammates' machines are listed but disabled: a whole
+Session moves only between your own macOS and Linux machines, so for a teammate
+use **Hand off with a note…** (below). Machines Pane can't reach, or that run a
+Pane too old to receive a Session, are disabled with the reason. While you view
+a host connected with a pairing code rather than over Tailscale, the item is
+disabled. In All machines, the same item is in each Session's menu and moves
+the Session from its own machine without switching to it.
+
+Choosing a machine runs the checks at once, and nothing is paused until they
+pass:
+
+- each repository the Panes use is on that machine, matched by its remote.
+  A missing one offers **Clone**, to the same place under your home folder;
+- no branch there has commits this machine doesn't have, and none is checked
+  out in another folder there;
+- each agent the tabs use is installed there, with a warning naming both
+  versions when it is older there. Agent Farm profiles must be installed there
+  (a different version warns), and **Trust** runs `agent-farm workspace trust`
+  for a repository Agent Farm doesn't trust there yet;
+- project environment variables set here but not there are listed by name
+  (values never travel; Pane secrets sync on their own).
+
+**Move** then stops each tab as soon as its turn ends. A tab whose agent is
+only waiting in `runpane watch` counts as idle and stops at once. The dialog
+lists the agents still working; **Stop now** interrupts them, and they pick up
+the interrupted turn on the other machine. A stopped tab shows "Moving to
+<machine>" and refuses input, including messages and Notify answers, until the
+move is done. Run scripts stop too. **Cancel move** restarts everything here,
+unchanged.
+
+Pane then packs, sends and rebuilds the Session:
+
+- each Pane's branch travels as a git bundle with the commits its origin
+  lacks, plus a snapshot of its staged, unstaged and untracked work. The other
+  machine creates the worktree on the same branch (upstream set when origin has
+  it), puts the work back so staged stays staged, checks it, then runs the
+  Pane's normal setup. Ignored files such as `.env` or `node_modules` aren't
+  copied; setup rebuilds them there, and the done screen lists what stayed;
+- conversations (Claude, Codex and Cursor tabs, and chat tabs) are copied byte
+  for byte into that machine's agent stores, never edited. A copy there that was
+  continued after an earlier move is never overwritten: the move stops instead;
+- the Session folder is copied with its text files rewritten for that machine's
+  paths. `moved.json` in the folder records the path map, for anything that
+  still names the old paths (conversation history keeps them);
+- open approvals move with the Session, and terminal tabs keep their scrollback.
+
+Until it starts, the Session shows as "Arriving from <machine>" there. Once
+this machine has frozen its copy (shown as "Moving to <machine>"), the other
+machine starts each tab that was running on its conversation. The orchestrator
+and each agent that was working get one line saying the Session moved, the
+path map, and to restart their servers and watches. A tab that can't resume
+shows the problem there; the move isn't undone.
+
+This machine then archives the Session as "Moved to <machine>", with its Panes
+archived and their worktrees removed. The uncommitted work stays in each
+repository (`refs/pane/move/<pane id>`), so **Restore here** from the archived
+list brings back the Session and its Panes with their work while the archive
+lasts. Restore only when the other machine no longer runs it. Moving the
+Session back later replaces that archived copy.
+
+If anything fails before the other machine starts the tabs, it removes
+everything it set up, this machine restarts the tabs, and the dialog says what
+happened and what to fix. If the connection drops after the freeze, this
+machine keeps the Session paused as "Moving to <machine>" and offers **Check
+again**: it never restarts the tabs by itself, so the Session never runs twice.
+
+Not moved: secret values and keychain items, running processes (restart them
+there), Agent Farm telemetry, and conversations of agents whose sessions aren't
+plain files (an OpenCode tab starts fresh).
+
+**Hand off with a note…** in the same dialog keeps the older way: it asks the
+Session's agent to write a handoff note and run
+[`runpane handoff`](RUNPANE_WORKSPACES.md#hand-a-task-to-another-machine) with
+the `handoff` skill. That suits a single task, another agent, or a teammate's
+machine. Handoff creates a Session on that machine with the same name (numbered
+"<name> 2" if the name is taken), goal and agent, whose next action is to read
+the note in that machine's `~/.pane/handoffs/`. With the same agent, the
+agent session's files are copied too, and the new Session starts on that
+conversation right away; check that it shows the last message. With a
+different agent, or `--note-only`, only the note moves. The Session folder and
+its Panes stay where they are, and the original Session is not archived.
 
 ## Bring your existing sessions into Pane
 
