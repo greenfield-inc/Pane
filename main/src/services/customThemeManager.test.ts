@@ -68,6 +68,18 @@ describe('CustomThemeManager', () => {
     expect(config.config.theme).toBe('abyss');
   });
 
+  it('keeps Custom selected through an invalid file at launch, and resets a dark base in the light slot to that base', async () => {
+    writeFileSync(file, JSON.stringify({ base: 'abyss', colors: { '--color-bg-primary': 'nope' } }));
+    const config = fakeConfig({ appearanceMode: 'system', systemLightTheme: 'custom', systemDarkTheme: 'dusk-oled' });
+    const manager = new CustomThemeManager(dir, config);
+    manager.loadSync();
+    await manager.deselectIfSelected();
+    expect(config.config.systemLightTheme).toBe('custom');
+
+    await manager.reset();
+    expect(config.config.systemLightTheme).toBe('abyss');
+  });
+
   it('ignores an invalid hand edit with a reason, keeps showing its base, and selects the base when the file is deleted', async () => {
     const config = fakeConfig({ appearanceMode: 'fixed', theme: 'custom' });
     const manager = new CustomThemeManager(dir, config);

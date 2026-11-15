@@ -3,7 +3,7 @@ import { readFileSync } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { PaneError } from '../../../shared/paneError';
-import { isLightTheme, normalizeAppearance, THEME_CLASSES, type Theme } from '../../../shared/types/appearance';
+import { DEFAULT_APPEARANCE, isLightTheme, normalizeAppearance, THEME_CLASSES, type Theme } from '../../../shared/types/appearance';
 import {
   checkCustomTheme,
   CUSTOM_THEME_FILE,
@@ -34,12 +34,12 @@ export interface CustomThemeSetRequest {
 
 const RELOAD_DEBOUNCE_MS = 100;
 
-/** Every slot that selects Custom, pointed at `base` instead. */
+/** Every slot that selects Custom, pointed at `base` instead; a slot's default only when the base is unknown. */
 function replaceCustom(config: AppConfig, base: Theme | null): Partial<AppConfig> {
   const updates: Partial<AppConfig> = {};
-  if (config.theme === CUSTOM_THEME_ID) updates.theme = base ?? 'folio';
-  if (config.systemLightTheme === CUSTOM_THEME_ID) updates.systemLightTheme = base && isLightTheme(base) ? base : 'folio';
-  if (config.systemDarkTheme === CUSTOM_THEME_ID) updates.systemDarkTheme = base && !isLightTheme(base) ? base : 'dusk-oled';
+  if (config.theme === CUSTOM_THEME_ID) updates.theme = base ?? DEFAULT_APPEARANCE.theme;
+  if (config.systemLightTheme === CUSTOM_THEME_ID) updates.systemLightTheme = base ?? DEFAULT_APPEARANCE.systemLightTheme;
+  if (config.systemDarkTheme === CUSTOM_THEME_ID) updates.systemDarkTheme = base ?? DEFAULT_APPEARANCE.systemDarkTheme;
   return updates;
 }
 
@@ -101,9 +101,9 @@ export class CustomThemeManager extends EventEmitter {
     if (changed) this.emit('changed', this.state);
   }
 
-  /** Startup clean-up: a selection of Custom with no file shows its base palette instead. */
+  /** Startup clean-up: a selection of Custom with no file shows its base palette instead. An invalid file keeps the selection, so fixing it brings Custom back. */
   async deselectIfSelected(): Promise<void> {
-    if (this.state.theme || !selectsCustomTheme(normalizeAppearance(this.config.getConfig()).appearance)) return;
+    if (this.lastText !== null || !selectsCustomTheme(normalizeAppearance(this.config.getConfig()).appearance)) return;
     await this.config.updateConfigWith((current) => replaceCustom(current, this.state.base));
   }
 

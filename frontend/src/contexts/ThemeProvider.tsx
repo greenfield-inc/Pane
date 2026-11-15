@@ -13,7 +13,7 @@ import { applyCustomThemeStyles, useCustomThemeState } from '../utils/customThem
 import { useConfigStore } from '../stores/configStore';
 import { readAppearanceCache, readLegacyThemeAsFixed, writeAppearanceCache } from '../utils/appearanceCache';
 import { isWindowControlsOverlayEnabled, readThemeTokenHex, readTitleBarOverlayColors } from '../utils/titleBarOverlay';
-import { THEME_CLASSES, ThemeContext } from './themeContextValue';
+import { THEME_CLASSES, ThemeContext, type ThemeContextType } from './themeContextValue';
 
 const ALL_THEME_CLASSES = [...new Set([...Object.values(THEME_CLASSES).flat(), CUSTOM_THEME_CLASS])];
 const mediaQuery = (): MediaQueryList => window.matchMedia('(prefers-color-scheme: dark)');
@@ -184,11 +184,13 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return setAppearance(prefersDark ? { systemDarkTheme: theme } : { systemLightTheme: theme });
   }, [prefersDark, setAppearance]);
 
+  const value = useMemo((): ThemeContextType => ({
+    theme: resolvedTheme, themeChoice, themeRevision, customTheme, appearance, prefersDark, activeSystemSlot,
+    setTheme, setAppearance, highContrast,
+  }), [resolvedTheme, themeChoice, themeRevision, customTheme, appearance, prefersDark, activeSystemSlot, setTheme, setAppearance, highContrast]);
+
   return (
-    <ThemeContext.Provider value={{
-      theme: resolvedTheme, themeChoice, themeRevision, customTheme, appearance, prefersDark, activeSystemSlot,
-      setTheme, setAppearance, highContrast,
-    }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );
