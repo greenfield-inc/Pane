@@ -161,9 +161,34 @@ export async function exchangeRelayPairing(
   return [relayProfile({ computer: result.computer, token: result.token }), ...linked.map(grant => relayProfile(grant, result.computer.name))];
 }
 
-/** Whether a computer sits at `https://<id>.<domain>`, so its answer can't stand in for another address. */
+const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
+const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+/**
+ * Whether a computer's key fingerprint (base64url sha256 of its public key) is the one its id names:
+ * the id is the fingerprint's first 80 bits in lowercase base32 (relay/src/id.rs). A pin that matches
+ * the scanned id can't be swapped for another key, even by a relay that holds a certificate for the name.
+ */
+export function relayKeyMatchesId(computer: Pick<RelayComputer, 'id' | 'fingerprint'>): boolean {
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(computer.fingerprint)) return false;
+  let value = 0;
+  let bits = 0;
+  let id = '';
+  for (const char of computer.fingerprint.slice(0, 16)) {
+    value = ((value << 6) | BASE64URL.indexOf(char)) & 0x7ff;
+    bits += 6;
+    while (bits >= 5 && id.length < 16) {
+      id += BASE32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  return id === computer.id;
+}
+
+/** Whether a computer sits at `https://<id>.<domain>` with the key its id names, so its answer can't stand in for another computer. */
 export function isRelayComputerUnder(computer: RelayComputer, domain: string): boolean {
   return COMPUTER_ID.test(computer.id)
+    && relayKeyMatchesId(computer)
     && computer.domain === domain
     && computer.address.replace(/\/+$/u, '') === relayComputerAddress({ computerId: computer.id, domain });
 }
