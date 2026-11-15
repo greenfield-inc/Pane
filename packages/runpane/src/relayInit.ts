@@ -6,6 +6,7 @@ import { parseArgs } from 'node:util';
 import { RunpaneError } from './errors';
 
 const USAGE = 'runpane relay init --domain <relay domain> [--public-ip <IPv4>] [--resolver <ip[:port]>]';
+const GUIDE = 'https://github.com/greenfield-inc/Pane/blob/main/docs/SELF_HOSTED_RELAY.md';
 const COMPOSE_URL = 'https://raw.githubusercontent.com/greenfield-inc/Pane/main/relay/compose.yaml';
 
 interface Check {
@@ -48,14 +49,15 @@ export async function runRelayInit(args: string[]): Promise<number> {
   const pad = (name: string) => name.padEnd(Math.max(domain.length, nsHost.length) + 2);
   console.log(`Pane relay for ${domain} on ${ip}
 
-1. Open these ports to the machine: TCP 443, UDP and TCP 53, UDP 7842.
+1. Open these ports to the machine: TCP 443, UDP and TCP 53, and UDP 7842 (optional; it helps devices find direct paths).
 
 2. Add these two records at the DNS provider for ${parent}:
 
      ${pad(nsHost)}A    ${ip}
      ${pad(domain)}NS   ${nsHost}
 
-3. Start the relay on the machine, in an empty folder:
+3. Start the relay on the machine, in an empty folder. On Ubuntu and Debian, free port 53 first:
+   ${GUIDE}#start-one-in-five-minutes
 
      curl -fsSLO ${COMPOSE_URL}
      printf '%s\\n' PANE_RELAY_DOMAIN=${domain} PANE_RELAY_PUBLIC_IP=${ip} PANE_RELAY_NS=${nsHost} > .env

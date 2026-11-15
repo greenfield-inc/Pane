@@ -12,14 +12,17 @@ open-source binary, `pane-relay` ([`relay/`](../relay)); its wire protocol is
 
 You need:
 
-- A Linux machine with a public IPv4 address and Docker, such as a small
-  cloud VM. This guide uses `203.0.113.10`.
+- A Linux machine with a public IPv4 address and Docker with its Compose
+  plugin ([install Docker](https://docs.docker.com/engine/install/)), such as
+  a small cloud VM. This guide uses `203.0.113.10`; use your machine's public
+  address, as its cloud console shows it.
 - A name for the relay under a domain whose DNS you manage, such as
   `relay.example.com`. The relay answers DNS for every name under it, so use
   a name you use for nothing else.
 
 1. **Open the ports.** In the machine's firewall or cloud security group,
-   allow TCP 443, UDP and TCP 53, and UDP 7842.
+   allow TCP 443 and UDP and TCP 53. Also allow UDP 7842, which helps devices
+   find direct paths; without it they still connect.
 
 2. **Add two DNS records** at the DNS provider for `example.com`:
 
@@ -28,34 +31,37 @@ You need:
    | `relay-ns.example.com` | A | `203.0.113.10` |
    | `relay.example.com` | NS | `relay-ns.example.com` |
 
-   `runpane relay init` prints these records, and every command below, for
+   Many providers want only the part before your domain in the Name field
+   (`relay-ns`, `relay`). On Cloudflare, set the A record to **DNS only**
+   (grey cloud); a proxied record breaks the delegation.
+
+   `runpane relay init` prints these records, and every command below, with
    your own name and address. It needs Node.js 22 or later and runs on any
-   machine:
+   machine. Its checks at the end fail until you finish step 3; that is
+   expected.
 
    ```sh
    npx --yes runpane@latest relay init --domain relay.example.com --public-ip 203.0.113.10
    ```
 
-   On the relay machine itself you can leave out `--public-ip` when the
-   machine's network interface has its public address.
-
-3. **Start the relay** on the machine, in an empty folder:
-
-   ```sh
-   curl -fsSLO https://raw.githubusercontent.com/greenfield-inc/Pane/main/relay/compose.yaml
-   printf '%s\n' PANE_RELAY_DOMAIN=relay.example.com PANE_RELAY_PUBLIC_IP=203.0.113.10 PANE_RELAY_NS=relay-ns.example.com > .env
-   docker compose up -d
-   ```
-
-   If Docker says port 53 is already in use, the machine's own DNS stub
-   holds it (Ubuntu and Debian run `systemd-resolved`). Turn the stub off,
-   keep the machine's own lookups working, and start again:
+3. **Start the relay** on the machine. On Ubuntu and Debian, first free
+   port 53: their `systemd-resolved` holds it for the machine's own lookups.
+   This turns that listener off and keeps lookups working:
 
    ```sh
    sudo mkdir -p /etc/systemd/resolved.conf.d
    printf '[Resolve]\nDNSStubListener=no\n' | sudo tee /etc/systemd/resolved.conf.d/pane-relay.conf
    sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
    sudo systemctl restart systemd-resolved
+   ```
+
+   Then, in an empty folder, use the lines `relay init` printed, or replace
+   all three values with your own (`PANE_RELAY_NS` is the A record's name
+   from step 2):
+
+   ```sh
+   curl -fsSLO https://raw.githubusercontent.com/greenfield-inc/Pane/main/relay/compose.yaml
+   printf '%s\n' PANE_RELAY_DOMAIN=relay.example.com PANE_RELAY_PUBLIC_IP=203.0.113.10 PANE_RELAY_NS=relay-ns.example.com > .env
    docker compose up -d
    ```
 
@@ -110,10 +116,11 @@ from the GitHub release once, checks it against the release's
 (`~/.cache/runpane/relay`, `~/Library/Caches/runpane/relay` on macOS,
 `%LOCALAPPDATA%\runpane\relay` on Windows). Its flags, output and exit code
 are `pane-relay`'s. Ports 443 and 53 need root, or on Linux the
-`CAP_NET_BIND_SERVICE` capability:
+`CAP_NET_BIND_SERVICE` capability. Free port 53 first as in step 3; passing
+your `PATH` through `sudo` finds `npx` when Node.js came from nvm:
 
 ```sh
-sudo npx --yes runpane@latest relay \
+sudo env "PATH=$PATH" npx --yes runpane@latest relay \
   --domain relay.example.com --public-ip 203.0.113.10 --ns relay-ns.example.com \
   --dns 0.0.0.0:53 --direct-quic 0.0.0.0:7842 \
   --acme-cache /var/lib/pane-relay/acme
@@ -127,46 +134,51 @@ download yourself, and the container image is
 `--acme-directory` points at another CA, such as Let's Encrypt staging
 (`https://acme-staging-v02.api.letsencrypt.org/directory`) while you try
 things out. The relay's DNS publishes CAA records that allow only Let's
-Encrypt; with another CA, set `--caa-issuer` to its domain. `--cert` and `--key` take your own certificate instead; it must
-cover `relay.example.com` and `us.relay.relay.example.com` (each region's
-name). `--direct-quic` is optional: it helps phones and computers find a
+Encrypt; with another CA, set `--caa-issuer` to its domain. `--cert` and `--key` take your own certificate instead. It must
+cover `relay.example.com` and `us.relay.relay.example.com`: each relay has a
+region (`us` unless you set `--region`) and also answers at
+`<region>.relay.<your domain>`. `--direct-quic` is optional: it helps phones and computers find a
 direct path to each other, and without it they still connect.
 
 ## Two name servers
 
-Registrars usually want two name servers, and a second DNS helper keeps
-names resolving while one machine is down. Run `--dns` on two relays, say
-`us` at 203.0.113.10 and `eu` at 198.51.100.7, and give each the other's
-registry address and the same secret:
+Some registrars want two name servers, and a second relay that answers DNS
+keeps your names resolving while one machine is down. Run two relays with
+DNS, say `us` at 203.0.113.10 and `eu` at 198.51.100.7, that share one
+secret and tell each other about computers. Make the secret once, with
+`openssl rand -hex 32`.
+
+At the DNS provider for `example.com`, add an A record for each machine and
+point the NS records at both:
+
+| Name | Type | Value |
+| --- | --- | --- |
+| `relay-ns1.example.com` | A | `203.0.113.10` |
+| `relay-ns2.example.com` | A | `198.51.100.7` |
+| `relay.example.com` | NS | `relay-ns1.example.com` |
+| `relay.example.com` | NS | `relay-ns2.example.com` |
+
+The `.env` on `us` (on `eu`, swap the region, the public address and the
+other relay's URL):
 
 ```sh
-# on us; on eu, swap the --region and the --registry-url host
-pane-relay --domain relay.example.com --region us \
-  --acme-cache /var/lib/pane-relay/acme --dns 0.0.0.0:53 --public-ip 203.0.113.10 \
-  --region-ip us=203.0.113.10,eu=198.51.100.7 \
-  --ns-ip ns1=203.0.113.10,ns2=198.51.100.7 \
-  --registry-url https://eu.relay.relay.example.com/v1/registry \
-  --registry-secret "$SECRET"
+PANE_RELAY_DOMAIN=relay.example.com
+PANE_RELAY_REGION=us
+PANE_RELAY_PUBLIC_IP=203.0.113.10
+PANE_RELAY_REGION_IP=us=203.0.113.10,eu=198.51.100.7
+PANE_RELAY_NS=relay-ns1.example.com,relay-ns2.example.com
+PANE_RELAY_REGISTRY_URL=https://eu.relay.relay.example.com/v1/registry
+PANE_RELAY_REGISTRY_SECRET=<the secret>
 ```
 
-At the registrar, delegate `relay.example.com` to `ns1.relay.example.com`
-and `ns2.relay.example.com` with those two addresses as glue. A region
-without `--dns` lists both helpers:
-`--registry-url https://us.relay.relay.example.com/v1/registry,https://eu.relay.relay.example.com/v1/registry`.
-Every relay sends each change to every helper and re-posts its computers
-every minute, so both answer the same records.
+Each relay sends every change to the other and re-sends its computers every
+minute, so both answer the same records. A further relay that doesn't answer DNS (started without `--dns`) lists
+both in `--registry-url`:
+`https://us.relay.relay.example.com/v1/registry,https://eu.relay.relay.example.com/v1/registry`.
 
-The first time, start one helper and wait for its certificate (the log says
-`relay certificate issued`) before starting the other. Relays reach a helper
-over https, so it needs its certificate before others can post to it; while
-the second helper is down, Let's Encrypt asks the first.
-
-Check it:
-
-```sh
-curl https://relay.example.com/healthz
-dig @203.0.113.10 relay.example.com A
-```
+The first time, start `us` and wait for `relay certificate issued` in its
+log before starting `eu`: relays reach each other over https, so the first
+needs its certificate before the second can post to it.
 
 ## Alerts
 
