@@ -20,7 +20,7 @@ const CHAT_WAIT_MS = 10_000;
 
 /** Text typed into the box before the person went elsewhere, waiting for that chat to mount. */
 let held: { panelId: string; draft: LaunchDraft } | null = null;
-/** A mounted chat waiting for an IME composition in the box to end. */
+/** A mounted chat waiting to take the box: for its own box to settle, or an IME composition to end. */
 let waiting: (() => void) | null = null;
 /** Stops what revealApp set up to drop the outline. */
 let stopWatching = () => {};
@@ -81,44 +81,73 @@ export function dropLaunchOutline(): void {
   remove(root);
 }
 
+/** How long a mounted chat waits for its box to reach the outline box's place before taking over anyway. */
+const SETTLE_MS = 500;
+
 /**
- * The chat tab `panelId` is mounting: `apply` gets its share of the launch outline, if any. Called
- * from a layout effect, so the outline goes in the same frame the chat's box first paints. An IME
- * composition in the box finishes there first: the text moves when it ends. Returns a cleanup for
- * a tab that unmounts before then.
+ * The chat tab `panelId` is mounting: `apply` gets its share of the launch outline, if any. The
+ * outline goes in the frame where the chat's box (`chatBox`) first sits exactly where the outline's
+ * box is: a mounting tab lays out at zero width first. An IME composition in the box finishes
+ * there first. Returns a cleanup for a tab that unmounts before then.
  */
-export function takeLaunchDraft(panelId: string, apply: (draft: LaunchDraft) => void): () => void {
+export function takeLaunchDraft(panelId: string, chatBox: () => HTMLElement | null, apply: (draft: LaunchDraft) => void): () => void {
   const root = outline();
   const box = launchBox();
-  if (root && box?.dataset.launchComposer === panelId) {
-    const handOver = () => {
-      waiting = null;
-      apply({
-        text: box.value,
-        selectionStart: box.selectionStart,
-        selectionEnd: box.selectionEnd,
-        focused: document.activeElement === box,
-        send: box.dataset.send === 'pending' && !!box.value.trim(),
-      });
-      remove(root);
-    };
-    if (box.dataset.composing !== 'true') {
-      handOver();
-      return () => undefined;
+  if (!root || box?.dataset.launchComposer !== panelId) {
+    if (held?.panelId === panelId) {
+      const { draft } = held;
+      held = null;
+      apply(draft);
     }
-    // After the input method's own handler (index.html), so the text is final.
-    const later = () => queueMicrotask(() => { if (waiting === handOver) handOver(); });
-    waiting = handOver;
-    box.addEventListener('compositionend', later, { once: true });
-    return () => {
-      if (waiting === handOver) waiting = null;
-      box.removeEventListener('compositionend', later);
-    };
+    return () => undefined;
   }
-  if (held?.panelId === panelId) {
-    const { draft } = held;
-    held = null;
-    apply(draft);
+  let frame = 0;
+  let observer: ResizeObserver | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stop = () => {
+    if (waiting === handOver) waiting = null;
+    cancelAnimationFrame(frame);
+    observer?.disconnect();
+    clearTimeout(timer);
+    box.removeEventListener('compositionend', check);
+  };
+  const handOver = (): void => {
+    stop();
+    apply({
+      text: box.value,
+      selectionStart: box.selectionStart,
+      selectionEnd: box.selectionEnd,
+      focused: document.activeElement === box,
+      send: box.dataset.send === 'pending' && !!box.value.trim(),
+    });
+    remove(root);
+  };
+  const inPlace = () => {
+    const chat = chatBox()?.getBoundingClientRect();
+    const outlined = box.getBoundingClientRect();
+    return !!chat && Math.abs(chat.x - outlined.x) <= 1 && Math.abs(chat.y - outlined.y) <= 1
+      && Math.abs(chat.width - outlined.width) <= 1 && Math.abs(chat.height - outlined.height) <= 1;
+  };
+  // Run after layout and before paint (a layout effect, a resize observation, a frame), so the swap shows in one frame.
+  const check = (): void => {
+    if (box.dataset.composing === 'true') return;
+    if (inPlace()) handOver();
+  };
+  const everyFrame = () => {
+    check();
+    if (waiting === handOver) frame = requestAnimationFrame(everyFrame);
+  };
+  waiting = handOver;
+  check();
+  if (waiting !== handOver) return () => undefined;
+  const target = chatBox();
+  if (target) {
+    observer = new ResizeObserver(check);
+    observer.observe(target);
   }
-  return () => undefined;
+  frame = requestAnimationFrame(everyFrame);
+  // After the input method's own handler (index.html), so the text is final.
+  box.addEventListener('compositionend', check);
+  timer = setTimeout(() => { if (box.dataset.composing !== 'true') handOver(); }, SETTLE_MS);
+  return stop;
 }

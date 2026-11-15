@@ -52,19 +52,27 @@ async function holdApp(page: Page): Promise<() => void> {
   return release;
 }
 
-/** Records the launch box's last styled rect every frame, since it is gone once the chat mounts. */
+/**
+ * Records, every frame, the launch box's last styled rect (it is gone once the chat mounts), and
+ * any frame after it in which no message box sits at that rect.
+ */
 async function recordLaunchBox(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    const record = () => {
+    // SAFETY: test-only records read back by the spec.
+    const record = window as typeof window & { __launchBox?: number[]; __gaps?: number[][] };
+    record.__gaps = [];
+    const rectOf = (element: Element) => { const { x, y, width, height } = element.getBoundingClientRect(); return [x, y, width, height]; };
+    const tick = () => {
       const box = document.querySelector('textarea[data-launch-composer]');
-      if (box && getComputedStyle(box).fontSize === '15px') {
-        const { x, y, width, height } = box.getBoundingClientRect();
-        // SAFETY: a test-only record read back by the spec.
-        (window as typeof window & { __launchBox?: number[] }).__launchBox = [x, y, width, height];
+      const chat = document.querySelector('textarea[data-chat-composer]');
+      if (box && getComputedStyle(box).fontSize === '15px') record.__launchBox = rectOf(box);
+      else if (record.__launchBox && !box) {
+        const shown = chat ? rectOf(chat) : [];
+        if (shown.join() !== record.__launchBox.join()) record.__gaps!.push(shown);
       }
-      requestAnimationFrame(record);
+      requestAnimationFrame(tick);
     };
-    requestAnimationFrame(record);
+    requestAnimationFrame(tick);
   });
 }
 
@@ -93,8 +101,26 @@ for (const layout of layouts) {
     const launched = await recordedLaunchBox(page);
     expect(launched).toBeDefined();
     expect(await rectOf(page)).toEqual(launched);
+    // No frame between the outline and the chat showed the box missing or elsewhere.
+    // SAFETY: written by recordLaunchBox.
+    expect(await page.evaluate(() => (window as typeof window & { __gaps?: number[][] }).__gaps)).toEqual([]);
   });
 }
+
+test('a Custom theme paints its cached colours in the first frame, then the app\'s own sheet takes over', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('pane.custom-theme.v1', JSON.stringify({ base: 'folio', theme: { base: 'folio', colors: { '--color-surface-secondary': '#402030', '--color-bad': 'url(https://example.com/x)' } } }));
+  });
+  const release = await holdApp(page);
+  await installElectronApiMock(page, { ...fixture, initialConfig: { appearanceMode: 'fixed', theme: 'custom' } });
+  await page.goto('/', { waitUntil: 'commit' });
+  // Only the plain colour; the value that could load something is left out.
+  expect(await page.locator('#pane-launch-custom-theme').evaluate(style => style.textContent)).toBe('html:root.pane-custom-theme { --color-surface-secondary: #402030; }');
+  release();
+  await expect(chatBox(page)).toBeVisible();
+  // The app's own checked sheet (utils/customTheme.ts) replaces these colours.
+  await expect(page.locator('#pane-launch-custom-theme')).toHaveCount(0);
+});
 
 test('text and caret typed before the app loads move into the chat, which takes focus', async ({ page }) => {
   const release = await holdApp(page);

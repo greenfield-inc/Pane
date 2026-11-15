@@ -371,22 +371,29 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends once (D-62).
   const launchSend = useRef(false);
-  useLayoutEffect(() => takeLaunchDraft(panelId, draft => {
-    viewer.setDraft(draft.text);
-    runtime.thread.composer.setText(draft.text);
-    launchSend.current = draft.send;
-    const input = document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
-    if (!input || !draft.focused) return;
-    // Set here, not on React's next render, so the caret is in place in the first frame.
-    input.value = draft.text;
-    input.focus({ preventScroll: true });
-    input.setSelectionRange(draft.selectionStart, draft.selectionEnd);
-  }), [panelId, runtime, viewer]);
+  /** The handover can land after mount, once the box settles: this re-runs the send check then. */
+  const [launchHandedOver, setLaunchHandedOver] = useState(false);
+  useLayoutEffect(() => {
+    const input = () => document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
+    return takeLaunchDraft(panelId, input, draft => {
+      viewer.setDraft(draft.text);
+      runtime.thread.composer.setText(draft.text);
+      launchSend.current = draft.send;
+      setLaunchHandedOver(true);
+      const box = input();
+      if (!box) return;
+      // Set here, not on React's next render, so the text and caret show in the same frame.
+      box.value = draft.text;
+      if (!draft.focused) return;
+      box.focus({ preventScroll: true });
+      box.setSelectionRange(draft.selectionStart, draft.selectionEnd);
+    });
+  }, [panelId, runtime, viewer]);
   useEffect(() => {
     if (!launchSend.current || sendDisabled) return;
     launchSend.current = false;
     void runtime.thread.composer.send();
-  }, [runtime, sendDisabled]);
+  }, [runtime, sendDisabled, launchHandedOver]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {
