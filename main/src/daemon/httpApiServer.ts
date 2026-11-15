@@ -270,6 +270,8 @@ interface PairingRequest {
   secret: string;
   label: string;
   phoneId?: string;
+  /** Computer ids the phone already has a token for. */
+  known?: string[];
   /** The caller's IP address; wrong secrets lock out only this source. */
   source: string;
 }
@@ -289,6 +291,7 @@ const pairingBodySchema = boundary.object({
   secret: boundary.optional(boundary.json),
   label: boundary.optional(boundary.json),
   phoneId: boundary.optional(boundary.json),
+  known: boundary.optional(boundary.json),
 });
 
 interface WorkspaceIdentityOptions {
@@ -868,6 +871,8 @@ export class PaneRemoteHttpApiServer {
     const exchangeRequest: PairingRequest = { secret, label: decodeOptionalBoundary(body.label, boundary.string) ?? '', source: this.sourceAddress(request) };
     const phoneId = decodeOptionalBoundary(body.phoneId, boundary.string);
     if (phoneId) exchangeRequest.phoneId = phoneId;
+    const known = decodeOptionalBoundary(body.known, boundary.array(boundary.string));
+    if (known) exchangeRequest.known = known.slice(0, 100);
     const result = await pairing.exchange(exchangeRequest);
     if (!result.ok) {
       this.writeJson(response, result.status, { ok: false, error: { code: result.code, message: result.message } });

@@ -60,6 +60,8 @@ export interface RelayExchangeRequest {
   secret: string;
   label: string;
   phoneId?: string;
+  /** Computer ids the app already has a token for. Linked computers among them hand out no new token, which would replace the app's. */
+  known?: string[];
 }
 
 /** `POST /pair/exchange` answer: the token, this computer, and tokens for every computer linked with it. */

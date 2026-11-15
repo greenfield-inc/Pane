@@ -10,10 +10,11 @@ import { CLIENT_LABEL, createDaemonClient, DEVICE_LABEL, getRuntimeId, streaming
 
 /**
  * Trades a scanned code's one-time secret for this phone's token. Returns the computer first,
- * then every computer linked with it, each with its own token.
+ * then each computer linked with it that `saved` doesn't already reach, with its own token.
  */
-export async function exchangeRelayLink(link: RelayPairingLink): Promise<RelayConnectionProfile[]> {
-  return exchangeRelayPairing(streamingFetch, link, { secret: link.secret, label: DEVICE_LABEL ?? CLIENT_LABEL, phoneId: await getRuntimeId() });
+export async function exchangeRelayLink(link: RelayPairingLink, saved: readonly RemotePaneConnectionProfile[]): Promise<RelayConnectionProfile[]> {
+  const known = saved.flatMap(profile => (profile.relay ? [profile.relay.computerId] : []));
+  return exchangeRelayPairing(streamingFetch, link, { secret: link.secret, label: DEVICE_LABEL ?? CLIENT_LABEL, phoneId: await getRuntimeId(), known });
 }
 
 /**
