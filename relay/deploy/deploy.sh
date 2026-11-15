@@ -109,7 +109,14 @@ for line in "${RELAYS[@]}"; do
   startup=$(cat <<EOF
 #!/bin/bash
 set -euo pipefail
-token=\$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | tr -d '\n' | sed -E 's/.*"access_token": *"([^"]+)".*/\1/')
+# The serial log shows where the script stopped.
+trap 'echo "pane-relay startup failed at line \$LINENO: \$BASH_COMMAND" >&2' ERR
+metadata() { curl -sf -H 'Metadata-Flavor: Google' "http://metadata.google.internal/computeMetadata/v1/instance/\$1"; }
+token=\$(metadata service-accounts/default/token | tr -d '\n' | sed -E 's/.*"access_token": *"([^"]+)".*/\1/')
+# GCE maps the external IP to this one. DNS is published only here: COS's
+# systemd-resolved already holds port 53 on 127.0.0.53.
+internal_ip=\$(metadata network-interfaces/0/ip)
+[ -n "\$token" ] && [ -n "\$internal_ip" ]
 secret() { curl -sf -H "Authorization: Bearer \$token" "https://secretmanager.googleapis.com/v1/projects/$PROJECT/secrets/\$1/versions/latest:access" | tr -d '\n' | sed -E 's/.*"data": *"([^"]+)".*/\1/' | base64 -d; }
 install -d -m 0700 -o 65532 -g 65532 /var/lib/pane-relay
 secret pane-relay-registry-secret > /var/lib/pane-relay/registry-secret
@@ -127,7 +134,7 @@ if [ -s /var/lib/pane-relay/apns-key.p8 ] && [ -n "$APNS_KEY_ID" ]; then
   apns="--apns-key-path /data/apns-key.p8 --apns-key-id $APNS_KEY_ID --apns-team-id $APNS_TEAM_ID"
 fi
 docker run -d --name pane-relay --restart always \
-  -p 443:443/tcp -p 53:53/udp -p 53:53/tcp -p 7842:7842/udp \
+  -p 443:443/tcp -p "\$internal_ip:53:53/udp" -p "\$internal_ip:53:53/tcp" -p 7842:7842/udp \
   -v /var/lib/pane-relay:/data \
   -e PANE_RELAY_REGISTRY_SECRET="\$(cat /var/lib/pane-relay/registry-secret)" \
   "$IMAGE" \
@@ -137,6 +144,13 @@ docker run -d --name pane-relay --restart always \
   --direct-quic 0.0.0.0:7842 \
   --acme-email $ACME_EMAIL --acme-cache /data/acme \
   --fcm-project $PROJECT \${apns} ${ANDROID_SHA:+--android-cert-sha256 $ANDROID_SHA}
+sleep 10
+if [ "\$(docker inspect -f '{{.State.Running}}' pane-relay)" != true ]; then
+  docker logs --tail 50 pane-relay >&2
+  echo "pane-relay startup failed: the container is not running" >&2
+  exit 1
+fi
+echo "pane-relay started"
 EOF
 )
   printf '%s\n' "$startup" >"$startup_file"
