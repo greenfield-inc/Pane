@@ -4,6 +4,7 @@ import { PaneError } from '../../../../shared/paneError';
 import { normalizeRemoteDaemonConfig, type RemoteRelaySettings } from '../../../../shared/types/remoteDaemon';
 import type { ConfigManager } from '../../services/configManager';
 import type { RelayService } from './relayService';
+import type { ComputerLinking } from './computerLinking';
 import type { RelayPreviews } from './relayPreviews';
 import { RELAY_COMPUTER_COMMANDS, relayComputerSchema, type RelayLinks } from './relayLinks';
 import { RELAY_CLIENT_COMMANDS, RELAY_DEVICE_COMMANDS } from '../../../../shared/types/relay';
@@ -15,6 +16,10 @@ const RELAY_COMMANDS = {
   pairingCode: 'relay:pairing-code',
   /** Local only: linked computers with the tokens to call them, for `runpane workspace`. */
   linkedComputers: 'relay:linked-computers',
+  /** Local only: `{link}` → `LinkPreview`, without spending the link. */
+  linkPreview: 'relay:link-preview',
+  /** Local only: `{link}` → `LinkRedeemResult`. The client asks the person first when `needsConfirm`. */
+  redeemLink: 'relay:redeem-link',
 } as const;
 
 const callerSchema = boundary.object({ clientId: boundary.nonEmptyString });
@@ -24,6 +29,8 @@ const previewTargetSchema = boundary.union(
 );
 
 const peerRequestSchema = boundary.object({ peer: relayComputerSchema });
+const linkRequestSchema = boundary.object({ link: boundary.nonEmptyString });
+const pairingCodeSchema = boundary.optional(boundary.object({ expiresIn: boundary.optional(boundary.enumeration('10m', '1h', '24h')) }));
 
 function onThisComputerOnly(): void {
   if (isRemotePaneCommand()) {
@@ -37,9 +44,10 @@ function onThisComputerOnly(): void {
 
 export function registerRelayCommands(
   registry: PaneCommandRegistry,
-  relay: RelayService,
+  relay: Pick<RelayService, 'getStatus' | 'createPairingCode' | 'computerInfo'>,
   previews: RelayPreviews,
   links: RelayLinks,
+  linking: ComputerLinking,
   configManager: Pick<ConfigManager, 'updateConfigWith'>,
 ): void {
   registry.register(RELAY_COMMANDS.status, () => relay.getStatus());
@@ -76,9 +84,18 @@ export function registerRelayCommands(
     return relay.getStatus();
   });
 
-  registry.register(RELAY_COMMANDS.pairingCode, () => {
+  // No argument: a 10-minute QR code shown on screen. A copied link names its lifetime.
+  registry.register(RELAY_COMMANDS.pairingCode, (request: PaneCommandValue) => {
     onThisComputerOnly();
-    return relay.createPairingCode();
+    return relay.createPairingCode(decodeBoundary(request ?? undefined, pairingCodeSchema)?.expiresIn ?? '10m');
+  });
+  registry.register(RELAY_COMMANDS.linkPreview, (request: PaneCommandValue) => {
+    onThisComputerOnly();
+    return linking.preview(decodeBoundary(request, linkRequestSchema).link);
+  });
+  registry.register(RELAY_COMMANDS.redeemLink, (request: PaneCommandValue) => {
+    onThisComputerOnly();
+    return linking.redeem(decodeBoundary(request, linkRequestSchema).link);
   });
 
   // Called by paired phones and linked computers; the HTTP server supplies the caller.
@@ -103,6 +120,9 @@ export function registerRelayCommands(
     const phone = decodeBoundary(request, boundary.object({ label: boundary.string, phoneId: boundary.optional(boundary.string) }));
     return links.grantPhone(phone, caller(from));
   });
+  registry.register(RELAY_COMPUTER_COMMANDS.grantComputer, (request: PaneCommandValue, from: PaneCommandValue) => (
+    links.grantComputer(decodeBoundary(request, peerRequestSchema).peer, caller(from))
+  ));
   registry.register(RELAY_COMPUTER_COMMANDS.removePhone, async (request: PaneCommandValue, from: PaneCommandValue) => {
     await links.removePhone(decodeBoundary(request, boundary.object({ phoneId: boundary.nonEmptyString })).phoneId, caller(from));
     return null;

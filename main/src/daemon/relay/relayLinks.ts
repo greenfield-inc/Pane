@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { pinnedServerIdentity } from './keyPinning';
 import https from 'https';
+import type { OutgoingHttpHeaders } from 'http';
 import tls from 'tls';
 import { PaneError } from '../../../../shared/paneError';
 import {
@@ -9,15 +10,27 @@ import {
   type RemoteDaemonConfig,
   type RemotePaneConnectionProfile,
 } from '../../../../shared/types/remoteDaemon';
-import type { RelayComputer, RelayComputerGrant, RelayDevice } from '../../../../shared/types/relay';
-import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import {
+  computerRelayId,
+  foundRoutes,
+  routeProfile,
+  upsertComputer,
+  type ComputerRoute,
+  type ComputerRoutesReport,
+  type RemoteComputer,
+} from '../../../../shared/types/remoteComputers';
+import type { RelayComputer, RelayComputerGrant, RelayDevice, RelayExchangeRequest } from '../../../../shared/types/relay';
+import { boundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { AppConfig } from '../../types/config';
 import { isRelayComputerUnder, relayKeyMatchesId } from '../../../../shared/remoteClient/relay';
+import { RemoteRequestError } from '../../../../shared/remoteClient/remoteDaemonClient';
 
 /** Commands only a linked computer may call, with its link token. */
 export const RELAY_COMPUTER_COMMANDS = {
   /** `{label, phoneId}` → `{token}`: a token for a phone that paired with the caller. */
   grantPhone: 'relay:client:grant-phone',
+  /** `{peer: RelayComputer}` → `{token}`: a token for a computer that redeemed the caller's link. */
+  grantComputer: 'relay:client:grant-computer',
   /** `{phoneId}`: revoke that phone here ("Remove from all your computers"). */
   removePhone: 'relay:client:remove-phone',
   /** `{computerId}`: forget that computer ("Unlink from all your computers"). */
@@ -28,6 +41,9 @@ interface RelayLinksConfig {
   getConfig(): Pick<AppConfig, 'remoteDaemon'>;
   updateConfigWith(update: (current: AppConfig) => Partial<AppConfig>): Promise<object>;
 }
+
+/** A linked computer as the link calls take it: its relay route, with the profile id of its computer. */
+export type LinkedComputer = RemotePaneConnectionProfile & { relay: NonNullable<RemotePaneConnectionProfile['relay']> };
 
 /** Calls a linked computer's `/invoke` with its link token; the key fingerprint is checked. Resolves with its JSON result. */
 export type CallComputer = (profile: RemotePaneConnectionProfile, channel: string, args: unknown[]) => Promise<JsonValue | undefined>;
@@ -47,7 +63,7 @@ const invokeAnswerSchema = boundary.object({
   result: boundary.optional(boundary.json),
   error: boundary.optional(boundary.json),
 });
-const invokeErrorSchema = boundary.object({ message: boundary.string });
+const invokeErrorSchema = boundary.object({ message: boundary.string, code: boundary.optional(boundary.string) });
 const grantedTokenSchema = boundary.object({ token: boundary.string });
 
 export interface RelayLinksDeps {
@@ -69,13 +85,26 @@ function newToken() {
   return { token, tokenHash: createHash('sha256').update(token).digest('hex') };
 }
 
-function profileId(computerId: string): string {
-  return `relay-${computerId}`;
+/**
+ * A computer without its links to the given relay ids: the routes that carry the revoked link
+ * token go. A Tailscale route stays, reached by Tailscale identity alone, so a computer also on the
+ * tailnet stays as a Tailscale-only row; a computer left with no route goes.
+ */
+function withoutLinks(computer: RemoteComputer, relayIds: ReadonlySet<string>): RemoteComputer | null {
+  const relayId = computerRelayId(computer);
+  if (relayId === undefined || !relayIds.has(relayId)) return computer;
+  const linkTokens = new Set(computer.routes.filter((route) => route.relay?.computerId === relayId).map((route) => route.token));
+  const routes = computer.routes.flatMap((route): ComputerRoute[] => {
+    if (route.relay?.computerId === relayId) return [];
+    if (!linkTokens.has(route.token)) return [route];
+    return route.kind === 'tailscale' ? [{ ...route, token: '' }] : [];
+  });
+  return routes.length ? { ...computer, routes } : null;
 }
 
 /**
- * Removes clients here with everything they vouched for: links a removed phone minted, and for each
- * computer whose link goes, the phone tokens it handed out and the profile that calls it.
+ * Removes clients here with everything they vouched for: links a removed phone or computer minted,
+ * and for each computer whose link goes, the phone tokens it handed out and the routes that call it.
  */
 export function revokeClients(
   remote: RemoteDaemonConfig,
@@ -101,7 +130,12 @@ export function revokeClients(
       }
     }
   }
-  const forgetsActive = remote.client.activeProfileId !== null && [...computers].some((id) => remote.client.activeProfileId === profileId(id));
+  const kept = remote.client.computers.flatMap((computer) => {
+    const next = withoutLinks(computer, computers);
+    return next ? [next] : [];
+  });
+  const active = remote.client.activeProfileId;
+  const forgetsActive = active !== null && remote.client.computers.some((computer) => computer.id === active) && !kept.some((computer) => computer.id === active);
   return {
     revoked: [...clients],
     remote: {
@@ -109,8 +143,8 @@ export function revokeClients(
       host: { ...remote.host, clients: remote.host.clients.filter((client) => !clients.has(client.id)) },
       client: {
         ...remote.client,
-        profiles: remote.client.profiles.filter((profile) => profile.relay === undefined || !computers.has(profile.relay.computerId)),
-        activeProfileId: forgetsActive ? null : remote.client.activeProfileId,
+        computers: kept,
+        activeProfileId: forgetsActive ? null : active,
         mode: forgetsActive ? 'local' : remote.client.mode,
       },
     },
@@ -118,10 +152,12 @@ export function revokeClients(
 }
 
 /**
- * "Your computers" (D-16): each computer a phone pairs with links to the phone's other computers
- * with no prompt. Links are client records of kind "computer" (the token a peer uses to call this
- * computer) and client profiles with `relay` (the token this computer uses to call the peer), so
- * "Switch to", ports and runpane workspace reach linked computers through today's client code.
+ * "Your computers": linked computers can call each other. A link is a client record of kind
+ * "computer" here (the token the peer uses to call this computer) and a relay route on the peer's
+ * record in `client.computers` (the token this computer uses to call it), so "Switch to", ports and
+ * runpane workspace reach linked computers through today's client code. A paired phone or a linked
+ * computer links computers: a phone after it pairs with one (D-16), a computer after it redeems
+ * another's one-time link.
  */
 export class RelayLinks {
   constructor(private readonly deps: RelayLinksDeps) {}
@@ -140,10 +176,11 @@ export class RelayLinks {
     return record;
   }
 
-  private callerPhone(clientId: string): RemoteDaemonClientRecord {
+  /** A paired phone or a linked computer: the devices that link computers. */
+  private callerLinker(clientId: string): RemoteDaemonClientRecord {
     const record = this.caller(clientId);
-    if (record.kind !== undefined) {
-      throw new PaneError('ERR_RELAY_PHONE_ONLY', 'Only a paired phone can link computers.', 'Scan both computers with the same phone.');
+    if (record.kind === 'glasses') {
+      throw new PaneError('ERR_RELAY_PHONE_ONLY', 'Only a paired phone or a linked computer can link computers, so nothing was linked.', 'Link computers from the Pane app on your phone or from Pane on a computer.');
     }
     return record;
   }
@@ -151,85 +188,148 @@ export class RelayLinks {
   private callerComputer(clientId: string): RemoteDaemonClientRecord & { computerId: string } {
     const record = this.caller(clientId);
     if (record.kind !== 'computer' || !record.computerId) {
-      throw new PaneError('ERR_RELAY_COMPUTER_ONLY', 'Only a linked computer can ask for this.', 'Link the computers by scanning both with the same phone.');
+      throw new PaneError('ERR_RELAY_COMPUTER_ONLY', 'Only a linked computer can ask for this.', 'Link the computers with a one-time link from Add a device › Computer.');
     }
     return { ...record, computerId: record.computerId };
   }
 
-  /** Linked computers this computer can call. */
-  linked(): Array<RemotePaneConnectionProfile & { relay: NonNullable<RemotePaneConnectionProfile['relay']> }> {
-    return this.remote().client.profiles.flatMap((profile) => (profile.relay ? [{ ...profile, relay: profile.relay }] : []));
+  /** Linked computers this computer can call, each on its relay route. */
+  linked(): LinkedComputer[] {
+    return this.remote().client.computers.flatMap((computer) => {
+      const route = computer.routes.find((candidate) => candidate.kind === 'relay' && candidate.relay);
+      if (!route) return [];
+      const profile = routeProfile(computer, route);
+      return profile.relay ? [{ ...profile, relay: profile.relay }] : [];
+    });
   }
 
-  /** A peer this computer may link with: one at `https://<id>.<domain>` under this computer's own relay domain. */
-  private checkPeer(peer: RelayComputer): void {
-    const domain = this.deps.self()?.domain;
-    if (!domain) {
-      throw new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so it was not linked.', 'Turn on phone access in Settings › Remote Access, then scan both computers again.');
+  /** The relay id a saved computer's id or a relay id names. */
+  private relayIdOf(id: string): string {
+    const computer = this.remote().client.computers.find((candidate) => candidate.id === id);
+    return (computer && computerRelayId(computer)) ?? id;
+  }
+
+  /** A peer this computer may link with: one at `https://<id>.<domain>` under this computer's own relay domain, and not itself. */
+  checkPeer(peer: RelayComputer): void {
+    const self = this.deps.self();
+    if (!self) {
+      throw new PaneError('ERR_RELAY_OFF', 'Phone access is off on this computer, so it was not linked.', 'Turn on phone access in Settings › Remote Access, then try the link again.');
     }
     if (!relayKeyMatchesId(peer)) {
       throw new PaneError(
         'ERR_RELAY_LINK_KEY_MISMATCH',
         `${peer.name}'s key fingerprint is not the one its id ${peer.id} names, so it was not linked.`,
-        'Scan both computers again with the Pane app.',
+        'Copy a new link on that computer and open it again.',
       );
     }
-    if (!isRelayComputerUnder(peer, domain)) {
+    if (!isRelayComputerUnder(peer, self.domain)) {
       throw new PaneError(
         'ERR_RELAY_LINK_OUTSIDE_DOMAIN',
-        `${peer.name} is at ${peer.address}, outside this computer's relay domain ${domain}, so it was not linked.`,
-        `Link only computers that use the same relay: set the same Relay address in Settings › Remote Access on both, then scan both again.`,
+        `${peer.name} is at ${peer.address}, outside this computer's relay domain ${self.domain}, so it was not linked.`,
+        `Link only computers that use the same relay: set the same Relay address in Settings › Remote Access on both, then link them again.`,
       );
     }
+    if (peer.id === self.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'A computer cannot link with itself.', 'Open the link on another computer.');
   }
 
-  /** A phone asks this computer for a token its peer computer will use to call this one. */
-  async mintLink(peer: RelayComputer, callerClientId: string): Promise<{ token: string }> {
-    const phone = this.callerPhone(callerClientId);
-    this.checkPeer(peer);
-    if (peer.id === this.deps.self()?.id) throw new PaneError('ERR_RELAY_LINK_SELF', 'A computer cannot link with itself.', 'Scan another computer.');
-    // A phone that scans a computer again offers its links again. Replacing a working link would cut off the peer's open connection.
-    if (this.linked().some((profile) => profile.relay.computerId === peer.id) && this.remote().host.clients.some((client) => client.kind === 'computer' && client.computerId === peer.id)) {
-      throw new PaneError('ERR_RELAY_ALREADY_LINKED', `${peer.name} is already linked with this computer, so nothing changed.`, 'Nothing to do; to link it again, unlink it first.');
-    }
+  /** A client record for a peer computer, replacing any earlier one for it; the new token is returned once. */
+  private async addComputerClient(peer: Pick<RelayComputer, 'id' | 'name'>, vouch: { linkedBy?: string; mintedBy?: string } = {}): Promise<{ token: string; clientId: string }> {
     const { token, tokenHash } = newToken();
     const record: RemoteDaemonClientRecord = {
       id: randomUUID(),
-      label: peer.name,
+      label: peer.name.slice(0, 60) || 'Computer',
       createdAt: new Date().toISOString(),
       tokenHash,
       kind: 'computer',
       computerId: peer.id,
-      linkedBy: phone.label,
-      mintedBy: phone.id,
     };
-    const replaced = this.remote().host.clients.filter((client) => client.kind === 'computer' && client.computerId === peer.id).map((client) => client.id);
+    if (vouch.linkedBy) record.linkedBy = vouch.linkedBy;
+    if (vouch.mintedBy) record.mintedBy = vouch.mintedBy;
+    await this.addClient(record);
+    return { token, clientId: record.id };
+  }
+
+  /**
+   * Saves a new client record. A phone paired again, or a computer linked again, replaces its
+   * earlier record here, and that record's open connections close.
+   */
+  async addClient(record: RemoteDaemonClientRecord): Promise<void> {
+    const replaces = (client: RemoteDaemonClientRecord) => (record.kind === 'computer'
+      ? client.kind === 'computer' && client.computerId === record.computerId
+      : client.kind === undefined && record.kind === undefined && record.phoneId !== undefined && client.phoneId === record.phoneId);
+    const replaced = this.remote().host.clients.filter(replaces).map((client) => client.id);
     await this.update((remote) => ({
       ...remote,
       host: { ...remote.host, clients: [...remote.host.clients.filter((client) => !replaced.includes(client.id)), record] },
     }));
     if (replaced.length) this.deps.disconnect(replaced);
+  }
+
+  /** A token for a computer redeeming a link this computer opened; the caller is this computer itself. */
+  mintFor(peer: Pick<RelayComputer, 'id' | 'name'>): Promise<{ token: string; clientId: string }> {
+    return this.addComputerClient(peer);
+  }
+
+  /** Removes a client record this computer minted for a link that did not go through. */
+  async dropClient(clientId: string): Promise<void> {
+    await this.revokeLocally({ clients: (client) => client.id === clientId });
+  }
+
+  /** A phone or linked computer asks this computer for a token its peer computer will use to call this one. */
+  async mintLink(peer: RelayComputer, callerClientId: string): Promise<{ token: string }> {
+    const linker = this.callerLinker(callerClientId);
+    this.checkPeer(peer);
+    // A phone that scans a computer again offers its links again. Replacing a working link would cut off the peer's open connection.
+    if (this.linked().some((profile) => profile.relay.computerId === peer.id) && this.remote().host.clients.some((client) => client.kind === 'computer' && client.computerId === peer.id)) {
+      throw new PaneError('ERR_RELAY_ALREADY_LINKED', `${peer.name} is already linked with this computer, so nothing changed.`, 'Nothing to do; to link it again, unlink it first.');
+    }
+    const { token } = await this.addComputerClient(peer, { linkedBy: linker.label, mintedBy: linker.id });
     return { token };
   }
 
-  /** A phone hands this computer the token to call a peer it just linked. */
-  async saveLink(peer: RelayComputer, token: string, callerClientId: string): Promise<void> {
-    const phone = this.callerPhone(callerClientId);
-    this.checkPeer(peer);
-    if (peer.id === this.deps.self()?.id) return;
-    const profile: RemotePaneConnectionProfile = {
-      id: profileId(peer.id),
-      label: peer.name,
-      baseUrl: peer.address,
+  /**
+   * Saves a computer this one can now call: its relay route with the token, plus the routes it
+   * reported, on its record in `client.computers` (a computer saved already gains the routes).
+   * Returns the record's id.
+   */
+  async saveComputer(peer: { computer: RelayComputer; token: string; routes?: ComputerRoutesReport; linkedBy?: string }): Promise<string> {
+    const { computer, token, linkedBy } = peer;
+    // A report about another relay id is not this computer's.
+    const report = peer.routes && (!peer.routes.relay || peer.routes.relay.id === computer.id) ? peer.routes : undefined;
+    const linkRoute: ComputerRoute = {
+      id: `relay:${computer.address.replace(/\/+$/u, '')}`,
+      kind: 'relay',
+      source: 'link',
+      baseUrl: computer.address.replace(/\/+$/u, ''),
       token,
-      transport: 'http+sse',
-      relay: { computerId: peer.id, fingerprint: peer.fingerprint, linkedBy: phone.label },
+      relay: { computerId: computer.id, fingerprint: computer.fingerprint },
     };
-    await this.update((remote) => ({
-      ...remote,
-      client: { ...remote.client, profiles: [...remote.client.profiles.filter((existing) => existing.id !== profile.id), profile] },
-    }));
-    this.deps.log?.(`[relay] linked with ${peer.name} (${peer.id}), linked by ${phone.label}`);
+    let id = '';
+    await this.update((remote) => {
+      // An install id another saved computer holds under a different relay id is not trusted to merge.
+      const holder = report ? remote.client.computers.find((candidate) => candidate.machineId === report.machineId) : undefined;
+      const holderRelay = holder && computerRelayId(holder);
+      const machineId = holderRelay && holderRelay !== computer.id ? undefined : report?.machineId;
+      const saved = upsertComputer(remote.client.computers, {
+        machineId,
+        relayId: computer.id,
+        label: computer.name,
+        os: report?.os,
+        linkedBy,
+        routes: [...(report ? foundRoutes(report, token) : []), linkRoute],
+      });
+      id = saved.id;
+      return { ...remote, client: { ...remote.client, computers: saved.computers } };
+    });
+    this.deps.log?.(`[relay] linked with ${computer.name} (${computer.id})${linkedBy ? `, linked by ${linkedBy}` : ''}`);
+    return id;
+  }
+
+  /** A phone or linked computer hands this computer the token to call a peer it just linked. */
+  async saveLink(peer: RelayComputer, token: string, callerClientId: string): Promise<void> {
+    const linker = this.callerLinker(callerClientId);
+    this.checkPeer(peer);
+    await this.saveComputer({ computer: peer, token, linkedBy: linker.label });
   }
 
   /** A linked computer hands out a token for a phone that just paired with it. */
@@ -245,23 +345,33 @@ export class RelayLinks {
       grantedBy: granter.computerId,
     };
     if (phone.phoneId) record.phoneId = phone.phoneId;
-    const replaced = phone.phoneId
-      ? this.remote().host.clients.filter((client) => client.kind === undefined && client.phoneId === phone.phoneId).map((client) => client.id)
-      : [];
-    await this.update((remote) => ({
-      ...remote,
-      host: { ...remote.host, clients: [...remote.host.clients.filter((client) => !replaced.includes(client.id)), record] },
-    }));
-    if (replaced.length) this.deps.disconnect(replaced);
+    await this.addClient(record);
+    return { token };
+  }
+
+  /** A linked computer hands out a token for a computer that just redeemed its link; unlinking the granter revokes it. */
+  async grantComputer(peer: RelayComputer, callerClientId: string): Promise<{ token: string }> {
+    const granter = this.callerComputer(callerClientId);
+    this.checkPeer(peer);
+    const { token } = await this.addComputerClient(peer, { linkedBy: granter.label, mintedBy: granter.id });
     return { token };
   }
 
   /** Tokens on every linked computer for a phone that just paired here, skipping those it has. */
-  async grantsFor(phone: { label: string; phoneId?: string }, known: readonly string[]): Promise<RelayComputerGrant[]> {
+  grantsFor(phone: { label: string; phoneId?: string }, known: readonly string[]): Promise<RelayComputerGrant[]> {
+    return this.grants(RELAY_COMPUTER_COMMANDS.grantPhone, phone, known);
+  }
+
+  /** Tokens on every linked computer for a computer that just redeemed this computer's link, skipping those it has. */
+  computerGrantsFor(peer: RelayComputer, known: readonly string[]): Promise<RelayComputerGrant[]> {
+    return this.grants(RELAY_COMPUTER_COMMANDS.grantComputer, { peer }, [...known, peer.id]);
+  }
+
+  private async grants(channel: string, request: { label: string; phoneId?: string } | { peer: RelayComputer }, known: readonly string[]): Promise<RelayComputerGrant[]> {
     const grants = await Promise.all(this.linked().filter((profile) => !known.includes(profile.relay.computerId)).map(async (profile) => {
       try {
         const [result, computer] = await Promise.all([
-          this.deps.call(profile, RELAY_COMPUTER_COMMANDS.grantPhone, [phone]),
+          this.deps.call(profile, channel, [request]),
           this.deps.call(profile, 'relay:client:computer', []),
         ]);
         const token = decodeOptionalBoundary(result, grantedTokenSchema)?.token;
@@ -334,8 +444,9 @@ export class RelayLinks {
     return { removed, notReached };
   }
 
-  /** "Unlink from all your computers" on a linked computer's row. */
-  async unlinkComputerEverywhere(computerId: string): Promise<{ removed: string[]; notReached: string[] }> {
+  /** "Unlink from all your computers" on a linked computer's row; `id` is its relay id or its id in `client.computers`. */
+  async unlinkComputerEverywhere(id: string): Promise<{ removed: string[]; notReached: string[] }> {
+    const computerId = this.relayIdOf(id);
     const targets = this.linked();
     // The computers it is removed from: this one, and each other linked computer that answers.
     const removed = [this.deps.self()?.name ?? 'This computer'];
@@ -368,23 +479,30 @@ export class RelayLinks {
   }
 }
 
-/**
- * `POST <address>/invoke` with a link token. The peer's certificate must carry the key its
- * fingerprint names, so a second certificate for the same name (D-16 trust model) is refused.
- */
-export function createComputerCaller(options: { dial?: { host: string; port: number }; extraCa?: string } = {}): CallComputer {
-  return (profile, channel, args) => new Promise((resolve, reject) => {
-    const url = new URL('/invoke', profile.baseUrl);
-    const fingerprint = profile.relay?.fingerprint;
+/** How main reaches a computer's address: Pane's relay by name, or a development relay and CA. */
+interface ComputerDialOptions {
+  dial?: { host: string; port: number };
+  extraCa?: string;
+}
+
+/** `POST <url>` with a JSON body; resolves with the status and parsed JSON. With a fingerprint, any other key is refused. */
+function postJson(
+  options: ComputerDialOptions,
+  target: { url: string; label: string; body: unknown; token?: string; fingerprint?: string },
+): Promise<{ status: number; json: unknown }> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(target.url);
+    const headers: OutgoingHttpHeaders = { 'content-type': 'application/json', host: url.host };
+    if (target.token) headers.authorization = `Bearer ${target.token}`;
     const request = https.request({
       host: options.dial?.host ?? url.hostname,
       port: options.dial?.port ?? (url.port || 443),
       servername: url.hostname,
       path: url.pathname,
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${profile.token}`, host: url.host },
+      headers,
       ca: options.extraCa ? [...tls.rootCertificates, options.extraCa] : undefined,
-      checkServerIdentity: fingerprint ? pinnedServerIdentity(fingerprint, profile.label) : tls.checkServerIdentity,
+      checkServerIdentity: target.fingerprint ? pinnedServerIdentity(target.fingerprint, target.label) : tls.checkServerIdentity,
       timeout: 15_000,
     }, (response) => {
       let text = '';
@@ -392,23 +510,52 @@ export function createComputerCaller(options: { dial?: { host: string; port: num
       response.on('data', (chunk: string) => { text += chunk; });
       response.on('end', () => {
         try {
-          const body = decodeBoundary(JSON.parse(text), invokeAnswerSchema);
-          if (body.ok) resolve(body.result);
-          else reject(new Error(decodeOptionalBoundary(body.error, invokeErrorSchema)?.message ?? `HTTP ${response.statusCode}`));
+          resolve({ status: response.statusCode ?? 0, json: JSON.parse(text) });
         } catch {
-          reject(new Error(`${profile.label} answered HTTP ${response.statusCode}.`));
+          reject(new Error(`${target.label} answered HTTP ${response.statusCode}.`));
         }
       });
       // A computer that sleeps or drops off mid-reply ends the response with no 'end' or 'error'.
       response.on('close', () => {
-        if (!response.complete) reject(new Error(`${profile.label} stopped answering partway through its reply.`));
+        if (!response.complete) reject(new Error(`${target.label} stopped answering partway through its reply.`));
       });
     });
     // The socket timeout restarts with every byte; this bounds the whole call.
-    const deadline = setTimeout(() => request.destroy(new Error(`${profile.label} did not finish answering within ${CALL_DEADLINE_MS / 1000} seconds.`)), CALL_DEADLINE_MS);
+    const deadline = setTimeout(() => request.destroy(new Error(`${target.label} did not finish answering within ${CALL_DEADLINE_MS / 1000} seconds.`)), CALL_DEADLINE_MS);
     request.on('close', () => clearTimeout(deadline));
-    request.on('timeout', () => request.destroy(new Error(`${profile.label} did not answer within 15 seconds.`)));
+    request.on('timeout', () => request.destroy(new Error(`${target.label} did not answer within 15 seconds.`)));
     request.on('error', reject);
-    request.end(JSON.stringify({ channel, args }));
+    request.end(JSON.stringify(target.body));
   });
+}
+
+/**
+ * `POST <address>/invoke` with a link token. The peer's certificate must carry the key its
+ * fingerprint names, so a second certificate for the same name (D-16 trust model) is refused.
+ */
+export function createComputerCaller(options: ComputerDialOptions = {}): CallComputer {
+  return async (profile, channel, args) => {
+    const { status, json } = await postJson(options, {
+      url: new URL('/invoke', profile.baseUrl).toString(),
+      label: profile.label,
+      body: { channel, args },
+      token: profile.token,
+      fingerprint: profile.relay?.fingerprint,
+    });
+    const body = decodeOptionalBoundary(json, invokeAnswerSchema);
+    if (!body) throw new Error(`${profile.label} answered HTTP ${status}.`);
+    if (body.ok) return body.result;
+    const error = decodeOptionalBoundary(body.error, invokeErrorSchema);
+    throw new RemoteRequestError(error?.message ?? `HTTP ${status}`, status, error?.code ?? null);
+  };
+}
+
+/** A body for a computer's unauthenticated pairing routes: `/pair/preview` takes the secret, `/pair/exchange` the whole request. */
+type PairingPostBody = { secret: string } | RelayExchangeRequest;
+
+/** Posts to a computer's pairing routes (`/pair/preview`, `/pair/exchange`) before its key is known; the public certificate is checked. */
+export type PostToComputer = (address: string, path: '/pair/preview' | '/pair/exchange', body: PairingPostBody, label: string) => Promise<{ status: number; json: unknown }>;
+
+export function createComputerPoster(options: ComputerDialOptions = {}): PostToComputer {
+  return (address, path, body, label) => postJson(options, { url: new URL(path, address).toString(), label, body });
 }

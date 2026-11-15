@@ -143,7 +143,7 @@ import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
 import { syncAutoStartOnBoot } from './utils/autoStart';
 import { addRunpaneToUserPathBestEffort } from './services/runpaneShim';
 import { syncPaneMcpForApp } from './services/paneMcpRegistration';
-import { findPaneLinkArg, forwardPaneLinkToRunningPane, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME, parsePaneLink } from './services/paneLinks';
+import { findPaneLinkArg, forwardPaneLinkToRunningPane, isPanePairLink, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME, parsePaneLink } from './services/paneLinks';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
 import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
@@ -293,6 +293,12 @@ function openPaneLink(link: string): void {
     return;
   }
   pendingPaneLink = undefined;
+  // Another computer's one-time link opens the confirm page, in local and remote mode alike.
+  if (isPanePairLink(link)) {
+    showMainWindow();
+    mainWindow?.webContents.send('relay:link-opened', { link });
+    return;
+  }
   if (remotePaneClientController.isRemoteModeActive()) {
     // The link names the active host's Panes, which only the renderer holds in remote mode.
     try {
@@ -1197,6 +1203,10 @@ async function initializeServices() {
   machineConnections = new MachineConnections({
     configManager,
     invokeLocal: (channel, args) => commandRegistry.invoke(channel, args),
+    routes: {
+      prepare: (route) => remotePaneClientController.prepareRoute(route),
+      saveReport: (computerId, routeId, report) => remotePaneClientController.saveRoutesReport(computerId, routeId, report),
+    },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
   const machines = machineConnections;

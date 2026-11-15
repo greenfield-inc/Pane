@@ -1,8 +1,13 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import type { RemoteDaemonClientRecord } from '../../../../shared/types/remoteDaemon';
+import type { RelayLinkLifetime } from '../../../../shared/types/relay';
 
-const SECRET_TTL_MS = 10 * 60_000;
-/** Recently used or expired secrets are remembered this long, so a late scan gets the right message. */
+const LINK_LIFETIME_MS = {
+  '10m': 10 * 60_000,
+  '1h': 60 * 60_000,
+  '24h': 24 * 60 * 60_000,
+} satisfies Record<RelayLinkLifetime, number>;
+/** Used or expired secrets are remembered this long past their expiry, so a late use gets the right message. */
 const SPENT_MEMORY_MS = 60 * 60_000;
 const MAX_PENDING = 16;
 const FAILURE_WINDOW_MS = 60_000;
@@ -12,19 +17,18 @@ const LOCK_MS = 15 * 60_000;
 const MAX_TRACKED_SOURCES = 1_000;
 const MAX_LABEL_LENGTH = 60;
 
+export type PairingRefusal = { ok: false; status: number; code: string; message: string };
+
 export type PairingExchangeResult =
   | { ok: true; token: string; client: RemoteDaemonClientRecord }
-  | { ok: false; status: number; code: string; message: string };
-
-export interface PairedEvent {
-  clientId: string;
-  label: string;
-}
+  | PairingRefusal;
 
 export interface PairingExchangeRequest {
   secret: string;
   label: string;
   phoneId?: string;
+  /** Set when a computer redeems the secret: its relay id. The new record is a linked computer. */
+  computerId?: string;
   /** The client's IP address: the relay's `peer` for a relayed connection, else the socket's. */
   source: string;
 }
@@ -36,13 +40,14 @@ interface SourceFailures {
 
 interface Pending {
   hash: Buffer;
+  lifetime: RelayLinkLifetime;
   expiresAt: number;
   spentAt: number | null;
 }
 
 interface PairingExchangeDeps {
   now?: () => number;
-  /** Saves the new client record in `remoteDaemon.host.clients`, replacing earlier records of the same phone. */
+  /** Saves the new client record in `remoteDaemon.host.clients`, replacing earlier records of the same phone or computer. */
   addClient(record: RemoteDaemonClientRecord): Promise<void>;
   log?: (line: string) => void;
 }
@@ -51,46 +56,71 @@ function sha256(value: string): Buffer {
   return createHash('sha256').update(value).digest();
 }
 
-function cleanLabel(label: string): string {
+function cleanLabel(label: string, fallback: string): string {
   const clean = label.replace(/[\p{Cc}\p{Cf}]/gu, '').trim().slice(0, MAX_LABEL_LENGTH);
-  return clean || 'Phone';
+  return clean || fallback;
 }
 
 /**
- * One-time QR secrets: 32 random bytes, kept only as a hash, good for 10 minutes and one trade,
- * like glasses pairing secrets. The trade is the pairing listener's only unauthenticated route, so
- * five wrong secrets from one source within a minute lock that source out for 15 minutes; other
- * sources, the owner's phone among them, still pair.
+ * One-time secrets for QR codes and links: 32 random bytes, kept only as a hash, good for one trade
+ * until their own expiry (10 minutes, 1 hour or 24 hours), like glasses pairing secrets. The trade
+ * and its preview are the pairing listener's only unauthenticated routes, so five wrong secrets
+ * from one source within a minute lock that source out for 15 minutes; other sources, the owner's
+ * phone among them, still pair.
  */
 export class PairingExchange {
   private readonly pending: Pending[] = [];
   private readonly sources = new Map<string, SourceFailures>();
-  private readonly listeners = new Set<(event: PairedEvent) => void>();
   private readonly now: () => number;
 
   constructor(private readonly deps: PairingExchangeDeps) {
     this.now = deps.now ?? Date.now;
   }
 
-  createSecret() {
+  /** A new secret. At most 16 wait at once: a 17th spends the oldest 10-minute one, else the oldest. */
+  createSecret(lifetime: RelayLinkLifetime = '10m') {
     const now = this.now();
     this.prune(now);
-    const live = this.pending.filter((entry) => entry.spentAt === null);
-    if (live.length >= MAX_PENDING) live[0].spentAt = now;
+    const waiting = this.pending.filter((entry) => entry.spentAt === null && now <= entry.expiresAt);
+    if (waiting.length >= MAX_PENDING) (waiting.find((entry) => entry.lifetime === '10m') ?? waiting[0]).spentAt = now;
     const secret = randomBytes(32).toString('base64url');
-    const expiresAt = now + SECRET_TTL_MS;
-    this.pending.push({ hash: sha256(secret), expiresAt, spentAt: null });
+    const expiresAt = now + LINK_LIFETIME_MS[lifetime];
+    this.pending.push({ hash: sha256(secret), lifetime, expiresAt, spentAt: null });
     return { secret, expiresAt: new Date(expiresAt).toISOString() };
   }
 
-  onPaired(listener: (event: PairedEvent) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  async exchange({ secret, label, phoneId, source }: PairingExchangeRequest): Promise<PairingExchangeResult> {
+  /** Whether a secret would trade now, without spending it. Wrong secrets count toward the lockout. */
+  check(secret: string, source: string): { ok: true; expiresAt: string } | PairingRefusal {
     const now = this.now();
     this.prune(now);
+    const found = this.find(secret, source, now);
+    return found.ok ? { ok: true, expiresAt: new Date(found.entry.expiresAt).toISOString() } : found;
+  }
+
+  async exchange({ secret, label, phoneId, computerId, source }: PairingExchangeRequest): Promise<PairingExchangeResult> {
+    const now = this.now();
+    this.prune(now);
+    const found = this.find(secret, source, now);
+    if (!found.ok) return found;
+    found.entry.spentAt = now;
+    const token = randomBytes(32).toString('base64url');
+    const client: RemoteDaemonClientRecord = {
+      id: randomUUID(),
+      label: cleanLabel(label, computerId ? 'Computer' : 'Phone'),
+      createdAt: new Date(now).toISOString(),
+      tokenHash: sha256(token).toString('hex'),
+    };
+    if (computerId) {
+      client.kind = 'computer';
+      client.computerId = computerId;
+    } else if (phoneId) {
+      client.phoneId = phoneId.slice(0, 100);
+    }
+    await this.deps.addClient(client);
+    return { ok: true, token, client };
+  }
+
+  private find(secret: string, source: string, now: number): { ok: true; entry: Pending } | PairingRefusal {
     if (now < (this.sources.get(source)?.lockedUntil ?? 0)) {
       return { ok: false, status: 429, code: 'ERR_PAIRING_LOCKED', message: 'Too many wrong pairing codes from this network. Try again in 15 minutes.' };
     }
@@ -101,24 +131,13 @@ export class PairingExchange {
       return { ok: false, status: 403, code: 'ERR_PAIRING_CODE_INVALID', message: 'This code is not from this computer. Scan the code it shows now.' };
     }
     if (entry.spentAt !== null && entry.expiresAt > entry.spentAt) {
-      return { ok: false, status: 410, code: 'ERR_PAIRING_CODE_USED', message: 'This code was already used. Scan the new code on the computer.' };
+      return { ok: false, status: 410, code: 'ERR_PAIRING_CODE_USED', message: 'This code was already used. Ask for a new link, or scan the new code on the computer.' };
     }
     if (entry.spentAt !== null || now > entry.expiresAt) {
       entry.spentAt ??= now;
-      return { ok: false, status: 410, code: 'ERR_PAIRING_CODE_EXPIRED', message: 'This code expired. Scan the new code on the computer.' };
+      return { ok: false, status: 410, code: 'ERR_PAIRING_CODE_EXPIRED', message: 'This code expired. Ask for a new link, or scan the new code on the computer.' };
     }
-    entry.spentAt = now;
-    const token = randomBytes(32).toString('base64url');
-    const client: RemoteDaemonClientRecord = {
-      id: randomUUID(),
-      label: cleanLabel(label),
-      createdAt: new Date(now).toISOString(),
-      tokenHash: sha256(token).toString('hex'),
-    };
-    if (phoneId) client.phoneId = phoneId.slice(0, 100);
-    await this.deps.addClient(client);
-    for (const listener of this.listeners) listener({ clientId: client.id, label: client.label });
-    return { ok: true, token, client };
+    return { ok: true, entry };
   }
 
   private recordFailure(source: string, now: number): void {

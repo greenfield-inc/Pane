@@ -6,13 +6,13 @@ import os from 'os';
 import path from 'path';
 import tls from 'tls';
 import type { RemoteDaemonClientRecord, RemoteRelaySettings } from '../../../../shared/types/remoteDaemon';
-import type { RelayComputer, RelayDirectEndpoint, RelayPairingInfo, RelayStatus } from '../../../../shared/types/relay';
+import type { RelayComputer, RelayDirectEndpoint, RelayLinkLifetime, RelayPairingInfo, RelayStatus } from '../../../../shared/types/relay';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { loadComputerKey, type ComputerKey, type KeyStore } from './computerKey';
 import { ComputerCertificate, LETS_ENCRYPT_DIRECTORY } from './computerCertificate';
 import { createComputerTlsServer, type ComputerTlsServer } from './computerTlsServer';
 import { computerHost, localAddressHost } from './computerNames';
-import { PairingExchange, type PairedEvent, type PairingExchangeRequest, type PairingExchangeResult } from './pairingExchange';
+import { PairingExchange, type PairingExchangeRequest, type PairingExchangeResult, type PairingRefusal } from './pairingExchange';
 import { RelayAgent, type RelayAgentState, type RelayAlert, type RelayGrantRequest } from './relayAgent';
 import { findPaneDirect, PaneDirectProcess } from './paneDirect';
 import { DEFAULT_RELAY_DOMAIN } from '../../../../shared/remoteClient/relay';
@@ -108,10 +108,6 @@ export class RelayService {
     return () => this.listeners.delete(listener);
   }
 
-  onPaired(listener: (event: PairedEvent) => void): () => void {
-    return this.exchange.onPaired(listener);
-  }
-
   /** True while connected to the relay, so it can carry alerts. */
   isOnline(): boolean {
     return this.agent?.isOnline() === true;
@@ -182,8 +178,8 @@ export class RelayService {
     return `Phones can't connect: this computer's phone listener isn't running (${reasonOf(listener.error)}). In Settings › Remote Access › More › Advanced, turn on the host listener or give it a free port.`;
   }
 
-  /** A one-time QR code. Throws while the relay is not ready. */
-  createPairingCode(): RelayPairingInfo {
+  /** A one-time QR code or link, 10 minutes unless the link asks for longer. Throws while the relay is not ready. */
+  createPairingCode(lifetime: RelayLinkLifetime = '10m'): RelayPairingInfo {
     const status = this.getStatus();
     if (status.phase !== 'ready' || !status.id || !status.domain) {
       throw new PaneError(
@@ -192,9 +188,14 @@ export class RelayService {
         'Try again in a moment; Settings › Remote Access shows when phone access is ready.',
       );
     }
-    const { secret, expiresAt } = this.exchange.createSecret();
+    const { secret, expiresAt } = this.exchange.createSecret(lifetime);
     const fragment = new URLSearchParams({ s: secret, c: status.id, n: this.deps.displayName().slice(0, 60) });
     return { url: `https://${status.domain}/pair#${fragment.toString()}`, expiresAt };
+  }
+
+  /** The pairing listener's `POST /pair/preview`: whether a secret would trade, without spending it. */
+  checkSecret(secret: string, source: string): { ok: true; expiresAt: string } | PairingRefusal {
+    return this.exchange.check(secret, source);
   }
 
   /** The pairing listener's `POST /pair/exchange`. */

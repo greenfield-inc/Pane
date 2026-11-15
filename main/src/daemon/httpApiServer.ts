@@ -13,6 +13,8 @@ import {
 } from '../services/remoteAnalytics';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { PaneCommandRegistry } from './commandRegistry';
+import { buildRoutesReport } from './computerCommands';
+import type { ComputerRoutesReport } from '../../../shared/types/remoteComputers';
 import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type WorkspaceAccessPolicy } from './auth';
 
 export type { WorkspaceAccessPolicy } from './auth';
@@ -150,6 +152,8 @@ interface RemoteReadyEventPayload {
   deduplicatesRequestIds: true;
   /** This host's install id (`AppConfig.machineId`), which "Show cards on" names it by. Hosts before it omit it. */
   machineId?: string;
+  /** This host's routes (D-51), saved by the client as found automatically. Hosts before it omit it. */
+  computer?: ComputerRoutesReport;
 }
 
 interface RemoteHealthPayload {
@@ -179,6 +183,8 @@ type RemoteRequestAuthResult =
   };
 
 const MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES = 1024 * 1024;
+/** `/pair/preview` takes only a secret. */
+const MAX_PAIRING_PREVIEW_BODY_BYTES = 4 * 1024;
 const MAX_AUTHENTICATED_REQUEST_BODY_BYTES = 16 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_REMOTE_DAEMON_HEARTBEAT_INTERVAL_MS = 5_000;
@@ -272,17 +278,25 @@ interface PairingRequest {
   phoneId?: string;
   /** Computer ids the phone already has a token for. */
   known?: string[];
+  /** A computer redeeming the code: who it is, its routes and a token for this computer (`RelayComputerOffer`), decoded by the route. */
+  computer?: JsonValue;
   /** The caller's IP address; wrong secrets lock out only this source. */
   source: string;
 }
 
-/** The phone's new token, what it stores about this computer, and the computers it may now reach. */
+type PairingRefusal = { ok: false; status: number; code: string; message: string };
+
+/** The new token, what the caller stores about this computer, and the computers it may now reach. */
 type PairingRouteResult =
-  | { ok: true; token: string; client: { id: string }; computer?: RelayComputer; linked?: RelayComputerGrant[] }
-  | { ok: false; status: number; code: string; message: string };
+  | { ok: true; token: string; client: { id: string }; computer?: RelayComputer; linked?: RelayComputerGrant[]; routes?: ComputerRoutesReport }
+  | PairingRefusal;
+
+/** Whose code it is, without spending it: this computer, then every computer linked with it. */
+type PairingPreviewResult = { ok: true; group: Array<{ id: string; name: string }>; expiresAt: string } | PairingRefusal;
 
 export interface PairingRoute {
   exchange(request: PairingRequest): Promise<PairingRouteResult>;
+  preview(request: { secret: string; source: string }): Promise<PairingPreviewResult>;
   /** The client IP behind a connection the relay's TLS terminator forwarded here; null for any other connection. */
   clientAddress(remoteAddress: string | undefined, remotePort: number | undefined): string | null;
 }
@@ -292,6 +306,7 @@ const pairingBodySchema = boundary.object({
   label: boundary.optional(boundary.json),
   phoneId: boundary.optional(boundary.json),
   known: boundary.optional(boundary.json),
+  computer: boundary.optional(boundary.json),
 });
 
 interface WorkspaceIdentityOptions {
@@ -838,6 +853,11 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
+    if (url.pathname === '/pair/preview' && this.pairing && !this.workspace) {
+      await this.handlePairingPreview(request, response, this.pairing);
+      return;
+    }
+
     if (url.pathname === '/invoke') {
       await this.handleInvokeRequest(request, response);
       return;
@@ -897,6 +917,7 @@ export class PaneRemoteHttpApiServer {
     if (phoneId) exchangeRequest.phoneId = phoneId;
     const known = decodeOptionalBoundary(body.known, boundary.array(boundary.string));
     if (known) exchangeRequest.known = known.slice(0, 100);
+    if (body.computer !== undefined) exchangeRequest.computer = body.computer;
     const result = await pairing.exchange(exchangeRequest);
     if (!result.ok) {
       this.writeJson(response, result.status, { ok: false, error: { code: result.code, message: result.message } });
@@ -904,6 +925,31 @@ export class PaneRemoteHttpApiServer {
     }
     const { client, ...rest } = result;
     this.writeJson(response, 200, { ...rest, clientId: client.id });
+  }
+
+  /** Unauthenticated like the exchange and behind the same lockout: whose code it is, without spending it. */
+  private async handlePairingPreview(request: IncomingMessage, response: ServerResponse, pairing: PairingRoute): Promise<void> {
+    if (request.method !== 'POST') {
+      this.writeMethodNotAllowed(response, 'POST');
+      return;
+    }
+    let secret: string | undefined;
+    try {
+      secret = decodeOptionalBoundary(decodeBoundary(JSON.parse(await readRequestBody(request, MAX_PAIRING_PREVIEW_BODY_BYTES)), pairingBodySchema).secret, boundary.string);
+    } catch {
+      this.writeJson(response, 400, { ok: false, error: { code: 'ERR_PAIRING_BAD_REQUEST', message: 'Send {"secret"} as JSON.' } });
+      return;
+    }
+    if (!secret || secret.length > 200) {
+      this.writeJson(response, 400, { ok: false, error: { code: 'ERR_PAIRING_BAD_REQUEST', message: 'The pairing code is missing.' } });
+      return;
+    }
+    const result = await pairing.preview({ secret, source: this.sourceAddress(request) });
+    if (!result.ok) {
+      this.writeJson(response, result.status, { ok: false, error: { code: result.code, message: result.message } });
+      return;
+    }
+    this.writeJson(response, 200, result);
   }
 
   private async handleInvokeRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -1130,6 +1176,9 @@ export class PaneRemoteHttpApiServer {
     if (this.paneVersion) ready.paneVersion = this.paneVersion;
     const hostMachineId = this.configManager.getConfig().machineId;
     if (hostMachineId) ready.machineId = hostMachineId;
+    // Its routes, so the client saves every way to reach this computer (D-51).
+    const routes = buildRoutesReport();
+    if (routes) ready.computer = routes;
     writeSseEvent(stream, 'ready', ready);
 
     const clientConnectionId = String(this.nextClientConnectionId++);
@@ -1472,6 +1521,12 @@ export class PaneRemoteHttpApiServer {
 
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
     if (this.workspace) {
+      // A linked computer's or paired phone's token is accepted on every listener, Tailscale's too (D-51).
+      const paired = authenticateRemoteDaemonBearerToken(
+        getAuthorizationHeaderForRequest(request, token),
+        this.getRemoteConfig().host.clients.filter((client) => client.kind !== 'glasses'),
+      );
+      if (paired.ok && paired.client) return paired;
       return authenticateWorkspaceRequest(
         request.headers['tailscale-user-login'],
         getAuthorizationHeaderForRequest(request, token),
