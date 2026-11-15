@@ -56,11 +56,22 @@
         let resolved = mode === 'fixed' ? fixedTheme : (prefersDark ? darkTheme : lightTheme);
         let custom = [];
         if (resolved === 'custom') {
-          // The Custom theme shows as its base; its colours and CSS follow from the cache in src/utils/customTheme.ts.
-          let base;
-          try { base = JSON.parse(localStorage.getItem('pane.custom-theme.v1') || 'null')?.base; } catch { base = undefined; }
+          // The Custom theme shows as its base with its cached colours; its CSS follows from src/utils/customTheme.ts,
+          // which also replaces these colours with its own checked sheet.
+          let cachedCustom;
+          try { cachedCustom = JSON.parse(localStorage.getItem('pane.custom-theme.v1') || 'null'); } catch { cachedCustom = undefined; }
+          const base = cachedCustom?.base;
           custom = Object.prototype.hasOwnProperty.call(themeClasses, base) ? ['pane-custom-theme'] : [];
           resolved = custom.length ? base : (mode === 'system' && prefersDark ? defaults.systemDarkTheme : defaults.theme);
+          // Only colour tokens with plain hex or rgb() values, which cannot load anything.
+          const colors = Object.entries(cachedCustom?.theme?.colors || {}).filter(([token, value]) =>
+            /^--color-[a-z0-9-]+$/.test(token) && typeof value === 'string' && /^(#[0-9a-f]{3,8}|rgba?\([0-9.,%\/\s-]+\))$/i.test(value.trim()));
+          if (custom.length && colors.length) {
+            const style = document.createElement('style');
+            style.id = 'pane-launch-custom-theme';
+            style.textContent = `html:root.pane-custom-theme { ${colors.map(([token, value]) => `${token}: ${value.trim()};`).join(' ')} }`;
+            document.head.append(style);
+          }
         }
         window.__paneBootstrapThemeClasses = [...themeClasses[resolved], ...custom];
         document.documentElement.classList.add(...window.__paneBootstrapThemeClasses);
