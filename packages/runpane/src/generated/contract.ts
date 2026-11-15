@@ -187,7 +187,7 @@ export const RUNPANE_CONTRACT = {
             "--permission-mode",
             "default",
             "--strict-mcp-config",
-            "--disallowedTools=Bash,Edit,Write,NotebookEdit"
+            "--tools=Read,Grep,Glob"
           ],
           "output": "result-json"
         }
@@ -267,6 +267,9 @@ export const RUNPANE_CONTRACT = {
             "--json",
             "--ephemeral",
             "--skip-git-repo-check",
+            "--ignore-user-config",
+            "--disable",
+            "apps",
             "-s",
             "read-only"
           ],
@@ -419,7 +422,7 @@ export const RUNPANE_CONTRACT = {
             "plan"
           ],
           "env": {
-            "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"edit\":\"deny\",\"bash\":\"deny\"}}"
+            "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"edit\":\"deny\",\"bash\":\"deny\"},\"tools\":{\"*_*\":false}}"
           },
           "output": "opencode-jsonl"
         }
@@ -23312,7 +23315,7 @@ export const RUNPANE_CONTRACT = {
       "ask": {
         "name": "ask",
         "summary": "Ask any agent and model one read-only question, on this or another machine, and get its answer: no tab is opened and nothing is left behind.",
-        "details": "Runs the agent's own headless mode once with flags that refuse edits and shell commands (Claude: -p with Bash, Edit and Write disallowed; Codex: exec -s read-only; Cursor: -p --mode ask; OpenCode: run --agent plan with edit and bash denied), waits for it, and prints its final answer. Nothing is stored and no tab or Pane is created. On another machine it runs through that machine's Pane (runpane workspace); a WSL repository runs inside WSL. Use it for second opinions and questions to another model; anything that edits files or needs an approval goes to a tab (runpane panes create, with the model in --tool-command). Start several in parallel as background shell commands to ask several models at once.",
+        "details": "Runs the agent's own headless mode once with flags that refuse edits and shell commands (Claude: -p with only Read, Grep and Glob and no MCP servers; Codex: exec -s read-only without the user's config, MCP servers or apps; Cursor: -p --mode ask; OpenCode: run --agent plan with edit, bash and every MCP tool denied), waits for it, and prints its final answer. Nothing is stored and no tab or Pane is created. On another machine it runs through that machine's Pane (runpane workspace); a WSL repository runs inside WSL. Use it for second opinions and questions to another model; anything that edits files or needs an approval goes to a tab (runpane panes create, with the model in --tool-command). Start several in parallel as background shell commands to ask several models at once.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [

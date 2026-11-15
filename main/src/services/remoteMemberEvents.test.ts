@@ -9,8 +9,9 @@ const DEVBOX = 'tailnet-devbox';
 const member = { machine: { id: DEVBOX, label: 'parsa-devbox' } };
 
 /** The devbox: its own journal, a connection that is up or down, and the Mac at the other end. */
-function setup() {
-  const devbox = new WorkspaceJournal();
+function setup(options: { devboxCapacity?: number } = {}) {
+  const devbox = new WorkspaceJournal({ capacity: options.devboxCapacity });
+  const cursors = new Map<string, { epoch: string; gen: number }>();
   const mac = new WorkspaceJournal();
   const listeners = new Set<(event: MachineConnectionsEvent) => void>();
   let online = true;
@@ -27,6 +28,8 @@ function setup() {
         const request = args[0] as { since: number; epoch?: string; paneIds: string[]; kinds: RunpaneWorkspaceEntry['kind'][]; limit: number };
         if (request.epoch && request.epoch !== devbox.epoch) return { epoch: devbox.epoch, entries: [], reset: { reason: 'epoch-changed' } };
         const read = devbox.readAfter(request.since, { paneIds: request.paneIds, kinds: request.kinds }, request.limit);
+        // Its journal kept only its newest entries, as the host answers a cursor older than those.
+        if (read.dropped !== undefined) return { epoch: devbox.epoch, entries: [], reset: { reason: 'cursor-truncated' }, dropped: read.dropped };
         // SAFETY: a JSON round trip of journal entries is a PaneCommandValue, as the daemon sends it.
         return JSON.parse(JSON.stringify({ epoch: devbox.epoch, entries: read.entries })) as PaneCommandValue;
       },
@@ -35,6 +38,8 @@ function setup() {
     members: {
       remoteMember: paneId => (paneId === 'pane-win' ? member : undefined),
       remoteMemberPaneIds: machineId => (machineId === DEVBOX ? ['pane-win'] : []),
+      remoteCursor: machineId => cursors.get(machineId),
+      saveRemoteCursor: (machineId, cursor) => { cursors.set(machineId, cursor); },
     },
   });
   bridge.start();
@@ -65,6 +70,15 @@ describe('RemoteMemberEvents', () => {
     await reconnect();
 
     expect(recorded().map(entry => entry.report?.summary)).toEqual(['first', 'second', 'third']);
+  });
+
+  it("reads on from the oldest entry the machine still keeps once its journal has wrapped", async () => {
+    const { report, recorded, reconnect, goOffline } = setup({ devboxCapacity: 3 });
+    goOffline();
+    for (const summary of ['one', 'two', 'three', 'four', 'five']) report(summary);
+    await reconnect();
+
+    expect(recorded().map(entry => entry.report?.summary)).toEqual(['three', 'four', 'five']);
   });
 
   it("ignores Panes that aren't this computer's members", () => {

@@ -10,6 +10,7 @@ import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { paneListResultSchema, repoListResultSchema } from './localControl';
 import { quote } from './handoff';
+import { windowsBatchCommand } from './secrets';
 import { readMachines, resolveMachine, workspaceTarget } from './workspace';
 
 /**
@@ -118,16 +119,20 @@ async function runInWsl(place: Place, argv: string[], options: { cwd?: string; e
   return run({ ...place, environment: 'native' }, ['wsl.exe', '-e', 'bash', '-l', linuxPath], { timeoutMs: options.timeoutMs });
 }
 
-function runHere(argv: string[], options: { cwd?: string; env?: Readonly<Record<string, string>>; timeoutMs: number }): Promise<RunResult> {
+function runHere(argv: string[], options: RunOptions): Promise<RunResult> {
+  const env = { ...process.env, ...options.env };
+  // No shell: the prompt reaches the agent as one argument. A Windows .cmd shim runs through cmd
+  // with each argument quoted, and is refused when cmd can't pass one literally.
+  const [file, args, verbatim] = windowsBatchCommand(argv, env) ?? [argv[0], argv.slice(1), false];
   return new Promise((resolve) => {
-    const child = spawn(argv[0], argv.slice(1), {
+    const child = spawn(file, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...options.env },
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
       // Its own process group, so a timeout stops everything the agent started.
       detached: process.platform !== 'win32',
       windowsHide: true,
-      shell: process.platform === 'win32',
+      windowsVerbatimArguments: verbatim,
     });
     let stdout = '';
     let stderr = '';
@@ -180,7 +185,8 @@ async function resolveWorkingDirectory(place: Place, parsed: ParsedArgs): Promis
       : await invokeDaemon('runpane:panes:list', [{}], paneListResultSchema, { paneDir: parsed.paneDir, timeoutMs: 20_000 });
     const pane = listed.panes.find(item => item.id === parsed.paneId || item.paneId === parsed.paneId);
     if (!pane) throw new RunpaneError('ERR_ASK_PANE_NOT_FOUND', `${place.machine} has no Pane ${parsed.paneId}.`, `List its Panes with: runpane${place.remote ? ` workspace ${place.machine}` : ''} panes list --json`);
-    return { cwd: pane.worktreePath, environment: isWslPath(pane.worktreePath) ? 'wsl' : 'native' };
+    // Only a Windows machine has a WSL; a Mac or Linux worktree path also starts with /.
+    return { cwd: pane.worktreePath, environment: place.windows && isWslPath(pane.worktreePath) ? 'wsl' : 'native' };
   }
   if (parsed.repo === undefined) return { environment: 'native' };
   const selector = String(parsed.repo);

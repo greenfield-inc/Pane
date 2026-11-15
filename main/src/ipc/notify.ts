@@ -256,12 +256,10 @@ const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary
 type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
   sessionManager: Pick<AppServices['sessionManager'], 'getSession'> & Partial<Pick<AppServices['sessionManager'], 'on' | 'off'>>;
   databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'> & Partial<Pick<AppServices['databaseService'], 'getSession' | 'getPanel'>>;
-  /** Names the machine of a remote Session member's tab. */
-  workspaceJournal?: Pick<NonNullable<AppServices['workspaceJournal']>, 'machineOfPanel'>;
   /** Files each Approvals item under its Session. */
   orchestrationSessionManager?: {
     /** A Session member on another saved machine; its Pane and tabs are not in this computer's database. */
-    remoteMember?(paneId: string): { machine: { label: string } } | undefined;
+    remoteMember?(paneId: string): { machine: { id: string; label: string } } | undefined;
     approvalSession(paneId: string, panelId?: string): NotifySession | undefined;
     approvalSessionsById(): Map<string, NotifySession>;
     approvalSessionRecord(sessionId: string): { name: string; paneId: string; archived: boolean } | undefined;
@@ -313,6 +311,37 @@ function askerPaneGone(database: NotifyServices['databaseService'], item: Notify
 export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
   /** Every machine's state, once the machine connections start; "Show cards on" reads it from the first snapshot. */
   let machineList: (() => MachineState[]) | null = null;
+  /** Types an owed answer into this computer's tab, only at a live agent's prompt. */
+  const typeHere = async (panelId: string, text: string): Promise<TabTypeOutcome> => {
+      const panel = panelManager.getPanel(panelId);
+      if (!panel) return 'gone';
+      if (panel.type === 'chat') {
+        if (getChatTabManager().agentState(panelId) !== 'idle') return 'busy';
+      } else {
+        // The status is free to read; the process group costs a `ps`, so only an idle tab pays for it.
+        const status = terminalPanelManager.getAgentStatus(panelId);
+        if (status !== 'idle') return 'busy';
+        const agentInForeground = await terminalPanelManager.readForegroundAgent(panelId);
+        // Where Pane can't see what runs in the tab (Windows, WSL, the PTY host), it never types (F-7).
+        if (agentInForeground === undefined) return 'unsupported';
+        if (!tabTakesText(status, agentInForeground)) return 'busy';
+      }
+      try {
+        const submit = () => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);
+        const result = decodeOptionalBoundary(await (panel.type === 'chat' ? submit() : submitOnlyToAgent(panelId, submit)), boundary.object({ ok: boundary.optional(boundary.boolean) }));
+        return result?.ok === false ? 'busy' : 'delivered';
+      } catch (error) {
+        // Not started yet, say: the next time it's at its prompt, or the next sweep, tries again.
+        console.warn(`[Notify] Couldn't type into tab ${panelId} yet:`, error);
+        return 'busy';
+      }
+    };
+
+  // Another computer whose Session holds one of this computer's Panes types its answers through here.
+  commandRegistry.register(NOTIFY_TYPE_INTO_TAB, (request: PaneCommandValue) => {
+    const { panelId, text } = decodeBoundary(request, boundary.object({ panelId: boundary.nonEmptyString, text: boundary.string }));
+    return typeHere(panelId, text);
+  });
   const notify = new NotifyService({
     configManager: services.configManager,
     getMainWindow: services.getMainWindow,
@@ -393,35 +422,14 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
         manager.off?.('session-updated', listener);
       };
     },
-    typeIntoTab: async (panelId, text) => {
-      const panel = panelManager.getPanel(panelId);
-      const memberMachine = panel ? undefined : services.workspaceJournal?.machineOfPanel(panelId);
-      if (memberMachine && memberMachines) return typeIntoMemberTab(memberMachines, memberMachine, panelId, text);
-      if (!panel) return 'gone';
-      if (panel.type === 'chat') {
-        if (getChatTabManager().agentState(panelId) !== 'idle') return 'busy';
-      } else {
-        // The status is free to read; the process group costs a `ps`, so only an idle tab pays for it.
-        const status = terminalPanelManager.getAgentStatus(panelId);
-        if (status !== 'idle') return 'busy';
-        const agentInForeground = await terminalPanelManager.readForegroundAgent(panelId);
-        // Where Pane can't see what runs in the tab (Windows, WSL, the PTY host), it never types (F-7).
-        if (agentInForeground === undefined) return 'unsupported';
-        if (!tabTakesText(status, agentInForeground)) return 'busy';
-      }
-      try {
-        const submit = () => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);
-        const result = decodeOptionalBoundary(await (panel.type === 'chat' ? submit() : submitOnlyToAgent(panelId, submit)), boundary.object({ ok: boundary.optional(boundary.boolean) }));
-        return result?.ok === false ? 'busy' : 'delivered';
-      } catch (error) {
-        // Not started yet, say: the next time it's at its prompt, or the next sweep, tries again.
-        console.warn(`[Notify] Couldn't type into tab ${panelId} yet:`, error);
-        return 'busy';
-      }
+    typeIntoTab: async (panelId, text, paneId) => {
+      // A Session member on another machine: that machine's Pane runs the same checks before it types.
+      const member = !panelManager.getPanel(panelId) && paneId ? services.orchestrationSessionManager?.remoteMember?.(paneId) : undefined;
+      return member && memberMachines ? typeIntoMemberTab(memberMachines, member.machine.id, panelId, text) : typeHere(panelId, text);
     },
     idleSeconds: () => (hasHeadlessDaemonLaunchArg() ? Infinity : idleSeconds()),
     cardsOn: () => cardsOnStatus(services.configManager.getConfig(), readingMachines.has, machineList?.() ?? []),
-    tabAlive: (panelId) => panelManager.getPanel(panelId) !== undefined || services.workspaceJournal?.machineOfPanel(panelId) !== undefined,
+    tabAlive: (panelId) => panelManager.getPanel(panelId) !== undefined,
   });
 
   notifyBeforeQuit = () => notify.queue.prepareForQuit();
@@ -584,13 +592,23 @@ export type NotifyMachines = Pick<MachineConnections, 'subscribe' | 'list' | 're
 /** The saved machines, for typing an answer into a remote Session member's tab. */
 let memberMachines: NotifyMachines | null = null;
 
-/** Types an answer into a Session member's tab on another saved machine, as its own Pane would. */
-async function typeIntoMemberTab(machines: NotifyMachines, machineId: string, panelId: string, text: string): Promise<'delivered' | 'busy'> {
+/** The host channel that types an owed answer into one of its tabs, for a Session on another computer. */
+const NOTIFY_TYPE_INTO_TAB = 'notify:type-into-tab';
+
+/** What typing an owed answer into a tab came to. */
+type TabTypeOutcome = 'delivered' | 'busy' | 'gone' | 'unsupported';
+const tabTypeOutcomeSchema = boundary.enumeration('delivered', 'busy', 'gone', 'unsupported');
+
+/**
+ * Types an answer into a Session member's tab on another saved machine. That machine's Pane runs
+ * the same checks as for its own tabs (`notify:type-into-tab`), so an answer is never typed blind.
+ */
+async function typeIntoMemberTab(machines: NotifyMachines, machineId: string, panelId: string, text: string): Promise<TabTypeOutcome> {
   try {
-    const result = await machines.invokeOn?.(machineId, 'runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);
-    return decodeOptionalBoundary(result, boundary.object({ ok: boundary.optional(boundary.boolean) }))?.ok === false ? 'busy' : 'delivered';
+    const outcome = decodeOptionalBoundary(await machines.invokeOn?.(machineId, NOTIFY_TYPE_INTO_TAB, [{ panelId, text }]), tabTypeOutcomeSchema);
+    return outcome ?? 'busy';
   } catch (error) {
-    // Its machine is away or the agent is mid-turn: the next sweep tries again.
+    // Its machine is away, or its Pane predates remote members: the next sweep tries again.
     console.warn(`[Notify] Couldn't type into ${machineId}'s tab ${panelId} yet:`, error);
     return 'busy';
   }

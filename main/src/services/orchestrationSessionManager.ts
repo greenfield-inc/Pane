@@ -67,7 +67,7 @@ import {
 } from '../../../shared/types/paneChat';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { OrchestrationSessionStore, type RemoteJournalCursor, type RemoteMemberRecord } from './orchestrationSessionStore';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { agentReportData, readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
@@ -593,20 +593,23 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
-  /** The remote member with this Pane id, and its Session; reads the in-memory store without the lock. */
-  remoteMember(paneId: string): { sessionId: string; paneId: string; name: string; machine: OrchestrationMemberMachine } | undefined {
-    for (const session of this.store.read().sessions) {
-      const association = session.associations.find(item => item.paneId === paneId && item.machine);
-      if (association?.machine) return { sessionId: session.id, paneId, name: association.name ?? paneId, machine: association.machine };
-    }
-    return undefined;
+  /** The remote member with this Pane id, and its Session; reads the in-memory store without the lock or a copy. */
+  remoteMember(paneId: string): RemoteMemberRecord | undefined {
+    return this.store.remoteMember(paneId);
   }
 
-  /** The Pane ids of every Session's members on this saved machine. */
+  /** The Pane ids of this saved machine's members in Sessions that are not archived. */
   remoteMemberPaneIds(machineId: string): string[] {
-    return this.store.read().sessions.flatMap(session => session.associations
-      .filter(association => association.machine?.id === machineId)
-      .map(association => association.paneId));
+    return this.store.remoteMemberPaneIds(machineId);
+  }
+
+  /** Where the next catch-up read of a saved machine's journal starts, kept beside the remote members. */
+  remoteCursor(machineId: string): RemoteJournalCursor | undefined {
+    return this.store.remoteCursor(machineId);
+  }
+
+  saveRemoteCursor(machineId: string, cursor: RemoteJournalCursor): void {
+    this.store.saveRemoteCursor(machineId, cursor);
   }
 
   /** Reads remote members from their machines; set by the desktop, which holds the machine connections. */
