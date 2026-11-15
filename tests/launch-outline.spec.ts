@@ -1,10 +1,12 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect as baseExpect, test, type Page } from '@playwright/test';
 import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 
 // The launch outline (frontend/index.html): the window's first frame, with the launch chat's
 // message box where the chat's own box mounts. Text, caret and an Enter typed before the app
 // loads move into the chat (D-62).
 
+// The renderer loads its whole app from a cold Vite server here, slower on CI than on a laptop.
+const expect = baseExpect.configure({ timeout: 15_000 });
 const now = new Date(0).toISOString();
 const project = { id: 81, name: 'Launch fixture', path: '/tmp/launch-fixture', active: true, created_at: now, updated_at: now };
 const pane = (id: string, name: string, displayOrder: number) => ({
