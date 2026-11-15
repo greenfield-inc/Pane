@@ -38,7 +38,8 @@ import { databaseService } from '../database';
 import { locateConversation } from './conversations';
 import { createBundle, createSnapshot, ignoredPaths } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
-import { agentFarmProfileOf, onlyWatching } from './rules';
+import { agentFarmProfileOf } from './rules';
+import { runpaneWaits } from '../agentStatus/midTurn';
 import { readTabFields, sessionMoveCheckSchema, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab, type PackageFile } from './manifest';
 import { resolvePeer, type MovePeer } from './peer';
 import { listSessionFolder } from './sessionFolder';
@@ -127,19 +128,6 @@ async function git(cwd: string, args: string[]): Promise<string> {
 
 async function tryGit(cwd: string, args: string[]): Promise<string | null> {
   try { return await git(cwd, args); } catch { return null; }
-}
-
-/** Every process's parent and command line, to find what a tab is running under its agent. */
-async function processTable(): Promise<Array<{ pid: number; ppid: number; command: string }>> {
-  try {
-    const { stdout } = await run('ps', ['-A', '-o', 'pid=,ppid=,command='], { maxBuffer: 16 * 1024 * 1024 });
-    return stdout.split('\n').flatMap(line => {
-      const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-      return match ? [{ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] }] : [];
-    });
-  } catch {
-    return [];
-  }
 }
 
 /**
@@ -549,14 +537,13 @@ export class MoveCoordinator {
     };
     for (;;) {
       this.checkCancelled(job);
-      const table = await processTable();
       const waiting: SessionMoveWaitingTab[] = [];
       for (const tab of job.tabs.filter(item => !item.stopped)) {
+        // A tab only waiting in `runpane watch`, `panels wait` or Notify is idle (P2, D-386).
         const busy = tab.running && (tab.kind === 'terminal'
           ? await terminalPanelManager.isAgentMidTurn(tab.panel.id)
-          : getChatTabManager().busy(tab.panel.id));
-        const pid = tab.kind === 'terminal' ? terminalPanelManager.getPanelPid(tab.panel.id) : getChatTabManager().processId(tab.panel.id);
-        const watching = busy && pid !== undefined && onlyWatching(pid, table);
+          : getChatTabManager().isMidTurn(tab.panel.id));
+        const watching = busy && tab.kind === 'terminal' && runpaneWaits.isWaiting(tab.panel.id);
         if (busy && !watching && !job.stopNow) {
           tab.working = true;
           tab.since ??= new Date().toISOString();

@@ -219,7 +219,7 @@ useConfigStore.setState({ config: config() });
 useSessionStore.setState({ sessions: [], isLoaded: true, activeSessionId: null });
 useOrchestrationSessionStore.setState({ sessions: hostSessions.get('local') ?? [], selectedSessionId: 'x', availability: 'ready' });
 useNavigationStore.setState({ activeView: 'pane-chat' });
-const snapshot = (host: HostKey) => ({ projects: [], sessions: hostSessions.get(host) ?? [], statuses: [], notify: null, permissions: [] });
+const snapshot = (host: HostKey) => ({ projects: [], sessions: hostSessions.get(host) ?? [], statuses: [], activity: [], notify: null, permissions: [] });
 useAllMachinesStore.setState({
   enabled: true,
   machines: machineStates,

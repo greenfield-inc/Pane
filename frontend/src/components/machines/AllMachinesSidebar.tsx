@@ -1,7 +1,8 @@
 import { SessionApprovalsCount } from '../approvals/ApprovalsCount';
 import { useEffect, useRef, useState } from 'react';
 import { Archive, ArrowRightLeft, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
-import { AgentStatusDot, PausedGlyph } from '../ui/AgentStatusDot';
+import { PausedGlyph } from '../ui/AgentStatusDot';
+import { SessionActivityIcon } from '../SessionActivity';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
@@ -284,7 +285,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
         </button>
         {dimmed
           ? <PausedGlyph size="sm" className="pointer-events-none flex-shrink-0" />
-          : <AgentStatusDot status={row.status} size="sm" className="pointer-events-none flex-shrink-0" />}
+          : <SessionActivityIcon state={row.activity} className="pointer-events-none" />}
         <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', dimmed ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
         {moveLabel ? (
           <span data-testid="session-move-label" className="pointer-events-none max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
@@ -292,7 +293,9 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           <SessionApprovalsCount
             sessionId={session.id}
             machineId={machine.id}
-            otherwise={row.panes.length > 0 && <span className="text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
+            otherwise={row.workingPanes > 0
+              ? <span className="text-[12px] tabular-nums text-text-secondary">{row.workingPanes} working</span>
+              : row.panes.length > 0 && <span className="text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
           />
         )}
         {session.isPinned && <PinnedMark />}

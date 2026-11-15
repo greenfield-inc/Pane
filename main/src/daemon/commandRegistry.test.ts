@@ -2,8 +2,45 @@ import { describe, expect, it } from 'vitest';
 import type { IpcMainInvokeEvent } from 'electron';
 import { PaneCommandRegistry, isRemotePaneCommand, rejectWithPaneErrorText, type PaneCommandValue } from './commandRegistry';
 import { PaneError } from '../../../shared/paneError';
+import { runpaneWaits } from '../services/agentStatus/midTurn';
 
 describe('PaneCommandRegistry', () => {
+  it('marks the caller tab waiting while a runpane watch, panels wait or notify call is open', async () => {
+    const registry = new PaneCommandRegistry();
+    const finish: Array<() => void> = [];
+    for (const channel of ['runpane:workspace:wait', 'runpane:panels:wait', 'runpane:notify']) {
+      registry.register(channel, () => new Promise<void>(resolve => { finish.push(resolve); }));
+    }
+    registry.register('runpane:panels:list', () => []);
+    const caller = { paneId: 'pane', panelId: 'tab' };
+    const signal = new AbortController().signal;
+
+    await registry.invokeConnected('runpane:panels:list', [], signal, caller);
+    expect(runpaneWaits.isWaiting('tab')).toBe(false);
+    const calls = ['runpane:workspace:wait', 'runpane:panels:wait', 'runpane:notify'].map(channel => registry.invokeConnected(channel, [], signal, caller));
+    await Promise.resolve();
+    expect(runpaneWaits.isWaiting('tab')).toBe(true);
+    finish[0]();
+    finish[1]();
+    await Promise.all(calls.slice(0, 2));
+    expect(runpaneWaits.isWaiting('tab')).toBe(true);
+    finish[2]();
+    await Promise.all(calls);
+    expect(runpaneWaits.isWaiting('tab')).toBe(false);
+  });
+  it('stops marking a tab waiting the moment its caller disconnects, and after a call fails', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:workspace:wait', () => new Promise<void>(() => undefined));
+    registry.register('runpane:panels:wait', () => Promise.reject(new Error('no such panel')));
+    const lifetime = new AbortController();
+    void registry.invokeConnected('runpane:workspace:wait', [], lifetime.signal, { panelId: 'gone' });
+    await Promise.resolve();
+    expect(runpaneWaits.isWaiting('gone')).toBe(true);
+    lifetime.abort();
+    expect(runpaneWaits.isWaiting('gone')).toBe(false);
+    await expect(registry.invokeConnected('runpane:panels:wait', [], new AbortController().signal, { panelId: 'failed' })).rejects.toThrow('no such panel');
+    expect(runpaneWaits.isWaiting('failed')).toBe(false);
+  });
   it('keeps a PaneError\'s code in the text Electron IPC sends, as Node does for coded errors', async () => {
     const rejected = await rejectWithPaneErrorText(Promise.reject(new PaneError('CHAT_SWITCH_FAILED', 'The chat did not open.', 'Try again.'))).then(() => new Error('resolved'), (error: Error) => error);
     // Electron replies with error.toString(); the renderer reads the code back from it.

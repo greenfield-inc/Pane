@@ -1,24 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { agentFarmProfileOf, movedLine, onlyWatching } from './rules';
+import { agentFarmProfileOf, movedLine } from './rules';
 import { buildPathMap } from './pathMap';
-
-describe('a tab only waiting in runpane watch counts as idle', () => {
-  const table = [
-    { pid: 10, ppid: 1, command: 'claude --resume abc' },
-    { pid: 11, ppid: 10, command: '/bin/zsh -c runpane watch --session s --until-event --json' },
-    { pid: 12, ppid: 11, command: 'node /usr/local/bin/runpane watch --session s --until-event --json' },
-    { pid: 20, ppid: 1, command: 'codex' },
-    { pid: 21, ppid: 20, command: 'pnpm test' },
-  ];
-
-  it('is idle when the agent is running runpane watch', () => {
-    expect(onlyWatching(10, table)).toBe(true);
-  });
-
-  it('is working when the agent runs anything else', () => {
-    expect(onlyWatching(20, table)).toBe(false);
-  });
-});
 
 describe('agentFarmProfileOf', () => {
   it('reads the profile an Agent Farm tab launches, without its variant', () => {

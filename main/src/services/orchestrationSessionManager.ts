@@ -68,6 +68,7 @@ import {
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { OrchestrationSessionStore, type RemoteJournalCursor, type RemoteMemberRecord } from './orchestrationSessionStore';
+import { SessionActivityService, type SessionActivityMembers } from './sessionActivity';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { agentReportData, readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
@@ -106,6 +107,17 @@ export class OrchestrationSessionManager extends EventEmitter {
   /** The line a person is typing into each Session agent panel, until its first message names the Session. */
   private readonly firstMessageDrafts = new Map<string, string | null>();
   private readonly namedPanelIds = new Set<string>();
+  /** Each counted tab's type, from the last member read, so the 500 ms check reads no database. */
+  private activityPanelTypes = new Map<string, 'chat' | 'terminal'>();
+  /** Each Session's live working/idle activity; bootstrap starts it, events.ts relays it. */
+  readonly liveActivity = new SessionActivityService({
+    members: () => this.activityMembers(),
+    isMidTurn: (panelId, now) => {
+      const type = this.activityPanelTypes.get(panelId);
+      if (type === 'chat') return getChatTabManager().isMidTurn(panelId, now);
+      return type === 'terminal' && terminalPanelManager.isMidTurn(panelId, now);
+    },
+  });
   private remoteMachines: RemoteMachineAccess | undefined;
 
   constructor(
@@ -118,6 +130,10 @@ export class OrchestrationSessionManager extends EventEmitter {
   ) {
     super();
     this.setMaxListeners(100);
+    // Membership changes re-read the members at once; anything else waits for the 2 s refresh.
+    this.on('changed', (change: { kind?: string }) => {
+      if (change.kind !== undefined && ['created', 'updated', 'associated', 'detached'].includes(change.kind)) this.liveActivity.invalidateMembers();
+    });
   }
 
   async initialize(): Promise<void> {
@@ -513,6 +529,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         selectedSessionId,
       };
       this.store.write(nextData);
+      // An archive or restore can come with a report, whose change kind does not re-read the members.
+      if ((current.archived === true) !== (nextRecord.archived === true)) this.liveActivity.invalidateMembers();
       this.emitChanged(nextRecord, input.report ? 'report' : 'updated', selectedSessionId !== data.selectedSessionId);
       return this.withPaused(clone(nextRecord));
     });
@@ -891,6 +909,37 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (!latest || mark.at > latest.at) latest = mark;
     }
     return { ...record, paused: latest };
+  }
+
+  /**
+   * What each open Session's activity counts: its orchestrator's own agent tabs, and the agent
+   * tabs of its Panes that still exist and are not archived (an association's tab subset where
+   * it has one). Other tabs in the orchestrator's Pane, shells and browsers never count. Reads the
+   * in-memory store without the lock, like `workspaceMembership`.
+   */
+  activityMembers(): SessionActivityMembers[] {
+    const types = new Map<string, 'chat' | 'terminal'>();
+    const counted = (panels: Array<{ id: string; type: string; sessionId?: string } | undefined>, paneId?: string) => panels.flatMap(panel => {
+      if (!panel || (paneId !== undefined && panel.sessionId !== undefined && panel.sessionId !== paneId)) return [];
+      if (panel.type !== 'terminal' && panel.type !== 'chat') return [];
+      types.set(panel.id, panel.type);
+      return [panel.id];
+    });
+    // Read every 2 s for every open Session, so only the columns it needs: the Pane's archived
+    // flag and its tabs' ids and types, never whole rows with their parsed state.
+    const members = this.store.memberships().filter(session => !session.archived).map(session => ({
+      sessionId: session.id,
+      // Only tabs that exist: a Session keeps a panel id for each agent, most never created.
+      orchestratorPanelIds: counted(session.panelIds.map(panelId => panelManager.getPanel(panelId))),
+      panes: session.associations.filter(association => databaseService.isSessionArchived(association.paneId) === false).map(association => ({
+        paneId: association.paneId,
+        panelIds: association.panelIds.length > 0
+          ? counted(association.panelIds.map(panelId => panelManager.getPanel(panelId)), association.paneId)
+          : counted(databaseService.getPanelTypesForSession(association.paneId)),
+      })),
+    }));
+    this.activityPanelTypes = types;
+    return members;
   }
 
   /** The hidden owner Pane of each Session that is not archived, read like `activeMemberPaneIds`. */

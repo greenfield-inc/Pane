@@ -36,6 +36,9 @@ describe('reading a linked document from its machine', () => {
   it('tells a missing document from a machine it could not reach', async () => {
     stubRead(async () => ({ machineId: 'mini', data: { kind: 'missing', path: '/a', message: 'gone' } }));
     expect(await readMachineDoc(item, '/a/plan.html')).toEqual({ kind: 'missing' });
+    // The host's size limit isn't a missing file.
+    stubRead(async () => ({ machineId: 'mini', data: { kind: 'missing', path: '/a', message: 'report.html is larger than 2 MiB; open it in Pane instead.' } }));
+    expect(await readMachineDoc(item, '/a/plan.html')).toEqual({ kind: 'too-large' });
     stubRead(async () => { throw new Error('offline'); });
     expect(await readMachineDoc(item, '/a/plan.html')).toEqual({ kind: 'unreachable' });
     stubRead(async () => ({ machineId: 'mini', data: null }));
@@ -53,6 +56,7 @@ describe('reading a linked document from its machine', () => {
 
   it('says a failure in one line', () => {
     expect(machineDocFailure({ kind: 'missing' }, 'plan.html', 'Mac mini')).toBe("plan.html isn't on Mac mini anymore");
+    expect(machineDocFailure({ kind: 'too-large' }, 'report.html', 'Mac mini')).toBe('report.html is larger than 2 MiB, too big to show from another machine: open it on Mac mini');
     expect(machineDocFailure({ kind: 'unreachable' }, 'plan.html', 'Mac mini')).toBe("Couldn't reach Mac mini");
     expect(machineDocFailure({ kind: 'text', text: 'x' }, 'plan.html', 'Mac mini')).toBeUndefined();
   });
