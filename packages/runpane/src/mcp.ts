@@ -7,7 +7,7 @@ import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpT
 import { ProtocolError, ProtocolErrorCode, Server, serveStdio, StdioServerTransport, type AuthInfo, type JSONRPCMessage, type McpRequestContext } from './mcpSdk';
 import { getWrapperVersion } from './version';
 import type { RunpaneFailure } from './errors';
-import { agentsIntroForInstructions, claudeMdHasPaneBlock, scratchRule } from './paneIntro';
+import { agentsIntroForInstructions, claudeMdHasPaneGuidance, scratchRule } from './paneIntro';
 
 // A type alias, unlike an interface, is assignable to the SDK's open result type.
 type ToolResult = {
@@ -113,7 +113,7 @@ export interface PaneMcpServerOptions extends McpServerOptions {
    * Who the client is when the request doesn't say. Over stateless HTTP a 2025-era client names
    * itself only at `initialize`, so later calls arrive unnamed; Pane names them from the tab, and
    * says whether that agent holds a tool call open while `notify` waits for the person. The name
-   * also picks the server's instructions: Claude Code skips what Pane's CLAUDE.md block says.
+   * also picks the server's instructions: Claude Code skips what its CLAUDE.md already says.
    */
   clientFor?: (auth: AuthInfo | undefined) => { name: string; waitsLong: boolean } | undefined;
 }
@@ -174,7 +174,7 @@ export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: 
       { name: 'pane', title: 'Pane', version: getWrapperVersion() },
       {
         capabilities: { tools: {}, resources: {} },
-        instructions: CLAUDE_CODE.test(options.clientFor?.(context?.authInfo)?.name ?? '') && claudeMdHasPaneBlock() ? INSTRUCTIONS_BESIDE_CLAUDE_MD : INSTRUCTIONS,
+        instructions: CLAUDE_CODE.test(options.clientFor?.(context?.authInfo)?.name ?? '') && claudeMdHasPaneGuidance() ? INSTRUCTIONS_BESIDE_CLAUDE_MD : INSTRUCTIONS,
         cacheHints: { 'tools/list': LIST_CACHE, 'resources/list': LIST_CACHE },
       },
     );

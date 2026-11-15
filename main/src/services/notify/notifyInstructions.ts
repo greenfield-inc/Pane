@@ -6,7 +6,7 @@ import { promisify } from 'util';
 import type { NotifyInstructionsFile } from '../../../../shared/types/notify';
 import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 import { linuxToUNCPath, windowsPathToWSLMount } from '../../utils/wslUtils';
-import { agentsIntroForInstructions, PANE_NOTIFY_BLOCK_PREFIX, scratchRule } from '../../../../packages/runpane/src/paneIntro';
+import { agentsIntroForInstructions, scratchRule } from '../../../../packages/runpane/src/paneIntro';
 
 /**
  * A few lines in the agents' user-level instruction files (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md)
@@ -16,6 +16,8 @@ import { agentsIntroForInstructions, PANE_NOTIFY_BLOCK_PREFIX, scratchRule } fro
  */
 const NOTIFY_BLOCK_BEGIN = '<!-- pane-notify:begin (managed by Pane; edits are replaced) -->';
 const NOTIFY_BLOCK_END = '<!-- pane-notify:end -->';
+/** Matches the begin marker whatever its note says, so a reworded marker is still found. */
+const BEGIN_PREFIX = '<!-- pane-notify:begin';
 const BOM = '\uFEFF';
 const execFileAsync = promisify(execFile);
 
@@ -274,7 +276,7 @@ function findOwned(body: string): { start: number; end: number } | undefined {
     lines.push({ start, text: body.slice(start, end) });
     start = end + 1;
   }
-  const begins = lines.filter(line => bare(line.text).trim().startsWith(PANE_NOTIFY_BLOCK_PREFIX));
+  const begins = lines.filter(line => bare(line.text).trim().startsWith(BEGIN_PREFIX));
   const ends = lines.filter(line => bare(line.text).trim() === NOTIFY_BLOCK_END);
   if (begins.length === 0 && ends.length === 0) return undefined;
   if (begins.length !== 1 || ends.length !== 1 || ends[0].start < begins[0].start) {

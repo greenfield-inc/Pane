@@ -73,17 +73,16 @@ export function paneAndTabRules(): string {
   return RUNPANE_CONTRACT.agentContext.workspaceRules.filter((rule) => rule.startsWith('Pane:') || rule.startsWith('Tab:')).join(' ');
 }
 
-/** How the block Pane keeps in ~/.claude/CLAUDE.md and ~/.codex/AGENTS.md begins, whatever its note says. */
-export const PANE_NOTIFY_BLOCK_PREFIX = '<!-- pane-notify:begin';
-
 /**
- * Whether Claude Code's user CLAUDE.md carries Pane's block, which states the agents intro, the
- * scratch rule and how to reach the person. Pane writes the block only while Notify is on.
+ * Whether Claude Code's user CLAUDE.md already states the agents intro and the scratch rule, as
+ * Pane's block there does while Notify is on (the block also says to reach the person through
+ * `notify`). A block written by another Pane version, with other wording, doesn't count.
  */
-export function claudeMdHasPaneBlock(env: NodeJS.ProcessEnv = process.env): boolean {
+export function claudeMdHasPaneGuidance(env: NodeJS.ProcessEnv = process.env): boolean {
   const dir = env.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), '.claude');
   try {
-    return fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8').includes(PANE_NOTIFY_BLOCK_PREFIX);
+    const text = fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8');
+    return text.includes(agentsIntroForInstructions()) && text.includes(scratchRule());
   } catch {
     return false;
   }
