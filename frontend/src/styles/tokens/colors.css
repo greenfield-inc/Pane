@@ -31,6 +31,7 @@
   --discord-primary: #5865F2;
   --discord-hover: #4752C4;
   --discord-secondary: #7289DA;
+  --discord-foreground: #FFFFFF;
 
   /* GitHub Dark palette - rich OLED blacks */
   --gh-black: rgb(1 4 9);         /* True OLED black */
