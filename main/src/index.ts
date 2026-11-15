@@ -468,20 +468,25 @@ async function createWindow() {
   const windowControlsOverlay = shouldEnableWindowControlsOverlay(process.platform, process.env);
   const appearance = normalizeAppearance(configManager.getConfig()).appearance;
   const osPrefersDark = resolveOsPrefersDark();
-  applyNativeThemeSource(appearance);
+  const customTheme = configManager.customTheme;
+  applyNativeThemeSource(appearance, customTheme.getState().base);
   // Appearance edits that arrive through the config file watcher (not the
   // config:update IPC) must re-point nativeTheme too, or System mode resolves
   // against a themeSource still pinned by a previous Fixed palette.
   if (!appearanceConfigSyncRegistered) {
     appearanceConfigSyncRegistered = true;
     configManager.on('config-updated', (updated: AppConfig) => {
-      applyNativeThemeSource(normalizeAppearance(updated).appearance);
+      applyNativeThemeSource(normalizeAppearance(updated).appearance, customTheme.getState().base);
+    });
+    customTheme.on('changed', () => {
+      applyNativeThemeSource(normalizeAppearance(configManager.getConfig()).appearance, customTheme.getState().base);
     });
   }
   const appearanceOptions = buildWindowAppearanceOptions(
     appearance,
     osPrefersDark,
     readStoredBackgroundColors(),
+    customTheme.getState().base,
   );
 
   // An icon path Electron cannot load is worse than none: on Windows it sets an
@@ -1358,6 +1363,10 @@ if (launchRemoteSetup) {
         onAction: sendMenuAction,
         paneChords: activePaneChords(config),
         settingsAccelerator: settingsMenuAccelerator(config),
+        resetCustomTheme: configManager ? {
+          enabled: configManager.customTheme.getState().theme !== null || configManager.customTheme.getState().error !== null,
+          onClick: () => void configManager.customTheme.reset().catch((error) => console.error('[CustomTheme] Reset failed:', error)),
+        } : undefined,
       });
     };
     installMenu({});
@@ -1378,6 +1387,7 @@ if (launchRemoteSetup) {
     await initializeServices();
     installMenu(configManager.getConfig());
     configManager.on('config-updated', () => installMenu(configManager.getConfig()));
+    configManager.customTheme.on('changed', () => installMenu(configManager.getConfig()));
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     void addRunpaneToUserPathBestEffort();
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') setTimeout(() => syncPaneMcpForApp({

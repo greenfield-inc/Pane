@@ -51,6 +51,7 @@ import { registerFeedbackHandlers } from './feedback';
 import { registerMobilePushHandlers } from './mobilePush';
 import { registerSharedCredentialHandlers } from './sharedCredentials';
 import { registerPaneSecretHandlers } from './paneSecrets';
+import { registerCustomThemeHandlers } from './customTheme';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { registerPaneLinkHandler } from '../services/paneLinks';
 import { getPaneEventSink } from '../core/runtime';
@@ -108,6 +109,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerMobilePushHandlers(ipcMain, services, commandRegistry);
   registerSharedCredentialHandlers(services, commandRegistry);
   registerPaneSecretHandlers(ipcMain, commandRegistry);
+  registerCustomThemeHandlers(ipcMain, commandRegistry, services.configManager, services.getMainWindow);
   registerDialogHandlers(ipcMain, services);
   registerExportHandlers(ipcMain, services);
   registerSetupHandlers(ipcMain, services);

@@ -335,6 +335,9 @@ const RUNPANE_CHANNELS = [
   'runpane:secrets:set',
   'runpane:secrets:delete',
   'runpane:secrets:resolve',
+  'runpane:theme:read',
+  'runpane:theme:set',
+  'runpane:theme:reset',
 ] as const;
 
 const AGENT_IDS = new Set<string>(RUNPANE_CONTRACT.enums.agents);
