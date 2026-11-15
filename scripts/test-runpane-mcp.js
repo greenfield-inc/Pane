@@ -826,7 +826,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
-    'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
+    'theme_read', 'theme_set', 'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
   ]);
   const git = await names(['--toolsets', 'git']);
   assert.deepEqual(git.map((tool) => tool.name).sort(), [

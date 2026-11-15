@@ -55,7 +55,7 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 
 | Toolset | Tools |
 |---|---|
-| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `panels_open` (show a page or file beside the agent), `repos_list`, `repos_add`, `repos_rename`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_adopt`, `panes_rename`, `panes_archive`, `panes_restore`, `sessions_create`, `sessions_associate`, `sessions_pin`, `links_create`, `docs_search`, `docs_read`, `doctor`, `notify` (ask the person and wait for the answer), `secrets_request` (ask the person for a secret, saved as a [Pane secret](PANE_SECRETS.md); the value never comes back), the four `workspace` tools, and the seven loop tools (`loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete`) |
+| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `panels_open` (show a page or file beside the agent), `repos_list`, `repos_add`, `repos_rename`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_adopt`, `panes_rename`, `panes_archive`, `panes_restore`, `sessions_create`, `sessions_associate`, `sessions_pin`, `links_create`, `docs_search`, `docs_read`, `doctor`, `notify` (ask the person and wait for the answer), `secrets_request` (ask the person for a secret, saved as a [Pane secret](PANE_SECRETS.md); the value never comes back), `theme_read` and `theme_set` (restyle Pane itself with a [Custom theme](APPEARANCE.md#custom-theme), only when the person asks), the four `workspace` tools, and the seven loop tools (`loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete`) |
 | `agents` | the three agent tasks, `workspace_state`, `watch` |
 | `panes` | create, adopt, list, archive, restore, pin, unpin, rename, focus, pause, resume, cost, run and stop the run script, move to a folder, `folders_list`, `folders_create` |
 | `panels` | create, open, list, output, screen, input, submit, submit-composer, wait, pause, resume, last-message, close |
@@ -201,7 +201,7 @@ A few flags are left out. `--json` is always passed. `--follow` and `--until-eve
 
 ## Confirmation
 
-Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `secrets_request`, `report`, and the `sessions_*` and lock tools have no `yes`. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
+Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `secrets_request`, `theme_set`, `report`, and the `sessions_*` and lock tools have no `yes`. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
 
 ## Agent guidance
 
