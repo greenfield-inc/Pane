@@ -188,7 +188,8 @@ describe('gitSnapshot', () => {
     expect(after.diff).toBe(before.diff);
     expect(after.cached).toBe(before.cached);
     expect(after.untracked).toBe(before.untracked);
-    expect(after.diff).toContain('old mode 100644');
+    // Windows checkouts don't track the executable bit (core.filemode false).
+    if (process.platform !== 'win32') expect(after.diff).toContain('old mode 100644');
     expect(after.untracked).toContain('untracked file.txt');
     expect(after.untracked).toContain('newdir/inner.txt');
     expect(git(target, ['rev-parse', 'HEAD']).trim()).toBe(snap.head);
@@ -278,7 +279,8 @@ describe('gitSnapshot', () => {
     await importBundle(b, bundle, { branch: 'spike-x', snapshotRef: SNAPSHOT_REF, incomingPrefix: PREFIX });
     const error = await failureOf(placeBranch(b, 'spike-x', `${PREFIX}/branch`));
     expect(error.code).toBe('ERR_MOVE_BRANCH_CHECKED_OUT');
-    expect(error.message).toContain(`branch spike-x is checked out at ${b} there`);
+    // git names the worktree with forward slashes on every platform.
+    expect(error.message).toContain(`branch spike-x is checked out at ${b.replace(/\\/g, '/')} there`);
   });
 
   it('moves a detached HEAD', async () => {
