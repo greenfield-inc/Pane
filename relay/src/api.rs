@@ -184,13 +184,16 @@ async fn registry_post(
     s: &mut BoxStream,
     acme: bool,
 ) -> std::io::Result<()> {
-    let authorized = match (&state.cfg.registry_secret, req.header("authorization")) {
-        (Some(secret), Some(auth)) => auth
-            .strip_prefix("Bearer ")
-            .is_some_and(|given| constant_time_eq(given.as_bytes(), secret.as_bytes())),
-        _ => false,
-    };
-    if !authorized {
+    let secret = state.cfg.registry_secret.as_deref();
+    let auth = req.header("authorization").unwrap_or("");
+    let bearer = secret.is_some_and(|secret| {
+        auth.strip_prefix("Bearer ")
+            .is_some_and(|given| constant_time_eq(given.as_bytes(), secret.as_bytes()))
+    });
+    // ACME challenge posts may instead carry a MAC over the request, checked once the
+    // body is read (registry.rs, `post`).
+    let signed = acme && secret.is_some() && auth.starts_with("Pane-HMAC ");
+    if !bearer && !signed {
         return respond_json(s, 401, &json!({"error": "bad or missing registry secret"})).await;
     }
     let len: usize = req
@@ -212,6 +215,12 @@ async fn registry_post(
         body.extend_from_slice(&chunk[..n]);
     }
     body.truncate(len);
+    if !bearer
+        && !secret
+            .is_some_and(|secret| crate::registry::acme_mac_ok(secret, auth, &req.path, &body))
+    {
+        return respond_json(s, 401, &json!({"error": "bad or missing registry secret"})).await;
+    }
     if acme {
         return match serde_json::from_slice::<AcmeTxt>(&body) {
             Ok(t) if crate::dns::is_relay_acme_name(state, &t.name) && valid_txt(&t.values) => {

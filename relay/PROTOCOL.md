@@ -249,10 +249,16 @@ helpers, so both helpers answer the same records.
 
 A relay with `--acme-cache` gets its own certificate for `<D>` and
 `<region>.relay.<D>` with DNS-01. It sets each challenge value on every
-helper with `POST /v1/registry/acme` (same bearer secret), body
+helper with `POST /v1/registry/acme`, body
 `{"name":"_acme-challenge.<region>.relay.<D>","values":["..."]}` (the same
 2 values of at most 64 bytes), and clears
-it with `"values":[]` when the CA is done. Helpers accept only
+it with `"values":[]` when the CA is done. On a first deploy no relay has a
+real certificate yet, so these posts accept any certificate from the helper
+and send no secret. Instead they carry
+`authorization: Pane-HMAC <unix secs> <base64url HMAC-SHA256 with the registry secret over "pane registry acme v1\n<secs>\n<path>\n<body>">`,
+which the helper accepts within 5 minutes of its clock. The helper also
+still accepts the bearer secret here. Computer updates always verify the
+helper's certificate. Helpers accept only
 `_acme-challenge.<D>` and `_acme-challenge.<region>.relay.<D>` for a region
 they know. A helper relay sets its own values in memory as well.
 

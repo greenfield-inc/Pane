@@ -154,16 +154,11 @@ impl Helper {
     }
 
     /// Sends the queue one request at a time, in the order `Queue::next` gives.
-    async fn run(
-        self: Arc<Self>,
-        url: String,
-        secret: Option<String>,
-        tls: Arc<rustls::ClientConfig>,
-    ) {
+    async fn run(self: Arc<Self>, url: String, secret: Option<String>, tls: Tls) {
         let send = |suffix: &'static str, body: Vec<u8>| {
             let (url, secret, tls) = (&url, secret.as_deref(), tls.clone());
             async move {
-                tokio::time::timeout(POST_TIMEOUT, post(url, suffix, secret, &body, tls))
+                tokio::time::timeout(POST_TIMEOUT, post(url, suffix, secret, &body, &tls))
                     .await
                     .map_err(|_| {
                         format!(
@@ -223,7 +218,10 @@ impl Registry {
         extra_ca: Option<&Path>,
         max_entries: usize,
     ) -> Result<Self, crate::Error> {
-        let tls = client_config(extra_ca)?;
+        let tls = Tls {
+            trusted: client_config(extra_ca)?,
+            any: any_certificate_config()?,
+        };
         let helpers = urls
             .iter()
             .map(|url| {
@@ -423,14 +421,73 @@ async fn wait(replies: Vec<oneshot::Receiver<Result<(), String>>>) -> Result<(),
     Err(first_err.unwrap_or_else(|| "registry push stopped".to_string()))
 }
 
+/// The client configurations for posting to helpers.
+#[derive(Clone)]
+struct Tls {
+    /// WebPKI roots plus `--provider-ca`: for computer updates, which carry local addresses.
+    trusted: Arc<rustls::ClientConfig>,
+    /// Any certificate: for ACME challenges, signed with the secret instead (`acme_mac`).
+    any: Arc<rustls::ClientConfig>,
+}
+
+/// How long a signed ACME challenge post stays valid.
+pub const ACME_MAC_WINDOW_SECS: u64 = 300;
+
+/// The `Pane-HMAC <unix secs> <base64url MAC>` value for an ACME challenge post: HMAC-SHA256
+/// with the registry secret over `pane registry acme v1\n<secs>\n<path>\n<body>`.
+pub fn acme_mac(secret: &str, secs: u64, path: &str, body: &[u8]) -> String {
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret.as_bytes());
+    let mut ctx = ring::hmac::Context::with_key(&key);
+    ctx.update(format!("pane registry acme v1\n{secs}\n{path}\n").as_bytes());
+    ctx.update(body);
+    let tag = ctx.sign();
+    format!(
+        "Pane-HMAC {secs} {}",
+        data_encoding::BASE64URL_NOPAD.encode(tag.as_ref())
+    )
+}
+
+/// Checks an `acme_mac` value against the secret, the request and the clock.
+pub fn acme_mac_ok(secret: &str, given: &str, path: &str, body: &[u8]) -> bool {
+    let Some(secs) = given
+        .strip_prefix("Pane-HMAC ")
+        .and_then(|v| v.split(' ').next())
+        .and_then(|t| t.parse::<u64>().ok())
+    else {
+        return false;
+    };
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    if now.abs_diff(secs) > ACME_MAC_WINDOW_SECS {
+        return false;
+    }
+    let want = acme_mac(secret, secs, path, body);
+    want.len() == given.len()
+        && want
+            .bytes()
+            .zip(given.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+}
+
 /// POSTs JSON to an http(s) URL and succeeds on a 2xx answer.
+///
+/// ACME challenge posts (`suffix` "/acme") accept any certificate. On a first deploy every
+/// relay still serves a self-signed certificate, and each needs a helper to publish its
+/// challenge before it can get a real one, so verifying the helper's certificate would
+/// deadlock. The secret never goes on the wire for them: the request carries a MAC over its
+/// path, body and time (`acme_mac`), so an impostor helper learns nothing it can reuse
+/// beyond 5 minutes, and challenge values are public in DNS anyway. Everything else
+/// verifies the helper's certificate and sends the bearer secret.
 async fn post(
     url: &str,
     suffix: &str,
     secret: Option<&str>,
     body: &[u8],
-    tls_config: Arc<rustls::ClientConfig>,
+    configs: &Tls,
 ) -> Result<(), String> {
+    let acme = suffix == "/acme";
     let (tls, rest) = if let Some(r) = url.strip_prefix("https://") {
         (true, r)
     } else if let Some(r) = url.strip_prefix("http://") {
@@ -447,9 +504,17 @@ async fn post(
         Some((h, p)) => (h, p.parse().map_err(|_| "bad registry port")?),
         None => (authority, if tls { 443 } else { 80 }),
     };
-    let auth = secret
-        .map(|s| format!("authorization: Bearer {s}\r\n"))
-        .unwrap_or_default();
+    let auth = match secret {
+        Some(s) if acme => {
+            let secs = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            format!("authorization: {}\r\n", acme_mac(s, secs, &path, body))
+        }
+        Some(s) => format!("authorization: Bearer {s}\r\n"),
+        None => String::new(),
+    };
+    let tls_config = if acme { &configs.any } else { &configs.trusted }.clone();
     let head = format!(
         "POST {path} HTTP/1.1\r\nhost: {authority}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n{auth}connection: close\r\n\r\n",
         body.len()
@@ -508,6 +573,66 @@ fn client_config(extra_ca: Option<&Path>) -> Result<Arc<rustls::ClientConfig>, c
         rustls::ClientConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()?
             .with_root_certificates(roots)
+            .with_no_client_auth(),
+    ))
+}
+
+/// Accepts any server certificate, still checking that the server holds its key.
+#[derive(Debug)]
+struct AnyCertificate(Arc<rustls::crypto::CryptoProvider>);
+
+impl rustls::client::danger::ServerCertVerifier for AnyCertificate {
+    fn verify_server_cert(
+        &self,
+        _: &rustls::pki_types::CertificateDer<'_>,
+        _: &[rustls::pki_types::CertificateDer<'_>],
+        _: &rustls::pki_types::ServerName<'_>,
+        _: &[u8],
+        _: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &self.0.signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.0.signature_verification_algorithms.supported_schemes()
+    }
+}
+
+fn any_certificate_config() -> Result<Arc<rustls::ClientConfig>, crate::Error> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    Ok(Arc::new(
+        rustls::ClientConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AnyCertificate(provider)))
             .with_no_client_auth(),
     ))
 }
