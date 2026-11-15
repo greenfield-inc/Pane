@@ -374,13 +374,13 @@ export class RemotePaneClient {
   /** Opens the event stream on the first route that answers. */
   private async openOnRoutes(isReconnect: boolean, resolveOnReady = false, failedRouteId?: string): Promise<void> {
     const order = this.routeOrder(failedRouteId);
-    let lastError: unknown = new Error('No route to the host');
+    let lastError = new Error('No route to the host');
     for (const [position, index] of order.entries()) {
       const final = position === order.length - 1;
       try {
         await this.useRoute(index);
       } catch (error) {
-        lastError = error;
+        lastError = error instanceof Error ? error : new Error(String(error));
         if (final) throw error;
         continue;
       }
@@ -389,7 +389,7 @@ export class RemotePaneClient {
         await this.openEventStream(isReconnect, resolveOnReady, final ? undefined : ROUTE_ATTEMPT_TIMEOUT_MS, final);
         return;
       } catch (error) {
-        lastError = error;
+        lastError = error instanceof Error ? error : new Error(String(error));
         if (final || this.closedByClient || this.recoveryStopped) throw error;
         console.info(`[Pane remote daemon] ${this.currentProfile.label}: route ${this.routes[index].kind} did not answer (${getErrorMessage(error, 'unknown error')}); trying the next`);
       }
@@ -928,12 +928,13 @@ export class RemotePaneClient {
               this.markRemoteSeen();
               armTimeout(this.restoreTimeoutMs, `Workspace restoration timed out after ${this.restoreTimeoutMs}ms`);
               if (resolveOnReady && !settled) { settled = true; resolve(); }
-              const hostRoutes = decodeComputerRoutesReport(readyPayload.computer);
-              this.reportStatus('restoring', 'host ready', null, {
+              const host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostRoutes'> = {
                 hostVersion: readyPayload.paneVersion,
                 hostMachineId: readyPayload.machineId,
-                ...(hostRoutes ? { hostRoutes } : {}),
-              });
+              };
+              const hostRoutes = decodeComputerRoutesReport(readyPayload.computer);
+              if (hostRoutes) host.hostRoutes = hostRoutes;
+              this.reportStatus('restoring', 'host ready', null, host);
               void Promise.resolve().then(() => this.onResyncRequired?.()).then(() => {
                 if (!isStale()) {
                   clearHandshakeTimer();
@@ -1141,7 +1142,9 @@ export class RemotePaneClient {
     const route = this.routes[this.routeIndex];
     console.info(`[Pane remote daemon] ${this.profile.label}: ${status}${this.routes.length > 1 ? ` on ${route.kind}` : ''} (${reason})`);
     this.status = status;
-    this.onConnectionStateChange?.(status, errorMessage, { lastSeenAt: this.lastSeenAt, ...host, ...(route?.routeId ? { routeId: route.routeId } : {}) });
+    const metadata: RemoteConnectionStateMetadata = { lastSeenAt: this.lastSeenAt, ...host };
+    if (route?.routeId) metadata.routeId = route.routeId;
+    this.onConnectionStateChange?.(status, errorMessage, metadata);
     for (const waiter of [...this.statusWaiters]) waiter();
   }
 

@@ -15,13 +15,13 @@ export type ComputerOs = 'macOS' | 'Windows' | 'Linux';
 /** Nearest first: same network, Tailscale, SSH, public URL, Pane relay. */
 export const COMPUTER_ROUTE_KINDS: readonly ComputerRouteKind[] = ['lan', 'tailscale', 'ssh', 'public', 'relay'];
 
-export const COMPUTER_ROUTE_LABELS: Record<ComputerRouteKind, string> = {
+export const COMPUTER_ROUTE_LABELS = {
   lan: 'Same network',
   tailscale: 'Tailscale',
   ssh: 'SSH',
   public: 'Public URL',
   relay: 'Pane relay',
-};
+} as const satisfies Record<ComputerRouteKind, string>;
 
 export interface ComputerRoute {
   /** `<kind>:<address>`, unique within its computer. */
@@ -129,7 +129,7 @@ export function decodeComputers(value: JsonValue | undefined): RemoteComputer[] 
   });
 }
 
-export function decodeComputerRoutesReport(value: unknown): ComputerRoutesReport | undefined {
+export function decodeComputerRoutesReport(value: JsonValue | undefined): ComputerRoutesReport | undefined {
   try {
     return value === undefined ? undefined : decodeBoundary(value, reportSchema);
   } catch {
@@ -281,8 +281,14 @@ export interface ComputerUpsert extends ComputerIdentity {
   id?: string;
 }
 
-/** Saves routes onto the computer the identity names, or a new computer. Returns the list and the computer's id. */
-export function upsertComputer(computers: readonly RemoteComputer[], upsert: ComputerUpsert): { computers: RemoteComputer[]; id: string } {
+/** The saved computers after a change, and the id of the computer it was about. */
+export interface ComputersChange {
+  computers: RemoteComputer[];
+  id: string;
+}
+
+/** Saves routes onto the computer the identity names, or a new computer. */
+export function upsertComputer(computers: readonly RemoteComputer[], upsert: ComputerUpsert): ComputersChange {
   const existing = findComputer(computers, upsert);
   if (existing) {
     const merged: RemoteComputer = { ...existing, routes: withRoutes(existing.routes, upsert.routes) };
@@ -341,7 +347,7 @@ export function applyRoutesReport(
   computerId: string,
   via: ComputerRoute,
   report: ComputerRoutesReport,
-): { computers: RemoteComputer[]; id: string } {
+): ComputersChange {
   const computer = computers.find((candidate) => candidate.id === computerId);
   if (!computer) return { computers: [...computers], id: computerId };
   const found = foundRoutes(report, via.token);
@@ -364,6 +370,12 @@ export function applyRoutesReport(
   };
 }
 
+/** Computers converted from entries saved before them, and the active one's id among them. */
+export interface ConvertedComputers {
+  computers: RemoteComputer[];
+  activeProfileId: string | null;
+}
+
 /**
  * Converts entries saved before computers (one per route) into computers. A saved Tailscale machine
  * and a relay computer with the same name become one computer with both routes. The merged record
@@ -372,7 +384,7 @@ export function applyRoutesReport(
 export function convertProfiles(
   profiles: readonly RemotePaneConnectionProfile[],
   activeProfileId: string | null,
-): { computers: RemoteComputer[]; activeProfileId: string | null } {
+): ConvertedComputers {
   let computers: RemoteComputer[] = [];
   const idOf = new Map<string, string>();
   for (const profile of profiles) {
