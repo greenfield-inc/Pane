@@ -171,6 +171,45 @@ test('an IME composition open when the chat mounts finishes in the first box, th
   await expect(page.locator('#pane-launch-outline')).toHaveCount(0);
 });
 
+test('an Enter on an empty box, or followed by more typing, sends nothing', async ({ page }) => {
+  const release = await holdApp(page);
+  await installElectronApiMock(page, fixture);
+  await page.goto('/', { waitUntil: 'commit' });
+  await expect(launchBox(page)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('hel');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('lo');
+  release();
+  await expect(chatBox(page)).toHaveValue('hello');
+  await page.waitForTimeout(1500);
+  // SAFETY: installElectronApiMock defines this test-only bridge.
+  expect(await page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getChatSends: () => unknown[] } }).__paneTestElectronMock.getChatSends())).toEqual([]);
+  await expect(chatBox(page)).toHaveValue('hello');
+});
+
+test('the outline gives way within 10 s when the app cannot read its Panes', async ({ page }) => {
+  test.setTimeout(45_000);
+  await installElectronApiMock(page, fixture);
+  await page.addInitScript(() => {
+    window.electronAPI.sessions.getAll = () => Promise.reject(new Error('host offline'));
+  });
+  await page.goto('/');
+  await expect(launchBox(page)).toBeVisible();
+  await expect(page.locator('#pane-launch-outline')).toHaveCount(0, { timeout: 15_000 });
+});
+
+test('a reload draws no message box: the person is already in the app', async ({ page }) => {
+  await installElectronApiMock(page, fixture);
+  await page.goto('/');
+  await expect(chatBox(page)).toBeVisible();
+  // Hold the app's code on the reload, so the outline stays to be read.
+  await page.route(/\/src\/main\.tsx$/, () => undefined);
+  await page.reload({ waitUntil: 'commit' });
+  await expect(page.locator('#pane-launch-outline')).toHaveCount(1);
+  await expect(launchBox(page)).toHaveCount(0);
+});
+
 test('a launch onto Home draws no message box, and the outline gives way to the app', async ({ page }) => {
   const release = await holdApp(page);
   await installElectronApiMock(page, { ...fixture, launchChat: undefined });
