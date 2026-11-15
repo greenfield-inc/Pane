@@ -18,6 +18,12 @@ function profile(id: string): RemotePaneConnectionProfile {
   return { id, label: id, baseUrl: `http://${id}.tail1234.ts.net:4800/`, token: `token-${id}`, transport: 'http+sse' };
 }
 
+const started: MachineConnections[] = [];
+
+afterEach(async () => {
+  await Promise.all(started.splice(0).map(machines => machines.stop()));
+});
+
 function setup(ids: string[]) {
   const configManager = new ConfigManager();
   const defaults = createDefaultRemoteDaemonConfig();
@@ -48,6 +54,7 @@ function setup(ids: string[]) {
   const events: MachineConnectionsEvent[] = [];
   machines.subscribe(event => events.push(event));
   machines.start();
+  started.push(machines);
   const client = (id: string): FakeClient => {
     const found = clients.get(id);
     if (!found) throw new Error(`no client for ${id}`);
@@ -185,12 +192,14 @@ describe('MachineConnections', () => {
     connect('mini');
     client('devbox').options.onConnectionStateChange?.('reconnecting');
 
+    // A stream left half-open from before the devbox slept is still counted when its new one opens.
     readingMachines.add('devbox-install');
+    expect(client('devbox').retryNow).toHaveBeenCalledTimes(1);
     readingMachines.add('devbox-install');
     readingMachines.remove('devbox-install');
     readingMachines.remove('devbox-install');
 
-    expect(client('devbox').retryNow).toHaveBeenCalledTimes(1);
+    expect(client('devbox').retryNow).toHaveBeenCalledTimes(2);
     expect(client('mini').retryNow).not.toHaveBeenCalled();
   });
 

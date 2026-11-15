@@ -8,11 +8,10 @@ const arrivals = new Set<(machineId: string) => void>();
 
 export const readingMachines = {
   add(machineId: string): void {
-    const count = streams.get(machineId) ?? 0;
-    streams.set(machineId, count + 1);
-    if (count === 0) for (const listener of arrivals) listener(machineId);
+    streams.set(machineId, (streams.get(machineId) ?? 0) + 1);
+    for (const listener of arrivals) listener(machineId);
   },
-  /** Calls `listener` when a Pane install starts reading (its first stream opens). Returns the unsubscribe. */
+  /** Calls `listener` each time a Pane install opens a stream, even while an older one is still counted. Returns the unsubscribe. */
   onArrive(listener: (machineId: string) => void): () => void {
     arrivals.add(listener);
     return () => { arrivals.delete(listener); };

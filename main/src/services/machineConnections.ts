@@ -177,10 +177,8 @@ export class MachineConnections {
   }
 
   private retryOffline(): void {
-    for (const machine of this.machines.values()) {
-      if (machine.state.status !== 'offline') continue;
-      clearRetry(machine);
-      void machine.client.retryNow().catch(() => undefined);
+    for (const [id, machine] of this.machines) {
+      if (machine.state.status === 'offline') void this.retry(id).catch(() => undefined);
     }
   }
 
