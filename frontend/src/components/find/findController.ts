@@ -136,6 +136,22 @@ export function syncFindMode(panelId: string): void {
   if (bar.query) applyResult(panelId, target.adapter.search(bar.query));
 }
 
+/**
+ * The tab's content was replaced wholesale (a Summary frame reloaded, a
+ * reference page finished loading): run the open query again from scratch.
+ */
+export function refreshFind(panelId: string): void {
+  const target = targets.get(panelId);
+  const bar = getFindBar(panelId);
+  if (!target || !bar.open || !bar.query || bar.noText) return;
+  if (target.adapter.mode() !== 'text') {
+    syncFindMode(panelId);
+    return;
+  }
+  target.adapter.clear();
+  applyResult(panelId, target.adapter.search(bar.query));
+}
+
 function seedFromSelection(adapter: FindAdapter): string | null {
   const selection = adapter.selectedText?.().trim() ?? '';
   if (!selection || /[\r\n]/.test(selection)) return null;

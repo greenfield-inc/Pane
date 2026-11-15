@@ -31,6 +31,8 @@ import { ChatCopyButton } from './ChatCopyButton';
 import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
+import { FindBar } from '../find/FindBar';
+import { usePageTextFind } from '../find/usePageTextFind';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -203,6 +205,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     followLiveEnd.current?.();
   }, [messages]);
   const viewportRef = useRef<HTMLDivElement>(null);
+  // ⌘F searches the whole loaded conversation and the cards docked under it (approvals, questions).
+  const findRootRef = useRef<HTMLDivElement>(null);
+  usePageTextFind(panelId, findRootRef);
   const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length, !!snapshot.hasNewer);
   const onViewportScroll = () => {
     recordAnchor();
@@ -401,7 +406,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   };
 
   return <AssistantRuntimeProvider runtime={runtime}>
-    <ThreadPrimitive.Root className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} {...dragProps}>
+    <ThreadPrimitive.Root ref={findRootRef} className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} {...dragProps}>
+      <FindBar panelId={panelId} />
       {dragging && <div className="chat-drop" aria-hidden>
         <div className="chat-drop-card">
           <Paperclip className="chat-drop-icon" />

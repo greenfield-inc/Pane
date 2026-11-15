@@ -3,6 +3,7 @@ import {
   closeFind,
   getFindBar,
   openFind,
+  refreshFind,
   registerFindTarget,
   reportFindResult,
   resetFindForTests,
@@ -253,5 +254,30 @@ describe('find controller', () => {
     register('browser', second);
 
     expect(second.calls).toEqual(['search:needle']);
+  });
+
+  it('searches the open query again from scratch when the content is replaced (a frame reloads)', () => {
+    const adapter = fakeAdapter(4);
+    register('summary', adapter);
+    openFind('summary');
+    setFindQuery('summary', 'key');
+    adapter.calls.length = 0;
+    refreshFind('summary');
+    expect(adapter.calls).toEqual(['clear', 'search:key']);
+    expect(getFindBar('summary').result).toEqual({ current: 1, total: 4 });
+  });
+
+  it('leaves a closed bar, an empty query or a tab without text alone on refresh', () => {
+    const adapter = fakeAdapter(4);
+    register('summary', adapter);
+    refreshFind('summary');
+    openFind('summary');
+    refreshFind('summary');
+    adapter.currentMode = 'none';
+    setFindQuery('summary', 'key');
+    adapter.calls.length = 0;
+    syncFindMode('summary');
+    refreshFind('summary');
+    expect(adapter.calls.filter(call => call.startsWith('search'))).toEqual([]);
   });
 });
