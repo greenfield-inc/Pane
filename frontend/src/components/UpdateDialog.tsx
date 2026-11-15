@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { isMac } from '../utils/platformUtils';
 import { LiveRegion } from './ui/LiveRegion';
+import { DiscordIcon, DISCORD_INVITE_URL } from './DiscordIcon';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 
 interface UpdateDialogProps {
@@ -443,7 +444,9 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
                 ) : (
                   <Button
                     onClick={() => versionInfo.releaseUrl && window.electronAPI.openExternal(versionInfo.releaseUrl)}
-                    variant="primary"
+                    variant="secondary"
+                    className="border border-border-primary"
+                    icon={<ExternalLink className="w-4 h-4" />}
                   >
                     View Release
                   </Button>
@@ -686,18 +689,29 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
               </div>
             </div>
           )}
+
+          <div className="mt-4 flex items-center gap-3 rounded-lg border border-border-primary bg-surface-secondary px-4 py-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-discord text-white">
+              <DiscordIcon className="w-4 h-4" />
+            </div>
+            <p className="flex-1 text-sm text-text-primary">Chat with the team and other Pane users.</p>
+            <Button variant="primary" onClick={() => window.electronAPI.openExternal(DISCORD_INVITE_URL)}>
+              Join Discord
+            </Button>
+          </div>
       </ModalBody>
 
       <ModalFooter>
         <div className="flex justify-between items-center w-full">
-          <div className="text-sm text-text-tertiary">
+          <div>
             {versionInfo?.releaseUrl && (
-              <button
+              <Button
                 onClick={() => window.electronAPI.openExternal(versionInfo.releaseUrl!)}
-                className="hover:text-text-secondary underline transition-colors"
+                variant="secondary"
+                icon={<ExternalLink className="w-4 h-4" />}
               >
                 View on GitHub
-              </button>
+              </Button>
             )}
           </div>
           <Button
