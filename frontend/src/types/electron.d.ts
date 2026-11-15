@@ -765,8 +765,6 @@ interface ElectronAPI {
   // Resource monitor
   resourceMonitor: {
     getSnapshot: () => Promise<IPCResponse>;
-    startActive: () => Promise<IPCResponse>;
-    stopActive: () => Promise<IPCResponse>;
   };
 
   // Agent subscription usage

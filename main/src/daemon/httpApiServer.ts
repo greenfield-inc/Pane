@@ -85,7 +85,6 @@ interface ConnectedRemoteEventClient {
   shown: boolean;
   remoteAddress: string | null;
   connectedAt: string;
-  lastSeenAt: string;
   heartbeatTimer: NodeJS.Timeout;
   /** What a workspace client signed in with, checked again before each event it receives. */
   workspaceCredentials: WorkspaceCredentials | null;
@@ -1121,7 +1120,6 @@ export class PaneRemoteHttpApiServer {
       shown: !getSingleHeaderValue(request.headers['x-pane-machine-id'])?.trim(),
       remoteAddress: getRemoteAddress(request),
       connectedAt,
-      lastSeenAt: connectedAt,
       heartbeatTimer,
       workspaceCredentials: this.workspace && !glassesClient
         ? {
@@ -1607,12 +1605,11 @@ export class PaneRemoteHttpApiServer {
       writeSseEvent(client.stream, 'heartbeat', {
         timestamp,
       } satisfies RemoteDaemonHeartbeatPayload);
-      client.lastSeenAt = timestamp;
       terminalPanelManager.pruneVisibilityViewersByPrefix(
         this.getRemoteVisibilityViewerPrefix(client.remoteClientId, client.remoteClientTokenHash, client.remoteRuntimeId),
         REMOTE_VISIBILITY_VIEWER_STALE_MS,
       );
-      this.publishConnectedClients();
+      // The published client list changes only on connect and disconnect, so a heartbeat doesn't republish it.
     } catch {
       this.dropEventClient(clientConnectionId);
     }
@@ -1632,7 +1629,6 @@ export class PaneRemoteHttpApiServer {
       deviceLabel: client.deviceLabel,
       remoteAddress: client.remoteAddress,
       connectedAt: client.connectedAt,
-      lastSeenAt: client.lastSeenAt,
     }));
   }
 

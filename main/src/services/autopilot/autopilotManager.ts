@@ -727,14 +727,16 @@ export class AutopilotManager extends EventEmitter {
 
   private setState(state: AutopilotAgentState): void {
     this.state = state;
-    if (state === 'stopped') {
-      this.instructionsApplied = undefined;
+    if (state === 'stopped') this.instructionsApplied = undefined;
+    if (state !== 'running') {
+      // Paused, the file is not polled; Go on picks up an edit made meanwhile.
       this.stopWatchingInstructions?.();
       this.stopWatchingInstructions = undefined;
     } else if (!this.stopWatchingInstructions) {
       // An edit to the file itself (an editor, the CLI, Autopilot after the person approved a line) reaches the agent too.
       const watch = this.ports.watchFile ?? defaultWatchFile;
       this.stopWatchingInstructions = watch(this.instructionsFile(), () => this.deliverInstructions());
+      this.deliverInstructions();
     }
     if (state !== 'running') this.stopDriving();
     if (state === 'stopped') this.carryOnsInARow = 0;

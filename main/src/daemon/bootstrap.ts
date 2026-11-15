@@ -656,7 +656,6 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       setPaneMcpEndpoint(undefined);
       paneMcpEndpoint.detachAll();
       await tabListener.stop();
-      resourceMonitorService.stop();
       listeningPortMonitor.stop();
       backgroundActivity?.dispose();
       await spotlightManager.disableAll();

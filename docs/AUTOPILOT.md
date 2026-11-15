@@ -57,8 +57,8 @@ in a plain file on the machine Autopilot runs on,
 - Saved while it runs, they reach it at once as a `[Pane · Instructions]`
   line (shown in its chat as "Your instructions updated"), and the box says
   **Applied**. An edit to the file itself is picked up the same way within a
-  couple of seconds. While it is stopped the box says **Applies on next
-  Start**.
+  couple of seconds; while Autopilot is paused, it reaches it at **Go on**.
+  While it is stopped the box says **Applies on next Start**.
 - They shape how it works but never override its hard limits: it never
   answers an approval or a permission prompt, and never merges, deletes,
   pushes or closes anything without your word.

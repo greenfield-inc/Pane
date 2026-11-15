@@ -1399,8 +1399,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       resourceMonitor: namespace({
         getSnapshot: () => success(null),
-        startActive: () => success(),
-        stopActive: () => success(),
       }),
       loops: namespace({
         list: () => success(clone(mockLoops)),

@@ -763,7 +763,6 @@ describe('PaneRemoteHttpApiServer', () => {
       deviceLabel: 'Parsas MacBook Air',
       remoteAddress: expect.any(String),
       connectedAt: expect.any(String),
-      lastSeenAt: expect.any(String),
     }]);
 
     server.getEventSink().send('session:created', {
@@ -920,7 +919,6 @@ describe('PaneRemoteHttpApiServer', () => {
       label: 'Mac mini',
       remoteAddress: expect.any(String),
       connectedAt: expect.any(String),
-      lastSeenAt: expect.any(String),
     }]);
 
     stream.close();

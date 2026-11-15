@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { create } from 'zustand';
 import type { Loop, LoopInput, LoopRun } from '../../../shared/types/loop';
 import { API } from '../utils/api';
+import { useWindowActive } from '../hooks/useWindowActive';
 import { showActionError } from './errorStore';
 import { useNavigationStore } from './navigationStore';
 import { useOrchestrationSessionStore } from './orchestrationSessionStore';
@@ -137,14 +138,22 @@ const REFRESH_INTERVAL_MS = 60_000;
  * Keeps loops current while the sidebar is mounted: on start, whenever main
  * says they changed, when a Pane or project is deleted (a project's loops go
  * with it), when this window starts driving another Pane host, and every
- * minute so "next run" and skipped runs move on.
+ * minute while the window is on screen so "next run" and skipped runs move on.
  */
 export function useLoopsRefresh(): void {
   const refresh = useLoopsStore(state => state.refresh);
+  const { visible } = useWindowActive();
+  useEffect(() => {
+    // Hidden, nothing shows the times; coming back on screen rereads at once.
+    if (!window.electronAPI || !visible) return;
+    const reread = () => { void refresh(); };
+    reread();
+    const timer = window.setInterval(reread, REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [refresh, visible]);
   useEffect(() => {
     if (!window.electronAPI) return;
     const reread = () => { void refresh(); };
-    reread();
     const events = window.electronAPI.events;
     const unsubscribers = [
       events.onLoopsChanged(reread),
@@ -152,9 +161,7 @@ export function useLoopsRefresh(): void {
       events.onRemoteDaemonResyncRequested(reread),
       events.onProjectListChanged?.(reread),
     ];
-    const timer = window.setInterval(reread, REFRESH_INTERVAL_MS);
     return () => {
-      window.clearInterval(timer);
       for (const unsubscribe of unsubscribers) unsubscribe?.();
     };
   }, [refresh]);

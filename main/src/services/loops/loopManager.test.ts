@@ -250,6 +250,20 @@ describe('LoopManager timer', () => {
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(started).toEqual(['Nightly bug sweep']);
   });
+
+  it('sleeps with no timer while no loop is on, and a loop saved later still starts at its slot', async () => {
+    const { manager, started, setNow } = setup();
+    manager.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    await manager.save(nightly);
+    await vi.advanceTimersByTimeAsync(0);
+    setNow('2026-10-24T07:00:30Z');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(started).toEqual(['Nightly bug sweep']);
+    manager.stop();
+  });
 });
 
 describe('LoopManager schedule restarts', () => {

@@ -1681,9 +1681,6 @@ if (launchRemoteSetup) {
       console.log('[Main] Local daemon server stopped');
     }
 
-    // Stop resource monitoring
-    resourceMonitorService.stop();
-
     // Terminals exiting because Pane is quitting are not owners releasing their
     // named locks; resumed agents still hold them after the restart.
     paneDaemonHost?.services.namedLockService?.suspendAutoRelease();
