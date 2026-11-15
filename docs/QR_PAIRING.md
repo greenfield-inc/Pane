@@ -109,7 +109,7 @@ Pane reaches each computer by up to five routes, tried nearest first:
 
 | Route | How Pane gets it |
 |---|---|
-| **Same network** | The computer reports its addresses on your Wi-Fi. |
+| **Same network** | The computer reports its private addresses. Pane tries one only when it is on a subnet of the computer trying it, so another home network or a WSL, Docker or VM adapter costs no wait. |
 | **Tailscale** | Both computers are on your tailnet. See [Workspaces](RUNPANE_WORKSPACES.md). |
 | **SSH** | **Add a device › SSH**. See [SSH route](SELF_HOSTED_REMOTE_DAEMON.md#ssh-route). |
 | **Public URL** | The computer has its own HTTPS address. See [Public URL](SELF_HOSTED_REMOTE_DAEMON.md#public-url). |
