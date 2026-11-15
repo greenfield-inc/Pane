@@ -31,6 +31,7 @@ const previewTargetSchema = boundary.union(
 const peerRequestSchema = boundary.object({ peer: relayComputerSchema });
 const linkRequestSchema = boundary.object({ link: boundary.nonEmptyString });
 const unlinkRequestSchema = boundary.object({ computerId: boundary.nonEmptyString });
+const forgetRequestSchema = boundary.object({ computerId: boundary.nonEmptyString, keep: boundary.optional(boundary.array(boundary.string)) });
 const pairingCodeSchema = boundary.optional(boundary.object({ expiresIn: boundary.optional(boundary.enumeration('10m', '1h', '24h')) }));
 
 function onThisComputerOnly(): void {
@@ -158,7 +159,8 @@ export function registerRelayCommands(
     return null;
   });
   registry.register(RELAY_COMPUTER_COMMANDS.forgetComputer, async (request: PaneCommandValue, from: PaneCommandValue) => {
-    await links.forgetComputer(decodeBoundary(request, unlinkRequestSchema).computerId, caller(from));
+    const { computerId, keep } = decodeBoundary(request, forgetRequestSchema);
+    await links.forgetComputer(computerId, caller(from), keep);
     return null;
   });
 

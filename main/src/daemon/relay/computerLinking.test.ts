@@ -165,7 +165,16 @@ function network() {
     }
   }
 
-  return { add, reaches, advance: (ms: number) => { now += ms; } };
+  /** Calls `channel` on `to` as `from`, with the token `from` saved for it. */
+  async function callAs(from: Computer, to: Computer, channel: string, request: JsonObject): Promise<PaneCommandValue> {
+    const saved = from.config().client.computers.find((computer) => computer.routes.some((route) => route.relay?.computerId === to.info.id && route.kind === 'relay'));
+    const route = saved?.routes.find((candidate) => candidate.kind === 'relay');
+    if (!saved || !route) throw new Error(`${from.name} has no link to ${to.name}`);
+    // SAFETY: link commands answer JSON.
+    return await call({ id: saved.id, label: saved.label, baseUrl: route.baseUrl, token: route.token, transport: 'http+sse', relay: route.relay }, channel, [request]) as PaneCommandValue;
+  }
+
+  return { add, reaches, callAs, advance: (ms: number) => { now += ms; } };
 }
 
 describe('linking computers with a one-time link', () => {
@@ -344,6 +353,29 @@ describe('linking computers with a one-time link', () => {
       expect(await net.reaches(lone, from), `Studio reaches ${from.name}`).toBe(false);
       for (const to of group) if (to !== from) expect(await net.reaches(from, to), `${from.name} reaches ${to.name}`).toBe(true);
     }
+  });
+
+  it.each([
+    ['"Not you? Unlink"', 'relay:undo-join'],
+    ['"Unlink from all your computers"', 'relay:unlink-computer-everywhere'],
+  ])('%s also removes the links a stranger\'s computer minted for computers outside the group', async (_name, channel) => {
+    const net = network();
+    const mac = net.add('Mac', 'macmacmacmacmac0');
+    const windows = net.add('Windows', 'winwinwinwinwin0');
+    await windows.redeem(await mac.link());
+    const stranger = net.add('Stranger', 'strstrstrstrstr0');
+    await stranger.redeem(await mac.link());
+    const madeUp = net.add('Made up', 'fakfakfakfakfak0');
+    await net.callAs(stranger, windows, 'relay:client:mint-link', { peer: { ...madeUp.info } });
+    const madeUpOnWindows = () => windows.config().host.clients.filter((client) => client.computerId === madeUp.info.id);
+    expect(madeUpOnWindows()).toHaveLength(1);
+    const strangerOnMac = mac.config().client.computers.find((computer) => computer.label === 'Stranger');
+
+    await mac.registry.invoke(channel, [{ computerId: strangerOnMac?.id ?? '' }]);
+
+    expect(madeUpOnWindows()).toEqual([]);
+    expect(await net.reaches(windows, mac)).toBe(true);
+    expect(await net.reaches(mac, windows)).toBe(true);
   });
 
   it('refuses a link from a computer claiming a linked computer\'s id with another key, and leaves the link unused', async () => {

@@ -104,22 +104,30 @@ function withoutLinks(computer: RemoteComputer, relayIds: ReadonlySet<string>): 
 
 /**
  * Removes clients here with everything they vouched for: links a removed phone minted, and for each
- * computer whose link goes, the phone tokens it handed out and the routes that call it. Links a
- * removed computer minted between others stay unless `linksItMade` asks for them too.
+ * computer whose link goes, the phone tokens it handed out and the routes that call it. With `keep`,
+ * the links a removed computer minted go too, except links for the computers `keep` names: the
+ * group as the computer asking sees it, so a stranger's made-up peers go and the group stays linked.
  */
 export function revokeClients(
   remote: RemoteDaemonConfig,
-  seed: { clients?: (client: RemoteDaemonClientRecord) => boolean; computers?: readonly string[]; linksItMade?: boolean },
+  seed: { clients?: (client: RemoteDaemonClientRecord) => boolean; computers?: readonly string[]; keep?: readonly string[] },
 ) {
   const clients = new Set(remote.host.clients.filter((client) => seed.clients?.(client) === true).map((client) => client.id));
   const computers = new Set(seed.computers);
-  const minters = new Set(remote.host.clients.filter((client) => client.kind === undefined || seed.linksItMade === true).map((client) => client.id));
+  const keep = seed.keep && new Set(seed.keep);
+  const byId = new Map(remote.host.clients.map((client) => [client.id, client]));
+  const cascades = (client: RemoteDaemonClientRecord) => {
+    const minter = client.mintedBy === undefined ? undefined : byId.get(client.mintedBy);
+    if (!minter || !clients.has(minter.id)) return false;
+    if (minter.kind === undefined) return true;
+    return minter.kind === 'computer' && keep !== undefined && !keep.has(client.computerId ?? '');
+  };
   for (let grew = true; grew;) {
     grew = false;
     for (const client of remote.host.clients) {
       const linkedComputer = client.kind === 'computer' ? client.computerId : undefined;
       if (!clients.has(client.id)) {
-        const vouched = (client.mintedBy !== undefined && minters.has(client.mintedBy) && clients.has(client.mintedBy))
+        const vouched = cascades(client)
           || (linkedComputer !== undefined && computers.has(linkedComputer))
           || (client.grantedBy !== undefined && computers.has(client.grantedBy));
         if (!vouched) continue;
@@ -409,10 +417,13 @@ export class RelayLinks {
     await this.revokeLocally({ clients: (client) => client.kind === undefined && client.phoneId === phoneId });
   }
 
-  /** Forgets a computer here: its link both ways and the phone tokens it handed out. */
-  async forgetComputer(computerId: string, callerClientId: string): Promise<void> {
+  /**
+   * Forgets a computer here: its link both ways and the phone tokens it handed out. With `keep`, the
+   * links it minted go too, except those for the computers `keep` names.
+   */
+  async forgetComputer(computerId: string, callerClientId: string, keep?: readonly string[]): Promise<void> {
     this.callerComputer(callerClientId);
-    await this.revokeLocally({ computers: [computerId] });
+    await this.revokeLocally({ computers: [computerId], keep });
   }
 
   devices(): RelayDevice[] {
@@ -463,19 +474,19 @@ export class RelayLinks {
     const computerId = this.relayIdOf(id);
     const targets = this.linked();
     const self = this.deps.self()?.id;
+    // The group without it: links it minted for these stay, and links it minted for anything else go.
+    const group = targets.map((profile) => profile.relay.computerId).filter((other) => other !== computerId).concat(self ?? []);
     // The computers it is removed from: this one, and each other linked computer that answers.
     const removed = [this.deps.self()?.name ?? 'This computer'];
     const notReached: string[] = [];
     await Promise.all(targets.map(async (profile) => {
       const unlinked = profile.relay.computerId === computerId;
       // The unlinked computer forgets this one and the rest; the others forget it.
-      const forget = unlinked
-        ? targets.filter((other) => other.relay.computerId !== computerId).map((other) => other.relay.computerId).concat(self ?? [])
-        : [computerId];
-      if (!await this.tell(profile, forget)) notReached.push(profile.label);
+      const told = unlinked ? await this.tell(profile, group, []) : await this.tell(profile, [computerId], group);
+      if (!told) notReached.push(profile.label);
       else if (!unlinked) removed.push(profile.label);
     }));
-    await this.revokeLocally({ computers: [computerId] });
+    await this.revokeLocally({ computers: [computerId], keep: group });
     return { removed, notReached };
   }
 
@@ -488,7 +499,7 @@ export class RelayLinks {
     const remote = this.remote();
     const before = this.linked();
     // The join's links here are the joining computer's and every link it minted, so they are what goes with it.
-    const after = new Set(revokeClients(remote, { computers: [this.relayIdOf(id)], linksItMade: true }).remote.client.computers
+    const after = new Set(revokeClients(remote, { computers: [this.relayIdOf(id)], keep: [] }).remote.client.computers
       .flatMap((computer) => computerRelayId(computer) ?? []));
     const brought = before.filter((profile) => !after.has(profile.relay.computerId));
     const stay = before.filter((profile) => after.has(profile.relay.computerId));
@@ -496,17 +507,20 @@ export class RelayLinks {
     const theirs = brought.map((profile) => profile.relay.computerId);
     const notReached: string[] = [];
     await Promise.all([
-      ...brought.map(async (profile) => { if (!await this.tell(profile, ours)) notReached.push(profile.label); }),
-      ...stay.map(async (profile) => { if (!await this.tell(profile, theirs)) notReached.push(profile.label); }),
+      ...brought.map(async (profile) => { if (!await this.tell(profile, ours, theirs)) notReached.push(profile.label); }),
+      ...stay.map(async (profile) => { if (!await this.tell(profile, theirs, ours)) notReached.push(profile.label); }),
     ]);
-    await this.revokeLocally({ computers: theirs });
+    await this.revokeLocally({ computers: theirs, keep: ours });
     return { removed: brought.map((profile) => profile.label), notReached };
   }
 
-  /** Asks a linked computer to forget each of `computerIds`; false when it does not answer. */
-  private async tell(profile: LinkedComputer, computerIds: readonly string[]): Promise<boolean> {
+  /**
+   * Asks a linked computer to forget each of `computerIds` and the links they minted there, except
+   * links for the computers `keep` names; false when it does not answer.
+   */
+  private async tell(profile: LinkedComputer, computerIds: readonly string[], keep: readonly string[]): Promise<boolean> {
     try {
-      for (const computerId of computerIds) await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.forgetComputer, [{ computerId }]);
+      for (const computerId of computerIds) await this.deps.call(profile, RELAY_COMPUTER_COMMANDS.forgetComputer, [{ computerId, keep: [...keep] }]);
       return true;
     } catch {
       return false;

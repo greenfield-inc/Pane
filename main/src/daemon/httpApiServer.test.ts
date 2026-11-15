@@ -1190,11 +1190,12 @@ describe('QR-paired phones and linked computers', () => {
       const { body } = await invoke(token, 'relay:client:mint-link', { peer });
       return decodeBoundary(body, boundary.object({ result: boundary.object({ token: boundary.nonEmptyString }) })).result.token;
     };
-    return { server, registry, invoke, mint, call };
+    return { server, registry, invoke, mint, call, addClient: (record: RemoteDaemonClientRecord) => links.addClient(record) };
   }
 
   it.each([
     ['relay:client:grant-phone', { label: 'Rogue phone', phoneId: 'pane-native-rogue' }],
+    ['relay:client:grant-computer', { peer: ROGUE }],
     ['relay:client:remove-phone', { phoneId: 'pane-native-ana' }],
     ['relay:client:forget-computer', { computerId: STUDIO.id }],
   ])('refuses %s from a paired phone, and changes nothing', async (channel, request) => {
@@ -1203,6 +1204,20 @@ describe('QR-paired phones and linked computers', () => {
     await expect(computer.invoke('phone-token', channel, request))
       .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_COMPUTER_ONLY' } } });
     await expect(computer.invoke('phone-token', 'sessions:get-all')).resolves.toMatchObject({ statusCode: 200 });
+    await expect(computer.invoke('studio-token', 'runpane:machine:info')).resolves.toMatchObject({ statusCode: 200 });
+  });
+
+  it.each([
+    ['relay:client:mint-link', { peer: ROGUE }, 'ERR_RELAY_PHONE_ONLY'],
+    ['relay:client:save-link', { peer: ROGUE, token: 'stolen' }, 'ERR_RELAY_PHONE_ONLY'],
+    ['relay:client:grant-computer', { peer: ROGUE }, 'ERR_RELAY_COMPUTER_ONLY'],
+    ['relay:client:forget-computer', { computerId: STUDIO.id }, 'ERR_RELAY_COMPUTER_ONLY'],
+  ])('refuses %s from paired glasses, and changes nothing', async (channel, request, code) => {
+    const computer = await startComputer();
+    await computer.addClient({ id: 'glasses-ana', label: 'Ana’s glasses', createdAt: '2026-11-14T00:00:00.000Z', tokenHash: hashRemoteDaemonToken('glasses-token'), kind: 'glasses' });
+
+    await expect(computer.registry.invokeRemote(channel, [request, { clientId: 'glasses-ana' }])).rejects.toMatchObject({ code });
+    await expect(computer.registry.invoke('relay:linked-computers', [])).resolves.toEqual([expect.objectContaining({ name: 'Studio Mac' })]);
     await expect(computer.invoke('studio-token', 'runpane:machine:info')).resolves.toMatchObject({ statusCode: 200 });
   });
 
