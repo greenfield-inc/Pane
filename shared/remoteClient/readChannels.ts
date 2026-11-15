@@ -97,9 +97,9 @@ export const REMOTE_STREAMLESS_CHANNELS = new Set([
   'relay:client:preview-address',
 ]);
 
-/** Idempotent viewer bookkeeping required to restore a connected workspace. */
+/** Idempotent viewer bookkeeping required to restore a connected workspace. `panels:initialize` starts a terminal only once. */
 export const REMOTE_RESTORE_CHANNELS = new Set([
-  'terminal:resize', 'panels:resize-terminal', 'terminal:setVisibility',
+  'panels:initialize', 'terminal:resize', 'panels:resize-terminal', 'terminal:setVisibility',
   'terminal:ack', 'terminal:resetFlowControl', 'sessions:mark-viewed',
   'panels:set-active', 'terminal:reply',
 ]);
