@@ -63,6 +63,8 @@ export class RelayService {
   private localPort: number | null = null;
   private domain: string | null = null;
   private relayHost: string | null = null;
+  /** The target the running relay was started for: `''` means Pane's nearest relay. */
+  private relayTarget: string | null = null;
   private agentState: RelayAgentState = { status: 'stopped' };
   private lastError: string | null = null;
   private renewTimer: NodeJS.Timeout | null = null;
@@ -234,7 +236,7 @@ export class RelayService {
       const want = settings?.enabled === true ? this.targetRelay(settings) : null;
       if (want === null) {
         await this.shutdown();
-      } else if (want !== this.relayHost || !this.agent) {
+      } else if (want !== this.relayTarget || !this.agent) {
         await this.shutdown();
         await this.startup(want);
       }
@@ -274,6 +276,7 @@ export class RelayService {
     const key = this.key;
     const { host, port } = target ? parseHostPort(target) : { host: await nearestRelay(PANE_RELAYS), port: 443 };
     this.relayHost = target || host;
+    this.relayTarget = target;
     const ca = readOptionalFile(this.env.PANE_RELAY_CA);
     this.relayApi = { host, port, connectHost: this.env.PANE_RELAY_CONNECT_HOST, ca };
 
@@ -475,6 +478,7 @@ export class RelayService {
     this.terminator = null;
     this.localPort = null;
     this.relayHost = null;
+    this.relayTarget = null;
   }
 }
 

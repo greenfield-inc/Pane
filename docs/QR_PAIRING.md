@@ -14,6 +14,10 @@ computer, on any network. No account, no Tailscale, no port forwarding.
 The phone shows the computer's sessions a few seconds later. The code works
 once and expires after 10 minutes; the dialog shows a new one after each use.
 
+Opening the dialog turns phone access on. If you close it before a code ever
+appears (for example after "Can't reach ..."), Pane turns phone access back
+off, so it doesn't keep retrying in the background.
+
 Inside the Pane app you can also scan from **Settings › Add a machine**.
 The app still accepts `pane-remote://` connection codes.
 
