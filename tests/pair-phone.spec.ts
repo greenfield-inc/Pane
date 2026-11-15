@@ -59,6 +59,9 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(dialog).toContainText(/Expires in (10:00|9:5\d) · works once/);
     expect(await calls(page, 'relay:set-enabled')).toEqual([[true]]);
     await shot(page, `dialog-code-${theme}`);
+    await dialog.getByRole('button', { name: 'Done' }).click();
+    await expect(dialog).toBeHidden();
+    expect(await calls(page, 'relay:set-enabled')).toEqual([[true]]);
   });
 }
 
@@ -99,6 +102,8 @@ test('a computer that cannot reach the relay says why and retries', async ({ pag
   await shot(page, 'dialog-error-dark');
   await dialog.getByRole('button', { name: 'Try again' }).click();
   await expect.poll(async () => (await calls(page, 'relay:set-enabled')).length).toBe(2);
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect.poll(() => calls(page, 'relay:set-enabled')).toEqual([[true], [true], [false]]);
 });
 
 const PHONE: RemoteDaemonClientRecord = { id: 'phone-1', label: "Sam's iPhone", createdAt: '2026-11-01T10:00:00Z', tokenHash: 'h1', phoneId: 'install-1', lastUsedAt: '2026-11-12T10:00:00Z' };
