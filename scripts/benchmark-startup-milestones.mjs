@@ -19,10 +19,11 @@
 // Pass --home <dir> to keep the usage scanner from indexing your real ~/.claude while measuring.
 // Pass --app label=dir (repeatable) to compare builds; runs alternate between them. --fresh
 // runs each from a new APFS copy of the app (macOS), so its files are not in the OS cache.
+// --relaunch keeps Chromium's caches between runs (by default each run clears them).
 //
 //   node scripts/benchmark-startup-milestones.mjs --pane-dir ~/.pane_test_cold \
 //     (--open-pane "my-repo/feature" | --chat) [--runs 10] [--port 4171] [--home dir] [--json out.json]
-//     [--app base=../base-checkout --app change=.] [--fresh]
+//     [--app base=../base-checkout --app change=.] [--fresh | --relaunch]
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -42,6 +43,7 @@ const { values: args } = parseArgs({
     home: { type: 'string' },
     app: { type: 'string', multiple: true },
     fresh: { type: 'boolean', default: false },
+    relaunch: { type: 'boolean', default: false },
     'sync-spawns': { type: 'boolean', default: false },
   },
 });
@@ -211,9 +213,12 @@ function freshCopy(appDir) {
 
 async function runOnce(appDir) {
   fs.rmSync(path.join(paneDir, '.running'), { force: true });
-  // Chromium's own caches go too: every run compiles and loads the renderer from scratch.
-  for (const cache of ['Code Cache', 'GPUCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'Cache']) {
-    fs.rmSync(path.join(paneDir, 'chromium-user-data', cache), { recursive: true, force: true });
+  // Chromium's own caches go too, so every run compiles and loads the renderer from scratch;
+  // --relaunch keeps them, as a launch right after quitting finds them.
+  if (!args.relaunch) {
+    for (const cache of ['Code Cache', 'GPUCache', 'DawnGraphiteCache', 'DawnWebGPUCache', 'Cache']) {
+      fs.rmSync(path.join(paneDir, 'chromium-user-data', cache), { recursive: true, force: true });
+    }
   }
   const runDir = args.fresh ? freshCopy(appDir) : appDir;
   const env = { ...process.env, NODE_ENV: 'production', PANE_DIR: paneDir, NODE_OPTIONS: `--require ${probe}` };

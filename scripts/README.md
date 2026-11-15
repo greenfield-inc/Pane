@@ -83,7 +83,9 @@ first contentful paint, and then either the sidebar row and terminal of
 on screen, and two probe letters typed into it at 50 ms intervals appearing.
 The window shows without taking focus. Pass `--app label=dir` once per build to
 compare them (rounds alternate), and `--fresh` to run each launch from a new
-APFS copy of the app, so its files are not in the OS cache.
+APFS copy of the app, so its files are not in the OS cache. Each run clears
+Chromium's caches; `--relaunch` keeps them, as a launch right after quitting
+finds them.
 
 ```bash
 pnpm build:frontend && pnpm build:main
