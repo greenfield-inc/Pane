@@ -116,8 +116,15 @@ Pane reaches each computer by up to five routes, tried nearest first:
 | **Pane relay** | A link or QR code. Pane's servers pass the connection along. |
 
 Each computer reports its own routes when Pane connects to it, and Pane saves
-them as "found automatically". A link's credential works on every route, so a
-found route needs no new pairing.
+them as "found automatically" when they are `https:` addresses. A link's
+credential works on every route, so a found route needs no new pairing.
+
+Each route proves it reaches the right computer its own way. Pane relay and
+Same network routes check the computer's own key. A Tailscale route relies on
+Tailscale's device identity, and a Public URL route on its HTTPS certificate:
+Tailscale and your proxy end the encrypted connection with their own
+certificates, so the computer's key never reaches the other side there. An SSH
+route relies on SSH's host key check.
 
 Pane connects on the first route that answers. When the connection goes
 silent for 8 seconds, Pane checks the other routes and moves to the first that
@@ -143,8 +150,9 @@ computer.
 
 Pane's servers see which computer a connection is for, IP addresses, timing
 and byte counts. They never see what you type, what your agents print, your
-tokens or your pages. The Pane app and desktop also check each computer's key,
-so a certificate issued for the same name to anyone else is refused.
+tokens or your pages. On the relay, the Pane app and desktop also check each
+computer's key, so a certificate issued for the same name to anyone else is
+refused.
 
 ## What works
 
