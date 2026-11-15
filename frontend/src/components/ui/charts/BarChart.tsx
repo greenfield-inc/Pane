@@ -1,4 +1,4 @@
-import { linearScale, niceMax } from './chartScales';
+import { formatShare, linearScale, niceMax } from './chartScales';
 
 interface BarDatum {
   label: string;
@@ -24,11 +24,6 @@ interface BarDatum {
  * A model with 13 million tokens next to one with 5.6 billion is a real 0.2%,
  * and printing "0%" makes it look like a bug rather than a ratio.
  */
-function formatShare(share: number): string {
-  const percent = share * 100;
-  if (percent > 0 && percent < 1) return '<1%';
-  return `${Math.round(percent)}%`;
-}
 
 /**
  * Smallest rendered bar width, in percent.

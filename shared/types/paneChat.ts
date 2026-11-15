@@ -19,6 +19,24 @@ export const PANE_CHAT_SESSION_ID = '__pane_chat_session__';
 export const PANE_ONE_TIME_PROMPT_OPENING = 'Pane sent this once';
 /** How the Onboarding Session's one-time first prompt begins. */
 export const PANE_CHAT_MIGRATE_OFFER_OPENING = `${PANE_ONE_TIME_PROMPT_OPENING}, the first time the Onboarding Session started with this Pane data folder:`;
+/** How the first prompt begins for a Session started by a Yes on the first-run screen reopened from Home. */
+export const FIRST_RUN_MIGRATE_SESSION_OPENING = `${PANE_ONE_TIME_PROMPT_OPENING}, when this Session started:`;
+/** The last sentence of every first-run prompt: work after Start here gets Sessions of its own. */
+export const FIRST_RUN_NEW_TASKS = 'After that, every new task the person asks for gets its own new Session, as "New tasks after Start here" in that skill says.';
+
+/**
+ * The prompt after a Yes on the first-run screen: run the Migrate to Pane skill on its
+ * first-run path. `opening` says when Pane sent it; `skill` points the agent at the skill.
+ */
+export function firstRunMigratePrompt(opening: string, skill: string): string {
+  return [
+    `${opening} on Pane's first-run screen the person said Yes to bringing in their agent sessions that are running or were active in the last 7 days.`,
+    `That Yes is their confirmation. Follow the Migrate to Pane skill (${skill}) now, on its first-run path: show no list and ask nothing first.`,
+    'It ends with the Start here page beside this chat.',
+    FIRST_RUN_NEW_TASKS,
+  ].join(' ');
+}
+
 /** What the person answered on the first-run screen; main turns it into the Onboarding Session's first prompt. */
 export const ONBOARDING_HANDOFF_PREFERENCE = 'onboarding_handoff';
 /** `migrate`: Yes to bringing agent sessions in. `project`: Not now, or nothing found, so they open a project. */

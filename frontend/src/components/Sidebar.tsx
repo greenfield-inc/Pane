@@ -1,5 +1,6 @@
 import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { NewDialog } from './NewDialog';
+import { onOpenNewDialogRequest } from '../utils/openNewDialog';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
@@ -411,6 +412,9 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   useEffect(() => {
     void loadOrchestrationSessions();
   }, [loadOrchestrationSessions]);
+
+  // Home's Get Started "New" opens this same dialog.
+  useEffect(() => onOpenNewDialogRequest(() => setShowNewDialog(true)), []);
 
   const handleRefreshGitStatus = async () => {
     try {

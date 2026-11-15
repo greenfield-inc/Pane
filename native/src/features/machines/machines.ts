@@ -1,4 +1,4 @@
-import type { ConnectionPresence } from '@shared/remoteClient';
+import { DEFAULT_RELAY_DOMAIN, isRelayProfile, type ConnectionPresence } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '@shared/types/remoteDaemon';
 import type { TailnetMachine, TailnetMachineList } from '@shared/types/workspaceAccess';
 import { assignMachineColorSlots, preferredMachineColorSlot } from '@shared/utils/machineColor';
@@ -98,6 +98,8 @@ export function listMachines({ profiles, current, connection, presence, tailnet 
       colorName: entry?.name ?? profile.tailnetMachine ?? profile.label,
       os: entry?.os ?? null,
       ...live,
+      // Until the networking module finds a direct path, a relay computer is always reached through its relay.
+      status: isRelayProfile(profile) ? `${live.status} · Via ${relayName(profile.relay.domain)}` : live.status,
       current: isCurrent,
       selectable: !isCurrent && live.state !== 'dimmed',
       profile,
@@ -149,4 +151,8 @@ export function hostOf(url: string): string {
 export function shortMachineName(name: string, length: number): string {
   const characters = Array.from(name);
   return characters.length > length ? `${characters.slice(0, length).join('')}…` : name;
+}
+
+function relayName(domain: string): string {
+  return domain === DEFAULT_RELAY_DOMAIN ? 'Pane’s servers' : domain;
 }

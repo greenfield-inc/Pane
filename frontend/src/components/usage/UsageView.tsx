@@ -10,9 +10,10 @@ import { DonutChart } from '../ui/charts/DonutChart';
 import { formatTokens, formatUsd } from '../ui/charts/chartScales';
 import { LimitBar, LimitStatusBanners, CreditsLine } from './ProviderLimits';
 import { LeaderboardTab } from './LeaderboardTab';
+import { settingDomId } from '../settings/catalog';
 import { PaneUsageSummary } from './PaneUsageSummary';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
-import { presetCalendarRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
+import { presetCalendarRange, rollingUsageRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
   type UsageByPane,
@@ -21,7 +22,6 @@ import {
   type UsageReport,
 } from '../../../../shared/types/usage';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 /** Poll while a scan is running so the progress line stays honest. */
 const SCAN_POLL_MS = 4000;
 
@@ -144,11 +144,11 @@ function PaneUsageRow({ pane }: { pane: UsageByPane }) {
  * - **Provider**: rate limits, credits, blocked state — reported by Codex in
  *   every token_count event. Anthropic does not expose plan limits locally.
  */
-type UsageTab = 'usage' | 'leaderboard';
+export type UsageTab = 'usage' | 'leaderboard';
 
-export function UsageView() {
+export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
   const contentRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<UsageTab>('usage');
+  const [activeTab, setActiveTab] = useState<UsageTab>(initialTab);
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -174,9 +174,8 @@ export function UsageView() {
     if (mode === 'refresh') setRefreshing(true);
     else setLoading(true);
     try {
-      const toMs = Date.now();
       const response = await API.usage.getReport({
-        ...(customRange ? usageDateBounds(customRange) : { fromMs: toMs - rangeDays * DAY_MS, toMs }),
+        ...(customRange ? usageDateBounds(customRange) : rollingUsageRange(rangeDays)),
         providers: provider === 'all' ? undefined : [provider],
       });
       if (id !== requestId.current) return;
@@ -438,6 +437,7 @@ export function UsageView() {
           <button
             type="button"
             role="tab"
+            id={settingDomId('usage-leaderboard')}
             aria-selected={activeTab === 'leaderboard'}
             onClick={() => setActiveTab('leaderboard')}
             className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${

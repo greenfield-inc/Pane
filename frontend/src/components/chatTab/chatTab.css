@@ -197,6 +197,9 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 .chat-attach-alert { display:flex; align-items:flex-start; gap:8px; }
 .chat-attach-alert ul { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; overflow-wrap:anywhere; }
 @media (prefers-reduced-motion:reduce) { .chat-spin { animation:none; } }
+/* The end of the conversation sits a small gap above the composer (D-365). Scroll to latest only shows
+   when scrolled up, where covering a message is expected, so no room is kept for it at the bottom. */
+.chat-tab .chat-column { padding-bottom:16px; }
 /* Copying (D-140). The app's chrome is not selectable (index.css); the conversation is. */
 .chat-tab .chat-viewport { user-select:text; }
 .chat-tab .chat-viewport :is(button,[role=button],.chat-step-icon,.chat-message-actions) { user-select:none; }

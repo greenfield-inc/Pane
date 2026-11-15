@@ -5,6 +5,13 @@ export interface UsageDateRange {
   end: string;
 }
 
+export const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The last `days` days up to now, as Usage & Limits' presets and Home's usage card read them. */
+export function rollingUsageRange(days: number, nowMs = Date.now()) {
+  return { fromMs: nowMs - days * DAY_MS, toMs: nowMs };
+}
+
 export function localDateString(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }

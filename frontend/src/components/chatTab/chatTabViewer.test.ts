@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AgentChatMessage } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabEvent, ChatTabView } from '../../../../shared/types/chatTab';
 import { ChatTabViewer, ChatTabViewerRegistry } from '../../../../shared/chatTabViewer';
+import { STREAM_FRAME_MS } from '../../../../shared/constants/streamCadence';
 
 const message = (index: number): AgentChatMessage => ({ id: `m${index}`, role: index % 2 ? 'assistant' : 'user', parts: [{ type: 'text', text: `message ${index}` }] });
 
@@ -165,5 +166,28 @@ describe('chat tab viewer registry (F-2)', () => {
     release();
     await settle();
     expect(ids(viewer).at(-1)).toBe('m8');
+  });
+});
+
+describe('chat tab viewer streaming', () => {
+  it('redraws a burst of live events once per stream frame, showing the first at once and losing none', async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = host(1);
+      const viewer = new ChatTabViewer(fake.client, 'p');
+      let redraws = 0;
+      viewer.subscribe(() => { redraws++; });
+      await vi.advanceTimersByTimeAsync(1000);
+      const before = redraws;
+      for (let index = 0; index < 5; index++) fake.append();
+      expect(redraws).toBe(before + 1);
+      expect(ids(viewer)).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5']);
+      await vi.advanceTimersByTimeAsync(STREAM_FRAME_MS);
+      expect(redraws).toBe(before + 2);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(redraws).toBe(before + 2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

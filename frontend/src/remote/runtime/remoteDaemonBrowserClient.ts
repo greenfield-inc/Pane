@@ -154,7 +154,7 @@ function endpointUrl(context: RemoteRequestContext, path: string, extra: Record<
   return url.toString();
 }
 
-function getRuntimeId(): string {
+export function getRuntimeId(): string {
   const existing = window.localStorage.getItem(RUNTIME_ID_STORAGE_KEY);
   if (existing) {
     return existing;
@@ -165,7 +165,7 @@ function getRuntimeId(): string {
   return generated;
 }
 
-function getClientLabel(): string {
+export function getClientLabel(): string {
   const platform = navigator.platform || 'Browser';
   return `Pane PWA on ${platform}`;
 }

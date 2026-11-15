@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { ChevronDown, Minus, Plus, Terminal, X } from 'lucide-react';
+import { ChevronDown, MessageSquare, Minus, Plus, QrCode, Smartphone, Terminal, X } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useConfigStore } from '../stores/configStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -8,7 +8,7 @@ import { API } from '../utils/api';
 import { Dropdown } from './ui/Dropdown';
 import { Badge } from './ui/Badge';
 import { Toggle } from './ui/Toggle';
-import { IconButton } from './ui/Button';
+import { Button, IconButton } from './ui/Button';
 import { AddProjectDialog } from './AddProjectDialog';
 import { CloneFromGitHubDialog } from './CloneFromGitHubDialog';
 import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
@@ -19,6 +19,10 @@ import type { PreferredShell } from '../types/config';
 import { useHostShellSettings } from '../hooks/useHostShellSettings';
 import { capture } from '../services/posthog';
 import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
+import { HomeUsageCard } from './HomeUsageCard';
+import { PairPhoneDialog } from './PairPhoneDialog';
+import { requestOpenNewDialog } from '../utils/openNewDialog';
+import { requestOpenFirstRun } from '../utils/openFirstRun';
 
 const HIDE_DISCORD_PREFERENCE = 'hide_discord';
 
@@ -49,23 +53,6 @@ function FolderOpenIcon({ className }: { className?: string }) {
       <path d="M5 19a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2 2h4a2 2 0 0 1 2 2v1" />
       <path d="M20.5 16.5L21 12h-6l-.5 4.5" />
       <path d="M3 12h18l-1.5 7H4.5L3 12z" />
-    </svg>
-  );
-}
-
-function PlusIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
     </svg>
   );
 }
@@ -230,6 +217,24 @@ function DiscordBanner() {
   );
 }
 
+/** Where a new person finds phone pairing: opens the Pair a phone dialog. */
+function UsePhoneCard() {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-border-secondary bg-surface-primary/70 p-6 shadow-sm">
+      <span className="flex h-11 w-11 flex-none items-center justify-center rounded-lg bg-interactive/10 text-interactive" aria-hidden="true">
+        <Smartphone className="h-5 w-5" />
+      </span>
+      <div className="min-w-0 flex-1 basis-64">
+        <h2 className="text-base font-semibold text-text-primary">Use Pane on your phone</h2>
+        <p className="mt-1 text-sm text-text-tertiary">Scan a code to watch and steer your agents from anywhere, with previews of your dev servers.</p>
+      </div>
+      <Button type="button" icon={<QrCode className="h-4 w-4" />} onClick={() => setOpen(true)}>Pair a phone</Button>
+      <PairPhoneDialog isOpen={open} onClose={() => setOpen(false)} />
+    </section>
+  );
+}
+
 export function HomePage() {
   const { theme, setTheme } = useTheme();
   const { config, updateConfig } = useConfigStore();
@@ -317,22 +322,22 @@ export function HomePage() {
             <div>
               <h2 className="mb-2 text-lg font-semibold text-text-primary">Get Started</h2>
               <p className="text-sm text-text-tertiary">
-                Open a project, create a new one, or clone from GitHub.
+                Start a Session, open a project, or clone from GitHub.
               </p>
             </div>
             <div className="grid justify-center gap-4 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={requestOpenNewDialog}
+                className={actionCardClassName}
+              >
+                <MessageSquare className="w-8 h-8 text-interactive" strokeWidth={1.5} aria-hidden="true" />
+                <span className="text-sm font-medium text-text-primary">New</span>
+              </button>
               <OpenProjectCard
                 projects={projects ?? []}
                 onAddProject={() => setShowAddProject(true)}
               />
-              <button
-                type="button"
-                onClick={() => setShowAddProject(true)}
-                className={actionCardClassName}
-              >
-                <PlusIcon className="w-8 h-8 text-text-secondary" />
-                <span className="text-sm font-medium text-text-primary">New Project</span>
-              </button>
               <button
                 type="button"
                 onClick={() => setShowCloneDialog(true)}
@@ -449,6 +454,10 @@ export function HomePage() {
             </section>
           </section>
 
+          <UsePhoneCard />
+
+          {isFirstRun && <HomeUsageCard />}
+
           {recentSessions.length > 0 && (
             <section className="rounded-2xl border border-border-secondary bg-surface-primary/70 p-6 shadow-sm">
               <h2 className="mb-4 text-lg font-semibold text-text-primary">Recent Panes</h2>
@@ -488,7 +497,15 @@ export function HomePage() {
 
           {recentSessions.length === 0 && isFirstRun && (
             <p className="text-center text-sm text-text-tertiary">
-              Select a project from the sidebar or create a new one to get started.
+              New here?{' '}
+              <button
+                type="button"
+                onClick={requestOpenFirstRun}
+                className="rounded-sm text-interactive hover:text-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+              >
+                Start a Session
+              </button>
+              : it sets up Pane for you and brings in your projects and work from any agent.
             </p>
           )}
         </div>

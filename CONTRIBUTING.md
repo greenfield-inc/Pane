@@ -64,15 +64,12 @@ app:
   listener, leaves Tailscale Serve alone, and on quit leaves the other Pane's
   daemon socket in place. It logs `Another Pane already serves <dir>` at startup. Quit it and
   give it its own `PANE_DIR`.
-- **Analytics** are on by default in a fresh data directory. Setting
-  `analytics.enabled: false` in config alone does not prevent the first-render
-  default policy from enabling analytics when neither `analytics_consent_shown`
-  nor `analytics_default_applied` records a choice. Native QA must establish an
-  explicit analytics choice and its persisted preference before the first UI
-  render, or isolate analytics with a test-runtime guard. Instances with their
+- **Analytics** are on by default in a fresh data directory. To keep a QA
+  instance quiet, write `analytics.enabled: false` to its `config.json` before
+  the first launch, or launch it with `RUNPANE_TELEMETRY_DISABLED=1`; either
+  stops all analytics, error reports and the heartbeat. Instances with their
   own `PANE_DIR` or `--pane-dir`, and unpackaged builds, send no install
-  heartbeat. Packaged QA on the default data directory should set
-  `RUNPANE_TELEMETRY_DISABLED=1`.
+  heartbeat.
 - **Pane data** (`sessions.db`, `config.json`, skills): a dev (unpackaged)
   build with neither `PANE_DIR` nor `--pane-dir` uses `~/.pane_dev`, never the
   installed app's `~/.pane`, and says so at startup. `~/.pane_dev` lasts across
@@ -350,7 +347,10 @@ Agents merge only when the person asks for that pull request.
 Test UI and packaging changes in a packaged build for your platform
 (`pnpm build:mac`, `pnpm build:linux:x64` on x64 Linux,
 `pnpm build:linux:arm64` on ARM64 Linux, or `pnpm build:win:x64`; output in
-`dist-electron/`). The x64 Linux build scans native modules with `objdump`
+`dist-electron/`). Packaging builds the `pane-direct` helper (`direct/`) with
+Rust (https://rustup.rs); without cargo, a local package leaves it out and
+warns, and direct paths stay off. The x64 Linux build scans
+native modules with `objdump`
 (from binutils) and fails if one needs a CPU newer than generic x86-64; if your
 compiler defaults higher, export `CFLAGS` and `CXXFLAGS` as
 `-march=x86-64 -mtune=generic` before `pnpm install`. The packaged app can show problems that development mode

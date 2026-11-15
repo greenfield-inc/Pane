@@ -156,7 +156,7 @@ test.describe('compact sidebar', () => {
     await addProject.click();
     await expect(dialog).toBeVisible();
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'New', exact: true }).click();
+    await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'New', exact: true })).toBeVisible();
     await expect(page.getByRole('radio', { name: 'Pane', exact: true })).toBeVisible();
   });

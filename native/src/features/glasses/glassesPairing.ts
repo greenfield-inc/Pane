@@ -1,4 +1,5 @@
 import { glassesListSchema, isOlderPane } from '@shared/glassesRevoke';
+import { isRelayProfile } from '@shared/remoteClient/relay';
 import {
   encodeGlassesPairingCode,
   GLASSES_COMMANDS,
@@ -12,9 +13,13 @@ import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '@
 
 import { codelessProfile } from '@/auth/computers';
 
-/** A computer on this phone's Tailscale login and the profile that reaches it, with its password when saved. */
+/**
+ * A computer the glasses can pair with and the profile that reaches it: one on this phone's
+ * Tailscale login (with its password when saved), or one this phone paired by QR, at its relay
+ * address. `dnsName` is the full host name, unique across tailnets and relays.
+ */
 export interface GlassesComputer {
-  machine: TailnetMachine;
+  machine: Pick<TailnetMachine, 'name' | 'dnsName' | 'url'>;
   profile: RemotePaneConnectionProfile;
 }
 
@@ -69,6 +74,23 @@ export function pairableComputers(
     }
   }
   return { computers, skipped };
+}
+
+/**
+ * The computers this phone paired by QR, reached at their relay address with the phone's own
+ * token, which is the owner's proof there. A computer already in `tailnet` is left out, matched by
+ * name, so the glasses pair with it once: pairing it twice would revoke the first token.
+ */
+export function relayGlassesComputers(saved: readonly RemotePaneConnectionProfile[], tailnet: readonly GlassesComputer[]): GlassesComputer[] {
+  const onTailnet = new Set(tailnet.map(computer => machineKey(computer.machine.name)));
+  return saved.filter(isRelayProfile)
+    .filter(profile => !onTailnet.has(machineKey(profile.label)))
+    .map(profile => ({ machine: { name: profile.label, dnsName: new URL(profile.baseUrl).host, url: profile.baseUrl }, profile }));
+}
+
+/** A computer's name as Tailscale writes it: "Ana's MacBook Pro" and "anas-macbook-pro" match. */
+function machineKey(name: string): string {
+  return name.toLowerCase().replace(/'/gu, '').replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '');
 }
 
 /**

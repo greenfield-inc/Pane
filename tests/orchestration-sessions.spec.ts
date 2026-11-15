@@ -560,7 +560,7 @@ for (const theme of ['light', 'night-owl']) {
           scrollers[0].scrollTop = (scrollers[0].scrollHeight - scrollers[0].clientHeight) * progress;
         }, fraction);
         await page.screenshot({ path: `tmp/verify/sidebar-sticky/${theme}-${compact ? 'rail' : 'expanded'}-${fraction}.png` });
-        await reachable(page.getByRole('button', { name: 'New', exact: true }));
+        await reachable(page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }));
         await reachable(creation);
         await reachable(stickyAction);
         if (compact) {
@@ -2726,7 +2726,7 @@ test('New offers Session and Pane in one dialog and restores keyboard focus', as
   await installSessionsFixture(page, []);
   await page.goto('/');
   await dismissStartupDialogs(page);
-  const newButton = page.getByRole('button', { name: 'New', exact: true });
+  const newButton = page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true });
   await newButton.click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toHaveCount(1);
@@ -2752,7 +2752,7 @@ test('New creates a Session with its selected WSL runtime and agent', async ({ p
   await installSessionsFixture(page, [], [], { distributions: ['Ubuntu-24.04'] });
   await page.goto('/');
   await dismissStartupDialogs(page);
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   await page.getByLabel('Run agent in').selectOption('Ubuntu-24.04');
   await page.getByTestId('create-session-agent-cursor').click();
   await page.getByLabel('Session name (optional)').fill('Coordinate new work');
@@ -2776,7 +2776,7 @@ test('New defaults to the active repository and creates a Pane from the changed 
   });
   await page.goto('/');
   await dismissStartupDialogs(page);
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   await page.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(page.getByLabel('Repository', { exact: true })).toHaveValue('2');
   await expect(page.getByRole('combobox', { name: 'Base Branch' })).toHaveValue('origin/main');
@@ -2798,7 +2798,7 @@ test('New explains the missing repository and remains available from the compact
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
-  const newButton = page.getByRole('button', { name: 'New', exact: true });
+  const newButton = page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true });
   await newButton.click();
   await page.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(page.getByText('A Pane needs a repository. Add one with the + beside Projects.')).toBeVisible();
@@ -2813,7 +2813,7 @@ test('New can show Session settings when an older host has no Session API', asyn
   await installElectronApiMock(page);
   await page.goto('/');
   await dismissStartupDialogs(page);
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   await expect(page.getByLabel('Session name (optional)')).toBeVisible();
   await expect(page.getByLabel('Run agent in')).toHaveCount(0);
   await page.getByRole('button', { name: 'Create Session', exact: true }).click();
@@ -2830,7 +2830,7 @@ test('New keeps a pending Session creation in its dialog and enables retry after
   });
   await page.goto('/');
   await dismissStartupDialogs(page);
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
   await expect(dialog.getByRole('radio', { name: 'Pane', exact: true })).toBeDisabled();
@@ -2851,7 +2851,7 @@ test('New preserves multiple-Pane options while switching repositories', async (
   ] });
   await page.goto('/');
   await dismissStartupDialogs(page);
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('sidebar').getByRole('button', { name: 'New', exact: true }).click();
   await page.getByRole('radio', { name: 'Pane', exact: true }).click();
   await page.getByRole('button', { name: 'Advanced', exact: true }).click();
   await page.getByRole('button', { name: 'Create multiple panes', exact: true }).click();

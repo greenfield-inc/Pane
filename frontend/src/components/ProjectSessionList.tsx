@@ -938,7 +938,7 @@ function AttentionInboxToggle({ sessions, members, showAll, onShowAllChange }: {
 function NotifyWaitingDot({ className }: { className?: string }) {
   return (
     <span className={cn('inline-flex h-3 w-3 flex-shrink-0 items-center justify-center', className)} role="status" aria-label="Notify question waiting">
-      <span className="h-2 w-2 rounded-full bg-status-warning ring-[3px] ring-status-warning/20" />
+      <span className="h-2 w-2 rounded-full bg-status-warning ring-status ring-status-warning/20" />
     </span>
   );
 }

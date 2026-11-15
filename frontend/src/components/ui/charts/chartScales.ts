@@ -111,6 +111,13 @@ export function formatTokens(value: number): string {
   return String(Math.round(value));
 }
 
+/** A share of a whole as a percent, with "<1%" for a sliver that would round to 0. */
+export function formatShare(share: number): string {
+  const percent = share * 100;
+  if (percent > 0 && percent < 1) return '<1%';
+  return `${Math.round(percent)}%`;
+}
+
 /** Cost formatting that stays informative for very small amounts. */
 export function formatUsd(value: number): string {
   if (!Number.isFinite(value) || value === 0) return '$0.00';

@@ -181,6 +181,46 @@ describe('port stream through the pairing-code door', () => {
     await closedByHost(stream);
   });
 
+  it('survives a client that resets while the host is still reading its ports', async () => {
+    const port = await startEchoServer();
+    let reading!: () => void;
+    const readStarted = new Promise<void>(resolve => { reading = resolve; });
+    let finishRead!: (forwarded: boolean) => void;
+    let reads = 0;
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), { getConfig: () => ({ remoteDaemon: pairedConfig() }) }, {
+      // The first read is slow, as an lsof read while ports are paused can be; later reads answer at once.
+      isForwardedPort: candidate => {
+        reads += 1;
+        if (reads > 1) return candidate === port;
+        reading();
+        return new Promise<boolean>(resolve => { finishRead = resolve; });
+      },
+    });
+    await server.start();
+    cleanups.push(() => server.stop());
+    const address = server.getAddress();
+    if (!address) throw new Error('server is not listening');
+
+    const client = net.connect(address.port, '127.0.0.1');
+    client.on('error', () => {});
+    client.write([
+      `GET /ports/${port} HTTP/1.1`,
+      'Host: 127.0.0.1',
+      'Connection: Upgrade',
+      'Upgrade: websocket',
+      'Sec-WebSocket-Version: 13',
+      'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
+      'Authorization: Bearer secret-token',
+      '', '',
+    ].join('\r\n'));
+    await readStarted;
+    client.resetAndDestroy();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    finishRead(true);
+
+    expect(await roundTrip(await openStream(server, `/ports/${port}`, bearer), 'still up')).toBe('still up');
+  });
+
   it('refuses a port that is not in the forwarded list, even when something listens on it', async () => {
     const port = await startEchoServer();
     const server = await startPairingServer(() => []);
