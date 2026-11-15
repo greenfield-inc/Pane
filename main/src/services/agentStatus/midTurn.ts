@@ -16,6 +16,7 @@
 
 import type { AgentDetectionResult } from '../../../../shared/types/agentStatus';
 import type { ChatTabStatus } from '../../../../shared/types/chatTab';
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 
 /** Working chrome counts only while the screen changed this recently. */
 export const SCREEN_FRESH_MS = 15_000;
@@ -65,6 +66,12 @@ const WAIT_COMMAND = new RegExp(String.raw`(?:^|[;&|(\n])\s*${RUNPANE}\s+(?:watc
 // The pane MCP's waiting tools, as agents title them (mcp__pane__notify, pane.notify, pane/notify).
 const WAIT_TOOL = /(?:^|__|[\s.:/])pane(?:__|[./])(?:notify|watch|panels_wait|secrets_request)\b/;
 
+/** A shell tool's input: Claude sends a command line, Codex an argv. */
+const shellInputSchema = boundary.object({
+  command: boundary.union(boundary.string, boundary.array(boundary.string)),
+  run_in_background: boundary.optional(boundary.boolean),
+});
+
 /** An ACP tool call, as much of it as says what it runs. */
 export interface ToolCallInput {
   title?: string | null;
@@ -77,13 +84,9 @@ export interface ToolCallInput {
  */
 export function isRunpaneWait(call: ToolCallInput): boolean {
   if (call.title && WAIT_TOOL.test(call.title)) return true;
-  const input = call.rawInput;
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) return false;
-  if ('run_in_background' in input && input.run_in_background === true) return false;
-  const command = 'command' in input ? input.command : undefined;
-  const candidates = typeof command === 'string' ? [command]
-    : Array.isArray(command) ? [...command.filter((part): part is string => typeof part === 'string'), command.join(' ')]
-      : [];
+  const input = decodeOptionalBoundary(call.rawInput, shellInputSchema);
+  if (!input || input.run_in_background === true) return false;
+  const candidates = Array.isArray(input.command) ? [...input.command, input.command.join(' ')] : [input.command];
   return candidates.some(candidate => WAIT_COMMAND.test(candidate));
 }
 
