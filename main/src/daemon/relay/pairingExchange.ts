@@ -47,7 +47,7 @@ interface Pending {
 }
 
 /** Where waiting links are kept across restarts: only their hashes, lifetimes and times. */
-export interface PendingLinkStore {
+interface PendingLinkStore {
   read(): string | null;
   write(text: string): void;
 }
