@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fetchNewRelayProfiles, linkRelayComputers, relayProfile, type RelayLinkPeer } from '@shared/remoteClient';
+import { fetchNewRelayProfiles, linkRelayComputers, relayProfile, RemoteRequestError, type RelayLinkPeer } from '@shared/remoteClient';
 import type { RelayComputer } from '@shared/types/relay';
 
 function computer(id: string): RelayComputer {
@@ -8,7 +8,7 @@ function computer(id: string): RelayComputer {
 }
 
 /** A computer that mints `<self>-for-<peer>` tokens and records the links it saves. */
-function fakeComputer(id: string, { offline = false } = {}) {
+function fakeComputer(id: string, { offline = false, linkedWith = [] as string[] } = {}) {
   const saved: Array<{ peer: string; token: string }> = [];
   const peer: RelayLinkPeer = {
     computer: computer(id),
@@ -16,6 +16,7 @@ function fakeComputer(id: string, { offline = false } = {}) {
       async invoke<T>(channel: string, args: unknown[] = []): Promise<T> {
         if (offline) throw new TypeError('Network request failed');
         const [arg] = args as [{ peer: RelayComputer; token?: string }];
+        if (channel === 'relay:client:mint-link' && linkedWith.includes(arg.peer.id)) throw new RemoteRequestError(`${arg.peer.id} is already linked`, 409, 'ERR_RELAY_ALREADY_LINKED');
         if (channel === 'relay:client:mint-link') return { token: `${id}-for-${arg.peer.id}` } as T;
         if (channel === 'relay:client:save-link') { saved.push({ peer: arg.peer.id, token: arg.token ?? '' }); return null as T; }
         throw new Error(`unexpected ${channel}`);
@@ -46,6 +47,15 @@ describe('linking a newly paired computer with the phone’s others', () => {
     expect(await linkRelayComputers(added.peer, [asleep.peer, a.peer])).toEqual(['asleep']);
     expect(a.saved).toEqual([{ peer: 'new', token: 'new-for-a' }]);
     expect(added.saved).toEqual([{ peer: 'a', token: 'a-for-new' }]);
+  });
+
+  it('leaves a pair that is already linked as it is, and counts it as linked', async () => {
+    const added = fakeComputer('new', { linkedWith: ['a'] });
+    const a = fakeComputer('a', { linkedWith: ['new'] });
+
+    expect(await linkRelayComputers(added.peer, [a.peer])).toEqual([]);
+    expect(added.saved).toEqual([]);
+    expect(a.saved).toEqual([]);
   });
 
   it('never links a computer with itself', async () => {
