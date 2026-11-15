@@ -1147,12 +1147,17 @@ describe('RemotePaneClientController', () => {
     const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [lan, { id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'link-token' }] };
     remoteConfig.client.computers = [studio];
     const controller = createController();
-    controller.initialize({ configManager: createConfigManagerStub(remoteConfig), rendererEventSink: { send() {} } });
+    const checklistRoutes: string[] = [];
+    controller.initialize({ configManager: createConfigManagerStub(remoteConfig), rendererEventSink: { send() {
+      const route = controller.getConnectionState().check?.route;
+      if (route && checklistRoutes.at(-1) !== route) checklistRoutes.push(route);
+    } } });
 
     await controller.activateProfile(primaryProfile(studio));
 
     await waitFor(() => controller.getConnectionState().status === 'connected');
     expect(controller.getConnectionState()).toMatchObject({ activeRouteId: `public:${server.baseUrl}` });
+    expect(checklistRoutes.at(-1)).toBe('Public URL');
     await controller.switchToLocalMode();
   });
 

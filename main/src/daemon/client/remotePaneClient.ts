@@ -2024,7 +2024,9 @@ export class RemotePaneClientController extends EventEmitter {
     let nearest: RouteProbe | null = null;
     for (const route of routes) {
       const several = routes.length > 1;
-      const probe = await this.probeRoute(id, route, several ? COMPUTER_ROUTE_LABELS[route.kind] : routeOf(route.profile), several);
+      // A route left alone after skipping other routes is still one of the computer's routes: name it as such.
+      const named = several || route.profile !== profile;
+      const probe = await this.probeRoute(id, route, named ? COMPUTER_ROUTE_LABELS[route.kind] : routeOf(route.profile), several);
       if (this.check?.id !== id) {
         throw new PaneError('ERR_REMOTE_CHECK_SUPERSEDED', `The connection to ${profile.label} was replaced by a newer one.`, 'Wait for the newer connection to finish.');
       }
