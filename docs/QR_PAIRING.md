@@ -100,9 +100,9 @@ of every computer it reached through yours.
 
 - **"This code was already used" or "This code expired":** scan the new code
   the computer shows.
-- **"Can't reach <computer>. Retrying…":** the app keeps retrying while it is
-  open; nothing to do. On the same Wi-Fi it connects directly even when the
-  internet is down.
+- **"Reconnecting to <computer>…":** the app keeps retrying, at least every
+  5 seconds, while it is open; nothing to do. On the same Wi-Fi it connects
+  directly even when the internet is down.
 - **"Asleep since 9:40":** the computer is asleep. Wake it, or turn on Keep
   Awake.
 - **A browser on a Wi-Fi with no internet** can't reach the computer: a

@@ -9,10 +9,10 @@ describe('connectionPresence', () => {
     expect(connectionNotice({ status: 'reconnecting', lastError: 'socket closed' }, 9_999, 'Studio Mac')).toBeNull();
   });
 
-  it("says it can't reach the machine once the outage reaches 10 seconds", () => {
+  it('says it is reconnecting, with Retry now, once the outage reaches 10 seconds', () => {
     expect(connectionPresence('reconnecting', 10_000)).toBe('unreachable');
     expect(connectionNotice({ status: 'reconnecting', lastError: 'socket closed' }, 10_000, 'Studio Mac'))
-      .toEqual({ message: "Can't reach Studio Mac. Retrying…", canRetry: true });
+      .toEqual({ message: 'Reconnecting to Studio Mac…', canRetry: true });
   });
 
   it('keeps saying reconnecting while a machine that answered is still restoring', () => {

@@ -1,6 +1,6 @@
 import { decodeUpdateIntent, type RemoteUpdateIntent } from './updateIntent';
 import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_STREAMLESS_CHANNELS, REMOTE_WRITES_BUSY_CODE } from './readChannels';
-import { RecoveryCycle, backoffDelayMs } from './recoveryCycle';
+import { RecoveryCycle, STALE_STREAM_TIMEOUT_MS, backoffDelayMs, relayRecoveryCycle } from './recoveryCycle';
 import type { ParsedSseEvent } from '../sseParser';
 import {
   decodeRemoteDaemonEventEnvelope,
@@ -104,8 +104,7 @@ export interface RemoteDaemonClientOptions {
   fetch?: RemoteFetch;
   /**
    * Reconnect when the stream delivers nothing (the host sends a heartbeat
-   * every 5 s) for this long. Mobile networks drop idle sockets without an
-   * error, so native clients should set it. Off by default.
+   * every 5 s) for this long. Defaults to `STALE_STREAM_TIMEOUT_MS`.
    */
   staleStreamTimeoutMs?: number;
   /**
@@ -188,8 +187,6 @@ const WAKE_PROBE_WINDOW_MS = 4_000;
 const WAKE_PROBE_TIMEOUT_MS = 2_000;
 /** Phones allow only a few connections per host; the stream and restore reads need the rest. */
 const WAKE_PROBES_IN_FLIGHT = 2;
-/** A computer behind Pane's servers is retried this often at most, so it is back within seconds of an outage ending. */
-const RELAY_MAX_RECONNECT_DELAY_MS = 5_000;
 
 /** Platform-neutral client for a Pane daemon's HTTP + SSE API. */
 export class RemoteDaemonClient {
@@ -240,10 +237,7 @@ export class RemoteDaemonClient {
     this.resolveRuntimeId = options.runtimeId;
     this.staleStreamTimeoutMs = options.staleStreamTimeoutMs;
     this.schedule = options.schedule ?? scheduleWithGlobals;
-    // A computer reached through a relay is never given up on while the app is open (D-15); only a revoked token stops it.
-    this.recovery = options.profile.relay
-      ? new RecoveryCycle(Math.random, Number.POSITIVE_INFINITY, RELAY_MAX_RECONNECT_DELAY_MS)
-      : new RecoveryCycle();
+    this.recovery = options.profile.relay ? relayRecoveryCycle() : new RecoveryCycle();
   }
 
   getState(): RemoteDaemonConnectionState {
@@ -613,7 +607,7 @@ export class RemoteDaemonClient {
         if (stream.signal.aborted) return;
         stream.abort();
         this.scheduleReconnect('Remote event stream stopped responding');
-      }, this.staleStreamTimeoutMs ?? 20_000);
+      }, this.staleStreamTimeoutMs ?? STALE_STREAM_TIMEOUT_MS);
     };
 
     try {
