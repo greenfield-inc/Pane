@@ -356,13 +356,15 @@ When you connect to a host (Switch in Settings → Remote Access, Add a machine,
 the sidebar's machine menu, or Retry), the main area shows a checklist of
 the connection's stages. The first stage that fails shows what went wrong and a
 fix. The same checklist appears when Pane gives up reconnecting after five
-minutes, and from **Retry now** on the "Can't reach <machine>" banner. That
+minutes, and from **Retry now** on the "Reconnecting to <machine>…" banner. That
 banner appears once the connection has been down for 10 seconds; until then
 the workspace dims and the host dot pulses while Pane reconnects.
 
-The host's 5-second heartbeat decides whether a connection is alive. One failed
-request fails only itself; three requests in a row that get no answer reconnect.
-Reconnects wait 250 ms, 750 ms and 2 s, then double up to 30 s between tries.
+The host's 5-second heartbeat decides whether a connection is alive: 12 seconds
+without one reconnects. One failed request fails only itself; three requests in
+a row that get no answer reconnect. Reconnects wait 250 ms, 750 ms and 2 s, then
+double up to 30 s between tries. A computer linked through Pane's relay is
+retried at least every 5 seconds and never given up on while Pane is open.
 
 | Stage | Fails when | Fix |
 |---|---|---|

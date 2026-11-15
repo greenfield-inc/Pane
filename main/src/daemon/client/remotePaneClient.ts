@@ -172,7 +172,10 @@ const REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS = 30_000;
 const REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS = 300_000;
 /** Answers that mean the request was cut off, not refused; only these are retried. */
 const INTERRUPTION_CODES = new Set(['ERR_REMOTE_TRANSPORT', 'ERR_REMOTE_DELIVERY_UNKNOWN', 'ERR_REMOTE_STALE_RESPONSE']);
-const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
+/** The host sends a heartbeat every 5 s; two missed, with room for a slow one, mean the path is dead. */
+const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 12_000;
+/** A computer behind Pane's relay is retried this often at most, so it is back within seconds of an outage ending. */
+const RELAY_MAX_RECONNECT_DELAY_MS = 5_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
 const REMOTE_DAEMON_RESTORE_TIMEOUT_MS = 30_000;
 const REMOTE_DAEMON_REQUEST_TIMEOUT_MS = 15_000;
@@ -270,7 +273,10 @@ export class RemotePaneClient {
     this.requestTimeoutMs = options.requestTimeoutMs ?? REMOTE_DAEMON_REQUEST_TIMEOUT_MS;
     this.maxRetryDelayMs = options.reconnectMaxDelayMs ?? REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS;
     this.writeResendBudgetMs = options.reconnectDurationMs ?? REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS;
-    this.recovery = new RecoveryCycle(Math.random, this.writeResendBudgetMs, this.maxRetryDelayMs);
+    // A computer reached through a relay is never given up on while the app is open (D-15), as on the phone; only a revoked token stops it.
+    this.recovery = profile.relay
+      ? new RecoveryCycle(Math.random, Number.POSITIVE_INFINITY, options.reconnectMaxDelayMs ?? RELAY_MAX_RECONNECT_DELAY_MS)
+      : new RecoveryCycle(Math.random, this.writeResendBudgetMs, this.maxRetryDelayMs);
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.onResyncRequired = options.onResyncRequired;
     this.dnsLookup = options.dnsLookup ?? defaultLookup;
@@ -880,7 +886,7 @@ export class RemotePaneClient {
   }
 
   private armDeadline(): void {
-    if (this.deadlineTimer || this.recoveryStopped) return;
+    if (this.deadlineTimer || this.recoveryStopped || !Number.isFinite(this.recovery.remainingMs)) return;
     this.deadlineTimer = setTimeout(() => this.expireRecovery(), this.recovery.remainingMs);
   }
 
