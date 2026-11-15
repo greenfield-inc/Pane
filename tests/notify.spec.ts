@@ -128,6 +128,28 @@ test.describe('Approvals in the main window', () => {
     await expect(rows.filter({ hasText: 'PR #812 checks passed' })).toContainText('Update');
   });
 
+  test('Dismiss closes the open approval without answering it, and it stays in the list', async ({ page }) => {
+    await boot(page);
+    await page.getByTestId('approvals-nav').click();
+    const queue = page.getByTestId('approvals-queue');
+    const column = page.getByTestId('approval-column');
+    await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
+    const dismiss = column.getByRole('button', { name: 'Dismiss' });
+    await expect(dismiss).toBeVisible();
+    await expect(dismiss).toHaveText('Dismiss');
+    await dismiss.click();
+
+    // Nothing answered: it only leaves the floating strip, and no other item takes its place.
+    await expect(column).toHaveCount(0);
+    await expect.poll(() => commands(page)).toEqual([{ type: 'dismiss', id: 'q-options' }]);
+    await expect(queue.getByRole('tab', { name: 'Waiting 3' })).toHaveAttribute('aria-selected', 'true');
+    await expect(queue.getByTestId('approvals-row').filter({ hasText: 'Which session store' })).toHaveCount(1);
+
+    // Picking a row opens it again.
+    await queue.getByTestId('approvals-row').filter({ hasText: 'Which session store' }).click();
+    await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
+  });
+
   test("an Autopilot answer is overridden with a click on a choice, and its notes don't hide Send behind Details", async ({ page }) => {
     const fixture = notifyFixture();
     const [options] = fixture.items;
