@@ -24,13 +24,13 @@ function served(name: string, source: string): string {
 }
 
 const RAN = '<script>document.documentElement.dataset.ran = "yes"</script>';
-const HOSTILE: Record<string, string> = {
+const HOSTILE = {
   'commented-out head': `<!doctype html><!-- <head> --><html><head>${RAN}</head><body>x</body></html>`,
   'no head': `${RAN}<p>no head at all</p>`,
   'head inside a script string': `<script>var s = "<head>";</script>${RAN}<p>x</p>`,
   'head inside an attribute': `<html data-x="<head>"><body>${RAN}</body></html>`,
   'ordinary page': `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>t</title>${RAN}</head><body><img src=x onerror="document.documentElement.dataset.ran='yes'"></body></html>`,
-};
+} satisfies Record<string, string>;
 
 for (const [name, source] of Object.entries(HOSTILE)) {
   test(`Summary policy holds for a page with a ${name}`, async ({ page }) => {
