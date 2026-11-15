@@ -78,6 +78,19 @@ describe('chat tab manager', () => {
     await manager.cancel('p1');
   });
 
+  it('forgets a tool call its turn left open, so a later silent turn of the agent\'s own still stalls', { timeout: 30_000 }, async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-abandon', text: 'abandon' });
+    await expect.poll(() => manager.receipt('p1', 'op-abandon')?.state, { timeout: 10_000 }).not.toBe('accepted');
+    // The agent works on by itself, silently: the turn's open tool call no longer keeps it counting.
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('working');
+    expect(manager.isMidTurn('p1')).toBe(true);
+    expect(manager.isMidTurn('p1', Date.now() + 5 * 60_000 + 1)).toBe(false);
+    await manager.cancel('p1');
+  });
+
   it('starts on first view, sends a message and ends idle, with viewers able to follow by events alone', async () => {
     const { manager, store, directory, events } = harness();
     store.add('p1', newTab(directory));

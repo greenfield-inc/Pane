@@ -26,6 +26,8 @@
 //   usage               reports context usage (usage_update 1234 of 200000), then replies
 //   task [quick]        starts a background shell (an async task) and replies; it runs until stopped
 //                       with _session/async_task/stop, or with "quick" ends by itself shortly after
+//   abandon             ends its turn with a tool call left open (as some agents do on cancel), then
+//                       runs a silent turn of its own that sends nothing until stopped
 //   background          replies, then runs a turn of its own with no prompt open (as Claude does for a
 //                       finished background task), announced as an async task to a client that takes them
 //
@@ -267,6 +269,17 @@ const app = agent()
       if (rest[0] === 'quick') setTimeout(() => { if (liveTasks.delete(asyncTaskId)) void notify({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: 'completed' }); }, 150);
       await say('Started a task.');
       return { stopReason: 'end_turn' };
+    }
+    if (word === 'abandon') {
+      await send({ sessionUpdate: 'tool_call', toolCallId: `tool-${randomUUID()}`, title: 'sleep 30', kind: 'execute', status: 'in_progress' });
+      void (async () => {
+        await new Promise(resolve => setTimeout(resolve, 40));
+        const asyncTaskId = `autonomous-turn-${randomUUID()}`;
+        await send({ sessionUpdate: 'async_task_spawned', asyncTaskId, name: 'Claude is working', taskType: 'turn', description: 'A background task finished.', showInTranscript: false, canStop: true });
+        while (!session.ownTurnStopped) await new Promise(resolve => setTimeout(resolve, 100));
+        await send({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: 'stopped' });
+      })();
+      return { stopReason: 'cancelled' };
     }
     if (word === 'background') {
       void ownTurn(session, send);

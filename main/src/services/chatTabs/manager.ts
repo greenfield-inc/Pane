@@ -797,6 +797,8 @@ export class ChatTabManager {
       // A turn of a released runtime ends after the release: the next runtime's delivery is not its to end.
       if (tab.run !== generation) return;
       tab.delivering = false;
+      // A tool call the turn left open (an agent need not close one on cancel) is over with it.
+      tab.toolsRunning = undefined;
       if (!this.options.store.state(panelId)) return;
       const marker = this.endTurn(panelId, tab, { type: 'pane_turn', stopReason, startedAt, endedAt: new Date().toISOString() });
       if (marker) this.options.send('chat-tab:event', marker);
@@ -909,6 +911,7 @@ export class ChatTabManager {
     const runtime = tab.runtime;
     tab.runtime = undefined;
     tab.delivering = false;
+    tab.toolsRunning = undefined;
     // Outcomes that arrive while stopping belong to no runtime: a turn cut off by a
     // quit stays recorded, so the next start can say it stopped. The public generation
     // is kept, so viewers accept the stopped state published next.
@@ -1047,7 +1050,6 @@ function withTurnTime(state: ChatPanelState, sessionId: string, turn: ChatTurnTi
   return { sessionId, turns: [...turns, turn].slice(-TURN_TIMES_LIMIT) };
 }
 
-/** A resume from pause with nothing to send reads as idle, so the tab and sidebar do not flash a spinner. */
 /** Follow the turn's tool calls: pending or in progress keeps a silent turn counting. */
 function trackToolCall(tab: Tab, update: SessionUpdate): void {
   if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return;
@@ -1065,6 +1067,7 @@ function chatStallMs(): number {
   return Number.isFinite(override) && override > 0 ? override : CHAT_STALL_MS;
 }
 
+/** A resume from pause with nothing to send reads as idle, so the tab and sidebar do not flash a spinner. */
 function publishedState(view: ChatTabView, tab: Tab): AgentState {
   if (view.status === 'starting' && tab.resuming && view.queue.length === 0) return 'idle';
   return toAgentState(view);
