@@ -28,6 +28,7 @@ export type SettingsSettingId =
   | 'keep-awake'
   | 'keep-awake-plugged-in'
   | 'keep-awake-on-battery'
+  | 'background-activity'
   | 'resume-paused-on-open'
   | 'auto-pause'
   | 'auto-pause-hours'

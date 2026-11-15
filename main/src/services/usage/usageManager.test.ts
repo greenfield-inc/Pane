@@ -71,7 +71,7 @@ function createManager(
   return new UsageManager({
     roots,
     repository, scanFile,
-    createPriceProvider: () => ({ start() {}, stop() {} }),
+    createPriceProvider: () => ({ start() {}, stop() {}, setPaused() {} }),
   });
 }
 
@@ -153,6 +153,18 @@ describe('usage polling', () => {
     await vi.waitFor(() => expect(repository.countEvents()).toBe(8));
     await manager.rescan();
     expect(repository.countEvents()).toBe(8);
+  });
+
+  it('holds scheduled scans while paused and indexes once on resume', async () => {
+    await manager.start();
+    await manager.rescan();
+    manager.setPaused(true);
+    await transcript('.claude/projects/project/session.jsonl', 'claude');
+    await vi.advanceTimersByTimeAsync(POLL_MS * 2);
+    expect(repository.countEvents()).toBe(0);
+
+    manager.setPaused(false);
+    await vi.waitFor(() => expect(repository.countEvents()).toBe(1));
   });
 
   it('discovers provider parents and transcript roots created after startup', async () => {

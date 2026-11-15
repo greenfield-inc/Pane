@@ -1,4 +1,7 @@
+import { readdir, readFile, stat } from 'fs/promises';
+import path from 'path';
 import type { CommandRunner } from '../utils/commandRunner';
+import { linuxToUNCPath } from '../utils/wslUtils';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { RunpaneBaseRefreshStatus, RunpanePaneBase } from '../../../shared/types/runpaneOrchestration';
 
@@ -27,12 +30,26 @@ interface FetchRecord {
 const inFlightFetches = new Map<string, Promise<FetchRecord>>();
 const lastFetches = new Map<string, FetchRecord>();
 const lastFetchAll = new Map<string, number>();
+/** When each base (project, remote and branch) was last fetched, from any path, seeded from FETCH_HEAD files. */
+const lastBaseFetches = new Map<string, number>();
+const seededProjects = new Map<string, Promise<void>>();
+const lastNotified = new Map<string, number>();
+const fetchListeners = new Set<(projectPath: string) => void>();
+const remoteBranches = new Map<string, { at: number; target: Promise<RemoteBranch | null> }>();
+const remoteUrlLists = new Map<string, { at: number; urls: Promise<Map<string, string>> }>();
+
+/** How long a project's remotes and a base's remote branch are reused before git is asked again. */
+const REMOTE_CACHE_MS = 10 * 60_000;
+/** Fetches reported this close together refresh the project's Panes once. */
+const FETCH_NOTIFY_SETTLE_MS = 2_000;
+const GIT_QUERY_TIMEOUT_MS = 10_000;
 
 // Pane runs git without a terminal; these make a credential problem fail fast
 // instead of waiting for input until the cap.
 const NON_INTERACTIVE_GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
 
 type FetchError = { message?: string; stderr?: string; killed?: boolean };
+type RemoteBranch = { remote: string; branch: string };
 
 const fetchErrorSchema = boundary.object({
   message: boundary.optional(boundary.string),
@@ -43,6 +60,132 @@ const fetchErrorSchema = boundary.object({
 /** Records a successful `git fetch --all` so creates right after it don't fetch again. */
 export function recordProjectFetch(projectPath: string): void {
   lastFetchAll.set(projectPath, Date.now());
+  notifyFetch(projectPath);
+}
+
+/** Something fetched part of the project (one remote, or a ref that is no Pane's base): its Panes may have moved. */
+export function noteFetch(projectPath: string): void {
+  notifyFetch(projectPath);
+}
+
+/**
+ * A FETCH_HEAD in the project changed: an agent's or a terminal's own `git fetch` or `git pull`.
+ * Each remote branch it names counts as fetched at the file's time.
+ */
+export async function recordFetchHead(projectPath: string, fetchHeadPath: string, commandRunner: CommandRunner): Promise<void> {
+  if (await readFetchHead(projectPath, fetchHeadPath, commandRunner)) notifyFetch(projectPath);
+}
+
+/** Calls `listener` after recorded fetches, once per burst. Returns a function that stops it. */
+export function onFetch(listener: (projectPath: string) => void): () => void {
+  fetchListeners.add(listener);
+  return () => fetchListeners.delete(listener);
+}
+
+function notifyFetch(projectPath: string): void {
+  const now = Date.now();
+  if (now - (lastNotified.get(projectPath) ?? Number.NEGATIVE_INFINITY) < FETCH_NOTIFY_SETTLE_MS) return;
+  lastNotified.set(projectPath, now);
+  for (const listener of fetchListeners) listener(projectPath);
+}
+
+function recordBaseFetch(projectPath: string, target: RemoteBranch, at: number): void {
+  const key = baseKey(projectPath, target);
+  lastBaseFetches.set(key, Math.max(lastBaseFetches.get(key) ?? 0, at));
+}
+
+function baseKey(projectPath: string, target: RemoteBranch): string {
+  return `${projectPath}::${target.remote}/${target.branch}`;
+}
+
+/**
+ * When the remote branch behind `baseRef` was last fetched, or undefined if unknown or `baseRef`
+ * is not a remote-tracking branch. A `git fetch --all` counts for every base. The first read
+ * seeds it from the FETCH_HEAD files of the repository and its worktrees, so it survives restarts.
+ */
+export async function lastBaseFetchedAt(projectPath: string, baseRef: string, commandRunner: CommandRunner): Promise<number | undefined> {
+  const target = await cachedRemoteBranchOf(projectPath, baseRef, commandRunner);
+  if (!target) return undefined;
+  let seeding = seededProjects.get(projectPath);
+  if (!seeding) {
+    seeding = seedFromFetchHeads(projectPath, commandRunner);
+    seededProjects.set(projectPath, seeding);
+  }
+  await seeding;
+  const times = [lastBaseFetches.get(baseKey(projectPath, target)), lastFetchAll.get(projectPath)].filter((time): time is number => time !== undefined);
+  return times.length > 0 ? Math.max(...times) : undefined;
+}
+
+async function seedFromFetchHeads(projectPath: string, commandRunner: CommandRunner): Promise<void> {
+  let commonDir: string;
+  try {
+    // Plain `--git-common-dir` (relative inside the main checkout) works on every git version.
+    const { stdout } = await commandRunner.execFile('git', ['rev-parse', '--git-common-dir'], projectPath, { silent: true, timeout: GIT_QUERY_TIMEOUT_MS });
+    const dir = stdout.trim();
+    // git answers with a Linux path for a WSL project; Pane reads the file from Windows.
+    commonDir = commandRunner.wslContext
+      ? linuxToUNCPath(path.posix.resolve(projectPath, dir), commandRunner.wslContext.distribution)
+      : path.resolve(projectPath, dir);
+  } catch {
+    return;
+  }
+  const worktreesDir = path.join(commonDir, 'worktrees');
+  const worktreeNames = await readdir(worktreesDir).catch(() => []);
+  const candidates = [commonDir, ...worktreeNames.map(name => path.join(worktreesDir, name))];
+  await Promise.all(candidates.map(dir => readFetchHead(projectPath, path.join(dir, 'FETCH_HEAD'), commandRunner)));
+}
+
+/** Records each remote branch a FETCH_HEAD names. A failed fetch leaves it empty. Returns whether it named any. */
+async function readFetchHead(projectPath: string, fetchHeadPath: string, commandRunner: CommandRunner): Promise<boolean> {
+  const [info, text] = await Promise.all([stat(fetchHeadPath).catch(() => null), readFile(fetchHeadPath, 'utf8').catch(() => '')]);
+  if (!info || !text.trim()) return false;
+  const urls = await remoteUrls(projectPath, commandRunner);
+  // A file dated ahead of this clock (skew, a copied repo) counts as fetched now, not in the future.
+  const fetchedAt = Math.min(info.mtimeMs, Date.now());
+  let named = false;
+  // Each line: `<sha>\t[not-for-merge]\tbranch '<branch>' of <url>`, the URL without credentials or `.git`.
+  for (const line of text.split('\n')) {
+    const match = /\tbranch '(.+)' of (.+)$/.exec(line);
+    const remote = match ? urls.get(normalizeRemoteUrl(match[2])) : undefined;
+    if (!match || !remote) continue;
+    recordBaseFetch(projectPath, { remote, branch: match[1] }, fetchedAt);
+    named = true;
+  }
+  return named;
+}
+
+function remoteUrls(projectPath: string, commandRunner: CommandRunner): Promise<Map<string, string>> {
+  const cached = remoteUrlLists.get(projectPath);
+  if (cached && Date.now() - cached.at < REMOTE_CACHE_MS) return cached.urls;
+  const urls = commandRunner.execFile('git', ['remote', '-v'], projectPath, { silent: true, timeout: GIT_QUERY_TIMEOUT_MS })
+    .then(({ stdout }) => {
+      const byUrl = new Map<string, string>();
+      for (const line of stdout.split('\n')) {
+        const [name, url] = line.trim().split(/\s+/);
+        if (name && url) byUrl.set(normalizeRemoteUrl(url), name);
+      }
+      return byUrl;
+    }, () => new Map<string, string>());
+  remoteUrlLists.set(projectPath, { at: Date.now(), urls });
+  return urls;
+}
+
+/** A remote URL as FETCH_HEAD names it: git drops the user and password (`git@host:`, `https://user:token@host/`) and a trailing `.git`. */
+function normalizeRemoteUrl(url: string): string {
+  return url.trim()
+    .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1')
+    .replace(/^[^/@:]+@([^/:]+:)/, '$1')
+    .replace(/\/+$/, '')
+    .replace(/\.git$/, '');
+}
+
+function cachedRemoteBranchOf(projectPath: string, baseRef: string, commandRunner: CommandRunner): Promise<RemoteBranch | null> {
+  const key = `${projectPath}::${baseRef}`;
+  const cached = remoteBranches.get(key);
+  if (cached && Date.now() - cached.at < REMOTE_CACHE_MS) return cached.target;
+  const target = remoteBranchOf(projectPath, baseRef, commandRunner);
+  remoteBranches.set(key, { at: Date.now(), target });
+  return target;
 }
 
 /**
@@ -79,6 +222,10 @@ export async function refreshWorktreeBase(
     pending = fetchBranch(projectPath, target.remote, target.branch, commandRunner).then(record => {
       lastFetches.set(key, record);
       inFlightFetches.delete(key);
+      if (record.reason === undefined) {
+        recordBaseFetch(projectPath, target, record.at);
+        notifyFetch(projectPath);
+      }
       return record;
     });
     inFlightFetches.set(key, pending);
@@ -112,14 +259,14 @@ async function remoteBranchOf(
   projectPath: string,
   baseRef: string,
   commandRunner: CommandRunner,
-): Promise<{ remote: string; branch: string } | null> {
+): Promise<RemoteBranch | null> {
   try {
     const { stdout: fullName } = await commandRunner.execFile(
-      'git', ['rev-parse', '--verify', '--symbolic-full-name', '--end-of-options', baseRef], projectPath, { silent: true, timeout: 10_000 },
+      'git', ['rev-parse', '--verify', '--symbolic-full-name', '--end-of-options', baseRef], projectPath, { silent: true, timeout: GIT_QUERY_TIMEOUT_MS },
     );
     const remoteRef = fullName.trim();
     if (!remoteRef.startsWith('refs/remotes/')) return null;
-    const { stdout: remoteList } = await commandRunner.execFile('git', ['remote'], projectPath, { silent: true, timeout: 10_000 });
+    const { stdout: remoteList } = await commandRunner.execFile('git', ['remote'], projectPath, { silent: true, timeout: GIT_QUERY_TIMEOUT_MS });
     const shortName = remoteRef.slice('refs/remotes/'.length);
     // Remote names may contain slashes, so the longest matching remote wins.
     const remote = remoteList.split('\n').map(name => name.trim())
@@ -145,7 +292,7 @@ async function fetchBranch(
   const fetch = (async (): Promise<string | undefined> => {
     try {
       await commandRunner.execFile(
-        'git', ['fetch', '--no-tags', '--quiet', '--', remote, `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`],
+        'git', ['fetch', '--no-tags', '--no-auto-gc', '--quiet', '--', remote, `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`],
         projectPath,
         { timeout: BASE_REFRESH_TIMEOUT_MS, env: NON_INTERACTIVE_GIT_ENV },
       );

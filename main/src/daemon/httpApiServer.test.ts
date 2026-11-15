@@ -18,6 +18,7 @@ import { RelayService } from './relay/relayService';
 import { RELAY_DEVICE_COMMANDS } from '../../../shared/types/relay';
 import type { AppConfig } from '../types/config';
 import { readingMachines } from './readingMachines';
+import { remoteEventStreams } from './remoteEventStreams';
 import { PaneError } from '../../../shared/paneError';
 
 interface ConfigManagerStub {
@@ -815,6 +816,26 @@ describe('PaneRemoteHttpApiServer', () => {
 
     stream.close();
     await waitFor(() => !readingMachines.has('book-install'));
+  });
+
+  it('counts a phone\'s stream as someone looking at this computer, and a saved machine\'s Notify stream not', async () => {
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    const before = remoteEventStreams.count();
+
+    const savedMachine = await openEventStream(server, 'secret-token', { 'X-Pane-Machine-Id': 'book-install' });
+    await savedMachine.nextEvent();
+    expect(remoteEventStreams.count()).toBe(before);
+
+    const phone = await openEventStream(server, 'secret-token', { 'X-Pane-Remote-Runtime-Id': 'phone-runtime' });
+    await phone.nextEvent();
+    expect(remoteEventStreams.count()).toBe(before + 1);
+
+    savedMachine.close();
+    phone.close();
+    await waitFor(() => server.getConnectedClients().length === 0);
+    expect(remoteEventStreams.count()).toBe(before);
   });
 
   it('gzips the event stream for clients that accept it and still delivers each event immediately', async () => {

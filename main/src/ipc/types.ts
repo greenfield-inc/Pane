@@ -9,6 +9,7 @@ import type { WorkspaceStateReader } from '../services/workspaceStateReader';
 import type { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import type { WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import type { NamedLockService } from '../services/namedLockService';
+import type { BackgroundActivity } from '../services/backgroundActivity';
 import type { LoopManager } from '../services/loops/loopManager';
 import type { SessionInbox } from '../services/sessionInbox';
 import type { ExpectedReportTracker } from '../services/expectedReports';
@@ -28,6 +29,8 @@ export interface DaemonHostServices extends CoreServices {
   workspaceCursorStore?: WorkspaceCursorStore;
   workspaceWatchLeases?: WorkspaceWatchLeases;
   namedLockService?: NamedLockService;
+  /** Desktop only: whether Pane is away, so background checks that serve only the person's eyes pause. */
+  backgroundActivity?: BackgroundActivity;
   sessionInbox?: SessionInbox;
   /** This machine's approvals (sessions.db). */
   approvalStore?: ApprovalStore;

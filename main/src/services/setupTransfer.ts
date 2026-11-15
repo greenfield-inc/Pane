@@ -1,4 +1,5 @@
 import { isValidAutoPauseHours, isValidChatReleaseMinutes } from '../../../shared/types/autoPause';
+import { BACKGROUND_ACTIVITY_PROFILES } from '../../../shared/types/backgroundActivity';
 import { isDeepStrictEqual } from 'node:util';
 import type { AppConfig } from '../types/config';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
@@ -73,7 +74,7 @@ const PREFERENCE_CONFIG_KEYS = [
   'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'keyboardShortcutOverrides',
   'kittyKeyboardEnabled', 'terminalCopyOnSelect', 'terminalReferencesEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
-  'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'terminalPowerMode',
+  'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'backgroundActivity', 'terminalPowerMode',
   'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours', 'chatIdleReleaseMinutes',
   'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'notesEnabled',
   'sessionCreationPreferences',
@@ -127,6 +128,7 @@ const FIELD_LABELS = {
   keepAwakeWhileSessionsActive: 'Keep awake',
   keepAwakeWhilePluggedIn: 'Keep awake when plugged in',
   keepAwakeOnBattery: 'Keep awake on battery',
+  backgroundActivity: 'Background checks',
   resumePausedOnOpen: 'Resume paused Panes when opened',
   autoPauseEnabled: 'Auto-pause idle Panes',
   autoPauseAfterHours: 'Auto-pause after',
@@ -478,6 +480,7 @@ const sectionSchemas = {
     keepAwakeWhileSessionsActive: booleanField,
     keepAwakeWhilePluggedIn: booleanField,
     keepAwakeOnBattery: booleanField,
+    backgroundActivity: boundary.optional(boundary.enumeration(...BACKGROUND_ACTIVITY_PROFILES)),
     resumePausedOnOpen: booleanField,
     autoPauseEnabled: booleanField,
     autoPauseAfterHours: boundary.optional(boundary.refine(boundary.number, isValidAutoPauseHours, 'expected whole hours from 1 to 720')),

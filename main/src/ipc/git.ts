@@ -12,6 +12,7 @@ import type { Session } from '../types/session';
 import type { GitCommit, GitGraphCommit } from '../services/gitDiffManager';
 import { CommandRunner } from '../utils/commandRunner';
 import { getShellPath } from '../utils/shellPath';
+import { recordProjectFetch } from '../services/worktreeBaseRefresh';
 import { parseWSLPath, validateWSLAvailable } from '../utils/wslUtils';
 import { boundary, decodeBoundary, type JsonObject } from '../../../shared/validation/boundaryDecoder';
 import { registerGitDiffRequestHandlers } from './gitDiffRequests';
@@ -1247,6 +1248,7 @@ export function registerGitHandlers(
         output: result.output
       });
 
+      recordProjectFetch(ctx.project.path);
       // Refresh git status after fetch (may show new commits behind)
       await refreshGitStatusForSession(sessionId);
 
