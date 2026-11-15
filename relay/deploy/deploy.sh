@@ -115,8 +115,12 @@ install -d -m 0700 -o 65532 -g 65532 /var/lib/pane-relay
 secret pane-relay-registry-secret > /var/lib/pane-relay/registry-secret
 secret pane-relay-apns-key > /var/lib/pane-relay/apns-key.p8 || rm -f /var/lib/pane-relay/apns-key.p8
 chown 65532:65532 /var/lib/pane-relay/* && chmod 0600 /var/lib/pane-relay/*
-docker-credential-gcr configure-docker --registries=\$(echo "$IMAGE" | cut -d/ -f1) >/dev/null 2>&1 || true
-docker pull "$IMAGE"
+# COS keeps /root read-only, so docker gets its own config directory, outside the
+# container's /data, signed in with this VM's token.
+docker_config=/var/lib/pane-relay-docker
+install -d -m 0700 \$docker_config
+echo "\$token" | docker --config \$docker_config login -u oauth2accesstoken --password-stdin "https://\$(echo "$IMAGE" | cut -d/ -f1)"
+docker --config \$docker_config pull "$IMAGE"
 docker rm -f pane-relay >/dev/null 2>&1 || true
 apns=""
 if [ -s /var/lib/pane-relay/apns-key.p8 ] && [ -n "$APNS_KEY_ID" ]; then
