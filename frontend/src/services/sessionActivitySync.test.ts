@@ -7,6 +7,7 @@ const activity = (sessionId: string) => useSessionActivityStore.getState().activ
 
 let emit: (value: SessionActivity) => void;
 let resync: () => void;
+let disconnect: () => void;
 let reads: Array<{ resolve: (value: SessionActivity[]) => void; reject: (error: Error) => void }>;
 let cleanup: () => void;
 
@@ -15,6 +16,7 @@ function subscribe(overrides: Partial<SessionActivitySource> = {}) {
   const source: SessionActivitySource = {
     onActivity: callback => { emit = callback; return vi.fn(); },
     onResync: callback => { resync = callback; return vi.fn(); },
+    onDisconnect: callback => { disconnect = callback; return vi.fn(); },
     readActivity: () => new Promise((resolve, reject) => reads.push({ resolve, reject })),
     ...overrides,
   };
@@ -62,6 +64,23 @@ describe('Session activity sync', () => {
     await flush();
     expect(activity('s1')?.state).toBe('idle');
     expect(activity('gone')).toBeUndefined();
+  });
+
+  it('shows idle while the host is unreachable, not its last state, and reads it again on reconnect', async () => {
+    subscribe();
+    reads[0].resolve([{ sessionId: 's1', state: 'working', workingPanes: 1 }]);
+    await flush();
+    resync();
+    disconnect();
+    expect(activity('s1')).toBeUndefined();
+    // A read that was in flight when the connection dropped answers from before the drop.
+    reads[1].resolve([{ sessionId: 's1', state: 'working', workingPanes: 1 }]);
+    await flush();
+    expect(activity('s1')).toBeUndefined();
+    resync();
+    reads[2].resolve([{ sessionId: 's1', state: 'working', workingPanes: 1 }]);
+    await flush();
+    expect(activity('s1')?.state).toBe('working');
   });
 
   it('shows idle, with no error, for a host that does not have the read', async () => {

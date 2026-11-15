@@ -29,11 +29,14 @@ function subscribe(initial: RemoteBrowserConnectionState['status']) {
   replies = [];
   const listeners: Array<typeof emit> = [];
   emit = event => listeners.forEach(listener => listener(event));
+  const statusListeners: Array<(state: RemoteBrowserConnectionState) => void> = [];
+  let current = initial;
+  setConnection = status => { current = status; statusListeners.forEach(listener => listener({ status, lastError: null, lastSeenAt: null })); };
   const adapter = {
     onEvent: (listener: typeof emit) => { listeners.push(listener); return vi.fn(); },
     onStatus: (listener: (state: RemoteBrowserConnectionState) => void) => {
-      setConnection = status => listener({ status, lastError: null, lastSeenAt: null });
-      setConnection(initial);
+      statusListeners.push(listener);
+      listener({ status: current, lastError: null, lastSeenAt: null });
       return vi.fn();
     },
     // The adapter unwraps the host's { success, data } envelope.
@@ -65,6 +68,19 @@ describe('remote panel status', () => {
     cleanup();
     expect(useSessionActivityStore.getState().activity).toEqual({});
     subscribe('connected');
+  });
+
+  it('shows each Session idle while the connection is down, then the host\'s answer again', async () => {
+    cleanup();
+    activityReplies = [[{ sessionId: 's1', state: 'working', workingPanes: 1 }], [{ sessionId: 's1', state: 'working', workingPanes: 1 }]];
+    subscribe('connected');
+    await flush();
+    expect(useSessionActivityStore.getState().activity.s1?.state).toBe('working');
+    setConnection('reconnecting');
+    expect(useSessionActivityStore.getState().activity).toEqual({});
+    setConnection('connected');
+    await flush();
+    expect(useSessionActivityStore.getState().activity.s1?.state).toBe('working');
   });
 
   it('shows a Pane that was already blocked before any status event arrives', async () => {

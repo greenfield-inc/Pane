@@ -30,6 +30,8 @@ export interface SessionActivitySource {
   onActivity: (callback: (activity: SessionActivity) => void) => Unsubscribe;
   /** Fires when events may have been missed, so the baseline is read again. */
   onResync: (callback: () => void) => Unsubscribe;
+  /** Fires when the host becomes unreachable: its Sessions read idle until the next resync. */
+  onDisconnect?: (callback: () => void) => Unsubscribe;
   /** Reads the host's baseline; absent on a host too old to have one. */
   readActivity?: () => Promise<SessionActivity[]>;
 }
@@ -40,6 +42,9 @@ function desktopActivitySource(): SessionActivitySource {
   return {
     onActivity: callback => api.events.onOrchestrationSessionActivity?.(callback),
     onResync: callback => api.events.onRemoteDaemonResyncRequested?.(() => callback()),
+    onDisconnect: callback => api.remoteDaemon?.onConnectionStateChanged?.(state => {
+      if (state.mode === 'remote' && state.status !== 'connected') callback();
+    }),
     readActivity: read ? async () => decodeBoundary(await read(), activityListResponseSchema).data : undefined,
   };
 }
@@ -85,12 +90,19 @@ export function subscribeSessionActivity(source: SessionActivitySource = desktop
     });
   };
   const unsubscribeResync = source.onResync(() => { void refresh(); });
+  // While the host is unreachable its Sessions show idle, not their last state (D-366); a read
+  // still in flight answers from before the drop, so it is dropped too.
+  const unsubscribeDisconnect = source.onDisconnect?.(() => {
+    requestId++;
+    useSessionActivityStore.setState({ activity: {} });
+  });
   void refresh();
 
   return () => {
     disposed = true;
     unsubscribeActivity?.();
     unsubscribeResync?.();
+    unsubscribeDisconnect?.();
     // Activity belongs to this host; the next host starts from its own baseline.
     useSessionActivityStore.setState({ activity: {} });
   };

@@ -47,10 +47,15 @@ export function subscribeRemotePanelStatus(adapter: StatusAdapter): () => void {
     });
   };
 
+  const onDisconnect = (callback: () => void) => adapter.onStatus(state => {
+    if (state.status !== 'connected') callback();
+  });
+
   // Each Session's working/idle activity, decided by the host (a host without it reads idle).
   const unsubscribeActivity = subscribeSessionActivity({
     onActivity: callback => on('orchestration-sessions:activity', sessionActivitySchema, callback),
     onResync: onReconnect,
+    onDisconnect,
     readActivity: async () => decodeBoundary(await adapter.invoke('orchestration-sessions:activity-list'), sessionActivityListSchema),
   });
 
