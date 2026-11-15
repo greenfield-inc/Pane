@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { LinkPreview, LinkRedeemResult, RelayLinkOpenedEvent, RelayPairedEvent } from '../../../../shared/types/relay';
 import { startAddDeviceListeners, useAddDeviceStore } from './addDeviceStore';
-import { MakerResultView } from './ComputerTab';
+import { ComputerTab, MakerResultView } from './ComputerTab';
 import { LinkFlowView } from './LinkConfirm';
 
 const LINK = 'https://runpane.net/pair#s=k3x9q2secret&c=studio-mac&n=Studio%20Mac';
@@ -198,5 +198,14 @@ describe('The computer that made the link', () => {
 
     expect(callsTo('relay:undo-join')).toEqual([[{ computerId: 'build-box' }]]);
     expect(text(renderMaker())).toContain('Unlinked Build Box, NAS from your computers.');
+  });
+});
+
+describe('Add a device › Computer when phone access can\'t start', () => {
+  it('says why and offers "Try again" instead of waiting forever', () => {
+    const html = renderToStaticMarkup(<ComputerTab ready={false} error="The relay did not answer." onRetry={() => undefined} />);
+    expect(text(html)).toContain('The relay did not answer.');
+    expect(buttons(html)).toContain('Try again');
+    expect(text(html)).not.toContain('Getting this computer ready');
   });
 });

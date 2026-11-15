@@ -75,7 +75,7 @@ export function AddDeviceDialog({ isOpen, tab, onTabChange, onClose }: {
         </div>
         <div role="tabpanel" id="add-device-panel" aria-labelledby={`add-device-tab-${tab}`}>
           {tab === 'phone' && <PhoneTab view={view} paired={paired} renewed={renewal !== null} onRetry={retry} />}
-          {tab === 'computer' && <ComputerTab ready={ready} />}
+          {tab === 'computer' && <ComputerTab ready={ready} error={view.step === 'error' ? view.message : null} onRetry={retry} />}
           {tab === 'ssh' && <SshTab onClose={onClose} />}
           {tab === 'wearables' && <WearablesTab domain={domain} />}
         </div>
