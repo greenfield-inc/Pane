@@ -12,6 +12,7 @@ import { escapeForBash, linuxToUNCPath, windowsPathToWSLMount } from '../utils/w
 import { parse as parseToml } from 'smol-toml';
 import { syncPaneUserSkills, type UserSkillTarget } from './paneUserSkills';
 import { PANE_MCP_SERVER_NAME } from './paneMcpNames';
+import { isPanePluginEnabled } from './claudePanePlugin';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const execFileAsync = promisify(execFile);
@@ -35,13 +36,19 @@ export interface PaneMcpServerEntry {
 export interface McpRegistrationTarget {
   label: string;
   server: PaneMcpServerEntry;
-  /** Present when Claude Code is installed. Writes go through its CLI, which owns ~/.claude.json. */
-  claude?: { configPath: string; run: (args: string[]) => Promise<void> };
+  /**
+   * Present when Claude Code is installed. Writes go through its CLI, which owns ~/.claude.json.
+   * `settingsPath` is its user settings.json: while Pane's Claude plugin is on there, the plugin
+   * brings the server, so Pane removes its own entry.
+   */
+  claude?: { configPath: string; settingsPath?: string; run: (args: string[]) => Promise<void> };
   /** Present when Codex is installed. */
   codex?: { configPath: string };
   /** Present when Cursor is installed. */
   cursor?: { configPath: string };
   userSkills?: UserSkillTarget[];
+  /** Skill folders where Pane removes its copy whatever the setting, because Pane's Claude plugin carries the skill. */
+  retiredUserSkills?: UserSkillTarget[];
 }
 
 type RegistrationAction = 'added' | 'updated' | 'removed' | 'unchanged' | 'skipped';
@@ -90,10 +97,11 @@ async function syncClaude(
     return { action: 'skipped', detail: `${claude.configPath} has a "pane" MCP server that Pane did not add; left it unchanged` };
   }
   const remove = ['mcp', 'remove', PANE_MCP_SERVER_NAME, '--scope', 'user'];
-  if (!enabled) {
+  const plugin = enabled && claude.settingsPath !== undefined && await isPanePluginEnabled(claude.settingsPath);
+  if (!enabled || plugin) {
     if (!current) return { action: 'unchanged' };
     await claude.run(remove);
-    return { action: 'removed' };
+    return plugin ? { action: 'removed', detail: "Pane's Claude plugin is on and brings the server" } : { action: 'removed' };
   }
   if (current && sameClaudeEntry(current, server)) return { action: 'unchanged' };
   // `claude mcp add` refuses to overwrite, so an update is remove + add, with the old entry restored on failure.
@@ -348,11 +356,16 @@ async function buildHostTarget(host: PaneMcpHost): Promise<McpRegistrationTarget
 
   const claude = host.claudeExecutablePath || await findExecutable('claude');
   if (claude) {
+    const claudeDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+    const settingsPath = path.join(claudeDir, 'settings.json');
     target.claude = {
       configPath: path.join(process.env.CLAUDE_CONFIG_DIR || os.homedir(), '.claude.json'),
+      settingsPath,
       run: (args) => runHostCli(claude, args),
     };
-    target.userSkills?.push({ client: 'Claude Code', skillsRoot: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills') });
+    // Pane's Claude plugin carries this skill too, so Pane's copy steps aside while the plugin is on.
+    if (!await isPanePluginEnabled(settingsPath)) target.userSkills?.push({ client: 'Claude Code', skillsRoot: path.join(claudeDir, 'skills') });
+    else target.retiredUserSkills = [{ client: 'Claude Code', skillsRoot: path.join(claudeDir, 'skills') }];
   }
   const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
   if (await exists(codexHome) || await findExecutable('codex')) {
@@ -533,6 +546,7 @@ async function syncRegistrations(
   await Promise.all(targets.map(async (target) => {
     if (!target) return;
     await syncPaneUserSkills(target.userSkills ?? [], enabled);
+    await syncPaneUserSkills(target.retiredUserSkills ?? [], false);
     for (const outcome of await syncMcpRegistration(target, enabled)) {
       if (outcome.action === 'unchanged') continue;
       const detail = outcome.detail ? `: ${outcome.detail}` : '';

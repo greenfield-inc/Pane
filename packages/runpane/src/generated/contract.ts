@@ -423,9 +423,17 @@ export const RUNPANE_CONTRACT = {
         "runpane doctor --fix [--json] [--pane-dir <path>]",
         "runpane doctor --report [--title <text>] --body-file <path|-> [--yes] [--json]"
       ],
+      "cliOnlyFlags": [
+        "--fix",
+        "--report",
+        "--body-file",
+        "--title",
+        "--yes"
+      ],
       "toolsets": [
         "core",
-        "admin"
+        "admin",
+        "plugin"
       ],
       "jsonSchemas": [
         "doctorResult"
@@ -508,7 +516,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "repos"
+        "repos",
+        "plugin"
       ],
       "jsonSchemas": [
         "repoListResult"
@@ -526,7 +535,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "repos"
+        "repos",
+        "plugin"
       ],
       "jsonSchemas": [
         "repoAddRequest",
@@ -576,7 +586,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "repos"
+        "repos",
+        "plugin"
       ],
       "jsonSchemas": [
         "repoRenameRequest",
@@ -642,7 +653,8 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "additive": true,
       "toolsets": [
-        "core"
+        "core",
+        "plugin"
       ],
       "jsonSchemas": [
         "notifyRequest",
@@ -658,7 +670,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "plugin"
       ],
       "jsonSchemas": [
         "paneListResult"
@@ -688,7 +701,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "plugin"
       ],
       "jsonSchemas": [
         "workspaceStateResult"
@@ -856,7 +870,8 @@ export const RUNPANE_CONTRACT = {
       "additive": true,
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "plugin"
       ],
       "jsonSchemas": [
         "paneCreateResult"
@@ -873,7 +888,8 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "plugin"
       ],
       "jsonSchemas": [
         "paneArchiveRequest",
@@ -960,7 +976,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "plugin"
       ],
       "jsonSchemas": [
         "paneRenameRequest",
@@ -997,7 +1014,8 @@ export const RUNPANE_CONTRACT = {
       "additive": true,
       "toolsets": [
         "core",
-        "panels"
+        "panels",
+        "plugin"
       ],
       "jsonSchemas": [
         "panelCreateRequest",
@@ -1020,7 +1038,8 @@ export const RUNPANE_CONTRACT = {
       "localControl": true,
       "toolsets": [
         "core",
-        "panels"
+        "panels",
+        "plugin"
       ]
     },
     {
@@ -1033,7 +1052,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "panels"
+        "panels",
+        "plugin"
       ],
       "jsonSchemas": [
         "panelCloseRequest",
@@ -1092,7 +1112,8 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "toolsets": [
         "core",
-        "panels"
+        "panels",
+        "plugin"
       ],
       "jsonSchemas": [
         "panelInputRequest",
@@ -1230,7 +1251,8 @@ export const RUNPANE_CONTRACT = {
       },
       "toolsets": [
         "core",
-        "git"
+        "git",
+        "plugin"
       ],
       "jsonSchemas": [
         "daemonActionResult"
@@ -1344,7 +1366,8 @@ export const RUNPANE_CONTRACT = {
       },
       "toolsets": [
         "core",
-        "panes"
+        "panes",
+        "plugin"
       ],
       "jsonSchemas": [
         "daemonActionResult"
@@ -1580,7 +1603,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "links"
+        "links",
+        "plugin"
       ],
       "jsonSchemas": [
         "linkCreateResult"
@@ -1621,7 +1645,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "docs"
+        "docs",
+        "plugin"
       ],
       "jsonSchemas": [
         "docsSearchResult"
@@ -1639,7 +1664,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "docs"
+        "docs",
+        "plugin"
       ],
       "jsonSchemas": [
         "docsReadResult"
@@ -1659,7 +1685,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "plugin"
       ],
       "jsonSchemas": [
         "agentTaskResult"
@@ -1677,7 +1704,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "plugin"
       ],
       "jsonSchemas": [
         "agentStatusResult"
@@ -1696,7 +1724,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "agents"
+        "agents",
+        "plugin"
       ],
       "jsonSchemas": [
         "agentSendResult"
@@ -1732,7 +1761,8 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "additive": true,
       "toolsets": [
-        "core"
+        "core",
+        "plugin"
       ],
       "jsonSchemas": [
         "notifyRequest",
@@ -1896,7 +1926,8 @@ export const RUNPANE_CONTRACT = {
       "additive": true,
       "toolsets": [
         "core",
-        "sessions"
+        "sessions",
+        "plugin"
       ],
       "jsonSchemas": [
         "sessionResult"
@@ -1960,7 +1991,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "sessions"
+        "sessions",
+        "plugin"
       ],
       "jsonSchemas": [
         "sessionResult"
@@ -2071,7 +2103,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "sessions"
+        "sessions",
+        "plugin"
       ],
       "jsonSchemas": [
         "sessionResult"
@@ -2117,6 +2150,8 @@ export const RUNPANE_CONTRACT = {
       "usage": [
         "runpane pr watch [--pane <id>] --url <PR URL> [--head <full-sha>] [--json] [--pane-dir <path>]"
       ],
+      "mutates": true,
+      "additive": true,
       "toolsets": [
         "agents"
       ],
@@ -2131,6 +2166,7 @@ export const RUNPANE_CONTRACT = {
       "usage": [
         "runpane pr unwatch [--pane <id>] --url <PR URL> [--json] [--pane-dir <path>]"
       ],
+      "mutates": true,
       "toolsets": [
         "agents"
       ],
@@ -2161,7 +2197,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "toolsets": [
         "core",
-        "loops"
+        "loops",
+        "plugin"
       ],
       "jsonSchemas": [
         "loopListResult"
@@ -2178,7 +2215,8 @@ export const RUNPANE_CONTRACT = {
       "additive": true,
       "toolsets": [
         "core",
-        "loops"
+        "loops",
+        "plugin"
       ],
       "jsonSchemas": [
         "loopInput",
@@ -2197,7 +2235,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "loops"
+        "loops",
+        "plugin"
       ],
       "jsonSchemas": [
         "loopInput",
@@ -2216,7 +2255,8 @@ export const RUNPANE_CONTRACT = {
       "additive": true,
       "toolsets": [
         "core",
-        "loops"
+        "loops",
+        "plugin"
       ],
       "jsonSchemas": [
         "loopResult"
@@ -2233,7 +2273,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "loops"
+        "loops",
+        "plugin"
       ],
       "jsonSchemas": [
         "loopResult"
@@ -2250,7 +2291,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "loops"
+        "loops",
+        "plugin"
       ],
       "jsonSchemas": [
         "loopResult"
@@ -2267,7 +2309,8 @@ export const RUNPANE_CONTRACT = {
       "idempotent": true,
       "toolsets": [
         "core",
-        "loops"
+        "loops",
+        "plugin"
       ],
       "jsonSchemas": [
         "loopDeleteResult"
@@ -20626,7 +20669,7 @@ export const RUNPANE_CONTRACT = {
           "panelOpenResult"
         ],
         "notes": [
-          "Prefer this over opening the system browser when showing the user a page, plan, report, or dev server.",
+          "It shows the user a page, plan, report, or dev server as a tab beside the agent, where they are already working.",
           "Write plans and reports as self-contained HTML files. Use --url with a file URL to render a page in a live browser, or --file to open its editable source; reopening the same target reuses its tab.",
           "When the user views Pane from another computer, a file page loads only files in its own folder and the folders inside it. Keep the page's CSS, scripts and images there, put them inline, or serve the folder over HTTP and open its localhost URL. Give file URLs as the host sees them, not as the other computer would.",
           "Opening a tab does not steal window focus; use `panes focus` only on explicit user request.",
@@ -21676,7 +21719,7 @@ export const RUNPANE_CONTRACT = {
       "docs search": {
         "name": "docs search",
         "summary": "Search Pane's docs, runpane help, and the Pane Chat skills.",
-        "details": "Use this before guessing how Pane works. Results are short excerpts with a path; read the full text with `runpane docs read`.",
+        "details": "Answers how Pane works from its docs, command help and installed Pane skills. Results are short excerpts with a path; read the full text with `runpane docs read`.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -23394,7 +23437,7 @@ export const RUNPANE_CONTRACT = {
       "notify": {
         "name": "notify",
         "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
-        "details": "Prefer this to asking in the terminal whenever you need the person: to pick between options (ui options), to approve or deny an action (ui approve), to type a short answer (ui ask), or to tell them something that needs no answer (ui info). Pane shows it on screen even while the person works in another app, and the call waits until they answer, however long that takes. info returns at once.",
+        "details": "Asks the person through Pane: to pick between options (ui options), to approve or deny an action (ui approve), to type a short answer (ui ask), or tells them something that needs no answer (ui info). Pane shows it on screen even while the person works in another app, and the call waits until they answer, however long that takes. info returns at once.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
