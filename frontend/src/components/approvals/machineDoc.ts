@@ -7,6 +7,8 @@ export type MachineDoc =
   | { kind: 'text'; text: string }
   | { kind: 'html'; html: string }
   | { kind: 'missing' }
+  /** Over the holding machine's 2 MiB limit for sending a file: it's there, just not sent. */
+  | { kind: 'too-large' }
   | { kind: 'unreachable' };
 
 /** A read that has not answered by then has failed: no spinner stays up. */
@@ -27,14 +29,17 @@ export function machineFileLinks(item: NotifyItem): Array<{ path: string; label:
 
 const textSchema = boundary.object({ kind: boundary.literal('text'), text: boundary.string });
 const htmlSchema = boundary.object({ kind: boundary.literal('html'), html: boundary.string });
-const missingSchema = boundary.object({ kind: boundary.literal('missing') });
+const missingSchema = boundary.object({ kind: boundary.literal('missing'), message: boundary.optional(boundary.string) });
 
 function decodeDoc(answer: Awaited<ReturnType<MachineRead>>['data']): MachineDoc {
   const text = decodeOptionalBoundary(answer, textSchema);
   if (text) return { kind: 'text', text: text.text };
   const page = decodeOptionalBoundary(answer, htmlSchema);
   if (page) return { kind: 'html', html: page.html };
-  return decodeOptionalBoundary(answer, missingSchema) ? { kind: 'missing' } : { kind: 'unreachable' };
+  const missing = decodeOptionalBoundary(answer, missingSchema);
+  if (!missing) return { kind: 'unreachable' };
+  // `readDocument` refuses a file over its limit with this wording; the file itself is still there.
+  return /larger than 2 MiB/u.test(missing.message ?? '') ? { kind: 'too-large' } : { kind: 'missing' };
 }
 
 /** Reads a linked file from the item's machine. Never rejects: a failed read is a state. */
@@ -58,6 +63,7 @@ export async function readMachineDoc(item: NotifyItem, path: string): Promise<Ma
 /** The one line a document that didn't load shows. */
 export function machineDocFailure(doc: MachineDoc, label: string, machine: string): string | undefined {
   if (doc.kind === 'missing') return `${label} isn't on ${machine} anymore`;
+  if (doc.kind === 'too-large') return `${label} is larger than 2 MiB, too big to show from another machine: open it on ${machine}`;
   if (doc.kind === 'unreachable') return `Couldn't reach ${machine}`;
   return undefined;
 }

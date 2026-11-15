@@ -638,6 +638,8 @@ export function MachineFileFrame({ item, label, children }: { item: NotifyItem; 
           <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="min-w-0 truncate font-medium text-text-secondary">{label}</span>
           {machine && <span className="min-w-0 shrink truncate" data-testid="approval-file-machine">· on {machine}</span>}
+          {/* An HTML page from another machine shows as text in a frame with no scripts (MachineDocView). */}
+          <span className="shrink-0">· no scripts</span>
         </div>
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       </div>

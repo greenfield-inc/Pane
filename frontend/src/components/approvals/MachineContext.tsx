@@ -21,8 +21,8 @@ export function MachineDocView({ doc, label, machine, onRetry }: { doc: MachineD
     );
   }
   if (doc.kind === 'html') {
-    // Another machine's page: scripts may run, but it reaches nothing of Pane's.
-    return <iframe title={label} srcDoc={doc.html} sandbox="allow-scripts" className="min-h-0 w-full flex-1 border-0" data-testid="approvals-machine-page" />;
+    // Another machine's page, sent as text: no scripts (Pane's own content policy would block them anyway), no forms, no navigation.
+    return <iframe title={label} srcDoc={doc.html} sandbox="" className="min-h-0 w-full flex-1 border-0" data-testid="approvals-machine-page" />;
   }
   return (
     <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="approvals-machine-text">
