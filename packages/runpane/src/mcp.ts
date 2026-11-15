@@ -4,10 +4,10 @@ import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './bou
 import { loadDocs } from './docs';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
-import { ProtocolError, ProtocolErrorCode, Server, serveStdio, type AuthInfo, type McpRequestContext } from './mcpSdk';
+import { ProtocolError, ProtocolErrorCode, Server, serveStdio, StdioServerTransport, type AuthInfo, type JSONRPCMessage, type McpRequestContext } from './mcpSdk';
 import { getWrapperVersion } from './version';
 import type { RunpaneFailure } from './errors';
-import { agentsIntroForInstructions, scratchRule } from './paneIntro';
+import { agentsIntroForInstructions, claudeMdHasPaneGuidance, scratchRule } from './paneIntro';
 
 // A type alias, unlike an interface, is assignable to the SDK's open result type.
 type ToolResult = {
@@ -24,10 +24,7 @@ const DOCS_URI_PREFIX = 'runpane-docs:';
 
 // Every request an agent makes carries these, so they hold only what it needs before it picks a
 // tool; each tool's description, read when the agent loads it, says the rest.
-const INSTRUCTIONS = [
-  // Pane's model first: the intro and the scratch rule, from the contract.
-  agentsIntroForInstructions(),
-  `- ${scratchRule()}`,
+const TOOL_GUIDE = [
   'Each tool runs the matching `runpane` command against the running Pane app and returns its `--json` output.',
   '- `sessions_create` starts a Session, where a workstream lives. A new Pane creates a worktree that installs and builds, so create one only when the work\'s branch has none; add later agents with `agents_start` or `panels_create` and `pane: <id>` (inside a Pane, `$PANE_SESSION_ID` is its id).',
   '- `agents_start` starts an agent on a task, `agents_status` checks on it, `agents_send` sends it a follow-up, and `agents_ask` asks any agent and model one read-only question and returns the answer without a tab. `panels_input` sends named keys (for example `down,enter`) to answer a menu or prompt in an agent\'s terminal. Ask the user before answering trust or permission prompts.',
@@ -35,8 +32,21 @@ const INSTRUCTIONS = [
   '- Pass `yes: true` to a tool that changes state only when the user asked for that change or your Pane instructions authorize it; without it the call is refused and nothing happens.',
   '- `panels_open` shows the user a page, report, file or local dev server as a tab beside the agent.',
   '- `docs_search` and `docs_read` answer how Pane works.',
+];
+const INSTRUCTIONS = [
+  // Pane's model first: the intro and the scratch rule, from the contract.
+  agentsIntroForInstructions(),
+  `- ${scratchRule()}`,
+  ...TOOL_GUIDE,
   '- `notify` asks the person something (a choice, an approval, a short answer) through Pane, on screen even when they are in another app, and waits for the answer; its description says how to write the card.',
 ].join('\n');
+// Claude Code also reads Pane's CLAUDE.md block, which states the intro, the scratch rule and how
+// to reach the person, so it gets those once, from there.
+const INSTRUCTIONS_BESIDE_CLAUDE_MD = TOOL_GUIDE.join('\n');
+// Claude Code names itself `claude-code` at initialize; Pane's HTTP endpoint names its tabs' agent by label.
+// Exact, unlike LONG_WAIT_CLIENTS: only Claude Code itself reads ~/.claude/CLAUDE.md, while any
+// client named after Claude Code or Codex holds a call open.
+const CLAUDE_CODE = /^(claude-code|claude)$/i;
 
 // The lists only change with a new runpane version, which restarts this server.
 const LIST_CACHE = { ttlMs: 3_600_000, cacheScope: 'public' } as const;
@@ -54,6 +64,24 @@ const AGENT_NAMES: readonly [RegExp, string][] = [[/claude/i, 'Claude'], [/codex
 const clientInfoEnvelope = boundary.optional(boundary.object({
   'io.modelcontextprotocol/clientInfo': boundary.optional(boundary.object({ name: boundary.string })),
 }));
+
+// The opening message names the client: a 2025 `initialize` in its params, a 2026-07-28 request in its envelope.
+const openingMessage = boundary.object({
+  params: boundary.optional(boundary.object({
+    clientInfo: boundary.optional(boundary.object({ name: boundary.string })),
+    _meta: clientInfoEnvelope,
+  })),
+});
+
+/** The name a message gives its client, if any. */
+function clientNameOf(message: JSONRPCMessage): string | undefined {
+  try {
+    const params = decodeBoundary(message, openingMessage).params;
+    return params?.clientInfo?.name ?? params?._meta?.['io.modelcontextprotocol/clientInfo']?.name;
+  } catch {
+    return undefined;
+  }
+}
 
 interface McpServerOptions {
   toolsets?: readonly string[];
@@ -86,9 +114,11 @@ export interface PaneMcpServerOptions extends McpServerOptions {
   /**
    * Who the client is when the request doesn't say. Over stateless HTTP a 2025-era client names
    * itself only at `initialize`, so later calls arrive unnamed; Pane names them from the tab, and
-   * says whether that agent holds a tool call open while `notify` waits for the person.
+   * says whether that agent holds a tool call open while `notify` waits for the person. The name
+   * also picks the server's instructions: Claude Code skips what its CLAUDE.md already says, read
+   * with `env` (the agent's environment) when given, else this server's own.
    */
-  clientFor?: (auth: AuthInfo | undefined) => { name: string; waitsLong: boolean } | undefined;
+  clientFor?: (auth: AuthInfo | undefined) => { name: string; waitsLong: boolean; env?: NodeJS.ProcessEnv } | undefined;
 }
 
 /**
@@ -98,14 +128,22 @@ export interface PaneMcpServerOptions extends McpServerOptions {
  */
 export async function runMcpServer(options: McpServerOptions = {}): Promise<number> {
   setFlagsFromString(SERVER_V8_FLAGS);
+  // The client names itself in the opening message, which arrives before the server is built.
+  let opener: string | undefined;
   let createServer: (context?: McpRequestContext) => Server;
   try {
-    createServer = paneMcpServerFactory({ ...options, runCli: runSelf });
+    createServer = paneMcpServerFactory({ ...options, runCli: runSelf, clientFor: () => opener === undefined ? undefined : { name: opener, waitsLong: LONG_WAIT_CLIENTS.test(opener) } });
   } catch (error) {
     process.stderr.write(`runpane mcp: ${error instanceof Error ? error.message : String(error)}\n`);
     return 2;
   }
-  const handle = serveStdio(createServer, { onerror: (error) => process.stderr.write(`runpane mcp: ${error.message}\n`) });
+  const wire = new StdioServerTransport();
+  const handle = serveStdio(createServer, { transport: wire, onerror: (error) => process.stderr.write(`runpane mcp: ${error.message}\n`) });
+  const deliver = wire.onmessage;
+  wire.onmessage = (message) => {
+    opener ??= clientNameOf(message);
+    deliver?.(message);
+  };
   await new Promise<void>((resolve) => process.stdin.once('close', resolve).once('end', resolve));
   await handle.close();
   return 0;
@@ -135,11 +173,12 @@ export function paneMcpServerFactory(options: PaneMcpServerOptions): (context?: 
   };
 
   return (context) => {
+    const client = options.clientFor?.(context?.authInfo);
     const server = new Server(
       { name: 'pane', title: 'Pane', version: getWrapperVersion() },
       {
         capabilities: { tools: {}, resources: {} },
-        instructions: INSTRUCTIONS,
+        instructions: CLAUDE_CODE.test(client?.name ?? '') && claudeMdHasPaneGuidance(client?.env) ? INSTRUCTIONS_BESIDE_CLAUDE_MD : INSTRUCTIONS,
         cacheHints: { 'tools/list': LIST_CACHE, 'resources/list': LIST_CACHE },
       },
     );

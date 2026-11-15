@@ -25,6 +25,10 @@ pub async fn run(
     if state.is_blocked(&id) {
         return;
     }
+    // Limits charge the client's source, so a flood slows and refuses only its sender. Charged
+    // before the computer is looked up: a Pane retrying a computer that is gone counts too.
+    let source = source(peer.ip());
+    let level = state.charge_client(&id, &source, 0, 1);
     let Some(agent) = state.agent(&id) else {
         tracing::debug!(id, peer = %peer.ip(), "client for a computer that is not connected");
         return;
@@ -33,9 +37,7 @@ pub async fn run(
         tracing::warn!(id, peer = %peer.ip(), "client refused: relay at --max-connections");
         return;
     };
-    // Limits charge the client's source, so a flood slows and refuses only its sender.
-    let source = source(peer.ip());
-    match state.charge_client(&id, &source, 0, 1) {
+    match level {
         Level::Over => {
             tracing::info!(id, peer = %peer.ip(), "client refused: too many new connections this minute");
             return;

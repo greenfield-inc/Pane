@@ -18,7 +18,7 @@ const project = (id: number, name: string, panes: Session[], repository?: string
 };
 
 const snapshot = (projects: MachineSnapshot['projects'], extra: Partial<MachineSnapshot> = {}): MachineSnapshot => ({
-  projects, sessions: [], statuses: [], notify: null, permissions: [], ...extra,
+  projects, sessions: [], statuses: [], activity: [], notify: null, permissions: [], ...extra,
 });
 
 const record = (id: string, name: string, paneIds: string[] = [], extra: Partial<OrchestrationSessionRecord> = {}): OrchestrationSessionRecord => ({
@@ -32,6 +32,29 @@ const record = (id: string, name: string, paneIds: string[] = [], extra: Partial
 const view = (machine: MachineRef, data: MachineSnapshot, offline = false): MachineView => ({ machine, snapshot: data, offline });
 
 describe('buildAllMachinesTree', () => {
+  it('shows each Session as its own machine says: working with a working worker, never from another machine', () => {
+    const tree = buildAllMachinesTree([
+      view(studio, snapshot([], { sessions: [record('s1', 'Pane Fixes')], activity: [] })),
+      view(build, snapshot([], {
+        sessions: [record('s1', 'Infra')],
+        // The orchestrator on build-box is idle; its worker is working.
+        statuses: [{ panelId: 's1-claude', sessionId: 'internal-s1', state: 'idle', reason: null }],
+        activity: [{ sessionId: 's1', state: 'working', workingPanes: 1 }],
+      })),
+    ]);
+    expect(tree.sessions.map(row => [row.key, row.activity, row.workingPanes])).toEqual([
+      ['local:s1', 'idle', 0],
+      ['build-box-profile:s1', 'working', 1],
+    ]);
+  });
+
+  it('shows an offline machine\'s Sessions idle, whatever they last said', () => {
+    const tree = buildAllMachinesTree([
+      view(build, snapshot([], { sessions: [record('s1', 'Infra')], activity: [{ sessionId: 's1', state: 'working', workingPanes: 1 }] }), true),
+    ]);
+    expect(tree.sessions[0]).toMatchObject({ activity: 'idle', workingPanes: 0, offline: true });
+  });
+
   it('keeps two machines\' rows apart when their project and Pane ids are the same', () => {
     const tree = buildAllMachinesTree([
       view(studio, snapshot([project(1, 'acme-web', [pane('p1', 'fix-checkout-race')])])),

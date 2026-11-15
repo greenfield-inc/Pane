@@ -49,6 +49,13 @@ The computer's certificate covers `<id>.<D>` and `*.<id>.<D>`.
 Local address names answer only for RFC 1918 (`10/8`, `172.16/12`,
 `192.168/16`) and CGNAT (`100.64/10`) addresses; anything else is NXDOMAIN.
 
+A and CAA answers last 60 s and TXT answers 10 s. The names of an id the
+registry does not know (a computer that was forgotten, or never connected)
+answer as if it were on the answering relay, for 10 s, and that relay refuses
+its clients until the computer connects. A "no such name" answer would stay cached after the
+computer comes back: macOS doubles that cache time on each repeated miss,
+up to more than an hour.
+
 ## Control connection (computer to relay)
 
 The computer opens TLS to `<region>.relay.<D>:443` (certificate checked
@@ -83,8 +90,8 @@ Over the per-address control connection limit, the relay sends that
 `over-limit` error in place of the challenge.
 
 After `full`, `over-limit` or `blocked`, as an error or a `close`, Pane waits
-5 minutes before connecting again; after any other failure it retries within
-10 seconds.
+5 minutes before connecting again. After any other failure it redials within
+250 ms, then backs off to at most 10 seconds.
 
 A second control connection for the same id replaces the first, which gets
 `{"t":"close","code":"replaced"}`.
@@ -100,7 +107,7 @@ A second control connection for the same id replaces the first, which gets
 | computer | `{"t":"sleep"}` | The computer is about to sleep; the relay reports it as asleep until it reconnects. |
 | computer | `{"t":"grant","req":"<n>","platform":"ios"\|"android","token":"<device token>","hostProfileId":"<id>"}` | Push the phone a grant for this computer; see [Alerts](#alerts). |
 | computer | `{"t":"alert","req":"<n>",...}` | Deliver a push alert with the Pane app's keys; see [Alerts](#alerts). |
-| either | `{"t":"ping"}` / `{"t":"pong"}` | Keepalive. The computer pings every 25 s; the relay closes a control connection silent for 75 s. |
+| either | `{"t":"ping"}` / `{"t":"pong"}` | Keepalive. The computer pings every 5 s and redials when the relay has not answered for 8 s; the relay closes a control connection silent for 75 s. |
 | relay | `{"t":"close","code":"<code>","message":"<text>"}` | The relay is cutting the computer off (`replaced`, `blocked`, `over-limit`, `shutdown`). |
 
 ## Alerts
@@ -244,13 +251,17 @@ relay sends each update to every helper in its `--registry-url` list with
 body is one update, `{"id","region","local":[...],"txt":[...]|null,"online":true|false}` (TXT
 values as the `txt` frame allows), or a JSON array of up to 5,000 of them (at most 4 MiB); `"txt":null` leaves
 the TXT values as they are. The helper answers `200 {"ok":true}`, or `400`
-and applies nothing when any update is malformed.
+and applies nothing when any update is malformed. A helper skips an offline
+update from one region for a computer it has online in another: when a
+computer moves relays, its old relay's offline update can arrive after its
+new relay's online one.
 
 Each relay keeps one queue per helper and sends it from its own task, so a
 slow helper delays nothing else. Updates for the same id merge while they
 wait. A computer's TXT update goes first, in a request of its own; the rest
 go out together as one array. Every 60 s the relay queues all its connected
-computers again, so a helper that restarts relearns them within a minute. A
+computers again, online in its own region, so a helper that restarts relearns
+them and a stale entry is put right within a minute. A
 TXT update (a computer's or the relay's own ACME value) succeeds once every
 helper has it, or 2 s after the first one does, because the CA may ask any
 helper. It fails only when every helper failed.
@@ -292,7 +303,8 @@ computer and its other clients carry on.
 - Per computer and client address: 50 MB and 100 new client connections a
   minute (`--limit-bytes-per-min`, `--limit-conns-per-min`).
 - Per client address across all computers: 200 MB and 400 new connections a
-  minute (`--limit-ip-bytes-per-min`, `--limit-ip-conns-per-min`).
+  minute (`--limit-ip-bytes-per-min`, `--limit-ip-conns-per-min`). Connections
+  for a computer that is not connected count too.
 - Per client address on the iroh relay: 50 MB and 100 new connections a
   minute (the per-computer flags).
 - Per computer, its own control connection: past 1,200 frames a minute the
@@ -307,8 +319,8 @@ computer and its other clients carry on.
   a full registry takes the place of the one offline longest. Only when
   every computer is online does it get `full` (a helper skips the new ids it
   is sent then).
-- A computer offline for 7 days is forgotten: its names answer NXDOMAIN and
-  its status `since` is null. One that never set TXT values while the
+- A computer offline for 7 days is forgotten: its names answer as an unknown
+  id's (see Names) and its status `since` is null. One that never set TXT values while the
   registry knew it is forgotten after 1 hour offline. An offline computer's
   TXT values are cleared 10 minutes after it set them; an online computer
   keeps them.

@@ -140,6 +140,18 @@ export function canSend(item: NotifyItem, picks: readonly string[], text: string
   if (item.state !== 'waiting') return false;
   // One reply at a time with its reader (F-2): while it reads the last one, only picks can go.
   if (text.trim() && !item.agentPrompt && !item.optionsOnly) return !replyBeingRead(item);
+  return picksAnswer(item, picks);
+}
+
+/**
+ * Whether words typed with no pick can go on their own, as an answer or a question (D-245): not on
+ * a permission prompt or an options-only question, and not while the asker reads the last reply.
+ */
+export function canReplyAlone(item: NotifyItem): boolean {
+  return item.state === 'waiting' && !item.agentPrompt && !item.optionsOnly && !replyBeingRead(item);
+}
+
+function picksAnswer(item: NotifyItem, picks: readonly string[]): boolean {
   const questions = questionsOf(item);
   return questions.length > 0 && picks.length >= questions.length && questions.every((_, index) => Boolean(picks[index]));
 }
@@ -196,12 +208,6 @@ export function readyCount(items: readonly NotifyItem[]): number {
 export function firstToOpen(items: readonly NotifyItem[]): NotifyItem | undefined {
   const ready = items.filter(item => item.readyAgain !== undefined).sort((a, b) => (b.readyAgain ?? 0) - (a.readyAgain ?? 0));
   return ready[0] ?? items.find(item => !isBeingRead(item)) ?? items[0];
-}
-
-/** The picks a fresh card starts with: each question's recommended option, '' where none is. */
-export function recommendedPicks(item: NotifyItem): string[] {
-  if (item.agentPrompt) return [];
-  return questionsOf(item).map(question => question.choices.find(choice => choice.recommended)?.label ?? '');
 }
 
 /**

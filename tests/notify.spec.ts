@@ -109,7 +109,18 @@ test.describe('Approvals in the main window', () => {
     await expect(column.getByTestId('approval-pager')).toHaveText('1 of 3');
     // Decide first, then Summary, each reference, and the chat where it was asked (D-224).
     await expect(column.getByTestId('approval-tab')).toHaveText(['Decide', 'Summary', 'plan.html', 'PR #812', "auth-refactor's tab"]);
+    // Nothing starts picked, recommended or not, and Send waits for a pick (D-385).
+    await expect(column.locator('[role="radio"][aria-checked="true"]')).toHaveCount(0);
+    await expect(column.getByTestId('approval-send')).toBeDisabled();
+    if (process.env.PANE_VERIFY_DIR) await column.screenshot({ path: `${process.env.PANE_VERIFY_DIR}/approval-column-open.png` });
     await column.getByRole('radio', { name: /Keep Redis/ }).click();
+    // The person's own pick survives paging away and back.
+    await queue.getByTestId('approvals-row').filter({ hasText: 'Apply migration 0042' }).click();
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await expect(column.locator('[role="radio"][aria-checked="true"]')).toHaveCount(0);
+    await queue.getByTestId('approvals-row').filter({ hasText: 'Which session store' }).click();
+    await expect(column.getByRole('radio', { name: /Keep Redis/ })).toHaveAttribute('aria-checked', 'true');
+    if (process.env.PANE_VERIFY_DIR) await column.screenshot({ path: `${process.env.PANE_VERIFY_DIR}/approval-column-restored.png` });
     await column.getByTestId('approval-send').click();
 
     await queue.getByTestId('approvals-row').filter({ hasText: 'Apply migration 0042' }).click();
@@ -154,6 +165,51 @@ test.describe('Approvals in the main window', () => {
     const beside = page.getByTestId('approvals-origin');
     await expect(beside).toContainText('Pane');
     await expect(beside).toContainText('auth-refactor');
+  });
+
+  const remoteApproval = () => {
+    const fixture = notifyFixture();
+    const [options] = fixture.items;
+    const remote = { ...options, id: 'mini:q-remote', machineId: 'mini', machine: 'qa-mini', title: 'Approve the plan draft?', links: [{ label: 'Plan draft', path: '/work/bundle/plan.html' }] };
+    const machines: MachineState[] = [
+      { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+      { id: 'mini', label: 'qa-mini', kind: 'remote', status: 'online', offlineSince: null },
+    ];
+    return { snapshot: { ...fixture, items: [remote, ...fixture.items.slice(1)] }, machines };
+  };
+
+  test('another machine\'s approval opens its linked file here, "on <machine>"', async ({ page }) => {
+    const { snapshot, machines } = remoteApproval();
+    const plan = { kind: 'html', path: '/work/bundle/plan.html', html: '<!doctype html><body style="font:15px system-ui;padding:24px"><h1>Plan draft</h1><p>Served by qa-mini.</p></body>' };
+    await boot(page, snapshot, {}, undefined, [], null, { machines, reads: { mini: { 'autopilot:read-doc': plan } } });
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    await expect(column.getByTestId('approval-title')).toHaveText('Approve the plan draft?');
+    await column.getByTestId('approval-tab').filter({ hasText: 'Plan draft' }).click();
+    const file = column.getByTestId('approval-machine-file');
+    await expect(file).toContainText('Plan draft· on qa-mini');
+    await expect(file.getByTestId('approvals-machine-page')).toHaveAttribute('srcdoc', /Served by qa-mini/);
+    await expect(column).not.toContainText('open it there');
+  });
+
+  test('another machine\'s file says so with Retry when that machine doesn\'t answer, and Retry reads again', async ({ page }) => {
+    const { snapshot, machines } = remoteApproval();
+    // No document comes back: what an unreachable machine looks like to the column.
+    await boot(page, snapshot, {}, undefined, [], null, { machines, reads: { mini: { 'autopilot:read-doc': { success: false } } } });
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    await column.getByTestId('approval-tab').filter({ hasText: 'Plan draft' }).click();
+    await expect(column.getByTestId('approvals-doc-failed')).toContainText("Couldn't reach qa-mini");
+    // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+    const docReads = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getMachineReads(): Array<{ machineId: string; channel: string }> } })
+      .__paneTestElectronMock.getMachineReads().filter((read) => read.channel === 'autopilot:read-doc'));
+    const before = (await docReads()).length;
+    expect(before).toBeGreaterThan(0);
+    await column.getByTestId('approvals-doc-retry').click();
+    // Retry asks the same machine again.
+    await expect.poll(async () => (await docReads()).length).toBeGreaterThan(before);
+    expect((await docReads()).every((read) => read.machineId === 'mini')).toBe(true);
+    await expect(column.getByTestId('approvals-doc-failed')).toContainText("Couldn't reach qa-mini");
   });
 
   test("a worker item shows its Pane on the asking tab, not the tab the Pane last showed", async ({ page }) => {

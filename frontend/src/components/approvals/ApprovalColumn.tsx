@@ -6,17 +6,19 @@ import { cn } from '../../utils/cn';
 import { runNotify, sendNotify, useNotifyStore } from '../../stores/notifyStore';
 import { leadingQn } from '../../../../shared/autopilotDecision';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
-import { useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
+import { draftKey as draftKeyOf, useApprovalColumnStore, type ApprovalSurface } from '../../stores/approvalColumnStore';
 import { AutopilotDocument, AutopilotWebPage } from '../autopilot/AutopilotDocument';
 import { isLightTheme, useTheme } from '../../contexts/ThemeContext';
 import { sentenceStart } from '../../../../shared/approvalStatus';
 import { readSummaryPage, type SummaryRead } from './summaryPage';
+import { MachineDocument } from './MachineContext';
+import { linkedFileReadsHere } from './machineDoc';
 import { ItemCloseForm, NotifyCard } from '../notify/NotifyCard';
 import { relayReadOnlyLine } from './approvalGroups';
 import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import {
-  askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, recommendedPicks, replyLine,
+  askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
 } from './approvalCard';
 
@@ -255,13 +257,12 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
   const now = useNow();
   const questions = useMemo(() => markedQuestions(item), [item]);
   // The draft lives in the store, so it survives paging away and a refused Send (F-4).
-  const draftKey = `${item.id}:${item.version ?? 1}`;
+  const draftKey = draftKeyOf(item);
   const draft = useApprovalColumnStore((state) => state.drafts[draftKey]);
   const setDraft = useApprovalColumnStore((state) => state.setDraft);
   const clearSentDraft = useApprovalColumnStore((state) => state.clearSentDraft);
-  // Recommended picks start selected (D-345); the person changes any before sending.
-  const preselected = useMemo(() => recommendedPicks(item), [item]);
-  const picks = draft?.picks ?? (item.state === 'waiting' ? preselected : NO_PICKS);
+  // Nothing starts selected, recommended or not (D-385): only the person's own picks show.
+  const picks = draft?.picks ?? NO_PICKS;
   const text = draft?.text ?? '';
   const setPicks = (update: (current: string[]) => string[]) => setDraft(draftKey, { picks: update(picks), text });
   const setText = (value: string) => setDraft(draftKey, { picks, text: value });
@@ -453,7 +454,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
               <p className="min-w-0 flex-1 text-[12.5px] text-text-tertiary">
                 {item.agentPrompt ? 'A permission prompt takes one of its options.' : item.optionsOnly ? 'This question takes one of its options.'
                   : replyBeingRead(item) ? `${sentenceStart(item.reply?.reader?.name ?? item.source.name)} is reading your last reply. You can send another once it says how it took it, or pick an option now.`
-                    : preselected.some(Boolean) ? 'Recommended picks are pre-selected; change any before you send.' : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
+                    : 'Pick an option, or reply in your own words: an answer, or a question about it.'}
               </p>
               {!item.agentPrompt && (
                 <button type="button" onClick={() => setClosing(true)} className="shrink-0 text-[12.5px] text-text-tertiary hover:text-text-primary" data-testid="approval-close-item">Close…</button>
@@ -547,6 +548,11 @@ function QuestionBlock({ question, label, picked, disabled, onPick, showTitle }:
   );
 }
 
+/** The machine an approval is from, when it isn't this one: the reading tabs say "on <machine>". */
+function otherMachine(item: NotifyItem): string | undefined {
+  return (item.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID ? undefined : item.machine ?? 'the asking machine';
+}
+
 /**
  * Summary (P4): one HTML page, the asker's own or the one Pane writes from the card, read from the
  * machine that holds the approval and shown with scripts and network off, as on the phone.
@@ -555,24 +561,43 @@ function SummaryTab({ item }: { item: NotifyItem }) {
   const { theme } = useTheme();
   const dark = !isLightTheme(theme);
   const [page, setPage] = useState<SummaryRead | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let current = true;
     setPage(null);
     void readSummaryPage(item, dark ? 'dark' : 'light').then((read) => { if (current) setPage(read); });
     return () => { current = false; };
     // A new version rewrites the template; the item's other changes don't.
-  }, [item.id, item.version, item.state, item.reply?.state, dark]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [item.id, item.version, item.state, item.reply?.state, dark, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const retry = () => {
+    setPage(null);
+    const machineId = item.machineId ?? LOCAL_MACHINE_ID;
+    const reconnect = machineId === LOCAL_MACHINE_ID ? Promise.resolve() : window.electronAPI.machines.retry(machineId).catch(() => undefined);
+    void reconnect.then(() => setAttempt((current) => current + 1));
+  };
+  return <SummaryView item={item} page={page} onRetry={retry} />;
+}
+
+/** What the Summary tab shows for a read: loading, the sandboxed page, or why not with Retry. */
+export function SummaryView({ item, page, onRetry }: { item: NotifyItem; page: SummaryRead | null; onRetry: () => void }) {
   const label = page?.kind === 'page' ? baseName(page.path) : 'Written by Pane';
+  const machine = otherMachine(item);
   return (
     <div className="absolute inset-0 flex flex-col p-3" data-testid="approval-summary">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-secondary">
         <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border-secondary bg-surface-tertiary px-3 text-[12.5px] text-text-tertiary">
           <BookOpen className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="min-w-0 truncate font-medium text-text-secondary" data-testid="approval-summary-source">{label}</span>
+          {machine && <span className="min-w-0 shrink truncate" data-testid="approval-summary-machine">· on {machine}</span>}
           <span className="shrink-0">· sandboxed, no scripts</span>
         </div>
         {page === null && <p className="m-auto text-[13px] text-text-tertiary">Loading the Summary…</p>}
-        {page?.kind === 'failed' && <p className="m-auto px-6 text-center text-[13px] text-text-secondary">{page.message}</p>}
+        {page?.kind === 'failed' && (
+          <div className="m-auto px-6 text-center text-[13px] text-text-secondary" role="status">
+            <p>{page.message}</p>
+            <button type="button" onClick={onRetry} className="mt-2 font-medium text-interactive hover:underline" data-testid="approval-summary-retry">Retry</button>
+          </div>
+        )}
         {(page?.kind === 'page' || page?.kind === 'template') && (
           // sandbox with no allowances: no scripts, no forms, no navigation; the page's own policy blocks the network.
           <iframe title={`Summary: ${item.title}`} sandbox="" srcDoc={page.html} className="min-h-0 w-full flex-1 border-0 bg-surface-primary" data-testid="approval-summary-frame" />
@@ -589,7 +614,6 @@ function baseName(file: string): string {
 /** A reference: a file in the document viewer, a URL in the in-app browser, another approval in place. */
 function LinkTab({ item, link, onOpenApproval }: { item: NotifyItem; link: NotifyLink; onOpenApproval: (id: string) => void }) {
   const activeMachineId = useAllMachinesStore((state) => state.entries.find((entry) => entry.active)?.id ?? LOCAL_MACHINE_ID);
-  const here = (item.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID && activeMachineId === LOCAL_MACHINE_ID;
   if ('approval' in link) {
     return (
       <div className="p-6 text-[13.5px] text-text-secondary">
@@ -599,8 +623,27 @@ function LinkTab({ item, link, onOpenApproval }: { item: NotifyItem; link: Notif
     );
   }
   if ('url' in link) return <div className="absolute inset-0 flex flex-col"><AutopilotWebPage key={link.url} src={link.url} title={link.label} /></div>;
-  if (!here) return <p className="p-6 text-[13.5px] text-text-secondary">{link.label} is a file on {item.machine ?? 'the asking machine'}: open it there.</p>;
-  return <div className="absolute inset-0 flex flex-col overflow-y-auto"><AutopilotDocument key={link.path} path={link.path} label={link.label} /></div>;
+  if (linkedFileReadsHere(item, activeMachineId)) return <div className="absolute inset-0 flex flex-col overflow-y-auto"><AutopilotDocument key={link.path} path={link.path} label={link.label} /></div>;
+  return <MachineFileFrame item={item} label={link.label}><MachineDocument key={link.path} item={item} path={link.path} label={link.label} machine={item.machine ?? 'the asking machine'} /></MachineFileFrame>;
+}
+
+/** A file read from the approval's machine, under a header naming the file and, when it's another computer, that machine. */
+export function MachineFileFrame({ item, label, children }: { item: NotifyItem; label: string; children: ReactNode }) {
+  const machine = otherMachine(item);
+  return (
+    <div className="absolute inset-0 flex flex-col p-3" data-testid="approval-machine-file">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-secondary">
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border-secondary bg-surface-tertiary px-3 text-[12.5px] text-text-tertiary">
+          <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate font-medium text-text-secondary">{label}</span>
+          {machine && <span className="min-w-0 shrink truncate" data-testid="approval-file-machine">· on {machine}</span>}
+          {/* An HTML page from another machine shows as text in a frame with no scripts (MachineDocView). */}
+          <span className="shrink-0">· no scripts</span>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 /** Another approval opened from a link, in place, with Back. */

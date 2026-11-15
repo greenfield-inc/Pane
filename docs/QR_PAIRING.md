@@ -212,8 +212,9 @@ every computer it reached through yours.
 - **"&lt;computer&gt; uses the relay … and this computer uses …":** set both
   computers to the same relay.
 - **"Reconnecting to &lt;computer&gt;…":** every route failed. The app keeps
-  retrying, at least every 5 seconds, while it is open; nothing to do. On the
-  same Wi-Fi it connects directly even when the internet is down.
+  retrying while it is open, at least every 5 seconds (once a minute after an
+  hour without reaching it); nothing to do. On the same Wi-Fi it connects
+  directly even when the internet is down.
 - **"Asleep since 9:40":** the computer is asleep. Wake it, or turn on Keep
   Awake.
 - **A browser on a Wi-Fi with no internet** can't reach the computer: a

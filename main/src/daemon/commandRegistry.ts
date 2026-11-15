@@ -4,6 +4,7 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { AsyncLocalStorage } from 'async_hooks';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import type { PaneDaemonCaller } from '../../../shared/types/daemon';
+import { runpaneWaits } from '../services/agentStatus/midTurn';
 
 const invocationSignal = new AsyncLocalStorage<AbortSignal>();
 
@@ -15,6 +16,12 @@ export function paneCommandSignal(): AbortSignal | undefined {
 const remoteInvocation = new AsyncLocalStorage<{ teammate: string | null }>();
 
 const callerInvocation = new AsyncLocalStorage<PaneDaemonCaller>();
+
+/**
+ * Calls that hold the caller until something else happens (`runpane watch`, `panels wait`,
+ * `notify`): while one is open, its tab is waiting, not mid-turn (agentStatus/midTurn.ts).
+ */
+const RUNPANE_WAITING_CHANNELS = new Set(['runpane:workspace:wait', 'runpane:panels:wait', 'runpane:notify']);
 
 /** The agent's Pane and tab that sent the current request over the control socket; undefined for Pane's own UI. */
 export function paneCommandCaller(): PaneDaemonCaller | undefined {
@@ -131,7 +138,15 @@ export class PaneCommandRegistry {
   /** Transport-owned cancellation cannot be supplied through request arguments. */
   invokeConnected(channel: string, args: readonly PaneCommandValue[], signal: AbortSignal, caller?: PaneDaemonCaller): Promise<PaneCommandValue> {
     const run = () => invocationSignal.run(signal, () => this.invoke(channel, args));
-    return caller ? callerInvocation.run(caller, run) : run();
+    if (!caller) return run();
+    if (!RUNPANE_WAITING_CHANNELS.has(channel)) return callerInvocation.run(caller, run);
+    // The caller's tab is waiting, not working, until the call settles or its caller goes away.
+    const end = runpaneWaits.begin(caller.panelId);
+    signal.addEventListener('abort', end, { once: true });
+    return callerInvocation.run(caller, run).finally(() => {
+      signal.removeEventListener('abort', end);
+      end();
+    });
   }
 
   /** Provenance is set by the HTTP transport, never by caller-supplied arguments. */
