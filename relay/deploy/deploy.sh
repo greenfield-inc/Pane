@@ -109,8 +109,8 @@ for line in "${RELAYS[@]}"; do
   startup=$(cat <<EOF
 #!/bin/bash
 set -euo pipefail
-token=\$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
-secret() { curl -sf -H "Authorization: Bearer \$token" "https://secretmanager.googleapis.com/v1/projects/$PROJECT/secrets/\$1/versions/latest:access" | sed -E 's/.*"data":"([^"]+)".*/\1/' | base64 -d; }
+token=\$(curl -s -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token | tr -d '\n' | sed -E 's/.*"access_token": *"([^"]+)".*/\1/')
+secret() { curl -sf -H "Authorization: Bearer \$token" "https://secretmanager.googleapis.com/v1/projects/$PROJECT/secrets/\$1/versions/latest:access" | tr -d '\n' | sed -E 's/.*"data": *"([^"]+)".*/\1/' | base64 -d; }
 install -d -m 0700 -o 65532 -g 65532 /var/lib/pane-relay
 secret pane-relay-registry-secret > /var/lib/pane-relay/registry-secret
 secret pane-relay-apns-key > /var/lib/pane-relay/apns-key.p8 || rm -f /var/lib/pane-relay/apns-key.p8
