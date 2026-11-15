@@ -1,7 +1,6 @@
 import { X509Certificate } from 'crypto';
 import https from 'https';
 import tls from 'tls';
-import * as acme from 'acme-client';
 import type { ComputerKey, KeyStore } from './computerKey';
 
 export const LETS_ENCRYPT_DIRECTORY = 'https://acme-v02.api.letsencrypt.org/directory';
@@ -84,6 +83,9 @@ export class ComputerCertificate {
   private async issue(): Promise<void> {
     const { key, domain } = this.options;
     const base = `${key.id}.${domain}`;
+    // Loaded here, not at startup: with its x509 and axios dependencies it cost about
+    // 100 ms of main-process time before the window showed, and only issuing uses it.
+    const acme = await import('acme-client');
     const [, csr] = await acme.crypto.createCsr({ commonName: base, altNames: [base, `*.${base}`] }, key.privateKeyPem);
     const savedAccountKey = await this.options.accountStore.read();
     const accountKey = savedAccountKey ?? (await acme.crypto.createPrivateEcdsaKey('P-256')).toString();

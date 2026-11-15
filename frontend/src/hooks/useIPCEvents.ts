@@ -297,11 +297,12 @@ export function useIPCEvents() {
     });
     unsubscribeFunctions.push(unsubscribeSessionUpdated);
 
-    const unsubscribePaneFocusRequested = window.electronAPI.events.onPaneFocusRequested(({ paneId, panelId }) => {
+    const unsubscribePaneFocusRequested = window.electronAPI.events.onPaneFocusRequested(async ({ paneId, panelId }) => {
       devLog.debug('[useIPCEvents] Pane focus requested:', { paneId, panelId });
       // `panes focus` and `panes create --focus` move the host's own desktop
       // window only; a desktop connected to that host as a remote stays put.
-      const config = useConfigStore.getState().config;
+      // A pane:// link that launched Pane can arrive before config has loaded.
+      const config = useConfigStore.getState().config ?? await useConfigStore.getState().fetchConfig().catch(() => null);
       if (!config || getActiveRemoteHostId(config.remoteDaemon) !== null) return;
       // Same as clicking the Pane in the sidebar, which also leaves a repository or Sessions view.
       useNavigationStore.getState().navigateToSessions();
