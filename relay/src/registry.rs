@@ -200,6 +200,8 @@ impl Helper {
 }
 
 const POST_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long an update waits for the other helpers once one took it (see `wait`).
+const STRAGGLER_GRACE: Duration = Duration::from_secs(2);
 
 pub struct Registry {
     entries: Mutex<HashMap<String, Entry>>,
@@ -398,18 +400,29 @@ impl Registry {
     }
 }
 
-/// Succeeds as soon as one helper took the update, and fails only when all
-/// failed: a helper that is down answers no DNS, so resolvers ask the other.
-/// With no helpers, succeeds at once.
+/// Succeeds once every helper took the update, or `STRAGGLER_GRACE` after the first one
+/// did; fails only when all failed. The caller next tells a CA to look, and a resolver may
+/// ask any helper, so a slower helper needs the value too. A helper that is down answers
+/// no DNS, so it holds the update up by the grace at most. With no helpers, succeeds at once.
 async fn wait(replies: Vec<oneshot::Receiver<Result<(), String>>>) -> Result<(), String> {
     if replies.is_empty() {
         return Ok(());
     }
     let mut pending: tokio::task::JoinSet<_> = replies.into_iter().collect();
     let mut first_err = None;
-    while let Some(answer) = pending.join_next().await {
+    let mut took_it = None;
+    loop {
+        let answer = match took_it {
+            None => pending.join_next().await,
+            Some(deadline) => tokio::time::timeout_at(deadline, pending.join_next())
+                .await
+                .unwrap_or(None),
+        };
+        let Some(answer) = answer else { break };
         match answer {
-            Ok(Ok(Ok(()))) => return Ok(()),
+            Ok(Ok(Ok(()))) => {
+                took_it.get_or_insert(tokio::time::Instant::now() + STRAGGLER_GRACE);
+            }
             Ok(Ok(Err(e))) => {
                 first_err.get_or_insert(e);
             }
@@ -417,6 +430,9 @@ async fn wait(replies: Vec<oneshot::Receiver<Result<(), String>>>) -> Result<(),
                 first_err.get_or_insert("registry push stopped".to_string());
             }
         }
+    }
+    if took_it.is_some() {
+        return Ok(());
     }
     Err(first_err.unwrap_or_else(|| "registry push stopped".to_string()))
 }

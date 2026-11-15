@@ -891,6 +891,26 @@ async fn a_txt_update_succeeds_when_one_helper_never_answers() {
 }
 
 #[tokio::test]
+async fn an_acme_challenge_waits_for_a_slower_helper() {
+    use pane_relay::registry::{AcmeTxt, Registry};
+    // A relay near one helper and far from the other: the CA may ask either.
+    let (near, _) = fake_helper(Some(Duration::ZERO)).await;
+    let (far, _) = fake_helper(Some(Duration::from_millis(700))).await;
+    let client = Registry::new(&[near, far], Some("s3cret".into()), None, 10).unwrap();
+    let started = Instant::now();
+    let challenge = AcmeTxt {
+        name: format!("_acme-challenge.{D}"),
+        values: vec!["token-1".into()],
+    };
+    client.publish_acme(challenge).await.unwrap();
+    assert!(
+        started.elapsed() >= Duration::from_millis(700),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
 async fn a_txt_update_goes_out_ahead_of_a_queued_resync() {
     // A slow helper keeps a resync of every computer waiting in the queue.
     let (url, mut posts) = fake_helper(Some(Duration::from_secs(2))).await;
