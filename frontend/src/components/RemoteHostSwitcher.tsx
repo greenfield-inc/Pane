@@ -62,9 +62,10 @@ export function RemoteHostSwitcher({
     id: machine.id,
     // The pills sit on the name's line, clear of the pencil that shows on hover.
     label: (
-      <span className="flex items-center gap-3">
+      <span className="flex min-w-0 items-center gap-3">
         <span className="min-w-[5rem] flex-1 truncate font-medium">{machine.name}</span>
-        <RoutePills routes={machine.routes ?? []} className="flex-nowrap" />
+        {/* Many routes wrap onto a second line instead of running under the pencil. */}
+        <RoutePills routes={machine.routes ?? []} className="min-w-0 flex-initial" />
       </span>
     ),
     description: machine.subtitle,

@@ -118,7 +118,7 @@ function routeLine(pill: RoutePill, route: ComputerRoute): string {
 function linkedSentence(computer: RemoteComputer): string {
   if (computer.linkedBy) return `By ${computer.linkedBy}, which paired with both computers`;
   const sources = new Set(computer.routes.map((route) => route.source));
-  if (sources.has('link')) return 'With a one-time link';
+  if (sources.has('link')) return `By this computer and ${computer.label}, with a one-time link`;
   if (sources.has('ssh')) return 'Over SSH from this computer';
   if (sources.has('manual')) return 'With a connection code';
   return 'Found on Tailscale; not linked';

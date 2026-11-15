@@ -76,6 +76,25 @@ test('the menu shows a computer once with every route as a pill and a dot on the
   await expect(page.getByRole('menuitemradio', { name: /Build Box/ }).getByLabel('Same network, in use')).toBeVisible();
 });
 
+test('a saved computer agents do not run on shows its live state and the route it is on, with All machines off', async ({ page }) => {
+  await installElectronApiMock(page, {
+    computers: [buildBox],
+    tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale.' },
+    machineConnections: {
+      machines: [
+        { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+        { id: 'build-box', label: 'Build Box', kind: 'remote', status: 'online', offlineSince: null, routeId: 'relay:https://bb.runpane.net' },
+      ],
+      reads: {},
+    },
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Switch machine$/ }).click();
+  const row = page.getByRole('menuitemradio', { name: /Build Box/ });
+  await expect(row).toContainText('Windows · Online');
+  await expect(row.getByLabel('Pane relay, in use')).toBeVisible();
+});
+
 const tailnetMachines: TailnetMachineList = {
   ok: true,
   tailnet: 'demo.github',

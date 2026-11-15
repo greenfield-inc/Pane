@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
-import { useAllMachinesStore } from '../stores/allMachinesStore';
 import { buildMachineList, machineOsFromPlatform, type MachineEntry, type MachineOs } from '../utils/machineList';
 import { useConnectionPresence } from './useConnectionPresence';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import type { ComputerRoutesReport } from '../../../shared/types/remoteComputers';
+import type { MachineState } from '../../../shared/types/machineConnections';
 
 export type MachineSelectOutcome =
   | { ok: true }
@@ -35,7 +36,9 @@ function errorText(cause: unknown, fallback: string): string {
  */
 export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMachinesOptions) {
   const computers = useConfigStore((state) => state.config?.remoteDaemon?.client.computers);
-  const machineStates = useAllMachinesStore((state) => state.machines);
+  // Each saved computer's live state (online, the route in use), whether or not All machines is on.
+  const [machineStates, setMachineStates] = useState<MachineState[]>([]);
+  const localMode = connectionState.mode !== 'remote';
   const marks = useConfigStore((state) => state.config?.machineMarks);
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const [tailnet, setTailnet] = useState<TailnetMachineList | null>(null);
@@ -61,11 +64,28 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
         setListError(list.error ?? 'Could not list your machines.');
       }
       if (access?.success && access.data?.machineName) setLocalName(access.data.machineName);
+      else if (localMode) {
+        // Without Tailscale, this computer's name is the one it reports to the computers it links with.
+        const report: ComputerRoutesReport | null = await window.electronAPI.invoke('computers:routes-report').catch(() => null);
+        if (mounted.current && report?.name) setLocalName(report.name);
+      }
     } catch (cause) {
       if (mounted.current) setListError(errorText(cause, 'Could not list your machines.'));
     } finally {
       if (mounted.current) setRefreshing(false);
     }
+  }, [localMode]);
+
+  useEffect(() => {
+    let stopped = false;
+    const unsubscribe = window.electronAPI.machines.onEvent((event) => {
+      if (event.type === 'machines') setMachineStates(event.machines);
+    });
+    window.electronAPI.machines.list().then((states) => { if (!stopped) setMachineStates(states); }).catch(() => undefined);
+    return () => {
+      stopped = true;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

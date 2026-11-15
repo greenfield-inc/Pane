@@ -311,7 +311,8 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   // step through the machines in its order, skipping ones that cannot be
   // picked, and ⌃⌘0 goes between All machines and the machine it shows.
   const stepMachine = useCallback((delta: 1 | -1) => {
-    const pickable = machines.filter((machine) => machine.active || machine.action !== 'none');
+    // Next and previous skip a computer that is offline or can't be reached here; the switcher still offers it.
+    const pickable = machines.filter((machine) => machine.active || (machine.action !== 'none' && machine.presence !== 'dimmed'));
     if (pickable.length === 0) return;
     const current = allMachines ? -1 : pickable.findIndex((machine) => machine.active);
     const next = pickable[(current + delta + pickable.length) % pickable.length];
