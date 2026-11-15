@@ -187,13 +187,23 @@ describe('merging computers', () => {
       expect(computers).toEqual([studio, teammate]);
     });
 
-    it('folds the two records together when it also names that computer\'s relay id and key', () => {
-      const tailnet: RemoteComputer = { id: 'tailnet-studio', label: 'studio-mac', routes: [teammateRoute] };
-      const { computers } = applyRoutesReport([studio, tailnet], tailnet.id, teammateRoute, {
+    it('ignores Studio Mac\'s relay id and key in a report over Tailscale, since anyone can repeat them', () => {
+      const teammate: RemoteComputer = { id: 'tailnet-teammate', label: 'teammate', routes: [teammateRoute] };
+      const { computers } = applyRoutesReport([studio, teammate], teammate.id, teammateRoute, {
         ...claimsStudio,
         relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
       });
-      expect(computers.map((computer) => [computer.id, computer.machineId, computer.routes.map((route) => route.kind)])).toEqual([['tailnet-studio', 'studio-install', ['tailscale', 'relay']]]);
+      expect(computers).toEqual([studio, teammate]);
+    });
+
+    it('folds a leftover record into the computer when the report comes over a route that checked that computer\'s key', () => {
+      const leftover: RemoteComputer = { id: 'relay-old', label: 'Studio Mac', machineId: 'studio-install', routes: [{ ...relayRoute, id: 'relay:old', token: 'old' }] };
+      const fresh: RemoteComputer = { id: 'relay-k7xq2m4n8p3r5t6v', label: 'Studio Mac', routes: [relayRoute] };
+      const { computers } = applyRoutesReport([leftover, fresh], fresh.id, relayRoute, {
+        ...claimsStudio,
+        relay: { id: 'k7xq2m4n8p3r5t6v', address: 'https://k7xq2m4n8p3r5t6v.runpane.net', fingerprint: 'fp', local: [] },
+      });
+      expect(computers.map((computer) => [computer.id, computer.machineId])).toEqual([['relay-k7xq2m4n8p3r5t6v', 'studio-install']]);
     });
   });
 });

@@ -431,10 +431,12 @@ export function foundRoutes(report: ComputerRoutesReport, token: string): Comput
 
 /**
  * Applies what a computer reported on connecting over `via`: its install id, OS, and found routes.
- * Found routes it no longer reports are dropped. An install id is the host's own claim, so it moves
- * a route onto another saved record, or folds that record in, only when the report's relay id and
- * key are that record's too. A route that answers with an install id no record holds moves to a new
- * record; one that answers with an id another record holds unconfirmed stays where it is.
+ * Found routes it no longer reports are dropped. Everything in a report is the host's own claim, and
+ * the only claim checked is the key on a route whose TLS is pinned to it (Pane relay, Same network).
+ * So only a report over such a route, naming that route's own key, may set the install id, move the
+ * route onto another saved record, or fold another record in, and that record must pin the same key.
+ * Any other report keeps to its own record and adds no route pinned to a key the record doesn't pin.
+ * A route that answers with an install id no record holds moves to a new record.
  */
 export function applyRoutesReport(
   computers: readonly RemoteComputer[],
@@ -444,21 +446,25 @@ export function applyRoutesReport(
 ): ComputersChange {
   const computer = computers.find((candidate) => candidate.id === computerId);
   if (!computer) return { computers: [...computers], id: computerId };
-  const found = foundRoutes(report, via.token);
+  const proven = via.relay !== undefined && report.relay !== undefined
+    && via.relay.computerId === report.relay.id && via.relay.fingerprint === report.relay.fingerprint;
+  const pinned = (route: ComputerRoute, record: RemoteComputer) => route.relay === undefined
+    || record.routes.some((own) => own.relay?.computerId === route.relay?.computerId && own.relay?.fingerprint === route.relay?.fingerprint);
+  const found = foundRoutes(report, via.token).filter((route) => proven || pinned(route, computer));
   const holder = computers.find((candidate) => candidate.id !== computerId && candidate.machineId === report.machineId);
-  const confirmed = holder !== undefined && reportNamesKeyOf(holder, report);
+  const confirmed = proven && holder !== undefined && reportNamesKeyOf(holder, report);
   if (computer.machineId && computer.machineId !== report.machineId && (!holder || confirmed)) {
     const remaining = computers.map((candidate) => (candidate.id === computerId
       ? { ...candidate, routes: candidate.routes.filter((route) => route.id !== via.id) }
       : candidate)).filter((candidate) => candidate.routes.length > 0);
-    return upsertComputer(remaining, { machineId: report.machineId, label: report.name, os: report.os, routes: [via, ...found] });
+    return upsertComputer(remaining, { machineId: proven ? report.machineId : undefined, label: report.name, os: report.os, routes: [via, ...found] });
   }
   const reported = new Set(found.map((route) => route.id));
   const kept = computer.routes.filter((route) => route.source !== 'found' || reported.has(route.id) || route.id === via.id);
   const updated: RemoteComputer = { ...computer, routes: withRoutes(kept, found) };
-  if (!holder || confirmed) updated.machineId = report.machineId;
+  if (proven && (!holder || confirmed)) updated.machineId = report.machineId;
   if (report.os) updated.os = report.os;
-  // Another saved record with this install id and the same key is the same computer: fold it in.
+  // Another saved record with this install id and the key this route just checked is the same computer: fold it in.
   const twin = confirmed ? holder : undefined;
   if (twin) updated.routes = withRoutes(updated.routes, twin.routes);
   return {
