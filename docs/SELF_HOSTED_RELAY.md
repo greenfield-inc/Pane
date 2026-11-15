@@ -1,63 +1,136 @@
 # Run your own relay
 
-Pane's relay is one open-source binary, `pane-relay`, in [`relay/`](../relay).
-Run it on your own machine and domain, and your computers connect there
-instead of Pane's servers. The wire protocol is
+Pane's relay gives each of your computers an https address that works from
+any network, so phones, browsers and other computers reach them from
+anywhere. Run your own and your computers use your domain and your machine
+instead of Pane's servers. Everything works the same: pairing, terminals,
+previews, alerts, linked computers and direct paths. The relay is one
+open-source binary, `pane-relay` ([`relay/`](../relay)); its wire protocol is
 [relay/PROTOCOL.md](../relay/PROTOCOL.md).
 
-## What you need
+## Start one in five minutes
 
-- A machine reachable from the internet on TCP 443 and on UDP and TCP 53,
-  plus UDP 7842 if you turn on QUIC address discovery (`--direct-quic`).
-- A domain you control, say `relay.example.com`, delegated to that machine:
-  an `NS` record for `relay.example.com` pointing at a name with an `A`
-  record for the machine.
-- Nothing else for certificates: with `--acme-cache` each relay gets and
-  renews its own from Let's Encrypt through its DNS helper, and computers get
-  theirs the same way. You can pass your own with `--cert` and `--key`
-  instead; it must cover `relay.example.com` and
-  `us.relay.relay.example.com` (each region's name).
+You need:
 
-## Run it
+- A Linux machine with a public IPv4 address and Docker, such as a small
+  cloud VM. This guide uses `203.0.113.10`.
+- A name for the relay under a domain whose DNS you manage, such as
+  `relay.example.com`. The relay answers DNS for every name under it, so use
+  a name you use for nothing else.
 
-With Node.js 22 or later, `runpane relay` runs the prebuilt binary for macOS,
-Linux or Windows (x64 and arm64). Start it with its DNS helper:
+1. **Open the ports.** In the machine's firewall or cloud security group,
+   allow TCP 443, UDP and TCP 53, and UDP 7842.
+
+2. **Add two DNS records** at the DNS provider for `example.com`:
+
+   | Name | Type | Value |
+   | --- | --- | --- |
+   | `relay-ns.example.com` | A | `203.0.113.10` |
+   | `relay.example.com` | NS | `relay-ns.example.com` |
+
+   `runpane relay init` prints these records, and every command below, for
+   your own name and address. It needs Node.js 22 or later and runs on any
+   machine:
+
+   ```sh
+   npx --yes runpane@latest relay init --domain relay.example.com --public-ip 203.0.113.10
+   ```
+
+   On the relay machine itself you can leave out `--public-ip` when the
+   machine's network interface has its public address.
+
+3. **Start the relay** on the machine, in an empty folder:
+
+   ```sh
+   curl -fsSLO https://raw.githubusercontent.com/greenfield-inc/Pane/main/relay/compose.yaml
+   printf '%s\n' PANE_RELAY_DOMAIN=relay.example.com PANE_RELAY_PUBLIC_IP=203.0.113.10 PANE_RELAY_NS=relay-ns.example.com > .env
+   docker compose up -d
+   ```
+
+   If Docker says port 53 is already in use, the machine's own DNS stub
+   holds it (Ubuntu and Debian run `systemd-resolved`). Turn the stub off,
+   keep the machine's own lookups working, and start again:
+
+   ```sh
+   sudo mkdir -p /etc/systemd/resolved.conf.d
+   printf '[Resolve]\nDNSStubListener=no\n' | sudo tee /etc/systemd/resolved.conf.d/pane-relay.conf
+   sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+   sudo systemctl restart systemd-resolved
+   docker compose up -d
+   ```
+
+4. **Check it.** Run `relay init` again. Once DNS has spread (usually a few
+   minutes), every line shows ✓ and it says the relay is ready:
+
+   ```text
+   Checks (DNS changes can take a few minutes; run this again after each step):
+     ✓ relay-ns.example.com A 203.0.113.10
+     ✓ relay.example.com NS relay-ns.example.com
+     ✓ relay.example.com A 203.0.113.10, answered by the relay
+     ✓ https://relay.example.com/healthz
+   ```
+
+   The relay gets its certificate from Let's Encrypt through its own DNS. The
+   first one takes about a minute once DNS works; until then the last check
+   says the certificate is not trusted yet, and `docker compose logs relay`
+   shows `relay certificate issued` when it arrives. To check by hand:
+   `curl https://relay.example.com/healthz` and
+   `dig @203.0.113.10 relay.example.com A`.
+
+5. **Point Pane at it.** On each computer: **Settings › Remote Access › More ›
+   Relay address**, enter `relay.example.com` and press Enter. The computer
+   reconnects through your relay, gets a certificate for
+   `<id>.relay.example.com`, and new QR codes use your domain. Phones paired
+   through Pane's servers need a new scan, and computers link only with
+   computers on the same relay.
+
+## Keep it running
+
+The relay restarts with Docker. `docker compose pull && docker compose up -d`
+updates it to the latest release. To stay on one release, add
+`PANE_RELAY_VERSION=2.4.226` (any release number) to `.env`. Certificates
+renew on their own, without a restart, and live in the `pane-relay` Docker
+volume.
+
+Every `pane-relay` flag also reads an environment variable, so any other
+setting goes in `.env` too, such as `PANE_RELAY_ACME_EMAIL` for a Let's
+Encrypt contact address. [relay/README.md](../relay/README.md#flags) lists
+them all, including the connection and byte limits and the blocklist. Limits
+count each client address, so a flood slows and refuses only the address it
+comes from. Many computers behind one shared address, such as an office
+network, may need a higher `--limit-agent-conns-per-min` and
+`--limit-new-ids-per-hour`.
+
+## Without Docker
+
+`runpane relay` runs `pane-relay` on macOS, Linux and Windows (x64 and
+arm64) with Node.js 22 or later. It downloads the binary for its own version
+from the GitHub release once, checks it against the release's
+`pane-relay-sha256.txt` and keeps it in your cache folder
+(`~/.cache/runpane/relay`, `~/Library/Caches/runpane/relay` on macOS,
+`%LOCALAPPDATA%\runpane\relay` on Windows). Its flags, output and exit code
+are `pane-relay`'s. Ports 443 and 53 need root, or on Linux the
+`CAP_NET_BIND_SERVICE` capability:
 
 ```sh
-npx --yes runpane@latest relay \
-  --domain relay.example.com \
-  --region us \
-  --listen 0.0.0.0:443 \
-  --acme-cache /var/lib/pane-relay/acme --acme-email ops@example.com \
-  --dns 0.0.0.0:53 \
-  --public-ip 203.0.113.10 \
-  --direct-quic 0.0.0.0:7842
+sudo npx --yes runpane@latest relay \
+  --domain relay.example.com --public-ip 203.0.113.10 --ns relay-ns.example.com \
+  --dns 0.0.0.0:53 --direct-quic 0.0.0.0:7842 \
+  --acme-cache /var/lib/pane-relay/acme
 ```
 
-Ports 443 and 53 need root, or on Linux the `CAP_NET_BIND_SERVICE`
-capability. `runpane relay` passes its flags to `pane-relay` unchanged, so the
-`pane-relay` commands below work the same through it.
+The release also carries each binary, `pane-relay-<platform>-<arch>`, to
+download yourself, and the container image is
+`ghcr.io/greenfield-inc/pane-relay`. To build from source, run
+`cargo build --release` in `relay/`, or `docker build -t pane-relay relay/`.
 
-Or use the container: `docker build -t pane-relay relay/`, then pass the same
-flags after the image name. Publish the ports above, and mount a directory for
-`--acme-cache` that uid 65532 (the image's `nonroot` user) can write. To build
-the binary yourself, run `cargo build --release` in `relay/`.
-
-The first start serves a stand-in certificate for a few seconds while Let's
-Encrypt checks the relay's DNS; renewals swap the new certificate in without
-a restart. `--acme-directory` points at another CA, such as Let's Encrypt
-staging while you try things out. The relay's DNS publishes CAA records that
-allow only Let's Encrypt; with another CA, set `--caa-issuer` to its domain.
-
-`--direct-quic` is optional. It helps phones and computers find a direct
-path to each other; without it they still connect.
-
-`runpane relay --help` and [relay/README.md](../relay/README.md) list every
-flag, including connection and byte limits and the blocklist. Limits count
-each client address, so a flood slows and refuses only the address it comes
-from. Many computers behind one shared address, such as an office network,
-may need a higher `--limit-agent-conns-per-min` and
-`--limit-new-ids-per-hour`.
+`--acme-directory` points at another CA, such as Let's Encrypt staging
+(`https://acme-staging-v02.api.letsencrypt.org/directory`) while you try
+things out. The relay's DNS publishes CAA records that allow only Let's
+Encrypt; with another CA, set `--caa-issuer` to its domain. `--cert` and `--key` take your own certificate instead; it must
+cover `relay.example.com` and `us.relay.relay.example.com` (each region's
+name). `--direct-quic` is optional: it helps phones and computers find a
+direct path to each other, and without it they still connect.
 
 ## Two name servers
 
@@ -94,14 +167,6 @@ Check it:
 curl https://relay.example.com/healthz
 dig @203.0.113.10 relay.example.com A
 ```
-
-## Point Pane at it
-
-On each computer: **Settings › Remote Access › More › Relay address**, enter
-`us.relay.relay.example.com` (or `host:port`). The computer reconnects
-through your relay, gets a certificate for `<id>.relay.example.com`, and new
-QR codes use your domain. Phones already paired through Pane's servers need a
-new scan.
 
 ## Alerts
 

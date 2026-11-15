@@ -114,10 +114,11 @@ of every computer it reached through yours.
 
 ## Use your own relay
 
-Set **Settings › Remote Access › More › Relay address** to a relay you run,
-and Pane connects there instead of Pane's servers. Computers link only with
-computers on the same relay. See
-[Run your own relay](SELF_HOSTED_RELAY.md).
+Run a relay on your own machine and domain in a few minutes with Docker
+([Run your own relay](SELF_HOSTED_RELAY.md)), then set **Settings › Remote
+Access › More › Relay address** to its domain. Pane connects there instead of
+Pane's servers, and everything above works the same, on the same Wi-Fi and
+from anywhere. Computers link only with computers on the same relay.
 
 ## Use Tailscale instead
 
