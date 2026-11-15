@@ -30,7 +30,7 @@ const INSTRUCTIONS = [
   `- ${scratchRule()}`,
   'Each tool runs the matching `runpane` command against the running Pane app and returns its `--json` output.',
   '- `sessions_create` starts a Session, where a workstream lives. A new Pane creates a worktree that installs and builds, so create one only when the work\'s branch has none; add later agents with `agents_start` or `panels_create` and `pane: <id>` (inside a Pane, `$PANE_SESSION_ID` is its id).',
-  '- `agents_start` starts an agent on a task, `agents_status` checks on it, and `agents_send` sends it a follow-up. `panels_input` sends named keys (for example `down,enter`) to answer a menu or prompt in an agent\'s terminal. Ask the user before answering trust or permission prompts.',
+  '- `agents_start` starts an agent on a task, `agents_status` checks on it, `agents_send` sends it a follow-up, and `agents_ask` asks any agent and model one read-only question and returns the answer without a tab. `panels_input` sends named keys (for example `down,enter`) to answer a menu or prompt in an agent\'s terminal. Ask the user before answering trust or permission prompts.',
   '- Ids come from `repos_list`, `panes_list`, `workspace_state` and `agents_start`.',
   '- Pass `yes: true` to a tool that changes state only when the user asked for that change or your Pane instructions authorize it; without it the call is refused and nothing happens.',
   '- `panels_open` shows the user a page, report, file or local dev server as a tab beside the agent.',

@@ -35,6 +35,12 @@ interface Received {
   epoch: string;
 }
 
+/** Where a catch-up read starts in a machine's journal. */
+interface JournalCursor {
+  since: number;
+  epoch?: string;
+}
+
 const waitResultSchema = boundary.object({
   epoch: boundary.string,
   entries: boundary.array(boundary.json),
@@ -59,8 +65,11 @@ export class RemoteMemberEvents {
     return this.deps.machines.subscribe(event => {
       if (event.type === 'resync' && event.machineId !== LOCAL_MACHINE_ID) void this.catchUp(event.machineId);
       if (event.type !== 'event' || event.channel !== 'workspace:entry' || event.machineId === LOCAL_MACHINE_ID) return;
-      const received = decodeReceived(event.args[0], event.args[1]);
-      if (!received) return;
+      const [rawEntry, rawEpoch] = event.args;
+      const entry = decodeOptionalBoundary(rawEntry, workspaceEntrySchema);
+      const epoch = decodeOptionalBoundary(rawEpoch, boundary.string);
+      if (!entry || epoch === undefined) return;
+      const received: Received = { entry, epoch };
       const held = this.held.get(event.machineId);
       if (held) held.push(received);
       else this.record(event.machineId, received);
@@ -90,7 +99,7 @@ export class RemoteMemberEvents {
 
   private async readBacklog(machineId: string, paneIds: string[]): Promise<void> {
     const latest = this.deps.journal.latestFromMachine(machineId)?.machine;
-    let request: { since: number; epoch?: string } = latest ? { since: latest.gen, epoch: latest.epoch } : { since: 0 };
+    let request: JournalCursor = latest ? { since: latest.gen, epoch: latest.epoch } : { since: 0 };
     for (;;) {
       const result = decodeOptionalBoundary(await this.deps.machines.invoke(machineId, 'runpane:workspace:wait', [{
         ...request,
@@ -134,9 +143,4 @@ export class RemoteMemberEvents {
       machine: { id: machineId, label: member.machine.label, epoch, gen: entry.gen },
     });
   }
-}
-
-function decodeReceived(entry: unknown, epoch: unknown): Received | undefined {
-  const decoded = decodeOptionalBoundary(entry, workspaceEntrySchema);
-  return decoded && typeof epoch === 'string' ? { entry: decoded, epoch } : undefined;
 }

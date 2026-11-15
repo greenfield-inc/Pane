@@ -350,6 +350,7 @@ describe('OrchestrationSessionStore', () => {
 
     expect(new OrchestrationSessionStore(filePath).read().sessions[0].associations).toEqual([local, remote]);
     // An older Pane reads only this file: it sees the local member and nothing it would rewrite away.
+    // SAFETY: the store just wrote this file from a validated OrchestrationSessionStoreData.
     const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8')) as OrchestrationSessionStoreData;
     expect(onDisk.sessions[0].associations).toEqual([local]);
   });

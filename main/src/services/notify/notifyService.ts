@@ -76,6 +76,8 @@ export interface NotifyServiceDependencies {
   sessionsById?: () => Map<string, NotifySession>;
   /** A Session's name and state, archived too; undefined once it's gone. */
   sessionRecord?: (sessionId: string) => { name: string; paneId: string; archived: boolean } | undefined;
+  /** The saved machine a Session member's Pane runs on, when it isn't this computer. */
+  memberMachine?: (paneId: string) => string | undefined;
   /** Hears Session changes, which can end their items. */
   onSessionsChanged?: (listener: () => void) => () => void;
   /** Every Session's unacknowledged worker reports; a blocked one's question is a card. */
@@ -256,7 +258,9 @@ export class NotifyService {
       // D-81: the worker's status file, which its report named, opens beside the card.
       const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
       const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);
-      const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: entry.paneName, agent: agentName(entry.agentType) };
+      // A worker on another machine names it: the card says where to go to see its tab.
+      const machine = this.deps.memberMachine?.(entry.paneId);
+      const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: machine ? `${entry.paneName} on ${machine}` : entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
       this.queue.addWorkerQuestion({
         id: entry.id,

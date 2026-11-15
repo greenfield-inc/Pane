@@ -162,11 +162,11 @@ export class OrchestrationSessionStore {
       internalSessionId: session.internalSessionId,
       archived: session.archived === true,
       panelIds: Object.values(session.panelIds),
-      associations: session.associations.map(association => ({
-        paneId: association.paneId,
-        panelIds: [...association.panelIds],
-        ...(association.machine ? { machine: { ...association.machine } } : {}),
-      })),
+      associations: session.associations.map(association => {
+        const member: OrchestrationSessionMembership['associations'][number] = { paneId: association.paneId, panelIds: [...association.panelIds] };
+        if (association.machine) member.machine = { ...association.machine };
+        return member;
+      }),
     }));
   }
 
@@ -279,7 +279,7 @@ function safeJson(raw: string): JsonValue | undefined {
   }
 }
 
-function writeAtomically(filePath: string, value: unknown): void {
+function writeAtomically(filePath: string, value: OrchestrationSessionStoreData | { associations: Record<string, OrchestrationAssociation[]> }): void {
   const temporaryPath = `${filePath}.tmp-${process.pid}-${randomUUID()}`;
   try {
     fs.writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });

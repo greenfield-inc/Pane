@@ -334,7 +334,11 @@ Session's blockers, goal, next step, and decisions when they are set, then its
 Panes and recent activity. Each Pane card lists the Session's tabs in that Pane
 with their type icons: every tab when the Pane is linked whole, with Files and
 Changes last, or exactly the tabs a link names. Click a tab to open the Pane on
-it; Files and Changes open in the Pane's inspector. Agent state changes stay out
+it; Files and Changes open in the Pane's inspector. A Pane on another saved
+machine ([workers on another machine](RUNPANE_WORKSPACES.md#workers-on-another-machine-join-your-session))
+shows "On <machine>" with its tabs' states as that machine reports them, or
+"unreachable" when it doesn't answer, or "needs a Pane update" when its Pane is
+too old to report here; its card is read-only and opens from All machines. Agent state changes stay out
 of Activity; the status dot shows them. Files browses the Session workspace.
 Changes summarizes the Session's Panes and opens a Pane for detailed review. The upper-right sidebar
 button shows or hides the selected tab. A single Session uses two rows at the

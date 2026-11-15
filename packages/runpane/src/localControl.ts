@@ -1144,6 +1144,8 @@ interface WorkspaceEntry {
   expectedSince?: string;
   screenLines?: string[];
   itemId?: string;
+  /** A remote Session member's entry: the saved machine it came from, and its epoch and generation there. */
+  machine?: { id: string; label: string; epoch: string; gen: number };
 }
 
 interface WorkspaceStateResult {
@@ -2209,6 +2211,7 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   expectedSince: boundary.optional(boundary.string),
   screenLines: boundary.optional(boundary.array(boundary.string)),
   itemId: boundary.optional(boundary.string),
+  machine: boundary.optional(boundary.object({ id: boundary.string, label: boundary.string, epoch: boundary.string, gen: boundary.number })),
 });
 export const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
   ok: boundary.literal(true),
@@ -3991,6 +3994,7 @@ function describeReportDelivery(result: ReportResult): string[] {
     ? `No Session recorded this report. ${stored}, and only watchers that list agent.report receive it.`
     : `No Session recorded this report and no watcher was waiting for it. ${stored}, `
       + 'and a watch with a named cursor (runpane watch --as <name> --kinds agent.report) still receives it when it next waits.');
+  lines.push('If this Pane belongs to a Session on another computer, that computer records it there.');
   return [...lines, ...warnings];
 }
 

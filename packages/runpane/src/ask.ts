@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { boundary, decodeBoundary } from './boundaryDecoder';
+import { boundary, decodeBoundary, type BoundarySchema } from './boundaryDecoder';
 import type { ParsedArgs, RunpaneAgent } from './commands';
 import { invokeDaemon, invokeRemoteDaemon, resolvePaneDirectory, type RemoteDaemonTarget } from './daemonClient';
 import { RunpaneError } from './errors';
@@ -78,13 +78,21 @@ const execResultSchema = boundary.object({
 
 const NOT_FOUND = /command not found|is not recognized as the name of|No such file or directory|not found in PATH|cannot find the path/i;
 
-async function run(place: Place, argv: string[], options: { cwd?: string; env?: Readonly<Record<string, string>>; timeoutMs: number }): Promise<RunResult> {
+interface RunOptions {
+  cwd?: string;
+  env?: Readonly<Record<string, string>>;
+  timeoutMs: number;
+}
+
+async function run(place: Place, argv: string[], options: RunOptions): Promise<RunResult> {
   if (!place.remote) return runHere(argv, options);
   const shell = place.shell ?? 'bash';
   if (place.environment === 'wsl') return runInWsl(place, argv, options);
   const powershell = /(?:powershell|pwsh)(?:\.exe)?$/i.test(shell);
+  const env: NonNullable<RunOptions['env']> & { MSYS_NO_PATHCONV?: string } = { ...options.env };
   // Git Bash on Windows rewrites arguments that look like POSIX paths; WSL and the agents need them as given.
-  const vars = Object.entries({ ...options.env, ...(place.windows && !powershell ? { MSYS_NO_PATHCONV: '1' } : {}) });
+  if (place.windows && !powershell) env.MSYS_NO_PATHCONV = '1';
+  const vars = Object.entries(env);
   const command = [
     ...(powershell ? vars.map(([key, value]) => `$env:${key} = ${quote(value, shell)};`) : vars.length ? ['env', ...vars.map(([key, value]) => quote(`${key}=${value}`, shell))] : []),
     // Windows PowerShell 5 passes a double quote inside an argument through unescaped; a backslash keeps it.
@@ -194,48 +202,77 @@ function describePlace(place: Place): string {
 
 // ---------------------------------------------------------------- reading an answer
 
-export interface Answer {
+interface Answer {
   answer?: string;
   error?: string;
   costUsd?: number;
 }
 
-/** The final answer, the CLI's own error, and the cost it reports, from what one headless run printed. */
-export function extractAnswer(output: string, stdout: string): Answer {
-  const lines = stdout.split(/\r?\n/).map(line => line.trim()).filter(line => line.startsWith('{'));
-  const events = lines.flatMap(line => {
-    try {
-      const value: unknown = JSON.parse(line);
-      return value && typeof value === 'object' && !Array.isArray(value) ? [record(value)] : [];
-    } catch {
-      return [];
-    }
+const resultEventSchema = boundary.object({
+  type: boundary.optional(boundary.string),
+  subtype: boundary.optional(boundary.string),
+  is_error: boundary.optional(boundary.boolean),
+  result: boundary.optional(boundary.string),
+  total_cost_usd: boundary.optional(boundary.number),
+});
+const codexEventSchema = boundary.object({
+  type: boundary.string,
+  item: boundary.optional(boundary.object({ type: boundary.optional(boundary.string), text: boundary.optional(boundary.string) })),
+  message: boundary.optional(boundary.string),
+  error: boundary.optional(boundary.object({ message: boundary.optional(boundary.string) })),
+});
+const openCodeEventSchema = boundary.object({
+  type: boundary.string,
+  part: boundary.optional(boundary.object({ text: boundary.optional(boundary.string), cost: boundary.optional(boundary.number) })),
+  error: boundary.optional(boundary.object({
+    name: boundary.optional(boundary.string),
+    data: boundary.optional(boundary.object({ message: boundary.optional(boundary.string) })),
+  })),
+});
+
+/** Every line of `stdout` that decodes as `schema`; other lines (logs, banners) are skipped. */
+function jsonLines<T>(stdout: string, schema: BoundarySchema<T>): T[] {
+  return stdout.split(/\r?\n/).flatMap(line => {
+    const decoded = tryDecode(line.trim(), schema);
+    return decoded === undefined ? [] : [decoded];
   });
+}
+
+function tryDecode<T>(text: string, schema: BoundarySchema<T>): T | undefined {
+  if (!text.startsWith('{')) return undefined;
+  try {
+    return decodeBoundary(JSON.parse(text), schema);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The final answer, the CLI's own error, and the cost it reports, from what one headless run printed. @public scripts/test-runpane-ask.js */
+export function extractAnswer(output: string, stdout: string): Answer {
   if (output === 'result-json') {
+    const events = jsonLines(stdout, resultEventSchema);
     const result = findLast(events, event => event.type === 'result') ?? events.at(-1);
     if (!result) return {};
-    const text = typeof result.result === 'string' ? result.result : undefined;
-    const cost = typeof result.total_cost_usd === 'number' ? result.total_cost_usd : undefined;
-    return result.is_error === true ? { error: text || String(result.subtype ?? 'error'), costUsd: cost } : { answer: text, costUsd: cost };
+    return result.is_error === true
+      ? { error: result.result || result.subtype || 'error', costUsd: result.total_cost_usd }
+      : { answer: result.result, costUsd: result.total_cost_usd };
   }
   if (output === 'codex-jsonl') {
-    const message = findLast(events, event => event.type === 'item.completed' && record(event.item).type === 'agent_message');
-    if (message) return { answer: String(record(message.item).text ?? '') };
+    const events = jsonLines(stdout, codexEventSchema);
+    const message = findLast(events, event => event.type === 'item.completed' && event.item?.type === 'agent_message');
+    if (message) return { answer: message.item?.text ?? '' };
     const failure = findLast(events, event => event.type === 'turn.failed' || event.type === 'error');
-    return failure ? { error: String(record(failure.error).message ?? failure.message ?? 'Codex failed') } : {};
+    return failure ? { error: failure.error?.message ?? failure.message ?? 'Codex failed' } : {};
   }
   if (output === 'opencode-jsonl') {
-    const failure = findLast(events, event => event.type === 'error');
+    const events = jsonLines(stdout, openCodeEventSchema);
     let lastStep = 0;
     events.forEach((event, index) => { if (event.type === 'step_start') lastStep = index; });
-    const text = events.slice(lastStep).filter(event => event.type === 'text').map(event => String(record(event.part).text ?? '')).join('').trim();
-    const cost = events.filter(event => event.type === 'step_finish').reduce((sum, event) => sum + (Number(record(event.part).cost) || 0), 0);
+    const text = events.slice(lastStep).filter(event => event.type === 'text').map(event => event.part?.text ?? '').join('').trim();
+    const cost = events.filter(event => event.type === 'step_finish').reduce((sum, event) => sum + (event.part?.cost ?? 0), 0);
     if (text) return { answer: text, costUsd: cost || undefined };
-    if (failure) {
-      const error = record(failure.error);
-      return { error: String(record(error.data).message ?? error.name ?? 'OpenCode failed') };
-    }
-    return {};
+    const failure = findLast(events, event => event.type === 'error');
+    return failure ? { error: failure.error?.data?.message ?? failure.error?.name ?? 'OpenCode failed' } : {};
   }
   return {};
 }
@@ -245,13 +282,9 @@ function findLast<T>(items: readonly T[], matches: (item: T) => boolean): T | un
   return undefined;
 }
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : {};
-}
-
 // ---------------------------------------------------------------- runpane ask
 
-export interface AskResult {
+interface AskResult {
   ok: true;
   answer: string;
   agent: RunpaneAgent;
@@ -313,7 +346,7 @@ export async function runAsk(parsed: ParsedArgs): Promise<number> {
 
 // ---------------------------------------------------------------- runpane models
 
-export interface ModelRow {
+interface ModelRow {
   machine: string;
   environment: string;
   agent?: RunpaneAgent;
@@ -324,18 +357,15 @@ export interface ModelRow {
   note?: string;
 }
 
-/** Model names from what a list command printed, in the format the agents config names. */
+const codexModelsSchema = boundary.object({ models: boundary.array(boundary.object({ slug: boundary.string, visibility: boundary.optional(boundary.string) })) });
+const loggedInSchema = boundary.object({ loggedIn: boundary.optional(boundary.boolean), authMethod: boundary.optional(boundary.string) });
+
+/** Model names from what a list command printed, in the format the agents config names. @public scripts/test-runpane-ask.js */
 export function parseModelList(format: string, stdout: string): string[] | undefined {
   const text = stripAnsi(stdout);
   if (format === 'json-models') {
-    const start = text.indexOf('{');
-    try {
-      const value = record(JSON.parse(text.slice(start)));
-      if (!Array.isArray(value.models)) return undefined;
-      return value.models.map(record).filter(model => model.visibility !== 'hide' && typeof model.slug === 'string').map(model => String(model.slug));
-    } catch {
-      return undefined;
-    }
+    const listed = tryDecode(text.slice(text.indexOf('{')).trim(), codexModelsSchema);
+    return listed?.models.filter(model => model.visibility !== 'hide').map(model => model.slug);
   }
   const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (format === 'lines') {
@@ -349,15 +379,13 @@ export function parseModelList(format: string, stdout: string): string[] | undef
   return undefined;
 }
 
-/** One line in the agent's own words about sign-in. */
+/** One line in the agent's own words about sign-in. @public scripts/test-runpane-ask.js */
 export function describeSignIn(format: string, stdout: string, stderr: string): string | undefined {
   const text = stripAnsi(`${stdout}\n${stderr}`);
   if (format === 'json-logged-in') {
-    try {
-      const value = record(JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)));
-      if (value.loggedIn === true) return `signed in${typeof value.authMethod === 'string' ? ` (${value.authMethod})` : ''}`;
-      if (value.loggedIn === false) return 'signed out';
-    } catch { /* fall through to the text */ }
+    const status = tryDecode(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1), loggedInSchema);
+    if (status?.loggedIn === true) return `signed in${status.authMethod ? ` (${status.authMethod})` : ''}`;
+    if (status?.loggedIn === false) return 'signed out';
   }
   const words = text.split(/\r?\n/).map(line => line.replace(/[│┌└┐┘─●◇◆■•✓✗]/g, '').trim()).filter(line => line && !/^\d{4}-\d\d-\d\dT/.test(line));
   const line = words.join('; ');
@@ -365,7 +393,7 @@ export function describeSignIn(format: string, stdout: string, stderr: string): 
 }
 
 function stripAnsi(text: string): string {
-  // eslint-disable-next-line no-control-regex
+  // oxlint-disable-next-line eslint/no-control-regex -- an agent's list output carries terminal color codes.
   return text.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '');
 }
 
@@ -385,7 +413,11 @@ async function listAt(place: Place, agents: readonly RunpaneAgent[]): Promise<Mo
     const signIn = status && models.status ? describeSignIn(models.status.format, status.stdout, status.stderr) : undefined;
     const names = models.list ? parseModelList(models.list.format, listed.stdout) : [...(models.aliases ?? [])];
     if (!names) return [{ ...base, signIn, note: 'list unavailable' }];
-    return names.map(model => ({ ...base, model, ...(signIn ? { signIn } : {}) }));
+    return names.map(model => {
+      const row: ModelRow = { ...base, model };
+      if (signIn) row.signIn = signIn;
+      return row;
+    });
   }));
   return rows.flat();
 }

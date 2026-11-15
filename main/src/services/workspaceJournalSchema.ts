@@ -1,6 +1,7 @@
 import { boundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import type { RunpaneWorkspaceEntry, RunpaneWorkspacePanelSummary } from '../../../shared/types/runpaneOrchestration';
-const agentReportSchema = boundary.object({
+/** A `runpane report` as the journal and overviews carry it. */
+export const agentReportFields = {
   state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
   pr: boundary.optional(boundary.number),
   head: boundary.optional(boundary.string),
@@ -9,7 +10,8 @@ const agentReportSchema = boundary.object({
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
   reportedAt: boundary.nonEmptyString,
-});
+};
+const agentReportSchema = boundary.object(agentReportFields);
 const workspaceEntryKindSchema = boundary.enumeration(
   'agent.ready',
   'agent.busy',

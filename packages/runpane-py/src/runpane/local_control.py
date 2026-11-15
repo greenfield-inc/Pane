@@ -1700,6 +1700,7 @@ def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
             f"No Session recorded this report and no watcher was waiting for it. {stored}, "
             "and a watch with a named cursor (runpane watch --as <name> --kinds agent.report) still receives it when it next waits."
         )
+    lines.append("If this Pane belongs to a Session on another computer, that computer records it there.")
     return lines + warnings
 
 
