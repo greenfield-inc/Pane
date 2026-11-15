@@ -247,7 +247,14 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   focus stop of its own: Focus Right (⌘⌥→) and F6 move into it from the chat,
   the tab keys (⌘⇧[ ⌘⇧], ⌘⇧1-9) walk its tabs while it has focus, Focus Left
   or Esc go back to the chat's message box, and its active tab carries the
-  accent only while it has focus, as a split's does. The right
+  accent only while it has focus, as a split's does. By keyboard, each
+  question is one Tab stop: ↑ ↓ move and pick, Space picks the focused
+  option, Tab goes to the next question and then the reply box, and ⌘↩ sends
+  from anywhere in the approval. ⌥⌘A (Ctrl+K Ctrl+A on Windows and Linux)
+  opens it from the chat and goes back again; ⇧⌘A opens or closes Approvals
+  while Pane is in front. ⌘F finds text in Decide, the Summary (the frame
+  shares Pane's origin so it can be searched, with scripts still off) and
+  each reference. ⌘/ lists every key. The right
   sidebar (Overview, Files, Changes) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A
