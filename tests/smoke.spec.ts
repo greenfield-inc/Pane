@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { installElectronApiMock } from './electronApiMock';
-import { openConnectedRemotePwa } from './remotePwaMock';
+import { dropRemoteConnection, openConnectedRemotePwa, restoreRemoteConnection } from './remotePwaMock';
 
 test.beforeEach(async ({ page }) => {
   await installElectronApiMock(page, {
@@ -409,4 +409,38 @@ test('remote terminal ignores output that arrives after its panel is replaced', 
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   }));
   expect(pageErrors).toEqual([]);
+});
+
+test('remote terminal starts a shell that nobody has started since the computer restarted', async ({ page }) => {
+  await openConnectedRemotePwa(page);
+  // The computer restarted: the shell panel exists but its process doesn't run until a viewer starts it.
+  let started = false;
+  await page.route('**/invoke', async route => {
+    const body = route.request().postDataJSON();
+    if (body.args?.[0] !== 'anim-panel-1') {
+      await route.fallback();
+      return;
+    }
+    if (body.channel === 'panels:checkInitialized') {
+      await route.fulfill({ json: { ok: true, result: started } });
+      return;
+    }
+    if (body.channel === 'panels:initialize') started = true;
+    await route.fallback();
+  });
+
+  await page.getByRole('tab', { name: 'shell', exact: true }).click();
+  await expect.poll(() => started).toBe(true);
+
+  // The computer restarts while the phone shows the shell; the reconnect starts it again.
+  started = false;
+  await dropRemoteConnection(page);
+  await restoreRemoteConnection(page);
+  await expect.poll(() => started, { timeout: 10_000 }).toBe(true);
+
+  // Reopening the app on the shell tab mounts the terminal while the connection is still restoring.
+  started = false;
+  await page.reload();
+  await expect(page.getByRole('tab', { name: 'shell', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => started, { timeout: 10_000 }).toBe(true);
 });

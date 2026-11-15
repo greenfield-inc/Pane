@@ -829,7 +829,7 @@ describe('RemoteDaemonClient against a host that runs each request id once', () 
   it('still refuses a write made while restoring, which restore steps rely on', async () => {
     const { client, host, drop } = await connectToDeduplicatingHost();
     let restoring: Promise<unknown> | null = null;
-    client.onRestore(async () => { restoring ??= client.invoke('panels:initialize', ['panel-1']).catch((error: Error) => error); });
+    client.onRestore(async () => { restoring ??= client.invoke('panels:delete', ['panel-1']).catch((error: Error) => error); });
     drop();
     await flush();
     host.goDown(false);

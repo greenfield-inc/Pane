@@ -79,6 +79,11 @@ export function useRemoteTerminal({
   }, []);
 
   const hydrateTerminal = useCallback(async (terminal: Terminal, owns: () => boolean) => {
+    // Every attach, a reconnect included, starts a shell nobody has started since the computer restarted.
+    if (!await adapter.checkPanelInitialized(panel.id)) {
+      await adapter.initializePanel(panel.id, { sessionId, cols: terminal.cols, rows: terminal.rows });
+    }
+    if (!owns()) return false;
     let fullScreen = false;
     const hydrated = await hydrateRemoteTerminalSnapshot(terminal, async () => {
       const state = await adapter.getTerminalState(panel.id);
@@ -88,7 +93,7 @@ export function useRemoteTerminal({
     // A full-screen app's frame was drawn for the host's size; a forced resize makes the app repaint at this one.
     if (hydrated && fullScreen) await adapter.resizeTerminal(panel.id, terminal.cols, terminal.rows, { force: true });
     return hydrated;
-  }, [adapter, panel.id]);
+  }, [adapter, panel.id, sessionId]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -179,16 +184,6 @@ export function useRemoteTerminal({
       const generation = ++snapshotGenerationRef.current;
       const owns = () => !disposed && snapshotGenerationRef.current === generation;
       try {
-        const initialized = await adapter.checkPanelInitialized(panel.id);
-        if (!owns()) return;
-        if (!initialized) {
-          await adapter.initializePanel(panel.id, {
-            sessionId,
-            cols: terminal.cols,
-            rows: terminal.rows,
-          });
-          if (!owns()) return;
-        }
         if (!await hydrateTerminal(terminal, owns)) return;
         if (!owns()) return;
         fitTerminal();
