@@ -51,8 +51,9 @@ import { blockedPromptKey, blockedScreenLines, detectAgentState } from './agentS
 import { getManifestForAgent } from './agentStatus/manifests';
 import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { PaneEventArgument } from '../core/eventSink';
+import { STREAM_FRAME_MS } from '../../../shared/constants/streamCadence';
 
-const OUTPUT_BATCH_INTERVAL = 32; // ms (~30fps) — wider window reduces TUI flicker
+const OUTPUT_BATCH_INTERVAL = STREAM_FRAME_MS; // wider window reduces TUI flicker
 const OUTPUT_BATCH_INTERVAL_INTERACTIVE = 8;
 /** Output after a quiet spell goes out once reads pause this long: in the app, the reads of one `less` or `vim` redraw arrive up to ~2 ms apart. */
 const OUTPUT_SETTLE_MS = 3;
