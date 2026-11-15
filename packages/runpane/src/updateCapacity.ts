@@ -34,6 +34,8 @@ export const PANE_UNSNAPSHOTTED_FOLDERS = [
   'projects',
   // Agents' temporary files ($PANE_SCRATCH_DIR), which can hold whole clones; archive retention deletes them.
   'scratch',
+  // A Session move's staging on each machine; a move under way when Pane quits can't be finished.
+  'moves', 'moves-out',
 ] as const;
 
 const stateFolders = new Set<string>(PANE_STATE_FOLDERS);
