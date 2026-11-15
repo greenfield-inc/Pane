@@ -56,7 +56,9 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 .chat-step-icon svg { width:16px; height:16px; }
 .chat-step-icon[data-state=waiting] { color:var(--color-status-warning); }
 .chat-step-icon[data-state=failed] { color:var(--color-status-error); }
-.chat-step-icon[data-state=running] svg { animation:chat-spin 1s linear infinite; }
+/* A running step or to-do turns 6 times when it starts, then rests: an endless SVG spin repaints the
+   page every frame. 6 x 1 s matches the working dot (tailwind.config.js WORKING_TURNS). */
+.chat-step-icon[data-state=running] svg { animation:chat-spin 1s linear 6; }
 .chat-step-verb { font-weight:600; flex-shrink:0; }
 .chat-step-label,.chat-step-detail { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--chat-muted-foreground); }
 .chat-step-mono { font:13px/1.4 var(--font-mono,ui-monospace,monospace); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--chat-muted-foreground); }
@@ -84,7 +86,7 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 .chat-todo-title { font-weight:600; margin-bottom:6px; }
 .chat-todo li { display:flex; align-items:center; gap:8px; padding:2px 0; }
 .chat-todo li[data-status=completed] { color:var(--chat-muted-foreground); text-decoration:line-through; }
-.chat-todo li[data-status=in_progress] .chat-step-icon svg { animation:chat-spin 1s linear infinite; }
+.chat-todo li[data-status=in_progress] .chat-step-icon svg { animation:chat-spin 1s linear 6; }
 @keyframes chat-spin { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion:reduce) { .chat-step-icon svg,.chat-todo li .chat-step-icon svg { animation:none !important; } }
 
