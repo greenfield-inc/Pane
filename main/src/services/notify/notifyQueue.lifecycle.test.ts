@@ -16,7 +16,7 @@ describe('NotifyQueue with its store', () => {
   let store: ApprovalStore;
   let typed: Array<[string, string]>;
   let gone: Map<string, string>;
-  let tabState: 'delivered' | 'busy' | 'gone' | 'unsupported';
+  let tabState: 'delivered' | 'busy' | 'gone' | 'unsupported' | 'outdated';
   let using: boolean;
 
   const queueWith = (extra: Partial<NotifyQueueEnvironment> = {}) => new NotifyQueue({
@@ -109,6 +109,17 @@ describe('NotifyQueue with its store', () => {
     await vi.advanceTimersByTimeAsync(3_000);
     expect(typed).toEqual([]);
     expect(item(queue, 'in-1')?.undelivered?.reason).toBe("Pane can't see what runs in its tab");
+    queue.dispose();
+  });
+
+  it("says to update Pane on the asking tab's machine when that Pane is too old to type into it", async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-8: retry?', source: worker, at: Date.now() });
+    tabState = 'outdated';
+    queue.run({ type: 'answer', id: 'in-1', answer: { text: 'Yes' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(typed).toEqual([]);
+    expect(item(queue, 'in-1')?.undelivered?.reason).toBe('the Pane on its machine is too old to type into its tab; update Pane there');
     queue.dispose();
   });
 

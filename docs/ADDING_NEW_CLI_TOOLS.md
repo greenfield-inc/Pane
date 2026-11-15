@@ -49,6 +49,8 @@ same ids. The schema is `$defs/agent` and `$defs/agentChat` in
 | `install` | Install page `url` and install `command`, shown when the CLI is missing or too old |
 | `transcriptDirs` | Folders, relative to the home the CLI runs with, that hold its session transcripts. Before Pane deletes a folder it owns, it moves these out of it into `<pane-dir>/agent-logs/<agent>/` ([The scratch folder](SESSIONS.md#the-scratch-folder)) |
 | `signIn` | Arguments to the CLI that sign it in, run in a terminal tab when a chat agent advertises no terminal sign-in of its own; required with `chat` |
+| `models` | How the CLI takes a model (`flag`, and `effortFlag` or `effortConfig` for reasoning effort), its model `list` command and output `format`, or `aliases` when it has none, and its sign-in `status` command. `runpane handoff`, `runpane ask` and `runpane models` read it |
+| `ask` | One read-only headless turn for `runpane ask`: `args` that run a single turn and refuse edits and shell commands, any `env` it needs, and the `output` format its answer is read from. Leave it out unless a prompt asking the agent to write a file with its edit tool and with a shell command leaves the disk unchanged on macOS, Windows and WSL |
 | `onboarding` | Offered on the first-run screen |
 | `chat` | Present when chat tabs run the agent (below) |
 

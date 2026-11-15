@@ -248,7 +248,7 @@ async function runChild(command: string[], env: NodeJS.ProcessEnv): Promise<Chil
  * or .bat file, returns a cmd.exe invocation that passes every argument literally. Keep the cmd quoting
  * rules aligned with `quoteShellWord(word, 'cmd')` in main/src/services/agentChat/hostCommand.ts.
  */
-function windowsBatchCommand(command: string[], env: NodeJS.ProcessEnv): [string, string[], boolean] | undefined {
+export function windowsBatchCommand(command: string[], env: NodeJS.ProcessEnv): [string, string[], boolean] | undefined {
   if (process.platform !== 'win32') return undefined;
   const read = (name: string) => Object.entries(env).find(([key]) => key.toUpperCase() === name)?.[1] ?? '';
   const extensions = (read('PATHEXT') || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);

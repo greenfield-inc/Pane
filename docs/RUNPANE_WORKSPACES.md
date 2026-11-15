@@ -86,6 +86,26 @@ Every admitted login can also reach any port listening on the machine from deskt
 
 `write` and `exec` give your agents SSH-level control of every joined machine, and so does anyone the machine's visibility lets in: under "Everyone on tailnet" that includes the other people on the tailnet. A local agent's permission prompts and sandbox see only `runpane workspace ... exec`, not what runs on the other machine. Turn workspaces off on any machine that should not accept this.
 
+## Workers on another machine join your Session
+
+A Session orchestrator on this computer can run workers on your other machines. `runpane workspace parsa-devbox panes create --repo "Pane (win)" --tool-command "codex -m gpt-5.5" --prompt "..." --json`, run from inside a Session, creates the Pane on that machine and adds it to this computer's Session; `association.machine` names the machine. Pick a saved WSL repository there to run the worker in WSL. Its `runpane report` states, blocked questions and tab exits reach this computer's `runpane watch --session`, Approvals and phone, and an answer you give goes back to its tab. `sessions overview` and the Session's Overview tab list it with its machine; a machine that doesn't answer shows its workers as unreachable.
+
+The machine must be saved on this computer (the machine switcher > **Add a machine**): only saved machines send their workers' reports here, over the connection All machines already uses. Creating a Pane on an unsaved machine still works and returns `association.ok: false` with `ERR_MACHINE_NOT_SAVED`. Both machines need a Pane release with remote Session members; a machine on an older one returns `association.code: ERR_MACHINE_OLDER_PANE`, and its row says to update it. Reports sent while either computer was asleep or offline arrive when they reconnect, once each and in order.
+
+## Ask another model a question
+
+`runpane ask` asks any agent and model one read-only question and prints the answer. Nothing is left open: the agent's own headless mode runs once and exits.
+
+```bash
+runpane ask --agent claude --model sonnet --prompt "Is this migration safe to run twice?" --repo Pane --json
+runpane ask --agent codex --machine parsa-devbox --repo "Pane (win)" --prompt "Why does this test fail on Windows?"
+runpane ask --agent opencode --model openrouter/deepseek/deepseek-chat --machine parsa-devbox --repo "experiments (wsl)" --prompt-file question.md
+```
+
+`--machine` runs it on another machine in your workspace, `--repo` in a saved repository there (a WSL repository runs in WSL) and `--pane` in a Pane's worktree. The agent can read files but not edit them, run shell commands or call MCP tools: Claude runs with only Read, Grep and Glob, Codex in its read-only sandbox without your Codex config, MCP servers or apps, Cursor in ask mode, and OpenCode's plan agent with edit, bash and every MCP tool denied. Pi has no such mode, so ask refuses it. `--json` prints the answer, agent, model, machine, environment, duration and cost when the agent reports one. A missing agent, a sign-in problem, an unknown model and a timeout (`--timeout`, 10 minutes by default) each fail with the agent's own words and what to do next. The MCP tool is `agents_ask`.
+
+`runpane models` lists the models each installed agent offers, from the agent's own list, with its sign-in in the agent's words. `--all` covers this computer, every saved machine and the WSL of each machine with a saved WSL repository; `--agent` and `--search` narrow it. Claude has no list command and takes `fable`, `opus`, `sonnet`, `haiku` or a full model name. To give a terminal worker a model, put the agent's model flag in `--tool-command`.
+
 ## Hand a task to another machine
 
 `runpane handoff` uses workspaces to move a task to an agent on another of your machines. The sending agent writes a handoff note; the CLI checks it, makes sure the branch is pushed, and starts the agent there. When the sender is a Pane tab running Claude, Codex or Cursor and the receiver is the same agent, the agent's own session moves too:

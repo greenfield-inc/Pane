@@ -26,6 +26,7 @@ interface WatchEntry {
   idleCount?: number;
   report?: WatchReport;
   itemId?: string;
+  machine?: { label: string };
 }
 
 /** The fields of a worker report a REPORT line shows. */
@@ -60,7 +61,8 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
   if (entry.baseline && !entry.changedWhileAway) return undefined;
   const name = sanitizeName(entry.paneName);
   const pane = `pane ${sanitizeName(entry.paneId)}`;
-  const panel = entry.panelId ? ` panel ${sanitizeName(entry.panelId)}` : '';
+  // A remote Session member's entry names its machine after the panel.
+  const panel = `${entry.panelId ? ` panel ${sanitizeName(entry.panelId)}` : ''}${entry.machine ? ` machine ${sanitizeName(entry.machine.label)}` : ''}`;
   if (entry.changedWhileAway && entry.kind !== 'panel.stopped') return `CHANGED ${name} ${pane}${panel}`;
   switch (entry.kind) {
     case 'agent.ready': return `READY ${name} ${pane}${panel}`;

@@ -66,6 +66,8 @@ interface RemoteConnectionStateMetadata {
   hostVersion?: string;
   /** The host's install id from its ready event; absent before ready and from older hosts. */
   hostMachineId?: string;
+  /** Whether the host sends `workspace:entry` events; false from hosts before remote Session members. */
+  hostWorkspaceEntries?: boolean;
 }
 
 interface RemotePaneClientOptions {
@@ -128,6 +130,7 @@ interface RemoteReadyEventPayload {
   /** The host runs a write once per request id and answers a repeat with the first answer. Older hosts omit it. */
   deduplicatesRequestIds?: boolean;
   machineId?: string;
+  workspaceEntries?: boolean;
 }
 
 const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
@@ -154,6 +157,7 @@ const remoteReadyEventSchema: BoundarySchema<RemoteReadyEventPayload> = boundary
   paneVersion: boundary.optional(boundary.string),
   deduplicatesRequestIds: boundary.optional(boundary.boolean),
   machineId: boundary.optional(boundary.string),
+  workspaceEntries: boundary.optional(boundary.boolean),
 });
 const remoteHeartbeatSchema: BoundarySchema<RemoteDaemonHeartbeatPayload> = boundary.object({
   timestamp: boundary.nonEmptyString,
@@ -736,7 +740,7 @@ export class RemotePaneClient {
               this.markRemoteSeen();
               armTimeout(this.restoreTimeoutMs, `Workspace restoration timed out after ${this.restoreTimeoutMs}ms`);
               if (resolveOnReady && !settled) { settled = true; resolve(); }
-              this.reportStatus('restoring', 'host ready', null, { hostVersion: readyPayload.paneVersion, hostMachineId: readyPayload.machineId });
+              this.reportStatus('restoring', 'host ready', null, { hostVersion: readyPayload.paneVersion, hostMachineId: readyPayload.machineId, hostWorkspaceEntries: readyPayload.workspaceEntries === true });
               void Promise.resolve().then(() => this.onResyncRequired?.()).then(() => {
                 if (!isStale()) {
                   clearHandshakeTimer();
@@ -927,7 +931,7 @@ export class RemotePaneClient {
     status: RemotePaneConnectionStatus,
     reason: string,
     errorMessage: string | null = null,
-    host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId'> = {},
+    host: Pick<RemoteConnectionStateMetadata, 'hostVersion' | 'hostMachineId' | 'hostWorkspaceEntries'> = {},
   ): void {
     console.info(`[Pane remote daemon] ${this.profile.label}: ${status} (${reason})`);
     this.status = status;

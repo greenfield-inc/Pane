@@ -47,6 +47,12 @@ const NOTIFY_IDLE_BACKSTOP_MS = 10_000;
 const HISTORY_LIMIT = 200;
 /** The Answered list shows this long; the store keeps the record for 7 days. */
 const HISTORY_MS = 24 * 60 * 60_000;
+/** Why an answer that can never be typed into its asker's tab was not (F-3). */
+const UNDELIVERED_REASONS = {
+  gone: 'its tab closed',
+  unsupported: "Pane can't see what runs in its tab",
+  outdated: "the Pane on its machine is too old to type into its tab; update Pane there",
+} as const;
 /** An item unanswered this long goes stale: grouped, and never rings or pushes again (tests shorten it). */
 function staleAfterMs(): number {
   const configured = Number(process.env.PANE_APPROVALS_STALE_AFTER_MS);
@@ -121,6 +127,8 @@ interface TabMessage {
   answer: boolean;
   /** A reply's line: marks that reply delivered, or passes it to the next reader when its tab can't take it. */
   reply?: string;
+  /** The asking tab's Pane, which says which machine a Session member on another computer is on. */
+  paneId?: string;
 }
 
 /** Which item Autopilot's action left in place: for a rewrite, the new one. */
@@ -184,8 +192,9 @@ export interface NotifyQueueEnvironment {
   /**
    * Types into a tab when an agent is at its prompt. `busy`: try again later. `gone`: the tab is no
    * more. `unsupported`: Pane can't see what runs in that terminal (Windows, WSL, the PTY host).
+   * `outdated`: the tab is on another machine whose Pane is too old to type into it.
    */
-  typeIntoTab?: (panelId: string, text: string) => Promise<'delivered' | 'busy' | 'gone' | 'unsupported'>;
+  typeIntoTab?: (panelId: string, text: string, paneId?: string) => Promise<'delivered' | 'busy' | 'gone' | 'unsupported' | 'outdated'>;
   /** Whether a tab still exists (an orchestrator that relayed a question). Absent: yes. */
   tabAlive?: (panelId: string) => boolean;
   /** Autopilot's chat tab, while Autopilot is on; it reads replies no one else can (D-258). */
@@ -913,7 +922,7 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** How typing a reply's line went: delivered, or on to the next reader when this one's tab can't take it. */
-  private replyTyped(entry: Entry, message: TabMessage, outcome: 'delivered' | 'gone' | 'unsupported'): void {
+  private replyTyped(entry: Entry, message: TabMessage, outcome: 'delivered' | 'gone' | 'unsupported' | 'outdated'): void {
     const reply = entry.item.reply;
     if (!reply || reply.id !== message.reply || reply.state !== 'reading') return;
     if (outcome === 'delivered') {
@@ -1205,6 +1214,7 @@ export class NotifyQueue extends EventEmitter {
     if (to?.reply && this.tabMessages.some(message => message.reply === to.reply)) return;
     // One line: a newline in an answer would submit early, and a control character is a key press.
     const message: TabMessage = { itemId: item.id, panelId, text: text.replace(/\p{Cc}+/gu, ' '), answer };
+    if (!to && item.source.paneId) message.paneId = item.source.paneId;
     if (to?.reply) message.reply = to.reply;
     this.tabMessages.push(message);
     this.flushTabMessages();
@@ -1219,7 +1229,7 @@ export class NotifyQueue extends EventEmitter {
       this.tabsTyping.add(message.panelId);
       if (message.reply) this.repliesTyping.add(message.reply);
       let again = false;
-      void type(message.panelId, message.text).then((outcome) => {
+      void type(message.panelId, message.text, message.paneId).then((outcome) => {
         if (outcome === 'busy') return;
         again = true;
         this.tabMessages = this.tabMessages.filter(other => other !== message);
@@ -1228,7 +1238,7 @@ export class NotifyQueue extends EventEmitter {
         if (message.answer && entry) {
           // An answer that can never be typed says why, so the person or the orchestrator passes it on (F-3).
           if (outcome === 'delivered') entry.item.delivered = { via: 'tab', at: Date.now() };
-          else entry.item.undelivered = { reason: outcome === 'gone' ? 'its tab closed' : "Pane can't see what runs in its tab", at: Date.now() };
+          else entry.item.undelivered = { reason: UNDELIVERED_REASONS[outcome], at: Date.now() };
           this.save(entry);
           this.changed();
         }

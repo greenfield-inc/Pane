@@ -71,6 +71,8 @@ export interface PaneDaemonEndpoint {
 
 interface InvokeOptions {
   paneDir?: string;
+  /** Ask this machine's Pane even while `runpane workspace <machine>` routes calls elsewhere. */
+  thisMachine?: boolean;
   /** `Infinity` waits as long as the call takes, for requests that wait on a person. */
   timeoutMs?: number;
   eventInclude?: string[] | null;
@@ -229,10 +231,17 @@ const remoteInvokeResponseSchema = boundary.union(
 );
 
 let routedTarget: RemoteDaemonTarget | null = null;
+let routedToSelf = false;
 
 /** Sends every later daemon call in this process to another machine (`runpane workspace <machine> <command>`). */
-export function routeDaemonCallsTo(target: RemoteDaemonTarget | null): void {
+export function routeDaemonCallsTo(target: RemoteDaemonTarget | null, self = false): void {
   routedTarget = target;
+  routedToSelf = self;
+}
+
+/** The other machine daemon calls go to, or null when they stay on this one (this machine named by its own name included). */
+export function routedOtherMachine(): string | null {
+  return routedTarget && !routedToSelf ? routedTarget.machine : null;
 }
 
 export async function invokeRemoteDaemon<T>(
@@ -301,7 +310,7 @@ export async function invokeDaemon<T>(
   resultSchema: BoundarySchema<T>,
   options: InvokeOptions = {},
 ): Promise<T> {
-  if (routedTarget) {
+  if (routedTarget && !options.thisMachine) {
     return invokeRemoteDaemon(routedTarget, channel, args, resultSchema, options.timeoutMs);
   }
   const appDirectory = resolvePaneDirectory(options.paneDir);

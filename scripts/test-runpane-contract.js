@@ -1163,7 +1163,8 @@ async function checkReportDeliveryLine() {
   const base = { ok: true, paneId: 'pane-1', panelId: 'panel-1', report, sessionIds: [] };
   const hint = 'No Session recorded this report and no watcher was waiting for it. It is stored on the panel '
     + '(runpane agents status --panel panel-1), and a watch with a named cursor '
-    + '(runpane watch --as <name> --kinds agent.report) still receives it when it next waits.';
+    + '(runpane watch --as <name> --kinds agent.report) still receives it when it next waits.\n'
+    + 'If this Pane belongs to a Session on another computer, that computer records it there.';
   const cases = [
     [{ ...base, liveWatchers: 1 }, 'Reported blocked for panel panel-1. Delivered to 1 waiting watcher.\n'],
     [{ ...base, report: { ...report, state: 'done' }, sessionIds: ['s-1', 's-2'], liveWatchers: 2 },
@@ -1171,7 +1172,8 @@ async function checkReportDeliveryLine() {
     [{ ...base, liveWatchers: 0 }, `Reported blocked for panel panel-1.\n${hint}\n`],
     [{ ...base, sessionIds: ['s-1'], liveWatchers: 0 }, 'Reported blocked for panel panel-1. Recorded on Session s-1.\n'],
     [base, 'Reported blocked for panel panel-1.\nNo Session recorded this report. It is stored on the panel '
-      + '(runpane agents status --panel panel-1), and only watchers that list agent.report receive it.\n'],
+      + '(runpane agents status --panel panel-1), and only watchers that list agent.report receive it.\n'
+      + 'If this Pane belongs to a Session on another computer, that computer records it there.\n'],
   ];
   for (const runtime of ['npm', 'pip']) {
     const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-report-line-${runtime}-`));

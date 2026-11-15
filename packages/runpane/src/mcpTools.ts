@@ -22,6 +22,8 @@ export const CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT = 16384;
 export interface McpToolContract {
   commands: readonly {
     name: string;
+    /** The tool's name when it isn't the command name with underscores. */
+    mcpName?: string;
     summary: string;
     usage: readonly string[];
     mutates?: boolean;
@@ -208,7 +210,7 @@ function buildTool(
 
   const title = `runpane ${command.name}`;
   return {
-    name: toToolName(command.name),
+    name: command.mcpName ?? toToolName(command.name),
     title,
     command: command.name,
     words,
