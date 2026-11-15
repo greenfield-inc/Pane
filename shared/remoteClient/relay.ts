@@ -56,14 +56,6 @@ export function isRelayProfile(profile: RemotePaneConnectionProfile): profile is
   return profile.relay !== undefined;
 }
 
-/**
- * The address a client connects to. Today the relay address; the native networking module will
- * try the same-network addresses (`relay.local`) first and check the computer's key fingerprint.
- */
-export function relayBaseUrl(profile: RemotePaneConnectionProfile): string {
-  return profile.baseUrl;
-}
-
 /** A saved profile for a computer reached through a relay. Its id follows the computer, so pairing again replaces it. */
 export function relayProfile(grant: RelayComputerGrant, linkedBy?: string): RelayConnectionProfile {
   const { computer, token } = grant;

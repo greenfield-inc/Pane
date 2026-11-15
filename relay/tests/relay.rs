@@ -465,6 +465,25 @@ async fn status_reports_online_asleep_and_offline() {
     }
 }
 
+#[tokio::test]
+async fn the_phone_app_opens_pair_and_glasses_links() {
+    let env = Env::start(&[]).await;
+    let (code, body) = env
+        .http("GET", "/.well-known/apple-app-site-association", "", "")
+        .await;
+    assert_eq!(code, 200);
+    let aasa: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        aasa["applinks"]["details"][0]["components"],
+        json!([{"/": "/pair*"}, {"/": "/glasses*"}])
+    );
+    for path in ["/pair", "/glasses"] {
+        let (code, body) = env.http("GET", path, "", "").await;
+        assert_eq!(code, 200, "{path}");
+        assert!(body.contains("It's in TestFlight."), "{path}");
+    }
+}
+
 async fn dns_query(server: SocketAddr, name: String, rtype: RecordType, tcp: bool) -> Message {
     let mut q = Message::query();
     q.metadata.id = 7;

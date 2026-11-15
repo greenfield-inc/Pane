@@ -33,7 +33,9 @@ import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
 import { withNewProfiles } from '../../../shared/remoteClient/relay';
-import { pairingErrorText, pairThisBrowser, takePairingSecret } from './runtime/relayBrowserPairing';
+import { browserPairingJoin, pairingErrorText, pairThisBrowser, takePairingSecret } from './runtime/relayBrowserPairing';
+import type { RelayLinkJoin } from '../../../shared/remoteClient/relayLinkPreview';
+import { RemotePairJoinScreen } from './components/RemotePairJoinScreen';
 import { RelayConnectionBar } from './components/RelayConnectionBar';
 import { getClientLabel, getRuntimeId } from './runtime/remoteDaemonBrowserClient';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
@@ -136,6 +138,8 @@ export function RemotePwaApp() {
   const [archivedSessionToast, setArchivedSessionToast] = useState<OrchestrationSessionRecord | null>(null);
   /** The saved profile being reconnected to on open, until that attempt ends. */
   const [reconnectingProfile, setReconnectingProfile] = useState<RemotePaneConnectionProfile | null>(null);
+  /** A pairing link that would join this browser's computers with another group, until the person answers. */
+  const [pendingJoin, setPendingJoin] = useState<{ secret: string; join: RelayLinkJoin } | null>(null);
   /** Whether the notification tap that launched the app, if any, has been read; reconnecting waits for it. */
   const [pushRouteChecked, setPushRouteChecked] = useState(() => !isNativeMobile());
   /** Menus opened from the drawer render inside it, so the drawer's focus trap and outside-click dismissal leave them alone. */
@@ -608,10 +612,14 @@ export function RemotePwaApp() {
   useEffect(() => {
     if (profilesLoading || !pushRouteChecked || autoConnectStartedRef.current) return;
     autoConnectStartedRef.current = true;
-    // Opened from the pairing page's "Continue in browser": pair with the computer that served this page.
+    // Opened from the pairing page's "Continue in browser": pair with the computer that served this page,
+    // first asking when that joins this browser's computers with another group.
     const pairingSecret = takePairingSecret(window);
     if (pairingSecret) {
-      void pairFromLink(pairingSecret);
+      void browserPairingJoin(window, pairingSecret, (url, init) => fetch(url, init), savedProfiles).then(join => {
+        if (join) setPendingJoin({ secret: pairingSecret, join });
+        else void pairFromLink(pairingSecret);
+      });
       return;
     }
     // saveProfile keeps the last connected profile first.
@@ -1039,6 +1047,18 @@ export function RemotePwaApp() {
     <RelayConnectionBar profile={activeProfile ?? reconnectingProfile ?? savedProfiles[0]} status={connectionStatus} lastError={lastError} />
   );
   if (profilesLoading) return <main className="flex min-h-dvh items-center justify-center bg-bg-primary text-text-secondary">Loading saved connections…</main>;
+  if (pendingJoin) {
+    return (
+      <RemotePairJoinScreen
+        join={pendingJoin.join}
+        onLink={() => {
+          setPendingJoin(null);
+          void pairFromLink(pendingJoin.secret);
+        }}
+        onCancel={() => setPendingJoin(null)}
+      />
+    );
+  }
   if (reconnectingProfile && (!adapter || !activeProfile)) {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg-primary px-4 text-center text-text-secondary">

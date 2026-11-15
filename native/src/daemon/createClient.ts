@@ -5,7 +5,6 @@ import { Platform } from 'react-native';
 import {
   createFetchEventStreamTransport,
   getOrCreateRuntimeId,
-  relayBaseUrl,
   RemoteDaemonClient,
 } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
@@ -14,6 +13,7 @@ import { secureStore } from '@/auth/secureStore';
 import { demoConnection, isDemoProfile } from '@/features/demo/demoHost';
 
 import { routedFetch } from './direct/directRoute';
+import { sameNetworkFetch } from './direct/sameNetwork';
 
 // expo/fetch streams response bodies, which the /events stream needs.
 export const streamingFetch = expoFetch;
@@ -35,10 +35,11 @@ export function getRuntimeId(): Promise<string> {
 }
 
 export function createDaemonClient(profile: RemotePaneConnectionProfile): RemoteDaemonClient {
-  // A relay computer's requests take its direct connection while that path is picked.
-  const fetch = routedFetch(profile, streamingFetch);
+  // A relay computer's requests take its same-network address when one answers, else its direct
+  // connection while that path is picked, else the relay.
+  const fetch = sameNetworkFetch(profile, routedFetch(profile, streamingFetch));
   return new RemoteDaemonClient({
-    profile: { ...profile, baseUrl: relayBaseUrl(profile) },
+    profile,
     // The demo's sample computers answer in the app, whichever screen builds the client.
     ...(isDemoProfile(profile)
       ? demoConnection()

@@ -20,6 +20,7 @@ a.btn { display: block; padding: 12px 16px; margin-top: 12px; border-radius: 10p
   color: var(--fg); text-decoration: none; font-weight: 500; }
 a.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 p.note { margin: 24px 0 0; font-size: 14px; }
+p.note + p.note { margin-top: 12px; }
 p.note a { color: var(--fg); font-weight: 500; }
 [hidden] { display: none !important; }
 </style>
@@ -31,7 +32,9 @@ p.note a { color: var(--fg); font-weight: 500; }
   <div id="actions" hidden>
     <a class="btn primary" id="app" href="#">Open in Pane app</a>
     <a class="btn" id="web" href="#">Continue in browser</a>
-    <p class="note">No Pane app yet? It's in TestFlight.<br><a href="https://discord.gg/BdMyubeAZn" target="_blank" rel="noopener">Ask to join on Discord</a></p>
+    <p class="note" id="phone-note">No Pane app yet? It's in TestFlight.<br><a href="https://discord.gg/BdMyubeAZn" target="_blank" rel="noopener">Ask to join on Discord</a></p>
+    <p class="note" id="desktop-note" hidden>No Pane here yet? <a href="https://runpane.com" target="_blank" rel="noopener" id="download">Download Pane</a>, then open this link again.</p>
+    <p class="note" id="once" hidden>This link works once.</p>
   </div>
 </main>
 <script>
@@ -46,10 +49,27 @@ p.note a { color: var(--fg); font-weight: 500; }
     status.textContent = "This pairing link is incomplete. Scan the QR code on your computer again.";
     return;
   }
-  if (name) title.textContent = "Pair with " + name;
-  document.getElementById("app").href = "pane://pair" + location.hash + "&d=" + encodeURIComponent(location.host);
+  var app = document.getElementById("app");
+  app.href = "pane://pair" + location.hash + "&d=" + encodeURIComponent(location.host);
   document.getElementById("web").href = "https://" + id + "." + location.host + "/app/#pair=" + encodeURIComponent(secret);
+  // A desktop browser hands the link to desktop Pane, which links this computer.
+  var ua = navigator.userAgent;
+  var touchMac = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+  var desktop = !/Android|iPhone|iPad|iPod|Mobile/.test(ua) && !touchMac;
+  if (desktop) {
+    var os = /Windows/.test(ua) ? "Windows" : /Macintosh/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "";
+    if (os) document.getElementById("download").textContent = "Download Pane for " + os;
+    title.textContent = name ? "Link with " + name : "Link with Pane";
+    status.textContent = "Opening Pane on this computer to finish linking.";
+    app.textContent = "Open Pane";
+    document.getElementById("phone-note").hidden = true;
+    document.getElementById("desktop-note").hidden = false;
+    document.getElementById("once").hidden = false;
+  } else if (name) {
+    title.textContent = "Pair with " + name;
+  }
   document.getElementById("actions").hidden = false;
+  if (desktop) location.href = app.href;
   fetch("/v1/status/" + id).then(function (r) { return r.json(); }).then(function (s) {
     if (s.state === "asleep") status.textContent = "Your computer is asleep. Wake it, then continue.";
     else if (s.state === "offline") status.textContent = "Your computer is offline. Open Pane on it, then continue.";
