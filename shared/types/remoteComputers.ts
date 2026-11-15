@@ -23,6 +23,8 @@ export const COMPUTER_ROUTE_LABELS = {
   relay: 'Pane relay',
 } as const satisfies Record<ComputerRouteKind, string>;
 
+export type ComputerRouteLabel = (typeof COMPUTER_ROUTE_LABELS)[ComputerRouteKind];
+
 export interface ComputerRoute {
   /** `<kind>:<address>`, unique within its computer. */
   id: string;

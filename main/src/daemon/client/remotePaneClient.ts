@@ -3,7 +3,7 @@ import { pinnedServerIdentity } from '../relay/keyPinning';
 import { DirectPath } from '../relay/directPath';
 import { findPaneDirect } from '../relay/paneDirect';
 import { RELAY_CLIENT_COMMANDS } from '../../../../shared/types/relay';
-import { applyRoutesReport, decodeComputerRoutesReport, primaryProfile, routeProfile, type ComputerRoute, type ComputerRouteKind, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
+import { COMPUTER_ROUTE_LABELS, applyRoutesReport, decodeComputerRoutesReport, primaryProfile, routeProfile, type ComputerRoute, type ComputerRouteKind, type ComputerRoutesReport } from '../../../../shared/types/remoteComputers';
 import { EventEmitter } from 'events';
 import { lookup as defaultLookup, Resolver } from 'dns';
 import http, { type IncomingMessage, type RequestOptions } from 'http';
@@ -86,6 +86,8 @@ export interface RemoteRouteCandidate {
 /** One route's probe: the profile it was probed with and what the probe found. */
 interface RouteProbe {
   profile: RemotePaneConnectionProfile;
+  /** The route's name on the checklist. */
+  route: RemoteConnectionCheck['route'];
   outcome: ProbeOutcome;
 }
 
@@ -1995,7 +1997,8 @@ export class RemotePaneClientController extends EventEmitter {
     const candidates = routes.length > 1 ? routes : [{ ...routes[0], profile }];
     let nearest: RouteProbe | null = null;
     for (const route of candidates) {
-      const probe = await this.probeRoute(id, route, routes.length > 1);
+      const several = routes.length > 1;
+      const probe = await this.probeRoute(id, route, several, several ? COMPUTER_ROUTE_LABELS[route.kind] : routeOf(route.profile));
       if (this.check?.id !== id) {
         throw new PaneError('ERR_REMOTE_CHECK_SUPERSEDED', `The connection to ${profile.label} was replaced by a newer one.`, 'Wait for the newer connection to finish.');
       }
@@ -2012,11 +2015,11 @@ export class RemotePaneClientController extends EventEmitter {
       nearest ??= probe;
     }
     // SAFETY: `candidates` is never empty and every candidate either returned or set `nearest`.
-    const { profile: failedProfile, outcome } = nearest as RouteProbe;
+    const { profile: failedProfile, route: failedRoute, outcome } = nearest as RouteProbe;
     const failed = outcome.rows.find((row) => row.status === 'failed');
     this.checkProfile = failedProfile;
     this.hostFixes = outcome.hostFixes;
-    this.updateCheck(id, { route: routeOf(failedProfile), rows: outcome.rows, address: outcome.address, outcome: 'failed' });
+    this.updateCheck(id, { route: failedRoute, rows: outcome.rows, address: outcome.address, outcome: 'failed' });
     if (outcome.failedCheck) this.trackCheckFailure(outcome.failedCheck);
     throw new PaneError('ERR_REMOTE_CHECK_FAILED', `${failed?.label ?? `Can't reach ${profile.label}`}.`, failed?.detail ?? 'Use the fix on the connection checklist, then retry.');
   }
@@ -2025,9 +2028,9 @@ export class RemotePaneClientController extends EventEmitter {
    * Probes one route, showing it on the checklist. With several routes an SSH route's tunnel is
    * opened first; a route that cannot be readied fails at "Host reachable".
    */
-  private async probeRoute(id: number, route: RemoteRouteCandidate, prepare: boolean): Promise<RouteProbe> {
+  private async probeRoute(id: number, route: RemoteRouteCandidate, prepare: boolean, label: RemoteConnectionCheck['route']): Promise<RouteProbe> {
     let profile = route.profile;
-    this.updateCheck(id, { route: routeOf(profile), address: addressOf(profile), rows: initialRows(profile) });
+    this.updateCheck(id, { route: label, address: addressOf(profile), rows: initialRows(profile) });
     // A Tailscale route's probe looks the machine up itself.
     if (prepare && !tailnetMachineRef(profile)) {
       try {
@@ -2036,11 +2039,11 @@ export class RemotePaneClientController extends EventEmitter {
         const rows = initialRows(profile).map((row): RemoteConnectionCheckRow => (row.stage === 'reachable'
           ? { ...row, status: 'failed', label: `Can't reach ${profile.label}`, detail: getErrorMessage(error, 'The route could not be opened.') }
           : row));
-        return { profile, outcome: { rows, failedCheck: 'host_unreachable', hostVersion: null, address: addressOf(profile), hostFixes: new Map() } };
+        return { profile, route: label, outcome: { rows, failedCheck: 'host_unreachable', hostVersion: null, address: addressOf(profile), hostFixes: new Map() } };
       }
     }
     const outcome = await probeHost(profile, new RemotePaneClient(profile, { dnsLookup: this.dnsLookup }), this.checkDependencies, (rows) => this.updateCheck(id, { rows }));
-    return { profile, outcome };
+    return { profile, route: label, outcome };
   }
 
   /**

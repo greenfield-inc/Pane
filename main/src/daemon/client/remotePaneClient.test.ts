@@ -1116,9 +1116,13 @@ describe('RemotePaneClientController', () => {
       ],
     }];
     const controller = createController();
+    const checklistRoutes: string[] = [];
     controller.initialize({
       configManager: createConfigManagerStub(remoteConfig),
-      rendererEventSink: { send() {} },
+      rendererEventSink: { send() {
+        const route = controller.getConnectionState().check?.route;
+        if (route && checklistRoutes.at(-1) !== route) checklistRoutes.push(route);
+      } },
       resolveTailnetMachineUrl: async () => { throw new Error('Tailscale is signed out. Open Tailscale and sign in.'); },
       checkDependencies: { lookupTailnetMachine: async () => ({ kind: 'tailscale-down', reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' }) },
     });
@@ -1129,6 +1133,8 @@ describe('RemotePaneClientController', () => {
 
     await waitFor(() => controller.getConnectionState().status === 'connected');
     expect(controller.getConnectionState()).toMatchObject({ activeRouteId: `public:${server.baseUrl}` });
+    // The checklist names each route it tries.
+    expect(checklistRoutes).toEqual(['Tailscale', 'Public URL']);
   });
 
   it('restores the saved local state when a manual activation fails', async () => {

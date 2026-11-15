@@ -1,4 +1,5 @@
 import type { PaneChatAgent } from './paneChat';
+import type { ComputerRouteLabel } from './remoteComputers';
 import type { VoiceTranscriptionMode } from './voiceTranscription';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { BoundarySchema, JsonObject, JsonValue } from '../validation/boundaryDecoder';
@@ -432,8 +433,8 @@ export interface RemoteConnectionCheck {
   id: number;
   profileId: string;
   hostLabel: string;
-  /** How this computer reaches the host, for the card's subtitle. */
-  route: 'Tailscale' | 'SSH tunnel' | 'URL';
+  /** How this computer reaches the host, for the card's subtitle: the route's name when the computer has several. */
+  route: 'Tailscale' | 'SSH tunnel' | 'URL' | ComputerRouteLabel;
   address: string;
   /** `warning`: connected, but a row warns, so the card waits for "Continue to workspace". */
   outcome: 'running' | 'failed' | 'warning' | 'passed';
