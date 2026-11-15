@@ -83,7 +83,7 @@ export class VersionChecker {
         hasUpdate,
         releaseUrl: release.html_url,
         downloadUrl: this.findMacDmgDownloadUrl(release),
-        releaseNotes: release.body ?? undefined,
+        releaseNotes: release.body ? inAppReleaseNotes(release.body) : undefined,
         publishedAt: release.published_at
       };
     } catch (error) {
@@ -204,4 +204,10 @@ export class VersionChecker {
       return false;
     }
   }
+}
+
+// The release script appends a Download section after this marker for the GitHub page;
+// the app is already installed, so it shows the notes above the marker without HTML comments.
+function inAppReleaseNotes(body: string): string {
+  return body.split('<!-- pane-download-links -->')[0].replace(/<!--[\s\S]*?-->/g, '').trim();
 }
