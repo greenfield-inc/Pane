@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CleanupRun } from '../../../../shared/types/machineHealth';
-import { OtherApps, type AppProcessRow, type OtherAppsDeps } from './otherApps';
+import { OtherApps, parseAppProcessTable, type AppProcessRow, type OtherAppsDeps } from './otherApps';
 
 const PANE_PID = 500;
 
@@ -21,7 +21,10 @@ const macTable = (): AppProcessRow[] => [
   row(11, `${CHROME}/Contents/Frameworks/Google Chrome Framework.framework/Versions/1/Helpers/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)`, 700, { ppid: 10 }),
   row(12, `${CHROME}/Contents/Frameworks/Google Chrome Framework.framework/Versions/1/Helpers/Google Chrome Helper (GPU).app/Contents/MacOS/Google Chrome Helper (GPU)`, 300, { ppid: 10 }),
   row(20, '/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder', 200),
-  row(30, '/Applications/Pane.app/Contents/MacOS/Pane', 600),
+  row(30, '/Applications/Pane.app/Contents/MacOS/Pane', 600), // another Pane instance
+  row(31, '/bin/zsh', 10, { ppid: 30 }), // its tab
+  row(32, 'claude', 900, { ppid: 31, exe: '/Users/me/.local/share/claude/versions/2.1.322' }), // its agent
+  row(70, 'claude', 400, { exe: '/Users/me/.local/share/claude/versions/2.1.322' }), // an agent in a plain terminal
   row(40, '/usr/local/bin/node', 90),
   row(41, '/Users/me/.nvm/versions/node/v22/bin/node', 70),
   row(50, '/System/Applications/Notes.app/Contents/MacOS/Notes', 80),
@@ -49,11 +52,12 @@ function apps(over: Partial<OtherAppsDeps> = {}, tables: AppProcessRow[][] = [ma
 }
 
 describe('OtherApps.list', () => {
-  it('folds each macOS app bundle (and each simulator runtime) with its helpers into one app, biggest memory first, without Pane\'s own processes', async () => {
+  it('folds each macOS app bundle, simulator runtime and other Pane instance with what it runs into one app, biggest memory first, without this Pane\'s processes', async () => {
     const list = await apps().apps.list();
     expect(list.map(app => [app.name, Math.round(app.rssMB), app.processCount])).toEqual([
+      ['Pane', 1510, 3],
       ['Google Chrome', 1500, 3],
-      ['Pane', 600, 1],
+      ['claude', 400, 1],
       ['Finder', 200, 1],
       ['node', 160, 2],
       ['Terminal', 150, 1],
@@ -64,18 +68,32 @@ describe('OtherApps.list', () => {
     ]);
   });
 
-  it('protects system processes, Pane itself and the apps Pane runs inside; ordinary apps can stop', async () => {
+  it('marks which apps are grouped by executable name, so the confirm can say they span other terminals', async () => {
+    const list = await apps().apps.list();
+    expect(list.filter(app => app.byName).map(app => app.name)).toEqual(['claude', 'node', 'launchd', 'zsh']);
+  });
+
+  it('locks Pane itself with what it runs, the iOS simulator and the apps Pane runs inside; ordinary apps can stop', async () => {
     const list = await apps().apps.list();
     const reason = (name: string) => list.find(app => app.name === name)?.protectedReason;
     expect(reason('Google Chrome')).toBeNull();
     expect(reason('node')).toBeNull();
-    // A built-in app outside /System/Library is the person's to quit.
-    expect(reason('Notes')).toBeNull();
-    expect(reason('Finder')).toMatch(/macOS/u);
-    expect(reason('launchd')).toMatch(/macOS/u);
-    expect(reason('Pane')).toMatch(/Pane/u);
+    expect(reason('claude')).toBeNull();
+    expect(reason('Pane')).toMatch(/This is Pane/u);
+    expect(reason('iOS 27.0 Simulator')).toMatch(/Simulator app/u);
     expect(reason('Terminal')).toMatch(/Pane runs inside/u);
     expect(reason('zsh')).toMatch(/Pane runs inside/u);
+  });
+
+  it('leaves out locked processes under 1 MB, and sends each icon only to a screen that lacks it', async () => {
+    const table = [...macTable(), row(80, '/usr/libexec/tiny', 0.5)];
+    const { apps: other } = apps({ iconOf: async path => `icon:${path}` }, [table]);
+    const first = await other.list();
+    expect(first.some(app => app.name === 'tiny')).toBe(false);
+    expect(first.find(app => app.name === 'Google Chrome')?.icon).toBe(`icon:${CHROME}`);
+    const again = await other.list([CHROME]);
+    expect(again.find(app => app.name === 'Google Chrome')?.icon).toBeUndefined();
+    expect(again.find(app => app.name === 'Finder')?.icon).toBe('icon:/System/Library/CoreServices/Finder.app');
   });
 
   it('reports CPU from the change in CPU time between two reads a second apart', async () => {
@@ -105,6 +123,60 @@ describe('OtherApps.list', () => {
   });
 });
 
+/** The reason one user-owned process, started outside Pane's tree, gets on `platform`; each case hits one rule only. */
+async function reasonFor(platform: NodeJS.Platform, proc: AppProcessRow): Promise<string | null | undefined> {
+  const list = await apps({ platform, paneProcesses: () => new Set() }, [[proc]]).apps.list();
+  return list[0]?.protectedReason;
+}
+
+describe('which apps are system', () => {
+  it.each([
+    ['Finder', '/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder', {}],
+    ['a daemon in /usr/libexec', '/usr/libexec/sharingd', {}],
+    ['a daemon in /Library/Apple', '/Library/Apple/System/Library/CoreServices/XProtect.app/Contents/MacOS/XProtect', {}],
+    ['an agent in the system cryptex', '/System/Cryptexes/App/usr/libexec/AuthenticationServicesAgent', {}],
+    ['a bare-name daemon whose executable is in /System', 'cloudphotod', { exe: '/System/Library/PrivateFrameworks/CloudPhotoLibrary.framework/Versions/A/Support/cloudphotod' }],
+    ['another user\'s app', '/Applications/Docker.app/Contents/MacOS/com.docker.backend', { otherUser: true }],
+  ])('macOS locks %s', async (_label, path, over) => {
+    expect(await reasonFor('darwin', row(9, path, 50, over))).toMatch(/Part of macOS/u);
+  });
+
+  it.each([
+    ['Homebrew node', '/usr/local/bin/node', {}],
+    ['a built-in app the person quits', '/System/Applications/Notes.app/Contents/MacOS/Notes', {}],
+    ['Safari in its cryptex', '/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app/Contents/MacOS/Safari', {}],
+    ['a quarantined app run from its translocation folder', '/private/var/folders/x1/T/AppTranslocation/AB12/d/Foo.app/Contents/MacOS/Foo', {}],
+    ['an agent CLI named by argv[0]', 'claude', { exe: '/Users/me/.local/share/claude/versions/2.1.322' }],
+  ])('macOS lets the person stop %s', async (_label, path, over) => {
+    expect(await reasonFor('darwin', row(9, path, 50, over))).toBeNull();
+  });
+
+  it('macOS locks a bare-name process whose executable it could not read', async () => {
+    expect(await reasonFor('darwin', row(9, 'mystery', 50))).toMatch(/can't tell which program/u);
+  });
+
+  it.each(['ksmserver', 'kwin_wayland', 'plasmashell', 'xfce4-session', 'cinnamon', 'mate-session', 'sway', 'Hyprland', 'i3', 'gnome-shell', 'gnome-session-b', 'gnome-keyring-d', 'xdg-desktop-por', 'at-spi-bus-laun', 'pipewire-pulse', 'Xwayland'])(
+    'Linux locks the desktop session process %s', async comm => {
+      expect(await reasonFor('linux', row(9, comm, 50))).toMatch(/Part of the system/u);
+    });
+
+  it('Linux lets the person stop an ordinary app, and locks another user\'s', async () => {
+    expect(await reasonFor('linux', row(9, 'firefox', 50))).toBeNull();
+    expect(await reasonFor('linux', row(9, 'firefox', 50, { otherUser: true }))).toMatch(/Part of the system/u);
+  });
+
+  it('reads the owner from the ps table: another uid marks a process as another user\'s', () => {
+    const table = [
+      '  412     1   501  20480   0:01.50 Mon Nov 16 09:00:01 2026 /Applications/Slack.app/Contents/MacOS/Slack',
+      '   88     1     0   8192   0:00.20 Mon Nov 16 08:59:58 2026 /usr/sbin/syslogd',
+    ].join('\n');
+    expect(parseAppProcessTable(table, 501).map(proc => [proc.pid, proc.otherUser, proc.rssKB, proc.cpuSeconds, proc.started, proc.path])).toEqual([
+      [412, false, 20480, 1.5, 'Mon Nov 16 09:00:01 2026', '/Applications/Slack.app/Contents/MacOS/Slack'],
+      [88, true, 8192, 0.2, 'Mon Nov 16 08:59:58 2026', '/usr/sbin/syslogd'],
+    ]);
+  });
+});
+
 describe('OtherApps.stop', () => {
   it('stops every process of the app it names, as it runs now, and records the stop', async () => {
     const { apps: other, stopped, runs } = apps();
@@ -117,6 +189,7 @@ describe('OtherApps.stop', () => {
     const { apps: other, stopped } = apps();
     await expect(other.stop('/System/Library/CoreServices/Finder.app', 'ui')).rejects.toMatchObject({ code: 'ERR_MACHINE_APP_PROTECTED' });
     await expect(other.stop('/Applications/Pane.app', 'ui')).rejects.toMatchObject({ code: 'ERR_MACHINE_APP_PROTECTED' });
+    await expect(other.stop(`${SIM.slice(0, SIM.indexOf('.simruntime') + '.simruntime'.length)}`, 'ui')).rejects.toMatchObject({ code: 'ERR_MACHINE_APP_PROTECTED' });
     expect(stopped).toEqual([]);
   });
 

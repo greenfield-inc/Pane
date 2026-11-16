@@ -221,7 +221,10 @@ export const MACHINE_HEALTH_RELIEF_CHANNEL = 'resource-monitor:machine-relief';
 export const MACHINE_HEALTH_PAUSE_IDLE_CHANNEL = 'resource-monitor:machine-pause-idle';
 /** Stops processes the latest sample attributes to a Pane, by pid and start time: `{ processes: [{ pid, started }], source }`. */
 export const MACHINE_HEALTH_STOP_PROCESSES_CHANNEL = 'resource-monitor:machine-stop-processes';
-/** The apps running outside Pane on this machine, biggest memory first: `OtherApp[]`. Read when Resources expands "Other apps". */
+/**
+ * The apps running outside Pane on this machine, biggest memory first: `OtherApp[]`. Read when Resources expands "Other apps".
+ * `{ knownIcons }` lists the keys whose icons the screen already has; only the others carry one.
+ */
 export const MACHINE_HEALTH_APPS_CHANNEL = 'resource-monitor:machine-apps';
 /** Stops every process of one app from that list, when the person asks: `{ key, source }`; protected apps are refused. */
 export const MACHINE_HEALTH_STOP_APP_CHANNEL = 'resource-monitor:machine-stop-app';
@@ -236,6 +239,8 @@ export interface OtherApp {
   /** Summed CPU of its processes, in percent of one core. */
   cpuPercent: number;
   processCount: number;
+  /** Grouped by executable name, not an app bundle: it takes in every process of that name outside Pane, other terminals' too. */
+  byName: boolean;
   /** A PNG data URL of the app's icon, when the OS gives one. */
   icon?: string;
   /** Why Pane will not stop it (system, Pane itself, or an app Pane runs inside); null when it can. */

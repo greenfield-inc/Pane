@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppWindow, LoaderCircle, Lock, OctagonX } from 'lucide-react';
 import type { OtherApp } from '../../../../shared/types/machineHealth';
 import { formatMB } from '../../../../shared/utils/formatBytes';
@@ -23,10 +23,14 @@ export function OtherAppsList({ machineId, readAt, readOnlyReason, onStopped }: 
   const [showAll, setShowAll] = useState(false);
   const [confirming, setConfirming] = useState<OtherApp | null>(null);
   const [stopping, setStopping] = useState<string | null>(null);
+  /** Icons by app key: the machine sends each once, since they don't change. */
+  const icons = useRef(new Map<string, string>());
 
   const load = useCallback(async () => {
     try {
-      setApps(await readOtherApps(machineId));
+      const list = await readOtherApps(machineId, [...icons.current.keys()]);
+      for (const app of list) if (app.icon) icons.current.set(app.key, app.icon);
+      setApps(list);
       setProblem(null);
     } catch (error) {
       const read = healthReadProblem(error);
@@ -42,8 +46,8 @@ export function OtherAppsList({ machineId, readAt, readOnlyReason, onStopped }: 
     } catch (error) {
       showActionError(`Could not stop ${app.name}`, error);
     } finally {
-      await load();
       setStopping(null);
+      // The page reloads, and its new reading reads this list again.
       onStopped();
     }
   };
@@ -52,6 +56,8 @@ export function OtherAppsList({ machineId, readAt, readOnlyReason, onStopped }: 
   if (!apps) return <p className="mt-3 text-sm text-text-secondary" role="status">Reading the apps on this machine…</p>;
   const shown = showAll ? apps : apps.slice(0, FIRST_ROWS);
   return (
+    <>
+    {problem && <p className="mt-3 text-sm text-status-error" role="status">{problem}</p>}
     <div className="mt-3 overflow-hidden rounded-lg border border-border-primary" aria-label="Other apps">
       <div className="flex items-center gap-3 border-b border-border-primary px-3 py-1.5 text-xs text-text-secondary">
         <span className="min-w-0 flex-1">App</span>
@@ -63,7 +69,7 @@ export function OtherAppsList({ machineId, readAt, readOnlyReason, onStopped }: 
         {shown.map(app => (
           <li key={app.key} className="flex items-center gap-3 px-3 py-1.5">
             <span className="flex h-4 w-4 shrink-0 items-center justify-center text-text-tertiary">
-              {app.icon ? <img src={app.icon} alt="" className="h-4 w-4" /> : <AppWindow className="h-4 w-4" aria-hidden="true" />}
+              {icons.current.get(app.key) ? <img src={icons.current.get(app.key)} alt="" className="h-4 w-4" /> : <AppWindow className="h-4 w-4" aria-hidden="true" />}
             </span>
             <span className="min-w-0 flex-1 truncate" title={app.key}>
               <span className="text-text-primary">{app.name}</span>
@@ -97,8 +103,16 @@ export function OtherAppsList({ machineId, readAt, readOnlyReason, onStopped }: 
       <ConfirmDialog isOpen={confirming !== null} onClose={() => setConfirming(null)}
         onConfirm={() => { if (confirming) void stop(confirming); }}
         title={confirming ? `Stop ${confirming.name}?` : ''}
-        message={confirming ? `Pane ends ${confirming.name} now${confirming.processCount > 1 ? ` (${confirming.processCount} processes)` : ''}. Unsaved work in it may be lost.` : ''}
+        message={confirming ? stopMessage(confirming) : ''}
         confirmText={confirming ? `Stop ${confirming.name}` : 'Stop'} />
     </div>
+    </>
   );
+}
+
+function stopMessage(app: OtherApp): string {
+  const count = app.processCount > 1 ? ` (${app.processCount} processes)` : '';
+  return app.byName
+    ? `Pane ends every ${app.name} process outside this Pane now${count}, including ones started in other terminals. Unsaved work in them may be lost.`
+    : `Pane ends ${app.name} now${count}. Unsaved work in it may be lost.`;
 }

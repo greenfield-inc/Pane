@@ -110,19 +110,29 @@ machine, and on this computer otherwise (the window switches back to it).
 On Resources, the chevron beside **Other apps** under Memory opens the apps
 running outside Pane, biggest memory first, each with its memory and CPU. On
 macOS an app is its `.app` bundle with all its helpers, and each iOS simulator
-runtime counts as one app. On Windows and Linux an app is every process of one
-executable. Pane reads this list when you open it and with each refresh after
-that; it is not part of the per-minute sample.
+runtime counts as one app. A program outside a bundle (`node`, `claude`), and
+every program on Windows and Linux, is grouped by executable name: the group
+takes in every process of that name outside Pane, including ones started in
+other terminals. Everything another Pane instance runs counts with that Pane.
+Pane reads this list when you open it and with each refresh after that; it is
+not part of the per-minute sample. Locked processes under 1 MB are left out.
 
 The stop button beside an app ends all of its processes after you confirm
 once: Pane asks each to quit, then forces whatever still runs after 3 seconds
-(Windows ends them at once). Unsaved work in that app may be lost. A lock
+(Windows ends them at once). Unsaved work in that app may be lost; for a group
+named by executable, the confirm says it reaches other terminals too. A lock
 replaces the button, with the reason, for:
 
-- system processes: another user's or the system's, macOS's own (under
-  `/System/Library`, `/usr` and similar), Windows' own (under `C:\Windows`,
-  or another session's), and the Linux desktop session;
-- Pane itself, including another Pane instance;
+- system processes: another user's or the system's; macOS's own (an
+  executable under `/System`, `/usr` but not `/usr/local`, `/bin`, `/sbin` or
+  `/Library/Apple`, except the apps in `/System/Applications` and Safari);
+  Windows' own (under `C:\Windows`, or another session's); and on Linux the
+  desktop session (display servers, session managers, compositors and window
+  managers such as `ksmserver`, `sway` or `gnome-shell`, and their services);
+- on macOS, a process named without a path whose executable Pane can't read;
+- the iOS simulator: some of its helpers run outside the runtime, so quit it
+  from the Simulator app or with `xcrun simctl shutdown all`;
+- Pane itself, including another Pane instance and everything it runs;
 - any app Pane runs inside, such as the terminal that started it.
 
 The machine checks these again when the stop arrives, so a linked machine

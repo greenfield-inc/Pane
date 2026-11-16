@@ -80,9 +80,9 @@ export async function runHealthAction(machineId: string, action: MachineHealthAc
   await window.electronAPI.machines.run(machineId, { type: 'machine-health', action, request });
 }
 
-/** The apps running outside Pane on a machine, biggest memory first. */
-export async function readOtherApps(machineId: string): Promise<OtherApp[]> {
-  return read<OtherApp[]>(machineId, 'resource-monitor:machine-apps');
+/** The apps running outside Pane on a machine, biggest memory first; icons only for keys not in `knownIcons`. */
+export async function readOtherApps(machineId: string, knownIcons: readonly string[]): Promise<OtherApp[]> {
+  return read<OtherApp[]>(machineId, 'resource-monitor:machine-apps', [{ knownIcons: [...knownIcons] }]);
 }
 
 /** One machine's latest health sample. */

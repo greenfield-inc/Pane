@@ -52,7 +52,7 @@ test.describe('Resources page', () => {
     ]);
   });
 
-  test('Other apps opens into each app, biggest first; stop asks once by name and runs on that machine; protected apps say why', async ({ page }) => {
+  test('Other apps opens into each app; stop asks once by name and runs on that machine; protected apps say why', async ({ page }) => {
     await open(page, 'machine=local');
     const memory = page.getByRole('region', { name: 'Memory' });
     await memory.getByRole('button', { name: 'Other apps' }).click();
@@ -69,6 +69,9 @@ test.describe('Resources page', () => {
     const dialog = page.getByRole('dialog', { name: 'Stop Slack?' });
     await expect(dialog).toContainText('Pane ends Slack now (6 processes). Unsaved work in it may be lost.');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await memory.getByRole('button', { name: 'Stop node' }).click();
+    await expect(page.getByRole('dialog', { name: 'Stop node?' })).toContainText('Pane ends every node process outside this Pane now (2 processes), including ones started in other terminals.');
+    await page.getByRole('dialog', { name: 'Stop node?' }).getByRole('button', { name: 'Cancel' }).click();
     expect(await page.evaluate(() => window.qaRuns)).toEqual([]);
 
     await memory.getByRole('button', { name: 'Stop Google Chrome' }).click();
@@ -162,6 +165,8 @@ test.describe('Resources page', () => {
     await open(page, 'machine=devbox&housekeeping=off');
     await expect(page.getByText('Pane on devbox does not clean up: another Pane there owns its data folder. Act from that Pane.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeDisabled();
+    await page.getByRole('region', { name: 'Memory' }).getByRole('button', { name: 'Other apps' }).click();
+    await expect(page.getByRole('button', { name: 'Stop chrome' })).toBeDisabled();
   });
 
   test('a leaking run-script process offers Restart, Stop and Ignore', async ({ page }) => {

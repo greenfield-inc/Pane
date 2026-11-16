@@ -15,8 +15,10 @@ export interface AppProcessRow {
   started: string;
   rssKB: number;
   cpuSeconds: number;
-  /** The executable's path, or its name when the OS gives no path. */
+  /** As the OS names it: on macOS and Linux argv[0] (a path or a bare name), on Windows the executable's path, else its name. */
   path: string;
+  /** macOS only: the executable's real path when argv[0] is not one (read with lsof), or undefined when it could not be read. */
+  exe?: string;
   /** Another user's process, a Windows service (session 0), or one whose path this user cannot read. */
   otherUser: boolean;
 }
@@ -42,10 +44,17 @@ export interface OtherAppsDeps {
   record: (run: CleanupRun) => void;
 }
 
-interface AppGroup {
+interface AppIdentity {
   key: string;
   name: string;
   iconPath?: string;
+  /** Grouped by executable name rather than an app bundle, so it can span other terminals. */
+  byName: boolean;
+  /** An iOS simulator runtime. */
+  simulator?: boolean;
+}
+
+interface AppGroup extends AppIdentity {
   rows: AppProcessRow[];
 }
 
@@ -54,12 +63,17 @@ const CPU_BASELINE_MAX_AGE_MS = 5 * 60_000;
 const CPU_BASELINE_GAP_MS = 1000;
 /** Icons for the biggest apps only, to keep the answer small for a linked machine. */
 const ICON_LIMIT = 40;
-/** Executables under these hold macOS itself. Built-in apps in /System/Applications are the person's to quit. */
-const MAC_SYSTEM_PATH = /^\/(?:System|usr(?!\/local\/)|bin|sbin|private|Library\/Apple)\//u;
-const MAC_USER_APP_PATH = /\/System\/Applications\/|\/Cryptexes\/App\//u;
+/** Protected rows smaller than this are left out of the list: they are system daemons nobody can act on. */
+const PROTECTED_MIN_MB = 1;
+/** Executables under these hold macOS itself. Built-in apps in /System/Applications (Safari in its cryptex) are the person's to quit. */
+const MAC_SYSTEM_PATH = /^\/(?:System|usr(?!\/local\/)|bin|sbin|Library\/Apple)\//u;
+const MAC_USER_APP_PATH = /^\/System\/Applications\/|\/Cryptexes\/App\/System\/Applications\//u;
 const WINDOWS_SYSTEM_PATH = /^[a-z]:\\windows\\/iu;
-/** The desktop session itself on Linux; stopping one ends the person's session. */
-const LINUX_SESSION = new Set(['systemd', 'init', 'Xorg', 'Xwayland', 'gnome-shell', 'gnome-session-b', 'plasmashell', 'kwin_x11', 'kwin_wayland', 'dbus-daemon', 'dbus-broker', 'pipewire', 'wireplumber', 'pulseaudio', 'sddm', 'gdm', 'lightdm']);
+/**
+ * The desktop session itself on Linux, as `comm` prints it (15 characters): display servers, session managers,
+ * compositors and window managers, and the session's own services. Stopping one ends or breaks the person's session.
+ */
+const LINUX_SESSION = /^(?:systemd|init|Xorg|Xwayland|dbus-daemon|dbus-broker|sddm|gdm\d?|lightdm|ksmserver|kwin\w*|plasmashell|plasma_session|startplasma-\S*|kded\d?|xfce4-session|xfwm4|xfsettingsd|xfce4-panel|cinnamon\S*|mate-session|marco|muffin|mutter|gnome-shell\S*|gnome-session\S*|gnome-keyring-d|gsd-\S+|sway|swaybg|Hyprland|i3|i3bar|openbox|xdg-desktop-por|xdg-document-po|xdg-permission-|at-spi\S*|pipewire\S*|wireplumber|pulseaudio)$/u;
 
 const systemText = (platform: NodeJS.Platform) =>
   `Part of ${platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : 'the system'}. Pane never stops system processes.`;
@@ -73,17 +87,26 @@ const baseName = (path: string) => path.split(/[\\/]/u).pop() ?? path;
 export class OtherApps {
   private baseline: { at: number; cpu: Map<string, number> } | null = null;
   private icons = new Map<string, Promise<string | undefined>>();
-  private inFlight: Promise<OtherApp[]> | null = null;
+  private inFlight: Promise<Array<OtherApp & { iconPath?: string }>> | null = null;
 
   constructor(private readonly deps: OtherAppsDeps) {}
 
-  /** Every app outside Pane, biggest memory first. Concurrent callers share one read. */
-  list(): Promise<OtherApp[]> {
+  /**
+   * Every app outside Pane, biggest memory first. Icons come only for apps whose key is not in `knownIcons`,
+   * so a screen that keeps them asks for each once. Concurrent callers share one read.
+   */
+  async list(knownIcons: readonly string[] = []): Promise<OtherApp[]> {
     this.inFlight ??= this.read().finally(() => { this.inFlight = null; });
-    return this.inFlight;
+    const known = new Set(knownIcons);
+    const apps = await this.inFlight;
+    return Promise.all(apps.map(async ({ iconPath, ...app }, index) => {
+      if (!iconPath || index >= ICON_LIMIT || known.has(app.key)) return app;
+      const icon = await this.icon(iconPath);
+      return icon ? { ...app, icon } : app;
+    }));
   }
 
-  private async read(): Promise<OtherApp[]> {
+  private async read(): Promise<Array<OtherApp & { iconPath?: string }>> {
     if (!this.baseline || this.deps.now() - this.baseline.at > CPU_BASELINE_MAX_AGE_MS) {
       this.baseline = { at: this.deps.now(), cpu: cpuTimes(await this.deps.read()) };
       await (this.deps.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms))))(CPU_BASELINE_GAP_MS);
@@ -93,24 +116,21 @@ export class OtherApps {
     const seconds = Math.max(0.001, (now - this.baseline.at) / 1000);
     const previous = this.baseline.cpu;
     this.baseline = { at: now, cpu: cpuTimes(rows) };
-    const groups = this.groups(rows);
-    return Promise.all(groups.map(async (group, index) => {
+    return this.groups(rows).flatMap(group => {
       const cpu = group.rows.reduce((sum, row) => {
         const before = previous.get(`${row.pid}:${row.started}`);
         return sum + (before === undefined ? 0 : Math.max(0, row.cpuSeconds - before));
       }, 0);
-      const icon = group.iconPath && index < ICON_LIMIT ? await this.icon(group.iconPath) : undefined;
-      const app: OtherApp = {
-        key: group.key,
-        name: group.name,
-        rssMB: Math.round(group.rows.reduce((sum, row) => sum + row.rssKB, 0) / 102.4) / 10,
+      const rssMB = Math.round(group.rows.reduce((sum, row) => sum + row.rssKB, 0) / 102.4) / 10;
+      const protectedReason = this.protectedReason(group, rows);
+      if (protectedReason && rssMB < PROTECTED_MIN_MB) return [];
+      return [{
+        key: group.key, name: group.name, iconPath: group.iconPath, rssMB, byName: group.byName,
         cpuPercent: Math.round((cpu / seconds) * 1000) / 10,
         processCount: group.rows.length,
-        protectedReason: this.protectedReason(group, rows),
-      };
-      if (icon) app.icon = icon;
-      return app;
-    }));
+        protectedReason,
+      }];
+    });
   }
 
   /** Stops every process of the app named `key` as it runs now; refuses a protected one. */
@@ -138,13 +158,31 @@ export class OtherApps {
     return run;
   }
 
-  /** Apps outside Pane: Pane's own process tree and processes credited to a Pane are left out. */
+  /**
+   * Apps outside Pane: Pane's own process tree and processes credited to a Pane are left out. Everything another
+   * Pane instance started counts with that Pane, so its agents and dev servers never fall into a stoppable group.
+   */
   private groups(rows: readonly AppProcessRow[]): AppGroup[] {
     const own = this.paneTree(rows);
+    const byPid = new Map(rows.map(row => [row.pid, row]));
+    const owners = new Map<number, AppIdentity>();
+    const ownerOf = (row: AppProcessRow): AppIdentity => {
+      const known = owners.get(row.pid);
+      if (known) return known;
+      const seen = new Set<number>();
+      let owner = this.identify(row);
+      for (let parent = byPid.get(row.ppid); parent && parent.pid > 1 && !seen.has(parent.pid); parent = byPid.get(parent.ppid)) {
+        seen.add(parent.pid);
+        const identity = this.identify(parent);
+        if (isPane(identity)) owner = identity;
+      }
+      owners.set(row.pid, owner);
+      return owner;
+    };
     const groups = new Map<string, AppGroup>();
     for (const row of rows) {
       if (own.has(row.pid)) continue;
-      const identity = this.identify(row.path);
+      const identity = ownerOf(row);
       const group = groups.get(identity.key);
       if (group) group.rows.push(row);
       else groups.set(identity.key, { ...identity, rows: [row] });
@@ -153,20 +191,23 @@ export class OtherApps {
     return [...groups.values()].sort((a, b) => memory(b) - memory(a) || a.name.localeCompare(b.name));
   }
 
-  /** macOS: the outermost .app bundle (or simulator runtime), so helpers count with their app. Elsewhere: the executable's name. */
-  private identify(path: string): Pick<AppGroup, 'key' | 'name' | 'iconPath'> {
+  /**
+   * macOS: the outermost .app bundle (or simulator runtime) of the real executable, so helpers count with their app;
+   * otherwise the name the process runs under (argv[0]: `claude`, not its versioned binary). Elsewhere: the executable's name.
+   */
+  private identify(row: AppProcessRow): AppIdentity {
     if (this.deps.platform === 'darwin') {
       // A simulator runtime holds a whole iOS, with its own apps and daemons: one app per runtime.
-      const bundle = /^(.*?\.(?:app|simruntime))(?:\/|$)/u.exec(path)?.[1];
-      if (bundle?.endsWith('.simruntime')) return { key: bundle, name: `${baseName(bundle).replace(/\.simruntime$/u, '')} Simulator` };
-      if (bundle) return { key: bundle, name: baseName(bundle).replace(/\.app$/u, ''), iconPath: bundle };
-      return { key: baseName(path), name: baseName(path) };
+      const bundle = /^(.*?\.(?:app|simruntime))(?:\/|$)/u.exec(row.exe ?? row.path)?.[1];
+      if (bundle?.endsWith('.simruntime')) return { key: bundle, name: `${baseName(bundle).replace(/\.simruntime$/u, '')} Simulator`, byName: false, simulator: true };
+      if (bundle) return { key: bundle, name: baseName(bundle).replace(/\.app$/u, ''), iconPath: bundle, byName: false };
+      return { key: baseName(row.path), name: baseName(row.path), byName: true };
     }
     if (this.deps.platform === 'win32') {
-      const name = baseName(path).replace(/\.exe$/iu, '');
-      return { key: name.toLowerCase(), name, iconPath: /^[a-z]:\\/iu.test(path) ? path : undefined };
+      const name = baseName(row.path).replace(/\.exe$/iu, '');
+      return { key: name.toLowerCase(), name, iconPath: /^[a-z]:\\/iu.test(row.path) ? row.path : undefined, byName: true };
     }
-    return { key: baseName(path), name: baseName(path) };
+    return { key: baseName(row.path), name: baseName(row.path), byName: true };
   }
 
   private paneTree(rows: readonly AppProcessRow[]): Set<number> {
@@ -184,7 +225,12 @@ export class OtherApps {
   }
 
   private protectedReason(group: AppGroup, rows: readonly AppProcessRow[]): string | null {
-    if (group.name.toLowerCase() === 'pane') return 'This is Pane. Quit it from its own window.';
+    if (isPane(group)) return 'This is Pane, with what it runs. Quit it from its own window.';
+    // Its devices run helpers outside the runtime (launchd_sim's host, the render server), so a stop here would not end it.
+    if (group.simulator) return 'Quit it from the Simulator app, or run `xcrun simctl shutdown all`. Some of its helpers run outside this list.';
+    if (this.deps.platform === 'darwin' && group.rows.some(row => !row.exe && !row.path.startsWith('/') && !row.otherUser && row.pid > 1)) {
+      return 'Pane can\'t tell which program this is, so it does not stop it.';
+    }
     const parents = new Map(rows.map(row => [row.pid, row.ppid]));
     const ancestors = new Set<number>();
     for (let pid = parents.get(this.deps.selfPid); pid !== undefined && pid > 1 && !ancestors.has(pid); pid = parents.get(pid)) ancestors.add(pid);
@@ -195,9 +241,12 @@ export class OtherApps {
 
   private isSystem(row: AppProcessRow): boolean {
     if (row.otherUser || row.pid <= 1) return true;
-    if (this.deps.platform === 'darwin') return MAC_SYSTEM_PATH.test(row.path) && !MAC_USER_APP_PATH.test(row.path);
+    if (this.deps.platform === 'darwin') {
+      const exe = row.exe ?? row.path;
+      return MAC_SYSTEM_PATH.test(exe) && !MAC_USER_APP_PATH.test(exe);
+    }
     if (this.deps.platform === 'win32') return WINDOWS_SYSTEM_PATH.test(row.path);
-    return LINUX_SESSION.has(baseName(row.path));
+    return LINUX_SESSION.test(baseName(row.path));
   }
 
   private icon(path: string): Promise<string | undefined> {
@@ -212,6 +261,8 @@ export class OtherApps {
   }
 }
 
+const isPane = (identity: Pick<AppIdentity, 'name'>) => identity.name.toLowerCase() === 'pane';
+
 function cpuTimes(rows: readonly AppProcessRow[]): Map<string, number> {
   return new Map(rows.map(row => [`${row.pid}:${row.started}`, row.cpuSeconds]));
 }
@@ -219,7 +270,7 @@ function cpuTimes(rows: readonly AppProcessRow[]): Map<string, number> {
 const POSIX_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+\s+\S+\s+\d+\s+[\d:]+\s+\d+)\s*(.*)$/u;
 
 /** Parse `ps -Ao pid=,ppid=,uid=,rss=,time=,lstart=,comm=`; `comm` goes last because it may hold spaces. */
-function parseAppProcessTable(stdout: string, uid: number): AppProcessRow[] {
+export function parseAppProcessTable(stdout: string, uid: number): AppProcessRow[] {
   const rows: AppProcessRow[] = [];
   for (const line of stdout.split('\n')) {
     const match = POSIX_ROW.exec(line);
@@ -249,5 +300,28 @@ export async function readAppProcesses(): Promise<AppProcessRow[]> {
     });
   }
   const { stdout } = await execFileAsync('ps', ['-Ao', 'pid=,ppid=,uid=,rss=,time=,lstart=,comm='], { ...options, env: cLocaleEnv() });
-  return parseAppProcessTable(stdout, process.getuid?.() ?? -1);
+  const rows = parseAppProcessTable(stdout, process.getuid?.() ?? -1);
+  if (process.platform !== 'darwin') return rows;
+  // macOS prints argv[0], which can be a bare name: read the real executable of those, in one call.
+  const bare = rows.filter(row => !row.path.startsWith('/') && !row.otherUser);
+  const exes = await readExecutables(bare.map(row => row.pid));
+  for (const row of bare) row.exe = exes.get(row.pid);
+  return rows;
+}
+
+/** macOS: each process's executable (its first `txt` file) from one lsof call; unreadable ones are left out. */
+async function readExecutables(pids: readonly number[]): Promise<Map<number, string>> {
+  const exes = new Map<number, string>();
+  if (pids.length === 0) return exes;
+  // lsof exits 1 when one of the pids has gone; what it printed for the rest still counts.
+  const stdout = await new Promise<string>(resolve => {
+    execFile('lsof', ['-a', '-d', 'txt', '-Fn', '-p', pids.join(',')], { encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024 * 1024, env: cLocaleEnv() },
+      (_error, out) => resolve(out ?? ''));
+  });
+  let pid = 0;
+  for (const line of stdout.split('\n')) {
+    if (line.startsWith('p')) pid = Number(line.slice(1));
+    else if (line.startsWith('n') && pid && !exes.has(pid)) exes.set(pid, line.slice(1));
+  }
+  return exes;
 }

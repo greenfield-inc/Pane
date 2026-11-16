@@ -19,6 +19,7 @@ const archiveFinishedSchema = boundary.object({
 const sourceSchema = boundary.object({ source: boundary.enumeration('ui', 'card', 'cli') });
 const identitySchema = boundary.object({ pid: boundary.number, started: boundary.string });
 const stopProcessesSchema = boundary.object({ processes: boundary.array(identitySchema), source: boundary.enumeration('ui', 'card', 'cli') });
+const appsRequestSchema = boundary.object({ knownIcons: boundary.optional(boundary.array(boundary.string)) });
 const stopAppSchema = boundary.object({ key: boundary.nonEmptyString, source: boundary.enumeration('ui', 'card', 'cli') });
 const cleanupRequestSchema = boundary.object({
   ids: boundary.optional(boundary.array(boundary.string)),
@@ -151,7 +152,8 @@ export function registerResourceMonitorHandlers(
     }
     return services.otherApps;
   };
-  commandRegistry.register(MACHINE_HEALTH_APPS_CHANNEL, async () => otherApps().list());
+  commandRegistry.register(MACHINE_HEALTH_APPS_CHANNEL, async (value: PaneCommandValue) =>
+    otherApps().list(decodeBoundary(value ?? {}, appsRequestSchema).knownIcons ?? []));
   /** Stops one app outside Pane when the person asks; the service refuses system apps, Pane itself and Pane's parents. */
   commandRegistry.register(MACHINE_HEALTH_STOP_APP_CHANNEL, async (value: PaneCommandValue) => {
     const request = decodeBoundary(value, stopAppSchema);
