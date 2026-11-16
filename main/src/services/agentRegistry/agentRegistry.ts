@@ -8,7 +8,7 @@ import { pipeline } from 'stream/promises';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import type { RegistryAgent, RegistryAgentList } from '../../../../shared/types/agentRegistry';
-import { hostCommand } from '../agentChat/hostCommand';
+import { besideItsNode, hostCommand } from '../agentChat/hostCommand';
 
 const execFileAsync = promisify(execFile);
 
@@ -292,7 +292,7 @@ export class AgentRegistry {
     const npm = this.options.findExecutable('npm');
     if (!npm) throw new PaneError('AGENT_REGISTRY_NEEDS_NODE', `${entry.name} is an npm package, and npm is not on this computer's PATH.`, 'Install Node.js (it includes npm), then install the agent again.');
     const npmInstall = hostCommand(npm, ['install', '--prefix', folder, '--no-audit', '--no-fund', spec]);
-    await execFileAsync(npmInstall.executable, npmInstall.args, { timeout: INSTALL_TIMEOUT_MS, windowsVerbatimArguments: npmInstall.windowsVerbatimArguments, maxBuffer: 16 * 1024 * 1024 });
+    await execFileAsync(npmInstall.executable, npmInstall.args, { env: besideItsNode(npm), timeout: INSTALL_TIMEOUT_MS, windowsVerbatimArguments: npmInstall.windowsVerbatimArguments, maxBuffer: 16 * 1024 * 1024 });
     const name = spec.startsWith('@') ? `@${spec.slice(1).split('@')[0]}` : spec.split('@')[0];
     const root = path.join(folder, 'node_modules', ...name.split('/'));
     const { bin: declared } = decodeBoundary(JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')), boundary.object({ bin: boundary.optional(boundary.json) }));

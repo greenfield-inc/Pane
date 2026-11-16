@@ -147,8 +147,8 @@ describe('scanStorage', () => {
   });
 
   it('offers a folder at an archived Pane\'s path only when git shows it as that Pane\'s worktree', async () => {
-    const mine = pane('p3', 'merged-feature', { archived: true, updatedAt: NOW + DAY });
-    const recreated = pane('p4', 'reused-name', { archived: true, updatedAt: NOW + DAY });
+    const mine = pane('p3', 'merged-feature', { archived: true, updatedAt: Date.now() + DAY });
+    const recreated = pane('p4', 'reused-name', { archived: true, updatedAt: Date.now() + DAY });
     file('repo/worktrees/merged-feature/a.txt', 600);
     file('repo/worktrees/reused-name/a.txt', 700);
     file('repo/worktrees/agent-made/a.txt', 800);
