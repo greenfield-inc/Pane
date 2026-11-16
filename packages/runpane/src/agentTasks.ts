@@ -72,7 +72,7 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
     timeoutMs: (parsed.timeoutMs ?? 120_000) + (parsed.readyTimeoutMs ?? 30_000) + 10_000,
   });
   const item = created.items[0];
-  const setupWait = item?.setupQueue ?? item?.setupPending;
+  const setupWait = item?.ok ? item.setupQueue ?? item.setupPending : undefined;
   if (item?.ok && item.sessionId && setupWait) {
     const queued = {
       ok: true,

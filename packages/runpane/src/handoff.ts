@@ -1181,7 +1181,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
       throw new Error(`runpane panes create failed on ${remote.name}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check ${recovery('sessions', 'list')} before retrying to avoid a duplicate Pane.`);
     }
     const item = created.items[0];
-    const setupWait = item?.setupQueue ?? item?.setupPending;
+    const setupWait = item?.ok ? item.setupQueue ?? item.setupPending : undefined;
     if (item?.ok && item.sessionId && setupWait) {
       result.pane = { id: item.sessionId, name: item.name, worktreePath: item.worktreePath };
       const setupState = item.setupQueue ? 'is queued for setup' : 'is still running setup';
