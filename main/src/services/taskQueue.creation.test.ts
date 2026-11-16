@@ -154,6 +154,12 @@ describe('pane creation name reuse', () => {
     expect((await runner.execFile('git', ['branch', '--show-current'], created.worktree_path)).stdout.trim()).toBe(worktreeName);
   });
 
+  it('cuts a long name at 100 characters when its only word break is near the start', async () => {
+    const created = await createPane(`A ${'b'.repeat(200)}`);
+
+    expect(created.worktree_name).toBe(`a-${'b'.repeat(98)}`);
+  });
+
   it('respects an absolute worktree folder and preserves existing files', async () => {
     project.worktree_folder = path.join(tempDir, 'custom-worktrees');
     const existingPath = path.join(project.worktree_folder, 'feature');

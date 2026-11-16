@@ -56,10 +56,12 @@ export function sessionNameFromMessage(message: string): string | undefined {
   const firstLine = message.split('\n').map(line => line.replace(/\s+/g, ' ').trim()).find(Boolean) ?? '';
   if (firstLine.startsWith('/') || firstLine.length < 3 || !/\p{L}/u.test(firstLine)) return undefined;
   let name = firstLine;
-  if (name.length > MAX_NAME_LENGTH) {
-    const cut = name.slice(0, MAX_NAME_LENGTH + 1);
+  // Counted in characters as a person sees them, so an emoji is never cut in half.
+  const characters = Array.from(new Intl.Segmenter().segment(name), part => part.segment);
+  if (characters.length > MAX_NAME_LENGTH) {
+    const cut = characters.slice(0, MAX_NAME_LENGTH + 1).join('');
     const lastSpace = cut.lastIndexOf(' ');
-    name = lastSpace > 0 ? cut.slice(0, lastSpace) : cut.slice(0, MAX_NAME_LENGTH);
+    name = lastSpace > 0 ? cut.slice(0, lastSpace) : characters.slice(0, MAX_NAME_LENGTH).join('');
   }
   return name.replace(/[\s.,;:!?…-]+$/u, '') || undefined;
 }

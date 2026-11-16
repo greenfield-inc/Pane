@@ -29,12 +29,12 @@ const loadQueueDependency = createRequire(__filename);
 /** Worktree folder and default branch names stay this short: a file name holds 255 bytes, and Git adds `.lock` and Pane adds `-N`. */
 const MAX_WORKTREE_NAME_LENGTH = 100;
 
-/** A worktree name of at most MAX_WORKTREE_NAME_LENGTH characters, cut after a whole word when it can be. */
+/** A worktree name of at most MAX_WORKTREE_NAME_LENGTH characters, cut after a whole word when that keeps at least half of it. */
 function fitWorktreeName(name: string): string {
   if (name.length <= MAX_WORKTREE_NAME_LENGTH) return name;
   const cut = name.slice(0, MAX_WORKTREE_NAME_LENGTH + 1);
   const lastBreak = cut.lastIndexOf('-');
-  return (lastBreak > 0 ? cut.slice(0, lastBreak) : cut.slice(0, MAX_WORKTREE_NAME_LENGTH)).replace(/-+$/, '');
+  return (lastBreak >= MAX_WORKTREE_NAME_LENGTH / 2 ? cut.slice(0, lastBreak) : cut.slice(0, MAX_WORKTREE_NAME_LENGTH)).replace(/-+$/, '');
 }
 
 interface TaskQueueOptions {
