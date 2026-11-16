@@ -53,6 +53,10 @@ Pane never installs Xcode, the Android SDK, runtimes or system images; when one 
 the tool's error says what and where to get it. **Settings → Devices** shows what this
 computer has.
 
+Android emulators register with adb on port 5037. If something else holds that port, such as
+a port forwarded from another machine, emulators boot but never come online. Free the port, or
+start Pane with `ANDROID_ADB_SERVER_PORT` set to another port.
+
 ## iOS from Windows and Linux
 
 A computer without Xcode runs iOS on a linked Mac. Link one once: on the Mac, open
