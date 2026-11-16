@@ -554,7 +554,7 @@ export class NotifyQueue extends EventEmitter {
     for (const entry of [...this.entries.values()]) {
       if (!isOpen(entry.item) || (entry.item.id !== id && entry.item.rewrittenFrom?.id !== id)) continue;
       // The orchestrator acked the answer its relay got, but the worker took that reply as a question.
-      if (keepReopened && (entry.item.reply?.state === 'question' || entry.item.readyAgain !== undefined)) continue;
+      if (keepReopened && (entry.item.reply?.state === 'question' || entry.item.revision !== undefined)) continue;
       this.closeOpen(entry, { by: 'pane', reason }, closedResult(`Closed: ${reason}.`));
     }
   }
@@ -1224,7 +1224,8 @@ export class NotifyQueue extends EventEmitter {
    * --update call took its place), so the orchestrator's recorded answer gets corrected.
    */
   private correctRelay(item: NotifyItem): void {
-    if (item.originKind !== 'worker' || !item.relayedBy || !item.revision) return;
+    // The orchestrator made the new version itself, so its own call gets the answer.
+    if (item.originKind !== 'worker' || !item.relayedBy || !item.revision || item.revision.by === item.relayedBy.name) return;
     this.enqueueTabMessage(item, answerLine(item).replace(/^answer:/u, 'correction:'), false, { panelId: item.relayedBy.panelId });
   }
 

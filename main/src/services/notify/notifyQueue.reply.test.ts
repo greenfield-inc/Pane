@@ -340,6 +340,39 @@ describe('NotifyQueue replies (the reply contract)', () => {
     expect(typed).toContainEqual(['orch', 'correction: Q-21 → eu-west (by you)']);
   });
 
+  it('J10: a late ack leaves a reopened worker card open while the person\'s reply to its new version waits for the worker', async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-21: which region?', source: worker, at: Date.now() });
+    void queue.ask({ relays: 'in-1', question: { ui: 'ask', title: 'Q-21: which region?' }, source: orchestrator });
+    queue.run({ type: 'answer', id: 'in-1', answer: { picks: [], text: 'what is latency like in eu-west?' } });
+    await vi.advanceTimersByTimeAsync(1);
+    queue.took({ panelId: 'w1' }, 'Q-21', 'question');
+    void queue.update({ panelId: 'w1' }, 'Q-21', { asked: 'what is latency like in eu-west?', whatChanged: 'Added latency per region' });
+    tabs.set('w1', 'busy');
+    queue.run({ type: 'answer', id: 'in-1', answer: { picks: [], text: 'eu-west then' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(item(queue, 'in-1')?.reply?.state).toBe('reading');
+    queue.endWorkerQuestion('in-1', 'its orchestrator dealt with it', true);
+    expect(item(queue, 'in-1')?.state).toBe('waiting');
+  });
+
+  it('J10: an orchestrator that read the reply and updated the card gets the answer on its own call, with no correction line', async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-21: which region?', source: worker, at: Date.now() });
+    const relay = queue.ask({ relays: 'in-1', question: { ui: 'options', title: 'Q-21: which region?', choices: [{ label: 'eu' }, { label: 'us' }] }, source: orchestrator });
+    gone.set('w1', ASKING_TAB_CLOSED);
+    closedTabs.add('w1');
+    queue.run({ type: 'answer', id: 'in-1', answer: { picks: [], text: 'what is latency like?' } });
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(relay).resolves.toMatchObject({ reply: 'what is latency like?' });
+    queue.took({ panelId: 'orch' }, 'Q-21', 'question');
+    const updated = queue.update({ panelId: 'orch' }, 'Q-21', { asked: 'what is latency like?', whatChanged: 'Added latency per region' });
+    queue.run({ type: 'answer', id: 'in-1', answer: { picks: ['eu'] } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect(updated).resolves.toEqual({ answer: 'eu' });
+    expect(typed.filter(([panel]) => panel === 'orch')).toEqual([]);
+  });
+
   it('a call in resume rounds that read a reply never gets it back as the answer after it was reopened', async () => {
     const queue = queueWith();
     const first = queue.ask({ question: q20, source: orchestrator, id: 'q20', returnAfterMs: 50_000 });
