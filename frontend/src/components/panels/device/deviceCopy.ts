@@ -21,7 +21,7 @@ export function devicePhaseCopy(state: Pick<DevicePanelState, 'phase' | 'name' |
     case 'off':
       return { title: 'Shut down after 10 minutes idle', action: 'boot' };
     case 'closed':
-      return { title: 'Closed by the agent', detail: 'It shuts down in 10 minutes unless a Pane opens it.', action: 'boot' };
+      return { title: 'Closed', detail: 'No Pane is using it. It shuts down in 10 minutes unless one opens it.', action: 'boot' };
     case 'in-use':
       return { title: `In use by ${state.heldBy?.paneName ?? 'another Pane'}`, detail: 'One simulator per machine. Taking over moves it to this Pane.', action: 'take-over' };
     case 'error':

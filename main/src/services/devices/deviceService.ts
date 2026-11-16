@@ -37,6 +37,8 @@ const stateSchema = boundary.object({
 interface DeviceState { made: Record<string, MadeDevice> }
 
 /** The hub's device list entries Pane reads. */
+const simctlDevicesSchema = boundary.object({ devices: boundary.record(boundary.array(boundary.object({ udid: boundary.string, name: boundary.string, state: boundary.string, isAvailable: boundary.optional(boundary.boolean) }))) });
+
 const hubDevicesSchema = boundary.object({
   simulators: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, version: boundary.optional(boundary.string), booted: boundary.boolean, physical: boundary.optional(boundary.boolean) })),
   emulators: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, version: boundary.optional(boundary.string), booted: boundary.boolean, serial: boundary.optional(boundary.string) })),
@@ -122,7 +124,7 @@ export class DeviceService {
   async list(): Promise<DeviceSummary[]> {
     const capabilities = await this.probe();
     if (!capabilities.ios.ready && !capabilities.android.ready) return [];
-    return (await this.devices()).map(device => this.summary(device));
+    return (await this.devices({ inventory: true })).map(device => this.summary(device));
   }
 
   /** Leases and boots a device for `caller`, waiting up to `BUSY_WAIT_MS` when every one is held. */
@@ -131,7 +133,7 @@ export class DeviceService {
     this.requireReady(capabilities, request.platform);
     const deadline = this.now() + BUSY_WAIT_MS;
     for (;;) {
-      const devices = await this.devices(() => onPhase?.('installing'));
+      const devices = await this.devices({ inventory: true, onInstall: () => onPhase?.('installing') });
       const chosen = request.device ? this.named(devices, request) : await this.choose(caller, request.platform, devices, deadline);
       if (!chosen) continue;
       const holder = this.lifecycle.holderOf(chosen.id);
@@ -223,8 +225,8 @@ export class DeviceService {
     const state = this.readState();
     state.made[id] = { platform, name, model: model.label, createdAt: this.now(), lastUsedAt: this.now(), users: [], slimmed: false };
     this.writeState(state);
-    const device = (await this.devices()).find(candidate => candidate.id === id || candidate.name === name && candidate.platform === platform && candidate.paneMade);
-    if (!device) throw new PaneError('ERR_DEVICE_CREATE_FAILED', `Pane made ${name} but cannot find it in the device list.`, 'Try again.');
+    const device = (await this.devices({ inventory: true })).find(candidate => candidate.platform === platform && candidate.id === id);
+    if (!device) throw new PaneError('ERR_DEVICE_CREATE_FAILED', `Pane made ${name} but cannot find it on this machine.`, 'Try again.');
     return device;
   }
 
@@ -425,7 +427,7 @@ export class DeviceService {
   async usage(checkouts: () => { path: string; bytes: number }[] = () => []): Promise<DeviceUsage> {
     const capabilities = await this.probe();
     const running = this.hub !== undefined;
-    const devices = running || this.hasMadeDevices() ? await this.devices() : [];
+    const devices = running || this.hasMadeDevices() ? await this.devices({ inventory: true }) : await this.machineDevices().then(entries => entries.map(entry => ({ id: entry.id, platform: entry.platform, name: entry.name, os: entry.version ?? '', paneMade: false, booted: entry.booted }))).catch(() => []);
     const hub = running ? await this.hub : undefined;
     const folders = await this.simulatorFolders(capabilities);
     const report: DeviceUsage = {
@@ -477,7 +479,7 @@ export class DeviceService {
   /** Shuts down unleased devices (`idle`), or also erases and deletes Pane's unleased devices (`all`). */
   async free(mode: 'idle' | 'all'): Promise<{ shutdown: string[]; deleted: string[] }> {
     if (!this.hub && !this.hasMadeDevices()) return { shutdown: [], deleted: [] };
-    const devices = await this.devices();
+    const devices = await this.devices({ inventory: true });
     const unleased = devices.filter(device => device.paneMade && !this.lifecycle.holderOf(device.id));
     const shutdown: string[] = [];
     for (const device of unleased.filter(candidate => candidate.booted)) {
@@ -497,7 +499,7 @@ export class DeviceService {
 
   /** Runs the lifecycle: idle leases, warm windows, stale devices, and stopping the helpers. */
   async sweep(): Promise<void> {
-    const devices = await this.devices();
+    const devices = await this.devices({ inventory: true });
     const { ended, shutdown } = this.lifecycle.sweep(devices);
     for (const lease of ended) {
       const device = devices.find(candidate => candidate.id === lease.id);
@@ -581,8 +583,12 @@ export class DeviceService {
     return this.hub;
   }
 
-  private async devices(onInstall?: () => void): Promise<HubDevice[]> {
-    const hub = await this.ensureHub(onInstall);
+  /**
+   * The hub's devices. The hub leaves out devices that have never booted, so `inventory` adds them
+   * from the machine's own lists: what usage, free, the sweep and the pool must see (D-84).
+   */
+  private async devices(options: { inventory?: boolean; onInstall?: () => void } = {}): Promise<HubDevice[]> {
+    const hub = await this.ensureHub(options.onInstall);
     const response = await hub.request('/api/devices');
     if (!response.ok) throw new PaneError('ERR_DEVICE_HUB_FAILED', `Pane's device hub answered ${response.status} when listing devices.`, 'Try again.');
     const listed = decodeBoundary(await response.json(), hubDevicesSchema);
@@ -595,11 +601,37 @@ export class DeviceService {
       if (entry.serial) device.serial = entry.serial;
       return device;
     };
-    return [
+    const devices = [
       ...listed.simulators.filter(entry => !entry.physical).map(entry => record('ios', entry)),
-      // An emulator is listed by its AVD name until it boots, then by its serial; Pane keys it by AVD name.
-      ...listed.emulators.map(entry => record('android', entry.booted ? { ...entry, id: entry.name, serial: entry.serial ?? entry.id } : entry)),
+      // The hub lists a running emulator by its serial; Pane keys it by AVD name.
+      ...listed.emulators.map(entry => record('android', { ...entry, id: entry.name, serial: entry.serial ?? (entry.id === entry.name ? undefined : entry.id) })),
     ];
+    if (!options.inventory) return devices;
+    const known = new Set(devices.map(device => `${device.platform}:${device.id}`));
+    const unlisted = (await this.machineDevices()).filter(entry => !known.has(`${entry.platform}:${entry.id}`));
+    return [...devices, ...unlisted.map(entry => record(entry.platform, entry))];
+  }
+
+  /** Every simulator and AVD on this machine, booted or not, from simctl and the emulator. */
+  private async machineDevices(): Promise<{ platform: DevicePlatform; id: string; name: string; version?: string; booted: boolean }[]> {
+    const capabilities = await this.probe();
+    const found: { platform: DevicePlatform; id: string; name: string; version?: string; booted: boolean }[] = [];
+    if (capabilities.ios.ready) {
+      const { stdout } = await execFileAsync(capabilities.ios.xcrun, ['simctl', 'list', 'devices', '--json'], { maxBuffer: 16 * 1024 * 1024 });
+      const listed = decodeBoundary(JSON.parse(stdout), simctlDevicesSchema);
+      for (const [runtime, entries] of Object.entries(listed.devices)) {
+        // com.apple.CoreSimulator.SimRuntime.iOS-27-0 is "iOS 27.0".
+        const version = runtime.split('.').pop()?.replace('-', ' ').replace(/-/g, '.');
+        for (const entry of entries) {
+          if (entry.isAvailable !== false && version?.startsWith('iOS')) found.push({ platform: 'ios', id: entry.udid, name: entry.name, version, booted: entry.state === 'Booted' });
+        }
+      }
+    }
+    if (capabilities.android.ready) {
+      const { stdout } = await execFileAsync(capabilities.android.emulator, ['-list-avds'], { timeout: 30_000 });
+      for (const name of stdout.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('INFO'))) found.push({ platform: 'android', id: name, name, booted: false });
+    }
+    return found;
   }
 
   private summary(device: HubDevice): DeviceSummary {

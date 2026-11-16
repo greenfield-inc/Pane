@@ -127,7 +127,7 @@ function deviceCaller(services: AppServices): DeviceCaller {
     throw new PaneError('ERR_DEVICE_NO_PANE', 'Device tools work only for agents running in a Pane tab, and this call came from outside one. Nothing ran.', 'Run the command from a terminal or agent tab inside a Pane.');
   }
   if (!deviceSettings(services).enabled) {
-    throw new PaneError('ERR_DEVICE_TOOLS_OFF', 'Agent device tools are turned off in this Pane. Nothing ran.', 'Turn on Settings > Devices > Agent device tools, then try again.');
+    throw new PaneError('ERR_DEVICE_TOOLS_OFF', 'Agent device tools are turned off in Settings > Devices. Nothing ran.', 'Turn on Settings > Devices > Agent device tools, then try again.');
   }
   const deviceCaller: DeviceCaller = { paneId: caller.paneId, paneName: session.name };
   if (caller.panelId) deviceCaller.panelId = caller.panelId;
@@ -194,6 +194,9 @@ async function followDeviceChange(change: DeviceChange): Promise<void> {
       else await setPanelState(panel, { phase: 'in-use', heldBy: { paneId: change.paneId, paneName: appServices ? paneNameOf(appServices, change.paneId) : change.paneId } });
     } else if (change.kind === 'released' && panel.sessionId === change.paneId) {
       await setPanelState(panel, { phase: change.reason === 'closed' ? 'closed' : change.reason === 'taken' ? state.phase : 'off' });
+    } else if (change.kind === 'released' && change.reason !== 'taken' && state.phase === 'in-use') {
+      // The other Pane let go, so this tab's Boot can open the device again.
+      await setPanelState(panel, { phase: 'closed', heldBy: undefined });
     } else if (change.kind === 'shutdown') {
       await setPanelState(panel, { phase: 'off' });
     }
