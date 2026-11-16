@@ -4,8 +4,8 @@ Pair a phone, a browser or another computer with Pane, on any network. No
 account, no Tailscale, no port forwarding.
 
 Open **Add a device** from **Settings › Remote Access**, from **Add a
-device…** in the sidebar's machine menu, or with **Pair a phone** on Home. It
-has four tabs:
+device…** in the sidebar's machine menu, or with **Pair a device** on Home,
+which opens on the **Phone** tab. It has four tabs:
 
 | Tab | What it does |
 |---|---|
