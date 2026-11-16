@@ -428,7 +428,7 @@ export class AutopilotManager extends EventEmitter {
   }
 
   private readInstructions(): string {
-    try { return fs.readFileSync(this.instructionsFile(), 'utf8').trim().slice(0, INSTRUCTIONS_LIMIT); } catch { return ''; }
+    try { return fs.readFileSync(this.instructionsFile(), 'utf8').trim(); } catch { return ''; }
   }
 
   /** The running agent gets the person's instructions as they are on disk, once per change. */
