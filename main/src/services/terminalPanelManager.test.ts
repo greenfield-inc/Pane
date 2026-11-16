@@ -1720,19 +1720,21 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it.each([
-    ['WSL', true, true],
-    ['unreadable transcripts', false, false],
-  ])('trusts the recorded Claude conversation when Pane cannot check transcripts (%s)', (_label, isWSL, readableTranscripts) => {
+    ['WSL', 'claude', true, true],
+    ['unreadable transcripts', 'claude', false, false],
+    // Pane looks in its own config dir; this Claude keeps its transcripts elsewhere.
+    ['a command that sets its own CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIR=/elsewhere claude', false, true],
+  ])('trusts the recorded Claude conversation when Pane cannot check transcripts (%s)', (_label, command, isWSL, readableTranscripts) => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const id = '00000000-0000-4000-8000-000000001382';
     const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(readableTranscripts);
     const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue(undefined);
     try {
-      const result = manager.resolveCliLaunchCommand(id, 'claude', {
+      const result = manager.resolveCliLaunchCommand(id, command, {
         agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
       }, undefined, isWSL);
       expect(lookup).not.toHaveBeenCalled();
-      expect(result.commandToRun).toBe(`claude --resume "${id}"`);
+      expect(result.commandToRun).toBe(`${command} --resume "${id}"`);
     } finally { readable.mockRestore(); lookup.mockRestore(); }
   });
 
