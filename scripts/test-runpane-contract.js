@@ -3523,6 +3523,65 @@ print(json.dumps({"codes": codes, "calls": calls, "stdout": stdout.getvalue().sp
   assert.ok(python.stderr.includes('transcript-unavailable: No claude transcript reply found.'), python.stderr.join('\n'));
 }
 
+async function checkOlderOutputNote() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const output = {
+    ok: true, panelId: 'panel-1', paneId: 'session-1', limit: 2, returnedCount: 1, hasMore: true,
+    outputs: [{ type: 'stdout', data: 'line 9\nline 10', timestamp: '2026-09-27T18:00:00.000Z' }], text: 'line 9\nline 10',
+  };
+  const screen = {
+    ok: true, panelId: 'panel-1', paneId: 'session-1', source: 'scrollback', limit: 2, returnedLineCount: 2, hasMore: true,
+    text: 'line 9\nline 10', state: { initialized: true }, composer: { isPresent: false, hasUndeliveredText: false },
+  };
+  const complete = { ...screen, hasMore: false };
+  const note = '(older output not shown; raise --limit above 2 to see more)';
+  const respond = (channel, request) => channel === 'runpane:panels:output' ? output : request.panelId === 'panel-2' ? complete : screen;
+  const written = [];
+  const stderr = [];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleError = console.error;
+  const originalWrite = process.stdout.write;
+  daemonClient.invokeDaemon = async (channel, args, schema) => decodeBoundary(respond(channel, args[0]), schema);
+  console.error = (line) => stderr.push(String(line));
+  process.stdout.write = (chunk) => { written.push(String(chunk)); return true; };
+  try {
+    await localControl.runPanelsOutput(parseRunpaneArgs(['panels', 'output', '--panel', 'panel-1', '--limit', '2']));
+    await localControl.runPanelsScreen(parseRunpaneArgs(['panels', 'screen', '--panel', 'panel-1', '--limit', '2']));
+    await localControl.runPanelsScreen(parseRunpaneArgs(['panels', 'screen', '--panel', 'panel-2', '--limit', '2']));
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.error = originalConsoleError;
+    process.stdout.write = originalWrite;
+  }
+  assert.strictEqual(written.join(''), 'line 9\nline 10\n'.repeat(3), 'stdout carries only the panel text');
+  assert.deepStrictEqual(stderr, [note, note], 'output and screen note dropped lines; a complete screen adds nothing');
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+output = json.loads(${JSON.stringify(JSON.stringify(output))})
+screen = json.loads(${JSON.stringify(JSON.stringify(screen))})
+complete = json.loads(${JSON.stringify(JSON.stringify(complete))})
+local_control.invoke_daemon = lambda channel, args, **kwargs: output if channel == "runpane:panels:output" else complete if args[0]["panelId"] == "panel-2" else screen
+stdout = io.StringIO()
+stderr = io.StringIO()
+with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+    local_control.run_panels_output(parse_args(["panels", "output", "--panel", "panel-1", "--limit", "2"]))
+    local_control.run_panels_screen(parse_args(["panels", "screen", "--panel", "panel-1", "--limit", "2"]))
+    local_control.run_panels_screen(parse_args(["panels", "screen", "--panel", "panel-2", "--limit", "2"]))
+print(json.dumps({"stdout": stdout.getvalue(), "stderr": stderr.getvalue().splitlines()}))
+`));
+  assert.strictEqual(python.stdout, 'line 9\nline 10\n'.repeat(3));
+  assert.deepStrictEqual(python.stderr, [note, note]);
+}
+
 async function checkPanelsCloseParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -6797,6 +6856,7 @@ async function runChecks() {
   await checkChatTabCreateParity();
   await checkDeliveryParity();
   await checkReportParity();
+  await checkOlderOutputNote();
   await checkPanelsCloseParity();
   await checkArchiveClosedAndCallerPanel();
   await checkReportDeliveryLine();

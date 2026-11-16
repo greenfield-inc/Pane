@@ -23,6 +23,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { withLock } from '../utils/mutex';
 import { PaneError } from '../../../shared/paneError';
 import type { RunpanePaneBase } from '../../../shared/types/runpaneOrchestration';
+import { COMMAND_OUTPUT_LIMIT } from '../utils/commandExecutor';
 
 const loadQueueDependency = createRequire(__filename);
 
@@ -674,7 +675,9 @@ export class TaskQueue {
           stdout: boundary.optional(boundary.string),
           message: boundary.optional(boundary.string),
         }));
-        reason = installFailureLine(`${failure.stderr ?? ''}\n${failure.stdout ?? ''}`) ?? firstLine(failure.message ?? reason);
+        reason = installError instanceof Error && 'code' in installError && installError.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+          ? `it printed more than ${COMMAND_OUTPUT_LIMIT / 1024 / 1024} MB of output`
+          : installFailureLine(`${failure.stderr ?? ''}\n${failure.stdout ?? ''}`) ?? firstLine(failure.message ?? reason);
       } catch { /* "unknown error" still reports the failure. */ }
       await this.writeSetupLines(sessionId, worktreePath, ctx, [`Dependency install failed: ${reason.slice(0, 200)}. Run ${installCommand} to retry.`]);
     }
