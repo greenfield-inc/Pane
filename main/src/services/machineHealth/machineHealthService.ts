@@ -86,6 +86,7 @@ export class MachineHealthService extends EventEmitter {
   private inventory: StorageInventory | null = null;
   private inventoryInFlight: Promise<StorageInventory> | null = null;
   private inventoryTimer: NodeJS.Timeout | null = null;
+  private scheduledCleanup: (() => Promise<void>) | null = null;
 
   constructor(private readonly deps: MachineHealthDeps) {
     super();
@@ -121,6 +122,11 @@ export class MachineHealthService extends EventEmitter {
     this.inventoryTimer = null;
   }
 
+  /** Runs after each scheduled scan (daily, and when disk reaches the warning level): the tier 1 pass. */
+  setScheduledCleanup(run: () => Promise<void>): void {
+    this.scheduledCleanup = run;
+  }
+
   /**
    * The cached inventory, or null before the first scan finishes. Never waits for a walk. With none, a read
    * starts one scan (shared with any in flight) and nothing else; `refresh` (Measure now, Run now) scans and
@@ -147,8 +153,13 @@ export class MachineHealthService extends EventEmitter {
   private async scanSafely(): Promise<void> {
     try {
       await this.scanInventory();
+      if (this.scheduledCleanup) {
+        await this.scheduledCleanup();
+        // Scan again so Resources and the CLI don't offer what the pass just removed.
+        await this.scanInventory();
+      }
     } catch (error) {
-      console.warn('[MachineHealth] storage scan failed:', error instanceof Error ? error.message : error);
+      console.warn('[MachineHealth] scheduled scan failed:', error instanceof Error ? error.message : error);
     }
   }
 

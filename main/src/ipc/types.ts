@@ -15,6 +15,7 @@ import type { SessionInbox } from '../services/sessionInbox';
 import type { ExpectedReportTracker } from '../services/expectedReports';
 import type { NotifyService } from '../services/notify/notifyService';
 import type { MachineHealthService } from '../services/machineHealth/machineHealthService';
+import type { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import type { ApprovalStore } from '../services/approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 
@@ -41,6 +42,8 @@ export interface DaemonHostServices extends CoreServices {
   notifyService?: NotifyService;
   /** Free disk, memory pressure and per-Pane process cost, sampled every minute. */
   machineHealth?: MachineHealthService;
+  /** The one path machine health deletes through. */
+  machineCleanup?: CleanupEngine;
 }
 
 export interface AppServices extends DaemonHostServices {

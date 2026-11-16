@@ -89,6 +89,10 @@ export interface MachineHealthSettings {
   leakMinGrowthMB?: number;
   leakMinGrowthPercent?: number;
   leakMinAgeMinutes?: number;
+  /** Tier 2 "Do this automatically" switches; every one ships off. */
+  autoClearAgentTemp?: boolean;
+  autoClearPausedScratch?: boolean;
+  autoClearArchivedFolders?: boolean;
 }
 
 /** The value of every machine health setting nobody has overridden. */
@@ -101,7 +105,7 @@ export const MACHINE_HEALTH_DEFAULTS = {
   leakMinGrowthMB: 500,
   leakMinGrowthPercent: 50,
   leakMinAgeMinutes: 30,
-} as const satisfies Required<MachineHealthSettings>;
+} as const satisfies Partial<Record<keyof MachineHealthSettings, number>>;
 
 /** Sent without a payload when the disk or memory level changes; readers re-read the snapshot. */
 export const MACHINE_HEALTH_CHANGED_EVENT = 'resource-monitor:machine-health-changed';
@@ -115,15 +119,17 @@ export const MACHINE_HEALTH_SNAPSHOT_CHANNEL = 'resource-monitor:machine-health'
  */
 export type ReclaimTier = 1 | 2 | 3;
 
-export type ReclaimKind =
-  | 'update-snapshot'
-  | 'migration-backup'
-  | 'archived-pane-folder'
-  | 'agent-temp'
-  | 'paused-scratch'
-  | 'foreign-worktree'
-  | 'foreign-pane-data'
-  | 'other-tool-data';
+export const RECLAIM_KINDS = [
+  'update-snapshot',
+  'migration-backup',
+  'archived-pane-folder',
+  'agent-temp',
+  'paused-scratch',
+  'foreign-worktree',
+  'foreign-pane-data',
+  'other-tool-data',
+] as const;
+export type ReclaimKind = typeof RECLAIM_KINDS[number];
 
 export interface ReclaimItem {
   /** Stable across scans: the kind and path. */
@@ -138,6 +144,8 @@ export interface ReclaimItem {
   sessionId: string | null;
   /** Plain words for why it can go, or who owns it. */
   reason: string;
+  /** For worktree folders: the repository whose git records them. */
+  projectPath?: string;
   /** Tier 3 only: the command or setting that frees it. */
   howToFree?: string;
 }
@@ -174,3 +182,7 @@ export interface StorageInventory {
 
 export const MACHINE_HEALTH_INVENTORY_CHANNEL = 'resource-monitor:machine-inventory';
 export const MACHINE_HEALTH_INVENTORY_CHANGED_EVENT = 'resource-monitor:machine-inventory-changed';
+/** Runs a cleanup through the one engine: `{ ids?, kinds?, source }`; tier 3 is refused. */
+export const MACHINE_HEALTH_CLEANUP_CHANNEL = 'resource-monitor:machine-cleanup';
+/** Recent cleanup runs on this machine, newest first; held in memory since the last start. */
+export const MACHINE_HEALTH_HISTORY_CHANNEL = 'resource-monitor:machine-cleanup-history';
