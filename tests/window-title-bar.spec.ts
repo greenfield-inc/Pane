@@ -112,31 +112,52 @@ test.describe('window title bar', () => {
     expect(collapseBox?.x).toBeGreaterThanOrEqual(88);
   });
 
-  test('cuts a long name short of the controls on both sides and keeps it centered', async ({ page }) => {
+  test('cuts a long name and its pills short of the controls on both sides and keeps it centered', async ({ page }) => {
     await openDesktop(page);
     const longName = 'Investigate why the nightly release pipeline intermittently fails when the macOS notarization step times out '
       + 'and retries overlap with the Windows signing job, then propose a fix and a rollout plan for the team';
     await page.getByRole('button', { name: worktreeSession.name, exact: true }).click();
-    await page.evaluate((renamed) => (
+    await page.evaluate(({ renamed, gitStatus }) => {
       // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
-      window as typeof window & {
-        __paneTestElectronMock: { emitSessionUpdated: (session: typeof worktreeSession) => void };
-      }
-    ).__paneTestElectronMock.emitSessionUpdated(renamed),
-    { ...worktreeSession, name: longName });
+      const mock = (window as typeof window & {
+        __paneTestElectronMock: {
+          emitSessionUpdated: (session: typeof renamed) => void;
+          emitGitStatusUpdated: (sessionId: string, status: typeof gitStatus) => void;
+        };
+      }).__paneTestElectronMock;
+      mock.emitSessionUpdated(renamed);
+      mock.emitGitStatusUpdated(renamed.id, gitStatus);
+    }, {
+      renamed: { ...worktreeSession, name: longName },
+      gitStatus: { state: 'ahead', ahead: 3, isReadyToMerge: true, prNumber: 472, prState: 'OPEN', prTitle: 'Fix the release pipeline' },
+    });
     await expect(titleBarLabel(page)).toHaveAttribute('title', `${project.name} · ${longName}`);
+    await expect(page.getByTestId('window-title-bar-pills')).toHaveText('#472Ready to merge');
 
-    const boxes = await page.evaluate(() => {
+    const measure = () => page.evaluate(() => {
       const box = (testId: string) => document.querySelector(`[data-testid="${testId}"]`)!.getBoundingClientRect();
       const label = box('window-title-bar-label');
-      const leading = box('window-title-bar-controls');
-      const trailing = box('window-title-bar-trailing-controls');
-      return { label: { left: label.left, right: label.right }, leadingRight: leading.right, trailingLeft: trailing.left, width: window.innerWidth };
+      return {
+        label: { left: label.left, right: label.right },
+        pillsRight: box('window-title-bar-pills').right,
+        leadingRight: box('window-title-bar-controls').right,
+        trailingLeft: box('window-title-bar-trailing-controls').left,
+        width: window.innerWidth,
+      };
     });
-    expect(boxes.label.left).toBeGreaterThanOrEqual(boxes.leadingRight);
-    expect(boxes.label.right).toBeLessThanOrEqual(boxes.trailingLeft);
-    expect(Math.abs((boxes.label.left + boxes.label.right) / 2 - boxes.width / 2)).toBeLessThanOrEqual(1);
-    await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toBeVisible();
+    const wide = await measure();
+    expect(wide.label.left).toBeGreaterThanOrEqual(wide.leadingRight);
+    expect(wide.pillsRight).toBeLessThanOrEqual(wide.trailingLeft);
+    expect(Math.abs((wide.label.left + wide.label.right) / 2 - wide.width / 2)).toBeLessThanOrEqual(1);
+
+    // A window narrower than the project label: the label gives way too instead of overflowing.
+    await page.setViewportSize({ width: 420, height: 720 });
+    await expect.poll(async () => (await measure()).width).toBe(420);
+    const narrow = await measure();
+    expect(narrow.label.left).toBeGreaterThanOrEqual(narrow.leadingRight);
+    expect(narrow.label.right).toBeLessThanOrEqual(narrow.trailingLeft);
+
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.getByRole('button', { name: 'Collapse sidebar' }).click();
     await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
   });

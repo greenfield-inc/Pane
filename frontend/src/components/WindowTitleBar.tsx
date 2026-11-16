@@ -84,25 +84,25 @@ function useArrivedKeys(scope: string | null, keys: string[]): Set<string> {
 
 /**
  * How far the name must stay from each edge of the bar to clear the controls:
- * the sidebar controls on the left and the global ones on the right. A long
- * name then truncates beside them instead of running under them. Null until
- * the slots are laid out.
+ * the sidebar controls on the left, and on the right the global ones plus the
+ * pills that hang off the end of the name. A long name then truncates beside
+ * them instead of running under them. Null until the slots are laid out.
  */
-function useControlsClearance(bar: HTMLElement | null, leading: HTMLElement | null, trailing: HTMLElement | null): { left: number; right: number } | null {
+function useControlsClearance(bar: HTMLElement | null, leading: HTMLElement | null, trailing: HTMLElement | null, pills: HTMLElement | null): { left: number; right: number } | null {
   const [clearance, setClearance] = useState<{ left: number; right: number } | null>(null);
   useLayoutEffect(() => {
     if (!bar || !leading || !trailing) return;
     const measure = () => {
       const barBox = bar.getBoundingClientRect();
       const left = Math.ceil(leading.getBoundingClientRect().right - barBox.left) + GUTTER;
-      const right = Math.ceil(barBox.right - trailing.getBoundingClientRect().left) + GUTTER;
+      const right = Math.ceil(barBox.right - trailing.getBoundingClientRect().left + (pills?.getBoundingClientRect().width ?? 0)) + GUTTER;
       setClearance(current => current?.left === left && current.right === right ? current : { left, right });
     };
     measure();
     const observer = new ResizeObserver(measure);
-    for (const element of [bar, leading, trailing]) observer.observe(element);
+    for (const element of [bar, leading, trailing, pills]) if (element) observer.observe(element);
     return () => observer.disconnect();
-  }, [bar, leading, trailing]);
+  }, [bar, leading, trailing, pills]);
   return clearance;
 }
 
@@ -134,7 +134,8 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
   const [trailingSlot, setTrailingSlotElement] = useState<HTMLDivElement | null>(null);
   const leadingSlotRef = useCallback((element: HTMLDivElement | null) => { controlsSlotRef?.(element); setLeadingSlot(element); }, [controlsSlotRef]);
   const trailingSlotRef = useCallback((element: HTMLDivElement | null) => { setTrailingSlot(element); setTrailingSlotElement(element); }, [setTrailingSlot]);
-  const clearance = useControlsClearance(bar, leadingSlot, trailingSlot);
+  const [pillsElement, setPillsElement] = useState<HTMLDivElement | null>(null);
+  const clearance = useControlsClearance(bar, leadingSlot, trailingSlot, pillsElement);
   const activeView = useNavigationStore(state => state.activeView);
   const activeSession = useSessionStore(state => {
     if (!state.activeSessionId) return undefined;
@@ -233,7 +234,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
       )}
       {title && !offlineNotice && (
         <div className="relative flex min-w-0 items-center">
-          {/* The project or parent Session keeps its width, up to 16rem, so a long name gives way first. */}
+          {/* The name gives way first; the project or parent Session (up to 16rem) shrinks only once the name can't. */}
           <div
             className="flex min-w-0 items-center gap-1.5 text-xs"
             data-testid="window-title-bar-label"
@@ -242,7 +243,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
             {parentSessionName ? (
               <button
                 type="button"
-                className="max-w-64 flex-shrink-0 truncate rounded-sm text-text-tertiary hover:text-text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+                className="min-w-0 max-w-64 truncate rounded-sm text-text-tertiary hover:text-text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
                 style={NO_DRAG}
                 onClick={openParentSession}
                 aria-label={`Back to Session ${parentSessionName}`}
@@ -252,13 +253,13 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
                 {parentSessionName}
               </button>
             ) : (
-              <span className="max-w-64 flex-shrink-0 truncate text-text-tertiary">{title.project}</span>
+              <span className="min-w-0 max-w-64 truncate text-text-tertiary">{title.project}</span>
             )}
             {title.pane && (
               <>
                 <span className="flex-shrink-0 text-text-tertiary" aria-hidden="true">{parentSessionName ? '›' : '·'}</span>
                 <span
-                  className="truncate font-medium text-text-secondary"
+                  className="min-w-0 shrink-[9999] truncate font-medium text-text-secondary"
                   style={HEAD_ELLIPSIS_STYLE}
                 >
                   <span style={LTR_RUN_STYLE}>{title.pane}</span>
@@ -271,6 +272,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
             // Anchored past the end of the title rather than laid out after it, so a
             // pill appearing or clearing never nudges the centered name sideways.
             <div
+              ref={setPillsElement}
               className="absolute left-full top-1/2 flex -translate-y-1/2 items-center gap-1 pl-2"
               data-testid="window-title-bar-pills"
             >
