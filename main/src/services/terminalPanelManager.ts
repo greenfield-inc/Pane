@@ -738,14 +738,15 @@ export class TerminalPanelManager extends EventEmitter {
             ? panelId
             : undefined;
       const claudeSessionId = existingClaudeSessionId ?? randomUUID();
-      // An idle launch allocates an ID without creating a transcript. Also
-      // resolve old project locations explicitly for pre-cross-project CLIs.
-      // When Pane cannot see the transcripts (WSL, or a config dir set only in
-      // the shell), trust the recorded conversation.
-      const checkTranscript = Boolean(customState.orchestrationSessionId) && !isWSL && canReadClaudeTranscripts();
-      const transcript = checkTranscript && existingClaudeSessionId
-        ? findClaudeSessionTranscript(existingClaudeSessionId)
-        : undefined;
+      // An idle launch allocates an ID without creating a transcript, so a tab
+      // never sent a message has nothing to resume (#1380). Also resolve old
+      // project locations explicitly for pre-cross-project CLIs. Pane checks
+      // only a direct `claude` command, which reads Pane's own config dir;
+      // otherwise (WSL, a launcher or a command that sets its own config dir,
+      // no transcripts folder) it trusts the recorded conversation.
+      const checkTranscript = customState.hasClaudeSessionId === true && isValidUuid(existingClaudeSessionId)
+        && /^claude(?:\s|$)/.test(initialCommand) && !isWSL && canReadClaudeTranscripts();
+      const transcript = checkTranscript ? findClaudeSessionTranscript(existingClaudeSessionId) : undefined;
       const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId)
         && (!checkTranscript || Boolean(transcript));
       const promptWord = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
@@ -1771,7 +1772,7 @@ export class TerminalPanelManager extends EventEmitter {
     const panel = panelManager.getPanel(panelId);
     if (!panel) throw new Error(`Panel ${panelId} not found`);
     const state = terminalCustomState(panel.state);
-    const launch = this.resolveCliLaunchCommand(panelId, initialCommand, state, state.shellType);
+    const launch = this.resolveCliLaunchCommand(panelId, initialCommand, state, state.shellType, this.terminals.get(panelId)?.isWSL);
     const isDirectOpenCode = launch.customState.agentType === 'opencode'
       && launch.customState.launchMode !== 'wrapped'
       && !effectiveCustomResume(launch.customState)
