@@ -20,7 +20,7 @@ from .pane_intro import pane_intro, render_pane_intro
 from .generated_contract import RUNPANE_CONTRACT
 from .installers import resolve_existing_pane_path
 from .platforms import PanePlatform, detect_platform
-from .releases import resolve_release
+from .releases import github_token, resolve_release
 from .version import pane_version, wrapper_version
 
 DOCTOR_DAEMON_TIMEOUT_MS = 5_000
@@ -229,7 +229,7 @@ def build_doctor_report(parsed, source: str) -> Dict[str, Any]:
     platform_result = collect_platform()
     with ThreadPoolExecutor(max_workers=2) as executor:
         release_future = (
-            executor.submit(collect_release_check, parsed, source, platform_result["platform"])
+            executor.submit(collect_release_check, parsed, source, platform_result["platform"], release_cache_file(pane_dir))
             if platform_result["ok"]
             else None
         )
@@ -251,7 +251,8 @@ def build_doctor_report(parsed, source: str) -> Dict[str, Any]:
     return {
         "intro": pane_intro(pane_dir),
         "workspaceRules": RUNPANE_CONTRACT["agentContext"]["workspaceRules"],
-        "ok": bool(release["ok"] and daemon["reachable"] and remote_setup["ready"]),
+        # The release lookup never decides `ok`: a GitHub outage or rate limit is a warning on `release`.
+        "ok": bool(platform_result["ok"] and daemon["reachable"] and remote_setup["ready"]),
         "source": source,
         "wrapper": {
             "runtime": "python",
@@ -608,7 +609,19 @@ def collect_platform() -> Dict[str, Any]:
         return {"ok": False, "error": str(error)}
 
 
-def collect_release_check(parsed, source: str, platform: PanePlatform) -> Dict[str, Any]:
+def release_cache_file(pane_dir: str) -> str:
+    """Where doctor keeps its last good release lookup, so repeated runs don't spend GitHub's rate limit."""
+    return os.path.join(pane_dir, "runpane", "release-cache.json")
+
+
+def release_lookup_next(has_token: bool) -> str:
+    """The step after a failed release lookup; Pane itself is not affected by one."""
+    if has_token:
+        return "Check that GH_TOKEN or GITHUB_TOKEN holds a valid GitHub token, or rerun runpane doctor later. Pane itself is not affected."
+    return "Set GH_TOKEN or GITHUB_TOKEN to a GitHub token to raise GitHub's rate limit, or rerun runpane doctor later. Pane itself is not affected."
+
+
+def collect_release_check(parsed, source: str, platform: PanePlatform, cache_file: str) -> Dict[str, Any]:
     try:
         release = resolve_release(
             version=parsed.pane_version,
@@ -618,8 +631,9 @@ def collect_release_check(parsed, source: str, platform: PanePlatform) -> Dict[s
             format_name=parsed.format,
             target="client",
             fetch_timeout_seconds=DOCTOR_RELEASE_TIMEOUT_SECONDS,
+            cache_file=cache_file,
         )
-        return {
+        check = {
             "ok": True,
             "tagName": release.release["tag_name"],
             "artifactName": release.artifact["name"],
@@ -627,10 +641,26 @@ def collect_release_check(parsed, source: str, platform: PanePlatform) -> Dict[s
             "preferredDownloadUrl": release.preferred_download_url,
             "fallbackDownloadUrl": release.fallback_download_url,
         }
+        lookup = getattr(release, "lookup", None)
+        if lookup:
+            check["cached"] = lookup.cached
+            check["fetchedAt"] = lookup.fetched_at
+            if lookup.refresh_error is not None:
+                check["severity"] = "warning"
+                check["code"] = "RUNPANE_RELEASE_CHECK_CACHED"
+                check["error"] = (
+                    f"Could not refresh the release lookup ({lookup.refresh_error}), "
+                    f"so this is the one cached at {lookup.fetched_at}."
+                )
+                check["next"] = release_lookup_next(github_token() is not None)
+        return check
     except Exception as error:
         return {
             "ok": False,
-            "error": str(error),
+            "severity": "warning",
+            "code": "RUNPANE_RELEASE_CHECK_FAILED",
+            "error": f"Could not look up the latest Pane release, and no recent lookup is cached: {error}",
+            "next": release_lookup_next(github_token() is not None),
         }
 
 
@@ -693,11 +723,16 @@ def render_doctor_text(report: Dict[str, Any]) -> None:
 
     release = report["release"]
     if release["ok"]:
-        print(f"Latest release: {release['tagName']}")
+        cached = f" (cached {release['fetchedAt']})" if release.get("cached") else ""
+        print(f"Latest release: {release['tagName']}{cached}")
         print(f"Selected artifact: {release['artifactName']}")
         print(f"Website URL: {release['preferredDownloadUrl']}")
         print(f"GitHub fallback: {release['fallbackDownloadUrl']}")
-    else:
+    if release.get("severity") == "warning":
+        print(f"Release check warning: {release.get('error') or 'unknown error'}")
+        if release.get("next"):
+            print(f"Next: {release['next']}")
+    elif not release["ok"]:
         print(f"Release check: failed - {release.get('error') or 'unknown error'}")
 
     installed = report["installedPane"]

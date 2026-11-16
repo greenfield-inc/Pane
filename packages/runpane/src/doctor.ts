@@ -15,7 +15,7 @@ import {
 import { resolveExistingPanePath } from './installers';
 import { detectPlatform, type PanePlatform } from './platform';
 import { RUNPANE_CONTRACT } from './generated/contract';
-import { resolveRelease } from './releases';
+import { githubToken, resolveRelease } from './releases';
 import { getPaneVersion, getWrapperVersion } from './version';
 import { checkCliInstalls, fixCliInstalls, type CliInstallsCheck } from './managedCli';
 import type { BoundarySchema } from './boundaryDecoder';
@@ -150,6 +150,10 @@ const daemonDoctorResultSchema: BoundarySchema<DaemonDoctorResult> = boundary.ob
   }),
 });
 
+/**
+ * The release lookup. It never decides the top-level `ok`: a GitHub outage or rate limit is a
+ * `severity: 'warning'` with a `next` step, while Pane itself may be perfectly healthy.
+ */
 interface DoctorReleaseCheck {
   ok: boolean;
   tagName?: string;
@@ -157,7 +161,12 @@ interface DoctorReleaseCheck {
   format?: string;
   preferredDownloadUrl?: string;
   fallbackDownloadUrl?: string;
+  cached?: boolean;
+  fetchedAt?: string;
+  severity?: 'warning';
+  code?: string;
   error?: string;
+  next?: string;
 }
 
 interface DoctorInstalledPaneCheck {
@@ -442,7 +451,7 @@ async function buildDoctorReport(parsed: ParsedArgs, source: 'npm' | 'pip'): Pro
   const endpoint = getPaneDaemonEndpoint(paneDir);
   const platform = collectPlatform();
   const releasePromise = platform.ok
-    ? collectReleaseCheck(parsed, source, platform.platform)
+    ? collectReleaseCheck(parsed, source, platform.platform, releaseCacheFile(paneDir))
     : Promise.resolve({ ok: false, error: platform.error });
   const installedPane = collectInstalledPane(parsed.panePath);
   const daemonPromise = collectDaemonHealth(parsed.paneDir, endpoint);
@@ -458,7 +467,7 @@ async function buildDoctorReport(parsed: ParsedArgs, source: 'npm' | 'pip'): Pro
   return {
     intro: paneIntro(paneDir),
     workspaceRules: RUNPANE_CONTRACT.agentContext.workspaceRules,
-    ok: release.ok && daemon.reachable && remoteSetup.ready && (cliInstalls.fixed ?? []).every(result => result.ok),
+    ok: platform.ok && daemon.reachable && remoteSetup.ready && (cliInstalls.fixed ?? []).every(result => result.ok),
     source,
     wrapper: {
       runtime: 'node',
@@ -857,10 +866,23 @@ function collectPlatform(): { ok: true; platform: PanePlatform } | { ok: false; 
   }
 }
 
-async function collectReleaseCheck(
+/** Where doctor keeps its last good release lookup, so repeated runs don't spend GitHub's rate limit. */
+export function releaseCacheFile(paneDir: string): string {
+  return path.join(paneDir, 'runpane', 'release-cache.json');
+}
+
+/** The step after a failed release lookup; Pane itself is not affected by one. */
+export function releaseLookupNext(hasToken: boolean): string {
+  return hasToken
+    ? 'Check that GH_TOKEN or GITHUB_TOKEN holds a valid GitHub token, or rerun runpane doctor later. Pane itself is not affected.'
+    : 'Set GH_TOKEN or GITHUB_TOKEN to a GitHub token to raise GitHub\'s rate limit, or rerun runpane doctor later. Pane itself is not affected.';
+}
+
+export async function collectReleaseCheck(
   parsed: ParsedArgs,
   source: 'npm' | 'pip',
-  platform: PanePlatform
+  platform: PanePlatform,
+  cacheFile: string,
 ): Promise<DoctorReleaseCheck> {
   try {
     const release = await resolveRelease({
@@ -871,8 +893,9 @@ async function collectReleaseCheck(
       format: parsed.format,
       target: 'client',
       fetchTimeoutMs: DOCTOR_RELEASE_TIMEOUT_MS,
+      cacheFile,
     });
-    return {
+    const check: DoctorReleaseCheck = {
       ok: true,
       tagName: release.release.tag_name,
       artifactName: release.artifact.name,
@@ -880,10 +903,24 @@ async function collectReleaseCheck(
       preferredDownloadUrl: release.preferredDownloadUrl,
       fallbackDownloadUrl: release.fallbackDownloadUrl,
     };
+    if (release.lookup) {
+      check.cached = release.lookup.cached;
+      check.fetchedAt = release.lookup.fetchedAt;
+      if (release.lookup.refreshError !== undefined) {
+        check.severity = 'warning';
+        check.code = 'RUNPANE_RELEASE_CHECK_CACHED';
+        check.error = `Could not refresh the release lookup (${release.lookup.refreshError}), so this is the one cached at ${release.lookup.fetchedAt}.`;
+        check.next = releaseLookupNext(githubToken() !== undefined);
+      }
+    }
+    return check;
   } catch (error) {
     return {
       ok: false,
-      error: errorMessage(error),
+      severity: 'warning',
+      code: 'RUNPANE_RELEASE_CHECK_FAILED',
+      error: `Could not look up the latest Pane release, and no recent lookup is cached: ${errorMessage(error)}`,
+      next: releaseLookupNext(githubToken() !== undefined),
     };
   }
 }
@@ -952,11 +989,15 @@ function renderDoctorText(report: DoctorReport): void {
   }
 
   if (report.release.ok) {
-    console.log(`Latest release: ${report.release.tagName}`);
+    console.log(`Latest release: ${report.release.tagName}${report.release.cached ? ` (cached ${report.release.fetchedAt})` : ''}`);
     console.log(`Selected artifact: ${report.release.artifactName}`);
     console.log(`Website URL: ${report.release.preferredDownloadUrl}`);
     console.log(`GitHub fallback: ${report.release.fallbackDownloadUrl}`);
-  } else {
+  }
+  if (report.release.severity === 'warning') {
+    console.error(`Release check warning: ${report.release.error ?? 'unknown error'}`);
+    if (report.release.next) console.error(`Next: ${report.release.next}`);
+  } else if (!report.release.ok) {
     console.error(`Release check: failed - ${report.release.error ?? 'unknown error'}`);
   }
 

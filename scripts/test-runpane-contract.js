@@ -5913,7 +5913,8 @@ async function checkDoctorExitStatus() {
   const cases = [
     { reachable: false, releaseAvailable: true, expectedCode: 1 },
     { reachable: true, releaseAvailable: true, expectedCode: 0 },
-    { reachable: true, releaseAvailable: false, expectedCode: 1 },
+    // A failed release lookup is a warning on `release`; the daemon decides `ok` (#1128).
+    { reachable: true, releaseAvailable: false, expectedCode: 0 },
   ];
   const original = { release: releases.resolveRelease, invoke: daemon.invokeDaemon, platform: platform.detectPlatform, log: console.log };
   try {
