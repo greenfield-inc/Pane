@@ -426,10 +426,11 @@ export class DeviceService {
     const running = this.hub !== undefined;
     const devices = running || this.hasMadeDevices() ? await this.devices() : [];
     const hub = running ? await this.hub : undefined;
+    const folders = await this.simulatorFolders(capabilities);
     const report: DeviceUsage = {
       machine: this.options.machineName(),
       // Every simulator and emulator here, Pane's and the person's, so machine health sees them all (D-84).
-      devices: await Promise.all(devices.map(device => this.deviceUsage(device, capabilities))),
+      devices: await Promise.all(devices.map(device => this.deviceUsage(device, capabilities, folders))),
       helpers: hub?.pid ? [{ name: 'expo-device-hub', pid: hub.pid, memoryBytes: await processMemory(hub.pid) }] : [],
       checkouts: checkouts(),
       slimSim: capabilities.simslim !== undefined,
@@ -437,16 +438,25 @@ export class DeviceService {
     return report;
   }
 
-  private async deviceUsage(device: HubDevice, capabilities: DeviceCapabilities): Promise<DeviceUsage['devices'][number]> {
+  private async deviceUsage(device: HubDevice, capabilities: DeviceCapabilities, folders: ReadonlyMap<string, string>): Promise<DeviceUsage['devices'][number]> {
     const usage: DeviceUsage['devices'][number] = { id: device.id, platform: device.platform, name: device.name, os: device.os, paneMade: device.paneMade, booted: device.booted };
     const holder = this.lifecycle.holderOf(device.id);
     if (holder) usage.heldBy = holder;
     if (device.lastUsedAt) usage.lastUsedAt = new Date(device.lastUsedAt).toISOString();
     if (device.platform === 'ios') {
       if (device.booted) usage.memoryBytes = await iosMemory(device.id, capabilities.simslim);
-      usage.diskBytes = await folderBytes(path.join(this.options.probeEnvironment().home, 'Library', 'Developer', 'CoreSimulator', 'Devices', device.id));
+      const folder = folders.get(device.id);
+      if (folder) usage.diskBytes = await folderBytes(folder);
     }
     return usage;
+  }
+
+  /** Each simulator's folder, from simctl (its dataPath's parent), wherever CoreSimulator keeps it. */
+  private async simulatorFolders(capabilities: DeviceCapabilities): Promise<Map<string, string>> {
+    if (!capabilities.ios.ready) return new Map();
+    const { stdout } = await execFileAsync(capabilities.ios.xcrun, ['simctl', 'list', 'devices', '--json'], { maxBuffer: 16 * 1024 * 1024 });
+    const listed = decodeBoundary(JSON.parse(stdout), boundary.object({ devices: boundary.record(boundary.array(boundary.object({ udid: boundary.string, dataPath: boundary.optional(boundary.string) }))) }));
+    return new Map(Object.values(listed.devices).flat().flatMap(entry => entry.dataPath ? [[entry.udid, path.dirname(entry.dataPath)] as const] : []));
   }
 
   /** Shuts one device down now (the device tab's Shut down), ending any lease on it. */
