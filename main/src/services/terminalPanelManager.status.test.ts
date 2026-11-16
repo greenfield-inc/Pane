@@ -784,7 +784,7 @@ describe('program status reports (OSC 7501)', () => {
     expect(statuses()).not.toContainEqual(expect.objectContaining({ reason: 'program_status:working' }));
   });
 
-  it('keeps a running record while another process group holds the foreground, checking it seldom', async () => {
+  it.skipIf(process.platform === 'win32')('keeps a running record while another process group holds the foreground, checking it seldom', async () => {
     const readGroup = vi.fn(async () => 4242);
     manager = new TerminalPanelManager(undefined, undefined, readGroup);
     // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
