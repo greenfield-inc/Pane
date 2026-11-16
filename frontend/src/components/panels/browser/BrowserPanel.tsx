@@ -449,6 +449,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     const onDidStartLoading = () => setIsLoading(true);
     const onDidFailLoad = (event: Electron.DidFailLoadEvent) => {
       if (!event.isMainFrame || event.errorCode === -3) return;
+      // A failed load sends no did-navigate, but the tab now shows its address.
+      setShownUrl(toHostUrlRef.current(webview.getURL()));
       setIsLoading(false);
       setUrlError(`Unable to load this page: ${event.errorDescription}`);
     };

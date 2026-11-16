@@ -174,6 +174,14 @@ test('Open in your browser hands the tab\'s address to the OS, and says why when
   await open.click();
   await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally.at(-1))).toBe('http://localhost:5173/settings');
 
+  // A page that fails to load never sends did-navigate, but the tab shows its address.
+  await page.locator('webview').evaluate(webview => {
+    Object.assign(webview, { getURL: () => 'http://localhost:5174/' });
+    webview.dispatchEvent(Object.assign(new Event('did-fail-load'), { isMainFrame: true, errorCode: -102, errorDescription: 'ERR_CONNECTION_REFUSED' }));
+  });
+  await open.click();
+  await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally.at(-1))).toBe('http://localhost:5174/');
+
   await page.evaluate(() => { window.portsTest.openExternalError = 'That port on the host is not reachable from this computer right now.'; });
   await open.click();
   await expect(page.getByText('That port on the host is not reachable from this computer right now.')).toBeVisible();
