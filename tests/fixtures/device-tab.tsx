@@ -70,7 +70,7 @@ const STATES: { label: string; state: Partial<DevicePanelState> }[] = [
 ];
 
 const openResult = JSON.stringify({ ok: true, panelId: 'device', paneDevice: { kind: 'pane-device', panelId: 'device', name: 'iPhone 17 Pro', os: 'iOS 27', machine: 'This Mac' } });
-const chatPhase = (params.get('card') ?? 'live') as DevicePanelPhase;
+const chatPhase: DevicePanelPhase = params.get('card') === 'closed' ? 'closed' : 'live';
 const view: ChatTabView = {
   panelId: 'chat', agent: 'claude', generation: 1, status: 'idle', canAttachImages: true, commands: [], permissions: [], questions: [], queue: [], messageCount: 2, controls: [],
   transcript: { panelId: 'chat', generation: 1, revision: 0, start: 0, messages: [
