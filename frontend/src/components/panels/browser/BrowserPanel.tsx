@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, ArrowRight, RotateCw, Loader2, ChevronDown, Copy, Check, FileCode } from 'lucide-react';
+import { ArrowLeft, ArrowRight, RotateCw, Loader2, ChevronDown, Copy, Check, FileCode, ExternalLink } from 'lucide-react';
 import type { ToolPanel, BrowserPanelState } from '../../../../../shared/types/panels';
 import { cn } from '../../../utils/cn';
 import { panelApi } from '../../../services/panelApi';
@@ -389,6 +389,13 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     }, (error: Error) => console.error('[BrowserPanel] Failed to copy URL:', error));
   };
 
+  // Main maps a host port to where this computer reaches it, as for terminal links.
+  const handleOpenExternal = () => {
+    void window.electronAPI.openExternal(url).then(result => {
+      if (!result.success) setUrlError(result.error || 'Pane could not open this page in your browser');
+    });
+  };
+
   const handleViewSource = () => {
     if (!sourceFile) return;
     openFileInEditor({ sessionId: panel.sessionId, filePath: sourceFile, pin: true })
@@ -654,6 +661,18 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           title="Copy URL"
         >
           {copied ? <Check className="w-3.5 h-3.5 text-status-success" /> : <Copy className="w-3.5 h-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={handleOpenExternal}
+          disabled={!url || isFileUrl}
+          className={cn(
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
+            (!url || isFileUrl) && 'opacity-30 cursor-not-allowed'
+          )}
+          title="Open in your browser"
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
         </button>
         {sourceFile && (
           <button

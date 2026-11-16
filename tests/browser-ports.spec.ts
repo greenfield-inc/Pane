@@ -157,3 +157,16 @@ test.describe('a remote desktop loading a host page', () => {
     await expect(page.getByText('on old host')).toHaveCount(0);
   });
 });
+
+test('Open in your browser hands the tab\'s address to the OS, and says why when it cannot', async ({ page }) => {
+  await openBrowserPanel(page, 'http://localhost:5173/login');
+  await answerConnectionState(page, 'remote');
+  const open = page.getByTitle('Open in your browser');
+
+  await open.click();
+  await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['http://localhost:5173/login']);
+
+  await page.evaluate(() => { window.portsTest.openExternalError = 'That port on the host is not reachable from this computer right now.'; });
+  await open.click();
+  await expect(page.getByText('That port on the host is not reachable from this computer right now.')).toBeVisible();
+});
