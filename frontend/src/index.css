@@ -647,9 +647,13 @@ body.understory {
   }
 
   /* Decorative loops that translate. The bar and the accent stay visible; only
-     the sweep stops. Loading skeletons hold still too. */
+     the sweep stops. */
   .animate-slide-progress,
-  .animate-status-working,
+  .animate-status-working {
+    animation: none;
+  }
+
+  /* A loading skeleton's shape already says "loading", so its breathe stops. */
   .animate-skeleton {
     animation: none;
   }

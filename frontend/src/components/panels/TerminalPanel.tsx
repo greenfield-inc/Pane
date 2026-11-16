@@ -61,6 +61,7 @@ import type { InterceptorState, TerminalSuggestion } from '../../services/termin
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import { onTerminalReflow } from '../../utils/terminalReflow';
 import { createMaskOwnership } from '../../utils/maskOwnership';
+import { markTerminalShown, wasTerminalShown } from '../../utils/shownTerminals';
 import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
 
@@ -429,8 +430,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     return () => clearTimeout(timeout);
   }, [overlayActive, initAttempt]);
   const [overlayVisible, setOverlayVisible] = useState(true);
-  // A terminal already shown once is loaded: its refit masks stay plain.
-  const [terminalShown, setTerminalShown] = useState(false);
+  // A terminal already shown once, in this mount or an earlier one, is loaded:
+  // its refit masks stay plain.
+  const [, setShownRevision] = useState(0);
+  const terminalShown = wasTerminalShown(panel.id);
   useEffect(() => {
     if (overlayActive) {
       setOverlayVisible(true);
@@ -438,11 +441,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     }
     const lingerTimer = setTimeout(() => {
       setOverlayVisible(false);
-      setTerminalShown(true);
+      markTerminalShown(panel.id, panel.sessionId);
+      setShownRevision(revision => revision + 1);
       markPaneTerminalShown(panel.sessionId);
     }, TERMINAL_OVERLAY_LINGER_MS);
     return () => clearTimeout(lingerTimer);
-  }, [overlayActive, panel.sessionId]);
+  }, [overlayActive, panel.id, panel.sessionId]);
 
   // Listen for cliReady event (only for CLI panels that aren't already ready)
   useEffect(() => {
