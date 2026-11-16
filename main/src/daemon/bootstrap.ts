@@ -67,7 +67,7 @@ import { DB_CLEAN_OPEN_PREFERENCE } from '../services/machineHealth/reclaimRules
 import { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import { FinishedPaneMonitor, findFinishedPanes } from '../services/machineHealth/finishedPanes';
 import { MemoryRelief } from '../services/machineHealth/memoryRelief';
-import { ArchiveProcessTracker, readArchiveProcesses } from '../services/archiveProcessTracker';
+import { stopProcessIdentities } from '../services/archiveProcessTracker';
 import type { LevelChange } from '../services/machineHealth/machineHealthService';
 import { paneInactiveSince } from '../services/paneInactivity';
 import { findPrStatusForPane } from '../ipc/runpane';
@@ -819,35 +819,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const latestPaneMemoryMB = (paneId: string) => machineHealth.latestSnapshot()?.panes.find(pane => pane.sessionId === paneId)?.rssMB ?? 0;
   const memoryRelief = new MemoryRelief({
     now: () => Date.now(),
-    paneState: paneId => {
-      const session = databaseService.getSession(paneId);
-      if (!session || session.archived) return 'archived';
-      return panePausedMark(panelManager.getPanelsForSession(paneId)) ? 'paused' : 'open';
-    },
     paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
-    stop: async identities => {
-      // Identity-checked throughout: a pid whose start time changed (reused) is never signalled.
-      const matching = async () => {
-        const table = await readArchiveProcesses();
-        return identities.filter(identity => table.some(row => row.pid === identity.pid && row.started === identity.started && !row.exited));
-      };
-      if (process.platform !== 'win32') {
-        // Ask first, as quitting would: a database or dev server gets to shut down cleanly.
-        for (const identity of await matching()) {
-          try { process.kill(identity.pid, 'SIGTERM'); } catch { /* already gone */ }
-        }
-        await new Promise(resolve => setTimeout(resolve, 3000));
-      }
-      const left = await matching();
-      if (left.length > 0) {
-        const tracker = new ArchiveProcessTracker(left.map(identity => ({ ...identity, parent: 0 })), () => {});
-        await tracker.terminateSurvivors();
-        await tracker.verifyExited().catch(() => undefined);
-      }
-      return matching();
-    },
+    stop: identities => stopProcessIdentities(identities),
     idlePanes: hours => autoPauser.idlePanes(hours),
-    pauseIdle: hours => autoPauser.pauseIdleNow(hours),
+    pauseIdle: (hours, paneIds) => autoPauser.pauseIdleNow(hours, paneIds),
+    pinned: paneId => !!databaseService.getSession(paneId)?.is_favorite,
     paneMemoryMB: latestPaneMemoryMB,
     settings: () => configManager.getConfig().machineHealth,
     record: run => machineCleanup.note(run),

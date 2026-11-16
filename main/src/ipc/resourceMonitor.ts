@@ -4,6 +4,8 @@ import type { AppServices } from './types';
 import { resourceMonitorService } from '../services/resourceMonitorService';
 import { RECLAIM_KINDS, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RELIEF_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_HISTORY_CHANNEL, MACHINE_HEALTH_INVENTORY_CHANNEL, MACHINE_HEALTH_SNAPSHOT_CHANNEL } from '../../../shared/types/machineHealth';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { PaneError } from '../../../shared/paneError';
+import { logsManager } from '../services/panels/logPanel/logsManager';
 
 const inventoryRequestSchema = boundary.object({ refresh: boundary.optional(boundary.boolean) });
 const archiveFinishedSchema = boundary.object({
@@ -18,8 +20,6 @@ const cleanupRequestSchema = boundary.object({
   kinds: boundary.optional(boundary.array(boundary.enumeration(...RECLAIM_KINDS))),
   source: boundary.enumeration('ui', 'card', 'cli'),
 });
-import { PaneError } from '../../../shared/paneError';
-import { logsManager } from '../services/panels/logPanel/logsManager';
 
 const DAEMON_RESOURCE_MONITOR_CHANNELS = [
   'resource-monitor:get-snapshot',

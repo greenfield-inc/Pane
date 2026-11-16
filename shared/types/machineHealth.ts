@@ -95,10 +95,10 @@ export interface MachineHealthSettings {
   autoClearArchivedFolders?: boolean;
   autoArchiveFinished?: boolean;
   /** A Pane counts as finished after this many idle days (default 14). */
-  finishedIdleDays?: number;  /** Under memory pressure, pause Panes idle this many hours (default 2). */
+  finishedIdleDays?: number;
+  /** Under memory pressure, pause Panes idle this many hours (default 2). */
   pauseIdleHours?: number;
   autoPauseUnderPressure?: boolean;
-  autoStopLeftovers?: boolean;
 }
 
 /** The value of every machine health setting nobody has overridden. */

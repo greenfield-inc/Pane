@@ -110,14 +110,15 @@ export class AutoPauser {
     return this.deps.panes().filter(pane => this.pausable(pane, this.deps.testThresholdMs ?? hours * HOUR_MS, now)).map(pane => pane.id);
   }
 
-  /** Pauses Panes idle for `hours` now, whatever the setting says; for memory relief. */
-  pauseIdleNow(hours: number): Promise<string[]> {
-    return this.pauseIdlePanes(hours, this.deps.now());
+  /** Pauses those of `paneIds` still idle for `hours` now, whatever the setting says; for memory relief. */
+  pauseIdleNow(hours: number, paneIds: readonly string[]): Promise<string[]> {
+    return this.pauseIdlePanes(hours, this.deps.now(), new Set(paneIds));
   }
 
-  private async pauseIdlePanes(hours: number, now: number): Promise<string[]> {
+  private async pauseIdlePanes(hours: number, now: number, only?: ReadonlySet<string>): Promise<string[]> {
     const paused: string[] = [];
     for (const pane of this.deps.panes()) {
+      if (only && !only.has(pane.id)) continue;
       // Read per Pane: each pause takes seconds, and the person may focus a Pane meanwhile.
       if (!this.pausable(pane, this.deps.testThresholdMs ?? hours * HOUR_MS, now)) continue;
       // One Pane that cannot pause never stops the sweep for the Panes after it.
