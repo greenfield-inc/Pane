@@ -664,6 +664,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onPanelAgentStatus') {
           return (callback: MockEventCallback) => subscribe('panel:agent-status', callback);
         }
+        if (prop === 'onOrchestrationSessionActivity') {
+          return (callback: MockEventCallback) => subscribe('orchestration-sessions:activity', callback);
+        }
         if (prop === 'onArchiveProgress') {
           return (callback: MockEventCallback) => subscribe('archive:progress', callback);
         }
@@ -2167,6 +2170,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitPanelAgentStatus(panelId: string, sessionId: string, state: string, reason?: string) {
           emit('panel:agent-status', { panelId, sessionId, state, reason });
+        },
+        // Stands in for the host's Session activity, which counts a Session's working Panes.
+        emitOrchestrationSessionActivity(activity: { sessionId: string; state: 'working' | 'idle'; workingPanes: number }) {
+          emit('orchestration-sessions:activity', clone(activity));
         },
         emitPanelDeleted(panelId: string, sessionId: string) {
           emit('panel:deleted', { panelId, sessionId });

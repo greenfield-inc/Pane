@@ -1220,6 +1220,12 @@ test('Session rows show whether their child Panes are working or waiting', async
   await dismissStartupDialogs(page);
   const row = page.getByTestId('orchestration-session-activity');
   await expect(row).toContainText('2');
+  // The host counts a Session's working Panes (D-363); a Pane needing input comes from its agent status.
+  const emitActivity = (workingPanes: number) => page.evaluate(count => {
+    // SAFETY: installElectronApiMock adds these controls before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { emitOrchestrationSessionActivity: (activity: { sessionId: string; state: 'working' | 'idle'; workingPanes: number }) => void } };
+    mockWindow.__paneTestElectronMock.emitOrchestrationSessionActivity({ sessionId: 'activity', state: count > 0 ? 'working' : 'idle', workingPanes: count });
+  }, workingPanes);
   const emit = (panelId: string, sessionId: string, state: string) => page.evaluate(({ panelId, sessionId, state }) => {
     // SAFETY: installElectronApiMock adds these controls before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelAgentStatus: (panelId: string, sessionId: string, state: string) => void } };
@@ -1228,11 +1234,14 @@ test('Session rows show whether their child Panes are working or waiting', async
 
   await emit('alpha-agent', 'pane-alpha', 'working');
   await emit('beta-agent', 'pane-beta', 'working');
+  await emitActivity(2);
   await expect(row).toContainText('2 working');
   await emit('beta-agent', 'pane-beta', 'blocked');
+  await emitActivity(1);
   await expect(row).toContainText('1 needs input');
   await emit('alpha-agent', 'pane-alpha', 'idle');
   await emit('beta-agent', 'pane-beta', 'idle');
+  await emitActivity(0);
   await expect(row).not.toContainText('working');
   await expect(row).not.toContainText('input');
 });
