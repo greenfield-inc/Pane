@@ -132,11 +132,20 @@ function approvals() {
   const cards: LoopCard[] = [];
   const waiting: Array<(answer: string | null) => void> = [];
   const archivedSessions: string[] = [];
+  const taken: string[] = [];
   return {
     cards,
+    taken,
     archivedSessions,
     options: {
-      ask: (card: LoopCard) => { cards.push(card); return new Promise<string | null>(resolve => waiting.push(resolve)); },
+      ask: (card: LoopCard, signal: AbortSignal) => {
+        cards.push(card);
+        return new Promise<string | null>(resolve => {
+          waiting.push(resolve);
+          // Like Approvals: an aborted card comes down, unanswered.
+          signal.addEventListener('abort', () => { taken.push(card.title); resolve(null); });
+        });
+      },
       archiveSession: async (sessionId: string) => { archivedSessions.push(sessionId); },
     },
     answer: async (label: string) => {
@@ -183,7 +192,7 @@ describe('LoopManager cards', () => {
     await manager.runNow(id);
 
     expect(manager.list()[0].orchestrationSessionId).toBe('session-2');
-    expect(desk.cards[0].context).toBe('Its Session was gone, so Pane made a new Session, promises-watch 2, and sent this run there. Undo archives it and pauses the loop.');
+    expect(desk.cards[0].context).toBe('Its Session was gone, so Pane made promises-watch 2 in its place and sent this run there. Undo archives it and pauses the loop.');
     await desk.answer('Keep it');
     expect(desk.archivedSessions).toEqual([]);
     expect(manager.list()[0].enabled).toBe(true);
@@ -227,6 +236,46 @@ describe('LoopManager cards', () => {
     await desk.answer('Pause the loop');
     expect(manager.list()[0].enabled).toBe(false);
     expect(desk.cards.map(card => card.title)).toEqual(['promises-watch did not run', 'promises-watch did not run']);
+  });
+
+  it('says the prompt was held when a run restored its Session but could not send', async () => {
+    const desk = approvals();
+    const warning = 'When this run started, the Session\'s agent was stopped at a prompt. The loop\'s prompt was not sent. Open the Session and answer it.';
+    const { manager } = setup(async () => ({ sessionId: null, warning, recovered: restored }), undefined, desk.options);
+    const { id } = await manager.save(standup);
+    await manager.runNow(id);
+    expect(desk.cards[0].context).toBe(`Its Session promises-watch was archived, so Pane restored it. ${warning} Undo archives it and pauses the loop.`);
+  });
+
+  it('takes a failure card down once a run starts, and every card of a deleted loop', async () => {
+    const desk = approvals();
+    let fails = true;
+    const { manager } = setup(async () => {
+      if (fails) throw new Error('Session promises-watch is unreachable.');
+      return { sessionId: null };
+    }, undefined, desk.options);
+    const { id } = await manager.save(standup);
+    await manager.runNow(id);
+    fails = false;
+    // The scheduled run works: the card's Run again would start an extra run.
+    await manager.runNow(id);
+    await settle();
+    expect(desk.taken).toEqual(['promises-watch did not run']);
+
+    fails = true;
+    await manager.runNow(id);
+    manager.delete(id);
+    await settle();
+    expect(desk.taken).toEqual(['promises-watch did not run', 'promises-watch did not run']);
+  });
+
+  it('pauses the loops that send to a Session archived anywhere', async () => {
+    const { manager } = setup();
+    const { id } = await manager.save(standup);
+    const other = await manager.save({ ...nightly, name: 'Elsewhere' });
+    expect(manager.pauseForArchivedSession('session-1')).toEqual(['promises-watch']);
+    expect(manager.list().find(loop => loop.id === id)?.enabled).toBe(false);
+    expect(manager.list().find(loop => loop.id === other.id)?.enabled).toBe(true);
   });
 
   it('offers a project loop that failed to run again or pause', async () => {

@@ -25,7 +25,7 @@ async function approvals(page: Page): Promise<NotifySnapshot> {
   return page.evaluate(() => window.electronAPI.notify.getSnapshot());
 }
 
-test('a Session loop lives under Loops, and a run restores its archived Session with a card that undoes it', async ({ baseURL }) => {
+test('a Session loop lives under Loops, and archiving it anywhere pauses the loop, and Run now restores it with a card that undoes it', async ({ baseURL }) => {
   test.setTimeout(180_000);
   const pane = isolatedPane('pane-loop-sessions');
   const bin = path.join(pane.root, 'fake-bin');
@@ -53,10 +53,13 @@ test('a Session loop lives under Loops, and a run restores its archived Session 
     await expect(page.getByTestId('loop-detail').getByRole('button', { name: 'Open Session' })).toBeVisible();
     await expect(row).toHaveCount(0);
 
-    // Archived from outside the app (here, the CLI), then the next run brings it back.
+    // Archived from outside the app (here, the CLI): the loop pauses, so no scheduled run brings it back.
     const archive = path.join(pane.root, 'archive.json');
     writeFileSync(archive, JSON.stringify({ archived: true }));
     await runpane(pane, ['sessions', 'update', '--session', sessionId, '--from-json', archive, '--json']);
+    const enabled = async () => (await json<{ loops: Array<{ id: string; enabled: boolean }> }>(pane, ['loops', 'list'])).loops.find(item => item.id === loop.id)?.enabled;
+    expect(await enabled()).toBe(false);
+    // Run now still runs it, and brings the Session back.
     await runpane(pane, ['loops', 'run', '--loop', loop.id, '--yes', '--json']);
     const { session } = await json<{ session: { archived?: boolean; isPinned?: boolean } }>(pane, ['sessions', 'get', '--session', sessionId]);
     expect(session.archived).not.toBe(true);
@@ -67,12 +70,16 @@ test('a Session loop lives under Loops, and a run restores its archived Session 
       .toContain('promises-watch: Session restored');
     const card = (await approvals(page)).items.find(item => item.title === 'promises-watch: Session restored');
     expect(card?.ui).toBe('options');
+    // Only a pick acts on a loop's card: it takes no typed reply.
+    expect(card?.optionsOnly).toBe(true);
     expect(card?.source.session?.id).toBe(sessionId);
     await expect(row).toContainText('Loop: promises-watch');
     await expect(row.getByTestId('loop-mark')).toBeVisible();
     await shot(page, 'loop-session-waiting');
 
-    // Archiving it from the sidebar first says what it does to the loop.
+    // With the loop resumed, archiving it from the sidebar first says what it does to the loop.
+    await runpane(pane, ['loops', 'resume', '--loop', loop.id, '--yes', '--json']);
+    await expect.poll(enabled).toBe(true);
     await row.click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Archive Session' }).click();
     const dialog = page.getByRole('dialog', { name: 'Archive promises-watch?' });
@@ -80,10 +87,9 @@ test('a Session loop lives under Loops, and a run restores its archived Session 
     await shot(page, 'loop-session-archive-warning');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
 
-    // Undo on the card archives the Session again and pauses the loop.
+    // Undo on the card archives the Session again and keeps the loop paused.
     await page.evaluate(async id => { await window.electronAPI.notify.run({ type: 'answer', id, answer: { choice: 'Undo' } }); }, card?.id ?? '');
-    await expect.poll(async () => (await json<{ loops: Array<{ id: string; enabled: boolean }> }>(pane, ['loops', 'list'])).loops.find(item => item.id === loop.id)?.enabled, { timeout: 15_000 })
-      .toBe(false);
+    await expect.poll(enabled, { timeout: 15_000 }).toBe(false);
     await expect.poll(async () => (await json<{ session: { archived?: boolean } }>(pane, ['sessions', 'get', '--session', sessionId])).session.archived, { timeout: 15_000 })
       .toBe(true);
     await expect(row).toHaveCount(0);

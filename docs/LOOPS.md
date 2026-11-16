@@ -42,13 +42,16 @@ follows these rules:
    are cards too, with what was tried and the one thing the person can do. The
    loop acts on their answers on the card.
 2. **Remember across runs.** Keep a small ledger file: the items found, what
-   each run covered, and what was already surfaced. Start every run by reading
-   it, the last one or two outputs, and the person's card answers since the
-   last run. Scan only what is new, and re-check open items.
+   each run covered, what was already surfaced, and the id of each card it
+   posted. Start every run by reading it, the last one or two outputs, and
+   the person's card answers since the last run. Scan only what is new, and
+   re-check open items.
 3. **Never repeat.** Surface an item only when it is new, newly urgent or
    overdue, and record when it was last surfaced. Match items by meaning, not
-   wording. While a card is unanswered, update it (`runpane notify --update`)
-   instead of posting another.
+   wording. While a card is unanswered, update it (`runpane notify --update
+   <id>`, with the id from the ledger) instead of posting another. Any later
+   run of the same loop may update it, though each run of a project loop is a
+   new Pane.
 4. **One card per run, or none.** Batch the findings into one card. When
    nothing qualifies, stay quiet.
 5. **Publish outputs to one place.** Each run's output goes to the person's
@@ -86,7 +89,8 @@ You are the commitments-watch loop. You run at 7:30 and 16:30 while I am away.
 5. If anything qualifies, post one card that waits: `runpane notify --ui
    options --title "<n> commitments due soon" --choices '[{"label":"Got
    it"},{"label":"Not interested"}]' --links '[{"label":"Today","url":"<the
-   output>"}]'`. If my last card is unanswered, update it instead
+   output>"}]'`. If my last card (its id is in the ledger) is unanswered,
+   update it instead
    (`runpane notify --update <id> --asked <what> --what-changed <what>`). If
    nothing qualifies, post nothing.
 6. Never send a message for me. Propose it on an approve card, at most once
@@ -112,10 +116,12 @@ from it waits on you, marked with the loop icon in place of its status dot and
 "Loop: <name>". A loop's Session or run Pane is never pinned: saving a Session loop unpins its
 Session, and neither row's menu has Pin.
 
-Archiving a Session a loop sends to asks first, such as "promises-watch runs
-here daily at 7:30 AM", and pauses the loop, so no run brings the Session
-back. Undo restores the Session and resumes the loop; so does resuming the
-loop later. Deleting a loop says what happens to its Session or run Panes: they
+Archiving a Session a loop sends to pauses the loop, so no scheduled run
+brings the Session back. That holds wherever it is archived: the app, a phone,
+`runpane sessions update` or another machine. In the app it asks first, such
+as "promises-watch runs here daily at 7:30 AM", and Undo restores the Session
+and resumes the loop. Resume the loop later and its next run restores the
+Session. Deleting a loop says what happens to its Session or run Panes: they
 stay, and move back to the sidebar lists.
 
 The schedule works like Google Calendar's Repeat field. Pick **Hourly**,
@@ -214,8 +220,12 @@ runpane loops create --session new --name morning-standup --cron "0 9 * * 1-5" \
   the agent is stopped at a prompt of its own, or its launch exited back to
   the shell, the loop's prompt is not sent (Pane never types it into a shell)
   and the run shows as **needs attention**; open the Session and fix it.
-- **An archived or missing Session.** A run whose Session was archived (from
-  the CLI or another machine, say) restores it and sends there. A run whose
+- **An archived or missing Session.** A run whose Session is archived (a
+  resumed loop's next run, or **Run now** on a paused one) restores it and
+  sends there, however long ago it was archived. After 14 days (**Settings →
+  Worktrees & Git → Keep archived folders**) Pane has deleted the Session's
+  folder, so the Session comes back without the notes and files that were in
+  it. A run whose
   Session is gone makes a new Session named after the loop (`standup 2` when
   an archived Session keeps the name), points the loop at it and sends there.
   Either way you get a card that waits: **Keep it**, or **Undo**, which

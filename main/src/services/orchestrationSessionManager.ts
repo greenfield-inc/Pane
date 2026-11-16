@@ -441,6 +441,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       // An archive or restore can come with a report, whose change kind does not re-read the members.
       if ((current.archived === true) !== (nextRecord.archived === true)) this.liveActivity.invalidateMembers();
       this.emitChanged(nextRecord, input.report ? 'report' : 'updated', selectedSessionId !== data.selectedSessionId);
+      // Every way of archiving (the app, a phone, the CLI, another machine) passes here.
+      if (isArchiving) this.emit('archived', nextRecord.id);
       return this.withPaused(clone(nextRecord));
     });
   }

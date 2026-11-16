@@ -425,6 +425,11 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     wslDistros: () => (services.databaseService?.getAllProjects() ?? [])
       .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
     sessionOf: (paneId, panelId) => services.orchestrationSessionManager?.approvalSession(paneId, panelId),
+    sameLoop: (callerPaneId, askerPaneId) => {
+      const loopOf = (paneId: string) => services.loopManager?.loopFor({ paneId, sessionId: services.orchestrationSessionManager?.approvalSession(paneId)?.id })?.id;
+      const loop = loopOf(callerPaneId);
+      return loop !== undefined && loop === loopOf(askerPaneId);
+    },
     projectOf: (paneId) => {
       const projectId = services.databaseService?.getSession?.(paneId)?.project_id;
       return projectId === undefined || projectId === null ? undefined : services.databaseService?.getAllProjects().find(project => project.id === projectId)?.name;

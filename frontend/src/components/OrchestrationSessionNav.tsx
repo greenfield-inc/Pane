@@ -117,14 +117,16 @@ export function OrchestrationSessionNav({
   sessionsSectionExpanded,
   onSessionsSectionExpandedChange,
 }: OrchestrationSessionNavProps) {
+  const selectedSessionIdForList = useOrchestrationSessionStore(state => state.selectedSessionId);
   const sessions = useOrchestrationSessionStore(state => state.sessions);
   const loopsBySessionTarget = useLoopsStore(state => state.loopsBySessionTarget);
   const notifySnapshot = useNotifyStore(state => state.snapshot);
-  // A loop's Session lives under Loops; it joins the list only while a card from it waits on you.
+  const openSessionId = useNavigationStore(state => state.activeView === 'pane-chat') ? selectedSessionIdForList : undefined;
+  // A loop's Session lives under Loops; it joins the list only while a card from it waits on you, or while it is open.
   const activeSessions = useMemo(
     () => sessions.filter(session => !isArchivedOrchestrationSession(session)
-      && (!loopsBySessionTarget.has(session.id) || sessionWaitingCount(notifySnapshot, session.id) > 0)),
-    [sessions, loopsBySessionTarget, notifySnapshot],
+      && (!loopsBySessionTarget.has(session.id) || session.id === openSessionId || sessionWaitingCount(notifySnapshot, session.id) > 0)),
+    [sessions, loopsBySessionTarget, notifySnapshot, openSessionId],
   );
   const pinnedSessions = useMemo(
     () => activeSessions.filter(session => session.isPinned === true && !loopsBySessionTarget.has(session.id)),

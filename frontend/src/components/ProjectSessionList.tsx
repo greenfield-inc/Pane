@@ -34,6 +34,7 @@ import { confirmPaneArchive } from './archiveConfirm';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { LoopLabel, LoopMark } from './loops/LoopMark';
+import { useIsLoopRun, useListedPanes } from '../hooks/useListedPanes';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
@@ -108,13 +109,8 @@ export function ProjectSessionList({
   const [dragOverProjectId, setDragOverProjectId] = useState<number | null>(null);
 
   const allPanes = useSessionStore(s => s.sessions);
-  const runsBySessionId = useLoopsStore(s => s.runsBySessionId);
-  const notifySnapshot = useNotifyStore(s => s.snapshot);
-  // A loop's run Panes live under Loops; one joins its project's list only while it waits on you.
-  const sessions = useMemo(
-    () => allPanes.filter(pane => !runsBySessionId.has(pane.id) || paneHasWaitingQuestion(notifySnapshot, pane.id)),
-    [allPanes, runsBySessionId, notifySnapshot],
-  );
+  const sessions = useListedPanes();
+  const isLoopRun = useIsLoopRun();
   const sessionsLoaded = useSessionStore(s => s.isLoaded);
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const setActiveSession = useSessionStore(s => s.setActiveSession);
@@ -201,8 +197,8 @@ export function ProjectSessionList({
 
   const pinnedSessions = useMemo(() => {
     // A loop's run Pane is never pinned in the sidebar.
-    return getPinnedSessions(sessions.filter(pane => !runsBySessionId.has(pane.id)), projectById);
-  }, [sessions, runsBySessionId, projectById]);
+    return getPinnedSessions(sessions.filter(pane => !isLoopRun(pane.id)), projectById);
+  }, [sessions, isLoopRun, projectById]);
 
   // mod+1-9 session switch hotkeys are registered in useSessionNavigationHotkeys
   // (always mounted in Sidebar), and new-project auto-expansion lives there too.

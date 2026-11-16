@@ -175,6 +175,8 @@ export interface NotifyQueueEnvironment {
   };
   /** The Session a Pane (and tab) works in, filed on each new item; Approvals groups by it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
+  /** Both Panes run for the same loop: a later run may --update or --took an earlier run's card. */
+  sameLoop?: (callerPaneId: string, askerPaneId: string) => boolean;
   /** The machines saved on this screen (Settings → Remote), read from config: listed before their connections start. */
   savedMachineIds?: () => string[];
   /** The project a Pane belongs to, filed on each new item. */
@@ -1102,6 +1104,7 @@ export class NotifyQueue extends EventEmitter {
     // The open call the reply went back to holds its continuation id, and nobody else was given it:
     // that call's agent continues with it, from a terminal outside Pane as from a tab (D-294).
     if (reader && !reader.panelId && entry.continuation !== undefined && entry.continuation === ref) return true;
+    if (caller.paneId && item.source.paneId && this.env.sameLoop?.(caller.paneId, item.source.paneId)) return true;
     const panelId = caller.panelId;
     if (!panelId) return false;
     if (reader?.panelId) return reader.panelId === panelId || panelId === item.source.panelId;

@@ -404,6 +404,8 @@ describe('Approvals items, through the registered handlers', () => {
     ['session-pane', { id: 'session-pane', name: 'Launch' }],
     ['worker', { id: 'worker', name: 'api-fix' }],
     ['loose', { id: 'loose', name: 'docs' }],
+    ['run-1', { id: 'run-1', name: 'deal-watch · Nov 16 09:00' }],
+    ['run-2', { id: 'run-2', name: 'deal-watch · Nov 17 09:00' }],
   ]);
   const launch = { id: 'session-1', name: 'Launch', paneId: 'session-pane' };
   const later = { id: 'session-2', name: 'Later', paneId: 'later-pane' };
@@ -442,6 +444,36 @@ describe('Approvals items, through the registered handlers', () => {
     };
     return { configManager, registry, notify: registerNotifyHandlers(ipcMain, services, registry) };
   }
+
+  it('lets a later run of a loop update the card an earlier run posted, and nobody else (#1446)', async () => {
+    const db = createLoopTestDb();
+    let run = 0;
+    const loops = new LoopManager({
+      repo: new LoopRepository(() => db),
+      startRun: async () => ({ sessionId: `run-${++run}` }),
+      archiveRun: async () => true,
+      projectExists: () => true,
+      prepareSession: async target => target,
+    });
+    const loop = await loops.save({ name: 'deal-watch', projectId: 1, cron: '0 9 * * *', agent: 'claude', enabled: false });
+    await loops.runNow(loop.id);
+    await loops.runNow(loop.id);
+    const pane = await startWithSessions(undefined, loops);
+    const posted = await pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      ui: 'options', caller: { paneId: 'run-1', panelId: 'run-1-tab' }, title: '3 new deals?', context: 'Two under $40.',
+      choices: [{ label: 'Got it' }, { label: 'Not interested' }], returnAfterMs: 1,
+    }]);
+    const id = pane.notify.snapshot().items[0].id;
+    expect(posted).toMatchObject({ waiting: true });
+    const update = (paneId: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      update: id, asked: 'Two more deals', whatChanged: 'Now 5 deals', title: '5 new deals?', caller: { paneId, panelId: `${paneId}-tab` }, returnAfterMs: 1,
+    }]);
+
+    await expect(update('loose')).rejects.toMatchObject({ code: 'ERR_NOTIFY_NOT_READER' });
+    await update('run-2');
+    expect(pane.notify.snapshot().items.map(item => item.title)).toEqual(['5 new deals?']);
+    pane.notify.dispose();
+  });
 
   it("warns a loop off info cards, which disappear before the person is back (#1446)", async () => {
     const db = createLoopTestDb();

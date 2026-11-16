@@ -69,6 +69,14 @@ export const useArchivedSessionToastStore = createStore<{ toast: ArchivedSession
 export const setArchivedToast = (toast: ArchivedSessionToast | null) => useArchivedSessionToastStore.setState({ toast });
 export const clearArchivedToast = () => setArchivedToast(null);
 
+/** What archiving a Session does to the loops that send to it: each pauses, so no run restores it. */
+function loopArchiveNote(loops: readonly Loop[]): string | undefined {
+  if (loops.length === 0) return undefined;
+  const runs = loops.map(loop => `${loop.name} runs here ${loop.scheduleText.charAt(0).toLowerCase()}${loop.scheduleText.slice(1)}`).join('; ');
+  const one = loops.length === 1;
+  return `${runs}. Archiving the Session pauses ${one ? 'the loop' : 'those loops'}; once ${one ? 'it is' : 'they are'} resumed on the Loops page, ${one ? 'its' : 'their'} next run brings the Session back.`;
+}
+
 /**
  * Archives a Session with its Panes and offers Undo. The person confirms first; when a Pane has work
  * in progress (an agent mid-turn or waiting, unsent input, unsaved work), they choose to archive it
@@ -77,14 +85,6 @@ export const clearArchivedToast = () => setArchivedToast(null);
  * never on a Session the server or the auto-selection picks, so a person who opens something else
  * while the request is in flight keeps what they opened. Throws when the host refuses.
  */
-/** What archiving a Session does to the loops that send to it: each pauses, so no run restores it. */
-function loopArchiveNote(loops: readonly Loop[]): string | undefined {
-  if (loops.length === 0) return undefined;
-  const runs = loops.map(loop => `${loop.name} runs here ${loop.scheduleText.charAt(0).toLowerCase()}${loop.scheduleText.slice(1)}`).join('; ');
-  const one = loops.length === 1;
-  return `${runs}. Archiving the Session pauses ${one ? 'the loop' : 'those loops'}; resume ${one ? 'it' : 'them'} on the Loops page to bring the Session back.`;
-}
-
 export async function archiveOrchestrationSession(sessionId: string, sessionName: string): Promise<void> {
   const before = useOrchestrationSessionStore.getState();
   const hostChanged = () => useOrchestrationSessionStore.getState().hostRevision !== before.hostRevision;
@@ -108,7 +108,8 @@ export async function archiveOrchestrationSession(sessionId: string, sessionName
   // A host switch during the request leaves nothing on the new host to undo.
   if (hostChanged()) return;
   const { archivedPaneIds, keptPanes, failedPanes } = response.data;
-  for (const loop of loops) await useLoopsStore.getState().setEnabled(loop.id, false);
+  // The host paused these loops as it archived the Session; read their new state.
+  if (loops.length > 0) await useLoopsStore.getState().refresh();
   const pausedLoops = loops.map(loop => ({ id: loop.id, name: loop.name }));
   setArchivedToast({ sessionId, sessionName, wasOpen, hostRevision: before.hostRevision, panes: { archivedPaneIds, keptPanes, failedPanes }, pausedLoops });
   await useOrchestrationSessionStore.getState().refresh();

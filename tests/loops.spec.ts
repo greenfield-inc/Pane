@@ -378,8 +378,13 @@ function installLoopSessions() {
         return { success: true, data: find(selector) };
       },
       archivePreview: async (selector: { sessionId?: string }) => ({ success: true, data: { sessionId: find(selector).id, panes: [] } }),
+      // Like the host: archiving pauses the loops that send to the Session.
       archive: async (selector: { sessionId?: string }) => {
         find(selector).archived = true;
+        const loops = await window.electronAPI.loops.list();
+        for (const loop of loops.data ?? []) {
+          if (loop.orchestrationSessionId === find(selector).id) await window.electronAPI.loops.setEnabled(loop.id, false);
+        }
         return { success: true, data: { session: find(selector), archivedPaneIds: [], keptPanes: [], failedPanes: [] } };
       },
     },
@@ -431,7 +436,7 @@ for (const theme of ['light-rounded', 'dark'] as const) {
     await expect(menu.getByRole('menuitem', { name: /Pin Session|Unpin Session/ })).toHaveCount(0);
     await menu.getByRole('menuitem', { name: 'Archive Session' }).click();
     const dialog = page.getByRole('dialog', { name: 'Archive promises-watch?' });
-    await expect(dialog).toContainText('promises-watch runs here daily at 7:30 AM. Archiving the Session pauses the loop; resume it on the Loops page to bring the Session back.');
+    await expect(dialog).toContainText('promises-watch runs here daily at 7:30 AM. Archiving the Session pauses the loop; once it is resumed on the Loops page, its next run brings the Session back.');
     await shoot(page, `${prefix}13-archive-loop-session`);
     await dialog.getByRole('button', { name: 'Archive and pause' }).click();
     await expect(page.getByText('Archived promises-watch · paused promises-watch')).toBeVisible();
@@ -449,4 +454,25 @@ test('says what deleting a Session loop does to its Session', async ({ page }) =
   const drawer = page.getByRole('dialog');
   await drawer.getByRole('button', { name: 'Delete loop' }).click();
   await expect(drawer.getByText('Delete this loop? Its schedule stops, and its Session stays and moves to your Sessions list.')).toBeVisible();
+});
+
+test('numbers only the Panes the sidebar lists, and keeps an open run Pane listed', async ({ page }) => {
+  const feature = { ...runSession('feature-x', Date.now() - DAY, 30, 'stopped'), name: 'feature-x', worktreePath: '/tmp/worktrees/feature-x' };
+  await open(page, {
+    initialSessions: [...seededSessions, feature],
+    initialLoops: [seededLoops[0]],
+    initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
+    notifySnapshot: emptyApprovals,
+  });
+  const rows = page.locator('[data-pane-part="sidebar-pane"]');
+  await expect(rows).toHaveCount(1);
+  // Mod+1 opens the first listed Pane, not a hidden loop run.
+  await page.keyboard.press('ControlOrMeta+1');
+  await expect(rows.filter({ hasText: 'feature-x' }).locator('[aria-current="page"]')).toHaveCount(1);
+
+  // A run opened from Loops stays listed while it is open.
+  await page.getByTestId('loops-nav').click();
+  await page.getByTestId('loop-detail').getByRole('button', { name: /^Open run / }).first().click();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: 'Loop: Nightly bug sweep' }).locator('[aria-current="page"]')).toHaveCount(1);
 });
