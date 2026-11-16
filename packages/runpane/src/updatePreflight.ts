@@ -64,7 +64,7 @@ export interface UpdatePreflight {
  * Point at the one-time update that brings the command instead.
  */
 export const UPDATE_HOST_UNSUPPORTED = 'ERR_UPDATE_HOST_UNSUPPORTED';
-export function updateHostUnsupported(): RunpaneError {
+function updateHostUnsupported(): RunpaneError {
   return new RunpaneError(
     UPDATE_HOST_UNSUPPORTED,
     'The running Pane is older than runpane update: it has no update command (runpane:update:host), so runpane cannot update it in place. Nothing was changed.',
@@ -72,16 +72,12 @@ export function updateHostUnsupported(): RunpaneError {
   );
 }
 
-export function isUnknownChannel(error: unknown): boolean {
-  return error instanceof PaneDaemonClientError && error.code === 'ERR_UNKNOWN_CHANNEL';
-}
-
 /** The running Pane's identity for an update; a Pane too old to report it gets updateHostUnsupported. */
 export async function readUpdateHost(paneDir: string, timeoutMs: number): Promise<UpdateHost> {
   try {
     return await invokeDaemon('runpane:update:host', [], updateHostSchema, { paneDir, timeoutMs });
   } catch (error) {
-    if (isUnknownChannel(error)) throw updateHostUnsupported();
+    if (error instanceof PaneDaemonClientError && error.code === 'ERR_UNKNOWN_CHANNEL') throw updateHostUnsupported();
     throw error;
   }
 }
