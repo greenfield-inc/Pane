@@ -213,7 +213,7 @@ function PhoneFrame({ platform, children, dashed = false, footer }: { platform: 
       {size && (
         <>
         <div
-          className={cn('relative flex-shrink-0', dashed ? 'border-2 border-dashed border-border-secondary' : 'bg-device-bezel shadow-lg')}
+          className={cn('relative flex-shrink-0', dashed ? 'border-2 border-dashed border-border-secondary' : 'bg-device-bezel shadow-lg ring-1 ring-border-secondary')}
           style={{ width: size.width, height: size.height, borderRadius: radius, padding: dashed ? 0 : Math.max(4, Math.round(size.width * 0.03)) }}
         >
           <div className="relative h-full w-full overflow-hidden" style={{ borderRadius: dashed ? radius : Math.round(radius * 0.86) }}>{children}</div>
@@ -282,7 +282,7 @@ function PhaseOverlay({ state, busy, onBoot, onTakeOver }: { state: DevicePanelS
   const icon = state.phase === 'in-use' ? <Lock className="h-5 w-5" /> : dark ? <Loader2 className="h-5 w-5 animate-spin" /> : <Power className="h-5 w-5" />;
   return (
     <div
-      className={cn('absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center', dark ? 'bg-device-screen text-text-interactive-on-dark' : 'bg-bg-primary/90 text-text-primary backdrop-blur-sm')}
+      className={cn('absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center', dark ? 'bg-device-screen text-device-screen-text' : 'bg-bg-primary/80 text-text-primary')}
       data-testid="device-overlay"
     >
       <span className="flex h-6 w-6 items-center justify-center">{icon}</span>

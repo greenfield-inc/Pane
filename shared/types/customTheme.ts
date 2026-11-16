@@ -118,6 +118,7 @@ export const THEME_COLOR_TOKENS = [
   // A phone's bezel and dark screen in a device tab.
   '--color-device-bezel',
   '--color-device-screen',
+  '--color-device-screen-text',
   '--color-text-on-primary',
   '--color-text-on-secondary',
   '--color-text-on-tertiary',

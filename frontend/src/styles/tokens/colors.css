@@ -4,6 +4,7 @@
   /* A phone's bezel in the device tab: black hardware in every theme. */
   --color-device-bezel: rgb(12 12 13);
   --color-device-screen: rgb(0 0 0);
+  --color-device-screen-text: rgb(255 255 255);
   /* Primitive Colors - Based on Tailwind's Default Palette */
   --gray-50: rgb(249 250 251);
   --gray-100: rgb(243 244 246);
