@@ -57,6 +57,9 @@ import type { AppServices, DaemonHostServices } from '../ipc/types';
 import { setupEventListeners } from '../events';
 import { getAppDirectory } from '../utils/appDirectory';
 import { resourceMonitorService } from '../services/resourceMonitorService';
+import { MachineHealthService } from '../services/machineHealth/machineHealthService';
+import { readFootprints } from '../services/machineHealth/footprint';
+import { MACHINE_HEALTH_CHANGED_EVENT } from '../../../shared/types/machineHealth';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
@@ -408,7 +411,21 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   const archiveCleanupManager = new ArchiveCleanupManager(databaseService, sessionManager, archiveProgressManager);
   worktreeManager.setArchivePathGuard(target => archiveCleanupManager.assertPathAvailable(target));
+  const machineHealth = new MachineHealthService({
+    now: () => Date.now(),
+    settings: () => configManager.getConfig().machineHealth,
+    volumePaths: () => [
+      { path: getAppDirectory(), role: 'pane-data' as const },
+      { path: os.tmpdir(), role: 'temp' as const },
+      ...[...new Set(databaseService.getAllSessions(undefined, { includeHidden: true })
+        .flatMap(session => (session.worktree_path ? [path.dirname(session.worktree_path)] : [])))]
+        .map(folder => ({ path: folder, role: 'worktrees' as const })),
+    ],
+    processes: () => resourceMonitorService.getSnapshot(),
+    readFootprints: process.platform === 'darwin' ? readFootprints : undefined,
+  });
   const daemonServices: DaemonHostServices = {
+    machineHealth,
     configManager,
     databaseService,
     sessionManager,
@@ -621,6 +638,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   sessionPrMonitor.start();
   loopManager.start();
   autoPauser.sync();
+  // Payload-free: readers re-read the snapshot. The per-minute sample stays off the daemon stream.
+  machineHealth.on('level-changed', () => getPaneEventSink().send(MACHINE_HEALTH_CHANGED_EVENT));
+  machineHealth.start();
   // Delete archived folders past their retention, keeping their agent logs; deferred so startup stays fast.
   let stopArchiveExpiry: (() => void) | undefined;
   const archiveExpiryTimer = setTimeout(() => { stopArchiveExpiry = startArchiveExpiry(); }, ARCHIVE_EXPIRY_START_DELAY_MS);
@@ -631,6 +651,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   }
   resourceMonitorService.initialize({
     app: options.app,
+    processRoots: () => [
+      ...paneProcessManagers().flatMap(manager => manager.getPanelPids()),
+      ...databaseService.getAllSessions(undefined, { includeHidden: true }).flatMap(session =>
+        runCommandManager.getArchiveProcessPids(session.id).map(pid => ({ pid, sessionId: session.id, panelId: null }))),
+    ],
+    knownSessionIds: () => new Set(databaseService.getAllSessionsIncludingArchived({ includeHidden: true }).map(session => session.id)),
     getSessionById: (sessionId) => sessionManager.getSession(sessionId),
     getSessionWslDistro: (sessionId) => {
       const projectId = sessionManager.getSession(sessionId)?.projectId;
@@ -662,6 +688,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       prepareNotifyForQuit();
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
+      machineHealth.stop();
       autoPauser.stop();
       clearTimeout(archiveExpiryTimer);
       stopArchiveExpiry?.();
