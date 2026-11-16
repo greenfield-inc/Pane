@@ -110,6 +110,9 @@ type HubDeviceAction =
   | { platform: 'ios' | 'android'; id: string; name: string }
   | { platform: 'ios' | 'android'; name: string; runtime: string; deviceType: string };
 
+/** A body for serve-emu's REST routes: a selected serial, a tap or swipe, a key, or nothing. */
+type EmulatorBody = { serial: string } | { x: number; y: number } | { x1: number; y1: number; x2: number; y2: number } | { key: 'home' | 'back' } | Record<string, never>;
+
 /** The running device hub: loopback only, token required. The token never leaves this module's callers. */
 export interface RunningHub {
   port: number;
@@ -117,6 +120,8 @@ export interface RunningHub {
   pid: number | undefined;
   /** A request to the hub with its token: a GET, or a POST of a device action. */
   request(pathname: string, body?: HubDeviceAction): Promise<Response>;
+  /** A JSON POST to one of the hub's vendored device servers (serve-emu). */
+  post(pathname: string, body: EmulatorBody): Promise<Response>;
   stop(): Promise<void>;
 }
 
@@ -163,6 +168,7 @@ export function startHub(script: string, options: { node: NodeRunner; env: NodeJ
         request: (pathname, body) => fetch(`${base}${pathname}`, body === undefined
           ? { headers: { Authorization: `Bearer ${token}` } }
           : { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+        post: (pathname, body) => fetch(`${base}${pathname}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
         stop: () => new Promise<void>((done) => {
           if (child.exitCode !== null) return done();
           child.once('exit', () => done());

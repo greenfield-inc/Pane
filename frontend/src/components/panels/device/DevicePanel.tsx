@@ -232,7 +232,8 @@ function PhoneFrame({ platform, children, dashed = false, footer }: { platform: 
  * touches; moves are sent once a frame.
  */
 function LiveScreen({ client, panelId, platform }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform'] }) {
-  const stream = client.streamUrl(panelId);
+  // Simulators stream MJPEG; an emulator's screen comes as frames.
+  const stream = platform === 'ios' ? client.streamUrl(panelId) : undefined;
   const polled = useDeviceFrames(client, panelId, stream ? undefined : FRAME_POLL_MS);
   const src = stream ?? polled;
   return src ? <TouchScreen client={client} panelId={panelId} platform={platform} src={src} /> : <div className="absolute inset-0 bg-device-screen" />;

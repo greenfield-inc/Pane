@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 
 const runtimesSchema = boundary.object({ runtimes: boundary.array(boundary.object({ platform: boundary.optional(boundary.string), isAvailable: boundary.optional(boundary.boolean) })) });
 
-interface AndroidReady { ready: true; sdk: string; adb: string; emulator: string; avdmanager?: string }
+interface AndroidReady { ready: true; sdk: string; adb: string; emulator: string; avdmanager: string; javaHome?: string }
 
 /** What this machine can run. Probed on the first device call, never at app start. */
 export interface DeviceCapabilities {
@@ -81,8 +81,33 @@ async function probeAndroid(environment: ProbeEnvironment): Promise<DeviceCapabi
   if (environment.platform === 'linux' && !environment.exists('/dev/kvm')) {
     return { ready: false, reason: 'This Linux machine has no KVM (/dev/kvm), which the Android emulator needs. See https://developer.android.com/studio/run/emulator-acceleration#vm-linux.' };
   }
+  // The device hub lists, makes and boots emulators with avdmanager.
   const avdmanager = path.join(sdk, 'cmdline-tools', 'latest', 'bin', `avdmanager${bat}`);
-  const ready: AndroidReady = { ready: true, sdk, adb, emulator: path.join(sdk, 'emulator', `emulator${exe}`) };
-  if (environment.exists(avdmanager)) ready.avdmanager = avdmanager;
+  if (!environment.exists(avdmanager)) {
+    return { ready: false, reason: `The Android SDK at ${sdk} has no Command-line Tools (avdmanager). In Android Studio, open Settings > Languages & Frameworks > Android SDK > SDK Tools and install "Android SDK Command-line Tools (latest)".` };
+  }
+  const javaHome = findJavaHome(environment);
+  if (javaHome === null) {
+    return { ready: false, reason: 'Android\'s command-line tools need Java, and this machine has none Pane can find. Install Android Studio (it includes one) or set JAVA_HOME.' };
+  }
+  const ready: AndroidReady = { ready: true, sdk, adb, emulator: path.join(sdk, 'emulator', `emulator${exe}`), avdmanager };
+  if (javaHome) ready.javaHome = javaHome;
   return ready;
+}
+
+/**
+ * The Java avdmanager runs on: JAVA_HOME, else the runtime Android Studio bundles. An empty string
+ * means `java` on the PATH will do; null means none (macOS's /usr/bin/java is only a stub).
+ */
+function findJavaHome(environment: ProbeEnvironment): string | null {
+  const { platform, env, home } = environment;
+  const java = platform === 'win32' ? 'java.exe' : 'java';
+  const studio = platform === 'darwin'
+    ? ['/Applications/Android Studio.app/Contents/jbr/Contents/Home', path.join(home, 'Applications', 'Android Studio.app', 'Contents', 'jbr', 'Contents', 'Home')]
+    : platform === 'win32'
+      ? [path.join(env.ProgramFiles ?? 'C:\\Program Files', 'Android', 'Android Studio', 'jbr')]
+      : [path.join(home, 'android-studio', 'jbr'), '/opt/android-studio/jbr', '/snap/android-studio/current/jbr'];
+  const found = [env.JAVA_HOME, ...studio].find(folder => folder && environment.exists(path.join(folder, 'bin', java)));
+  if (found) return found;
+  return platform !== 'darwin' && environment.findExecutable('java') ? '' : null;
 }

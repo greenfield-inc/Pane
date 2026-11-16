@@ -2,7 +2,7 @@ import type { IpcMain } from 'electron';
 import os from 'os';
 import path from 'path';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
-import type { DeviceMac, DeviceOpenMarker, DevicePanelState, DevicePlatform, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
+import type { DeviceInput, DeviceMac, DeviceOpenMarker, DevicePanelState, DevicePlatform, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
 import type { MachineConnections } from '../services/machineConnections';
 import { DEFAULT_DEVICE_SETTINGS } from '../../../shared/types/devices';
 import type { ToolPanel } from '../../../shared/types/panels';
@@ -383,6 +383,32 @@ async function respond<Data>(work: () => Promise<Data> | Data): Promise<IpcRespo
  * own (agents reach runpane commands), so the person can drive any device their tab shows.
  * Settings > Devices is about this computer, so its channels stay local.
  */
+/** Where each emulator's current touch began: a touch becomes a tap, or a swipe when it moved. */
+const touchStarts = new Map<string, { x: number; y: number }>();
+const TAP_SLOP = 0.02;
+
+async function emulatorInput(service: DeviceService, deviceId: string, input: DeviceInput): Promise<void> {
+  if (input.kind === 'button') {
+    await service.emulatorCall(deviceId, 'key', { key: input.button });
+    return;
+  }
+  if (input.phase === 'begin') {
+    touchStarts.set(deviceId, { x: input.x, y: input.y });
+    return;
+  }
+  if (input.phase !== 'end') return;
+  const start = touchStarts.get(deviceId) ?? { x: input.x, y: input.y };
+  touchStarts.delete(deviceId);
+  if (Math.hypot(input.x - start.x, input.y - start.y) < TAP_SLOP) await service.emulatorCall(deviceId, 'tap', { x: input.x, y: input.y });
+  else await service.emulatorCall(deviceId, 'swipe', { x1: start.x, y1: start.y, x2: input.x, y2: input.y });
+}
+
+/** A frame as a data URL: PNG from an emulator, JPEG from a simulator's stream. */
+function imageDataUrl(frame: Buffer): string {
+  const png = frame.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  return `data:image/${png ? 'png' : 'jpeg'};base64,${frame.toString('base64')}`;
+}
+
 function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   const devices = () => deviceService(services);
   const panelOf = (panelId: PaneCommandValue) => {
@@ -398,6 +424,10 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     const { panel, state } = panelOf(panelId);
     if (!state.deviceId || state.phase !== 'live') return false;
     const decoded = decodeBoundary(input, inputSchema);
+    if (state.platform === 'android' && !state.machineId) {
+      await emulatorInput(devices(), state.deviceId, decoded);
+      return true;
+    }
     const stream = state.machineId ? await remoteDevices(services).stream(panel.sessionId) : await devices().stream(state.deviceId);
     inputSockets.send(`${state.machineId ?? 'local'}:${state.deviceId}`, stream, inputMessages(decoded, state.platform));
     return true;
@@ -424,7 +454,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     const { panel, state } = panelOf(panelId);
     if (!state.deviceId) throw new PaneError('ERR_DEVICE_NOT_OPEN', 'This tab has no device yet.', 'Wait for it to boot.');
     const frame = state.machineId ? await remoteDevices(services).frame(panel.sessionId) : await devices().latestFrame(state.deviceId);
-    return `data:image/jpeg;base64,${frame.toString('base64')}`;
+    return imageDataUrl(frame);
   }));
 
   commandRegistry.register('devices:visible', (panelId: PaneCommandValue, clientId: PaneCommandValue, visible: PaneCommandValue) => respond(async () => {

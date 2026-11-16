@@ -95,6 +95,8 @@ export class DeviceService {
   private readonly helpers: DeviceHelpers;
   private readonly node: NodeRunner;
   private readonly now: () => number;
+  /** The emulator serve-emu acts on; it acts on one selected emulator at a time. */
+  private selectedEmulator?: string;
   /** The last frame read of each device, kept for its off and closed states. */
   private readonly lastFrames = new Map<string, Buffer>();
 
@@ -205,10 +207,10 @@ export class DeviceService {
         'ERR_DEVICE_NO_RUNTIME',
         platform === 'ios'
           ? `${this.options.machineName()} has no iOS runtime Pane can make a simulator from. Nothing was created.`
-          : `${this.options.machineName()} has no Android system image, or no Android SDK Command-line Tools, so Pane cannot make an emulator. Nothing was created.`,
+          : `${this.options.machineName()} has no Android system image, so Pane cannot make an emulator. Nothing was created.`,
         platform === 'ios'
           ? 'Add an iOS runtime in Xcode > Settings > Components, then try again.'
-          : 'In Android Studio, open SDK Manager and install a system image and "Android SDK Command-line Tools (latest)". Or name one of your own emulators with device.',
+          : 'In Android Studio, open SDK Manager and install a system image. Or name one of your own emulators with device.',
       );
     }
     // The pool's devices: "Pane iPhone", then "Pane iPhone 2" when the cap allows more at once.
@@ -367,8 +369,27 @@ export class DeviceService {
     throw new PaneError('ERR_DEVICE_OFF', 'This device is shut down and Pane has no earlier frame of it.', 'Boot it from the device tab.');
   }
 
-  /** One JPEG frame of the device's screen, read from the hub's MJPEG stream. */
+  /** An Android emulator's REST call on the hub (serve-emu), after selecting that emulator. */
+  async emulatorCall(id: string, route: 'screenshot' | 'tap' | 'swipe' | 'key', body: EmulatorRequest): Promise<Response> {
+    const hub = await this.ensureHub();
+    const device = (await this.devices()).find(candidate => candidate.id === id && candidate.platform === 'android');
+    if (!device?.serial) throw new PaneError('ERR_DEVICE_OFF', 'That emulator is not running.', 'Boot it from the device tab or with device_open.');
+    if (this.selectedEmulator !== device.serial) {
+      await hub.post('/vendor/serve-emu/api/devices/select', { serial: device.serial });
+      this.selectedEmulator = device.serial;
+    }
+    return hub.post(`/vendor/serve-emu/api/${route}`, body);
+  }
+
+  /** One frame of the device's screen: JPEG from an iOS simulator's MJPEG stream, PNG from an emulator. */
   async frame(id: string): Promise<Buffer> {
+    if ((await this.devices()).find(candidate => candidate.id === id)?.platform === 'android') {
+      const response = await this.emulatorCall(id, 'screenshot', {});
+      if (!response.ok) throw new PaneError('ERR_DEVICE_FRAME', `The emulator's screenshot failed with HTTP ${response.status}.`, 'Try again in a moment.');
+      const png = Buffer.from(await response.arrayBuffer());
+      this.lastFrames.set(id, png);
+      return png;
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     try {
@@ -542,6 +563,7 @@ export class DeviceService {
       if (capabilities.android.ready) {
         env.ANDROID_HOME = capabilities.android.sdk;
         env.ANDROID_SDK_ROOT = capabilities.android.sdk;
+        if (capabilities.android.javaHome) env.JAVA_HOME = capabilities.android.javaHome;
       }
       return startHub(paths.hub, { node: this.node, env, onExit: () => { this.hub = undefined; } });
     })().catch((cause) => { this.hub = undefined; throw cause; });
@@ -564,7 +586,8 @@ export class DeviceService {
     };
     return [
       ...listed.simulators.filter(entry => !entry.physical).map(entry => record('ios', entry)),
-      ...listed.emulators.map(entry => record('android', entry)),
+      // An emulator is listed by its AVD name until it boots, then by its serial; Pane keys it by AVD name.
+      ...listed.emulators.map(entry => record('android', entry.booted ? { ...entry, id: entry.name, serial: entry.serial ?? entry.id } : entry)),
     ];
   }
 
@@ -712,6 +735,9 @@ export class DeviceService {
     renameSync(temporary, this.statePath());
   }
 }
+
+/** serve-emu's REST bodies: a normalized tap or swipe, a key, or nothing for a screenshot. */
+export type EmulatorRequest = { x: number; y: number } | { x1: number; y1: number; x2: number; y2: number } | { key: 'home' | 'back' } | Record<string, never>;
 
 export interface DeviceScreenshot { path: string; width?: number; height?: number }
 

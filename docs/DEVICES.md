@@ -46,7 +46,7 @@ run on Pane's own Node, so your Node version doesn't matter, but npm must be on 
 | Platform | Needs |
 | --- | --- |
 | iOS | A Mac with Xcode and an iOS runtime (Xcode > Settings > Components) |
-| Android | The Android SDK with its emulator and platform-tools (Android Studio), and a system image. To let Pane make its own emulator, also install "Android SDK Command-line Tools (latest)" |
+| Android | The Android SDK with its emulator, platform-tools and "Android SDK Command-line Tools (latest)" (Android Studio > SDK Manager > SDK Tools), and a system image |
 | Android on Linux | KVM (`/dev/kvm`) |
 
 Pane never installs Xcode, the Android SDK, runtimes or system images; when one is missing,
