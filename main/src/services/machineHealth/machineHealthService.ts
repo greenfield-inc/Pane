@@ -10,6 +10,7 @@ const SAMPLE_INTERVAL_MS = 60_000;
 const FIRST_SAMPLE_DELAY_MS = 20_000;
 const GB = 1024 ** 3;
 const MINUTE = 60_000;
+const FOOTPRINT_SLACK_MS = 5_000;
 
 
 function diskThresholdsOf(settings: MachineHealthSettings | undefined): DiskThresholds {
@@ -80,7 +81,8 @@ export class MachineHealthService extends EventEmitter {
   private latest: MachineHealthSnapshot | null = null;
   private memoryHistory: HealthLevel[] = [];
   private history = new Map<string, ProcessHistory>();
-  private flagged = new Set<string>();
+  /** Processes warned about, with their latest warning; kept until the process exits. */
+  private flagged = new Map<string, LeakWarning>();
   private ignored = new Set<string>();
   private lastCpu: CpuTimes | null = null;
   private footprintsAt = -Infinity;
@@ -144,7 +146,8 @@ export class MachineHealthService extends EventEmitter {
 
     const rule = leakRuleOf(settings);
     let footprints: Map<number, number> | null = null;
-    if (this.deps.readFootprints && now - this.footprintsAt >= Math.max(MINUTE, rule.sliceMs)) {
+    // A few seconds of slack: timer jitter must not push a read to the next sample.
+    if (this.deps.readFootprints && now - this.footprintsAt >= Math.max(MINUTE, rule.sliceMs) - FOOTPRINT_SLACK_MS) {
       footprints = await this.deps.readFootprints();
       if (footprints) this.footprintsAt = now;
     }
@@ -222,20 +225,25 @@ export class MachineHealthService extends EventEmitter {
         while (entry.samples.length > 1 && entry.samples[1].at <= now - keepMs) entry.samples.shift();
         this.history.set(key, entry);
         if (this.ignored.has(key)) continue;
-        const flaggedBefore = this.flagged.has(key);
-        if (usesFootprints && footprint === undefined && !flaggedBefore) continue;
+        const previous = this.flagged.get(key);
+        if (usesFootprints && footprint === undefined) {
+          // No new reading since the last footprint read: keep a standing warning as it was.
+          if (previous) leaks.push(previous);
+          continue;
+        }
         const finding = findLeak(entry.samples, entry.startedAt, now, rule);
-        if (!finding) continue;
+        if (!finding) {
+          this.flagged.delete(key);
+          continue;
+        }
         const warning: LeakWarning = {
           pid: proc.pid, started: proc.started, name: proc.name, sessionId: proc.sessionId, panelId: proc.panelId,
           memoryMB: finding.rssMB, growthMB: finding.growthMB, windowMs: finding.windowMs,
           series: entry.samples.filter(s => s.at >= now - rule.windowMs).map(s => Math.round(s.rssMB)),
         };
         leaks.push(warning);
-        if (!this.flagged.has(key)) {
-          this.flagged.add(key);
-          this.emit('leak', warning);
-        }
+        this.flagged.set(key, warning);
+        if (!previous) this.emit('leak', warning);
       }
     }
     for (const key of [...this.history.keys()]) {

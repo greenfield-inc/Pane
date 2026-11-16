@@ -86,5 +86,8 @@ describe('MachineHealthService', () => {
     expect(reads).toBe(8);
     expect(leaks).toHaveLength(1);
     expect(leaks[0]).toMatchObject({ memoryMB: 400, growthMB: 200, series: [200, 240, 280, 320, 360, 400] });
+    // Between footprint reads the warning stands.
+    state.now += 30_000;
+    expect((await service.sample()).leaks).toHaveLength(1);
   });
 });
