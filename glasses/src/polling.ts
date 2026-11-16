@@ -11,8 +11,11 @@ import {
   type RemoteFetch,
 } from '../../shared/remoteClient/remoteDaemonClient';
 import { createFetchEventStreamTransport } from '../../shared/remoteClient/fetchEventStreamTransport';
-import { boundary, decodeOptionalBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
+import { boundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../shared/validation/boundaryDecoder';
 import type { Cancel } from './platform';
+
+const unchangedSchema = boundary.object({ unchanged: boundary.literal(true), epoch: boundary.string, revision: boundary.number, inUse: boundary.boolean });
+const versionSchema = boundary.object({ epoch: boundary.string, revision: boundary.number, inUse: boundary.optional(boundary.boolean) });
 
 /** How often the glasses read each computer while Pane is in front, and while it isn't. */
 export const POLL_FRONT_MS = 2_000;
@@ -98,8 +101,26 @@ export function createPollingTransport(fetch: RemoteFetch, clock: PollClock): Re
         context.onEvent({ event: 'daemon-event', data: JSON.stringify({ channel, args: [value], timestamp: new Date().toISOString() }) });
       };
 
+      // A read names the version it holds; a Pane that knows this answers `unchanged` with only
+      // `inUse` while nothing changed (a day's cards run to hundreds of KB), and an older Pane
+      // ignores it and sends everything.
+      let held: { epoch: string; revision: number; inUse: boolean; state: JsonObject } | null = null;
+      const readNotify = async (): Promise<JsonValue | null> => {
+        const value = await read('notify:remote-snapshot', held ? [{ since: { epoch: held.epoch, revision: held.revision } }] : []);
+        const unchanged = decodeOptionalBoundary(value, unchangedSchema);
+        if (unchanged?.unchanged && held && unchanged.epoch === held.epoch && unchanged.revision === held.revision) {
+          if (unchanged.inUse === held.inUse) return null;
+          held = { ...held, inUse: unchanged.inUse };
+          return { ...held.state, inUse: unchanged.inUse };
+        }
+        const version = decodeOptionalBoundary(value, versionSchema);
+        const state = decodeOptionalBoundary(value, boundary.jsonObject);
+        held = version && state ? { epoch: version.epoch, revision: version.revision, inUse: version.inUse ?? false, state } : null;
+        return value;
+      };
+
       // The first read proves the computer answers; only then is the "stream" open.
-      let snapshot = await read('notify:remote-snapshot', []);
+      let snapshot = await readNotify();
       context.onOpen();
       context.onEvent({ event: 'ready', data: '{}' });
       let statuses: Map<string, string> | null = null;
@@ -122,7 +143,7 @@ export function createPollingTransport(fetch: RemoteFetch, clock: PollClock): Re
         }
         await clock.wait();
         if (context.signal.aborted) return;
-        snapshot = await read('notify:remote-snapshot', []);
+        snapshot = await readNotify();
       }
     },
   };

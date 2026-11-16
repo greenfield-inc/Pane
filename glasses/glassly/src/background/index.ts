@@ -113,11 +113,18 @@ registerMiniapp(async (session) => {
   let glance = '';
   let rendering = false;
   let pending: RenderElement[] | null = null;
+  // Each poll re-renders; only a changed frame goes to the glasses. Coming to the front or a new
+  // display clears it, since Glassly may have drawn something else there meanwhile.
+  let lastFrame = '';
+  let mirrorFrame: PhoneFrame | null = null;
   const send = (elements: RenderElement[]) => {
+    const key = JSON.stringify(elements);
+    if (key === lastFrame) return;
+    lastFrame = key;
     // The mirror on Pane's phone screen draws the same frame (dropped while that screen is closed).
     const display = session.capabilities?.display;
-    const frame: PhoneFrame = { width: display?.width ?? 576, height: display?.height ?? 288, elements: elements.flatMap((element) => (element.type === 'text' ? [element] : [])) };
-    session.ui.send('frame', frame);
+    mirrorFrame = { width: display?.width ?? 576, height: display?.height ?? 288, elements: elements.flatMap((element) => (element.type === 'text' ? [element] : [])) };
+    session.ui.send('frame', mirrorFrame);
     pending = elements;
     if (rendering) return;
     rendering = true;
@@ -379,6 +386,7 @@ registerMiniapp(async (session) => {
   session.on('visibility', (visibility) => {
     target({ type: visibility === 'foreground' ? 'foreground' : 'background' });
     if (visibility === 'foreground') {
+      lastFrame = '';
       polling.now();
       openNotified();
       draw();
@@ -391,11 +399,15 @@ registerMiniapp(async (session) => {
   });
   session.on('capabilities', (capabilities) => {
     tier = tierOf(capabilities);
+    lastFrame = '';
     draw();
   });
 
   // ---------- the phone screen ----------
-  session.ui.onOpen(() => publish());
+  session.ui.onOpen(() => {
+    publish();
+    if (mirrorFrame) session.ui.send('frame', mirrorFrame);
+  });
   session.ui.on('command', (payload) => {
     const command: PhoneCommand | null = decodeOptionalBoundary(payload, commandSchema) ?? null;
     if (!command) return;

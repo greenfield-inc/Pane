@@ -874,12 +874,13 @@ export class HostConnection {
       transcribe: async (audioDataUrl, durationMs) => (await this.invoke('voice:transcribe', [{ audioDataUrl, mimeType: 'audio/wav', durationMs, language: 'en' }], transcriptSchema)).text,
     };
     if (mode === 'recorded') return recordedDictation(host, onPreview);
+    if (!fallback) return streamingDictation(host, onPreview);
+    // Glassly's runtime: its speech-to-text is only for a computer with no key, so a failed
+    // socket is shown, not handed to Glassly. An older Pane refuses a socket without an Origin.
     try {
       return await streamingDictation(host, onPreview);
-    } catch (error) {
-      // An older Pane refuses a voice socket that comes without an Origin.
-      if (fallback) return fallback(onPreview);
-      throw error;
+    } catch {
+      throw new GlassesError('ERR_GLASSES_VOICE_UNREACHABLE', `${this.paired.name} didn't open its voice connection.`, `Check that Pane on ${this.paired.name} is up to date and online, then hold to talk again.`);
     }
   }
 }

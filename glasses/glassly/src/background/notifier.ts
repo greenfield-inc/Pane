@@ -11,7 +11,9 @@ export interface Poster {
 }
 
 /** What Glassly rejects a request with: an Error, or a plain `{ code, message }` object. */
-type Refusal = Error | { message?: string };
+type Refusal = Error & { code?: string } | { message?: string; code?: string };
+/** How a Glassly App that predates notifications refuses one; anything else may pass. */
+const CANNOT_POST: ReadonlySet<string> = new Set(['NOT_IMPLEMENTED', 'INVALID_ARGUMENT']);
 
 /** A question as a notification shows it. */
 export interface Asked {
@@ -101,8 +103,10 @@ export class Notifier {
     if (this.unsupported) return;
     call().catch((error: Refusal) => {
       // An older Glassly App can't post; Pane works without it, so this is logged, not shown.
-      this.unsupported = true;
-      this.log(`[Pane glasses] notifications off: ${error.message ?? 'refused'}`);
+      if (error.code !== undefined && CANNOT_POST.has(error.code)) {
+        this.unsupported = true;
+        this.log(`[Pane glasses] notifications off: ${error.message ?? 'refused'}`);
+      } else this.log(`[Pane glasses] notification not sent: ${error.message ?? 'failed'}`);
     });
   }
 }

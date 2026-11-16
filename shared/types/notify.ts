@@ -527,6 +527,14 @@ export interface NotifySharedState {
   inUse?: boolean;
 }
 
+/** `notify:remote-snapshot`'s answer to a reader that already holds this version: only `inUse` may differ. */
+export interface NotifySnapshotUnchanged {
+  unchanged: true;
+  epoch: string;
+  revision: number;
+  inUse: boolean;
+}
+
 /** Commands a connected screen or phone sends the host (`notify:remote-command`). */
 export type NotifyRemoteCommand =
   | { type: 'answer'; id: string; answer: NotifyAnswer }

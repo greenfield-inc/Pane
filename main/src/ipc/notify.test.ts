@@ -112,6 +112,18 @@ describe('Notify across machines, through the registered handlers', () => {
     host.notify.dispose();
   });
 
+  it('answers a reader that names the version it holds with that version alone, until something changes', async () => {
+    const host = await startPane();
+    const first = await host.registry.invoke<NotifySharedState>('notify:remote-snapshot', []);
+    const since = { epoch: first.epoch, revision: first.revision };
+    expect(await host.registry.invoke('notify:remote-snapshot', [{ since }])).toEqual({ unchanged: true, ...since, inUse: first.inUse });
+    void host.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Apply migration 0042?', caller: { cwd: '/repo/api' } }]);
+    await flush();
+    const next = await host.registry.invoke<NotifySharedState>('notify:remote-snapshot', [{ since }]);
+    expect(next.items).toMatchObject([{ title: 'Apply migration 0042?' }]);
+    host.notify.dispose();
+  });
+
   it('counts one question from each of three machines, and each card names its machine', async () => {
     const pane = await startPane();
     const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship the hotfix tonight?', 1_000)), devbox: stateOf('parsa-devbox', question('q-7', 'Apply migration 0042?', 2_000)) });

@@ -199,12 +199,14 @@ Pane in the Glassly app is the same app with these differences:
   Glassly app that can post them; an older one runs Pane without them. A computer on an older
   Pane never counts as in use.
 - **Speech-to-text**: a computer with a Deepgram or fal key turns your speech into text, as with
-  the Even app. A computer with neither, or one on an older Pane that refuses the glasses' live
-  voice connection, uses Glassly's own speech-to-text instead. That speech goes to Glassly's cloud
-  and counts against your Glassly plan's minutes.
+  the Even app. A computer with neither uses Glassly's own speech-to-text instead. That speech
+  goes to Glassly's cloud and counts against your Glassly plan's minutes. A computer with a key
+  whose voice connection fails shows **X didn't open its voice connection** and sends nothing to
+  Glassly: an older Pane refuses Glassly's voice connection, so update Pane there.
 - **Updates**: Glassly can't keep a live connection open for Pane, so the glasses read each
   computer every 2 seconds while Pane is in front, and its cards every 5 seconds while it isn't.
-  A computer that doesn't answer for 10 seconds shows offline.
+  A computer that doesn't answer for 10 seconds shows offline. A computer on this Pane version
+  answers a read with nothing new in a few bytes; an older one sends all of today's cards each time.
 - **Images**: Glassly draws no OS logos on stock G2 firmware; the status marks stay.
 - **Other glasses**: glasses smaller than G2's screen, or without swipes, show a glance: how many
   questions wait and the newest one. New questions also arrive as notifications there.
@@ -216,8 +218,9 @@ Pane in the Glassly app is the same app with these differences:
 - **Glassly AI**: ask Glassly's assistant "what needs me in Pane?" or "what's the PR status of
   nightly-backup?". It can also prepare an answer ("answer the nightly-backup question with yes")
   or a new Session, but sends or starts nothing: a notification asks you to confirm, opening Pane
-  shows the card with that choice selected (or the request), and one press does it. An unconfirmed
-  request lapses after 2 minutes. Pane answers only Glassly's own assistant, never another miniapp.
+  shows the card with that choice selected (or the request, under the Pane and question it
+  answers), and one press does it. A request too long to show whole on one screen is refused, so
+  a press never does more than you read. An unconfirmed request lapses after 2 minutes. Pane answers only Glassly's own assistant, never another miniapp.
 - **Dashboard widget** (Glassly's custom firmware only): Pane's widget shows "3 working · 1 needs
   you" and the newest question. Tap to expand it to that question's choices, swipe to pick, tap to
   answer; a tap in the next 5 seconds takes the answer back.
@@ -326,7 +329,8 @@ The pairing code on your clipboard holds one-time pairing secrets, not tokens, a
 | needs its password | The computer has a Workspaces password. Save it on one of your other computers by connecting to it once in **Settings › Remote Access**; that computer then adds the glasses. |
 | update Pane there | Update Pane on that computer. |
 | not answering | Start Pane on that computer and check that Tailscale is on there. The glasses try again within 10 minutes. |
-| Can't turn speech into text | Add a Deepgram or fal key on that computer. |
+| Can't turn speech into text | In the Even app: add a Deepgram or fal key on that computer. Glassly uses its own speech-to-text there instead. |
+| X didn't open its voice connection (Glassly) | Update Pane on that computer and check that it is online, then hold to talk again. |
 | Deepgram rejected X's key, or X's Deepgram key isn't a valid key | On that computer, paste a current key from the Deepgram console in **Settings › Integrations › Voice transcription**. Pane checks it with Deepgram when you save. |
 | Lost the connection to X while listening | Hold to talk again. If it keeps happening, check Tailscale on the phone. |
 

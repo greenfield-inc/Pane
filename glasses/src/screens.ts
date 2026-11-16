@@ -156,12 +156,31 @@ export function fullQuestionPage(card: Card): Page {
   };
 }
 
-/** Something asked for from outside the glasses (Glassly's assistant), waiting for one press here. */
-export function confirmPage(title: string, what: string): Page {
+const CONFIRM_Y = 36;
+const CONFIRM_H = 220;
+const CONFIRM_QUESTION_LINES = 2;
+
+/** A confirm page's body lines; a press does everything they say, so none is ever cut. */
+function confirmLines(what: string, question?: string): string[] {
+  const width = innerWidth(BODY_PAD);
+  const lead = question === undefined ? [] : [...wrapClamped(question, width, CONFIRM_QUESTION_LINES).lines, ''];
+  return [...lead, ...wrap(what, width)];
+}
+
+/** Whether a request from outside the glasses fits its confirm page whole; one that doesn't is never shown. */
+export function confirmFits(what: string, question?: string): boolean {
+  return confirmLines(what, question).length <= linesFor(CONFIRM_H, BODY_PAD);
+}
+
+/**
+ * Something asked for from outside the glasses (Glassly's assistant), waiting for one press here.
+ * For an answer, `question` names what it answers. Callers check `confirmFits` first.
+ */
+export function confirmPage(title: string, what: string, question?: string): Page {
   return {
     boxes: [
       header(title),
-      body(what, { y: 36, h: 220, capture: true }),
+      { kind: 'text', name: 'body', x: 0, y: CONFIRM_Y, w: SCREEN_W, h: CONFIRM_H, pad: BODY_PAD, lines: confirmLines(what, question), brightness: BRIGHT, capture: true },
       footer('press = do it   double press = cancel'),
     ],
   };

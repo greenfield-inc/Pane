@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { encodeGlassesPairingCode } from '../../shared/types/glasses';
 import type { NotifyItem, NotifySharedState } from '../../shared/types/notify';
-import { boundary, decodeBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
+import type { VoiceSocket } from '../src/voice';
 import { HostHub, STORAGE_KEY, pairComputers, pairedSaver, readPaired, type HostDeps, type PairedComputer } from '../src/host';
 import type { Cancel } from '../src/timers';
 import { POLL_FRONT_MS, PollClock } from '../src/polling';
@@ -130,7 +131,7 @@ function memoryStorage() {
 }
 
 /** A hub paired with `hosts`; it can reach those and `others`, which it isn't paired with. */
-function hub(hosts: FakeHost[], timers = manualTimers(), storage = memoryStorage(), others: FakeHost[] = [], polling?: PollClock) {
+function hub(hosts: FakeHost[], timers = manualTimers(), storage = memoryStorage(), others: FakeHost[] = [], polling?: PollClock, extra: Partial<HostDeps> = {}) {
   const paired: PairedComputer[] = hosts.map((fake, index) => ({ name: `computer-${index}`, url: fake.url, token: `pgt_token${index}`, deviceLabel: 'Even G2 · iPhone' }));
   storage.values.set(STORAGE_KEY, JSON.stringify(paired));
   const deps: HostDeps = {
@@ -148,7 +149,7 @@ function hub(hosts: FakeHost[], timers = manualTimers(), storage = memoryStorage
     savePaired: pairedSaver(storage),
   };
   if (polling) deps.polling = polling;
-  const result = new HostHub(paired, deps);
+  const result = new HostHub(paired, { ...deps, ...extra });
   result.start();
   return { hub: result, timers };
 }
@@ -647,6 +648,40 @@ describe('HostHub', () => {
   });
 });
 
+describe("Glassly's own speech-to-text", () => {
+  const glassly = { push() {}, finish: async () => 'heard by Glassly', cancel() {} };
+  /** A socket that fails to open, as on a network blip, Funnel or a lockout. */
+  const failingSocket = (): VoiceSocket => {
+    const socket: VoiceSocket = { binaryType: 'arraybuffer', readyState: 3, send() {}, close() {}, onopen: null, onclose: null, onmessage: null, onerror: null };
+    setTimeout(() => socket.onerror?.(new Event('error')), 0);
+    return socket;
+  };
+
+  it('listens with Glassly only for a computer with no speech key', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('remote:pwa-affordances', () => ({ voiceTranscription: { availableModes: [], defaultMode: 'streaming' } }));
+    const { hub: one } = hub([a], manualTimers(), memoryStorage(), [], undefined, { fallbackDictation: () => glassly });
+    await until(() => one.computers()[0]?.status === 'live');
+    const computer = one.computers()[0];
+    if (!computer) throw new Error('paired');
+    expect(await (await one.dictate(computer.id, () => {})).finish()).toBe('heard by Glassly');
+    one.stop();
+  });
+
+  it("shows why a keyed computer's voice connection failed, and never hands the words to Glassly", async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('remote:pwa-affordances', () => ({ voiceTranscription: { availableModes: ['streaming'], defaultMode: 'streaming' } }));
+    let fellBack = false;
+    const { hub: one } = hub([a], manualTimers(), memoryStorage(), [], undefined, { fallbackDictation: () => { fellBack = true; return glassly; }, openSocket: failingSocket });
+    await until(() => one.computers()[0]?.status === 'live');
+    const computer = one.computers()[0];
+    if (!computer) throw new Error('paired');
+    await expect(one.dictate(computer.id, () => {})).rejects.toMatchObject({ code: 'ERR_GLASSES_VOICE_UNREACHABLE' });
+    expect(fellBack).toBe(false);
+    one.stop();
+  });
+});
+
 describe('polling mode (a host without streaming fetch)', () => {
   function polled(fake: FakeHost) {
     const timers = manualTimers();
@@ -672,6 +707,28 @@ describe('polling mode (a host without streaming fetch)', () => {
     await until(() => polledHub.cards().length === 1);
     expect(polledHub.cards()[0]?.title).toBe('question q1');
     expect(studio.seen.some((seen) => seen.url.endsWith('/events'))).toBe(false);
+  });
+
+  it('names the version it holds, so an unchanged computer answers in a few bytes, and still follows inUse', async () => {
+    const studio = host('https://studio.tail1.ts.net:8443');
+    let inUse = false;
+    const asked: JsonValue[] = [];
+    studio.handlers.set('notify:remote-snapshot', (args) => {
+      const since = decodeOptionalBoundary(args[0] ?? {}, boundary.object({ since: boundary.optional(boundary.object({ epoch: boundary.string, revision: boundary.number })) }))?.since;
+      asked.push(since ?? null);
+      return since?.revision === 1 ? { unchanged: true, epoch: 'e1', revision: 1, inUse } : { ...notifyState('studio', 1, [item('q1', 5)]), inUse };
+    });
+    const { polledHub, timers } = polled(studio);
+    await until(() => polledHub.cards().length === 1);
+    timers.advance(POLL_FRONT_MS);
+    await until(() => asked.some((since) => since !== null));
+    expect(asked.find((since) => since !== null)).toEqual({ epoch: 'e1', revision: 1 });
+    expect(polledHub.cards().map((card) => card.title)).toEqual(['question q1']);
+
+    inUse = true;
+    timers.advance(POLL_FRONT_MS);
+    await until(() => polledHub.inUse());
+    expect(polledHub.cards().map((card) => card.title)).toEqual(['question q1']);
   });
 
   it('reads at once on wake or touch, without waiting out the interval', async () => {

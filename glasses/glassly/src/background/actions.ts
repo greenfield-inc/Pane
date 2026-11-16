@@ -3,7 +3,7 @@
 // confirmation step, so Pane answers only Glassly's assistant (by the caller name Glassly stamps),
 // reads only what the glasses already show, and turns every change into a request you confirm with
 // one press on the glasses. An unconfirmed request lapses after 2 minutes.
-import type { ConfirmRequest } from '../../../src/app';
+import { confirmable, type ConfirmRequest } from '../../../src/app';
 import type { Card, PaneSource } from '../../../src/model';
 
 /** Glassly's own assistant; no other miniapp may use Pane's Actions. */
@@ -39,6 +39,8 @@ const text = (value: string | undefined) => value?.trim() ?? '';
 const choicesOf = (card: Card) => (card.ui === 'approve' ? ['Approve', 'Not yet'] : card.ui === 'ask' ? card.suggestions : card.choices);
 const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }) === 0;
 const matches = (name: string, wanted: string) => name.toLowerCase().includes(wanted.toLowerCase());
+/** The glasses show a request whole before one press does it; a longer one is never staged. */
+const TOO_LONG: ActionResult = { ok: false, error: "That is more than the glasses show on one screen, so nothing was staged. Say it in fewer words." };
 
 export class PaneActions {
   constructor(private readonly deps: { source(): PaneSource | null; now(): number; stage(staged: Staged): void }) {}
@@ -88,6 +90,7 @@ export class PaneActions {
       const request: ConfirmRequest = card.ui === 'approve'
         ? { kind: 'answer', key: card.key, answer: { approved: false, note: answer }, summary: `Not yet, ${summary}`, expiresAt }
         : { kind: 'answer', key: card.key, answer: { text: answer }, summary, expiresAt };
+      if (!confirmable(request, () => card)) return TOO_LONG;
       this.deps.stage({ show: { kind: 'confirm', request }, title: `Confirm on the glasses: ${card.paneName} → ${summary}`, expiresAt });
     }
     return { ok: true, message: 'Waiting for you to confirm on the glasses: open Pane and press once.' };
@@ -99,8 +102,10 @@ export class PaneActions {
     const computer = wanted ? live.find((candidate) => matches(candidate.name, wanted)) : live[0];
     if (!computer) return { ok: false, error: wanted ? `${wanted} isn't reachable from the glasses.` : 'None of your computers is reachable.' };
     const expiresAt = this.deps.now() + STAGED_MS;
+    const request: ConfirmRequest = { kind: 'session', computerId: computer.id, machine: computer.name, goal, expiresAt };
+    if (!confirmable(request, () => undefined)) return TOO_LONG;
     this.deps.stage({
-      show: { kind: 'confirm', request: { kind: 'session', computerId: computer.id, machine: computer.name, goal, expiresAt } },
+      show: { kind: 'confirm', request },
       title: `Confirm on the glasses: new Session on ${computer.name}`,
       expiresAt,
     });

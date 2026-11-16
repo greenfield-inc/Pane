@@ -237,14 +237,18 @@ describe('notifications', () => {
     expect(n.opened()).toBeNull();
   });
 
-  it('stops trying after a Glassly App that cannot post refuses once', async () => {
+  it('stops trying after a Glassly App that cannot post refuses once, and keeps trying after any other failure', async () => {
     let posts = 0;
-    const n = new Notifier({ post: async () => { posts += 1; throw new Error('unknown request'); }, dismiss: async () => {}, speak: async () => {} });
+    let failure: Error & { code?: string } = Object.assign(new Error('timed out'), { code: 'REQUEST_ABORTED' });
+    const n = new Notifier({ post: async () => { posts += 1; throw failure; }, dismiss: async () => {}, speak: async () => {} });
     n.update({ ...away, asked: [] });
     n.update({ ...away, asked: [asked('q1')] });
     await new Promise((resolve) => setTimeout(resolve, 0));
+    failure = Object.assign(new Error('unknown request'), { code: 'NOT_IMPLEMENTED' });
     n.update({ ...away, asked: [asked('q2'), asked('q1')] });
-    expect(posts).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    n.update({ ...away, asked: [asked('q3'), asked('q2'), asked('q1')] });
+    expect(posts).toBe(2);
   });
 
   it('counts only timed events as meetings', () => {
@@ -296,6 +300,13 @@ describe('Actions for Glassly AI', () => {
     actions.handle('start_session', { goal: 'Find why checkout charges twice' }, 'com.glassly.ai');
     expect(staged.map((request) => request.show.kind === 'confirm' && request.show.request.kind)).toEqual(['answer', 'session']);
     expect(started).toBe(0);
+  });
+  it('refuses a request longer than the glasses show on one screen, so a press starts only what was read', async () => {
+    const { actions, staged } = await demoActions();
+    const long = 'Find why checkout charges twice, then '.repeat(12);
+    expect(actions.handle('start_session', { goal: long }, 'com.glassly.ai')).toMatchObject({ ok: false, error: expect.stringContaining('fewer words') });
+    expect(actions.handle('answer_card', { pane: 'fix-login', answer: long }, 'com.glassly.ai')).toMatchObject({ ok: false, error: expect.stringContaining('fewer words') });
+    expect(staged).toEqual([]);
   });
 });
 

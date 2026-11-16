@@ -15,6 +15,7 @@ import {
   ambientPage,
   bannerPage,
   cardPage,
+  confirmFits,
   confirmPage,
   undoPage,
   cardRows,
@@ -101,6 +102,16 @@ export type ConfirmRequest = (
   /** Epoch ms after which a press does nothing: the request lapsed unconfirmed. */
   expiresAt?: number;
 };
+
+/** How the confirm page states a free-text answer. */
+const confirmAnswer = (summary: string) => `Answer: ${summary}`;
+
+/** Whether a request can go on its confirm page: its card still waits and the page shows all of it. */
+export function confirmable(request: ConfirmRequest, card: (key: string) => Card | undefined): boolean {
+  if (request.kind === 'session') return confirmFits(request.goal);
+  const found = card(request.key);
+  return Boolean(found?.waiting) && confirmFits(confirmAnswer(request.summary), found?.title);
+}
 
 export interface AppDeps {
   source: PaneSource;
@@ -365,9 +376,9 @@ export class GlassesApp {
       }
       case 'confirm': {
         const { request } = view;
-        return request.kind === 'answer'
-          ? confirmPage('Glassly AI · answer', `${request.summary}\n\nPress to send it; double press to cancel.`)
-          : confirmPage(`Glassly AI · new Session on ${request.machine}`, `${request.goal}\n\nPress to start it; double press to cancel.`);
+        if (request.kind === 'session') return confirmPage(`Glassly AI · new Session on ${request.machine}`, request.goal);
+        const card = this.card(request.key);
+        return card ? confirmPage(`Glassly AI · answer ${card.paneName}`, confirmAnswer(request.summary), card.title) : this.homePage();
       }
       case 'undo': {
         const card = this.deps.source.cards().find((candidate) => candidate.key === view.key);
@@ -665,15 +676,27 @@ export class GlassesApp {
     this.undoTimer = this.deps.later(() => {
       this.undoTimer = null;
       const view = this.view;
-      if (view.name !== 'undo' || view.key !== card.key) return;
-      // Answered on a computer meanwhile: nothing to send.
-      const current = this.deps.source.cards().find((candidate) => candidate.key === card.key);
-      if (!current?.waiting) {
-        this.goHome();
-        return;
-      }
-      void this.deliverAnswer(current, answer, summary);
+      if (view.name === 'undo' && view.key === card.key) this.deliverHeld(view);
     }, UNDO_MS);
+  }
+
+  /** Sends the answer on the undo screen now: something from outside the glasses is replacing that screen. */
+  private flushUndo(): void {
+    const view = this.view;
+    if (view.name !== 'undo') return;
+    this.undoTimer?.cancel();
+    this.undoTimer = null;
+    this.deliverHeld(view);
+  }
+
+  private deliverHeld(view: { key: string; answer: NotifyAnswer; summary: string }): void {
+    // Answered on a computer meanwhile: nothing to send.
+    const current = this.deps.source.cards().find((candidate) => candidate.key === view.key);
+    if (!current?.waiting) {
+      this.goHome();
+      return;
+    }
+    void this.deliverAnswer(current, view.answer, view.summary);
   }
 
   private async deliverAnswer(card: Card, answer: NotifyAnswer, summary: string): Promise<void> {
@@ -1159,7 +1182,6 @@ export class GlassesApp {
 
   // ---------- ambient ----------
 
-  /** Turns ambient mode on or off now; off wakes the glasses and stops the timer. */
   /**
    * Opens a waiting card as a press on its row does: what opening Pane from a notification
    * shows. A card no longer waiting leaves the screen as it is.
@@ -1167,6 +1189,7 @@ export class GlassesApp {
   showCard(key: string, choice?: number): void {
     const card = this.card(key);
     if (!card?.waiting) return;
+    this.flushUndo();
     this.endQuiet();
     this.touched();
     this.openCard(card);
@@ -1180,7 +1203,8 @@ export class GlassesApp {
 
   /** Shows a request from another app for one press; a double press drops it. Nothing runs without the press. */
   confirm(request: ConfirmRequest): void {
-    if (request.kind === 'answer' && !this.card(request.key)?.waiting) return;
+    if (!confirmable(request, (key) => this.card(key))) return;
+    this.flushUndo();
     this.endQuiet();
     this.touched();
     this.go({ name: 'confirm', request });
@@ -1205,6 +1229,7 @@ export class GlassesApp {
     void this.startSessionNow(request.computerId, request.machine, sessionRequest(request.goal));
   }
 
+  /** Turns ambient mode on or off now; off wakes the glasses and stops the timer. */
   setAmbient(on: boolean): void {
     this.ambient = on;
     if (on) this.touched();

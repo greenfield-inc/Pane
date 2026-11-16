@@ -141,7 +141,9 @@ describe('answering', () => {
     if (!card) throw new Error('the demo has fix-login');
     app.confirm({ kind: 'answer', key: card.key, answer: { text: 'stub it' }, summary: '"stub it"' });
     await settle();
-    expect(text()).toEqual(['Glassly AI · answer', '"stub it" /  / Press to send it; double press to cancel.', 'press = do it   double press = cancel']);
+    expect(text()[0]).toBe('Glassly AI · answer fix-login');
+    expect(text()[1]).toBe('Stub the clock or loosen retry? /  / Answer: "stub it"');
+    expect(text()[2]).toBe('press = do it   double press = cancel');
     await press({ type: 'double' });
     await clock.advance(UNDO_MS);
     expect(source.cards().map((candidate) => candidate.paneName)).toContain('fix-login');
@@ -163,6 +165,36 @@ describe('answering', () => {
     await press({ type: 'press' });
     expect(started).toBe(0);
     expect(text().join(' ')).toContain('waited more than 2 minutes');
+  });
+
+  it('shows a request from another app only when the screen holds all of it', async () => {
+    const { app, text, source } = start();
+    const [computer] = source.computers();
+    if (!computer) throw new Error('the demo has a computer');
+    const before = text();
+    app.confirm({ kind: 'session', computerId: computer.id, machine: computer.name, goal: 'Find why checkout charges twice. '.repeat(20) });
+    await settle();
+    expect(text()).toEqual(before);
+    app.confirm({ kind: 'session', computerId: computer.id, machine: computer.name, goal: 'Find why checkout charges twice' });
+    await settle();
+    expect(text().slice(0, 2)).toEqual([`Glassly AI · new Session on ${computer.name}`, 'Find why checkout charges twice']);
+  });
+
+  it('sends an answer held for undo before showing what a notification opens', async () => {
+    const { app, press, source, clock } = start();
+    const sent: string[] = [];
+    const answer = source.answer.bind(source);
+    source.answer = async (card, value) => { sent.push(card.paneName); await answer(card, value); };
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    await press({ type: 'select', index: 0 });
+    const other = source.cards().find((candidate) => candidate.paneName === 'token-refresh');
+    if (!other) throw new Error('the demo has token-refresh');
+    app.showCard(other.key);
+    await settle();
+    expect(sent).toEqual(['fix-login']);
+    await clock.advance(UNDO_MS);
+    expect(sent).toEqual(['fix-login']);
   });
 
   it('takes an answer back with a double press on the undo screen, and sends nothing', async () => {
