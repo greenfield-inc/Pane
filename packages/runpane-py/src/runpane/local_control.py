@@ -2819,6 +2819,9 @@ def print_pane_create_result(result: Dict[str, Any], dry_run: bool = False, acti
             setup_queue = item.get("setupQueue")
             if setup_queue:
                 print(f"  {setup_queue.get('message')}")
+            setup_pending = item.get("setupPending")
+            if setup_pending:
+                print(f"  {setup_pending.get('message')}")
             if item.get("nextCommand"):
                 print(f"  Next: {item.get('nextCommand')}")
         else:

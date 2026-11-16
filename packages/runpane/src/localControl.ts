@@ -393,6 +393,7 @@ interface PaneCreateSuccessItem {
   expectedReport?: ExpectedReport;
   /** Set when setup waits for a slot; the agent starts after setup, so there is no panel yet. */
   setupQueue?: { position: number; message: string };
+  setupPending?: { message: string };
   /** The base a worktree Pane started from; `notice` says when it could not be refreshed from the remote. */
   base?: PaneBase;
 }
@@ -1798,6 +1799,9 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
       expectedReport: boundary.optional(expectedReportSchema),
       setupQueue: boundary.optional(boundary.object({
         position: boundary.number,
+        message: boundary.string,
+      })),
+      setupPending: boundary.optional(boundary.object({
         message: boundary.string,
       })),
       base: boundary.optional(boundary.object({
@@ -5229,6 +5233,9 @@ function printPaneCreateResult(result: PaneCreateResult, dryRun = false, action:
       }
       if (item.setupQueue) {
         console.log(`  ${item.setupQueue.message}`);
+      }
+      if (item.setupPending) {
+        console.log(`  ${item.setupPending.message}`);
       }
       if (item.nextCommand) {
         console.log(`  Next: ${item.nextCommand}`);

@@ -72,7 +72,8 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
     timeoutMs: (parsed.timeoutMs ?? 120_000) + (parsed.readyTimeoutMs ?? 30_000) + 10_000,
   });
   const item = created.items[0];
-  if (item?.ok && item.sessionId && item.setupQueue) {
+  const setupWait = item?.setupQueue ?? item?.setupPending;
+  if (item?.ok && item.sessionId && setupWait) {
     const queued = {
       ok: true,
       paneId: item.sessionId,
@@ -80,9 +81,10 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
       worktreePath: item.worktreePath,
       link: buildPaneLink({ kind: 'pane', id: item.sessionId }),
       setupQueue: item.setupQueue,
+      setupPending: item.setupPending,
       next: `Check on it after setup with \`runpane agents status --pane ${item.sessionId}\`.`,
     };
-    print(parsed, queued, `Created ${queued.name ?? queued.paneId}: ${queued.link}\n${item.setupQueue.message}\n${queued.next}`);
+    print(parsed, queued, `Created ${queued.name ?? queued.paneId}: ${queued.link}\n${setupWait.message}\n${queued.next}`);
     return 0;
   }
   // An item can be created yet not ok (agent not ready, prompt unverified); only a missing panel is a failure to start.

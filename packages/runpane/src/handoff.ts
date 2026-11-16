@@ -1181,14 +1181,16 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
       throw new Error(`runpane panes create failed on ${remote.name}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check ${recovery('sessions', 'list')} before retrying to avoid a duplicate Pane.`);
     }
     const item = created.items[0];
-    if (item?.ok && item.sessionId && item.setupQueue) {
+    const setupWait = item?.setupQueue ?? item?.setupPending;
+    if (item?.ok && item.sessionId && setupWait) {
       result.pane = { id: item.sessionId, name: item.name, worktreePath: item.worktreePath };
-      warnings.push(`Pane ${item.sessionId} was created and is queued for setup (${item.setupQueue.message}). The receiver starts after setup${resumedId ? ', resuming the session' : ' with the note'}; ${resumedId ? 'it is not checked' : 'its prompt is not verified'} yet, so do not retry. Check on it after setup: ${receiverStatus(item.sessionId)}`);
+      const setupState = item.setupQueue ? 'is queued for setup' : 'is still running setup';
+      warnings.push(`Pane ${item.sessionId} was created and ${setupState} (${setupWait.message}). The receiver starts after setup${resumedId ? ', resuming the session' : ' with the note'}; ${resumedId ? 'it is not checked' : 'its prompt is not verified'} yet, so do not retry. Check on it after setup: ${receiverStatus(item.sessionId)}`);
       for (const warning of warnings) say(`  ! ${warning}`);
       if (resumedId) {
         // The carry itself succeeded; only the check waits for setup, which is what inconclusive (exit 0) means.
         continuity.result = 'inconclusive';
-        continuity.reason = `Pane ${item.sessionId} is queued for setup; its agent resumes ${resumedId} after setup, so the continuity check has not run.`;
+        continuity.reason = `Pane ${item.sessionId} ${setupState}; its agent resumes ${resumedId} after setup, so the continuity check has not run.`;
         continuity.next = `After setup, check the receiver with ${receiverStatus(item.sessionId)} and, if its history is unclear, ask it: "${PROBE}". Then send it: ${receiverMessage(remote.name, item.worktreePath, notePath, true)}`;
         say(step('queued', continuity.reason, false));
         say(`Next: ${continuity.next}`);

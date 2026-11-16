@@ -11614,6 +11614,18 @@
                     },
                     "additionalProperties": false
                   },
+                  "setupPending": {
+                    "type": "object",
+                    "required": [
+                      "message"
+                    ],
+                    "properties": {
+                      "message": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
                   "base": {
                     "type": "object",
                     "required": [
@@ -21518,6 +21530,7 @@
           "If readiness returns blocked, inspect blocked.suggestedCommand rather than guessing which prompt to answer.",
           "With --tool-command, --agent names the agent the command runs (a wrapper such as `agent-farm run`): Pane launches the command unchanged and treats the panel as that agent. Without --agent, Pane detects Claude Code, Codex and Cursor from the foreground process or the agent's screen, and --wait-ready waits for the detected agent's input box; a command that never shows a supported agent is not ready and nothing is typed into it.",
           "At most 2 Panes run setup at once (worktree file sync, dependency install, build script); more wait in line. A queued `panes create` returns the Pane id right away with `setupQueue` ({ position, message }) and no `panelId`; the agent starts when setup finishes. Find its panel later with `runpane panels list --pane <id> --json`.",
+          "Setup that outlasts the create timeout (`--timeout`, default 120s), such as a slow dependency install, does not fail the create or drop the agent: the Pane id comes back with `setupPending` ({ message }) and no `panelId`, and the agent starts with its prompt or initial input when setup finishes. If setup fails, no agent starts and the Pane shows the failure. Find its panel later with `runpane panels list --pane <id> --json`.",
           "A Pane with its own worktree starts at the remote's current tip of a remote-tracking base (the default `origin/main`, or one named with `--base`): Pane fetches that branch first, waiting at most about 10 seconds, and creates started together share the fetch. Each item's `base` reports `{ ref, commit, refresh }`, where `refresh` is `fetched`, `recent` (reused a fetch from the last 30 seconds), `skipped` (a local branch or commit base) or `failed`. A failed refresh never fails the create; the Pane starts from the local ref and `base.notice` says what happened and how to catch up.",
           "`panes create --branch <name>` fails with code `ERR_RUNPANE_BRANCH_HAS_PANE` when another Pane already has that branch checked out. The message names the Pane and gives the next step: `runpane panels create --pane <id> --tool-command \"<cmd>\" --source agent --no-focus`."
         ]
