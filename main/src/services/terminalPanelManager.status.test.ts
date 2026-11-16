@@ -728,7 +728,8 @@ describe('program status reports (OSC 7501)', () => {
     expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:done', workedVisibly: true });
   });
 
-  it("outranks the agent's screen, and gives way to it once the program exits", async () => {
+  // Windows terminals cannot report their foreground, so a record there lasts until replaced or cleared.
+  it.skipIf(process.platform === 'win32')("outranks the agent's screen, and gives way to it once the program exits", async () => {
     let foregroundGroup: number | undefined = 999;
     manager = new TerminalPanelManager(undefined, undefined, async () => foregroundGroup);
     // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
