@@ -33,6 +33,9 @@ interface ProjectContext {
   commandRunner: CommandRunner;
 }
 
+/** How much a Build or Archive script may print before Pane stops it and says why. */
+const SCRIPT_OUTPUT_LIMIT = 256 * 1024 * 1024;
+
 interface CommandExecutionError {
   stderr?: string;
   stdout?: string;
@@ -1367,8 +1370,8 @@ export class SessionManager extends EventEmitter {
 
     const projectEnv = await this.resolveProjectEnv(sessionId, teammatePaneCaller());
     for (const warning of projectEnv.warnings) addSessionLog(sessionId, 'warn', warning, label);
-    // A script's output is its own business: a verbose build must not fail for printing a lot.
-    const options: CommandRunOptions = { maxBuffer: Infinity };
+    // Room for a verbose build; past it, the failure says why.
+    const options: CommandRunOptions = { maxBuffer: SCRIPT_OUTPUT_LIMIT };
     if (label === 'Build') options.timeout = 0;
     if (Object.keys(projectEnv.env).length > 0) options.env = projectEnv.env;
 
@@ -1402,7 +1405,9 @@ export class SessionManager extends EventEmitter {
               message: boundary.optional(boundary.string),
             }));
           } catch { /* String(cmdError) remains the fallback. */ }
-          const errorMessage = error.stderr || error.stdout || error.message || String(cmdError);
+          const errorMessage = cmdError instanceof Error && 'code' in cmdError && cmdError.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+            ? `Pane stopped it after it printed more than ${SCRIPT_OUTPUT_LIMIT / 1024 / 1024} MB of output. Make it quieter (or send its output to a file) and run it again.`
+            : error.stderr || error.stdout || error.message || String(cmdError);
           allOutput += errorMessage;
 
           addSessionLog(sessionId, 'error', `Command failed: ${command}`, label);

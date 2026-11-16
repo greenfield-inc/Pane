@@ -781,7 +781,6 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
     if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
     // The new version's context reads like a new card's; the card keeps its ui, and its links unless given.
     readStatusContext(request, false);
-    checkContext(request);
     return request;
   }
   if (request.asked !== undefined || request.whatChanged !== undefined) throw invalid('asked and whatChanged only go with update.');
@@ -816,11 +815,10 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.action && !/^https?:\/\//i.test(request.action.url)) throw invalid('action.url must be an http(s) URL.');
   if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
   readStatusContext(request, true);
-  checkContext(request);
   return request;
 }
 
-/** The context the card shows, after a status file sent as the context became its card. */
+/** The sender's context as the card shows it: checked after a status file becomes its card, before Pane adds a line. */
 function checkContext(request: NotifyRequest): void {
   if ((request.context?.length ?? 0) > MAX_TEXT) throw invalid(`context takes up to ${MAX_TEXT} characters.`);
 }
@@ -833,7 +831,10 @@ function checkContext(request: NotifyRequest): void {
 function readStatusContext(request: NotifyRequest, newCard: boolean): void {
   if (!request.context) return;
   const card = statusCard(request.context, request.title ?? '');
-  if (!card) return;
+  if (!card) {
+    checkContext(request);
+    return;
+  }
   const buttons = newCard && request.ui === 'ask' && !request.suggestions?.length;
   // Questions that can't get buttons here are written out in the context instead.
   const context = card.questions && !buttons ? card.questionsContext : card.context;
@@ -841,6 +842,7 @@ function readStatusContext(request: NotifyRequest, newCard: boolean): void {
   if (context) request.context = context;
   else if (newCard) delete request.context;
   else request.context = '';
+  checkContext(request);
   if (!newCard) return;
   if (buttons && card.questions) {
     request.ui = 'options';

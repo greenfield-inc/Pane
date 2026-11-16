@@ -661,7 +661,7 @@ export class TaskQueue {
     await this.writeSetupLines(sessionId, worktreePath, ctx, [`Installing dependencies: ${installCommand}`]);
     const startedAt = Date.now();
     try {
-      await ctx.commandRunner.execAsync(installCommand, worktreePath, { timeout: INSTALL_TIMEOUT_MS, maxBuffer: Infinity });
+      await ctx.commandRunner.execAsync(installCommand, worktreePath, { timeout: INSTALL_TIMEOUT_MS, maxBuffer: 256 * 1024 * 1024 });
       const seconds = Math.round((Date.now() - startedAt) / 1000);
       await this.writeSetupLines(sessionId, worktreePath, ctx, [`Dependencies installed (${seconds} s)`]);
     } catch (installError) {
