@@ -131,6 +131,9 @@ export const RUNPANE_CONTRACT = {
         "transcriptDirs": [
           ".claude/projects"
         ],
+        "tempDirs": [
+          "{tmp}/claude-{uid}"
+        ],
         "signIn": [
           "auth",
           "login"

@@ -107,3 +107,70 @@ export const MACHINE_HEALTH_DEFAULTS = {
 export const MACHINE_HEALTH_CHANGED_EVENT = 'resource-monitor:machine-health-changed';
 /** The read channel for this machine's latest snapshot; under resource-monitor: so daemon, phone and linked-machine allowlists already carry it. */
 export const MACHINE_HEALTH_SNAPSHOT_CHANNEL = 'resource-monitor:machine-health';
+
+/**
+ * Tier 1: Pane made it and it can no longer be used; Pane removes it by itself.
+ * Tier 2: Pane asks once, with sizes; each kind can be switched to automatic.
+ * Tier 3: shown only, with its owner and how to free it.
+ */
+export type ReclaimTier = 1 | 2 | 3;
+
+export type ReclaimKind =
+  | 'update-snapshot'
+  | 'migration-backup'
+  | 'archived-pane-folder'
+  | 'agent-temp'
+  | 'paused-scratch'
+  | 'foreign-worktree'
+  | 'foreign-pane-data'
+  | 'other-tool-data';
+
+export interface ReclaimItem {
+  /** Stable across scans: the kind and path. */
+  id: string;
+  kind: ReclaimKind;
+  tier: ReclaimTier;
+  path: string;
+  /** Logical size. Freed bytes are measured from free space when cleanup runs. */
+  sizeBytes: number;
+  modifiedAt: number;
+  /** The Pane it belongs to, when Pane knows. */
+  sessionId: string | null;
+  /** Plain words for why it can go, or who owns it. */
+  reason: string;
+  /** Tier 3 only: the command or setting that frees it. */
+  howToFree?: string;
+}
+
+export interface PaneDiskUsage {
+  sessionId: string;
+  name: string;
+  worktreePath: string;
+  /** Everything in the worktree, dependencies and scratch included. */
+  worktreeBytes: number;
+  dependencyBytes: number;
+  buildOutputBytes: number;
+  /** The worktree's .pane/scratch plus Pane's own scratch folder for this Pane. */
+  scratchBytes: number;
+  agentTempBytes: number;
+}
+
+/** Disk use by owner, for the stacked bar on the Resources page. */
+export interface DiskBuckets {
+  paneWorktrees: number;
+  dependencies: number;
+  qaAndScratch: number;
+  agentTemp: number;
+  paneData: number;
+}
+
+export interface StorageInventory {
+  scannedAt: number;
+  durationMs: number;
+  items: ReclaimItem[];
+  panes: PaneDiskUsage[];
+  buckets: DiskBuckets;
+}
+
+export const MACHINE_HEALTH_INVENTORY_CHANNEL = 'resource-monitor:machine-inventory';
+export const MACHINE_HEALTH_INVENTORY_CHANGED_EVENT = 'resource-monitor:machine-inventory-changed';

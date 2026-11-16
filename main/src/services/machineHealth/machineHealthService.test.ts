@@ -31,6 +31,7 @@ function harness(extra: Partial<MachineHealthDeps> = {}) {
     memory: () => ({ totalBytes: 32 * GB, freeBytes: 8 * GB }),
     cpuTimes: () => ({ idle: 0, total: 0 }),
     processes,
+    scanInventory: async () => { throw new Error('not scanned in these tests'); },
     ...extra,
   });
   const changes: LevelChange[] = [];

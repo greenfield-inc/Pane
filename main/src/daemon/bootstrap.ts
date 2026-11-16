@@ -58,8 +58,13 @@ import { setupEventListeners } from '../events';
 import { getAppDirectory } from '../utils/appDirectory';
 import { resourceMonitorService } from '../services/resourceMonitorService';
 import { MachineHealthService } from '../services/machineHealth/machineHealthService';
+import { scanStorage } from '../services/machineHealth/storageInventory';
 import { readFootprints } from '../services/machineHealth/footprint';
-import { MACHINE_HEALTH_CHANGED_EVENT } from '../../../shared/types/machineHealth';
+import { agentTempRoots, ignoredDirs, installPathOf, listGitWorktrees, otherToolPaths, processCwds, readUpdateRecords, wslDiskImages } from '../services/machineHealth/inventorySources';
+import { DB_CLEAN_OPEN_PREFERENCE } from '../services/machineHealth/reclaimRules';
+import { appScratchDirectory } from '../services/archiveRetention';
+import { panePausedMark } from '../../../shared/types/panels';
+import { MACHINE_HEALTH_CHANGED_EVENT, MACHINE_HEALTH_INVENTORY_CHANGED_EVENT } from '../../../shared/types/machineHealth';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
@@ -423,7 +428,37 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     ],
     processes: () => resourceMonitorService.getSnapshot(),
     readFootprints: process.platform === 'darwin' ? readFootprints : undefined,
+    scanInventory: () => scanStorage({
+      now: () => Date.now(),
+      paneDir: getAppDirectory(),
+      panes: () => databaseService.getAllSessionsIncludingArchived({ includeHidden: true }).flatMap(session => {
+        const project = session.project_id ? databaseService.getProject(session.project_id) : undefined;
+        if (!project || session.is_main_repo) return [];
+        return [{
+          id: session.id, name: session.name, worktreePath: session.worktree_path || null, projectPath: project.path,
+          branch: session.worktree_name, archived: !!session.archived, updatedAt: Date.parse(session.updated_at), isMainRepo: !!session.is_main_repo,
+          ownedByPane: session.worktree_ownership !== 'external',
+          paused: !session.archived && !!panePausedMark(panelManager.getPanelsForSession(session.id)),
+        }];
+      }),
+      // Only folders Pane made worktrees in: an adopted worktree's or a projectless session's parent is the person's own folder.
+      worktreeRoots: () => [...new Set(databaseService.getAllSessionsIncludingArchived({ includeHidden: true })
+        .flatMap(session => (session.worktree_path && session.project_id && !session.is_main_repo && session.worktree_ownership !== 'external'
+          ? [path.dirname(session.worktree_path)] : [])))],
+      agentTempRoots: () => agentTempRoots(),
+      installPath: () => installPathOf(process.execPath, !!options.app?.isPackaged),
+      cleanOpenAt: () => Number(databaseService.getUserPreference(DB_CLEAN_OPEN_PREFERENCE)) || null,
+      archiveJobsInFlight: () => new Set(archiveCleanupManager.getTasks().filter(task => task.status !== 'completed').map(task => task.sessionId)),
+      readUpdates: () => readUpdateRecords(getAppDirectory()),
+      listGitWorktrees,
+      ignoredDirs,
+      processCwds,
+      otherTools: async () => [...otherToolPaths(), ...await wslDiskImages()],
+      appScratchDir: appScratchDirectory,
+    }),
   });
+  // Migration backups become removable once a later start opened the database cleanly.
+  if (duties.housekeeping && !startupPanelBufferMigration.error) databaseService.setUserPreference(DB_CLEAN_OPEN_PREFERENCE, String(Date.now()));
   const daemonServices: DaemonHostServices = {
     machineHealth,
     configManager,
@@ -640,6 +675,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   autoPauser.sync();
   // Payload-free: readers re-read the snapshot. The per-minute sample stays off the daemon stream.
   machineHealth.on('level-changed', () => getPaneEventSink().send(MACHINE_HEALTH_CHANGED_EVENT));
+  machineHealth.on('inventory', () => getPaneEventSink().send(MACHINE_HEALTH_INVENTORY_CHANGED_EVENT));
   machineHealth.start();
   // Delete archived folders past their retention, keeping their agent logs; deferred so startup stays fast.
   let stopArchiveExpiry: (() => void) | undefined;

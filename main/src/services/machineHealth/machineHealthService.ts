@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import * as os from 'os';
-import { MACHINE_HEALTH_DEFAULTS, type HealthLevel, type LeakWarning, type MachineHealthSettings, type MachineHealthSnapshot, type PaneUsage } from '../../../../shared/types/machineHealth';
+import { MACHINE_HEALTH_DEFAULTS, type HealthLevel, type LeakWarning, type MachineHealthSettings, type MachineHealthSnapshot, type PaneUsage, type StorageInventory } from '../../../../shared/types/machineHealth';
 import type { ResourceSnapshot } from '../../../../shared/types/resourceMonitor';
 import { readDiskVolumes, type VolumePath } from './diskSpace';
 import { findLeak, leakRuleOf, type LeakRule, type RssSample } from './leakRule';
@@ -8,6 +8,8 @@ import { readMemoryPressure, readSwapUsedBytes, settleLevel, worstLevel, type Me
 
 const SAMPLE_INTERVAL_MS = 60_000;
 const FIRST_SAMPLE_DELAY_MS = 20_000;
+const INVENTORY_INTERVAL_MS = 24 * 60 * 60_000;
+const FIRST_INVENTORY_DELAY_MS = 10 * 60_000;
 const GB = 1024 ** 3;
 const MINUTE = 60_000;
 const FOOTPRINT_SLACK_MS = 5_000;
@@ -23,6 +25,8 @@ export interface MachineHealthDeps {
   settings: () => MachineHealthSettings | undefined;
   volumePaths: () => VolumePath[];
   processes: () => Promise<ResourceSnapshot>;
+  /** Walks storage off the main thread; run daily, on demand, and when disk reaches the warning level. */
+  scanInventory: () => Promise<StorageInventory>;
   readDisk?: typeof readDiskVolumes;
   readMemory?: () => Promise<MemoryPressureReading>;
   readSwap?: () => Promise<number | null>;
@@ -77,6 +81,9 @@ export class MachineHealthService extends EventEmitter {
   private footprintsAt = -Infinity;
   private timer: NodeJS.Timeout | null = null;
   private inFlight: Promise<MachineHealthSnapshot> | null = null;
+  private inventory: StorageInventory | null = null;
+  private inventoryInFlight: Promise<StorageInventory> | null = null;
+  private inventoryTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly deps: MachineHealthDeps) {
     super();
@@ -91,11 +98,49 @@ export class MachineHealthService extends EventEmitter {
     }, FIRST_SAMPLE_DELAY_MS);
     first.unref?.();
     this.timer = first;
+    const firstScan = setTimeout(() => {
+      void this.scanSafely();
+      this.inventoryTimer = setInterval(() => void this.scanSafely(), INVENTORY_INTERVAL_MS);
+      this.inventoryTimer.unref?.();
+    }, FIRST_INVENTORY_DELAY_MS);
+    firstScan.unref?.();
+    this.inventoryTimer = firstScan;
+    this.on('level-changed', (change: LevelChange) => {
+      if (change.kind === 'disk' && change.level !== 'ok') void this.scanSafely();
+    });
   }
 
   stop(): void {
     if (this.timer) clearTimeout(this.timer);
+    if (this.inventoryTimer) clearTimeout(this.inventoryTimer);
     this.timer = null;
+    this.inventoryTimer = null;
+  }
+
+  /** The cached inventory, scanning first when there is none or `refresh` asks for a new one. */
+  async getInventory(refresh = false): Promise<StorageInventory> {
+    if (this.inventory && !refresh) return this.inventory;
+    return this.scanInventory();
+  }
+
+  /** One scan; concurrent callers share it. */
+  scanInventory(): Promise<StorageInventory> {
+    this.inventoryInFlight ??= this.deps.scanInventory()
+      .then(inventory => {
+        this.inventory = inventory;
+        this.emit('inventory', inventory);
+        return inventory;
+      })
+      .finally(() => { this.inventoryInFlight = null; });
+    return this.inventoryInFlight;
+  }
+
+  private async scanSafely(): Promise<void> {
+    try {
+      await this.scanInventory();
+    } catch (error) {
+      console.warn('[MachineHealth] storage scan failed:', error instanceof Error ? error.message : error);
+    }
   }
 
   /** The latest sample, taking one first when none exists yet. */

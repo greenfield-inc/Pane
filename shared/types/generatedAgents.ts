@@ -30,6 +30,9 @@ export const AGENTS_CONFIG = {
       "transcriptDirs": [
         ".claude/projects"
       ],
+      "tempDirs": [
+        "{tmp}/claude-{uid}"
+      ],
       "signIn": [
         "auth",
         "login"
