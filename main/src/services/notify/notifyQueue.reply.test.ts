@@ -308,6 +308,18 @@ describe('NotifyQueue replies (the reply contract)', () => {
     expect(item(queue, 'in-1')).toMatchObject({ state: 'answered', answerSummary: 'eu-west', reply: { state: 'answer', reader: { kind: 'asker', panelId: 'w1' } } });
   });
 
+  it('J10: a reply the worker gets between its relay\'s resume rounds reaches the next --resume as the answer', async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-21: which region?', source: worker, at: Date.now() });
+    const relay = queue.ask({ relays: 'in-1', question: { ui: 'ask', title: 'Q-21: which region?' }, source: orchestrator, returnAfterMs: 60_000 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(relay).resolves.toMatchObject({ waiting: true, id: 'in-1' });
+    queue.run({ type: 'answer', id: 'in-1', answer: { picks: [], text: 'eu-west' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['w1', 'reply: Q-21 → "eu-west" (by you)']]);
+    await expect(queue.ask({ resume: 'in-1', source: orchestrator })).resolves.toEqual({ answer: 'eu-west' });
+  });
+
   it('J10: with the asker gone, the reply goes to the relaying orchestrator; with that gone too, to Autopilot; else unread', async () => {
     const queue = queueWith();
     queue.addWorkerQuestion({ id: 'in-1', question: 'Q-21: which region?', source: worker, at: Date.now() });

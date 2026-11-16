@@ -983,7 +983,9 @@ export class NotifyQueue extends EventEmitter {
     clearEntryTimers(entry);
     // The words are the answer, or a note on the picks: never both.
     const result: NotifyResult = reply.picks?.length ? { answer: picksText(reply.picks), answers: reply.picks, note: reply.text } : { answer: reply.text };
+    // A call between resume rounds gets it on its next --resume, unless that call already holds the reply itself.
     if (entry.waiter) entry.waiter.resolve(result);
+    else if (entry.resumeLoop && !entry.pending) entry.pending = result;
     if (reply.reader?.kind !== 'asker' && item.source.panelId && !this.env.askerGone?.(item)) this.enqueueTabMessage(item, answerLine(item), true);
     this.save(entry);
     this.trimHistory();
