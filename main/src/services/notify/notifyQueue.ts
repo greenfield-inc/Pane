@@ -235,6 +235,7 @@ export interface NotifyReaderCaller {
 
 /** `runpane notify --update`: the new version's fields; any question field passed replaces that field. */
 export interface NotifyUpdate {
+  /** The person's typed question this version answers; empty for the asker's own update. */
   asked: string;
   whatChanged: string;
   title?: string;
@@ -1001,6 +1002,10 @@ export class NotifyQueue extends EventEmitter {
   update(caller: NotifyReaderCaller, ref: string, update: NotifyUpdate, returnAfterMs?: number, signal?: AbortSignal): Promise<NotifyResult> {
     const entry = this.forReader(caller, ref, 'update');
     const { item } = entry;
+    // A version that answers the person's typed question quotes it; the asker's own update has none to quote.
+    if (item.reply && !update.asked.trim()) {
+      throw new PaneError('ERR_NOTIFY_INVALID', `${refOf(item)} has a question the person typed, and this update didn't say what it was. Nothing was changed.`, 'Run it again with --asked "<their question, as they typed it>".');
+    }
     const now = Date.now();
     const earlier: NotifyVersion = { version: item.version ?? 1, title: item.title, at: item.revision?.at ?? item.createdAt };
     if (item.context !== undefined) earlier.context = item.context;
@@ -1104,7 +1109,8 @@ export class NotifyQueue extends EventEmitter {
     // The open call the reply went back to holds its continuation id, and nobody else was given it:
     // that call's agent continues with it, from a terminal outside Pane as from a tab (D-294).
     if (reader && !reader.panelId && entry.continuation !== undefined && entry.continuation === ref) return true;
-    if (caller.paneId && item.source.paneId && this.env.sameLoop?.(caller.paneId, item.source.paneId)) return true;
+    // Only while it waits: a card the person answered stays answered, whichever run comes next.
+    if (item.state === 'waiting' && caller.paneId && item.source.paneId && this.env.sameLoop?.(caller.paneId, item.source.paneId)) return true;
     const panelId = caller.panelId;
     if (!panelId) return false;
     if (reader?.panelId) return reader.panelId === panelId || panelId === item.source.panelId;

@@ -49,7 +49,8 @@ follows these rules:
 3. **Never repeat.** Surface an item only when it is new, newly urgent or
    overdue, and record when it was last surfaced. Match items by meaning, not
    wording. While a card is unanswered, update it (`runpane notify --update
-   <id>`, with the id from the ledger) instead of posting another. Any later
+   <id> --what-changed <line>`, with the id from the ledger) instead of
+   posting another. Any later
    run of the same loop may update it, though each run of a project loop is a
    new Pane.
 4. **One card per run, or none.** Batch the findings into one card. When
@@ -91,7 +92,7 @@ You are the commitments-watch loop. You run at 7:30 and 16:30 while I am away.
    it"},{"label":"Not interested"}]' --links '[{"label":"Today","url":"<the
    output>"}]'`. If my last card (its id is in the ledger) is unanswered,
    update it instead
-   (`runpane notify --update <id> --asked <what> --what-changed <what>`). If
+   (`runpane notify --update <id> --what-changed <what changed>`). If
    nothing qualifies, post nothing.
 6. Never send a message for me. Propose it on an approve card, at most once
    a day per item.

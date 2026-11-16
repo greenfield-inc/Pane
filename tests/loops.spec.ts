@@ -476,3 +476,15 @@ test('numbers only the Panes the sidebar lists, and keeps an open run Pane liste
   await expect(rows).toHaveCount(2);
   await expect(rows.filter({ hasText: 'Loop: Nightly bug sweep' }).locator('[aria-current="page"]')).toHaveCount(1);
 });
+
+test('shows a loop\'s refreshed card as updated, with no "You asked"', async ({ page }) => {
+  const snapshot = loopCards();
+  const refreshed = { ...snapshot.items[1], id: 'run-card', title: '5 bugs need a decision', version: 2, readyAgain: Date.now(), revision: { asked: '', whatChanged: ['Three more bugs since this morning'], by: 'nightly-bug-sweep', at: Date.now() } };
+  await open(page, { initialSessions: seededSessions, initialLoops: [seededLoops[0]], notifySnapshot: { ...snapshot, items: [refreshed], queue: ['run-card'] } });
+  await page.getByTestId('approvals-nav').click();
+  const revision = page.getByTestId('approval-revision');
+  await expect(revision).toContainText('Updated');
+  await expect(revision).toContainText('Three more bugs since this morning');
+  await expect(revision).not.toContainText('You asked');
+  await expect(revision).not.toContainText('after your question');
+});

@@ -465,13 +465,18 @@ describe('Approvals items, through the registered handlers', () => {
     }]);
     const id = pane.notify.snapshot().items[0].id;
     expect(posted).toMatchObject({ waiting: true });
+    // A loop refreshing its own card has no question of the person's to quote: no --asked.
     const update = (paneId: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
-      update: id, asked: 'Two more deals', whatChanged: 'Now 5 deals', title: '5 new deals?', caller: { paneId, panelId: `${paneId}-tab` }, returnAfterMs: 1,
+      update: id, whatChanged: 'Now 5 deals', title: '5 new deals?', caller: { paneId, panelId: `${paneId}-tab` }, returnAfterMs: 1,
     }]);
 
     await expect(update('loose')).rejects.toMatchObject({ code: 'ERR_NOTIFY_NOT_READER' });
     await update('run-2');
-    expect(pane.notify.snapshot().items.map(item => item.title)).toEqual(['5 new deals?']);
+    expect(pane.notify.snapshot().items).toMatchObject([{ title: '5 new deals?', revision: { asked: '' } }]);
+
+    // Once the person answers, the card stays answered: a later run can no longer reopen it.
+    await pane.notify.run({ type: 'answer', id, answer: { choice: 'Got it' } });
+    await expect(update('run-2')).rejects.toMatchObject({ code: expect.stringMatching(/^ERR_NOTIFY_/u) });
     pane.notify.dispose();
   });
 

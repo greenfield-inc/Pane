@@ -819,9 +819,8 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.update !== undefined) {
     if (!request.update.trim()) throw invalid('update needs the approval\'s id or Q-n.');
     if (request.ui !== undefined) throw invalid('update keeps the approval\'s ui; leave ui out.');
-    if (!request.asked?.trim()) throw invalid('update needs asked: the person\'s question, as they asked it.');
     if (!request.whatChanged?.trim()) throw invalid('update needs whatChanged: one line per change.');
-    if ((request.title?.length ?? 0) > MAX_TEXT || request.asked.length > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, asked and whatChanged take up to ${MAX_TEXT} characters.`);
+    if ((request.title?.length ?? 0) > MAX_TEXT || (request.asked?.length ?? 0) > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, asked and whatChanged take up to ${MAX_TEXT} characters.`);
     if (request.choices && request.questions) throw invalid('pass choices or questions, not both.');
     if (request.choices) checkChoices(request.choices, 'choices');
     if (request.questions) checkQuestions(request.questions);
