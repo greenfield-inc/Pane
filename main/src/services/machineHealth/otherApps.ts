@@ -61,10 +61,8 @@ const WINDOWS_SYSTEM_PATH = /^[a-z]:\\windows\\/iu;
 /** The desktop session itself on Linux; stopping one ends the person's session. */
 const LINUX_SESSION = new Set(['systemd', 'init', 'Xorg', 'Xwayland', 'gnome-shell', 'gnome-session-b', 'plasmashell', 'kwin_x11', 'kwin_wayland', 'dbus-daemon', 'dbus-broker', 'pipewire', 'wireplumber', 'pulseaudio', 'sddm', 'gdm', 'lightdm']);
 
-const SYSTEM_TEXT: Partial<Record<NodeJS.Platform, string>> = {
-  darwin: 'Part of macOS. Pane never stops system processes.',
-  win32: 'Part of Windows. Pane never stops system processes.',
-};
+const systemText = (platform: NodeJS.Platform) =>
+  `Part of ${platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : 'the system'}. Pane never stops system processes.`;
 
 const baseName = (path: string) => path.split(/[\\/]/u).pop() ?? path;
 
@@ -102,15 +100,16 @@ export class OtherApps {
         return sum + (before === undefined ? 0 : Math.max(0, row.cpuSeconds - before));
       }, 0);
       const icon = group.iconPath && index < ICON_LIMIT ? await this.icon(group.iconPath) : undefined;
-      return {
+      const app: OtherApp = {
         key: group.key,
         name: group.name,
         rssMB: Math.round(group.rows.reduce((sum, row) => sum + row.rssKB, 0) / 102.4) / 10,
         cpuPercent: Math.round((cpu / seconds) * 1000) / 10,
         processCount: group.rows.length,
-        ...(icon ? { icon } : {}),
         protectedReason: this.protectedReason(group, rows),
       };
+      if (icon) app.icon = icon;
+      return app;
     }));
   }
 
@@ -190,7 +189,7 @@ export class OtherApps {
     const ancestors = new Set<number>();
     for (let pid = parents.get(this.deps.selfPid); pid !== undefined && pid > 1 && !ancestors.has(pid); pid = parents.get(pid)) ancestors.add(pid);
     if (group.rows.some(row => ancestors.has(row.pid))) return 'Pane runs inside it, so stopping it would stop Pane.';
-    if (group.rows.some(row => this.isSystem(row))) return SYSTEM_TEXT[this.deps.platform] ?? 'Part of the system. Pane never stops system processes.';
+    if (group.rows.some(row => this.isSystem(row))) return systemText(this.deps.platform);
     return null;
   }
 
@@ -220,7 +219,7 @@ function cpuTimes(rows: readonly AppProcessRow[]): Map<string, number> {
 const POSIX_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+\s+\S+\s+\d+\s+[\d:]+\s+\d+)\s*(.*)$/u;
 
 /** Parse `ps -Ao pid=,ppid=,uid=,rss=,time=,lstart=,comm=`; `comm` goes last because it may hold spaces. */
-export function parseAppProcessTable(stdout: string, uid: number): AppProcessRow[] {
+function parseAppProcessTable(stdout: string, uid: number): AppProcessRow[] {
   const rows: AppProcessRow[] = [];
   for (const line of stdout.split('\n')) {
     const match = POSIX_ROW.exec(line);

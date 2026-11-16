@@ -91,7 +91,7 @@ const history: CleanupRun[] = [{ at: now - 3_600_000, source: 'schedule', remove
 const MACOS = 'Part of macOS. Pane never stops system processes.';
 const app = (key: string, name: string, rssMB: number, cpuPercent: number, processCount: number, protectedReason: string | null = null): OtherApp =>
   ({ key, name, rssMB, cpuPercent, processCount, protectedReason });
-const otherApps: Record<'local' | 'devbox', OtherApp[]> = {
+const otherApps = {
   local: [
     app('/Applications/Google Chrome.app', 'Google Chrome', 4300, 12.4, 23),
     app('/Applications/Slack.app', 'Slack', 1250, 1.2, 6),
@@ -113,7 +113,7 @@ const otherApps: Record<'local' | 'devbox', OtherApp[]> = {
     app('explorer', 'explorer', 180, 0.4, 1, 'Part of Windows. Pane never stops system processes.'),
     app('code', 'Code', 640, 1, 9),
   ],
-};
+} satisfies Record<'local' | 'devbox', OtherApp[]>;
 const stoppedApps = new Set<string>();
 
 function outdated(): never {
@@ -153,7 +153,10 @@ const api = {
     },
     run: async (machineId: string, command: MachineCommand) => {
       window.qaRuns.push({ machineId, command });
-      if (command.type === 'machine-health' && command.action === 'stop-app' && 'key' in command.request && typeof command.request.key === 'string') stoppedApps.add(command.request.key);
+      if (command.type === 'machine-health' && command.action === 'stop-app') {
+        const request = JSON.stringify(command.request);
+        for (const item of [...otherApps.local, ...otherApps.devbox]) if (request.includes(JSON.stringify(item.key))) stoppedApps.add(item.key);
+      }
       return { machineId, data: null };
     },
   },
