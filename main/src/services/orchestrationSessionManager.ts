@@ -72,7 +72,6 @@ import { SessionActivityService, type SessionActivityMembers } from './sessionAc
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { agentReportData, readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
-import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
@@ -103,9 +102,6 @@ function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
 
 export class OrchestrationSessionManager extends EventEmitter {
   private initialized = false;
-  /** The line a person is typing into each Session agent panel, until its first message names the Session. */
-  private readonly firstMessageDrafts = new Map<string, string | null>();
-  private readonly namedPanelIds = new Set<string>();
   /** Each counted tab's type, from the last member read, so the 500 ms check reads no database. */
   private activityPanelTypes = new Map<string, 'chat' | 'terminal'>();
   /** Each Session's live working/idle activity; bootstrap starts it, events.ts relays it. */
@@ -687,34 +683,6 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (terminalReason) result.terminalReason = terminalReason;
       return result;
     });
-  }
-
-  /** Terminal input a person typed. The first message to a Session agent renames a Session that still has its default name. */
-  observeInput(panelId: string, data: string): void {
-    if (!panelId.startsWith(ORCHESTRATION_SESSION_PANEL_PREFIX) || this.namedPanelIds.has(panelId)) return;
-    const previous = this.firstMessageDrafts.get(panelId);
-    const { draft, submitted } = applyTerminalInput(previous === undefined ? '' : previous, data);
-    const name = submitted.map(sessionNameFromMessage).find(Boolean);
-    if (!name) {
-      this.firstMessageDrafts.set(panelId, draft);
-      return;
-    }
-    this.firstMessageDrafts.delete(panelId);
-    this.namedPanelIds.add(panelId);
-    void this.nameFromFirstMessage(panelId, name).catch(error => {
-      this.namedPanelIds.delete(panelId);
-      console.warn('[OrchestrationSessionManager] Could not name the Session from its first message:', error);
-    });
-  }
-
-  private async nameFromFirstMessage(panelId: string, name: string): Promise<void> {
-    const { sessions } = await this.list();
-    const record = sessions.find(session => session.panelIds[session.agent] === panelId);
-    if (!record?.nameIsDefault) return;
-    const taken = new Set(sessions.filter(session => session.id !== record.id).map(session => normalizeSessionName(session.name)));
-    let uniqueName = name;
-    for (let suffix = 2; taken.has(normalizeSessionName(uniqueName)); suffix += 1) uniqueName = `${name} ${suffix}`;
-    await this.update({ sessionId: record.id }, { name: uniqueName, expectedRevision: record.revision, source: 'system' });
   }
 
   /**

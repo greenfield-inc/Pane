@@ -10,8 +10,8 @@ In the sidebar, `+` opens an agent picker, an optional Session name field, and
 an optional "What is this Session for?" field that becomes the Session's goal.
 Pane remembers the chosen agent as the default for future Sessions while
 existing Sessions keep their own agent. A blank name starts as `New chat` or
-`New chat 2` and is renamed once from the first message you send the Session
-agent; a name you type or set later is kept. Each new Session opens as one Pane
+`New chat 2`, and the Session agent renames it once, in 3 to 5 words, when it
+replies to your first task. A name you type or set later is kept. Each new Session opens as one Pane
 Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
