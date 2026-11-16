@@ -21,7 +21,8 @@ export const AGENTS_CONFIG = {
         "promptArgument": true,
         "configDir": ".claude",
         "reportsConversation": true,
-        "paneMcpConfigFlag": "--mcp-config"
+        "paneMcpConfigFlag": "--mcp-config",
+        "resumeIdPattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
       },
       "install": {
         "url": "https://code.claude.com/docs/en/setup",
@@ -109,7 +110,8 @@ export const AGENTS_CONFIG = {
         ],
         "hotkey": "mod+alt+4",
         "promptArgument": true,
-        "configDir": ".codex"
+        "configDir": ".codex",
+        "resumeIdPattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
       },
       "install": {
         "url": "https://developers.openai.com/codex/cli",
