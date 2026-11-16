@@ -4,7 +4,7 @@ import path from 'path';
 import { promisify } from 'util';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
-import { hostCommand } from '../agentChat/hostCommand';
+import { besideItsNode, hostCommand } from '../agentChat/hostCommand';
 import { addDeviceHubPort, removeDeviceHubPort } from './deviceHubPorts';
 
 const execFileAsync = promisify(execFile);
@@ -89,7 +89,7 @@ export class DeviceHelpers {
     const install = hostCommand(npm, ['install', '--prefix', folder, '--no-audit', '--no-fund', `--before=${RESOLVED_BEFORE}`,
       `agent-device@${DEVICE_HELPER_PINS.agentDevice}`, `expo-device-hub@${DEVICE_HELPER_PINS.hub}`], this.options.platform);
     try {
-      await execFileAsync(install.executable, install.args, { timeout: INSTALL_TIMEOUT_MS, windowsVerbatimArguments: install.windowsVerbatimArguments, maxBuffer: 16 * 1024 * 1024 });
+      await execFileAsync(install.executable, install.args, { env: besideItsNode(npm), timeout: INSTALL_TIMEOUT_MS, windowsVerbatimArguments: install.windowsVerbatimArguments, maxBuffer: 16 * 1024 * 1024 });
     } catch (cause) {
       rmSync(folder, { recursive: true, force: true });
       throw new PaneError('ERR_DEVICE_INSTALL_FAILED', `npm could not install Pane's device tools on ${this.options.machineName()}: ${reasonOf(cause)}. Nothing was installed.`, 'Check the network connection and that `npm install` works in a terminal, then try again.');

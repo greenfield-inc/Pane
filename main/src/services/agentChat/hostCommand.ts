@@ -1,6 +1,6 @@
 import { PaneError } from '../../../../shared/paneError';
 import { quoteShellWord } from '../agents/shellWord';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, realpathSync } from 'fs';
 import path from 'path';
 
 /**
@@ -35,4 +35,15 @@ export function hostCommand(executable: string, args: string[], platform: NodeJS
     throw new PaneError('CHAT_COMMAND_UNREPRESENTABLE', 'The Windows command contains a value that cmd cannot pass literally. No process was started.', 'Use the provider executable directly or a path without cmd expansion characters.');
   }
   return { executable: 'cmd.exe', args: ['/d', '/s', '/c', `"${words.join(' ')}"`], windowsVerbatimArguments: true };
+}
+
+/**
+ * The environment for running a tool Pane found on the shell PATH, such as npm: the tool's own
+ * folder (and its link target's) goes first on PATH, so its `#!/usr/bin/env node` finds the Node
+ * installed beside it even when Pane was started from Finder with a bare PATH.
+ */
+export function besideItsNode(executable: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const key = Object.keys(env).find(name => name.toUpperCase() === 'PATH') ?? 'PATH';
+  const folders = new Set([path.dirname(executable), path.dirname(realpathSync(executable)), ...(env[key] ?? '').split(path.delimiter).filter(Boolean)]);
+  return { ...env, [key]: [...folders].join(path.delimiter) };
 }
