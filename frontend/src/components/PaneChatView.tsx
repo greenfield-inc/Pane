@@ -257,11 +257,17 @@ function SessionWorkspace() {
     if (next !== layout) applyLayout(next);
   }, [applyLayout, layout, selectedSessionId]);
 
-  /** Apply a gesture's layout and let the Session selection follow its focus. */
+  /**
+   * Apply a gesture's layout and let the Session selection follow its focus.
+   * The focused Session is already on screen, so this is not a visit: counting
+   * one would reload that tile mid-gesture (see `select`).
+   */
   const commitLayout = useCallback((next: SessionWorkspaceLayout) => {
     applyLayout(next);
-    selectSession(focusedSessionId(next));
-  }, [applyLayout, selectSession]);
+    const sessionId = focusedSessionId(next);
+    if (sessionId === useOrchestrationSessionStore.getState().selectedSessionId) return;
+    void select({ sessionId }, { visit: false }).catch(() => undefined);
+  }, [applyLayout, select]);
 
   const focusTile = useCallback((tileId: string) => {
     const current = currentLayout();

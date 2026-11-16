@@ -30,6 +30,11 @@ interface OrchestrationSessionState {
    * Session layout may override.
    */
   selectionRevision: number;
+  /**
+   * Counts, per Session, the times it was chosen to be shown (a sidebar click, a
+   * runpane focus); a tile re-reads its Session when the count moves. Moving
+   * focus between tiles already on screen is not a visit: see `select`'s `visit`.
+   */
   selectionVisits: Record<string, number>;
   /** Bumps on every host switch, so host-scoped UI state (such as a pending Undo) can tell hosts apart. */
   hostRevision: number;
@@ -38,7 +43,12 @@ interface OrchestrationSessionState {
   refresh: (options?: { adoptServerSelection?: boolean; throwOnError?: boolean }) => Promise<void>;
   /** This desktop's remembered Session for the current host, preferred over the host's last-used one. */
   preferSelection: (sessionId: string | undefined) => void;
-  select: (selector: OrchestrationSessionSelector) => Promise<void>;
+  /**
+   * Selects a Session. `visit: false` selects one a tile already shows (focusing,
+   * closing or dropping a tile), which must not re-read that tile: a reload swaps
+   * its header out under the pointer and drops the click that started it.
+   */
+  select: (selector: OrchestrationSessionSelector, options?: { visit?: boolean }) => Promise<void>;
   create: (input: OrchestrationSessionCreateInput) => Promise<OrchestrationSessionView<Session>>;
   update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput) => Promise<OrchestrationSessionRecord>;
   /**
@@ -215,7 +225,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     }
   },
 
-  select: async (selector) => {
+  select: async (selector, { visit = true } = {}) => {
     const orchestrationApi = getOrchestrationApi();
     if (!orchestrationApi) throw new Error('Sessions are unavailable in this Pane runtime');
     const generation = ++operationGeneration;
@@ -224,7 +234,9 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     const intended = get().sessions.find(session => session.id === selector.sessionId || session.name === selector.name);
     if (intended && !isArchivedOrchestrationSession(intended)) {
       set(state => ({ selectedSessionId: intended.id, availability: 'ready', error: null, selectionError: null,
-        selectionVisits: { ...state.selectionVisits, [intended.id]: (state.selectionVisits[intended.id] ?? 0) + 1 } }));
+        selectionVisits: visit
+          ? { ...state.selectionVisits, [intended.id]: (state.selectionVisits[intended.id] ?? 0) + 1 }
+          : state.selectionVisits }));
     }
     try {
       const data = ensureSuccess(await API.orchestrationSessions.select(selector), 'Failed to select Session');
