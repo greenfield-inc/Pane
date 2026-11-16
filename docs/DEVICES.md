@@ -1,8 +1,8 @@
 # Devices
 
 Any agent in a Pane can boot an iOS Simulator or an Android emulator, see it, drive it and
-build an app to it. The live screen opens in a device tab beside the agent, and chat tabs
-show a card at the step that opened it. On Windows and Linux, iOS runs on a Mac you linked,
+build an app to it. The live screen opens in a device tab beside the agent, selected so it
+comes to the front, and chat tabs show a card at the step that opened it. On Windows and Linux, iOS runs on a Mac you linked,
 with no SSH setup.
 
 ## The tools

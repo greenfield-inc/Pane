@@ -495,9 +495,10 @@ export function findExecutableInPath(executable: string): string | null {
   
   console.log(`[ShellPath] Searching in ${paths.length} PATH directories`);
   
-  // On Windows, executables might have .exe, .cmd, or .bat extensions
-  const executableNames = isWindows 
-    ? [executable, `${executable}.exe`, `${executable}.cmd`, `${executable}.bat`]
+  // On Windows, try PATHEXT's extensions before the bare name, as cmd.exe does: npm installs an
+  // extensionless sh script beside npm.cmd, and Node cannot start that script.
+  const executableNames = isWindows
+    ? [...(process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map(ext => `${executable}${ext.toLowerCase()}`), executable]
     : [executable];
   
   let searchedPaths = 0;
