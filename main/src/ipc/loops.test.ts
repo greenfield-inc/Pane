@@ -172,7 +172,7 @@ function sessionRegistry(options: {
 } = {}) {
   const calls: Array<{ channel: string; request: PaneCommandValue }> = [];
   const registry = new PaneCommandRegistry();
-  const session = { id: SESSION_ID, name: 'Standups', agent: 'claude', launchCommand: '', internalSessionId: 'standups-pane', panelIds, ...options.session };
+  const session = { id: SESSION_ID, name: 'Standups', agent: 'claude', launchCommand: '', panelIds, ...options.session };
   const answer = (channel: string, result: (request: PaneCommandValue) => PaneCommandValue) => registry.register(channel, (request: PaneCommandValue) => {
     calls.push({ channel, request });
     return result(request);
@@ -184,7 +184,7 @@ function sessionRegistry(options: {
   answer('runpane:sessions:create', request => {
     const { name } = decodeBoundary(request, boundary.object({ name: boundary.string }));
     if (options.takenNames?.includes(name)) throw new Error(`A Session named ${name} already exists`);
-    return { ok: true, session: { ...session, id: '__orchestration_session_2222__', name, internalSessionId: 'new-pane' } };
+    return { ok: true, session: { ...session, id: '__orchestration_session_2222__', name } };
   });
   answer('runpane:sessions:update', () => ({ ok: true, session }));
   answer('runpane:panels:resume', () => {
@@ -285,7 +285,7 @@ describe('startLoopRun for a Session loop', () => {
     const { registry, calls } = sessionRegistry({ session: { archived: true, isPinned: true } });
     await expect(startLoopRun(registry, standup, slotAtMs, noLaunches)).resolves.toEqual({
       sessionId: null,
-      recovered: { kind: 'restored', sessionId: SESSION_ID, sessionName: 'Standups', sessionPaneId: 'standups-pane' },
+      recovered: { kind: 'restored', sessionId: SESSION_ID, sessionName: 'Standups' },
     });
     expect(calls.map(call => call.channel)).toEqual(['runpane:sessions:get', 'runpane:sessions:update', 'runpane:panels:resume', 'runpane:panels:submit']);
     expect(calls[1].request).toEqual({ selector: { sessionId: SESSION_ID }, input: { archived: false, isPinned: false, source: 'user' } });
@@ -302,7 +302,7 @@ describe('startLoopRun for a Session loop', () => {
     const { registry, calls } = sessionRegistry({ missing: true, takenNames: ['Nightly bug sweep'] });
     await expect(startLoopRun(registry, standup, slotAtMs, noLaunches)).resolves.toEqual({
       sessionId: null,
-      recovered: { kind: 'recreated', sessionId: '__orchestration_session_2222__', sessionName: 'Nightly bug sweep 2', sessionPaneId: 'new-pane' },
+      recovered: { kind: 'recreated', sessionId: '__orchestration_session_2222__', sessionName: 'Nightly bug sweep 2' },
     });
     expect(calls.filter(call => call.channel === 'runpane:sessions:create').map(call => call.request)).toEqual([
       { name: 'Nightly bug sweep', agent: 'claude', launchCommand: '' },

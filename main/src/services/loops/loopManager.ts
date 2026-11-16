@@ -25,8 +25,6 @@ export interface LoopSessionRecovery {
   kind: 'restored' | 'recreated';
   sessionId: string;
   sessionName: string;
-  /** The Session's own workspace Pane, which files the loop's card under the Session. */
-  sessionPaneId: string;
 }
 
 export interface LoopRunStart {
@@ -47,8 +45,8 @@ export interface LoopCard {
   context: string;
   /** The first is the recommended one. */
   choices: string[];
-  /** Files the card under this Session. */
-  session?: { id: string; name: string; paneId: string };
+  /** Files the card under this Session, by id. */
+  sessionId?: string;
 }
 
 const LOOP_CARD_KEEP = 'Keep it';
@@ -92,6 +90,8 @@ export class LoopManager {
   private readonly archiving = new Set<string>();
   /** Loops with a card waiting on the person, so a loop never posts a second one. */
   private readonly cardOpen = new Set<string>();
+  /** The latest card a loop raised while one waited, posted once that one is answered. */
+  private readonly cardNext = new Map<string, { card: LoopCard; act: (answer: string | null) => Promise<void> }>();
   private readonly now: () => number;
 
   constructor(private readonly options: LoopManagerOptions) {
@@ -253,6 +253,7 @@ export class LoopManager {
       this.options.onChange?.();
       const { sessionId, warning, recovered } = await this.options.startRun(loop, slotAtMs);
       repo.finishRun(run.id, { status: 'started', error: warning ?? null, sessionId });
+      this.cardNext.delete(loop.id);
       if (recovered) this.recovered(loop, recovered);
       const where = sessionId ? `as Pane ${sessionId}` : `for Session ${recovered?.sessionId ?? loop.orchestrationSessionId}`;
       this.options.logger?.info(`[Loops] Started "${loop.name}" ${where}${warning ? `; it needs attention: ${warning}` : '.'}`);
@@ -328,7 +329,7 @@ export class LoopManager {
       title: `${loop.name}: Session ${recovered.kind === 'restored' ? 'restored' : 'recreated'}`,
       context: `${context} Undo archives it and pauses the loop.`,
       choices: [LOOP_CARD_KEEP, LOOP_CARD_UNDO],
-      session: { id: recovered.sessionId, name: recovered.sessionName, paneId: recovered.sessionPaneId },
+      sessionId: recovered.sessionId,
     }, async answer => {
       if (answer !== LOOP_CARD_UNDO) return;
       this.setEnabled(loop.id, false);
@@ -343,6 +344,7 @@ export class LoopManager {
       title: `${loop.name} did not run`,
       context: `${message} The loop tries again at its next scheduled run.`,
       choices: sessionLoop ? [LOOP_CARD_NEW_SESSION, LOOP_CARD_RUN_AGAIN, LOOP_CARD_PAUSE] : [LOOP_CARD_RUN_AGAIN, LOOP_CARD_PAUSE],
+      sessionId: loop.orchestrationSessionId,
     }, async answer => {
       if (answer === LOOP_CARD_PAUSE) {
         this.setEnabled(loop.id, false);
@@ -359,15 +361,28 @@ export class LoopManager {
     });
   }
 
-  /** One card per loop at a time: while one waits, the loop posts no other. */
+  /**
+   * One card per loop at a time. A card raised while one waits replaces any other held back, and
+   * is posted once the waiting one is answered and acted on; a run that starts meanwhile drops a
+   * held failure, which it made stale.
+   */
   private raise(loop: StoredLoop, card: LoopCard, act: (answer: string | null) => Promise<void>): void {
     const { ask, logger } = this.options;
-    if (!ask || this.cardOpen.has(loop.id)) return;
+    if (!ask) return;
+    if (this.cardOpen.has(loop.id)) {
+      this.cardNext.set(loop.id, { card, act });
+      return;
+    }
     this.cardOpen.add(loop.id);
     void ask(card)
-      .finally(() => this.cardOpen.delete(loop.id))
       .then(act)
-      .catch(error => logger?.warn(`[Loops] The card for "${loop.name}" failed: ${error instanceof Error ? error.message : String(error)}`));
+      .catch(error => logger?.warn(`[Loops] The card for "${loop.name}" failed: ${error instanceof Error ? error.message : String(error)}`))
+      .finally(() => {
+        this.cardOpen.delete(loop.id);
+        const next = this.cardNext.get(loop.id);
+        this.cardNext.delete(loop.id);
+        if (next) this.raise(loop, next.card, next.act);
+      });
   }
 
   private countsFrom(loop: StoredLoop): number {

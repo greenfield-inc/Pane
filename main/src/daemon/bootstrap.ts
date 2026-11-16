@@ -421,9 +421,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     ask: async card => {
       const queue = services.notifyService?.queue;
       if (!queue) return null;
+      const record = card.sessionId ? orchestrationSessionManager.approvalSessionRecord(card.sessionId) : undefined;
+      const session = card.sessionId && record ? { id: card.sessionId, name: record.name, paneId: record.paneId } : undefined;
       const result = await queue.ask({
         question: { ui: 'options', title: card.title, context: card.context, choices: card.choices.map((label, index) => ({ label, recommended: index === 0 })) },
-        source: { name: 'Loops', agent: 'Pane', ...(card.session && { session: card.session }) },
+        source: { name: 'Loops', agent: 'Pane', ...(session && { session }) },
       });
       return 'answer' in result ? result.answer : null;
     },

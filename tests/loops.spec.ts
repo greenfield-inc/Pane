@@ -417,6 +417,12 @@ for (const theme of ['light-rounded', 'dark'] as const) {
     const runRow = page.locator('[data-pane-part="sidebar-pane"]').filter({ hasText: 'Loop: Nightly bug sweep' });
     await expect(runRow).toHaveCount(1);
     await expect(runRow.getByTestId('loop-mark')).toBeVisible();
+    await expect(runRow.getByRole('button', { name: /^(Pin|Unpin) / })).toHaveCount(0);
+    await runRow.click({ button: 'right' });
+    const paneMenu = page.getByRole('menu', { name: /^Pane actions for / });
+    await expect(paneMenu.getByRole('menuitem').first()).toBeVisible();
+    await expect(paneMenu.getByRole('menuitem', { name: /^(Pin|Unpin)$/ })).toHaveCount(0);
+    await page.keyboard.press('Escape');
     await shoot(page, `${prefix}12-sidebar-loop-rows`);
 
     // Its menu has no Pin, and archiving says what it does to the loop.

@@ -109,8 +109,8 @@ A loop's Session and its run Panes live on the Loops page (**Open Session**,
 and **Open** on each run), out of the Sessions and project lists, so a run a
 day never crowds the sidebar. One joins the sidebar list only while a card
 from it waits on you, marked with the loop icon in place of its status dot and
-"Loop: <name>". A loop's Session is never pinned: saving the loop unpins it,
-and its menu has no Pin.
+"Loop: <name>". A loop's Session or run Pane is never pinned: saving a Session loop unpins its
+Session, and neither row's menu has Pin.
 
 Archiving a Session a loop sends to asks first, such as "promises-watch runs
 here daily at 7:30 AM", and pauses the loop, so no run brings the Session

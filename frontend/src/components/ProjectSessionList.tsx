@@ -1226,7 +1226,7 @@ function SessionRow({
             <Archive className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className={cn(actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
+        {loopName === undefined && <div className={cn(actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
@@ -1236,12 +1236,13 @@ function SessionRow({
           >
             <Pin className="h-3.5 w-3.5 rotate-45" />
           </button>
-        </div>
+        </div>}
       </div>
     </div>
     <CompactSessionMenu menu={contextMenu} onClose={() => setContextMenu(null)}
       onArchive={() => { setContextMenu(null); archive(); }}
-      onTogglePinned={() => { setContextMenu(null); onTogglePinned(); }} />
+      // A loop's run Pane is never pinned.
+      onTogglePinned={loopName === undefined ? () => { setContextMenu(null); onTogglePinned(); } : undefined} />
   </>);
 }
 

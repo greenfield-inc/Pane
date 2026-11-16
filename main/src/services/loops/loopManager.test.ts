@@ -155,7 +155,7 @@ describe('LoopManager cards', () => {
     initialInput: 'Remind me of what is due.',
     enabled: true,
   };
-  const restored = { kind: 'restored' as const, sessionId: 'session-1', sessionName: 'promises-watch', sessionPaneId: 'session-1-pane' };
+  const restored = { kind: 'restored' as const, sessionId: 'session-1', sessionName: 'promises-watch' };
 
   it('says when a run restored its archived Session, and Undo archives it again and pauses the loop', async () => {
     const desk = approvals();
@@ -167,7 +167,7 @@ describe('LoopManager cards', () => {
       title: 'promises-watch: Session restored',
       context: 'Its Session promises-watch was archived, so Pane restored it and sent this run there. Undo archives it and pauses the loop.',
       choices: ['Keep it', 'Undo'],
-      session: { id: 'session-1', name: 'promises-watch', paneId: 'session-1-pane' },
+      sessionId: 'session-1',
     }]);
     expect(manager.list()[0].runs[0]).toMatchObject({ status: 'started', error: null });
     await desk.answer('Undo');
@@ -177,7 +177,7 @@ describe('LoopManager cards', () => {
 
   it('points the loop at a Session a run made again, and Keep it changes nothing', async () => {
     const desk = approvals();
-    const recreated = { kind: 'recreated' as const, sessionId: 'session-2', sessionName: 'promises-watch 2', sessionPaneId: 'session-2-pane' };
+    const recreated = { kind: 'recreated' as const, sessionId: 'session-2', sessionName: 'promises-watch 2' };
     const { manager } = setup(async () => ({ sessionId: null, recovered: recreated }), undefined, desk.options);
     const { id } = await manager.save(standup);
     await manager.runNow(id);
@@ -205,6 +205,7 @@ describe('LoopManager cards', () => {
       title: 'promises-watch did not run',
       context: 'Session promises-watch runs Pi, which loops cannot run yet, so the prompt was not sent. The loop tries again at its next scheduled run.',
       choices: ['Point it at a new Session', 'Run again', 'Pause the loop'],
+      sessionId: 'session-1',
     }]);
     fails = false;
     await desk.answer('Point it at a new Session');
@@ -212,6 +213,20 @@ describe('LoopManager cards', () => {
     expect(manager.list()[0].orchestrationSessionId).toBe('session-new');
     expect(started).toHaveLength(3);
     expect(manager.list()[0].runs[0].status).toBe('started');
+    // The run that worked made the failure held back behind the card stale, so no second card.
+    expect(desk.cards).toHaveLength(1);
+  });
+
+  it('posts a failure that came while a card was being answered once that card is done', async () => {
+    const desk = approvals();
+    const { manager } = setup(async () => { throw new Error('Session promises-watch is unreachable.'); }, undefined, desk.options);
+    const { id } = await manager.save(standup);
+    await manager.runNow(id);
+    // Run now fails again before the person answers the first card.
+    await manager.runNow(id);
+    await desk.answer('Pause the loop');
+    expect(manager.list()[0].enabled).toBe(false);
+    expect(desk.cards.map(card => card.title)).toEqual(['promises-watch did not run', 'promises-watch did not run']);
   });
 
   it('offers a project loop that failed to run again or pause', async () => {

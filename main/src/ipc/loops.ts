@@ -51,7 +51,6 @@ const loopSessionSchema = boundary.object({
     launchCommand: boundary.optional(boundary.string),
     archived: boundary.optional(boundary.boolean),
     isPinned: boundary.optional(boundary.boolean),
-    internalSessionId: boundary.string,
     panelIds: boundary.object({ claude: boundary.string, codex: boundary.string, cursor: boundary.string }),
   }),
 });
@@ -213,7 +212,7 @@ async function readyLoopSession(commandRegistry: PaneCommandRegistry, loop: Stor
 }
 
 function recoveredSession(session: LoopSession): Omit<LoopSessionRecovery, 'kind'> {
-  return { sessionId: session.id, sessionName: session.name, sessionPaneId: session.internalSessionId };
+  return { sessionId: session.id, sessionName: session.name };
 }
 
 /** What a Session loop run reads from Pane: the command each terminal last launched, if Pane launched one. */
