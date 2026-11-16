@@ -21,16 +21,19 @@ export const APPROVALS_SORTS: ReadonlyArray<{ id: ApprovalsSort; label: string }
 
 const SORT_KEY = 'pane-approvals-sort';
 
+/** The sort until the person picks one. */
+const DEFAULT_APPROVALS_SORT: ApprovalsSort = 'session';
+
 export function parseApprovalsSort(value: string | null): ApprovalsSort {
-  return APPROVALS_SORTS.find((sort) => sort.id === value)?.id ?? 'recent';
+  return APPROVALS_SORTS.find((sort) => sort.id === value)?.id ?? DEFAULT_APPROVALS_SORT;
 }
 
-/** The sort this computer last chose. A bad value or a blocked store reads as Most recent. */
+/** The sort this computer last chose. No choice, a bad value or a blocked store reads as By Session. */
 export function readApprovalsSort(read: () => string | null = () => localStorage.getItem(SORT_KEY)): ApprovalsSort {
   try {
     return parseApprovalsSort(read());
   } catch {
-    return 'recent';
+    return DEFAULT_APPROVALS_SORT;
   }
 }
 
