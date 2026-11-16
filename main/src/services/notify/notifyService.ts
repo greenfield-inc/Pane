@@ -28,7 +28,6 @@ import {
 } from '../../../../shared/types/notify';
 import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed } from './notifyQueue';
 import { PaneError } from '../../../../shared/paneError';
-import { fitLinks } from './cardCheck';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
@@ -251,15 +250,21 @@ export class NotifyService {
       const once = `${entry.panelId}:${entry.at}`;
       if (carded.has(once)) continue;
       carded.add(once);
+      // Carded already: its status file isn't read again on every inbox change.
+      if (this.queue.holdsWorkerQuestion(entry.id)) continue;
+      // A worker on another machine names it: the card says where to go to see its tab.
+      const machine = this.deps.memberMachine?.(entry.paneId);
       const session = this.deps.sessionRecord?.(entry.sessionId);
       // The status file's needs_you, never its JSON: the question's why, its options and files.
       // Tidied when the question is an old paragraph (P8); a report recorded before the check stays as sent.
-      const card = workerCard(entry.report?.summary, question, { quietly: true, summaryPath: entry.report?.summaryPath });
-      // D-81: the worker's status file, which its report named, opens beside the card.
-      const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
-      const { links, context } = fitLinks([...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)], card.context);
-      // A worker on another machine names it: the card says where to go to see its tab.
-      const machine = this.deps.memberMachine?.(entry.paneId);
+      // D-81: the worker's status file, which its report named, opens beside the card. Only this
+      // machine's own file is read: another machine's path names a file over there.
+      const card = workerCard(entry.report?.summary, question, {
+        quietly: true,
+        summaryPath: entry.report?.summaryPath,
+        readStatusFile: entry.report?.summaryTruncated === true && !machine,
+        statusLabel: `${entry.paneName} status`,
+      });
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: machine ? `${entry.paneName} on ${machine}` : entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
       this.queue.addWorkerQuestion({
@@ -269,8 +274,8 @@ export class NotifyService {
         at,
         // The Session it was filed in, even after the worker has moved or the Session closed.
         connected: { kind: 'session', id: entry.sessionId, name: session?.name ?? 'Closed Session', paneId: session?.paneId ?? '' },
-        links: links.length ? links : undefined,
-        context,
+        links: card.links,
+        context: card.context,
         choices: card.choices,
         questions: card.questions,
         asSent: card.asSent,
