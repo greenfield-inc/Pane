@@ -50,7 +50,7 @@ describe('CleanupEngine', () => {
     expect(run.removed.map(entry => path.basename(entry.path)).sort()).toEqual(['backup.bak', 'u-old']);
     expect(run.freedBytes).toBe(2500);
     expect(existsSync(snapshot)).toBe(false);
-    expect(readdirSync(path.join(root, 'pane', 'updates')).filter(name => name !== '.pane-trash')).toEqual([]);
+    expect(readdirSync(path.join(root, 'pane', 'updates'))).toEqual([]);
     expect(cleanup.history()).toHaveLength(1);
   });
 
@@ -100,7 +100,7 @@ describe('CleanupEngine', () => {
 
     const next = engine([]);
     await next.cleanup.finishPendingDeletes();
-    expect(existsSync(trash) ? readdirSync(trash) : []).toEqual([]);
+    expect(existsSync(trash)).toBe(false);
   });
 
   it('skips an item that changed since the inventory was taken', async () => {

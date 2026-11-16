@@ -1,5 +1,5 @@
 import { randomBytes } from 'crypto';
-import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'fs/promises';
+import { mkdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from 'fs/promises';
 import * as path from 'path';
 import { PaneError } from '../../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
@@ -73,6 +73,8 @@ const inside = (child: string, parent: string) => child === parent || child.star
 async function removeTree(target: string): Promise<void> {
   // Windows can hold a just-closed handle briefly: retry EBUSY/EPERM as archive cleanup does.
   await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  // Drop the trash folder once it is empty; rmdir refuses while anything is left in it.
+  await rmdir(path.dirname(target)).catch(() => undefined);
 }
 
 /**
