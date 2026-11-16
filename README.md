@@ -299,7 +299,11 @@ The prompt stays small because Pane ships its skills and installs them into the 
 
 The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and four Pane-specific skills, `runpane`, `pane-orchestration` (the orchestrator guide), `pane-work`, and `migrate-to-pane`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime. The skills that come from Agent Farm were last refreshed from its greenfield plugin at `a903f09` (Agent Farm 0.2.33): to refresh them, three-way merge each skill from that commit to the new one (`git merge-file`), keeping Pane's adaptations, and record the new commit here.
 
-Pane Chat and named Sessions support Claude, Codex, Cursor, OpenCode, and Pi. Choose the agent when creating a Session, and set the default in AI & Agents settings. OpenCode reads the generated Session `AGENTS.md`; this does not install OpenCode skills or MCP configuration.
+Pane Chat and named Sessions support Claude, Codex, Cursor, OpenCode, and Pi. Choose the agent when creating a Session, and set the default in AI & Agents settings. OpenCode reads the generated Session `AGENTS.md`, and OpenCode tabs Pane starts get Pane's tools for that launch through `OPENCODE_CONFIG_CONTENT`; Pane doesn't edit OpenCode's own config or install OpenCode skills.
+
+## Phone simulators
+
+Any agent in a Pane can boot an iOS Simulator or Android emulator, see it, drive it, and build an app to it with the `device_*` tools (or `runpane devices`). The live screen opens in a tab beside the agent, and chat tabs show a live card. On Windows and Linux, iOS runs on a Mac you linked, with no SSH: Pane syncs the worktree there and builds it. Panes share a small pool of simulators that shut down when idle. See [Devices](docs/DEVICES.md).
 
 ---
 

@@ -413,6 +413,17 @@ never \`ask\`. Pane saves the value as a Pane secret and returns only saved or
 declined; run commands with it through \`runpane secrets exec\`. If it returns
 \`unavailable\`, ask the person to save it in Pane under Settings > Secrets.
 
+## Phone simulators
+
+To see or test an iOS or Android app, call \`device_open\` (or
+\`runpane devices open --platform ios|android --json\`). Pane boots a shared
+simulator for this Pane and shows it in a tab beside you; on a computer without
+Xcode, iOS runs on a linked Mac. Then \`device_run\` builds and runs the app
+there (\`--background\` for Metro), \`device_act\` drives it with agent-device
+commands (\`open <app id>\`, \`snapshot -i\`, \`press @eN --settle\`), and
+\`device_screenshot\` shows you the screen. Call \`device_close\` when done, so
+another Pane can use it. \`runpane docs read --doc DEVICES.md\` has the rest.
+
 ## Restyle Pane
 
 Only when the person asks to change how Pane itself looks: call \`theme_read\`
