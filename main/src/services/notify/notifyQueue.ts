@@ -518,9 +518,13 @@ export class NotifyQueue extends EventEmitter {
    * orchestrator relays it or after the grace (D-79's intent: orchestrators answer first what the
    * plan settles). Its asker is its tab, since a worker has no call open.
    */
+  /** Whether a worker's question is carded already: this start, or days ago with the card since answered and off the list. */
+  holdsWorkerQuestion(id: string): boolean {
+    return this.entries.has(id) || this.isRewrittenFrom(id) || Boolean(this.env.store?.readItem(id));
+  }
+
   addWorkerQuestion(question: WorkerQuestion): void {
-    // Already carded: this start, or days ago with the card since answered and off the list.
-    if (this.entries.has(question.id) || this.isRewrittenFrom(question.id) || this.env.store?.readItem(question.id)) return;
+    if (this.holdsWorkerQuestion(question.id)) return;
     const item: NotifyItem = {
       id: question.id,
       ui: question.choices?.length || question.questions?.length ? 'options' : 'ask',

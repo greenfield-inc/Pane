@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -161,7 +162,7 @@ describe("a worker's status file longer than the journal keeps", () => {
     const journaled = journalAgentReport(normalizeAgentReport({ state: 'blocked', question: 'Q-7: Four UI kit calls before the screens', summary: full, summaryPath: statusPath }, '2026-11-16T09:00:00.000Z'));
     expect(full.indexOf('"files"')).toBeGreaterThan(2_000);
 
-    const card = workerCard(journaled.summary, 'Q-7: Four UI kit calls before the screens', { quietly: true, summaryPath: statusPath });
+    const card = workerCard(journaled.summary, 'Q-7: Four UI kit calls before the screens', { quietly: true, summaryPath: statusPath, readStatusFile: journaled.summaryTruncated });
 
     expect(card.questions?.map(question => [question.title, question.choices.map(choice => choice.label)])).toEqual([
       ['Which type scale?', ['Major third', 'Perfect fourth', 'Golden ratio']],
@@ -175,5 +176,36 @@ describe("a worker's status file longer than the journal keeps", () => {
       { label: 'cover-sheet.html', path: '/work/glassly/bundle/cover-sheet.html' },
     ]);
     expect(card.summaryPage).toBe('options.html');
+  });
+
+  const cutReport = (summaryPath: string) => journalAgentReport(normalizeAgentReport({ state: 'blocked', question: 'Q-8: Pick one', summary: `{"step": "Waiting on Q-8", "log": "${'s'.repeat(2_100)}"}`, summaryPath }, '2026-11-16T09:00:00.000Z'));
+  const tempPath = (name: string) => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'worker-status-')), name);
+
+  it('keeps the cut summary when the file is prose or a pipe, and never waits on the pipe', () => {
+    const prose = tempPath('notes.txt');
+    fs.writeFileSync(prose, 'Private notes that are not a status file.');
+    const fifo = tempPath('status.fifo');
+    execFileSync('mkfifo', [fifo]);
+    for (const summaryPath of [prose, fifo]) {
+      const card = workerCard(cutReport(summaryPath).summary, 'Q-8: Pick one', { quietly: true, summaryPath, readStatusFile: true });
+      expect(card.context).toBe('Waiting on Q-8');
+    }
+  });
+
+  it('tells the worker when needs_you sits past the first 256 KB', () => {
+    const big = tempPath('status.json');
+    fs.writeFileSync(big, JSON.stringify({ step: 'Late step', log: 'x'.repeat(300 * 1024), needs_you: { questions: [{ q: 'Ship?', options: ['Ship (recommended)', 'Wait'] }] } }));
+    const card = workerCard(cutReport(big).summary, 'Q-8: Pick one', { quietly: true, summaryPath: big, readStatusFile: true });
+    expect(card.choices).toBeUndefined();
+    expect(card.warnings).toEqual([expect.stringContaining('over 256 KB')]);
+  });
+
+  it('shows the status link and the first files, and names the files it has no room for', () => {
+    const many = tempPath('status.json');
+    const files = Array.from({ length: 8 }, (_, index) => `/w/page-${index + 1}.html`);
+    fs.writeFileSync(many, JSON.stringify({ step: 's'.repeat(2_100), needs_you: { why: 'Eight pages to read.', questions: [{ q: 'Ship?', options: ['Ship (recommended)', 'Wait'] }], files } }));
+    const card = workerCard(cutReport(many).summary, 'Q-8: Pick one', { quietly: true, summaryPath: many, readStatusFile: true, statusLabel: 'kit status' });
+    expect(card.links?.map(link => link.label)).toEqual(['kit status', 'page-1.html', 'page-2.html', 'page-3.html', 'page-4.html', 'page-5.html']);
+    expect(card.context).toContain('More links: page-6.html, page-7.html, page-8.html');
   });
 });

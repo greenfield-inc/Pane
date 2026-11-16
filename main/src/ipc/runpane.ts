@@ -1971,7 +1971,7 @@ export function registerRunpaneHandlers(
       }
       const report = normalizeAgentReport(normalized, new Date().toISOString());
       // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
-      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath }).warnings : [];
+      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath, readStatusFile: report.summaryTruncated }).warnings : [];
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
       else await storePanelAgentReport(panel, report);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
