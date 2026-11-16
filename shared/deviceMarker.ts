@@ -12,6 +12,20 @@ const resultSchema = boundary.object({
   }),
 });
 
+const openedSchema = boundary.object({ name: boundary.string, os: boundary.optional(boundary.string), machine: boundary.string, openedBy: boundary.string });
+
+/** The device tabs `chatPanelId`'s agent opened, as markers for its chat cards. */
+export function devicesOpenedBy(panels: readonly ToolPanel[], chatPanelId: string): DeviceOpenMarker[] {
+  return panels.flatMap(panel => {
+    if (panel.type !== 'device') return [];
+    const state = decodeOptionalBoundary(panel.state.customState, openedSchema);
+    if (state?.openedBy !== chatPanelId) return [];
+    const marker: DeviceOpenMarker = { kind: 'pane-device', panelId: panel.id, name: state.name, machine: state.machine };
+    if (state.os) marker.os = state.os;
+    return [marker];
+  });
+}
+
 const phaseSchema = boundary.object({ phase: boundary.enumeration('installing', 'booting', 'live', 'off', 'in-use', 'closed', 'no-mac', 'mac-offline', 'error') });
 
 function markerIn(text: string): DeviceOpenMarker | undefined {

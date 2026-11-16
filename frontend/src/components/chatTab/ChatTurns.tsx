@@ -106,6 +106,12 @@ function deviceMarkers(items: readonly TurnItem[]) {
   return items.flatMap(item => item.type === 'steps' ? item.groups.flatMap(group => group.steps.length === 1 ? [deviceMarkerOf(group.steps[0].output)] : []) : []).filter(marker => marker !== undefined);
 }
 
+/** Cards that stay in view under a folded turn: its own device_open steps, and on the latest turn the tabs its agent opened that no step names. */
+function pinnedMarkers(items: readonly TurnItem[], openedHere: readonly NonNullable<ReturnType<typeof deviceMarkerOf>>[]) {
+  const own = deviceMarkers(items);
+  return [...own, ...openedHere.filter(marker => !own.some(step => step.panelId === marker.panelId))];
+}
+
 function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
   const marker = actions.device && group.steps.length === 1 && group.steps[0].status === 'completed' ? deviceMarkerOf(group.steps[0].output) : undefined;
   if (marker && actions.device) return <DeviceStepRow anchorId={group.id} marker={marker} device={actions.device} />;
@@ -228,7 +234,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
     <UserMessage turn={turn} />
     <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {fold}
-    {!open && actions.device && deviceMarkers(activity).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} device={actions.device!} />)}
+    {!open && actions.device && pinnedMarkers(activity, latest ? actions.device.openedHere : []).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} device={actions.device!} />)}
     <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}

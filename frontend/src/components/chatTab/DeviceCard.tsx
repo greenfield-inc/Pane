@@ -8,6 +8,8 @@ const FRAME_MS = 1_000;
 
 /** What a chat client gives its device cards: the device tab's phase, its frames, and how to open it. */
 export interface ChatDeviceActions {
+  /** Device tabs this chat's agent opened; their cards show under the latest turn when no step carried one. */
+  openedHere: readonly DeviceOpenMarker[];
   phase(panelId: string): DevicePanelPhase | undefined;
   frame(panelId: string): Promise<string | undefined>;
   open(panelId: string): void;

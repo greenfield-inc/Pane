@@ -1,6 +1,6 @@
 import { usePanelStore } from '../../stores/panelStore';
 import { openPaneTarget } from '../terminal/openPaneLink';
-import { devicePhaseOf } from '../../../../shared/deviceMarker';
+import { devicePhaseOf, devicesOpenedBy } from '../../../../shared/deviceMarker';
 import { useMemo } from 'react';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
@@ -46,6 +46,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     onViewDiff: file => void openFileInEditor({ sessionId: panel.sessionId, filePath: worktreeRelative(file, cwd), pin: true, diff: { kind: 'scope', scope: { kind: 'session' } } })
       .catch(error => showActionError('Could not open the diff', error)),
     device: {
+      openedHere: devicesOpenedBy(paneTabs ?? [], panel.id),
       phase: panelId => devicePhaseOf(paneTabs ?? [], panelId),
       frame: async panelId => {
         const response = await window.electronAPI.devices.frame(panelId);
