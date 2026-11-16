@@ -279,9 +279,16 @@ function idleState({ machine, state, needsLink, tailscaleOnly, tailnetListed }: 
   return { presence: 'solid', stateText: 'Saved', action: 'switch' };
 }
 
+/** The switcher's Hosting row: "Hosting · 2 clients connected", or "Hosting offline". */
+export interface HostingSummary {
+  label: string;
+  detail?: string;
+  state: 'live' | 'error';
+}
+
 /** Set when this machine is also hosting, so the switcher can link to it. */
-export function getHostingSummary(hostState: Pick<RemoteDaemonHostRuntimeState, 'status' | 'connectedClients'>): string | null {
+export function getHostingSummary(hostState: Pick<RemoteDaemonHostRuntimeState, 'status' | 'connectedClients'>): HostingSummary | null {
   const clientCount = hostState.connectedClients.length;
-  if (hostState.status === 'live') return `Hosting · ${clientCount} ${clientCount === 1 ? 'client' : 'clients'} connected`;
-  return hostState.status === 'error' ? 'Hosting offline' : null;
+  if (hostState.status === 'live') return { label: 'Hosting', detail: `${clientCount} ${clientCount === 1 ? 'client' : 'clients'} connected`, state: 'live' };
+  return hostState.status === 'error' ? { label: 'Hosting offline', state: 'error' } : null;
 }

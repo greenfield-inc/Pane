@@ -1,12 +1,13 @@
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from 'react';
 import { Plus, Radio, Settings } from 'lucide-react';
-import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
+import { Dropdown, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { MachineMarkEditor } from './machines/MachineMarkEditor';
-import { RoutePills } from './settings/computers/RoutePills';
+import { RoutePillView } from './settings/computers/RoutePills';
 import { useAddDeviceStore } from './addDevice/addDeviceStore';
 import { showActionError } from '../stores/errorStore';
-import type { MachineEntry } from '../utils/machineList';
+import { cn } from '../utils/cn';
+import type { HostingSummary, MachineEntry, RoutePill } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 
 interface RemoteHostSwitcherProps {
@@ -14,7 +15,7 @@ interface RemoteHostSwitcherProps {
   position: DropdownProps['position'];
   machines: MachineEntry[];
   switching: boolean;
-  hostingSummary: string | null;
+  hostingSummary: HostingSummary | null;
   onSelect: (machine: MachineEntry) => Promise<MachineSelectOutcome>;
   /** A machine that needs its password opens Remote Access with its password field. */
   onNeedsPassword: (machine: MachineEntry) => void;
@@ -31,6 +32,71 @@ function unpickable(machine: MachineEntry): boolean {
   return machine.action === 'none' && !machine.active;
 }
 
+/** The route a machine is connected on now, when it is online: the one pill its row shows. */
+function routeInUse(machine: MachineEntry): RoutePill | undefined {
+  if (machine.kind !== 'computer' || machine.presence === 'dimmed') return undefined;
+  return machine.routes?.find((route) => route.inUse && !route.down);
+}
+
+/** Each machine's round trip in ms, measured once when the menu opens; undefined until it answers, null when it did not. */
+type Latencies = Record<string, number | null | undefined>;
+
+/**
+ * Line two of a machine row. Connected: the route pill, its latency and the OS. Otherwise the
+ * subtitle says what it is ("Windows · Last seen 2 h ago"). The latency keeps one fixed box while
+ * "…" turns into a number, so the OS after it never moves.
+ */
+function MachineLine({ machine, latency }: { machine: MachineEntry; latency: number | null | undefined }) {
+  const route = routeInUse(machine);
+  if (!route) return <>{machine.subtitle}</>;
+  const text = latency === undefined ? '…' : latency === null ? '—' : `${latency} ms`;
+  return (
+    <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
+      <RoutePillView route={route} />
+      <span
+        className="w-11 flex-none tabular-nums text-text-secondary"
+        aria-label={latency === undefined ? 'Measuring latency' : latency === null ? 'No answer' : `${latency} milliseconds`}
+      >{text}</span>
+      {machine.os && <span className="truncate">{machine.os}</span>}
+    </span>
+  );
+}
+
+/** A footer row: its icon centred in the same 28 px column as the machine marks, so every label lines up. */
+function MenuAction({ icon: Icon, label, detail, dot, onClick }: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  detail?: ReactNode;
+  dot?: 'live' | 'error';
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'group flex min-h-[2rem] w-full items-center gap-2 rounded px-2.5 py-1 text-left text-[13px]',
+        'text-text-secondary hover:bg-bg-hover hover:text-text-primary',
+        'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle',
+      )}
+    >
+      <span className="relative flex h-5 w-7 flex-none items-center justify-center">
+        <Icon className="h-3.5 w-3.5 stroke-[1.5] text-text-tertiary group-hover:text-text-secondary" />
+        {dot && (
+          <span
+            aria-hidden="true"
+            className={cn('absolute right-1 top-0 h-1.5 w-1.5 rounded-full ring-2 ring-surface-primary', dot === 'live' ? 'bg-status-success' : 'bg-status-error')}
+          />
+        )}
+      </span>
+      <span className="min-w-0 flex-1 truncate">
+        {label}
+        {detail && <span className="text-text-tertiary group-hover:text-text-secondary"> · {detail}</span>}
+      </span>
+    </button>
+  );
+}
+
 /** A digit typed into a field, or anywhere in a dialog such as a machine's mark editor, is not a machine pick. */
 function typingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -38,7 +104,7 @@ function typingTarget(target: EventTarget | null): boolean {
     || target.closest('[role="dialog"]') !== null;
 }
 
-/** Picks which computer runs agents: this computer, a saved computer with its routes as pills, or any machine on Tailscale. */
+/** Picks which computer runs agents: this computer, a saved computer with the route it is on and its latency, or any machine on Tailscale. */
 export function RemoteHostSwitcher({
   trigger,
   position,
@@ -58,17 +124,27 @@ export function RemoteHostSwitcher({
     else showActionError(`Could not switch to ${machine.name}`, outcome.error);
   };
 
+  const [open, setOpen] = useState(false);
+  // One measurement per connected machine each time the menu opens, kept until it closes; nothing runs while it is closed.
+  const [latencies, setLatencies] = useState<Latencies>({});
+  const machinesRef = useRef(machines);
+  machinesRef.current = machines;
+  useEffect(() => {
+    if (!open) return undefined;
+    let current = true;
+    const record = (id: string, latency: number | null) => { if (current) setLatencies((before) => ({ ...before, [id]: latency })); };
+    for (const machine of machinesRef.current) {
+      if (!routeInUse(machine)) continue;
+      window.electronAPI.machines.latency(machine.id).then((latency) => record(machine.id, latency), () => record(machine.id, null));
+    }
+    return () => { current = false; setLatencies({}); };
+  }, [open]);
+
   const items: DropdownItem[] = machines.map((machine) => ({
     id: machine.id,
-    // The pills sit on the name's line, clear of the pencil that shows on hover.
-    label: (
-      <span className="flex min-w-0 items-center gap-3">
-        <span className="min-w-[5rem] flex-1 truncate font-medium">{machine.name}</span>
-        {/* Many routes wrap onto a second line instead of running under the pencil. */}
-        <RoutePills routes={machine.routes ?? []} className="min-w-0 flex-initial" />
-      </span>
-    ),
-    description: machine.subtitle,
+    // The name has line one to itself; the route in use and its latency lead line two.
+    label: <span className="block truncate font-medium">{machine.name}</span>,
+    description: <MachineLine machine={machine} latency={latencies[machine.id]} />,
     // A disabled row dims its mark and name, so the mark stays solid inside it.
     leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
     // Its letters and colour can change on this computer, whether or not it can be picked now.
@@ -90,7 +166,6 @@ export function RemoteHostSwitcher({
 
   // While the switcher is open, 0 picks All machines and 1 to 9 the machines
   // in its order (P6), by choosing that row as a click would.
-  const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -128,10 +203,10 @@ export function RemoteHostSwitcher({
       footer={({ close }) => (
         <>
           {hostingSummary && (
-            <DropdownMenuItem icon={Radio} label={hostingSummary} onClick={() => { close(); onOpenRemoteAccess(); }} />
+            <MenuAction icon={Radio} label={hostingSummary.label} detail={hostingSummary.detail} dot={hostingSummary.state} onClick={() => { close(); onOpenRemoteAccess(); }} />
           )}
-          <DropdownMenuItem icon={Plus} label="Add a device…" onClick={() => { close(); useAddDeviceStore.getState().open('computer'); }} />
-          <DropdownMenuItem icon={Settings} label="Remote Access settings…" onClick={() => { close(); onOpenRemoteAccess(); }} />
+          <MenuAction icon={Plus} label="Add a device…" onClick={() => { close(); useAddDeviceStore.getState().open('computer'); }} />
+          <MenuAction icon={Settings} label="Remote Access settings…" onClick={() => { close(); onOpenRemoteAccess(); }} />
         </>
       )}
     />

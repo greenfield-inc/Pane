@@ -26,7 +26,7 @@ import {
 const RETRY_AFTER_GIVE_UP_MS = 60_000;
 
 type RemoteClientOptions = NonNullable<ConstructorParameters<typeof RemotePaneClient>[1]>;
-export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream'>;
+export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream' | 'measureLatency'>;
 export type CreateMachineClient = (profile: RemotePaneConnectionProfile, options: RemoteClientOptions) => MachineClient;
 
 export interface MachineConnectionsDeps {
@@ -163,6 +163,14 @@ export class MachineConnections {
     const machine = this.machines.get(machineId);
     if (!machine) throw unknownMachine(machineId);
     return machine.client.openPortStream(port);
+  }
+
+  /** A saved machine's round trip in ms over the route it is connected on; null when it is not online or does not answer. */
+  async measureLatency(machineId: string): Promise<number | null> {
+    const machine = this.machines.get(machineId);
+    if (!machine) throw unknownMachine(machineId);
+    if (machine.state.status !== 'online') return null;
+    return machine.client.measureLatency();
   }
 
   /** A saved machine's current state, or undefined for an unknown id. */

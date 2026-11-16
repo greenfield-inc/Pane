@@ -1547,3 +1547,22 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<voi
 async function sleep(timeoutMs: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, timeoutMs));
 }
+
+describe('RemotePaneClient latency', () => {
+  it('measures the round trip to the host, and answers null when nothing is there', async () => {
+    // A host that takes 40 ms to answer: one round trip, so not the sum of two.
+    const server = http.createServer((_request, response) => { setTimeout(() => response.end('ok'), 40); });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    // SAFETY: a server listening on a host and port reports an AddressInfo.
+    const address = server.address() as import('net').AddressInfo;
+    const profile = { id: 'box', label: 'Box', token: 't', transport: 'http+sse' as const };
+    try {
+      const ms = await new RemotePaneClient({ ...profile, baseUrl: `http://127.0.0.1:${address.port}` }).measureLatency();
+      expect(ms).toBeGreaterThanOrEqual(39);
+      expect(ms).toBeLessThan(80);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    expect(await new RemotePaneClient({ ...profile, baseUrl: `http://127.0.0.1:${address.port}` }).measureLatency(1_000)).toBeNull();
+  });
+});

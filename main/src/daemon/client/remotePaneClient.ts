@@ -661,6 +661,22 @@ export class RemotePaneClient {
       : { kind: 'unreachable', detail: result.message };
   }
 
+  /**
+   * The round trip to the host over the route in use, in whole ms: the faster of two GET /health on
+   * a kept-alive connection, so a new connection's handshake does not count. Null when it does not answer.
+   */
+  async measureLatency(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<number | null> {
+    const endpoint = new URL('health', this.normalizedBaseUrl);
+    let fastest = Number.POSITIVE_INFINITY;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const startedAt = performance.now();
+      const result = await this.timedGet(endpoint, {}, timeoutMs, this.currentProfile, { reuseConnection: true });
+      if (!('statusCode' in result) || PROXY_BACKEND_DOWN_STATUSES.has(result.statusCode)) break;
+      fastest = Math.min(fastest, performance.now() - startedAt);
+    }
+    return Number.isFinite(fastest) ? Math.max(1, Math.round(fastest)) : null;
+  }
+
   /** Whether the host accepts this profile's sign-in, without opening an event stream. */
   async checkSignIn(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<'accepted' | 'rejected'> {
     const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'events');
@@ -675,10 +691,11 @@ export class RemotePaneClient {
     headers: http.OutgoingHttpHeaders,
     timeoutMs: number,
     profile: RemotePaneConnectionProfile = this.currentProfile,
+    { reuseConnection = false }: { reuseConnection?: boolean } = {},
   ): Promise<{ statusCode: number } | { code: string | undefined; message: string }> {
     const options = this.buildRequestOptions(endpoint, { method: 'GET', headers }, profile);
     // A probe tests the route itself, so it opens its own connection: a kept-alive socket from before a network change may be dead.
-    options.agent ??= false;
+    if (!reuseConnection) options.agent ??= false;
     return new Promise((resolve) => {
       const request = createRequest(endpoint, options, (response) => {
         response.resume();

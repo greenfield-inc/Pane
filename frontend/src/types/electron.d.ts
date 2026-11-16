@@ -833,6 +833,8 @@ interface ElectronAPI {
     run: (machineId: string, command: MachineCommand) => Promise<MachineResult>;
     /** Reconnects an offline saved machine now. */
     retry: (machineId: string) => Promise<void>;
+    /** A saved machine's round trip in ms over the route it is connected on; null when it is offline or does not answer. */
+    latency: (machineId: string) => Promise<number | null>;
     /** Every machine's list, Notify and permission events, resyncs and online/offline changes. */
     onEvent: (callback: (event: MachineConnectionsEvent) => void) => () => void;
   };

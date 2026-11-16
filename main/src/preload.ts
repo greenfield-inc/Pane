@@ -1441,6 +1441,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('machines:read', machineId, channel, args),
     run: (machineId: string, command: MachineCommand): Promise<MachineResult> => ipcRenderer.invoke('machines:run', machineId, command),
     retry: (machineId: string): Promise<void> => ipcRenderer.invoke('machines:retry', machineId),
+    latency: (machineId: string): Promise<number | null> => ipcRenderer.invoke('machines:latency', machineId),
     onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, event: MachineConnectionsEvent) => callback(event);
       ipcRenderer.on('machines:event', listener);

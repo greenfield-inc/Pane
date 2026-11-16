@@ -47,6 +47,8 @@ function setup(ids: string[]) {
         retryNow: vi.fn(async () => undefined),
         suspend: vi.fn(),
         resume: vi.fn(),
+        openPortStream: vi.fn(),
+        measureLatency: vi.fn(async () => 4),
       };
       clients.set(saved.id, client);
       return client;
@@ -210,6 +212,14 @@ describe('MachineConnections', () => {
     expect([client('build-box').suspend, client('mini').suspend].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
     machines.resume();
     expect([client('build-box').resume, client('mini').resume].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
+  });
+
+  it('measures a machine only once it is online', async () => {
+    const { machines, client, connect } = setup(['build-box']);
+    expect(await machines.measureLatency('build-box')).toBeNull();
+    expect(client('build-box').measureLatency).not.toHaveBeenCalled();
+    connect('build-box');
+    expect(await machines.measureLatency('build-box')).toBe(4);
   });
 
   it('refuses a write to an offline machine before sending it', async () => {
