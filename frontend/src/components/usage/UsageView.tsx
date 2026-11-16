@@ -14,6 +14,7 @@ import { LeaderboardTab } from './LeaderboardTab';
 import { settingDomId } from '../settings/catalog';
 import { PaneUsageSummary } from './PaneUsageSummary';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
+import { hasNoAgentTranscripts } from './usageEmptyState';
 import { presetCalendarRange, rollingUsageRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
@@ -411,7 +412,7 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
     ];
   }, [report]);
 
-  const bothRootsMissing = (report?.index.missingRoots.length ?? 0) >= 2;
+  const noAgentTranscripts = hasNoAgentTranscripts(report?.index);
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
@@ -576,13 +577,13 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}
           </div>
-        ) : bothRootsMissing ? (
+        ) : noAgentTranscripts ? (
           <div className="mx-auto max-w-lg rounded border border-border-primary bg-surface-secondary p-6 text-center">
             <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>
             <p className="text-xs text-text-secondary">
               Usage is read from the Claude Code and Codex transcript files in your home directory.
-              Neither <code className="font-mono">~/.claude/projects</code> nor{' '}
-              <code className="font-mono">~/.codex/sessions</code> exists yet — run an agent once and
+              Nothing was found in <code className="font-mono">~/.claude/projects</code> or{' '}
+              <code className="font-mono">~/.codex/sessions</code> yet — run an agent once and
               come back.
             </p>
           </div>
