@@ -837,7 +837,7 @@ export const RUNPANE_CONTRACT = {
       "mcpName": "device_open",
       "summary": "Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.",
       "usage": [
-        "runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]"
+        "runpane devices open --platform <ios|android> [--device <name-or-id>] [--focus|--no-focus] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -3423,11 +3423,11 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--no-focus",
-        "description": "Create the pane or panel in the background without changing focus."
+        "description": "Create the pane or panel, or open the tab or device, in the background without changing focus."
       },
       {
         "name": "--focus",
-        "description": "Explicitly focus the created pane or panel."
+        "description": "Explicitly focus the created pane or panel, or select the opened tab or device tab."
       },
       {
         "name": "--split",
@@ -3607,7 +3607,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
         "  runpane devices list [--json] [--pane-dir <path>]",
-        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--focus|--no-focus] [--json] [--pane-dir <path>]",
         "  runpane devices screenshot [--json] [--pane-dir <path>]",
         "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
         "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
@@ -5671,13 +5671,15 @@ export const RUNPANE_CONTRACT = {
       ],
       "devices open": [
         "Usage:",
-        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--focus|--no-focus] [--json] [--pane-dir <path>]",
         "",
-        "Leases a device to the calling tab's Pane and boots it. Without --device, Pane uses its own device (Pane iPhone or Pane_Android) and makes one from the newest installed runtime when needed. The first call on a machine installs Pane's device tools (agent-device and Expo's device hub), which takes a minute. When every device Pane may boot is held by another Pane, it waits up to 60 seconds, then fails with ERR_DEVICE_BUSY naming the holder. On a machine without Xcode, iOS opens on a linked Mac. Later device calls act on this device; you never pass it again.",
+        "Leases a device to the calling tab's Pane and boots it. Without --device, Pane uses its own device (Pane iPhone or Pane_Android) and makes one from the newest installed runtime when needed. The first call on a machine installs Pane's device tools (agent-device and Expo's device hub), which takes a minute. When every device Pane may boot is held by another Pane, it waits up to 60 seconds, then fails with ERR_DEVICE_BUSY naming the holder. On a machine without Xcode, iOS opens on a linked Mac. Later device calls act on this device; you never pass it again. A new device tab opens selected, in a split beside the agent. Opening again updates the open tab without selecting it, so the tab the person is in stays in front; pass --focus to select it anyway, or --no-focus to leave the selected tab alone either way.",
         "",
         "Options:",
         "  --platform <ios|android>       ios for an iOS simulator, android for an Android emulator",
         "  --device <name-or-id>          One of the person's own devices by name or id, from device_list. Leave it out to use Pane's own device",
+        "  --no-focus                     Open without selecting the device tab",
+        "  --focus                        Select the device tab, also when it is already open. Never raises or focuses the Pane window",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
       ],
@@ -5755,7 +5757,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "Commands:",
         "  runpane devices list [--json] [--pane-dir <path>]",
-        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--focus|--no-focus] [--json] [--pane-dir <path>]",
         "  runpane devices screenshot [--json] [--pane-dir <path>]",
         "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
         "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
@@ -7747,7 +7749,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "devices open": [
         "Usage:",
-        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--focus|--no-focus] [--json] [--pane-dir <path>]",
         "",
         "`runpane devices open` ships in the npm package and the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest devices open"
@@ -26583,7 +26585,7 @@ export const RUNPANE_CONTRACT = {
       "devices open": {
         "name": "devices open",
         "summary": "Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.",
-        "details": "Leases a device to the calling tab's Pane and boots it. Without --device, Pane uses its own device (Pane iPhone or Pane_Android) and makes one from the newest installed runtime when needed. The first call on a machine installs Pane's device tools (agent-device and Expo's device hub), which takes a minute. When every device Pane may boot is held by another Pane, it waits up to 60 seconds, then fails with ERR_DEVICE_BUSY naming the holder. On a machine without Xcode, iOS opens on a linked Mac. Later device calls act on this device; you never pass it again.",
+        "details": "Leases a device to the calling tab's Pane and boots it. Without --device, Pane uses its own device (Pane iPhone or Pane_Android) and makes one from the newest installed runtime when needed. The first call on a machine installs Pane's device tools (agent-device and Expo's device hub), which takes a minute. When every device Pane may boot is held by another Pane, it waits up to 60 seconds, then fails with ERR_DEVICE_BUSY naming the holder. On a machine without Xcode, iOS opens on a linked Mac. Later device calls act on this device; you never pass it again. A new device tab opens selected, in a split beside the agent. Opening again updates the open tab without selecting it, so the tab the person is in stays in front; pass --focus to select it anyway, or --no-focus to leave the selected tab alone either way.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -26598,6 +26600,16 @@ export const RUNPANE_CONTRACT = {
             "value": "<name-or-id>",
             "required": false,
             "description": "One of the person's own devices by name or id, from device_list. Leave it out to use Pane's own device."
+          },
+          {
+            "name": "--no-focus",
+            "required": false,
+            "description": "Open without selecting the device tab."
+          },
+          {
+            "name": "--focus",
+            "required": false,
+            "description": "Select the device tab, also when it is already open. Never raises or focuses the Pane window."
           },
           {
             "name": "--json",

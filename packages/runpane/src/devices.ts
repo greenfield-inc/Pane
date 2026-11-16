@@ -22,6 +22,9 @@ const actSchema = boundary.object({ ok: boundary.literal(true), exitCode: bounda
 const runSchema = boundary.object({ ok: boundary.literal(true), jobId: boundary.optional(boundary.string), state: boundary.optional(boundary.string), exitCode: boundary.optional(boundary.number), logTail: boundary.optional(boundary.string) });
 const freeSchema = boundary.object({ ok: boundary.literal(true), shutdown: boundary.array(boundary.string), deleted: boundary.array(boundary.string), checkouts: boundary.array(boundary.string), freedBytes: boundary.number });
 
+/** What `runpane:devices:open` takes. Without focus or noFocus, a new device tab is selected and an open one is left where it is. */
+interface DeviceOpenRequest { platform: 'ios' | 'android'; device?: string; noFocus?: true; focus?: true }
+
 /** What `runpane:devices:run` takes. */
 interface DeviceRunRequest { command?: string; background?: boolean; waitMs?: number; platform?: 'ios' | 'android' }
 
@@ -106,7 +109,13 @@ export async function runDevicesOpen(parsed: ParsedArgs): Promise<number> {
   if (platform !== 'ios' && platform !== 'android') {
     throw new RunpaneError('ERR_DEVICE_INVALID_REQUEST', 'runpane devices open needs --platform ios or --platform android. Nothing was opened.', 'Run `runpane devices open --platform ios`.');
   }
-  const request = parsed.deviceName ? { platform, device: parsed.deviceName } : { platform };
+  if (parsed.noFocus && parsed.focus) {
+    throw new RunpaneError('ERR_DEVICE_INVALID_REQUEST', 'runpane devices open takes --focus or --no-focus, not both. Nothing was opened.', 'Pass --no-focus to leave the selected tab alone, or --focus to select the device tab even when it is already open.');
+  }
+  const request: DeviceOpenRequest = { platform };
+  if (parsed.deviceName) request.device = parsed.deviceName;
+  if (parsed.noFocus) request.noFocus = true;
+  if (parsed.focus) request.focus = true;
   const result = await invokeDaemon('runpane:devices:open', [request], boundary.json, { paneDir: parsed.paneDir, timeoutMs: OPEN_TIMEOUT_MS });
   const { device } = decodeBoundary(result, openSchema);
   return print(parsed, result, `Opened ${device.name} · ${device.os} on ${device.machine}.`);

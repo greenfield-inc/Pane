@@ -2,8 +2,10 @@
 
 Any agent in a Pane can boot an iOS Simulator or an Android emulator, see it, drive it and
 build an app to it. The live screen opens in a device tab beside the agent, selected so it
-comes to the front, and chat tabs show a card at the step that opened it. On Windows and Linux, iOS runs on a Mac you linked,
-with no SSH setup.
+comes to the front, and chat tabs show a card at the step that opened it. Opening the device
+again updates that tab without selecting it, so a terminal the person is typing in stays in
+front; `--focus` selects it anyway and `--no-focus` opens without selecting it, as with
+`runpane panels open`. On Windows and Linux, iOS runs on a Mac you linked, with no SSH setup.
 
 ## The tools
 
