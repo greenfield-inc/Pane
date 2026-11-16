@@ -25,8 +25,8 @@ rsync -a ~/Photos backup:/photos && status done "Photos synced" || status error 
 | `state` | Tab status cue |
 | --- | --- |
 | `working` | Working. |
-| `blocked` | Blocked: a red dot, plus a desktop alert and a phone alert when the tab becomes blocked. In an agent tab, also `agent.blocked` in the Session journal. `msg` is the prompt line; `kind` (`permission`, `question`, `auth`) is in the status reason. |
-| `done`, `error` | Finished. The tab shows the done cue until you open it. The record itself ends when you type in the tab. |
+| `blocked` | Blocked: a red dot. When the tab becomes blocked, a desktop alert while Pane is in the background and a phone alert (at most one a minute per tab). In an agent tab, also `agent.blocked` in the Session journal. `msg` is the prompt line; `kind` (`permission`, `question`, `auth`) is in the status reason. |
+| `done`, `error` | Finished. While you're looking at another Pane, it shows the done cue until you open it. The record itself ends when you type in the tab. |
 | `idle` | Idle. |
 | `clear` | Removes the record, and the tab goes back to reading its screen. |
 
@@ -41,16 +41,21 @@ record.
 ## Precedence and lifetime
 
 A report outranks Pane's screen parsing and its output heuristics while the
-record lasts. When no record is left, the tab reads its screen again.
+record lasts, with one exception: when the screen shows an agent waiting on
+you (a permission or trust prompt) and the report isn't `blocked`, the tab
+shows blocked. Blocked is the most urgent state from either source. When no
+record is left, the tab reads its screen again.
 
-- `working`, `blocked` and `idle` end when the program exits: Pane's own shell
-  is back in the foreground. A full reset (`ESC c`) or a new shell prompt
-  (OSC 133 `A`) ends them too.
+- `working`, `blocked` and `idle` end when the program exits (Pane's own shell
+  is back in the foreground) or when an agent Pane recognizes takes the
+  foreground after the report, as when a wrapper reports and then starts
+  Claude. A full reset (`ESC c`) or a new shell prompt (OSC 133 `A`) ends them
+  too.
 - `done` and `error` stay after the program exits and end when you type in the
   tab.
 - On Windows, in WSL, and with the separate PTY host setting on, Pane cannot
-  see the foreground process, so records last until the program replaces or
-  clears them.
+  see the foreground process, so `working`, `blocked` and `idle` don't end
+  when the program exits. The other endings still apply.
 
 ## Rules Pane follows
 
@@ -59,8 +64,8 @@ record lasts. When no record is left, the tab reads its screen again.
 - A malformed pair is skipped. A report without a known `state`, with a bad
   `id`, with base64 that does not decode, with control characters in `msg` or
   `title`, or over the spec's size limits changes nothing.
-- Pane removes direction overrides and invisible formatting from `msg` and
-  `title` before showing them.
+- Pane removes format characters (direction overrides, zero-width and tag
+  characters) and line separators from `msg` and `title` before showing them.
 - Pane answers the feature-detection query `ESC ] 7501 ; ? ESC \` with
   `ESC ] 7501 ; ? ESC \`. The reply repeats the query, as the spec defines.
 - `progress` is accepted and not shown.
