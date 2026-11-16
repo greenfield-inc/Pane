@@ -1618,6 +1618,9 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
   await page.getByTestId('orchestration-session-alpha').click();
   const alphaChat = page.getByRole('heading', { name: 'Alpha', exact: true });
   await expect(alphaChat).toBeAttached({ timeout: 10_000 });
+  // The Session's terminal takes focus once it has finished opening. Wait for that before driving
+  // the menu by keyboard, or a slow open lands it in the middle and the next key goes to the terminal.
+  await expect(page.getByRole('textbox', { name: 'Terminal input' })).toBeFocused({ timeout: 10_000 });
 
   const actions = page.getByRole('button', { name: 'Actions for Alpha', exact: true });
   await actions.focus();
