@@ -68,6 +68,14 @@ describe('OtherApps.list', () => {
     ]);
   });
 
+  it('leaves out what this Pane started since the last sample, below a process the sample already credits', async () => {
+    // A dev build runs as Electron, so only its own tree keeps its agents out: tab shell 502 is credited, its new agent is not yet.
+    const table = [...macTable(), row(503, 'claude', 300, { ppid: 502, exe: '/Users/me/.local/share/claude/versions/2.1.322' }), row(504, '/opt/homebrew/bin/node', 80, { ppid: 503 })];
+    const list = await apps({ paneProcesses: () => new Set([502, 600]) }, [table]).apps.list();
+    expect(list.find(app => app.name === 'claude')?.processCount).toBe(1);
+    expect(list.find(app => app.name === 'node')?.processCount).toBe(2);
+  });
+
   it('marks which apps are grouped by executable name, so the confirm can say they span other terminals', async () => {
     const list = await apps().apps.list();
     expect(list.filter(app => app.byName).map(app => app.name)).toEqual(['claude', 'node', 'launchd', 'zsh']);

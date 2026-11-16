@@ -214,11 +214,13 @@ export class OtherApps {
     const own = new Set([this.deps.selfPid, ...this.deps.paneProcesses()]);
     const children = new Map<number, number[]>();
     for (const row of rows) if (row.pid !== row.ppid) children.set(row.ppid, [...(children.get(row.ppid) ?? []), row.pid]);
-    const queue = [this.deps.selfPid];
+    // Walk below every credited process too: an agent started since the last sample hangs under a credited tab shell.
+    const queue = [...own];
     for (let next = 0; next < queue.length; next++) {
       for (const child of children.get(queue[next]) ?? []) {
-        if (!own.has(child)) queue.push(child);
+        if (own.has(child)) continue;
         own.add(child);
+        queue.push(child);
       }
     }
     return own;
