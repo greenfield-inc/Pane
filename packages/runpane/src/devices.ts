@@ -20,10 +20,23 @@ const openSchema = boundary.object({ ok: boundary.literal(true), device: summary
 const screenshotSchema = boundary.object({ ok: boundary.literal(true), path: boundary.string });
 const actSchema = boundary.object({ ok: boundary.literal(true), exitCode: boundary.number, output: boundary.string });
 const runSchema = boundary.object({ ok: boundary.literal(true), jobId: boundary.optional(boundary.string), state: boundary.optional(boundary.string), exitCode: boundary.optional(boundary.number), logTail: boundary.optional(boundary.string) });
-const freeSchema = boundary.object({ ok: boundary.literal(true), shutdown: boundary.array(boundary.string), deleted: boundary.array(boundary.string) });
+const freeSchema = boundary.object({ ok: boundary.literal(true), shutdown: boundary.array(boundary.string), deleted: boundary.array(boundary.string), checkouts: boundary.array(boundary.string), freedBytes: boundary.number });
 
 /** What `runpane:devices:run` takes. */
-interface DeviceRunRequest { command?: string; background?: boolean; waitMs?: number }
+interface DeviceRunRequest { command?: string; background?: boolean; waitMs?: number; platform?: 'ios' | 'android' }
+
+/** Which of the Pane's devices a call acts on; Pane picks the one opened last when `platform` is absent. */
+interface DeviceTarget { platform?: 'ios' | 'android' }
+
+/** `--platform` for screenshot, act, run and close. */
+function targetPlatform(parsed: ParsedArgs, command: string): DeviceTarget {
+  const platform = parsed.devicePlatform;
+  if (platform === undefined) return {};
+  if (platform !== 'ios' && platform !== 'android') {
+    throw new RunpaneError('ERR_DEVICE_INVALID_REQUEST', `runpane devices ${command} takes --platform ios or --platform android, not "${platform}". Nothing ran.`, `Run \`runpane devices ${command} --platform ios\`, or leave --platform out for the device opened last.`);
+  }
+  return { platform };
+}
 
 /** Prints the daemon's result as JSON with --json, otherwise as `text`. */
 function print(parsed: ParsedArgs, result: JsonValue, text: string): number {
@@ -100,7 +113,7 @@ export async function runDevicesOpen(parsed: ParsedArgs): Promise<number> {
 }
 
 export async function runDevicesScreenshot(parsed: ParsedArgs): Promise<number> {
-  const result = await invokeDaemon('runpane:devices:screenshot', [{}], boundary.json, { paneDir: parsed.paneDir });
+  const result = await invokeDaemon('runpane:devices:screenshot', [targetPlatform(parsed, 'screenshot')], boundary.json, { paneDir: parsed.paneDir });
   return print(parsed, result, decodeBoundary(result, screenshotSchema).path);
 }
 
@@ -109,7 +122,7 @@ export async function runDevicesAct(parsed: ParsedArgs): Promise<number> {
   if (args.length === 0) {
     throw new RunpaneError('ERR_DEVICE_ACT_EMPTY', 'runpane devices act needs an agent-device command after --. Nothing ran.', 'Run `runpane devices act -- snapshot -i`.');
   }
-  const result = await invokeDaemon('runpane:devices:act', [{ args }], boundary.json, { paneDir: parsed.paneDir, timeoutMs: ACT_TIMEOUT_MS });
+  const result = await invokeDaemon('runpane:devices:act', [{ args, ...targetPlatform(parsed, 'act') }], boundary.json, { paneDir: parsed.paneDir, timeoutMs: ACT_TIMEOUT_MS });
   const { exitCode, output } = decodeBoundary(result, actSchema);
   print(parsed, result, output);
   return parsed.json ? 0 : exitCode;
@@ -118,7 +131,7 @@ export async function runDevicesAct(parsed: ParsedArgs): Promise<number> {
 export async function runDevicesRun(parsed: ParsedArgs): Promise<number> {
   const words = parsed.execCommand ?? [];
   const command = words.length === 1 ? words[0] : words.join(' ');
-  const request: DeviceRunRequest = {};
+  const request: DeviceRunRequest = { ...targetPlatform(parsed, 'run') };
   if (command.trim()) request.command = command;
   if (parsed.deviceBackground) request.background = true;
   if (parsed.deviceWaitMs !== undefined) request.waitMs = parsed.deviceWaitMs;
@@ -130,7 +143,7 @@ export async function runDevicesRun(parsed: ParsedArgs): Promise<number> {
 }
 
 export async function runDevicesClose(parsed: ParsedArgs): Promise<number> {
-  const result = await invokeDaemon('runpane:devices:close', [{}], boundary.json, { paneDir: parsed.paneDir });
+  const result = await invokeDaemon('runpane:devices:close', [targetPlatform(parsed, 'close')], boundary.json, { paneDir: parsed.paneDir });
   return print(parsed, result, 'Closed. The device stays warm for 10 minutes.');
 }
 
@@ -144,7 +157,8 @@ export async function runDevicesFree(parsed: ParsedArgs): Promise<number> {
     throw new RunpaneError('ERR_DEVICE_INVALID_REQUEST', 'runpane devices free needs exactly one of --idle or --all. Nothing was changed.', 'Run `runpane devices free --idle --yes`.');
   }
   await confirmMutation(parsed);
-  const result = await invokeDaemon('runpane:devices:free', [{ mode: parsed.all ? 'all' : 'idle' }], boundary.json, { paneDir: parsed.paneDir });
+  // Each device waits for its shutdown before it is deleted.
+  const result = await invokeDaemon('runpane:devices:free', [{ mode: parsed.all ? 'all' : 'idle' }], boundary.json, { paneDir: parsed.paneDir, timeoutMs: OPEN_TIMEOUT_MS });
   const freed = decodeBoundary(result, freeSchema);
-  return print(parsed, result, `Shut down ${freed.shutdown.length}, deleted ${freed.deleted.length}.`);
+  return print(parsed, result, `Shut down ${freed.shutdown.length}, deleted ${freed.deleted.length} devices and ${freed.checkouts.length} checkouts, freed ${Math.round(freed.freedBytes / 1_000_000)} MB.`);
 }

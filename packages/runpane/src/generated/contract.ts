@@ -840,7 +840,7 @@ export const RUNPANE_CONTRACT = {
       "mcpName": "device_screenshot",
       "summary": "Capture the screen of this Pane's open device as an image.",
       "usage": [
-        "runpane devices screenshot [--json] [--pane-dir <path>]"
+        "runpane devices screenshot [--platform <ios|android>] [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
         "core",
@@ -859,7 +859,7 @@ export const RUNPANE_CONTRACT = {
       "mcpName": "device_act",
       "summary": "Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.",
       "usage": [
-        "runpane devices act [--json] [--pane-dir <path>] -- <command>"
+        "runpane devices act [--platform <ios|android>] [--json] [--pane-dir <path>] -- <command>"
       ],
       "mutates": true,
       "toolsets": [
@@ -879,7 +879,7 @@ export const RUNPANE_CONTRACT = {
       "mcpName": "device_run",
       "summary": "Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.",
       "usage": [
-        "runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>"
+        "runpane devices run [--platform <ios|android>] [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>"
       ],
       "mutates": true,
       "openWorld": true,
@@ -898,9 +898,9 @@ export const RUNPANE_CONTRACT = {
     {
       "name": "devices close",
       "mcpName": "device_close",
-      "summary": "Release this Pane's device and stop the commands device_run started. The device stays warm for 10 minutes.",
+      "summary": "Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. The device stays warm for 10 minutes.",
       "usage": [
-        "runpane devices close [--json] [--pane-dir <path>]"
+        "runpane devices close [--platform <ios|android>] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "idempotent": true,
@@ -937,7 +937,7 @@ export const RUNPANE_CONTRACT = {
     {
       "name": "devices free",
       "mcpName": "device_free",
-      "summary": "Shut down unused devices (--idle), or also delete every unused device Pane made (--all).",
+      "summary": "Shut down unused devices (--idle), or also delete every unused device Pane made and the build checkouts no Pane holds (--all).",
       "usage": [
         "runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]"
       ],
@@ -3346,7 +3346,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--platform",
         "value": "<ios|android>",
-        "description": "devices open: ios or android."
+        "description": "devices open: ios or android. devices screenshot, act, run and close: which of the Pane's devices; defaults to the one opened last."
       },
       {
         "name": "--device",
@@ -18994,6 +18994,7 @@ export const RUNPANE_CONTRACT = {
               "devices",
               "helpers",
               "checkouts",
+              "runtimes",
               "slimSim"
             ],
             "properties": {
@@ -19094,6 +19095,32 @@ export const RUNPANE_CONTRACT = {
                   "additionalProperties": false
                 }
               },
+              "runtimes": {
+                "type": "array",
+                "description": "The OS runtimes and system images installed here, which devices are made from.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "platform",
+                    "name"
+                  ],
+                  "properties": {
+                    "platform": {
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
               "slimSim": {
                 "type": "boolean"
               }
@@ -19110,7 +19137,9 @@ export const RUNPANE_CONTRACT = {
         "ok",
         "machine",
         "shutdown",
-        "deleted"
+        "deleted",
+        "checkouts",
+        "freedBytes"
       ],
       "properties": {
         "ok": {
@@ -19130,6 +19159,17 @@ export const RUNPANE_CONTRACT = {
           "items": {
             "type": "string"
           }
+        },
+        "checkouts": {
+          "type": "array",
+          "description": "Build checkouts deleted (--all): those no Pane on this machine or a linked computer holds a device for.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "freedBytes": {
+          "type": "number",
+          "description": "Disk freed by the deleted devices and checkouts."
         }
       },
       "additionalProperties": false
@@ -26127,6 +26167,8 @@ export const RUNPANE_CONTRACT = {
       "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
+      "",
+      "Devices: the `device_*` MCP tools (or `runpane devices`) open an iOS simulator or Android emulator as a tab in the calling Pane, then drive it. `runpane docs read --doc docs/DEVICES.md` has the rest.",
       "",
       "MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = \"npx\"` and `args = [\"--yes\", \"runpane@latest\", \"mcp\"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too."
     ],

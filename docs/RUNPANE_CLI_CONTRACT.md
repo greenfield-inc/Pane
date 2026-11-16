@@ -337,9 +337,9 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `devices screenshot`: Capture the screen of this Pane's open device as an image.
 - `devices act`: Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.
 - `devices run`: Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.
-- `devices close`: Release this Pane's device and stop the commands device_run started. The device stays warm for 10 minutes.
+- `devices close`: Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. The device stays warm for 10 minutes.
 - `devices usage`: Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.
-- `devices free`: Shut down unused devices (--idle), or also delete every unused device Pane made (--all).
+- `devices free`: Shut down unused devices (--idle), or also delete every unused device Pane made and the build checkouts no Pane holds (--all).
 - `theme read`: Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.
 - `theme set`: Restyle Pane itself, only when the person asks to change Pane's look: write the Custom theme (a base theme, colour tokens and CSS) and select it, or switch to another theme. Pane restyles within a second.
 - `theme reset`: Delete the Custom theme and go back to the theme it was built on.
@@ -470,10 +470,10 @@ runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>].
 runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json] [--pane-dir <path>]
 runpane devices list [--json] [--pane-dir <path>]
 runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]
-runpane devices screenshot [--json] [--pane-dir <path>]
-runpane devices act [--json] [--pane-dir <path>] -- <command>
-runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>
-runpane devices close [--json] [--pane-dir <path>]
+runpane devices screenshot [--platform <ios|android>] [--json] [--pane-dir <path>]
+runpane devices act [--platform <ios|android>] [--json] [--pane-dir <path>] -- <command>
+runpane devices run [--platform <ios|android>] [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>
+runpane devices close [--platform <ios|android>] [--json] [--pane-dir <path>]
 runpane devices usage [--json] [--pane-dir <path>]
 runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]
 runpane theme read [--json] [--pane-dir <path>]
@@ -661,6 +661,8 @@ Pane: one per feature (one worktree, one branch). Before creating one, find the 
 When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question "<question>"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
+
+Devices: the `device_*` MCP tools (or `runpane devices`) open an iOS simulator or Android emulator as a tab in the calling Pane, then drive it. `runpane docs read --doc docs/DEVICES.md` has the rest.
 
 MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = "npx"` and `args = ["--yes", "runpane@latest", "mcp"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too.
 ```

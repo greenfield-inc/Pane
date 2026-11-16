@@ -295,7 +295,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
   ['--reason', ['secrets request', 'autopilot close']],
-  ['--platform', ['devices open']],
+  ['--platform', ['devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close']],
   ['--device', ['devices open']],
   ['--wait-ms', ['devices run']],
   ['--background', ['devices run']],

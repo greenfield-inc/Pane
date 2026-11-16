@@ -20,6 +20,11 @@ commands as `runpane devices`. Pane fills in the Pane, the device and the machin
 | `device_run` | `runpane devices run -- npx expo run:ios` | Runs a command where the device runs, such as a build, or Metro with `--background` |
 | `device_close` | `runpane devices close` | Ends the lease and stops the commands `device_run` started |
 
+A Pane can hold an iPhone and an Android emulator at once. `device_screenshot`, `device_act`,
+`device_run` and `device_close` act on the device it opened last; pass `--platform ios` or
+`--platform android` (the `platform` argument over MCP) to pick the other. `device_close`
+without a platform closes both.
+
 A typical session:
 
 ```sh
@@ -34,7 +39,9 @@ runpane devices close --json
 
 `device_act` passes any agent-device command through (`help workflow` lists them), pinned to
 the device this Pane holds. Flags that would pick another device, session or daemon
-(`--session`, `--device`, `--udid`, `--serial`, `--platform`) are refused.
+(`--session`, `--device`, `--udid`, `--serial`, `--platform`) are refused, and so are the
+commands that act on agent-device's shared daemon, sessions or connections (`daemon`,
+`session`, `connect`, `disconnect`, `proxy`, `batch`). Run batch steps as separate calls.
 
 ## Setup
 
@@ -83,6 +90,8 @@ its jobs on the Mac and removes its checkout there.
 | `ERR_DEVICE_NO_MAC` | No Mac is linked. Link one, as above. Android works on this computer meanwhile |
 | `ERR_DEVICE_MAC_OFFLINE` | The Mac is asleep or Pane isn't running there. Wake it, or pick another Mac in Settings |
 | `ERR_DEVICE_MAC_OUTDATED` | The Mac's Pane predates devices. Update it |
+| `ERR_DEVICE_MAC_NO_XCODE` | The Mac answers but has no Xcode with an iOS runtime. Install it there, or pick another Mac |
+| `ERR_DEVICE_MAC_TIMEOUT` | The Mac was still working when the call's time ran out (10 minutes for an open). Pass `--background` for long builds |
 
 ## Sharing and resources
 
@@ -98,8 +107,9 @@ Booted simulators are heavy, so Pane keeps few of them:
   to 60 seconds, then fails with `ERR_DEVICE_BUSY` naming the holder; **Take over** in the
   device tab moves the lease. When a device passes to another Pane, Pane uninstalls the apps
   the last Pane installed, without a reboot.
-- **Idle shutdown.** A lease that idles out shuts the device down at once; after
-  `device_close` it stays warm for 10 minutes. The helpers stop when nothing is booted.
+- **Idle shutdown.** A lease that idles out shuts down a device Pane made or booted at once;
+  a device you booted yourself keeps running. After `device_close` it stays warm for 10
+  minutes. A running `device_run` command counts as use. The helpers stop when nothing is booted.
 - **Erase and delete.** Archiving the last Pane that used one of Pane's devices erases it;
   Pane's devices unused for 7 days are deleted. Pane never deletes your devices or runtimes.
 - **SimSlim.** With [simslim](https://github.com/MobAI-App/simslim) installed
@@ -108,8 +118,10 @@ Booted simulators are heavy, so Pane keeps few of them:
 
 `runpane devices usage --json` lists every simulator and emulator on the machine (including
 ones made outside Pane, `paneMade: false`) with its OS, disk and, when booted, memory, plus the
-helpers' memory and the build checkouts. `runpane devices free --idle --yes` shuts down
-unused Pane devices; `--all` also deletes them.
+installed iOS runtimes and Android system images, the helpers' memory, and the build checkouts
+linked computers sync here. `runpane devices free --idle --yes` shuts down unused Pane
+devices; `--all` also deletes them and the checkouts no Pane holds a device for, and reports
+the disk freed.
 
 ## Phones and the browser app
 
@@ -120,6 +132,9 @@ browser app show the device card; the native app shows an **Open** row.
 ## Security
 
 The device hub listens on loopback only and requires a token, which stays in Pane's main
-process: it never reaches a tab, a log, a tool result or an agent. Device tools act only on
+process: it never reaches a tab, a log, a tool result or an agent. The hub also records its
+token in a state file, which Pane keeps in its own data folder (`devices/hub-state`) and
+deletes when the hub stops; the token guards the hub against other users of the computer.
+The device tab's own channels refuse calls from agents. Device tools act only on
 the calling tab's Pane, and refuse calls from outside a Pane tab. **Settings → Devices →
 Agent device tools** turns the tools off.
