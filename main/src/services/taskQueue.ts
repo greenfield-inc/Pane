@@ -26,6 +26,17 @@ import type { RunpanePaneBase } from '../../../shared/types/runpaneOrchestration
 
 const loadQueueDependency = createRequire(__filename);
 
+/** Worktree folder and default branch names stay this short: a file name holds 255 bytes, and Git adds `.lock` and Pane adds `-N`. */
+const MAX_WORKTREE_NAME_LENGTH = 100;
+
+/** A worktree name of at most MAX_WORKTREE_NAME_LENGTH characters, cut after a whole word when it can be. */
+function fitWorktreeName(name: string): string {
+  if (name.length <= MAX_WORKTREE_NAME_LENGTH) return name;
+  const cut = name.slice(0, MAX_WORKTREE_NAME_LENGTH + 1);
+  const lastBreak = cut.lastIndexOf('-');
+  return (lastBreak > 0 ? cut.slice(0, lastBreak) : cut.slice(0, MAX_WORKTREE_NAME_LENGTH)).replace(/-+$/, '');
+}
+
 interface TaskQueueOptions {
   sessionManager: SessionManager;
   worktreeManager: WorktreeManager;
@@ -287,6 +298,8 @@ export class TaskQueue {
             worktreeName = worktreeName.toLowerCase().replace(/[^a-z0-9-]/g, '');
           }
         }
+        // The Pane keeps its whole name; only the folder and branch derived from it are cut.
+        worktreeName = fitWorktreeName(worktreeName);
         
         // Get CommandRunner for this project
         const ctx = sessionManager.getProjectContextByProjectId(targetProject.id);
