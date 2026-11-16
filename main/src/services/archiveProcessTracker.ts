@@ -1,6 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { isProcessAlive, readControllingTerminals } from '../utils/processTree';
+import { cLocaleEnv, isProcessAlive, readControllingTerminals } from '../utils/processTree';
 
 const execFileAsync = promisify(execFile);
 
@@ -22,7 +22,7 @@ export async function readArchiveProcesses(): Promise<ArchiveProcessObservation[
   const { stdout } = process.platform === 'win32'
     ? await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
       '$ErrorActionPreference = "Stop"; Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { [long]$ticks = $_.CreationDate.ToUniversalTime().Ticks; $birth = ($ticks - ($ticks % [long]10)).ToString(); "$($_.ProcessId) $($_.ParentProcessId) $birth" } }'], options)
-    : await execFileAsync('ps', ['-Ao', 'pid=,ppid=,lstart=,stat='], options);
+    : await execFileAsync('ps', ['-Ao', 'pid=,ppid=,lstart=,stat='], { ...options, env: cLocaleEnv() });
   return stdout.split('\n').filter(line => line.trim()).map(line => {
     const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line);
     if (!match) throw new Error('Cannot parse the process identity snapshot');

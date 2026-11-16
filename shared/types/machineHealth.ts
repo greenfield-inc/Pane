@@ -22,6 +22,8 @@ export interface HealthProcess {
   /** Start time as the OS reports it; with the pid it names one process lifetime. */
   started: string;
   name: string;
+  /** The full command line, at most 200 characters, when the OS gives it. */
+  command?: string;
   sessionId: string;
   /** The tab that started it, when Pane knows. */
   panelId: string | null;
@@ -89,7 +91,19 @@ export interface MachineHealthSettings {
   leakMinAgeMinutes?: number;
 }
 
-/** Events the machine-health service sends to the renderer and linked machines. */
+/** The value of every machine health setting nobody has overridden. */
+export const MACHINE_HEALTH_DEFAULTS = {
+  diskWarningGB: 20,
+  diskCriticalGB: 5,
+  leakWindowMinutes: 30,
+  leakSliceMinutes: 5,
+  leakMinRssMB: 1024,
+  leakMinGrowthMB: 500,
+  leakMinGrowthPercent: 50,
+  leakMinAgeMinutes: 30,
+} as const satisfies Required<MachineHealthSettings>;
+
+/** Sent without a payload when the disk or memory level changes; readers re-read the snapshot. */
 export const MACHINE_HEALTH_CHANGED_EVENT = 'resource-monitor:machine-health-changed';
 /** The read channel for this machine's latest snapshot; under resource-monitor: so daemon, phone and linked-machine allowlists already carry it. */
 export const MACHINE_HEALTH_SNAPSHOT_CHANNEL = 'resource-monitor:machine-health';

@@ -638,7 +638,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   sessionPrMonitor.start();
   loopManager.start();
   autoPauser.sync();
-  machineHealth.on('snapshot', snapshot => getPaneEventSink().send(MACHINE_HEALTH_CHANGED_EVENT, snapshot));
+  // Payload-free: readers re-read the snapshot. The per-minute sample stays off the daemon stream.
+  machineHealth.on('level-changed', () => getPaneEventSink().send(MACHINE_HEALTH_CHANGED_EVENT));
   machineHealth.start();
   // Delete archived folders past their retention, keeping their agent logs; deferred so startup stays fast.
   let stopArchiveExpiry: (() => void) | undefined;
@@ -687,6 +688,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       prepareNotifyForQuit();
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
+      machineHealth.stop();
       autoPauser.stop();
       clearTimeout(archiveExpiryTimer);
       stopArchiveExpiry?.();

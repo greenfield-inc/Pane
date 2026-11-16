@@ -2,8 +2,12 @@ import { execFile } from 'child_process';
 import { readFile } from 'fs/promises';
 import { promisify } from 'util';
 import type { HealthProcess } from '../../../../shared/types/machineHealth';
+import { PANE_INSTANCE_ENV } from '../../utils/appDirectory';
+import { cLocaleEnv } from '../../utils/processTree';
 
 const execFileAsync = promisify(execFile);
+const COMMAND_MAX_CHARS = 200;
+const trimCommand = (text: string): string | undefined => text.replace(/\s+/gu, ' ').trim().slice(0, COMMAND_MAX_CHARS) || undefined;
 
 export interface ProcessRow {
   pid: number;
@@ -16,6 +20,8 @@ export interface ProcessRow {
   /** Cumulative CPU time. */
   cpuSeconds: number;
   name: string;
+  /** The command line, trimmed to COMMAND_MAX_CHARS; Windows reads it with the table, POSIX through readCommandLines. */
+  command?: string;
 }
 
 /** A process Pane started directly: a tab's PTY shell, an agent CLI, a run script. */
@@ -70,7 +76,7 @@ function parseWindowsProcessTable(stdout: string): ProcessRow[] {
   const rows: ProcessRow[] = [];
   for (const line of stdout.split(/\r?\n/u)) {
     const parts = line.split('\t');
-    if (parts.length < 6 || !/^\d+$/u.test(parts[2])) continue;
+    if (parts.length < 7 || !/^\d+$/u.test(parts[2])) continue;
     rows.push({
       pid: Number(parts[0]),
       ppid: Number(parts[1]),
@@ -79,6 +85,7 @@ function parseWindowsProcessTable(stdout: string): ProcessRow[] {
       rssKB: Math.round(Number(parts[3]) / 1024),
       cpuSeconds: Number(parts[4]) / 1e7,
       name: parts[5] || 'unknown',
+      command: trimCommand(parts.slice(6).join(' ')),
     });
   }
   return rows;
@@ -92,22 +99,65 @@ export async function readProcessRows(): Promise<ProcessRow[]> {
   const options = { encoding: 'utf8' as const, timeout: 10_000, maxBuffer: 16 * 1024 * 1024 };
   if (process.platform === 'win32') {
     const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
-      'Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { [long]$t = $_.CreationDate.ToUniversalTime().Ticks; $b = ($t - ($t % [long]10)).ToString(); "$($_.ProcessId)`t$($_.ParentProcessId)`t$b`t$($_.WorkingSetSize)`t$([long]$_.KernelModeTime + [long]$_.UserModeTime)`t$($_.Name)" } }'], options);
+      'Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { [long]$t = $_.CreationDate.ToUniversalTime().Ticks; $b = ($t - ($t % [long]10)).ToString(); $c = [string]$_.CommandLine -replace "\\s+", " "; if ($c.Length -gt 200) { $c = $c.Substring(0, 200) }; "$($_.ProcessId)`t$($_.ParentProcessId)`t$b`t$($_.WorkingSetSize)`t$([long]$_.KernelModeTime + [long]$_.UserModeTime)`t$($_.Name)`t$c" } }'], options);
     return parseWindowsProcessTable(stdout);
   }
-  const { stdout } = await execFileAsync('ps', ['-Ao', 'pid=,ppid=,rss=,time=,lstart=,comm='], options);
+  const { stdout } = await execFileAsync('ps', ['-Ao', 'pid=,ppid=,rss=,time=,lstart=,comm='], { ...options, env: cLocaleEnv() });
   return parsePosixProcessTable(stdout);
+}
+
+/**
+ * POSIX command lines for `pids` (Windows reads them with the table). `ps` cannot
+ * print the full name and the arguments in one call, so this is a second, narrow read.
+ * Unreadable processes are left out.
+ */
+export async function readCommandLines(pids: readonly number[]): Promise<Map<number, string>> {
+  const commands = new Map<number, string>();
+  if (pids.length === 0 || process.platform === 'win32') return commands;
+  if (process.platform === 'linux') {
+    await Promise.all(pids.map(async pid => {
+      try {
+        const command = trimCommand((await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').join(' '));
+        if (command) commands.set(pid, command);
+      } catch {
+        // It exited.
+      }
+    }));
+    return commands;
+  }
+  try {
+    const { stdout } = await execFileAsync('ps', ['-ww', '-o', 'pid=,args=', '-p', pids.join(',')],
+      { encoding: 'utf8', timeout: 10_000, maxBuffer: 8 * 1024 * 1024, env: cLocaleEnv() });
+    for (const line of stdout.split('\n')) {
+      const match = /^\s*(\d+)\s+(.*)$/u.exec(line);
+      const command = match && trimCommand(match[2]);
+      if (match && command) commands.set(Number(match[1]), command);
+    }
+  } catch {
+    // Commands are optional; the processes show without one.
+  }
+  return commands;
 }
 
 const ENV_TAG = /(?:^|\s)PANE_SESSION_ID=([\w-]+)/u;
 const PANEL_TAG = /(?:^|\s)PANE_PANEL_ID=([\w-]+)/u;
+const INSTANCE_TAG = new RegExp(`(?:^|\\s)${PANE_INSTANCE_ENV}=([\\w-]+)`, 'u');
+
+/** The tag in one process's environment text, when it names this Pane instance. */
+function tagOf(environ: string, instanceTag: string): EnvTag | null {
+  const sessionId = ENV_TAG.exec(environ)?.[1];
+  if (!sessionId || INSTANCE_TAG.exec(environ)?.[1] !== instanceTag) return null;
+  return { sessionId, panelId: PANEL_TAG.exec(environ)?.[1] ?? null };
+}
 
 /**
  * Pane tags for processes outside every tab's tree, read from their environment.
  * Only processes reparented to init are read: that is where an escaped child lands.
+ * A process counts only when its PANE_INSTANCE is `instanceTag` (paneInstanceTag()),
+ * so another Pane instance's processes are never this one's.
  * Windows keeps no reparenting and exposes no cheap environment read, so it reads none.
  */
-export async function readEscapedEnvTags(rows: readonly ProcessRow[], claimed: ReadonlySet<number>): Promise<Map<number, EnvTag>> {
+export async function readEscapedEnvTags(rows: readonly ProcessRow[], claimed: ReadonlySet<number>, instanceTag: string): Promise<Map<number, EnvTag>> {
   const tags = new Map<number, EnvTag>();
   if (process.platform === 'win32') return tags;
   const candidates = rows.filter(row => row.ppid === 1 && !claimed.has(row.pid)).map(row => row.pid);
@@ -115,9 +165,8 @@ export async function readEscapedEnvTags(rows: readonly ProcessRow[], claimed: R
   if (process.platform === 'linux') {
     await Promise.all(candidates.map(async pid => {
       try {
-        const environ = (await readFile(`/proc/${pid}/environ`, 'utf8')).split('\0').join(' ');
-        const sessionId = ENV_TAG.exec(environ)?.[1];
-        if (sessionId) tags.set(pid, { sessionId, panelId: PANEL_TAG.exec(environ)?.[1] ?? null });
+        const tag = tagOf((await readFile(`/proc/${pid}/environ`, 'utf8')).split('\0').join(' '), instanceTag);
+        if (tag) tags.set(pid, tag);
       } catch {
         // Another user's process, or it exited.
       }
@@ -127,11 +176,11 @@ export async function readEscapedEnvTags(rows: readonly ProcessRow[], claimed: R
   try {
     // macOS appends the environment to the command for this user's processes.
     const { stdout } = await execFileAsync('ps', ['-E', '-ww', '-o', 'pid=,command=', '-p', candidates.join(',')],
-      { encoding: 'utf8', timeout: 10_000, maxBuffer: 32 * 1024 * 1024 });
+      { encoding: 'utf8', timeout: 10_000, maxBuffer: 32 * 1024 * 1024, env: cLocaleEnv() });
     for (const line of stdout.split('\n')) {
       const pid = Number(/^\s*(\d+)/u.exec(line)?.[1]);
-      const sessionId = ENV_TAG.exec(line)?.[1];
-      if (pid && sessionId) tags.set(pid, { sessionId, panelId: PANEL_TAG.exec(line)?.[1] ?? null });
+      const tag = tagOf(line, instanceTag);
+      if (pid && tag) tags.set(pid, tag);
     }
   } catch {
     // Unreadable environments leave escaped processes unattributed.
@@ -166,7 +215,7 @@ export function attributeProcesses(
       const row = queue[next];
       if (assigned.has(row.pid)) continue;
       assigned.set(row.pid, {
-        pid: row.pid, started: row.started, startedAt: row.startedAt, name: row.name,
+        pid: row.pid, started: row.started, startedAt: row.startedAt, name: row.name, command: row.command,
         sessionId: owner.sessionId, panelId: owner.panelId, rssMB: row.rssKB / 1024, cpuSeconds: row.cpuSeconds, escaped,
       });
       for (const child of children.get(row.pid) ?? []) {

@@ -8,7 +8,8 @@ import type {
   SessionResourceInfo,
   ResourceSnapshot,
 } from '../../../shared/types/resourceMonitor';
-import { attributeProcesses, readEscapedEnvTags, readProcessRows, type EnvTag, type ProcessRoot, type ProcessRow } from './machineHealth/processAttribution';
+import { attributeProcesses, readCommandLines, readEscapedEnvTags, readProcessRows, type AttributedProcess, type EnvTag, type ProcessRoot, type ProcessRow } from './machineHealth/processAttribution';
+import { paneInstanceTag } from '../utils/appDirectory';
 
 const execFileAsync = promisify(execFile);
 
@@ -97,6 +98,8 @@ export class ResourceMonitorService {
   private processRoots: (() => ProcessRoot[]) | null = null;
   private knownSessionIds: (() => ReadonlySet<string>) | null = null;
   private readRows: () => Promise<ProcessRow[]> = readProcessRows;
+  /** Command lines by `pid:started`; read once per process lifetime. */
+  private commands = new Map<string, string>();
   private envTags = new Map<string, { pid: number; tag: EnvTag }>();
   private envTagsReadAt = -Infinity;
 
@@ -207,17 +210,15 @@ export class ResourceMonitorService {
     const now = Date.now();
     const roots = this.processRoots?.() ?? [];
     const sessionIds = [...new Set(roots.map(root => root.sessionId))];
-    let rows: ProcessRow[] = [];
-    try {
-      rows = await this.readRows();
-    } catch (error) {
-      console.warn('[ResourceMonitor] process table read failed:', error instanceof Error ? error.message : error);
-    }
+    // A failed read rejects: an empty table would read as every process gone.
+    // Windows reads no escaped processes, so with no tab running it has nothing to read.
+    const rows = roots.length === 0 && process.platform === 'win32' ? [] : await this.readRows();
     const claimed = new Set<number>();
     for (const list of attributeProcesses(rows, roots, new Map()).values()) for (const proc of list) claimed.add(proc.pid);
     const envTags = await this.escapedEnvTags(rows, claimed, now);
     const known = this.knownSessionIds?.() ?? new Set(sessionIds);
     const bySession = attributeProcesses(rows, roots, envTags, known);
+    const commandOf = await this.commandLines([...bySession.values()].flat());
 
     const sessions: SessionResourceInfo[] = [];
     const allTrackedKeys = new Set<string>();
@@ -233,7 +234,7 @@ export class ResourceMonitorService {
         const key = `${proc.pid}:${proc.started}`;
         allTrackedKeys.add(key);
         const cpuPercent = this.computeDeltaCpu(key, proc.cpuSeconds, now);
-        children.push({ pid: proc.pid, name: proc.name, cpuPercent, memoryMB: proc.rssMB, started: proc.started, panelId: proc.panelId, escaped: proc.escaped });
+        children.push({ pid: proc.pid, name: proc.name, command: proc.command ?? (commandOf.get(key) || undefined), cpuPercent, memoryMB: proc.rssMB, started: proc.started, panelId: proc.panelId, escaped: proc.escaped });
       }
 
       // WSL processes appear alongside the wsl.exe relay already attributed above
@@ -264,11 +265,24 @@ export class ResourceMonitorService {
     return sessions;
   }
 
+  /** Command lines of Pane processes the table did not carry, by `pid:started`; new processes only. */
+  private async commandLines(procs: readonly AttributedProcess[]): Promise<Map<string, string>> {
+    const live = new Set(procs.map(proc => `${proc.pid}:${proc.started}`));
+    for (const key of this.commands.keys()) if (!live.has(key)) this.commands.delete(key);
+    const missing = procs.filter(proc => !proc.command && !this.commands.has(`${proc.pid}:${proc.started}`));
+    if (missing.length > 0) {
+      const read = await readCommandLines(missing.map(proc => proc.pid));
+      // An unreadable command stays empty rather than being read again every sample.
+      for (const proc of missing) this.commands.set(`${proc.pid}:${proc.started}`, read.get(proc.pid) ?? '');
+    }
+    return this.commands;
+  }
+
   /** Escaped processes rarely change, and reading environments costs a process call: refresh every 5 minutes. */
   private async escapedEnvTags(rows: ProcessRow[], claimed: Set<number>, now: number): Promise<Map<number, EnvTag>> {
     if (now - this.envTagsReadAt >= ENV_SCAN_INTERVAL_MS) {
       this.envTagsReadAt = now;
-      const tags = await readEscapedEnvTags(rows, claimed);
+      const tags = await readEscapedEnvTags(rows, claimed, paneInstanceTag());
       this.envTags = new Map([...tags].map(([pid, tag]) => [`${pid}:${rows.find(row => row.pid === pid)?.started ?? ''}`, { pid, tag }]));
     }
     const live = new Map<number, EnvTag>();

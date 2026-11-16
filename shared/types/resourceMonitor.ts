@@ -9,6 +9,8 @@ export interface ElectronProcessInfo {
 export interface ChildProcessInfo {
   pid: number;
   name: string;
+  /** The full command line, at most 200 characters, when the OS gives it. */
+  command?: string;
   cpuPercent: number;
   memoryMB: number;
   /** Start time as the OS reports it; with the pid it names one process lifetime. */

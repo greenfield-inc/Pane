@@ -10,19 +10,22 @@ const T0 = Date.parse(STARTED);
 
 function harness(extra: Partial<MachineHealthDeps> = {}) {
   const memory: HealthLevel = 'ok';
-  const state = { now: T0, freeGB: 100, memory, rssMB: 100 };
-  const processes = async (): Promise<ResourceSnapshot> => ({
+  const state = { now: T0, freeGB: 100, memory, rssMB: 100, processReadFails: false };
+  const processes = async (): Promise<ResourceSnapshot> => {
+    if (state.processReadFails) throw new Error('ps timed out');
+    return {
     timestamp: state.now, cpuReady: true, totalCpuPercent: 0, totalMemoryMB: 0, electronProcesses: [],
     sessions: [{
       sessionId: 'A', sessionName: 'homepage', totalCpuPercent: 0, totalMemoryMB: state.rssMB,
       children: [{ pid: 42, name: 'vite', cpuPercent: 1, memoryMB: state.rssMB, started: STARTED, panelId: 'A1', escaped: false }],
     }],
-  });
+    };
+  };
   const service = new MachineHealthService({
     now: () => state.now,
-    settings: () => ({ diskWarningGB: 20, diskCriticalGB: 5, leakWindowMinutes: 5, leakSliceMinutes: 1, leakMinRssMB: 0, leakMinGrowthMB: 150, leakMinGrowthPercent: 50, leakMinAgeMinutes: 0 }),
+    settings: () => ({ leakWindowMinutes: 5, leakSliceMinutes: 1, leakMinRssMB: 0, leakMinGrowthMB: 150, leakMinGrowthPercent: 50, leakMinAgeMinutes: 0 }),
     volumePaths: () => [],
-    readDisk: async () => [{ path: '/', roles: ['pane-data'], totalBytes: 500 * GB, freeBytes: state.freeGB * GB, level: state.freeGB < 5 ? 'critical' : state.freeGB < 20 ? 'warning' : 'ok' }],
+    readDisk: async () => [{ path: '/data', roles: ['pane-data'], totalBytes: 500 * GB, freeBytes: state.freeGB * GB }],
     readMemory: async () => ({ level: state.memory, source: 'macos-pressure', detail: '' }),
     readSwap: async () => null,
     memory: () => ({ totalBytes: 32 * GB, freeBytes: 8 * GB }),
@@ -38,12 +41,35 @@ function harness(extra: Partial<MachineHealthDeps> = {}) {
 }
 
 describe('MachineHealthService', () => {
-  it('reports a disk level change on the sample that crosses the threshold', async () => {
+  it('reports disk levels against the default 20 GB warning and 5 GB critical thresholds', async () => {
     const { state, service, changes } = harness();
     await service.sample();
-    state.freeGB = 13;
+    state.freeGB = 21;
     await service.sample();
-    expect(changes).toEqual([{ kind: 'disk', level: 'warning', previous: 'ok' }]);
+    state.freeGB = 19;
+    const warning = await service.sample();
+    state.freeGB = 4;
+    await service.sample();
+    expect(warning.disk).toMatchObject({ level: 'warning', volumes: [{ path: '/data', roles: ['pane-data'], freeBytes: 19 * GB, totalBytes: 500 * GB }] });
+    expect(changes).toEqual([
+      { kind: 'disk', level: 'warning', previous: 'ok' },
+      { kind: 'disk', level: 'critical', previous: 'warning' },
+    ]);
+  });
+
+  it('keeps the processes and a standing leak warning through a failed process read', async () => {
+    const { state, service, leaks } = harness();
+    for (let m = 0; m <= 7; m++) {
+      state.now = T0 + m * MIN;
+      state.rssMB = 200 + m * 40;
+      await service.sample();
+    }
+    expect(leaks).toHaveLength(1);
+    state.now = T0 + 8 * MIN;
+    state.processReadFails = true;
+    const failed = await service.sample();
+    expect(failed.leaks).toHaveLength(1);
+    expect(failed.panes.map(pane => pane.sessionId)).toEqual(['A']);
   });
 
   it('reports memory pressure only after two samples', async () => {

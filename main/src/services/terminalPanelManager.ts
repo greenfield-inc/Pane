@@ -4,7 +4,7 @@ import { escapeForBash, windowsPathToWSLMount } from '../utils/wslUtils';
 import { validateCustomCommandResume, customResumeAgentType, effectiveCustomResume } from '../../../shared/types/customCommandResume';
 import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
-import { getAppDirectory } from '../utils/appDirectory';
+import { getAppDirectory, PANE_INSTANCE_ENV, paneInstanceTag } from '../utils/appDirectory';
 import { updateHoldIsLive } from './updateRestoration';
 import { noteContextPath } from './noteFiles';
 import { panePortFor } from './panePort';
@@ -1291,15 +1291,15 @@ export class TerminalPanelManager extends EventEmitter {
     getPaneDaemonEventSink().send(channel, ...args);
   }
 
-  /**
-   * Returns a map of sessionId → array of PTY PIDs for that session.
-   * Used by resource monitoring to discover which processes belong to which session.
-   */
   /** Each running terminal's shell, with its Pane and tab. */
   getPanelPids(): Array<{ pid: number; sessionId: string; panelId: string }> {
     return [...this.terminals.values()].map(terminal => ({ pid: terminal.pty.pid, sessionId: terminal.sessionId, panelId: terminal.panelId }));
   }
 
+  /**
+   * Returns a map of sessionId → array of PTY PIDs for that session.
+   * Used by archive cleanup and the listening-port monitor.
+   */
   getSessionPids(): Map<string, number[]> {
     const result = new Map<string, number[]>();
     for (const [, terminal] of this.terminals) {
@@ -2073,6 +2073,7 @@ export class TerminalPanelManager extends EventEmitter {
       PANE_SESSION_ID: panel.sessionId,
       PANE_NOTES_FILE: isWSL || getRuntimeConfigManager().getConfig().notesEnabled !== true ? '' : noteContextPath(path.join(getAppDirectory(), 'notes'), panel.sessionId),
       PANE_PANEL_ID: panel.id,
+      [PANE_INSTANCE_ENV]: paneInstanceTag(),
       PANE_PANEL_KIND: resolveTerminalPanelKind(panel, panelManager.getPanelsForSession(panel.sessionId)),
       PANE_UPDATE_RESUME_NONCE: updateResumeNonce ?? '',
       PANE_PORT: String(panePort),

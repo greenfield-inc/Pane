@@ -1,3 +1,5 @@
+import { MACHINE_HEALTH_DEFAULTS, type MachineHealthSettings } from '../../../../shared/types/machineHealth';
+
 /** One resident-memory reading of a process. */
 export interface RssSample {
   at: number;
@@ -23,15 +25,23 @@ export interface LeakFinding {
 }
 
 const MINUTE = 60_000;
+/** A slice's high counts as new only when it beats the last by this much, so jitter is not a climb. */
+const MIN_SLICE_RISE_MB = 10;
 
-export const DEFAULT_LEAK_RULE: LeakRule = {
-  windowMs: 30 * MINUTE,
-  sliceMs: 5 * MINUTE,
-  minRssMB: 1024,
-  minGrowthMB: 500,
-  minGrowthRatio: 0.5,
-  minAgeMs: 30 * MINUTE,
-};
+/** The rule from config.json's settings, each falling back to MACHINE_HEALTH_DEFAULTS. */
+export function leakRuleOf(settings: MachineHealthSettings | undefined): LeakRule {
+  const value = <K extends keyof MachineHealthSettings>(key: K) => settings?.[key] ?? MACHINE_HEALTH_DEFAULTS[key];
+  return {
+    windowMs: value('leakWindowMinutes') * MINUTE,
+    sliceMs: value('leakSliceMinutes') * MINUTE,
+    minRssMB: value('leakMinRssMB'),
+    minGrowthMB: value('leakMinGrowthMB'),
+    minGrowthRatio: value('leakMinGrowthPercent') / 100,
+    minAgeMs: value('leakMinAgeMinutes') * MINUTE,
+  };
+}
+
+export const DEFAULT_LEAK_RULE: LeakRule = leakRuleOf(undefined);
 
 /**
  * A likely leak keeps climbing: installs and builds climb for minutes and then
@@ -61,7 +71,7 @@ export function findLeak(samples: readonly RssSample[], startedAt: number, now: 
       const { at, rssMB } = samples[i];
       if (at > from && at <= to) sliceHigh = Math.max(sliceHigh, rssMB);
     }
-    if (sliceHigh <= high) return null;
+    if (sliceHigh < high + MIN_SLICE_RISE_MB) return null;
     high = sliceHigh;
   }
   return { growthMB: Math.round(growth), windowMs: rule.windowMs, rssMB: Math.round(current) };

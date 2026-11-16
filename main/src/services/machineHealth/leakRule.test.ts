@@ -38,6 +38,12 @@ describe('findLeak with the default rule (30 min window, 5 min slices, 1 GB, +50
     expect(findLeak(samples, 0, 60 * MIN, DEFAULT_LEAK_RULE)).toBeNull();
   });
 
+  it('ignores a process that jumps once and then creeps up a few MB a slice', () => {
+    // 1000 → 1600 MB by minute 35, then +1 MB a minute: each later slice sets a high by only 5 MB.
+    const samples = series(30, 60, m => (m <= 35 ? 1000 + (m - 30) * 120 : 1600 + (m - 35)));
+    expect(findLeak(samples, 0, 60 * MIN, DEFAULT_LEAK_RULE)).toBeNull();
+  });
+
   it('ignores growth under 50% even when it passes 500 MB', () => {
     const samples = series(30, 60, m => 2000 + (m - 30) * 20); // 2000 → 2600 MB, +30%
     expect(findLeak(samples, 0, 60 * MIN, DEFAULT_LEAK_RULE)).toBeNull();

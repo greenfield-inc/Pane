@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { attributeProcesses, parsePosixProcessTable, type ProcessRow } from './processAttribution';
+import { spawn, type ChildProcess } from 'child_process';
+import { afterEach, describe, expect, it } from 'vitest';
+import { attributeProcesses, parsePosixProcessTable, readCommandLines, readEscapedEnvTags, readProcessRows, type ProcessRow } from './processAttribution';
 
 const row = (pid: number, ppid: number, started: number, rssMB: number, name = `p${pid}`): ProcessRow =>
   ({ pid, ppid, started: String(started), startedAt: started, rssKB: rssMB * 1024, cpuSeconds: 0, name });
@@ -55,5 +56,41 @@ describe('parsePosixProcessTable', () => {
       [144, 57061, 40224, 0.34, 'Sun Nov 15 12:35:00 2026', '/Applications/Grain.app/Contents/MacOS/Grain Helper (Renderer)'],
       [777, 144, 2048, 93784, 'Sun Nov 15 12:36:00 2026', 'node'],
     ]);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('reading live processes', () => {
+  const children: ChildProcess[] = [];
+  const spawnIdle = (env: Record<string, string>): number => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { env, stdio: 'ignore' });
+    children.push(child);
+    if (!child.pid) throw new Error('spawn failed');
+    return child.pid;
+  };
+  const asEscaped = (pid: number): ProcessRow => ({ ...row(pid, 1, 0, 1), started: 'x' });
+  afterEach(() => { for (const child of children.splice(0)) child.kill(); });
+
+  it('attributes an escaped process only when its PANE_INSTANCE names this instance', async () => {
+    const mine = spawnIdle({ PANE_SESSION_ID: 'A', PANE_PANEL_ID: 'A1', PANE_INSTANCE: 'mine' });
+    const theirs = spawnIdle({ PANE_SESSION_ID: 'A', PANE_PANEL_ID: 'A1', PANE_INSTANCE: 'theirs' });
+    const untagged = spawnIdle({ PANE_SESSION_ID: 'A' });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    const tags = await readEscapedEnvTags([asEscaped(mine), asEscaped(theirs), asEscaped(untagged)], new Set(), 'mine');
+    expect([...tags]).toEqual([[mine, { sessionId: 'A', panelId: 'A1' }]]);
+  });
+
+  it('reads the process table and command lines under a non-US locale', async () => {
+    const previous = process.env.LC_ALL;
+    process.env.LC_ALL = 'en_GB.UTF-8';
+    try {
+      const pid = spawnIdle({});
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const self = (await readProcessRows()).find(r => r.pid === pid);
+      expect(Number.isFinite(self?.startedAt)).toBe(true);
+      expect((await readCommandLines([pid])).get(pid)).toBe(`${process.execPath} -e setTimeout(() => {}, 30000)`);
+    } finally {
+      if (previous === undefined) delete process.env.LC_ALL;
+      else process.env.LC_ALL = previous;
+    }
   });
 });

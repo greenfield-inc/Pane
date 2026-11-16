@@ -280,7 +280,6 @@ export class ChatTabManager {
 
   runningPanelIds(): string[] { return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() ? [panelId] : []); }
   processId(panelId: string): number | undefined { return this.tabs.get(panelId)?.runtime?.pid; }
-  /** Pane ID → adapter process IDs of its running chat tabs, for archive cleanup and port ownership. */
   /** Each running chat tab's adapter process, with its Pane and tab. */
   getPanelPids(): Array<{ pid: number; sessionId: string; panelId: string }> {
     return [...this.tabs].flatMap(([panelId, tab]) => {
@@ -289,6 +288,7 @@ export class ChatTabManager {
     });
   }
 
+  /** Pane ID → adapter process IDs of its running chat tabs, for archive cleanup and port ownership. */
   getSessionPids(): Map<string, number[]> {
     const result = new Map<string, number[]>();
     for (const [panelId, tab] of this.tabs) {

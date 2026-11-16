@@ -1,9 +1,9 @@
 import { EventEmitter } from 'events';
 import * as os from 'os';
-import type { HealthLevel, LeakWarning, MachineHealthSettings, MachineHealthSnapshot, PaneUsage } from '../../../../shared/types/machineHealth';
+import { MACHINE_HEALTH_DEFAULTS, type HealthLevel, type LeakWarning, type MachineHealthSettings, type MachineHealthSnapshot, type PaneUsage } from '../../../../shared/types/machineHealth';
 import type { ResourceSnapshot } from '../../../../shared/types/resourceMonitor';
-import { readDiskVolumes, type DiskThresholds, type VolumePath } from './diskSpace';
-import { DEFAULT_LEAK_RULE, findLeak, type LeakRule, type RssSample } from './leakRule';
+import { readDiskVolumes, type VolumePath } from './diskSpace';
+import { findLeak, leakRuleOf, type LeakRule, type RssSample } from './leakRule';
 import { readMemoryPressure, readSwapUsedBytes, settleLevel, worstLevel, type MemoryPressureReading } from './memoryPressure';
 
 const SAMPLE_INTERVAL_MS = 60_000;
@@ -12,21 +12,10 @@ const GB = 1024 ** 3;
 const MINUTE = 60_000;
 const FOOTPRINT_SLACK_MS = 5_000;
 
-
-function diskThresholdsOf(settings: MachineHealthSettings | undefined): DiskThresholds {
-  return { warningBytes: (settings?.diskWarningGB ?? 20) * GB, criticalBytes: (settings?.diskCriticalGB ?? 5) * GB };
-}
-
-function leakRuleOf(settings: MachineHealthSettings | undefined): LeakRule {
-  const minutes = (value: number | undefined, fallback: number) => (value ?? fallback / MINUTE) * MINUTE;
-  return {
-    windowMs: minutes(settings?.leakWindowMinutes, DEFAULT_LEAK_RULE.windowMs),
-    sliceMs: minutes(settings?.leakSliceMinutes, DEFAULT_LEAK_RULE.sliceMs),
-    minRssMB: settings?.leakMinRssMB ?? DEFAULT_LEAK_RULE.minRssMB,
-    minGrowthMB: settings?.leakMinGrowthMB ?? DEFAULT_LEAK_RULE.minGrowthMB,
-    minGrowthRatio: (settings?.leakMinGrowthPercent ?? DEFAULT_LEAK_RULE.minGrowthRatio * 100) / 100,
-    minAgeMs: minutes(settings?.leakMinAgeMinutes, DEFAULT_LEAK_RULE.minAgeMs),
-  };
+function diskLevel(freeBytes: number, settings: MachineHealthSettings | undefined): HealthLevel {
+  if (freeBytes < (settings?.diskCriticalGB ?? MACHINE_HEALTH_DEFAULTS.diskCriticalGB) * GB) return 'critical';
+  if (freeBytes < (settings?.diskWarningGB ?? MACHINE_HEALTH_DEFAULTS.diskWarningGB) * GB) return 'warning';
+  return 'ok';
 }
 
 export interface MachineHealthDeps {
@@ -109,7 +98,6 @@ export class MachineHealthService extends EventEmitter {
     this.timer = null;
   }
 
-
   /** The latest sample, taking one first when none exists yet. */
   async getSnapshot(): Promise<MachineHealthSnapshot> {
     return this.latest ?? this.sample();
@@ -137,20 +125,13 @@ export class MachineHealthService extends EventEmitter {
   private async takeSample(): Promise<MachineHealthSnapshot> {
     const settings = this.deps.settings();
     const now = this.deps.now();
-    const [volumes, memoryReading, swapUsedBytes, processes] = await Promise.all([
-      (this.deps.readDisk ?? readDiskVolumes)(this.deps.volumePaths(), diskThresholdsOf(settings)),
+    const [readings, memoryReading, swapUsedBytes, processes] = await Promise.all([
+      (this.deps.readDisk ?? readDiskVolumes)(this.deps.volumePaths()),
       (this.deps.readMemory ?? (() => readMemoryPressure()))(),
       (this.deps.readSwap ?? (() => readSwapUsedBytes()))(),
-      this.deps.processes(),
+      this.readProcesses(),
     ]);
-
-    const rule = leakRuleOf(settings);
-    let footprints: Map<number, number> | null = null;
-    // A few seconds of slack: timer jitter must not push a read to the next sample.
-    if (this.deps.readFootprints && now - this.footprintsAt >= Math.max(MINUTE, rule.sliceMs) - FOOTPRINT_SLACK_MS) {
-      footprints = await this.deps.readFootprints();
-      if (footprints) this.footprintsAt = now;
-    }
+    const volumes = readings.map(volume => ({ ...volume, level: diskLevel(volume.freeBytes, settings) }));
 
     this.memoryHistory = [...this.memoryHistory, memoryReading.level].slice(-2);
     const memory = this.deps.memory?.() ?? { totalBytes: os.totalmem(), freeBytes: os.freemem() };
@@ -160,23 +141,6 @@ export class MachineHealthService extends EventEmitter {
       : 0;
     this.lastCpu = cpuTimes;
 
-    const panes: PaneUsage[] = processes.sessions.map(session => ({
-      sessionId: session.sessionId,
-      name: session.sessionName,
-      rssMB: session.totalMemoryMB,
-      cpuPercent: session.totalCpuPercent,
-      processes: session.children.map(child => ({
-        pid: child.pid,
-        started: child.started,
-        name: child.name,
-        sessionId: session.sessionId,
-        panelId: child.panelId,
-        rssMB: Math.round(child.memoryMB * 10) / 10,
-        cpuPercent: child.cpuPercent,
-        escaped: child.escaped,
-      })),
-    }));
-
     const snapshot: MachineHealthSnapshot = {
       sampledAt: now,
       platform: process.platform,
@@ -184,12 +148,12 @@ export class MachineHealthService extends EventEmitter {
       disk: { level: worstLevel(volumes.map(volume => volume.level)), volumes },
       memory: { level: settleLevel(this.memoryHistory), source: memoryReading.source, detail: memoryReading.detail, ...memory, swapUsedBytes },
       cpuPercent,
-      app: {
-        rssMB: Math.round(processes.electronProcesses.reduce((sum, p) => sum + p.memoryMB, 0)),
-        cpuPercent: Math.round(processes.electronProcesses.reduce((sum, p) => sum + p.cpuPercent, 0) * 10) / 10,
-      },
-      panes,
-      leaks: this.updateLeaks(panes, now, rule, footprints),
+      // A failed process read is not an empty table: keep the last figures, leak history and ignores.
+      ...(processes ? await this.processUsage(processes, now, leakRuleOf(settings)) : {
+        app: this.latest?.app ?? { rssMB: 0, cpuPercent: 0 },
+        panes: this.latest?.panes ?? [],
+        leaks: this.latest?.leaks ?? [],
+      }),
     };
 
     const previous = this.latest;
@@ -207,6 +171,50 @@ export class MachineHealthService extends EventEmitter {
     }
     this.emit('snapshot', snapshot);
     return snapshot;
+  }
+
+  private async readProcesses(): Promise<ResourceSnapshot | null> {
+    try {
+      return await this.deps.processes();
+    } catch (error) {
+      console.warn('[MachineHealth] process read failed, keeping the last process figures:', error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
+  private async processUsage(processes: ResourceSnapshot, now: number, rule: LeakRule): Promise<Pick<MachineHealthSnapshot, 'app' | 'panes' | 'leaks'>> {
+    let footprints: Map<number, number> | null = null;
+    // A few seconds of slack: timer jitter must not push a read to the next sample.
+    if (this.deps.readFootprints && now - this.footprintsAt >= Math.max(MINUTE, rule.sliceMs) - FOOTPRINT_SLACK_MS) {
+      // A failed read waits a slice too: top costs over a second of CPU.
+      this.footprintsAt = now;
+      footprints = await this.deps.readFootprints();
+    }
+    const panes: PaneUsage[] = processes.sessions.map(session => ({
+      sessionId: session.sessionId,
+      name: session.sessionName,
+      rssMB: session.totalMemoryMB,
+      cpuPercent: session.totalCpuPercent,
+      processes: session.children.map(child => ({
+        pid: child.pid,
+        started: child.started,
+        name: child.name,
+        command: child.command,
+        sessionId: session.sessionId,
+        panelId: child.panelId,
+        rssMB: Math.round(child.memoryMB * 10) / 10,
+        cpuPercent: child.cpuPercent,
+        escaped: child.escaped,
+      })),
+    }));
+    return {
+      app: {
+        rssMB: Math.round(processes.electronProcesses.reduce((sum, p) => sum + p.memoryMB, 0)),
+        cpuPercent: Math.round(processes.electronProcesses.reduce((sum, p) => sum + p.cpuPercent, 0) * 10) / 10,
+      },
+      panes,
+      leaks: this.updateLeaks(panes, now, rule, footprints),
+    };
   }
 
   private updateLeaks(panes: PaneUsage[], now: number, rule: LeakRule, footprints: Map<number, number> | null): LeakWarning[] {
