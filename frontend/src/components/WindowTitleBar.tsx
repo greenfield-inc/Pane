@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, type CSSProperties } from 'react';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -27,7 +27,8 @@ const TITLE_BAR_STYLE = {
 // Traffic lights sit at x=10 with ~70px of width (see `trafficLightPosition` in
 // main/src/index.ts); equal padding on both sides clears them and keeps the
 // title centered on the window.
-const MAC_INSET_STYLE: CSSProperties = { paddingLeft: 88, paddingRight: 88 };
+const MAC_INSET = 88;
+const MAC_INSET_STYLE: CSSProperties = { paddingLeft: MAC_INSET, paddingRight: MAC_INSET };
 // Windows and Linux report the page's share of the strip through the Window
 // Controls Overlay env() values; the far side is whatever they do not cover.
 const OVERLAY_INSET_STYLE: CSSProperties = {
@@ -81,6 +82,30 @@ function useArrivedKeys(scope: string | null, keys: string[]): Set<string> {
   return seen.scope === scope && seen.signature === signature ? seen.arrived : new Set();
 }
 
+/**
+ * How far the name must stay from each edge of the bar to clear the controls:
+ * the sidebar controls on the left and the global ones on the right. A long
+ * name then truncates beside them instead of running under them. Null until
+ * the slots are laid out.
+ */
+function useControlsClearance(bar: HTMLElement | null, leading: HTMLElement | null, trailing: HTMLElement | null): { left: number; right: number } | null {
+  const [clearance, setClearance] = useState<{ left: number; right: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!bar || !leading || !trailing) return;
+    const measure = () => {
+      const barBox = bar.getBoundingClientRect();
+      const left = Math.ceil(leading.getBoundingClientRect().right - barBox.left) + GUTTER;
+      const right = Math.ceil(barBox.right - trailing.getBoundingClientRect().left) + GUTTER;
+      setClearance(current => current?.left === left && current.right === right ? current : { left, right });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    for (const element of [bar, leading, trailing]) observer.observe(element);
+    return () => observer.disconnect();
+  }, [bar, leading, trailing]);
+  return clearance;
+}
+
 interface WindowTitleBarProps {
   projects: Project[];
   sidebarWidth: number;
@@ -104,6 +129,12 @@ interface WindowTitleBarProps {
  */
 export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, controlsSlotRef }: WindowTitleBarProps) {
   const setTrailingSlot = useTitleBarSlotStore(state => state.setTrailingSlot);
+  const [bar, setBar] = useState<HTMLDivElement | null>(null);
+  const [leadingSlot, setLeadingSlot] = useState<HTMLDivElement | null>(null);
+  const [trailingSlot, setTrailingSlotElement] = useState<HTMLDivElement | null>(null);
+  const leadingSlotRef = useCallback((element: HTMLDivElement | null) => { controlsSlotRef?.(element); setLeadingSlot(element); }, [controlsSlotRef]);
+  const trailingSlotRef = useCallback((element: HTMLDivElement | null) => { setTrailingSlot(element); setTrailingSlotElement(element); }, [setTrailingSlot]);
+  const clearance = useControlsClearance(bar, leadingSlot, trailingSlot);
   const activeView = useNavigationStore(state => state.activeView);
   const activeSession = useSessionStore(state => {
     if (!state.activeSessionId) return undefined;
@@ -158,10 +189,18 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
     selectOrchestrationSession({ sessionId: parentSession.id }).catch(() => undefined);
   };
 
+  const insetStyle = isMac() ? MAC_INSET_STYLE : OVERLAY_INSET_STYLE;
+  // On macOS the name stays centered on the window, so both sides clear the wider of the two.
+  const macInset = clearance ? Math.max(MAC_INSET, clearance.left, clearance.right) : MAC_INSET;
+  const clearanceStyle: CSSProperties | null = !clearance ? null
+    : isMac() ? { paddingLeft: macInset, paddingRight: macInset }
+      : { paddingLeft: clearance.left, paddingRight: clearance.right };
+
   return (
     <div
+      ref={setBar}
       className="pane-window-title-bar relative flex flex-shrink-0 items-center justify-center overflow-hidden bg-bg-chrome select-none"
-      style={{ ...TITLE_BAR_STYLE, ...(isMac() ? MAC_INSET_STYLE : OVERLAY_INSET_STYLE) }}
+      style={{ ...TITLE_BAR_STYLE, ...(clearanceStyle ?? insetStyle) }}
       data-testid="window-title-bar"
     >
       {/* Over the sidebar the bar takes the sidebar's own colour and edge and
@@ -174,13 +213,13 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
         data-testid="window-title-bar-sidebar-segment"
       />
       <div
-        ref={controlsSlotRef}
+        ref={leadingSlotRef}
         className="absolute inset-y-0 flex items-center gap-0.5"
         style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_LEFT : OVERLAY_CONTROLS_LEFT) }}
         data-testid="window-title-bar-controls"
       />
       <div
-        ref={setTrailingSlot}
+        ref={trailingSlotRef}
         className="absolute inset-y-0 flex items-center gap-0.5"
         style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_RIGHT : OVERLAY_CONTROLS_RIGHT) }}
         data-testid="window-title-bar-trailing-controls"
@@ -194,6 +233,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
       )}
       {title && !offlineNotice && (
         <div className="relative flex min-w-0 items-center">
+          {/* The project or parent Session keeps its width, up to 16rem, so a long name gives way first. */}
           <div
             className="flex min-w-0 items-center gap-1.5 text-xs"
             data-testid="window-title-bar-label"
@@ -202,7 +242,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
             {parentSessionName ? (
               <button
                 type="button"
-                className="min-w-0 truncate rounded-sm text-text-tertiary hover:text-text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+                className="max-w-64 flex-shrink-0 truncate rounded-sm text-text-tertiary hover:text-text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
                 style={NO_DRAG}
                 onClick={openParentSession}
                 aria-label={`Back to Session ${parentSessionName}`}
@@ -212,7 +252,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
                 {parentSessionName}
               </button>
             ) : (
-              <span className="truncate text-text-tertiary">{title.project}</span>
+              <span className="max-w-64 flex-shrink-0 truncate text-text-tertiary">{title.project}</span>
             )}
             {title.pane && (
               <>

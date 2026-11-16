@@ -112,6 +112,35 @@ test.describe('window title bar', () => {
     expect(collapseBox?.x).toBeGreaterThanOrEqual(88);
   });
 
+  test('cuts a long name short of the controls on both sides and keeps it centered', async ({ page }) => {
+    await openDesktop(page);
+    const longName = 'Investigate why the nightly release pipeline intermittently fails when the macOS notarization step times out '
+      + 'and retries overlap with the Windows signing job, then propose a fix and a rollout plan for the team';
+    await page.getByRole('button', { name: worktreeSession.name, exact: true }).click();
+    await page.evaluate((renamed) => (
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+      window as typeof window & {
+        __paneTestElectronMock: { emitSessionUpdated: (session: typeof worktreeSession) => void };
+      }
+    ).__paneTestElectronMock.emitSessionUpdated(renamed),
+    { ...worktreeSession, name: longName });
+    await expect(titleBarLabel(page)).toHaveAttribute('title', `${project.name} · ${longName}`);
+
+    const boxes = await page.evaluate(() => {
+      const box = (testId: string) => document.querySelector(`[data-testid="${testId}"]`)!.getBoundingClientRect();
+      const label = box('window-title-bar-label');
+      const leading = box('window-title-bar-controls');
+      const trailing = box('window-title-bar-trailing-controls');
+      return { label: { left: label.left, right: label.right }, leadingRight: leading.right, trailingLeft: trailing.left, width: window.innerWidth };
+    });
+    expect(boxes.label.left).toBeGreaterThanOrEqual(boxes.leadingRight);
+    expect(boxes.label.right).toBeLessThanOrEqual(boxes.trailingLeft);
+    expect(Math.abs((boxes.label.left + boxes.label.right) / 2 - boxes.width / 2)).toBeLessThanOrEqual(1);
+    await expect(page.getByRole('button', { name: 'Collapse sidebar' })).toBeVisible();
+    await page.getByRole('button', { name: 'Collapse sidebar' }).click();
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+  });
+
   test('badges the PR and merge readiness without moving the title', async ({ page }) => {
     await openDesktop(page);
     await page.getByRole('button', { name: worktreeSession.name, exact: true }).click();
