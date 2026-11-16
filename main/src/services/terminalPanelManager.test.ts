@@ -113,7 +113,7 @@ type HandlerAccess = {
 };
 
 type LaunchCommandAccess = {
-  resolveCliLaunchCommand(panelId: string, initialCommand: string, customState: TerminalPanelState, shellType?: string): {
+  resolveCliLaunchCommand(panelId: string, initialCommand: string, customState: TerminalPanelState, shellType?: string, isWSL?: boolean): {
     commandToRun: string;
     customState: TerminalPanelState;
     isCliCommand: boolean;
@@ -164,7 +164,11 @@ function echoStagedWrites(terminal: TerminalUnderTest): void {
 }
 
 // Direct Claude launches get Pane's --settings file (its hooks are tested in claudePrompts); these tests read the rest of the command.
-beforeEach(() => { vi.spyOn(claudePrompts, 'withClaudePromptHooks').mockImplementation((_panelId, command) => command); });
+beforeEach(() => {
+  vi.spyOn(claudePrompts, 'withClaudePromptHooks').mockImplementation((_panelId, command) => command);
+  // Launch resolution checks Claude transcripts on disk; keep the developer's ~/.claude out of it.
+  vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(false);
+});
 
 function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnderTest {
   return {
@@ -1684,6 +1688,51 @@ describe('TerminalPanelManager hidden output delivery', () => {
       });
       expect(result.commandToRun).toBe(`claude --model test --session-id ${id}`);
       expect(result.customState.initialInputSentAt).toBeUndefined();
+    } finally { readable.mockRestore(); lookup.mockRestore(); }
+  });
+
+  it('reopens an unused plain Claude tab with the same ID instead of resuming a nonexistent transcript (#1380)', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const id = '00000000-0000-4000-8000-000000001380';
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
+    const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue(undefined);
+    try {
+      const result = manager.resolveCliLaunchCommand(id, 'claude', {
+        agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
+      });
+      expect(lookup).toHaveBeenCalledWith(id);
+      expect(result.commandToRun).toBe(`claude --session-id ${id}`);
+      expect(result.customState.agentSessionId).toBe(id);
+    } finally { readable.mockRestore(); lookup.mockRestore(); }
+  });
+
+  it('resumes a used plain Claude tab from its transcript', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const id = '00000000-0000-4000-8000-000000001381';
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
+    const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue('/claude/projects/old/transcript.jsonl');
+    try {
+      const result = manager.resolveCliLaunchCommand(id, 'claude --model test', {
+        agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
+      });
+      expect(result.commandToRun).toBe('claude --model test --resume "/claude/projects/old/transcript.jsonl"');
+    } finally { readable.mockRestore(); lookup.mockRestore(); }
+  });
+
+  it.each([
+    ['WSL', true, true],
+    ['unreadable transcripts', false, false],
+  ])('trusts the recorded Claude conversation when Pane cannot check transcripts (%s)', (_label, isWSL, readableTranscripts) => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const id = '00000000-0000-4000-8000-000000001382';
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(readableTranscripts);
+    const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue(undefined);
+    try {
+      const result = manager.resolveCliLaunchCommand(id, 'claude', {
+        agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
+      }, undefined, isWSL);
+      expect(lookup).not.toHaveBeenCalled();
+      expect(result.commandToRun).toBe(`claude --resume "${id}"`);
     } finally { readable.mockRestore(); lookup.mockRestore(); }
   });
 

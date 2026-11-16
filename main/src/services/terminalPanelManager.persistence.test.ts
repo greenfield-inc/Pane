@@ -27,6 +27,7 @@ import * as shellPathUtils from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
 import * as openCodeLaunch from './agents/opencodeLaunch';
 import * as claudePrompts from './claudePrompts';
+import * as claudeTranscripts from './claudeSessionTranscript';
 import * as processTree from '../utils/processTree';
 import { ArchiveProcessTracker } from './archiveProcessTracker';
 import { ExpectedReportTracker } from './expectedReports';
@@ -183,6 +184,8 @@ describe('terminal panel persistence', () => {
     // The fake PTY pids may belong to real processes here: never track them.
     vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue();
     vi.spyOn(processTree, 'isProcessAlive').mockReturnValue(false);
+    // Launch resolution checks Claude transcripts on disk; keep the developer's ~/.claude out of it.
+    vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(false);
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-terminal-persistence-'));
     ptyHost = new FakePtyHost();
     events = [];

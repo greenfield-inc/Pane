@@ -738,11 +738,12 @@ export class TerminalPanelManager extends EventEmitter {
             ? panelId
             : undefined;
       const claudeSessionId = existingClaudeSessionId ?? randomUUID();
-      // An idle launch allocates an ID without creating a transcript. Also
-      // resolve old project locations explicitly for pre-cross-project CLIs.
-      // When Pane cannot see the transcripts (WSL, or a config dir set only in
-      // the shell), trust the recorded conversation.
-      const checkTranscript = Boolean(customState.orchestrationSessionId) && !isWSL && canReadClaudeTranscripts();
+      // An idle launch allocates an ID without creating a transcript, so a tab
+      // never sent a message has nothing to resume (#1380). Also resolve old
+      // project locations explicitly for pre-cross-project CLIs. When Pane
+      // cannot see the transcripts (WSL, or a config dir set only in the
+      // shell), trust the recorded conversation.
+      const checkTranscript = !isWSL && canReadClaudeTranscripts();
       const transcript = checkTranscript && existingClaudeSessionId
         ? findClaudeSessionTranscript(existingClaudeSessionId)
         : undefined;
