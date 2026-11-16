@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -58,7 +58,7 @@ describe('scanStorage', () => {
     file('repo/worktrees/homepage/dist/out.js', 3000);
     file('repo/worktrees/homepage/.pane/scratch/qa.png', 2000);
     file('pane/scratch/p1/log.txt', 700);
-    const inventory = await scanStorage(deps([pane('p1', 'homepage')], { ignoredDirs: async () => ['dist/', 'node_modules/'] }));
+    const inventory = await scanStorage(deps([pane('p1', 'homepage')], { ignoredDirs: async () => ['dist/', 'node_modules/', '.pane/'] }));
     expect(inventory.panes).toEqual([expect.objectContaining({
       sessionId: 'p1', worktreeBytes: 11000, dependencyBytes: 5000, buildOutputBytes: 3000, scratchBytes: 2700, agentTempBytes: 0,
     })]);
@@ -81,13 +81,39 @@ describe('scanStorage', () => {
     file('claude-temp/busy.noindex/work/y.bin', 100, 5);
     dirAge('claude-temp/busy.noindex/work', 5);
     dirAge('claude-temp/busy.noindex', 5);
+    // The temp root is reached through a symlink (macOS /tmp -> /private/tmp) while the process reports the real path.
+    symlinkSync(path.join(root, 'claude-temp'), path.join(root, 'temp-link'));
 
-    const inventory = await scanStorage(deps([open, gone], { processCwds: async () => [busyCwd] }));
+    const inventory = await scanStorage(deps([open, gone], {
+      agentTempRoots: () => [path.join(root, 'temp-link')],
+      processCwds: async () => [busyCwd],
+    }));
     expect(inventory.panes[0].agentTempBytes).toBe(400);
     expect(inventory.items.map(item => [item.kind, item.tier, path.basename(item.path), item.sessionId, item.sizeBytes])).toEqual([
       ['agent-temp', 2, 'qa1.noindex', null, 3000],
       ['agent-temp', 2, path.basename(tempOf(gone)), 'p2', 900],
     ]);
+  });
+
+  it('offers no agent temp or paused scratch when running processes could not be listed', async () => {
+    const paused = pane('p1', 'homepage', { paused: true });
+    file('repo/worktrees/homepage/.pane/scratch/qa.png', 2000);
+    file('claude-temp/qa1.noindex/big.bin', 3000, 3);
+    dirAge('claude-temp/qa1.noindex', 3);
+    const inventory = await scanStorage(deps([paused], { processCwds: async () => null }));
+    expect(inventory.items).toEqual([]);
+    expect(inventory.buckets.agentTemp).toBe(3000);
+  });
+
+  it('never offers the temp folder of an open main-repo Pane', async () => {
+    const mainRepo = { ...pane('m1', 'repo', { isMainRepo: true }), worktreePath: path.join(root, 'repo') };
+    mkdirSync(mainRepo.worktreePath, { recursive: true });
+    const temp = `claude-temp/${mainRepo.worktreePath.replace(/[^a-zA-Z0-9]/gu, '-')}`;
+    file(`${temp}/scratchpad/notes.md`, 500, 3);
+    dirAge(`${temp}/scratchpad`, 3);
+    dirAge(temp, 3);
+    const inventory = await scanStorage(deps([mainRepo]));
+    expect(inventory.items).toEqual([]);
   });
 
   it('removes replaced update copies and old backups alone, and only shows copies Pane did not write', async () => {

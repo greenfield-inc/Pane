@@ -7,6 +7,7 @@ import { agentConfig, CONFIGURED_AGENT_IDS } from '../../../../shared/agents';
 import { readUpdateJournal } from '../../../../packages/runpane/src/updateOperation';
 import type { UpdateRecord } from './reclaimRules';
 import type { OtherToolPath } from './storageInventory';
+import type { CommandRunner } from '../../utils/commandRunner';
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 30_000;
@@ -42,25 +43,19 @@ export async function readUpdateRecords(paneDir: string): Promise<UpdateRecord[]
   return records;
 }
 
-export async function listGitWorktrees(projectPath: string): Promise<Array<{ path: string; branch?: string }>> {
-  const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd: projectPath, encoding: 'utf8', timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
-  const worktrees: Array<{ path: string; branch?: string }> = [];
-  for (const line of stdout.split('\n')) {
-    if (line.startsWith('worktree ')) worktrees.push({ path: line.slice('worktree '.length) });
-    else if (line.startsWith('branch ') && worktrees.length > 0) worktrees[worktrees.length - 1].branch = line.slice('branch '.length).replace(/^refs\/heads\//u, '');
-  }
-  return worktrees;
-}
-
-/** Folders git ignores in a worktree (build outputs, dependencies), relative and `/`-separated. */
-export async function ignoredDirs(worktreePath: string): Promise<string[]> {
-  const { stdout } = await execFileAsync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'],
-    { cwd: worktreePath, encoding: 'utf8', timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
+/** Folders git ignores in a worktree (build outputs, dependencies), relative and `/`-separated. Runs through the project's runner, so WSL works. */
+export async function ignoredDirs(worktreePath: string, runner: CommandRunner): Promise<string[]> {
+  const { stdout } = await runner.execFile('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'], worktreePath,
+    { timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, silent: true });
   return stdout.split('\0').filter(entry => entry.endsWith('/'));
 }
 
-/** Working directories of this user's processes. Windows reports none: a delete there fails while a process holds the folder. */
-export async function processCwds(): Promise<string[]> {
+/**
+ * Working directories of this user's processes, or null when the list could not be read (an lsof error or
+ * timeout). Windows reports none: a delete there fails while a Windows process holds the folder (WSL
+ * paths are covered by isWslPath).
+ */
+export async function processCwds(): Promise<string[] | null> {
   try {
     if (process.platform === 'darwin') {
       const { stdout } = await execFileAsync('lsof', ['-a', '-d', 'cwd', '-Fn', '-u', String(os.userInfo().uid)], { encoding: 'utf8', timeout: 10_000, maxBuffer: 16 * 1024 * 1024 });
@@ -72,7 +67,7 @@ export async function processCwds(): Promise<string[]> {
       return cwds.filter(Boolean);
     }
   } catch {
-    // An unreadable list protects nothing extra; deletion re-checks at execution time.
+    return null;
   }
   return [];
 }

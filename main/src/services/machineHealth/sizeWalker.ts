@@ -2,6 +2,8 @@ import { lstatSync, opendirSync } from 'fs';
 import { availableParallelism } from 'os';
 import * as path from 'path';
 import { isMainThread, parentPort, Worker } from 'worker_threads';
+import { PANE_SCRATCH_FOLDER } from '../../../../shared/constants/paneFolders';
+import { PaneError } from '../../../../shared/paneError';
 
 /** A folder to size; with `split`, its node_modules and ignored folders are counted apart. */
 export interface SizeRequest {
@@ -23,7 +25,6 @@ export interface SizeResult {
 }
 
 const DEPENDENCY_DIRS = new Set(['node_modules', '.pnpm-store', '.venv', 'venv', 'Pods', 'vendor']);
-const SCRATCH_DIR = '.pane/scratch';
 
 function walk(root: string, request: SizeRequest): SizeResult {
   const result: SizeResult = { path: root, totalBytes: 0, dependencyBytes: 0, buildOutputBytes: 0, scratchBytes: 0, newestMs: 0, exists: true };
@@ -56,7 +57,9 @@ function walk(root: string, request: SizeRequest): SizeResult {
         if (entry.isDirectory()) {
           let next: Bucket = bucket;
           if (bucket === 'plain') {
-            if (childRel === SCRATCH_DIR) next = 'scratch';
+            if (childRel === PANE_SCRATCH_FOLDER) next = 'scratch';
+            // A folder on the way to scratch (`.pane`) stays plain even when git ignores it.
+            else if (PANE_SCRATCH_FOLDER.startsWith(`${childRel}/`)) next = 'plain';
             else if (DEPENDENCY_DIRS.has(entry.name)) next = 'dependency';
             else if (ignored.has(childRel)) next = 'build';
           }
@@ -102,6 +105,9 @@ function measureInWorker(requests: readonly SizeRequest[]): Promise<SizeResult[]
       void worker.terminate();
     });
     worker.once('error', reject);
+    // Runs after a result too (terminate), when rejecting no longer changes the settled promise.
+    worker.once('exit', code => reject(new PaneError('ERR_STORAGE_SCAN_WORKER_EXIT',
+      `The disk size worker stopped (exit code ${code}) before it reported sizes.`, 'Run the storage scan again.')));
     worker.postMessage(requests);
   });
 }

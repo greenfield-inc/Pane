@@ -1,13 +1,17 @@
-import { readdir, stat } from 'fs/promises';
+import { readdir, realpath, stat } from 'fs/promises';
 import * as path from 'path';
 import type { DiskBuckets, PaneDiskUsage, ReclaimItem, StorageInventory } from '../../../../shared/types/machineHealth';
-import { agentTempFolderName, classifyPaneDataFile, replacedUpdates, type UpdateRecord } from './reclaimRules';
+import { agentTempFolderName, classifyPaneDataFile, isWslPath, replacedUpdates, type UpdateRecord } from './reclaimRules';
 import { measureSizes, type SizeRequest, type SizeResult } from './sizeWalker';
+import { PANE_SCRATCH_FOLDER } from '../../../../shared/constants/paneFolders';
+import { appBackupPath } from '../../../../packages/runpane/src/updateArtifacts';
+import { RESERVE_WORKTREE_PREFIX } from '../worktreePoolManager';
 
 const DAY = 86_400_000;
 /** Unmatched agent temp is offered once nothing in it changed for this long. */
 const AGENT_TEMP_IDLE_MS = 2 * DAY;
 
+/** Paths are file-system paths (a WSL project's are converted for Node's fs). */
 export interface InventoryPane {
   id: string;
   name: string;
@@ -46,10 +50,12 @@ export interface InventoryDeps {
   /** Panes whose archive cleanup job is still queued or running. */
   archiveJobsInFlight: () => ReadonlySet<string>;
   readUpdates: () => Promise<UpdateRecord[]>;
-  listGitWorktrees: (projectPath: string) => Promise<Array<{ path: string; branch?: string }>>;
-  ignoredDirs: (worktreePath: string) => Promise<string[]>;
-  /** Working directories of every running process. */
-  processCwds: () => Promise<string[]>;
+  /** Git's worktrees of the Pane's project, with file-system paths. */
+  listGitWorktrees: (pane: InventoryPane) => Promise<Array<{ path: string; branch?: string }>>;
+  /** Folders git ignores in the Pane's worktree. */
+  ignoredDirs: (pane: InventoryPane) => Promise<string[]>;
+  /** Working directories of every running process, or null when they could not be read. */
+  processCwds: () => Promise<string[] | null>;
   otherTools: () => Promise<OtherToolPath[]>;
   appScratchDir: (paneId: string) => string;
   measure?: (requests: readonly SizeRequest[]) => Promise<SizeResult[]>;
@@ -64,6 +70,8 @@ async function listDir(dir: string): Promise<string[]> {
 }
 
 const inside = (child: string, parent: string) => child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
+/** Resolves symlinks (macOS reports process cwds under /private/tmp, not /tmp). */
+const real = (folder: string) => realpath(folder).catch(() => path.resolve(folder));
 
 /**
  * Lists every reclaimable item with its owner, tier and logical size, and each
@@ -77,8 +85,14 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
   const panes = deps.panes();
   const withWorktree = panes.flatMap(pane => (pane.worktreePath ? [{ ...pane, worktreePath: pane.worktreePath }] : []));
   const open = withWorktree.filter(pane => !pane.archived && !pane.isMainRepo);
-  const cwds = await deps.processCwds();
-  const busy = (folder: string) => cwds.some(cwd => inside(cwd, folder));
+  const listedCwds = await deps.processCwds();
+  const cwds = listedCwds && await Promise.all(listedCwds.map(real));
+  /** Whether a process works in the folder; when the list could not be read, every folder counts as busy. */
+  const busy = async (folder: string) => {
+    if (!cwds || isWslPath(folder)) return true;
+    const resolved = await real(folder);
+    return cwds.some(cwd => inside(cwd, resolved));
+  };
   const items: ReclaimItem[] = [];
   const requests: SizeRequest[] = [];
   const pending: Array<{ request: SizeRequest; done: (size: SizeResult) => void }> = [];
@@ -97,7 +111,7 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
     const { worktreePath } = pane;
     const entry: PaneDiskUsage = { sessionId: pane.id, name: pane.name, worktreePath, worktreeBytes: 0, dependencyBytes: 0, buildOutputBytes: 0, scratchBytes: 0, agentTempBytes: 0 };
     usage.set(pane.id, entry);
-    const ignoredDirs = await deps.ignoredDirs(worktreePath).catch(() => []);
+    const ignoredDirs = await deps.ignoredDirs(pane).catch(() => []);
     size({ path: worktreePath, ignoredDirs }, result => {
       entry.worktreeBytes += result.totalBytes;
       entry.dependencyBytes += result.dependencyBytes;
@@ -110,13 +124,13 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
       scratchTotals.inPaneData += result.totalBytes;
     });
     if (pane.paused) {
-      for (const scratch of [path.join(worktreePath, '.pane', 'scratch'), deps.appScratchDir(pane.id)]) {
-        if (!busy(scratch)) addItem({ kind: 'paused-scratch', tier: 2, path: scratch, sessionId: pane.id, reason: `Scratch and QA files of ${pane.name}, which is paused.` });
+      for (const scratch of [path.join(worktreePath, ...PANE_SCRATCH_FOLDER.split('/')), deps.appScratchDir(pane.id)]) {
+        if (!await busy(scratch)) addItem({ kind: 'paused-scratch', tier: 2, path: scratch, sessionId: pane.id, reason: `Scratch and QA files of ${pane.name}, which is paused.` });
       }
     }
   }
 
-  // Agent temp: folders named after a Pane's worktree, and loose items.
+  // Agent temp: folders named after a Pane's worktree, and loose items. A main-repo Pane counts as open here.
   // Two Panes can map to one name (a reused path, or `a/b-c` and `a-b/c`): an open Pane always wins, so a live
   // Pane's temp folder is never offered as an archived Pane's.
   const byTempName = new Map<string, InventoryPane>();
@@ -130,15 +144,17 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
     for (const name of await listDir(root)) {
       const full = path.join(root, name);
       const owner = byTempName.get(name);
-      const openOwner = owner && usage.get(owner.id);
+      const ownerOpen = owner !== undefined && !owner.archived;
+      const isBusy = !ownerOpen && await busy(full);
       size({ path: full }, result => {
         if (!result.exists || result.totalBytes === 0) return;
         agentTempTotal.bytes += result.totalBytes;
-        if (openOwner) {
-          openOwner.agentTempBytes += result.totalBytes;
+        if (ownerOpen) {
+          const openUsage = usage.get(owner.id);
+          if (openUsage) openUsage.agentTempBytes += result.totalBytes;
           return;
         }
-        if (busy(full)) return;
+        if (isBusy) return;
         const gone = owner?.archived;
         const idle = now - result.newestMs >= AGENT_TEMP_IDLE_MS;
         if (!gone && !idle) return;
@@ -154,18 +170,18 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
   // Folders under each project's worktree root that no open Pane uses.
   const openPaths = new Set(open.map(pane => path.resolve(pane.worktreePath)));
   // An adopted worktree is the person's: archive keeps it on purpose, so it is never offered here.
-  const archivedByPath = new Map(withWorktree.filter(pane => pane.archived && pane.ownedByPane).map(pane => [path.resolve(pane.worktreePath), pane]));
+  const archivedByPath = new Map(withWorktree.filter(pane => pane.archived && pane.ownedByPane && !pane.isMainRepo).map(pane => [path.resolve(pane.worktreePath), pane]));
   const inFlight = deps.archiveJobsInFlight();
   const gitWorktrees = new Map<string, Array<{ path: string; branch?: string }>>();
-  for (const projectPath of new Set(panes.map(pane => pane.projectPath))) {
-    gitWorktrees.set(projectPath, await deps.listGitWorktrees(projectPath).catch(() => []));
+  for (const pane of panes) {
+    if (!gitWorktrees.has(pane.projectPath)) gitWorktrees.set(pane.projectPath, await deps.listGitWorktrees(pane).catch(() => []));
   }
   // Pane Chat and Session folders live in Pane's data folder; only project worktree folders are scanned here.
   const paneDir = path.resolve(deps.paneDir);
   for (const root of new Set(deps.worktreeRoots().map(root => path.resolve(root)).filter(root => !inside(root, paneDir)))) {
     for (const name of await listDir(root)) {
       const full = path.join(root, name);
-      if (openPaths.has(full) || name.startsWith('_reserve-') || name.startsWith('.')) continue;
+      if (openPaths.has(full) || name.startsWith(RESERVE_WORKTREE_PREFIX) || name.startsWith('.')) continue;
       let folder;
       try {
         folder = await stat(full);
@@ -198,11 +214,8 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
   }
   const installPath = deps.installPath();
   if (installPath) {
-    const prefix = `${path.basename(installPath)}.before-`;
-    for (const name of await listDir(path.dirname(installPath))) {
-      if (name.startsWith(prefix) && replaced.has(name.slice(prefix.length))) {
-        addItem({ kind: 'update-snapshot', tier: 1, path: path.join(path.dirname(installPath), name), sessionId: null, reason: 'The previous app copy of an update a newer update replaced.' });
-      }
+    for (const id of replaced) {
+      addItem({ kind: 'update-snapshot', tier: 1, path: appBackupPath(installPath, id), sessionId: null, reason: 'The previous app copy of an update a newer update replaced.' });
     }
   }
   const cleanOpenAt = deps.cleanOpenAt();

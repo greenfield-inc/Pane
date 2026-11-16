@@ -1,4 +1,5 @@
 /** Rules that decide which of Pane's own files are leftovers. Pure: callers read the disk. */
+import { PANEL_BUFFER_BACKUP_NAME } from '../../database/panelBufferMigration';
 
 const DAY = 86_400_000;
 /** user_preferences key: when the database last opened at startup with no migration error (epoch ms). */
@@ -29,7 +30,6 @@ export function agentTempFolderName(workingDirectory: string): string {
   return workingDirectory.replace(/[^a-zA-Z0-9]/gu, '-');
 }
 
-const MIGRATION_BACKUP = /^sessions\.db\.pre-panel-buffers-\d+\.bak$/u;
 const LIVE_DATABASE = /^sessions\.db(?:-wal|-shm|-journal)?$/u;
 
 /**
@@ -39,11 +39,19 @@ const LIVE_DATABASE = /^sessions\.db(?:-wal|-shm|-journal)?$/u;
  * - `keep`: everything else.
  */
 export function classifyPaneDataFile(name: string, modifiedAt: number, now: number, cleanOpenAt: number | null): 'migration-backup' | 'foreign' | 'keep' {
-  if (MIGRATION_BACKUP.test(name)) {
+  if (PANEL_BUFFER_BACKUP_NAME.test(name)) {
     const oldEnough = now - modifiedAt >= MIGRATION_BACKUP_DAYS * DAY;
     return oldEnough && cleanOpenAt !== null && cleanOpenAt > modifiedAt ? 'migration-backup' : 'keep';
   }
   if (LIVE_DATABASE.test(name) || name.endsWith('.before-import')) return 'keep';
   if (/\.db(?:[.-].*)?$/u.test(name) || name.startsWith('sessions.db')) return 'foreign';
   return 'keep';
+}
+
+/**
+ * A path inside a WSL distro as Windows sees it (\\wsl.localhost\<distro>\… or \\wsl$\…). Pane cannot list
+ * the working folders of the Linux processes there, so anything under one counts as in use.
+ */
+export function isWslPath(folder: string): boolean {
+  return /^\\\\wsl(?:\.localhost|\$)\\/iu.test(folder);
 }
