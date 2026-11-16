@@ -228,7 +228,8 @@ export class OtherApps {
     if (isPane(group)) return 'This is Pane, with what it runs. Quit it from its own window.';
     // Its devices run helpers outside the runtime (launchd_sim's host, the render server), so a stop here would not end it.
     if (group.simulator) return 'Quit it from the Simulator app, or run `xcrun simctl shutdown all`. Some of its helpers run outside this list.';
-    if (this.deps.platform === 'darwin' && group.rows.some(row => !row.exe && !row.path.startsWith('/') && !row.otherUser && row.pid > 1)) {
+    // A process can exit between ps and lsof, so one unread row among read ones does not lock the group.
+    if (this.deps.platform === 'darwin' && group.rows.every(row => !row.exe && !row.path.startsWith('/') && !row.otherUser && row.pid > 1)) {
       return 'Pane can\'t tell which program this is, so it does not stop it.';
     }
     const parents = new Map(rows.map(row => [row.pid, row.ppid]));

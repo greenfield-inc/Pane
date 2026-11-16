@@ -151,8 +151,10 @@ describe('which apps are system', () => {
     expect(await reasonFor('darwin', row(9, path, 50, over))).toBeNull();
   });
 
-  it('macOS locks a bare-name process whose executable it could not read', async () => {
+  it('macOS locks a bare-name process whose executable it could not read, unless others of its name were read', async () => {
     expect(await reasonFor('darwin', row(9, 'mystery', 50))).toMatch(/can't tell which program/u);
+    const list = await apps({ paneProcesses: () => new Set() }, [[row(9, 'node', 50, { exe: '/opt/homebrew/bin/node' }), row(10, 'node', 50)]]).apps.list();
+    expect(list.map(app => [app.name, app.processCount, app.protectedReason])).toEqual([['node', 2, null]]);
   });
 
   it.each(['ksmserver', 'kwin_wayland', 'plasmashell', 'xfce4-session', 'cinnamon', 'mate-session', 'sway', 'Hyprland', 'i3', 'gnome-shell', 'gnome-session-b', 'gnome-keyring-d', 'xdg-desktop-por', 'at-spi-bus-laun', 'pipewire-pulse', 'Xwayland'])(
