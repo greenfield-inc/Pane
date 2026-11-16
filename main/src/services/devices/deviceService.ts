@@ -142,7 +142,8 @@ export class DeviceService {
         this.options.onChange?.({ kind: 'held', id: chosen.id, paneId: caller.paneId });
       }
       const previousPane = this.markUsed(chosen.id, caller.paneId);
-      if (!chosen.booted || this.needsSlim(chosen, capabilities)) {
+      const booting = !chosen.booted || this.needsSlim(chosen, capabilities);
+      if (booting) {
         onPhase?.('booting');
         await this.boot(chosen, capabilities);
       }
@@ -150,7 +151,8 @@ export class DeviceService {
       if (previousPane && previousPane !== caller.paneId) {
         await this.wipeApps(chosen, capabilities).catch((cause) => this.options.log?.(`[devices] clearing apps on ${chosen.id} failed: ${reasonOf(cause)}`));
       }
-      await this.agentDevice(caller.paneId, chosen, ['open']);
+      // agent-device's session for this Pane: started on a new lease or boot, kept on a repeat open.
+      if (holder !== caller.paneId || booting) await this.openSession(caller.paneId, chosen);
       this.scheduleSweep();
       return { device: this.summary({ ...chosen, booted: true }) };
     }
@@ -511,6 +513,15 @@ export class DeviceService {
       throw new PaneError('ERR_DEVICE_AGENT_DEVICE', `agent-device ${args[0]} failed on ${device.name}: ${failure}`, 'Try again; device_act passes any agent-device command through if you need its diagnostics.');
     }
     return result;
+  }
+
+  private async openSession(paneId: string, device: HubDevice): Promise<void> {
+    try {
+      await this.agentDevice(paneId, device, ['open']);
+    } catch (cause) {
+      // A session that outlived Pane's own lease (a restart) is the one this Pane would open.
+      if (!(cause instanceof PaneError && /Session already active/i.test(cause.message))) throw cause;
+    }
   }
 
   private paths() {
