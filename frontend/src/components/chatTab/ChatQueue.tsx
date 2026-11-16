@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Pencil, X, Zap } from 'lucide-react';
 import type { ChatTabQueuedPrompt } from '../../../../shared/types/chatTab';
 
-/** The host keeps this many characters of a queued message as its preview; a longer one cannot be edited from it. */
+/** The host keeps this many characters of a queued message as its preview; a longer one shows an ellipsis and cannot be edited from it. */
 const PREVIEW_LIMIT = 500;
 
 export interface ChatQueueProps {
@@ -31,7 +31,8 @@ export function ChatQueue({ queue, working, disabled, label, onRemove, onSendNow
   return <ol className="chat-queue" aria-label="Queued messages">
     {queue.map((item, index) => {
       const shown = label?.(item.text);
-      const editable = shown === undefined && item.text.length < PREVIEW_LIMIT;
+      const cut = item.text.length >= PREVIEW_LIMIT;
+      const editable = shown === undefined && !cut;
       const order = index === 0 ? 'Sends next' : 'Queued';
       if (editing?.operationId === item.operationId) {
         return <li key={item.operationId} className="chat-queue-editing">
@@ -49,7 +50,7 @@ export function ChatQueue({ queue, working, disabled, label, onRemove, onSendNow
         </li>;
       }
       return <li key={item.operationId}>
-        <span className="chat-queue-text">{shown ?? (item.text || 'Image')}</span>
+        <span className="chat-queue-text">{shown ?? (item.text ? `${item.text}${cut ? '…' : ''}` : 'Image')}</span>
         {!!item.imageCount && shown === undefined && !!item.text && <span className="chat-queue-label">+{item.imageCount} image{item.imageCount === 1 ? '' : 's'}</span>}
         <span className="chat-queue-label">{order}</span>
         {working && <button type="button" className="chat-queue-now" disabled={disabled} aria-label="Send now"

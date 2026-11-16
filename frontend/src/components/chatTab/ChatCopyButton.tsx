@@ -24,8 +24,11 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-/** A copy button whose icon turns into a check (or a cross, if copying failed) for a moment. */
-export function ChatCopyButton({ label, text, className = 'chat-copy', showLabel = false }: { label: string; text: () => string; className?: string; showLabel?: boolean }) {
+/**
+ * A copy button whose icon turns into a check (or a cross, if copying failed) for a moment.
+ * `text` may load what it copies; if that rejects, nothing is copied.
+ */
+export function ChatCopyButton({ label, text, className = 'chat-copy', showLabel = false }: { label: string; text: () => string | Promise<string>; className?: string; showLabel?: boolean }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   useEffect(() => {
     if (state === 'idle') return;
@@ -35,7 +38,7 @@ export function ChatCopyButton({ label, text, className = 'chat-copy', showLabel
   const Icon = state === 'copied' ? Check : state === 'failed' ? X : Copy;
   const status = state === 'copied' ? 'Copied' : state === 'failed' ? 'Could not copy' : label;
   return <button type="button" className={className} data-state={state} aria-label={label} title={status}
-    onClick={() => { copyText(text()).then(() => setState('copied'), () => setState('failed')); }}>
+    onClick={() => { (async () => copyText(await text()))().then(() => setState('copied'), () => setState('failed')); }}>
     <span className="chat-copy-icon"><Icon aria-hidden="true" /></span>
     {showLabel && <span>{status}</span>}
     <span className="sr-only" role="status">{state === 'idle' ? '' : status}</span>

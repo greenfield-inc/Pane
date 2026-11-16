@@ -1,4 +1,5 @@
 import { STREAM_FRAME_MS } from './constants/streamCadence';
+import type { AgentChatMessage } from './types/agentChat';
 import { applyChatTabEvent, type ChatTabClient, type ChatTabEvent, type ChatTabSend, type ChatTabTranscript, type ChatTabView } from './types/chatTab';
 
 export interface ChatTabViewerState {
@@ -22,6 +23,8 @@ export interface ChatTabViewerState {
 const WINDOW = 600;
 const PAGE = 100;
 const PENDING_LIMIT = 2000;
+/** The most messages the host returns from one history read. */
+const HISTORY_PAGE = 500;
 
 /**
  * A disposable subscription to one chat tab's host state. Detaching has no
@@ -227,6 +230,28 @@ export class ChatTabViewer {
     } catch (error) {
       if (transport === this.transport) this.setError(error instanceof Error ? error.message : String(error));
     } finally { if (transport === this.transport) this.publish({ loadingNewer: false }); }
+  }
+
+  /**
+   * The whole conversation, for copying: the newest window (the mounted one when it
+   * reaches the end), then every older message paged in from the host. Rejects rather
+   * than returning part of it; the mounted window does not change.
+   */
+  async allMessages(): Promise<AgentChatMessage[]> {
+    const mounted = this.state.transcript;
+    const newest = mounted && !this.state.hasNewer ? mounted : (await this.chatClient.get(this.panelId, PAGE * 2)).transcript;
+    if (!newest) throw new Error('The conversation has not loaded yet.');
+    const pages: AgentChatMessage[][] = [newest.messages];
+    let start = newest.start;
+    while (start > 0) {
+      const page = await this.chatClient.history(this.panelId, start, Math.min(start, HISTORY_PAGE));
+      if (!page.length) throw new Error(`The host returned no messages before message ${start}.`);
+      pages.unshift(page);
+      start -= page.length;
+    }
+    const current = this.state.transcript?.generation ?? this.state.view?.generation;
+    if (current !== undefined && current !== newest.generation) throw new Error('The conversation was replaced while copying. Copy it again.');
+    return pages.flat();
   }
 
   /** Keeps the newest WINDOW messages mounted while following the end of the chat. */
