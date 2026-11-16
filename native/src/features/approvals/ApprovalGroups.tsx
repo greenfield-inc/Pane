@@ -15,7 +15,7 @@ export type MachineOf = (key: string) => Pick<Machine, 'os' | 'slot' | 'state' |
  * Home's Needs you list: what waits on you newest first, flat or in one card per Session or project
  * (its name and its machine's mark above it), in the sort chosen on its sheet. Then With the agent
  * (approvals whose reply an agent is reading, P7) and one row per machine that isn't online, neither
- * of which counts. Each home draws its own rows.
+ * of which counts. The caller draws each row (`renderEntry`).
  */
 export function ApprovalGroups<T extends ApprovalEntry>({ entries, offline = [], machineOf, renderEntry }: {
   entries: readonly T[];

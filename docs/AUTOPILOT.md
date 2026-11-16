@@ -333,6 +333,6 @@ rewrites its own environment.
 | Types | `shared/types/autopilot.ts` |
 | Desktop view, stack, sidebar row | `frontend/src/components/autopilot/` |
 | Settings › Autopilot (your instructions) | `frontend/src/components/settings/categories/AutopilotSettings.tsx` |
-| Phone: home row, chat with cards, approval and document screens | `native/src/features/autopilot/`, routes in `native/src/app/autopilot/` |
+| Phone: home's Autopilot bar, chat with cards, approval and document screens | `native/src/features/autopilot/`, routes in `native/src/app/autopilot/` |
 | CLI | `packages/runpane/src/autopilot.ts`, `packages/runpane-py/src/runpane/autopilot.py` |
 | Journeys (scripted agent) | `tests/autopilot.spec.ts` (`pnpm test:chat-tabs`) |

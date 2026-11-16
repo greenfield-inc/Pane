@@ -93,13 +93,13 @@ export function sessionKey(machineKey: string, sessionId: string): string {
 export interface WaitingCounts {
   /** What waits from each Session, by `sessionKey`; a Session with none isn't listed. */
   bySession: ReadonlyMap<string, number>;
-  /** Approvals' header: every Session's count plus what waits outside any Session. */
+  /** Every Session's count plus what waits outside any Session: the approvals the Needs you tile counts. */
   total: number;
 }
 
 /**
- * Home's amber counts (D-38): what waits on you from each Session row, and the total on the
- * Approvals header. Answers held for Undo don't count; fallback items count toward their Session.
+ * Home's amber counts (D-38): what waits on you from each Session row, and the approvals the
+ * Needs you tile counts. Answers held for Undo don't count; fallback items count toward their Session.
  */
 export function waitingCounts(entries: readonly ApprovalEntry[]): WaitingCounts {
   const bySession = new Map<string, number>();
