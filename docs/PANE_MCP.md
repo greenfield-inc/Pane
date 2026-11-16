@@ -66,6 +66,7 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 | `autopilot` | `autopilot_status`, `autopilot_waiting`, `autopilot_stack`, `autopilot_stack_push`, `autopilot_answer`, `autopilot_close`, `autopilot_rewrite`: Autopilot's (experimental) reads, its stack, and its actions on waiting items. `autopilot_stack_push` takes one `tab` per call (the CLI's `--tab` repeats). Only Autopilot's panel may act (`AUTOPILOT_ONLY`), and a permission prompt, or an answer or rewrite of a secret card, is refused with `AUTOPILOT_CANNOT_ANSWER` |
 | `repos` | the repository tools, including `repos_get` and `repos_update` (a repo's Project Settings: build, run and archive scripts, worktree folder) |
 | `devices` | the six device tools plus `device_usage` and `device_free`, which report and free what simulators use on this machine ([Devices](DEVICES.md)) |
+| `machine` | `machine_health` (disk and memory levels, the Panes using the most memory, leak warnings, and what Pane can free by tier) and `machine_cleanup` (lists one kind of tier 1 or 2 item, and deletes them with `yes: true`; tier 3 is refused with how to free it) |
 | `secrets` | `secrets_list`, `secrets_delete`. No tool sets or reads a value: agents use secrets through `runpane secrets exec` ([Pane secrets](PANE_SECRETS.md)) |
 | `docs`, `links`, `admin` | documentation, deep-link, and diagnostic tools |
 | `plugin` | `core` without the four `workspace` tools: what the [Claude plugin](#claude-plugin) serves |
@@ -202,7 +203,7 @@ A few flags are left out. `--json` is always passed. `--follow` and `--until-eve
 
 ## Confirmation
 
-Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `secrets_request`, `theme_set`, `report`, and the `sessions_*` and lock tools have no `yes`. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
+Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `secrets_request`, `theme_set`, `report`, and the `sessions_*` and lock tools have no `yes`. `machine_cleanup` without `yes` is a dry run: it lists what it would delete and changes nothing. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
 
 ## Agent guidance
 

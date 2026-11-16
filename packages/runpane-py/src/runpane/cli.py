@@ -93,6 +93,7 @@ from .local_control import (
     run_pr_watch_command,
     run_workspace_state,
 )
+from .machine import run_machine_cleanup, run_machine_health
 from .notify import RunpaneError, run_notify
 from .pairing_link import run_link
 from .secrets import run_secrets_delete, run_secrets_exec, run_secrets_list, run_secrets_request, run_secrets_set
@@ -120,6 +121,7 @@ AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
+COMMAND_GROUP_HELP_TOPICS.add("machine")
 COMMAND_GROUP_HELP_TOPICS.add("loops")
 COMMAND_GROUP_HELP_TOPICS.add("secrets")
 COMMAND_GROUP_HELP_TOPICS.add("autopilot")
@@ -184,6 +186,7 @@ FLAG_OWNERS = {
     "--deny": ("autopilot answer",),
     "--because": ("autopilot answer",),
     "--reason": ("secrets request", "autopilot close"),
+    "--kind": ("machine cleanup",),
     "--conversation": ("panels conversation",),
     "--hook": ("panels conversation",),
 }
@@ -252,6 +255,7 @@ class ParsedArgs:
     only: Optional[List[str]] = None
     secret_files: Optional[List[str]] = None
     reason: Optional[str] = None
+    kind: Optional[str] = None
     exec_command: Optional[List[str]] = None
     timeout_ms: Optional[float] = None
     wait_ready: bool = False
@@ -1238,6 +1242,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--project":
         parsed.project = value
         return
+    if flag == "--kind":
+        parsed.kind = value
+        return
     if flag == "--reason":
         parsed.reason = value
         return
@@ -1748,6 +1755,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "lock acquire": lambda parsed, context: run_lock_acquire(parsed),
     "lock release": lambda parsed, context: run_lock_release(parsed),
     "lock list": lambda parsed, context: run_lock_list(parsed),
+    "machine health": lambda parsed, context: run_machine_health(parsed),
+    "machine cleanup": lambda parsed, context: run_machine_cleanup(parsed),
     "loops list": lambda parsed, context: run_loops_list(parsed),
     "loops create": lambda parsed, context: run_loops_save(parsed),
     "loops update": lambda parsed, context: run_loops_save(parsed),

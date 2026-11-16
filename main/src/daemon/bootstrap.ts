@@ -66,7 +66,10 @@ import { agentTempRoots, ignoredDirs, installPathOf, otherToolPaths, processCwds
 import { DB_CLEAN_OPEN_PREFERENCE } from '../services/machineHealth/reclaimRules';
 import { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import { FinishedPaneMonitor, findFinishedPanes } from '../services/machineHealth/finishedPanes';
-import { MemoryRelief } from '../services/machineHealth/memoryRelief';
+import { MemoryRelief, canRestartProcess } from '../services/machineHealth/memoryRelief';
+import { HealthCardController } from '../services/machineHealth/healthCardController';
+import { showDesktopAlert } from '../ipc/desktopAlerts';
+import type { FinishedPane } from '../services/machineHealth/finishedPanes';
 import { stopProcessIdentities } from '../services/archiveProcessTracker';
 import type { LevelChange } from '../services/machineHealth/machineHealthService';
 import { paneInactiveSince } from '../services/paneInactivity';
@@ -77,7 +80,7 @@ import { withArchiveRepositoryLock } from '../services/archiveRepositoryLock';
 import { PaneError } from '../../../shared/paneError';
 import { appScratchDirectory, appScratchRoot } from '../services/archiveRetention';
 import { panePausedMark } from '../../../shared/types/panels';
-import { MACHINE_HEALTH_CHANGED_EVENT, MACHINE_HEALTH_FINISHED_CHANGED_EVENT, MACHINE_HEALTH_INVENTORY_CHANGED_EVENT } from '../../../shared/types/machineHealth';
+import { MACHINE_HEALTH_CHANGED_EVENT, MACHINE_HEALTH_FINISHED_CHANGED_EVENT, MACHINE_HEALTH_INVENTORY_CHANGED_EVENT, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, type LeakWarning } from '../../../shared/types/machineHealth';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
@@ -101,7 +104,7 @@ import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { startArchiveExpiry } from '../services/archiveExpiry';
 import { ARCHIVE_EXPIRY_START_DELAY_MS } from '../../../shared/constants/archiveRetention';
 
@@ -160,6 +163,9 @@ function registerPowerMonitorDiagnostics(logger: Logger): void {
 function megabytes(bytes: number | null): string {
   return bytes === null ? 'unknown' : `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
+
+/** Leftover processes the person chose to keep (pid:start), so a restart does not ask about them again. */
+const KEPT_PROCESSES_PREFERENCE = 'machine_health_kept_processes';
 
 export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Promise<PaneDaemonHost> {
   const mode = options.mode ?? 'desktop';
@@ -817,6 +823,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     });
   }
   const latestPaneMemoryMB = (paneId: string) => machineHealth.latestSnapshot()?.panes.find(pane => pane.sessionId === paneId)?.rssMB ?? 0;
+  const paneState = (paneId: string): 'archived' | 'paused' | 'open' => {
+    const session = databaseService.getSession(paneId);
+    if (!session || session.archived) return 'archived';
+    return panePausedMark(panelManager.getPanelsForSession(paneId)) ? 'paused' : 'open';
+  };
   const memoryRelief = new MemoryRelief({
     now: () => Date.now(),
     paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
@@ -832,6 +843,56 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   if (duties.housekeeping) {
     machineHealth.on('snapshot', snapshot => { void memoryRelief.onSnapshot(snapshot).catch(error => logger.warn('[MachineHealth] memory relief failed', error)); });
     taskQueue.setInstallsOneAtATime(() => machineHealth.latestSnapshot()?.memory.level !== undefined && machineHealth.latestSnapshot()?.memory.level !== 'ok');
+  }
+  const healthCards = new HealthCardController({
+    now: () => Date.now(),
+    ask: question => {
+      const queue = services.notifyService?.queue;
+      if (!queue) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' });
+      return queue.ask({
+        question: { ui: 'options', title: question.title, context: question.context, choices: question.choices.map((label, index) => ({ label, recommended: index === 0 })), machineHealth: question.card },
+        source: { name: 'Pane', agent: 'Pane' },
+      });
+    },
+    inventory: () => machineHealth.cachedInventory(),
+    idleOffer: () => memoryRelief.idleOffer(),
+    pauseIdleHours: () => configManager.getConfig().machineHealth?.pauseIdleHours ?? 2,
+    paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
+    paneState,
+    tabName: panelId => panelManager.getPanel(panelId)?.title ?? null,
+    canRestart: leak => canRestartProcess(machineHealth.latestSnapshot(), leak, paneId => logsManager.isRunning(paneId)),
+    cleanUp: async itemIds => {
+      await machineCleanup.run({ source: 'card', tiers: [1, 2], ids: itemIds });
+      // Rescan so Resources and the CLI stop listing what the card removed.
+      void machineHealth.scanInventory().catch(() => undefined);
+    },
+    readKept: () => {
+      try {
+        return decodeOptionalBoundary(JSON.parse(databaseService.getUserPreference(KEPT_PROCESSES_PREFERENCE) ?? '[]'), boundary.array(boundary.string)) ?? [];
+      } catch {
+        return [];
+      }
+    },
+    writeKept: identities => databaseService.setUserPreference(KEPT_PROCESSES_PREFERENCE, JSON.stringify(identities)),
+    pauseIdle: async () => { await memoryRelief.pauseIdle('card'); },
+    stopProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, [{ source: 'card', processes: [{ pid: leak.pid, started: leak.started }] }]); },
+    stopProcesses: processes => memoryRelief.stopProcesses(processes, 'card'),
+    restartProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, [{ pid: leak.pid, started: leak.started }]); },
+    ignoreLeak: leak => machineHealth.ignoreLeak(leak.pid, leak.started),
+    archive: async paneIds => { await finishedPanes.archive(paneIds, 'card'); },
+    alert: (title, body) => showDesktopAlert(services, services.notifyService?.queue.alertsHere() ?? true, title, body),
+    log: message => logger.warn(message),
+  });
+  if (duties.housekeeping) {
+    machineHealth.on('snapshot', snapshot => healthCards.onSnapshot(snapshot));
+    machineHealth.on('leak', (leak: LeakWarning) => {
+      const snapshot = machineHealth.latestSnapshot();
+      if (snapshot) void healthCards.onLeak(leak, snapshot);
+    });
+    finishedPanes.on('finished', (list: FinishedPane[]) => {
+      const snapshot = machineHealth.latestSnapshot();
+      if (snapshot) healthCards.onFinished(list, snapshot);
+    });
   }
   finishedPanes.on('finished', list => getPaneEventSink().send(MACHINE_HEALTH_FINISHED_CHANGED_EVENT, list));
   machineHealth.start();

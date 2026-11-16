@@ -99,6 +99,21 @@ export const RUNPANE_CONTRACT = {
       "cursor",
       "opencode",
       "pi"
+    ],
+    "reclaimKinds": [
+      "update-snapshot",
+      "migration-backup",
+      "archived-pane-folder",
+      "agent-temp",
+      "paused-scratch",
+      "foreign-worktree",
+      "foreign-pane-data",
+      "other-tool-data"
+    ],
+    "foreignReclaimKinds": [
+      "foreign-worktree",
+      "foreign-pane-data",
+      "other-tool-data"
     ]
   },
   "agents": {
@@ -2462,6 +2477,36 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "machine health",
+      "summary": "Show this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free, by tier.",
+      "usage": [
+        "runpane machine health [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "machine"
+      ],
+      "jsonSchemas": [
+        "machineHealthResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "machine cleanup",
+      "confirmDescription": "Delete the listed items (the CLI's --yes). Without it the call is a dry run that lists them and deletes nothing.",
+      "summary": "Free disk space that Pane made: list one kind of tier 1 or 2 item with its size (a dry run), or delete them with --yes.",
+      "usage": [
+        "runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "machine"
+      ],
+      "jsonSchemas": [
+        "machineCleanupResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "sessions unpin",
       "summary": "Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.",
       "usage": [
@@ -3360,6 +3405,11 @@ export const RUNPANE_CONTRACT = {
         "name": "--wait-ms",
         "value": "<milliseconds>",
         "description": "devices run: how long to wait for the command to exit."
+      },
+      {
+        "name": "--kind",
+        "value": "<kind>",
+        "description": "Kind of item for runpane machine cleanup, such as update-snapshot; runpane machine health lists each item's kind."
       }
     ],
     "localBoolean": [
@@ -3582,6 +3632,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane machine health [--json]",
+        "  runpane machine cleanup --kind <kind> [--yes] [--json]",
         "  runpane loops list [--json]",
         "  runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  runpane loops update|run|pause|resume|delete --loop <id> --yes",
@@ -4303,7 +4355,7 @@ export const RUNPANE_CONTRACT = {
         "The MCP server ships in the npm package and inside the Pane app. The Python package does not include it.",
         "",
         "Options:",
-        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, workspace, git, docs, links, admin",
+        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, workspace, machine, git, docs, links, admin",
         "  --read-only                    Serve only read-only tools"
       ],
       "relay": [
@@ -5710,6 +5762,47 @@ export const RUNPANE_CONTRACT = {
         "  runpane devices close [--json] [--pane-dir <path>]",
         "  runpane devices usage [--json] [--pane-dir <path>]",
         "  runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]"
+      ],
+      "machine": [
+        "Usage:",
+        "  runpane machine <health|cleanup> [options]",
+        "",
+        "Shows this machine's health and frees the disk space Pane made.",
+        "Tier 1: Pane made it and nothing uses it now; Pane removes it by itself.",
+        "Tier 2: may still be wanted (archived Pane folders, paused Panes' scratch, agent temp folders); Pane asks before it deletes.",
+        "Tier 3: not Pane's: another tool's data, a database copy Pane did not write, or a worktree Pane did not create.",
+        "Pane never deletes tier 3; machine health says how to free each one.",
+        "",
+        "Commands:",
+        "  runpane machine health [--json] [--pane-dir <path>]",
+        "  runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]"
+      ],
+      "machine health": [
+        "Usage:",
+        "runpane machine health [--json] [--pane-dir <path>]",
+        "",
+        "Shows free disk per volume, the memory level and its source, the Panes using the most memory,",
+        "leak warnings, and the last storage scan by tier, with sizes and reasons. It deletes nothing.",
+        "",
+        "Options:",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "machine cleanup": [
+        "Usage:",
+        "runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "Without --yes, lists the tier 1 and 2 items of that kind from the last scan and their total size,",
+        "and deletes nothing. With --yes, Pane re-checks each item, deletes it, and reports what it skipped and why.",
+        "Tier 3 kinds (foreign-worktree, foreign-pane-data, other-tool-data) are refused: free them with the tool that owns them.",
+        "",
+        "Options:",
+        "  --kind <kind>                Kind of item to delete, from machine health:",
+        "                               update-snapshot, migration-backup, archived-pane-folder,",
+        "                               agent-temp, paused-scratch.",
+        "  --yes                        Delete them. Without --yes, list them and delete nothing.",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
       ]
     },
     "pip": {
@@ -5795,6 +5888,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  python -m runpane machine health [--json]",
+        "  python -m runpane machine cleanup --kind <kind> [--yes] [--json]",
         "  python -m runpane loops list [--json]",
         "  python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  python -m runpane loops update|run|pause|resume|delete --loop <id> --yes",
@@ -7705,6 +7800,47 @@ export const RUNPANE_CONTRACT = {
         "",
         "`runpane devices` ships in the npm package and the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest devices"
+      ],
+      "machine": [
+        "Usage:",
+        "  python -m runpane machine <health|cleanup> [options]",
+        "",
+        "Shows this machine's health and frees the disk space Pane made.",
+        "Tier 1: Pane made it and nothing uses it now; Pane removes it by itself.",
+        "Tier 2: may still be wanted (archived Pane folders, paused Panes' scratch, agent temp folders); Pane asks before it deletes.",
+        "Tier 3: not Pane's: another tool's data, a database copy Pane did not write, or a worktree Pane did not create.",
+        "Pane never deletes tier 3; machine health says how to free each one.",
+        "",
+        "Commands:",
+        "  python -m runpane machine health [--json] [--pane-dir <path>]",
+        "  python -m runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]"
+      ],
+      "machine health": [
+        "Usage:",
+        "python -m runpane machine health [--json] [--pane-dir <path>]",
+        "",
+        "Shows free disk per volume, the memory level and its source, the Panes using the most memory,",
+        "leak warnings, and the last storage scan by tier, with sizes and reasons. It deletes nothing.",
+        "",
+        "Options:",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "machine cleanup": [
+        "Usage:",
+        "python -m runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "Without --yes, lists the tier 1 and 2 items of that kind from the last scan and their total size,",
+        "and deletes nothing. With --yes, Pane re-checks each item, deletes it, and reports what it skipped and why.",
+        "Tier 3 kinds (foreign-worktree, foreign-pane-data, other-tool-data) are refused: free them with the tool that owns them.",
+        "",
+        "Options:",
+        "  --kind <kind>                Kind of item to delete, from machine health:",
+        "                               update-snapshot, migration-backup, archived-pane-folder,",
+        "                               agent-temp, paused-scratch.",
+        "  --yes                        Delete them. Without --yes, list them and delete nothing.",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
       ]
     }
   },
@@ -7809,6 +7945,9 @@ export const RUNPANE_CONTRACT = {
       "runpane lock acquire --name testing-account --ttl 30m --wait 1800000 --note \"call QA\" --json",
       "runpane lock release --name testing-account --json",
       "runpane lock list --json",
+      "runpane machine health --json",
+      "runpane machine cleanup --kind update-snapshot --json",
+      "runpane machine cleanup --kind update-snapshot --yes --json",
       "runpane loops create --repo active --name nightly-bug-sweep --cron \"0 3 * * *\" --agent claude --prompt \"Fix one bug from yesterday's issues\" --yes --json",
       "runpane loops list --json",
       "runpane loops run --loop <loop-id> --yes --json",
@@ -7886,6 +8025,7 @@ export const RUNPANE_CONTRACT = {
       "`sessions detach` detach a Pane from a named Session.",
       "`sessions overview` read a live status, activity, git, and pull request overview for a named Session. Each panel in `panes[].panels[]` carries its own latest `runpane report` as `report`, so one call shows what every worker last reported and when (`reportedAt`, next to the panel's `state` and `lastActivityAt`). When a report's summary is a complete JSON object, such as a status file sent with `--summary-file`, `report.data` holds it exactly as the worker gave it; Pane never reads, renames or validates its fields. A summary that is not a JSON object (plain text, an array, a scalar or invalid JSON), is nested more than 64 levels deep, or was truncated (`summaryTruncated`), has no `data`. A panel that never reported has no `report`. `panes[].report` is still the newest report among the Pane's panels. Each panel also has `type` (`terminal`, `browser`, `editor`, `explorer`, `diff`, ...): a Pane linked whole lists every tab, with `explorer` and `diff` last, and a link that names tabs lists exactly those.",
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
+      "`runpane machine health` shows this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free by tier. `runpane machine cleanup --kind <kind>` lists one kind of tier 1 or 2 item (a dry run) and deletes them with `--yes`; tier 3 items are not Pane's, so it refuses them and says how to free them. Agents free disk only through this command, never with rm.",
       "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
@@ -9466,6 +9606,19 @@ export const RUNPANE_CONTRACT = {
       [
         "link",
         "https://runpane.net/pair#s=secret&c=k7xq2m4n8p3r5t6v&n=parsa-devbox",
+        "--yes",
+        "--json"
+      ],
+      [
+        "machine",
+        "health",
+        "--json"
+      ],
+      [
+        "machine",
+        "cleanup",
+        "--kind",
+        "update-snapshot",
         "--yes",
         "--json"
       ]
@@ -19176,6 +19329,527 @@ export const RUNPANE_CONTRACT = {
         }
       },
       "additionalProperties": false
+    },
+    "reclaimItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "tier",
+        "path",
+        "sizeBytes",
+        "modifiedAt",
+        "sessionId",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "update-snapshot",
+            "migration-backup",
+            "archived-pane-folder",
+            "agent-temp",
+            "paused-scratch",
+            "foreign-worktree",
+            "foreign-pane-data",
+            "other-tool-data"
+          ]
+        },
+        "tier": {
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "number"
+        },
+        "modifiedAt": {
+          "type": "number"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "projectPath": {
+          "type": "string"
+        },
+        "howToFree": {
+          "type": "string"
+        }
+      }
+    },
+    "machineHealthResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "snapshot",
+        "inventory"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "snapshot": {
+          "type": "object",
+          "required": [
+            "sampledAt",
+            "platform",
+            "hostname",
+            "disk",
+            "memory",
+            "cpuPercent",
+            "app",
+            "panes",
+            "leaks"
+          ],
+          "properties": {
+            "sampledAt": {
+              "type": "number"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "hostname": {
+              "type": "string"
+            },
+            "disk": {
+              "type": "object",
+              "required": [
+                "level",
+                "volumes"
+              ],
+              "properties": {
+                "level": {
+                  "enum": [
+                    "ok",
+                    "warning",
+                    "critical"
+                  ]
+                },
+                "volumes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "path",
+                      "roles",
+                      "totalBytes",
+                      "freeBytes",
+                      "level"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "enum": [
+                            "pane-data",
+                            "worktrees",
+                            "temp"
+                          ]
+                        }
+                      },
+                      "totalBytes": {
+                        "type": "number"
+                      },
+                      "freeBytes": {
+                        "type": "number"
+                      },
+                      "level": {
+                        "enum": [
+                          "ok",
+                          "warning",
+                          "critical"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "memory": {
+              "type": "object",
+              "required": [
+                "level",
+                "source",
+                "detail",
+                "totalBytes",
+                "freeBytes",
+                "swapUsedBytes"
+              ],
+              "properties": {
+                "level": {
+                  "enum": [
+                    "ok",
+                    "warning",
+                    "critical"
+                  ]
+                },
+                "source": {
+                  "enum": [
+                    "macos-pressure",
+                    "psi",
+                    "available"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "totalBytes": {
+                  "type": "number"
+                },
+                "freeBytes": {
+                  "type": "number"
+                },
+                "swapUsedBytes": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "cpuPercent": {
+              "type": "number"
+            },
+            "app": {
+              "type": "object",
+              "required": [
+                "rssMB",
+                "cpuPercent"
+              ],
+              "properties": {
+                "rssMB": {
+                  "type": "number"
+                },
+                "cpuPercent": {
+                  "type": "number"
+                }
+              }
+            },
+            "panes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "sessionId",
+                  "name",
+                  "rssMB",
+                  "cpuPercent",
+                  "processes"
+                ],
+                "properties": {
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "rssMB": {
+                    "type": "number"
+                  },
+                  "cpuPercent": {
+                    "type": "number"
+                  },
+                  "processes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            },
+            "leaks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "pid",
+                  "name",
+                  "sessionId",
+                  "memoryMB",
+                  "growthMB",
+                  "windowMs"
+                ],
+                "properties": {
+                  "pid": {
+                    "type": "number"
+                  },
+                  "started": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "panelId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "memoryMB": {
+                    "type": "number"
+                  },
+                  "growthMB": {
+                    "type": "number"
+                  },
+                  "windowMs": {
+                    "type": "number"
+                  },
+                  "series": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "inventory": {
+          "description": "Null until the first storage scan after Pane starts has finished.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "scannedAt",
+                "durationMs",
+                "items",
+                "panes",
+                "buckets"
+              ],
+              "properties": {
+                "scannedAt": {
+                  "type": "number"
+                },
+                "durationMs": {
+                  "type": "number"
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/jsonSchemas/reclaimItem"
+                  }
+                },
+                "panes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "buckets": {
+                  "type": "object"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "machineCleanupResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "dryRun",
+            "kind",
+            "items",
+            "totalBytes"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "dryRun": {
+              "const": true
+            },
+            "kind": {
+              "enum": [
+                "update-snapshot",
+                "migration-backup",
+                "archived-pane-folder",
+                "agent-temp",
+                "paused-scratch",
+                "foreign-worktree",
+                "foreign-pane-data",
+                "other-tool-data"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/jsonSchemas/reclaimItem"
+              }
+            },
+            "totalBytes": {
+              "type": "number"
+            },
+            "scanning": {
+              "type": "boolean",
+              "description": "True when Pane has not finished its first storage scan; items is empty. Run the dry run again in a few minutes."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "dryRun",
+            "kind",
+            "run"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "dryRun": {
+              "const": false
+            },
+            "kind": {
+              "enum": [
+                "update-snapshot",
+                "migration-backup",
+                "archived-pane-folder",
+                "agent-temp",
+                "paused-scratch",
+                "foreign-worktree",
+                "foreign-pane-data",
+                "other-tool-data"
+              ]
+            },
+            "run": {
+              "type": "object",
+              "required": [
+                "at",
+                "source",
+                "removed",
+                "skipped",
+                "freedBytes"
+              ],
+              "properties": {
+                "at": {
+                  "type": "number"
+                },
+                "source": {
+                  "const": "cli"
+                },
+                "removed": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "kind",
+                      "path",
+                      "sizeBytes"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "update-snapshot",
+                          "migration-backup",
+                          "archived-pane-folder",
+                          "agent-temp",
+                          "paused-scratch",
+                          "foreign-worktree",
+                          "foreign-pane-data",
+                          "other-tool-data"
+                        ]
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "sizeBytes": {
+                        "type": "number"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "skipped": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "kind",
+                      "path",
+                      "sizeBytes"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "update-snapshot",
+                          "migration-backup",
+                          "archived-pane-folder",
+                          "agent-temp",
+                          "paused-scratch",
+                          "foreign-worktree",
+                          "foreign-pane-data",
+                          "other-tool-data"
+                        ]
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "sizeBytes": {
+                        "type": "number"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "freedBytes": {
+                  "type": "number"
+                },
+                "deleting": {
+                  "type": "boolean",
+                  "description": "True while removed items are still being deleted in the background; freedBytes is 0 until they are."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "agentContext": {
@@ -19932,7 +20606,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--toolsets",
             "value": "<name,...>",
             "required": false,
-            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, git, docs, links, admin."
+            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, machine, git, docs, links, admin."
           },
           {
             "name": "--read-only",
@@ -26157,6 +26831,91 @@ export const RUNPANE_CONTRACT = {
         ],
         "jsonSchemas": [
           "devicesFreeResult"
+        ]
+      },
+      "machine health": {
+        "name": "machine health",
+        "summary": "Show this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free, by tier.",
+        "details": "Reads this machine's latest health snapshot and the last storage scan; it deletes nothing. disk lists each watched volume with free and total bytes; memory gives the level and the OS signal it came from; panes lists each Pane's processes and their memory; leaks lists processes whose memory keeps growing. inventory.items lists what can be freed, each with kind, tier, size and reason. Tier 1: Pane made it and nothing uses it now (replaced update snapshots, old migration backups); Pane also removes these by itself. Tier 2: may still be wanted, so Pane asks first (archived Pane folders, scratch of paused Panes, agent temp folders). Tier 3: not Pane's (other tools' data, database copies Pane did not write, worktrees Pane did not create); Pane never deletes these, and each item's howToFree says how to free it.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane machine health --json",
+          "runpane workspace <machine> machine health --json"
+        ],
+        "jsonSchemas": [
+          "machineHealthResult"
+        ],
+        "notes": [
+          "Free disk on any machine only through `runpane machine cleanup`, never with rm: cleanup re-checks each item, skips Panes in use, and moves each item to a trash folder before deleting it."
+        ]
+      },
+      "machine cleanup": {
+        "name": "machine cleanup",
+        "summary": "Free disk space that Pane made: list one kind of tier 1 or 2 item with its size (a dry run), or delete them with --yes.",
+        "details": "Without --yes it is a dry run: it lists the tier 1 and 2 items of --kind from the last scan and their total size, and deletes nothing. With --yes, Pane re-checks each item (it may be gone, in use, or protected because its Pane is pinned, focused, busy or has uncommitted changes), deletes the rest, and returns what it removed, what it skipped and why, and the bytes freed. A tier 3 kind is refused with ERR_MACHINE_CLEANUP_NOT_PANES, and `next` says how to free it with the tool that owns it. Tier 1: Pane made it and nothing uses it now (replaced update snapshots, old migration backups); Pane also removes these by itself. Tier 2: may still be wanted, so Pane asks first (archived Pane folders, scratch of paused Panes, agent temp folders). Tier 3: not Pane's (other tools' data, database copies Pane did not write, worktrees Pane did not create); Pane never deletes these, and each item's howToFree says how to free it.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--kind",
+            "value": "<kind>",
+            "required": true,
+            "description": "Kind of item to delete: update-snapshot, migration-backup, archived-pane-folder, agent-temp, paused-scratch. Tier 3 kinds (foreign-worktree, foreign-pane-data, other-tool-data) are refused.",
+            "schema": {
+              "enum": [
+                "update-snapshot",
+                "migration-backup",
+                "archived-pane-folder",
+                "agent-temp",
+                "paused-scratch",
+                "foreign-worktree",
+                "foreign-pane-data",
+                "other-tool-data"
+              ]
+            }
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Delete the items. Without it, list them and delete nothing."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane machine cleanup --kind update-snapshot --json",
+          "runpane machine cleanup --kind update-snapshot --yes --json",
+          "runpane workspace <machine> machine cleanup --kind update-snapshot --yes --json"
+        ],
+        "jsonSchemas": [
+          "machineCleanupResult"
+        ],
+        "notes": [
+          "Clean machines only through this command, never with rm or another raw delete.",
+          "Run it without --yes first. Add --yes yourself only for a tier 1 kind; for a tier 2 kind, show the person the list and total size and wait for their OK."
         ]
       }
     },

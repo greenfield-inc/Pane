@@ -101,3 +101,18 @@ export class MemoryRelief {
     return run;
   }
 }
+
+/**
+ * Whether Restart can serve this process: it is in the latest sample inside its Pane's run script tree
+ * (no tab, never left it, not sampled inside WSL) and that script is running. One rule for the card,
+ * the Resources read and the restart guard.
+ */
+export async function canRestartProcess(
+  snapshot: MachineHealthSnapshot | null,
+  identity: { pid: number; started: string },
+  isScriptRunning: (paneId: string) => Promise<boolean>,
+): Promise<boolean> {
+  if (identity.started.startsWith('wsl:')) return false;
+  const proc = snapshot?.panes.flatMap(pane => pane.processes).find(item => item.pid === identity.pid && item.started === identity.started);
+  return !!proc && proc.panelId === null && !proc.escaped && await isScriptRunning(proc.sessionId);
+}

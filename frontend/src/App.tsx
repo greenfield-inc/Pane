@@ -1,3 +1,4 @@
+import { HealthCardDialog } from './components/machineHealth/HealthCardDialog';
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
 import { AddDeviceHost } from './components/addDevice/AddDeviceDialog';
 import { ConnectionChecklist } from './components/ConnectionChecklist';
@@ -1047,6 +1048,7 @@ function App() {
               ? <MachineOfflineView onMachineDetails={() => openSettings({ category: 'remote-access', setting: 'remote-machines' })} />
               : <SessionView />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
+          <HealthCardDialog suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </RemoteWorkspace>
         </div>
         <OnboardingDialog
