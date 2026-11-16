@@ -18,6 +18,7 @@ import {
   MACHINE_READ_CHANNELS,
   type MachineConnectionsEvent,
   type MachineEventChannel,
+  type MachineLatency,
   type MachineResult,
   type MachineState,
 } from '../../../shared/types/machineConnections';
@@ -85,6 +86,7 @@ const commandSchemas = {
  */
 export class MachineConnections {
   private readonly machines = new Map<string, RemoteMachine>();
+  private readonly latencies = new Map<string, Promise<MachineLatency>>();
   private readonly listeners = new Set<(event: MachineConnectionsEvent) => void>();
   private readonly createClient: CreateMachineClient;
   private readonly onConfigUpdated = () => this.refresh();
@@ -165,12 +167,23 @@ export class MachineConnections {
     return machine.client.openPortStream(port);
   }
 
-  /** A saved machine's round trip in ms over the route it is connected on; null when it is not online or does not answer. */
-  async measureLatency(machineId: string): Promise<number | null> {
+  /**
+   * A saved machine's round trip over the route its connection is on, named so the caller can tell it
+   * is the route it shows. Not online: no answer, without a request. Asked again while one measurement
+   * runs, it answers with that one, so quick reopens of a menu never stack handshakes.
+   */
+  measureLatency(machineId: string): Promise<MachineLatency> {
     const machine = this.machines.get(machineId);
-    if (!machine) throw unknownMachine(machineId);
-    if (machine.state.status !== 'online') return null;
-    return machine.client.measureLatency();
+    if (!machine) return Promise.reject(unknownMachine(machineId));
+    const routeId = machine.state.routeId ?? null;
+    if (machine.state.status !== 'online') return Promise.resolve({ ms: null, routeId });
+    const running = this.latencies.get(machineId);
+    if (running) return running;
+    const measured = machine.client.measureLatency()
+      .then((ms): MachineLatency => ({ ms, routeId }))
+      .finally(() => this.latencies.delete(machineId));
+    this.latencies.set(machineId, measured);
+    return measured;
   }
 
   /** A saved machine's current state, or undefined for an unknown id. */

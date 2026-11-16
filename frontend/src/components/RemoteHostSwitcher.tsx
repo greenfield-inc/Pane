@@ -38,26 +38,34 @@ function routeInUse(machine: MachineEntry): RoutePill | undefined {
   return machine.routes?.find((route) => route.inUse && !route.down);
 }
 
-/** Each machine's round trip in ms, measured once when the menu opens; undefined until it answers, null when it did not. */
-type Latencies = Record<string, number | null | undefined>;
+/** Each round trip in ms by machine and route (`latencyKey`): absent until it answers, null when it did not. */
+type Latencies = Record<string, number | null>;
+
+/** A measurement belongs to one machine on one route: the pill it is shown beside. */
+function latencyKey(machineId: string, routeId: string): string {
+  return `${machineId} ${routeId}`;
+}
 
 /**
  * Line two of a machine row. Connected: the route pill, its latency and the OS. Otherwise the
  * subtitle says what it is ("Windows · Last seen 2 h ago"). The latency keeps one fixed box while
  * "…" turns into a number, so the OS after it never moves.
  */
-function MachineLine({ machine, latency }: { machine: MachineEntry; latency: number | null | undefined }) {
+function MachineLine({ machine, latencies }: { machine: MachineEntry; latencies: Latencies }) {
   const route = routeInUse(machine);
-  if (!route) return <>{machine.subtitle}</>;
+  // One fixed height for both forms, so a row keeps its height when its machine connects or drops.
+  if (!route) return <span className="flex h-5 min-w-0 items-center"><span className="truncate">{machine.subtitle}</span></span>;
+  const latency = latencies[latencyKey(machine.id, route.id)];
   // From one second up, seconds keep the text inside its box ("1.5 s", not "1510 ms").
   const text = latency === undefined ? '…' : latency === null ? '—' : latency >= 1000 ? `${(latency / 1000).toFixed(1)} s` : `${latency} ms`;
+  const spoken = latency === undefined ? 'measuring latency' : latency === null ? 'no answer' : `latency ${text}`;
   return (
-    <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
+    <span className="flex h-5 min-w-0 items-center gap-1.5">
       <RoutePillView route={route} />
-      <span
-        className="w-11 flex-none whitespace-nowrap tabular-nums text-text-secondary"
-        aria-label={latency === undefined ? 'Measuring latency' : latency === null ? 'No answer' : `${latency} milliseconds`}
-      >{text}</span>
+      <span className="w-11 flex-none whitespace-nowrap tabular-nums text-text-secondary" data-testid="machine-latency">
+        <span aria-hidden="true">{text}</span>
+        <span className="sr-only">{spoken}</span>
+      </span>
       {machine.os && <span className="truncate">{machine.os}</span>}
     </span>
   );
@@ -126,27 +134,34 @@ export function RemoteHostSwitcher({
   };
 
   const [open, setOpen] = useState(false);
-  // One measurement per connected machine each time the menu opens, kept until it closes; nothing runs while it is closed.
+  // While the menu is open, each connected machine is measured once on the route its pill shows, including
+  // one that connects or changes route meanwhile. Nothing runs while it is closed, and closing forgets them.
   const [latencies, setLatencies] = useState<Latencies>({});
-  const openCount = useRef(0);
-  const measureOnOpen = (next: boolean) => {
-    openCount.current += 1;
+  const opening = useRef({ count: 0, asked: new Set<string>() });
+  const forgetLatencies = () => {
+    opening.current = { count: opening.current.count + 1, asked: new Set() };
     setLatencies({});
-    if (!next) return;
-    const opening = openCount.current;
-    for (const machine of machines) {
-      if (!routeInUse(machine)) continue;
-      // An answer that lands after the menu closed belongs to an earlier opening and is dropped.
-      const record = (latency: number | null) => { if (openCount.current === opening) setLatencies((before) => ({ ...before, [machine.id]: latency })); };
-      window.electronAPI.machines.latency(machine.id).then(record, () => record(null));
-    }
   };
+  useEffect(() => {
+    if (!open) return;
+    const { count, asked } = opening.current;
+    for (const machine of machines) {
+      const route = routeInUse(machine);
+      if (!route) continue;
+      const key = latencyKey(machine.id, route.id);
+      if (asked.has(key)) continue;
+      asked.add(key);
+      // An answer measured over another route than the pill's is not this pill's latency; one from an earlier opening is dropped.
+      const record = (latency: number | null) => { if (opening.current.count === count) setLatencies((before) => ({ ...before, [key]: latency })); };
+      window.electronAPI.machines.latency(machine.id).then((answer) => record(answer.routeId === route.id ? answer.ms : null), () => record(null));
+    }
+  }, [open, machines]);
 
   const items: DropdownItem[] = machines.map((machine) => ({
     id: machine.id,
     // The name has line one to itself; the route in use and its latency lead line two.
     label: <span className="block truncate font-medium">{machine.name}</span>,
-    description: <MachineLine machine={machine} latency={latencies[machine.id]} />,
+    description: <MachineLine machine={machine} latencies={latencies} />,
     // A disabled row dims its mark and name, so the mark stays solid inside it.
     leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
     // Its letters and colour can change on this computer, whether or not it can be picked now.
@@ -200,7 +215,7 @@ export function RemoteHostSwitcher({
       width="auto"
       menuClassName="w-[400px] max-w-[calc(100vw-2rem)]"
       menuLabel="Agents run on"
-      onOpenChange={(next) => { setOpen(next); measureOnOpen(next); onOpenChange?.(next); }}
+      onOpenChange={(next) => { setOpen(next); forgetLatencies(); onOpenChange?.(next); }}
       itemClassName="py-1.5"
       footer={({ close }) => (
         <>

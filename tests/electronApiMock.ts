@@ -137,7 +137,7 @@ export type ElectronApiMockOptions = {
   paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage };
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
-  /** machines:latency answers by machine, in ms; `pending` never answers. Absent: null (no answer). */
+  /** machines:latency answers by machine, in ms, over the route its machine state names; `pending` never answers. Absent: null (no answer). */
   machineLatency?: Record<string, number | null | 'pending'>;
   /** machines:run answers by machine, then command type. Absent: `{ success: true }`. */
   machineRunAnswers?: Record<string, Record<string, JsonValue>>;
@@ -937,7 +937,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       latency: (machineId: string) => {
         machineLatencyCalls.push(machineId);
         const answer = mockOptions.machineLatency?.[machineId] ?? null;
-        return answer === 'pending' ? new Promise<number | null>(() => undefined) : Promise.resolve(answer);
+        // Measured over the route main's connection is on, as main answers.
+        const routeId = machineConnections.machines.find((machine) => machine.id === machineId)?.routeId ?? null;
+        return answer === 'pending' ? new Promise<{ ms: number | null; routeId: string | null }>(() => undefined) : Promise.resolve({ ms: answer, routeId });
       },
       onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
         machineListeners.add(callback);

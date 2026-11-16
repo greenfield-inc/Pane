@@ -683,6 +683,8 @@ export class RemotePaneClient {
   }
 
   private async timeTwoGets(endpoint: URL, options: RemoteRequestOptions, timeoutMs: number): Promise<number | null> {
+    // One deadline for both requests, so "no answer" takes at most timeoutMs.
+    const deadlineAt = performance.now() + timeoutMs;
     let elapsed = 0;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const startedAt = performance.now();
@@ -692,7 +694,7 @@ export class RemotePaneClient {
           // Read to the end, so the connection is free for the second request.
           response.on('end', () => resolve(ok)).resume();
         });
-        const deadline = setTimeout(() => request.destroy(new Error('no answer')), timeoutMs);
+        const deadline = setTimeout(() => request.destroy(new Error('no answer')), Math.max(0, deadlineAt - startedAt));
         request.on('error', () => resolve(false));
         // A connection dropped mid-answer closes without an error or an end; the first outcome wins.
         request.on('close', () => { clearTimeout(deadline); resolve(false); });

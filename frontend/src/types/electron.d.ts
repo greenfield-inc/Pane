@@ -29,7 +29,7 @@ import type {
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
-import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
+import type { MachineCommand, MachineConnectionsEvent, MachineLatency, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../../shared/types/glasses';
 import type {
   PanePermissionRequest,
@@ -833,8 +833,8 @@ interface ElectronAPI {
     run: (machineId: string, command: MachineCommand) => Promise<MachineResult>;
     /** Reconnects an offline saved machine now. */
     retry: (machineId: string) => Promise<void>;
-    /** A saved machine's round trip in ms over the route it is connected on; null when it is offline or does not answer. */
-    latency: (machineId: string) => Promise<number | null>;
+    /** A saved machine's round trip over the route its connection is on; `ms` null when it is offline or does not answer. */
+    latency: (machineId: string) => Promise<MachineLatency>;
     /** Every machine's list, Notify and permission events, resyncs and online/offline changes. */
     onEvent: (callback: (event: MachineConnectionsEvent) => void) => () => void;
   };

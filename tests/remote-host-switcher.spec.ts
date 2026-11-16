@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
 import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 import type { RemoteComputer } from '../shared/types/remoteComputers';
+import type { MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 
 async function saveHost(page: Page, connect: boolean) {
   await page.evaluate(async (connect) => {
@@ -122,15 +123,44 @@ test('a machine shows "…" until its latency answers, and an offline machine is
   await page.getByRole('button', { name: /Switch machine$/ }).click();
   const row = page.getByRole('menuitemradio', { name: /Build Box/ });
   await expect(row.getByLabel('Pane relay, in use')).toBeVisible();
-  await expect(row.getByLabel('Measuring latency')).toHaveText('…');
+  await expect(row.getByTestId('machine-latency')).toHaveText('…measuring latency');
   const studio = page.getByRole('menuitemradio', { name: /Studio Mac/ });
   await expect(studio).toContainText('macOS · Last seen');
   await expect(studio.getByLabel(/in use$/)).toHaveCount(0);
   // A slow route reads in seconds and stays on one line.
-  const far = page.getByRole('menuitemradio', { name: /Far Box/ }).getByLabel('1510 milliseconds');
-  await expect(far).toHaveText('1.5 s');
+  const far = page.getByRole('menuitemradio', { name: /Far Box/ }).getByTestId('machine-latency');
+  await expect(far).toHaveText('1.5 slatency 1.5 s');
   expect((await far.boundingBox())?.height).toBeLessThan(20);
   expect(await latencyCalls(page)).toEqual(['build-box', 'far']);
+});
+
+test('a machine that connects while the menu is open is measured then, on the route its pill shows', async ({ page }) => {
+  const local = { id: 'local', label: 'This computer', kind: 'local' as const, status: 'online' as const, offlineSince: null };
+  await installElectronApiMock(page, {
+    computers: [buildBox],
+    tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale.' },
+    machineConnections: {
+      machines: [local, { id: 'build-box', label: 'Build Box', kind: 'remote', status: 'offline', offlineSince: '2026-11-15T09:00:00.000Z' }],
+      reads: {},
+    },
+    machineLatency: { 'build-box': 12 },
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Switch machine$/ }).click();
+  const row = page.getByRole('menuitemradio', { name: /Build Box/ });
+  await expect(row).toContainText('Windows · Last seen');
+  expect(await latencyCalls(page)).toEqual([]);
+  const offlineHeight = (await row.boundingBox())?.height;
+
+  await page.evaluate((machines) => {
+    // SAFETY: installElectronApiMock defines this control before the app loads.
+    (window as typeof window & { __paneTestElectronMock: { emitMachineEvent(event: MachineConnectionsEvent): void } }).__paneTestElectronMock.emitMachineEvent({ type: 'machines', machines });
+  }, [local, { id: 'build-box', label: 'Build Box', kind: 'remote', status: 'online', offlineSince: null, routeId: 'relay:https://bb.runpane.net' }] satisfies MachineState[]);
+  await expect(row.getByLabel('Pane relay, in use')).toBeVisible();
+  await expect(row.getByTestId('machine-latency')).toHaveText('12 mslatency 12 ms');
+  expect(await latencyCalls(page)).toEqual(['build-box']);
+  // Swapping its state line for the pill line keeps the row's height.
+  expect((await row.boundingBox())?.height).toBe(offlineHeight);
 });
 
 test('a saved computer agents do not run on shows its live state and the route it is on, with All machines off', async ({ page }) => {

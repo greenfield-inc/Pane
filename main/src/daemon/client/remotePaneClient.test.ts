@@ -1,4 +1,9 @@
 import http, { type IncomingMessage, type ServerResponse } from 'http';
+import https from 'https';
+import tls from 'tls';
+import path from 'path';
+import { readFileSync } from 'fs';
+import { createHash, X509Certificate } from 'crypto';
 import { EventEmitter } from 'events';
 import { type LookupFunction } from 'net';
 import { hostname as getOsHostname } from 'os';
@@ -1564,6 +1569,34 @@ describe('RemotePaneClient latency', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     expect(await new RemotePaneClient({ ...profile, baseUrl: `http://127.0.0.1:${address.port}` }).measureLatency(1_000)).toBeNull();
+  });
+
+  it('times one round trip on a key-pinned route, over one TLS connection, and refuses any other key', async () => {
+    const fixtures = path.join(__dirname, '../relay/__fixtures__');
+    const cert = readFileSync(path.join(fixtures, 'computer.pem'), 'utf8');
+    const server = https.createServer({ cert, key: readFileSync(path.join(fixtures, 'computer.key'), 'utf8') }, (_request, response) => response.end('ok'));
+    let handshakes = 0;
+    server.on('secureConnection', () => { handshakes += 1; });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    // SAFETY: a server listening on a host and port reports an AddressInfo.
+    const { port } = server.address() as import('net').AddressInfo;
+    const defaults = tls.getCACertificates('default');
+    tls.setDefaultCACertificates([...defaults, readFileSync(path.join(fixtures, 'ca.pem'), 'utf8')]);
+    const fingerprint = createHash('sha256').update(new X509Certificate(cert).publicKey.export({ format: 'der', type: 'spki' })).digest('base64url');
+    // The certificate's name, reached at 127.0.0.1: name lookups fail, so the route's fixed address answers.
+    const pinned = (pin: string) => new RemotePaneClient({
+      id: 'box', label: 'Box', token: 't', transport: 'http+sse', baseUrl: `https://75rnqtlvttepjja3.relay.test:${port}`,
+      relay: { computerId: '75rnqtlvttepjja3', fingerprint: pin },
+      tunnel: { kind: 'tailscale', tailscaleIp: '127.0.0.1', selected: true },
+    }, { dnsLookup: (_host, _options, callback) => callback(Object.assign(new Error('not found'), { code: 'ENOTFOUND' }), '', 4) });
+    try {
+      expect(await pinned(fingerprint).measureLatency()).toBeGreaterThanOrEqual(1);
+      expect(handshakes).toBe(1);
+      expect(await pinned('another-key').measureLatency()).toBeNull();
+    } finally {
+      tls.setDefaultCACertificates(defaults);
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it('answers null when the host drops the connection partway through its answer', async () => {

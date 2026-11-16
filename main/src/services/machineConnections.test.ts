@@ -214,12 +214,15 @@ describe('MachineConnections', () => {
     expect([client('build-box').resume, client('mini').resume].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
   });
 
-  it('measures a machine only once it is online', async () => {
-    const { machines, client, connect } = setup(['build-box']);
-    expect(await machines.measureLatency('build-box')).toBeNull();
+  it('measures a machine only once it is online, names the route it measured, and shares a measurement already running', async () => {
+    const { machines, client } = setup(['build-box']);
+    expect(await machines.measureLatency('build-box')).toEqual({ ms: null, routeId: null });
     expect(client('build-box').measureLatency).not.toHaveBeenCalled();
-    connect('build-box');
-    expect(await machines.measureLatency('build-box')).toBe(4);
+    client('build-box').options.onConnectionStateChange?.('connected', undefined, { routeId: 'relay:https://bb.runpane.net' });
+    const [first, second] = await Promise.all([machines.measureLatency('build-box'), machines.measureLatency('build-box')]);
+    expect(first).toEqual({ ms: 4, routeId: 'relay:https://bb.runpane.net' });
+    expect(second).toEqual(first);
+    expect(client('build-box').measureLatency).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a write to an offline machine before sending it', async () => {
