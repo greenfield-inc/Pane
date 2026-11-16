@@ -1,3 +1,3 @@
-import { PaneListScreen } from '@/features/panes/PaneListScreen';
+import { HomeScreen } from '@/features/home/HomeScreen';
 
-export default PaneListScreen;
+export default HomeScreen;

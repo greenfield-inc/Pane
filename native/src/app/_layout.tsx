@@ -122,6 +122,14 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           name="new"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.8, 1], sheetGrabberVisible: true, headerShown: false }}
         />
+        <Stack.Screen
+          name="sort-approvals"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.42], sheetGrabberVisible: true, headerShown: false }}
+        />
+        {/* Home's Stale and Done today. */}
+        <Stack.Screen name="history" options={{ title: 'History', headerLargeTitle: true, headerBackTitle: 'Home', headerBackButtonDisplayMode: 'default' }} />
+        {/* Home's Sessions, Repositories and Archived, from the All panes tile. */}
+        <Stack.Screen name="panes/[section]" options={{ title: '' }} />
         <Stack.Screen name="hosts/new" options={{ title: 'Add a computer', ...grouped }} />
         <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add with a code' }} />
         <Stack.Screen name="computers" options={{ title: 'Your computers', ...grouped }} />

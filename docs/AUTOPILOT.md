@@ -177,11 +177,11 @@ The phone shows the same Autopilot as the computer it is on, over the
 host connection (`autopilot:*` channels, the `autopilot:changed` event). There
 are no tabs on the phone.
 
-- **Home** has an **Autopilot** row above Approvals ("Waiting on you") while
-  Autopilot is on for that computer. Before Start it carries **Start**, which
-  starts Autopilot and opens it; then it says Paused, or what it is walking,
-  with how many items are open on the stack. A computer whose Pane predates
-  Autopilot shows no row.
+- **Home** has an **Autopilot** bar above **Needs you** while Autopilot is on
+  for that computer. Before Start it reads "Walk these with Autopilot" and
+  carries **Start**, which starts Autopilot and opens it; then it says Paused,
+  or what it is walking, with how many items are open on the stack. A computer
+  whose Pane predates Autopilot shows no bar.
 - **The Autopilot screen** is its chat tab, with the walk bar above it:
   Running or Paused, every Session with what waits in it (the current one
   violet), and **Pause** or **Go on**. Opening it never starts a turn: until

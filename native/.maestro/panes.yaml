@@ -36,18 +36,15 @@ name: Pane list journeys
     start: 5%, 50%
     end: 90%, 50%
     duration: 400
-# Pinned and Sessions sit above Repositories, so the new row can be below the fold.
-- scrollUntilVisible:
-    element: "${output.pane}, .*Claude Code.*"
-    timeout: 30000
-
-# Search narrows the list to matching panes.
-- tapOn:
-    id: panes-search
-- inputText: ${output.pane}
+# Search lists matching panes on home.
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: ${output.pane}
 # Match the row by its status: the search field holds the name too.
-- assertVisible: "${output.pane}, .*Claude Code.*"
-- hideKeyboard
+- extendedWaitUntil:
+    visible: "${output.pane}, .*Claude Code.*"
+    timeout: 30000
 
 # Swipe the row right and tap Pin; it then shows under Pinned as well.
 - swipe:
@@ -83,12 +80,11 @@ name: Pane list journeys
     id: panes-search-clear
 - waitForAnimationToEnd
 
-# Delete it for good from the Archived section, which loads when opened.
-- scrollUntilVisible:
-    element:
-      id: sidebar-section-archived
-- tapOn:
-    id: sidebar-section-archived
+# Delete it for good from Archived, under the All panes tile.
+- runFlow:
+    file: subflows/home-open.yaml
+    env:
+      SECTION: archived
 - scrollUntilVisible:
     element: "Delete ${output.pane}"
     timeout: 15000

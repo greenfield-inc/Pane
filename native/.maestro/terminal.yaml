@@ -6,6 +6,10 @@
 appId: com.dcouple.pane.mobile
 ---
 - runFlow: subflows/signed-in.yaml
+- runFlow:
+    file: subflows/home-open.yaml
+    env:
+      SECTION: repositories
 - tapOn:
     id: "pane-row-.*"
     index: 0

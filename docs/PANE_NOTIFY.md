@@ -127,7 +127,7 @@ the first answer from the terminal, Approvals, the strip or the phone wins.
   waits, as No does in the terminal. A plan shows its text with "Yes, and
   auto-accept edits", "Yes, and manually approve edits" and "No, keep
   planning".
-- **The phone** lists the prompt in Approvals with **Yes** and
+- **The phone** lists the prompt under home's **Needs you** with **Yes** and
   **No**, and its alert carries the same two buttons. The question's sheet has
   every choice.
 - **Answered in the terminal**: Pane closes the question and lists it in

@@ -31,6 +31,10 @@ name: Try the demo
 
 # A live terminal: the agent streams, and what you send shows up.
 - waitForAnimationToEnd
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: fix-checkout
 - tapOn:
     id: "pane-row-demo-fix-checkout-race"
     index: 0
@@ -72,6 +76,10 @@ name: Try the demo
     id: terminal-back
 
 # Every other screen renders with sample data.
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: Spring sale
 - tapOn:
     id: "session-row-.*"
     index: 0
@@ -103,6 +111,10 @@ name: Try the demo
     timeout: 20000
 - tapOn:
     id: terminal-back
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: acme
 - scrollUntilVisible:
     element:
       id: "pane-row-demo-new-.*"

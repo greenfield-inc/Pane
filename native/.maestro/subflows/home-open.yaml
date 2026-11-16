@@ -1,0 +1,8 @@
+# Opens home's All panes tile, then its ${SECTION} row (sessions, repositories or archived).
+appId: com.dcouple.pane.mobile
+---
+- tapOn:
+    id: home-tile-all
+- tapOn:
+    id: home-open-${SECTION}
+- waitForAnimationToEnd

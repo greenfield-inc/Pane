@@ -14,10 +14,10 @@ export const NO_PROJECT = 'No project';
 /** How Approvals lists: flat with the newest on top, or in groups. Remembered per device. */
 export type ApprovalSort = 'recent' | 'session' | 'project';
 
-export const APPROVAL_SORTS: ReadonlyArray<{ id: ApprovalSort; label: string }> = [
-  { id: 'recent', label: 'Most recent' },
-  { id: 'session', label: 'By Session' },
-  { id: 'project', label: 'By project' },
+export const APPROVAL_SORTS: ReadonlyArray<{ id: ApprovalSort; label: string; description: string }> = [
+  { id: 'recent', label: 'Most recent', description: 'Newest first, in one list' },
+  { id: 'session', label: 'By Session', description: 'One card per Session, its machine marked' },
+  { id: 'project', label: 'By project', description: 'One card per repository' },
 ];
 
 export function parseApprovalSort(value: string | null): ApprovalSort {
