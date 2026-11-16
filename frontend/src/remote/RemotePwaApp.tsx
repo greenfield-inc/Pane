@@ -48,6 +48,9 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { ErrorDialog } from '../components/ErrorDialog';
 import { UndoToast } from '../components/ui/UndoToast';
 import { PortalContainerProvider } from '../contexts/PortalContainerContext';
+import { DevicePanel } from '../components/panels/device/DevicePanel';
+import { DeviceClientContext } from '../components/panels/device/deviceClient';
+import { remoteDeviceClient } from './components/remoteDeviceClient';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
   terminalShortcuts: [],
@@ -293,6 +296,7 @@ export function RemotePwaApp() {
   );
   const selectedPanel = selectedPanels.find(panel => panel.id === selectedPanelId) ?? firstSupportedPanel(selectedPanels);
   const { snapshot: listeningPorts, refresh: refreshListeningPorts } = useRemoteListeningPorts(adapter);
+  const deviceClient = useMemo(() => adapter && remoteDeviceClient(adapter, isNativeMobile() ? 'phone' : 'browser'), [adapter]);
   // A browser tab coming on screen shows the host's ports (a new tab lists them), so read them now.
   const browserPanelShown = selectedPanel?.type === 'browser' ? selectedPanel.id : null;
   useEffect(() => {
@@ -1242,6 +1246,11 @@ export function RemotePwaApp() {
                   onOpenWorker={openWorkerPane} onSelectPanel={selectPanel} />
               </Suspense>
             )}
+            {selectedPanel.type === 'device' && deviceClient && (
+              <DeviceClientContext.Provider value={deviceClient}>
+                <DevicePanel key={selectedPanel.id} panel={selectedPanel} isActive />
+              </DeviceClientContext.Provider>
+            )}
             {selectedPanel.type === 'diff' && adapter && (
               <RemoteDiffPanel key={selectedPanel.id} adapter={adapter} sessionId={selectedPanel.sessionId} />
             )}
@@ -1290,6 +1299,7 @@ const PANEL_TYPE_LABELS = {
   browser: 'Browser',
   notes: 'Notes',
   chat: 'Chat',
+  device: 'Device',
 } satisfies Record<ToolPanelType, string>;
 
 /** The open Session's recorded blockers, from the latest Session list. */
@@ -1312,7 +1322,7 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       <div className="max-w-md rounded-lg border border-border-primary bg-surface-primary p-6">
         <p className="text-sm font-semibold text-text-primary">{panel.title}</p>
         <p className="mt-2 text-sm text-text-secondary">
-          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA shows terminal, chat, browser, explorer and diff tabs for {session.name}.
+          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA shows terminal, chat, browser, explorer, diff and device tabs for {session.name}.
         </p>
       </div>
     </div>

@@ -391,8 +391,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       // Exclude permanent panels
       if (capabilities.permanent) return false;
 
-      // Logs is created by running scripts; editor tabs by opening files
-      if (type === 'logs' || type === 'editor') return false;
+      // Logs is created by running scripts, editor tabs by opening files, device tabs by device_open
+      if (type === 'logs' || type === 'editor' || type === 'device') return false;
 
       // Enforce singleton panels
       if (capabilities.singleton) {

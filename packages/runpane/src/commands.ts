@@ -77,6 +77,12 @@ export interface ParsedArgs {
   envRemove?: string[];
   /** `runpane secrets`: the secret project, exec's --only and --file names, and request's reason. */
   project?: string;
+  /** `runpane devices`: open's platform and device, run's --background and --wait-ms, free's --idle. */
+  devicePlatform?: string;
+  deviceName?: string;
+  deviceWaitMs?: number;
+  deviceBackground?: boolean;
+  deviceIdle?: boolean;
   only?: string[];
   secretFiles?: string[];
   reason?: string;
@@ -263,7 +269,7 @@ const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactForm
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops', 'secrets', 'autopilot']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops', 'secrets', 'autopilot', 'devices']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -289,6 +295,11 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
   ['--reason', ['secrets request', 'autopilot close']],
+  ['--platform', ['devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close']],
+  ['--device', ['devices open']],
+  ['--wait-ms', ['devices run']],
+  ['--background', ['devices run']],
+  ['--idle', ['devices free']],
   ['--theme', ['theme set']],
   ['--colors', ['theme set']],
   ['--css', ['theme set']],
@@ -547,6 +558,11 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
   }
   // Every word after `relay` is pane-relay's, --help included.
   if (command === 'relay') return { execCommand: args.splice(0) };
+  // agent-device's words, or device_run's command line, after `--`.
+  if (command === 'devices act' || command === 'devices run') {
+    const separator = args.indexOf('--');
+    return separator === -1 ? {} : { execCommand: args.splice(separator).slice(1) };
+  }
   if (command === 'workspace exec' || command === 'secrets exec') {
     const separator = args.indexOf('--');
     if (separator !== -1) return { execCommand: args.splice(separator).slice(1) };
@@ -948,6 +964,14 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.all = true;
     return;
   }
+  if (flag === '--background') {
+    parsed.deviceBackground = true;
+    return;
+  }
+  if (flag === '--idle') {
+    parsed.deviceIdle = true;
+    return;
+  }
   if (flag === '--push') {
     parsed.handoffPush = true;
     return;
@@ -1161,6 +1185,20 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--project') {
     parsed.project = value;
+    return;
+  }
+  if (flag === '--platform') {
+    parsed.devicePlatform = value;
+    return;
+  }
+  if (flag === '--device') {
+    parsed.deviceName = value;
+    return;
+  }
+  if (flag === '--wait-ms') {
+    const ms = Number(value);
+    if (!Number.isInteger(ms) || ms < 0) throw new Error('--wait-ms must be a whole number of milliseconds.');
+    parsed.deviceWaitMs = ms;
     return;
   }
   if (flag === '--reason') {

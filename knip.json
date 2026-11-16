@@ -87,6 +87,7 @@
       "project": ["src/**/*.ts", "build-mcp-bridge.js"],
       "ignoreUnresolved": ["/bin/sh", "/usr/bin/security"],
       "ignoreBinaries": [
+        "plutil",
         "fc-list",
         "system_profiler",
         "xclip",

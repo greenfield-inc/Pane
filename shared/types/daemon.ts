@@ -114,6 +114,7 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'pane-chat:',
   'agent-chat:',
   'chat-tab:',
+  'devices:',
   'ports:',
   'orchestration-sessions:',
   'projects:',

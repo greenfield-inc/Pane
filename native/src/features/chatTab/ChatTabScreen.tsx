@@ -38,6 +38,7 @@ export interface ChatTabScreenProps {
   /** The Session orchestrator's chat (D-18): finished turns fold, only the current step shows. */
   workers?: ChatWorkerLine[];
   onOpenWorker?: (paneId: string) => void;
+  onOpenDevice?: (panelId: string) => void;
   onViewDiff?: (path: string) => void;
   placeholder?: string;
   /** Fenced blocks this screen draws itself, by language (Autopilot's `autopilot-items` cards). */
@@ -56,7 +57,7 @@ export interface ChatTabScreenProps {
  * owns the composer; Pane draws the rows (Legend List over chatRows), the dock
  * and the composer's parts.
  */
-export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, placeholder, blocks, userNotice, queuedLabel, settings: showSettings = true }: ChatTabScreenProps) {
+export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, onViewDiff, placeholder, blocks, userNotice, queuedLabel, settings: showSettings = true }: ChatTabScreenProps) {
   const theme = useTheme();
   const { chat, viewer, snapshot, connected } = useChatTab(panelId);
   const catalog = useChatAgents();
@@ -71,9 +72,9 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, plac
   // Stable across streamed events, so rows that kept their identity skip rendering.
   const rowActions = useMemo<ChatRowActions>(() => ({
     onToggleTurn: turnId => setOpen(current => { const next = new Set(current); if (next.has(turnId)) next.delete(turnId); else next.add(turnId); return next; }),
-    onViewDiff, onOpenWorker,
+    onViewDiff, onOpenWorker, onOpenDevice,
     renderBlock: (language, content) => blocks?.[language]?.(content),
-  }), [onViewDiff, onOpenWorker, blocks]);
+  }), [onViewDiff, onOpenWorker, onOpenDevice, blocks]);
   const agent = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
   const disabled = !connected || !view || view.status === 'stopped';
   const commands = matchingCommands(snapshot.draft, view?.commands ?? []);

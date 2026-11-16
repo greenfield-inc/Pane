@@ -15,6 +15,7 @@ import { runLinksCreate } from './links';
 import { runNotify } from './notify';
 import { runLink } from './pairingLink';
 import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
+import { runDevicesAct, runDevicesClose, runDevicesFree, runDevicesList, runDevicesOpen, runDevicesRun, runDevicesScreenshot, runDevicesUsage } from './devices';
 import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
@@ -170,6 +171,8 @@ const THIS_MACHINE_ONLY = new Set<string>([
   'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
   // These read or change this machine's own secret store; another machine runs its own.
   'secrets list', 'secrets set', 'secrets delete', 'secrets exec', 'secrets request',
+  // Device tools act for the calling tab's Pane; a machine without Xcode reaches its Mac itself.
+  'devices list', 'devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close', 'devices usage', 'devices free',
 ]);
 
 /** `runpane workspace <machine> <command...>`: the same command, answered by that machine's Pane. */
@@ -267,6 +270,14 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'secrets delete': async (parsed) => runSecretsDelete(parsed),
   'secrets exec': async (parsed) => runSecretsExec(parsed),
   'secrets request': async (parsed) => runSecretsRequest(parsed),
+  'devices list': async (parsed) => runDevicesList(parsed),
+  'devices open': async (parsed) => runDevicesOpen(parsed),
+  'devices screenshot': async (parsed) => runDevicesScreenshot(parsed),
+  'devices act': async (parsed) => runDevicesAct(parsed),
+  'devices run': async (parsed) => runDevicesRun(parsed),
+  'devices close': async (parsed) => runDevicesClose(parsed),
+  'devices usage': async (parsed) => runDevicesUsage(parsed),
+  'devices free': async (parsed) => runDevicesFree(parsed),
   'theme read': async (parsed) => runThemeRead(parsed),
   'theme set': async (parsed) => runThemeSet(parsed),
   'theme reset': async (parsed) => runThemeReset(parsed),

@@ -18,6 +18,13 @@ import { revealInFileManager } from '../utils/revealInFileManager';
 
 const requestSchema = boundary.object({ sessionId: boundary.string, filePath: boundary.string });
 
+/** Other `pane-media://<host>/...` routes, such as a device tab's live screen. */
+const mediaRoutes = new Map<string, (request: Request, url: URL) => Promise<Response>>();
+
+export function registerMediaRoute(host: string, route: (request: Request, url: URL) => Promise<Response>): void {
+  mediaRoutes.set(host, route);
+}
+
 type PreviewHandler = (
   event: { sender: Pick<WebContents, 'id' | 'isDestroyed' | 'once'> },
   ...args: PaneCommandValue[]
@@ -177,6 +184,8 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runti
     try {
       if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405 });
       const url = new URL(request.url);
+      const route = mediaRoutes.get(url.hostname);
+      if (route) return await route(request, url);
       const grant = url.hostname === 'preview' ? grants.get(url.pathname.slice(1)) : undefined;
       const host = currentHost();
       if (!grant || grant.host !== (host?.id ?? null)) return new Response(null, { status: 403 });

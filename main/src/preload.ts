@@ -1,3 +1,4 @@
+import type { DeviceInput } from '../../shared/types/devices';
 import type { LoopInput } from '../../shared/types/loop';
 import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
@@ -383,6 +384,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list'),
     set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
     delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
+  },
+  /** The device tab (docs/DEVICES.md): the local screen, frames, and the person's own controls. */
+  devices: {
+    input: (panelId: string, input: DeviceInput): Promise<IPCResponse> => invokeIpc('devices:input', panelId, input),
+    frame: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame', panelId),
+    visible: (panelId: string, clientId: string, visible: boolean): Promise<IPCResponse> => invokeIpc('devices:visible', panelId, clientId, visible),
+    takeOver: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:take-over', panelId),
+    power: (panelId: string, action: 'boot' | 'restart' | 'shutdown'): Promise<IPCResponse> => invokeIpc('devices:power', panelId, action),
+    settings: (): Promise<IPCResponse> => ipcRenderer.invoke('device-settings:get'),
+    updateSettings: (patch: { enabled?: boolean; iosMachineId?: string | null; maxBooted?: number }): Promise<IPCResponse> => ipcRenderer.invoke('device-settings:update', patch),
   },
   onNotesChanged: (callback: () => void) => {
     const listener = () => callback();

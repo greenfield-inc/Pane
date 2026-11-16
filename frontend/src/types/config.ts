@@ -1,3 +1,4 @@
+import type { DeviceSettings } from '../../../shared/types/devices';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { CustomLink } from '../../../shared/types/customLinks';
@@ -93,6 +94,8 @@ export interface AppConfig {
   defaultOrchestratorAgent?: PaneChatAgent;
   // Chat tabs (Claude and Codex over ACP, no terminal).
   chatTabsEnabled?: boolean;
+  /** Settings > Devices (docs/DEVICES.md). */
+  devices?: Partial<DeviceSettings>;
   autopilotEnabled?: boolean;
   // Auto-check for updates
   autoCheckUpdates?: boolean;

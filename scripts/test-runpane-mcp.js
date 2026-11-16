@@ -822,11 +822,17 @@ test('serves the core toolset by default, and named toolsets or read-only on req
 
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
-    'agents_ask', 'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
+    'agents_ask', 'agents_send', 'agents_start', 'agents_status',
+    'device_act', 'device_close', 'device_list', 'device_open', 'device_run', 'device_screenshot',
+    'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'theme_read', 'theme_set', 'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
+  ]);
+  const devices = await names(['--toolsets', 'devices']);
+  assert.deepEqual(devices.map((tool) => tool.name).sort(), [
+    'device_act', 'device_close', 'device_free', 'device_list', 'device_open', 'device_run', 'device_screenshot', 'device_usage',
   ]);
   const git = await names(['--toolsets', 'git']);
   assert.deepEqual(git.map((tool) => tool.name).sort(), [

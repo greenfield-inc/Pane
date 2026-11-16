@@ -1,3 +1,4 @@
+import { isDeviceHubPort } from '../services/devices/deviceHubPorts';
 import http, { type IncomingMessage, type ServerResponse } from 'http';
 import { pipeline as pipelineCallback, Readable, type Duplex, type Writable } from 'stream';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
@@ -668,7 +669,9 @@ export class PaneRemoteHttpApiServer {
     socket.on('error', ignoreReset);
     let forwarded: boolean;
     try {
-      forwarded = await this.isForwardedPort(port);
+      // A linked computer (or the owner) may also reach this machine's device hub, to show its simulators.
+      const ownDevice = auth.client ? auth.client.kind === 'computer' : Boolean(this.workspace && this.workspaceOwnerLogin(request));
+      forwarded = (ownDevice && isDeviceHubPort(port)) || await this.isForwardedPort(port);
     } finally {
       socket.removeListener('error', ignoreReset);
     }

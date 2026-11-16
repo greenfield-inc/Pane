@@ -59,6 +59,7 @@ import { registerPaneLinkHandler } from '../services/paneLinks';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { registerWorkspaceAccessHandlers } from './workspaceAccess';
+import { registerDeviceHandlers } from './devices';
 import { readTailscaleStatus, resolveTailnetMachineUrl } from '../services/tailnetMachines';
 import { startedOnFreshBoot } from '../services/freshBoot';
 
@@ -112,6 +113,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerMobilePushHandlers(ipcMain, services, commandRegistry);
   registerSharedCredentialHandlers(services, commandRegistry);
   registerPaneSecretHandlers(ipcMain, commandRegistry);
+  registerDeviceHandlers(ipcMain, services, commandRegistry);
   registerCustomThemeHandlers(ipcMain, commandRegistry, services.configManager, services.getMainWindow);
   registerDialogHandlers(ipcMain, services);
   registerExportHandlers(ipcMain, services);

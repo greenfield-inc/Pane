@@ -3,6 +3,7 @@ import './versionQuery';
 // Load ReadableStream polyfill before any other imports
 import './polyfills/readablestream';
 import { getChatTabManager } from './services/chatTabs';
+import { disposeDevices, setDeviceMachines } from './ipc/devices';
 import { acknowledgeUpdateQuiescence } from './services/updateShutdown';
 
 import { registerStartupNotice } from './ipc/startup-notice';
@@ -1245,6 +1246,7 @@ async function initializeServices() {
     },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  setDeviceMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());
   powerMonitor.on('resume', () => machines.resume());
@@ -1744,6 +1746,10 @@ if (launchRemoteSetup) {
     // Terminals exiting because Pane is quitting are not owners releasing their
     // named locks; resumed agents still hold them after the restart.
     paneDaemonHost?.services.namedLockService?.suspendAutoRelease();
+
+    // Device helpers and device_run jobs stop with Pane; booted simulators keep running and
+    // the next launch's lifecycle shuts Pane's own down.
+    await disposeDevices().catch(error => console.error('[Main] Device helpers could not all stop; continuing shutdown:', error));
 
     // Chat tabs keep their saved state, so each comes back on the next launch.
     await getChatTabManager().stopAll().catch(error => console.error('[Main] Chat tabs could not all stop; continuing shutdown:', error));

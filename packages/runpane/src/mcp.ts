@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { setFlagsFromString } from 'node:v8';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
 import { loadDocs } from './docs';
@@ -11,7 +12,7 @@ import { agentsIntroForInstructions, claudeMdHasPaneGuidance, scratchRule } from
 
 // A type alias, unlike an interface, is assignable to the SDK's open result type.
 type ToolResult = {
-  content: { type: 'text'; text: string }[];
+  content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[];
   structuredContent?: JsonObject;
   isError?: boolean;
 };
@@ -31,6 +32,7 @@ const TOOL_GUIDE = [
   '- Ids come from `repos_list`, `panes_list`, `workspace_state` and `agents_start`.',
   '- Pass `yes: true` to a tool that changes state only when the user asked for that change or your Pane instructions authorize it; without it the call is refused and nothing happens.',
   '- `panels_open` shows the user a page, report, file or local dev server as a tab beside the agent.',
+  '- `device_open` boots an iOS simulator or Android emulator for this Pane and shows it in a tab beside you (iOS runs on a linked Mac when this machine has no Xcode); then `device_screenshot`, `device_act` (agent-device commands: `open <app id>`, `snapshot -i`, `press @eN`), `device_run` to build and run your app, and `device_close`.',
   '- `docs_search` and `docs_read` answer how Pane works.',
 ];
 const INSTRUCTIONS = [
@@ -295,7 +297,8 @@ async function callTool(
   }
   const structuredContent = parseJsonObject(text);
   if (!structuredContent) return errorResult(`runpane ${tool.command} did not print JSON:\n${text}`);
-  return { content: [{ type: 'text', text }], structuredContent };
+  const image = imageContent(structuredContent);
+  return { content: image ? [{ type: 'text', text }, image] : [{ type: 'text', text }], structuredContent };
 }
 
 /**
@@ -375,6 +378,18 @@ export function runCliProcess(
     child.on('error', (error) => resolve({ code: 1, stdout, stderr: `${stderr}${error.message}` }));
     child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
   });
+}
+
+const imageResultSchema = boundary.object({ mimeType: boundary.literal('image/png'), path: boundary.string });
+
+/** A result that names a PNG on this machine (device_screenshot) also carries the image, so the model sees it. */
+function imageContent(result: JsonObject): { type: 'image'; data: string; mimeType: string } | undefined {
+  try {
+    const image = decodeBoundary(result, imageResultSchema);
+    return { type: 'image', data: readFileSync(image.path).toString('base64'), mimeType: image.mimeType };
+  } catch {
+    return undefined;
+  }
 }
 
 function errorResult(text: string): ToolResult {

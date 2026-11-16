@@ -1,4 +1,5 @@
 /// <reference types="electron" />
+import type { DeviceInput, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
 import type { PreferencesApi } from '../../../shared/types/preferences';
 import type { VoiceKeyCheck } from '../../../shared/voice/voiceKeys';
 // Type definitions for Electron preload API
@@ -125,6 +126,16 @@ interface IPCResponse<T = any> {
 
 interface ElectronAPI {
   /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
+  /** The device tab (docs/DEVICES.md). */
+  devices: {
+    input: (panelId: string, input: DeviceInput) => Promise<IPCResponse<boolean>>;
+    frame: (panelId: string) => Promise<IPCResponse<string>>;
+    visible: (panelId: string, clientId: string, visible: boolean) => Promise<IPCResponse<boolean>>;
+    takeOver: (panelId: string) => Promise<IPCResponse<boolean>>;
+    power: (panelId: string, action: 'boot' | 'restart' | 'shutdown') => Promise<IPCResponse<boolean>>;
+    settings: () => Promise<IPCResponse<DeviceSettingsView>>;
+    updateSettings: (patch: { enabled?: boolean; iosMachineId?: string | null; maxBooted?: number }) => Promise<IPCResponse<DeviceSettings>>;
+  };
   paneSecrets: {
     list: () => Promise<IPCResponse<{ secrets: PaneSecretSummary[]; storage: PaneSecretStorage }>>;
     /** Data is true when it replaced a saved value. */
