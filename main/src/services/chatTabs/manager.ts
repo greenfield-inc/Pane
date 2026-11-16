@@ -90,6 +90,8 @@ interface Tab {
   starting?: Promise<void>;
   loading: boolean;
   delivering: boolean;
+  /** The queued message Send now is delivering into the running turn. */
+  steering?: string;
   /** When the agent began a turn of its own. */
   ownTurnStartedAt?: string;
   notice?: string;
@@ -368,17 +370,17 @@ export class ChatTabManager {
     catch (error) { this.bodies.remove(panelId, request.operationId); throw error; }
     this.publish(panelId);
     if (!tab.runtime?.isAlive()) void this.ensure(panelId).catch(() => undefined);
-    else if (request.now) this.interruptForQueue(panelId);
+    else if (request.now) this.sendFirstNow(panelId);
     else this.drain(panelId);
     return structuredClone(receipt);
   }
 
-  /** Moves a queued message to the front and interrupts the running turn, so it is delivered next. */
+  /** Moves a queued message to the front and sends it now (see sendFirstNow). */
   sendNow(panelId: string, operationId: string): void {
     const item = this.queued(panelId, operationId);
     this.update(panelId, current => ({ ...current, queue: [item, ...(current.queue ?? []).filter(entry => entry.operationId !== operationId)] }));
     this.publish(panelId);
-    if (this.tabs.get(panelId)?.runtime?.isAlive()) this.interruptForQueue(panelId);
+    if (this.tabs.get(panelId)?.runtime?.isAlive()) this.sendFirstNow(panelId);
   }
 
   /** Replaces a queued message's text and keeps its images. Its receipt is unchanged, so a retried send of the original still finds it. */
@@ -465,18 +467,53 @@ export class ChatTabManager {
   }
 
   /**
-   * Send now: the message is first in the queue, so ending the running turn (a prompt, the
-   * agent's own turn, or one being delivered) makes drain deliver it next. Cancelling also
-   * withdraws an open approval or question, which ends a turn blocked on it.
+   * Send now for the message first in the queue. An agent that takes steering gets it inside the
+   * running prompt turn, which goes on with its subagents and background tasks. Otherwise (no
+   * steering, or a turn the agent started on its own) the turn is cancelled, which also withdraws
+   * an open approval or question, and drain delivers the message next.
    */
-  private interruptForQueue(panelId: string): void {
+  private sendFirstNow(panelId: string): void {
     const tab = this.tab(panelId);
     const runtime = tab.runtime;
     if (!runtime?.isAlive()) return;
     if (!runtime.isRunning() && !runtime.isWorkingAlone() && !tab.delivering) { this.drain(panelId); return; }
+    if (runtime.isRunning() && runtime.canSteer()) { void this.steerFirst(panelId, tab, runtime); return; }
     void runtime.cancel().catch(error => {
       console.warn(`[ChatTabs] Send now could not interrupt ${panelId}'s turn: ${reasonOf(error)}. The message is sent when the turn ends.`);
     });
+  }
+
+  /** Delivers the first queued message into the running turn; when the turn already ended, drain sends it. */
+  private async steerFirst(panelId: string, tab: Tab, runtime: ChatTabRuntime): Promise<void> {
+    const next = this.required(panelId).queue?.[0];
+    // One steer at a time: a second message sent now waits in the queue, so no message is delivered twice.
+    if (!next || tab.steering) return;
+    const body = next.stored ? this.bodies.read(panelId, next.operationId) : { text: next.text, images: next.images };
+    // drain reports a missing copy when the turn ends.
+    if (!body) return;
+    const content = promptContent(body);
+    tab.steering = next.operationId;
+    let outcome: string;
+    try { outcome = await runtime.steer(content); }
+    catch (error) { outcome = reasonOf(error); }
+    finally { tab.steering = undefined; }
+    const state = this.options.store.state(panelId);
+    if (outcome !== 'injected' && outcome !== 'promptRequired' && tab.runtime === runtime) {
+      console.warn(`[ChatTabs] Send now could not deliver into ${panelId}'s turn: ${outcome}. The message is sent when the turn ends.`);
+      tab.notice = 'Send now could not reach the agent. Your message stays queued and is sent when this turn ends.';
+      this.publish(panelId);
+    }
+    if (outcome === 'injected' && tab.runtime === runtime && state?.queue?.some(item => item.operationId === next.operationId)) {
+      for (const event of tab.transcript?.userMessage(next.operationId, content, true) ?? []) this.options.send('chat-tab:event', event);
+      this.update(panelId, current => ({
+        ...current, queue: current.queue?.filter(item => item.operationId !== next.operationId),
+        receipts: current.receipts?.map(receipt => receipt.operationId === next.operationId ? { ...receipt, state: 'completed' } : receipt),
+      }));
+      this.bodies.remove(panelId, next.operationId);
+      this.publish(panelId);
+    }
+    // The turn may have ended while the steer was in flight; drain waits for a turn that still runs.
+    if (state) this.drain(panelId);
   }
 
   async cancel(panelId: string): Promise<void> {
@@ -783,7 +820,7 @@ export class ChatTabManager {
     const tab = this.tab(panelId);
     const runtime = tab.runtime;
     const state = this.required(panelId);
-    if (!runtime?.isAlive() || runtime.isRunning() || runtime.isWorkingAlone() || tab.delivering || tab.loading || state.status === 'starting' || state.status === 'stopped') return;
+    if (!runtime?.isAlive() || runtime.isRunning() || runtime.isWorkingAlone() || tab.delivering || tab.steering || tab.loading || state.status === 'starting' || state.status === 'stopped') return;
     const next = state.queue?.[0];
     if (!next) return;
     const body = next.stored ? this.bodies.read(panelId, next.operationId) : { text: next.text, images: next.images };
@@ -800,10 +837,7 @@ export class ChatTabManager {
     tab.activeAt = Date.now();
     tab.toolsRunning = undefined;
     const generation = tab.generation;
-    const content: ContentBlock[] = [
-      ...(body.text ? [{ type: 'text' as const, text: body.text }] : []),
-      ...(body.images ?? []).map(image => ({ type: 'image' as const, mimeType: image.mimeType, data: image.data })),
-    ];
+    const content = promptContent(body);
     const startedAt = new Date().toISOString();
     for (const event of tab.transcript?.userMessage(next.operationId, content) ?? []) this.options.send('chat-tab:event', event);
     this.update(panelId, current => ({ ...current, queue: current.queue?.slice(1), turn: { operationId: next.operationId, startedAt }, status: 'working' }));
@@ -1095,9 +1129,18 @@ function promptSize(body: Pick<ChatTabSend, 'text' | 'images'>): number {
   return body.text.length + (body.images ?? []).reduce((sum, image) => sum + image.data.length, 0);
 }
 
-/** Context usage, background tasks and the last /clear, each only when there is one. */
-function extras(state: ChatPanelState, runtime: ChatTabRuntime | undefined): Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt'> {
-  const result: Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt'> = {};
+/** A queued message as ACP prompt content. */
+function promptContent(body: { text?: string; images?: Array<{ mimeType: string; data: string }> }): ContentBlock[] {
+  return [
+    ...(body.text ? [{ type: 'text' as const, text: body.text }] : []),
+    ...(body.images ?? []).map(image => ({ type: 'image' as const, mimeType: image.mimeType, data: image.data })),
+  ];
+}
+
+/** Context usage, background tasks, the last /clear and whether Send now steers, each only when there is one. */
+function extras(state: ChatPanelState, runtime: ChatTabRuntime | undefined): Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt' | 'sendNowSteers'> {
+  const result: Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt' | 'sendNowSteers'> = {};
+  if (runtime?.canSteer() && !runtime.isWorkingAlone()) result.sendNowSteers = true;
   const usage = runtime?.usage();
   if (usage && usage.size > 0) result.context = usage;
   const tasks = runtime?.tasks() ?? [];

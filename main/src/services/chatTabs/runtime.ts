@@ -66,6 +66,13 @@ const asyncTaskUpdate = boundary.object({
 });
 const stopResult = boundary.object({ stopped: boundary.optional(boundary.boolean) });
 /**
+ * ACP's steering extension (claude-agent-acp, codex-acp): delivers a message into the running turn,
+ * so the turn, its subagents and its background tasks go on. Advertised in `initialize`'s `_meta.steering`.
+ */
+const STEER = '_session/steering';
+const steeringMeta = boundary.object({ steering: boundary.object({ supported: boundary.optional(boundary.boolean) }) });
+const steerResult = boundary.object({ outcome: boundary.string });
+/**
  * The SDK refuses session updates outside the ACP schema, and claude-agent-acp's async
  * task updates are. They travel under a method of Pane's own, in place in the stream,
  * so one still arrives in order with the updates around it.
@@ -125,6 +132,7 @@ export class ChatTabRuntime {
   supportsImages(): boolean { return this.initialization?.agentCapabilities?.promptCapabilities?.image === true; }
   canLoad(): boolean { return this.initialization?.agentCapabilities?.loadSession === true; }
   canList(): boolean { return Boolean(this.initialization?.agentCapabilities?.sessionCapabilities?.list); }
+  canSteer(): boolean { return decodeOptionalBoundary(this.initialization?._meta, steeringMeta)?.steering.supported === true; }
 
   /**
    * The agent's saved conversations in `cwd` (ACP session/list), following its cursor to the end.
@@ -262,6 +270,17 @@ export class ChatTabRuntime {
       this.running = false;
       this.options.onState();
     }
+  }
+
+  /**
+   * Delivers `content` into the running turn: `injected`. `promptRequired` when no turn is running,
+   * so the caller sends it as a prompt; anything else (codex-acp's `failed`) delivered nothing.
+   */
+  async steer(content: ContentBlock[]): Promise<string> {
+    if (!this.sessionId) throw new PaneError('CHAT_NOT_READY', 'The conversation has not started yet. Nothing was sent.', 'Wait for the tab to finish starting.');
+    const result = await this.bounded(this.agent().request(STEER, { sessionId: this.sessionId, prompt: content, _meta: { steering: { idleBehavior: 'promptRequired' } } }))
+      .catch(error => { throw chatFailure(error, { code: 'CHAT_STEER_FAILED', next: 'The message stays queued and is sent when the turn ends.' }); });
+    return decodeBoundary(result, steerResult).outcome;
   }
 
   async cancel(): Promise<void> {

@@ -7,6 +7,7 @@ import { CHAT_TERMINAL_LIMIT } from '../../../../shared/types/chatTab';
 const terminalMeta = boundary.object({ terminal_output_delta: boundary.optional(boundary.string), terminal_output: boundary.optional(boundary.string) });
 import type { AgentChatMessage, AgentChatPart } from '../../../../shared/types/agentChat';
 import { chatMessageSchema } from '../../../../shared/types/chatTabDecoders';
+import { steeredMessageId } from '../../../../shared/chatTabPresentation';
 import { patchTool, type ChatTabChange, type ChatTabEvent, type ChatTabTranscript, type ChatToolPatch, type ChatTurnTime } from '../../../../shared/types/chatTab';
 
 export interface ChatTranscriptOptions {
@@ -119,13 +120,13 @@ export class ChatTranscript {
     this.insertRestored();
   }
 
-  /** The prompt as Pane sent it. An echo of the same text from the agent is folded into it. */
-  userMessage(operationId: string, content: ContentBlock[]): ChatTabEvent[] {
+  /** The prompt as Pane sent it; `steered` when Send now delivered it into the running turn. An echo of the same text from the agent is folded into it. */
+  userMessage(operationId: string, content: ContentBlock[], steered = false): ChatTabEvent[] {
     this.chunk = undefined;
     this.anchor = undefined;
     this.sequence++; // The next to-do list is this prompt's own.
     const events: ChatTabEvent[] = [];
-    const id = `user:${operationId}`;
+    const id = steered ? steeredMessageId(operationId) : `user:${operationId}`;
     for (const block of content) {
       const part: AgentChatPart = block.type === 'text' ? { type: 'text', text: block.text } : { type: 'content', content: decodeBoundary(block, boundary.json) };
       const event = this.commit({ type: 'append', id, role: 'user', part });

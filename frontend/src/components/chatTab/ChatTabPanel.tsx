@@ -6,7 +6,7 @@ import {
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, messageTime, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
+import { chatTurns, messageTime, steeredMessageId, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -24,7 +24,7 @@ import { ChatSwitchBanner } from './ChatSwitchBanner';
 import { ConversationPicker } from './ConversationPicker';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, riskySetting, usePhoneWidth } from './ChatComposerControls';
 import { ChatStatusBar, type ChatStatusPullRequest } from './ChatStatusBar';
-import { sendNowKeys } from './chatKeys';
+import { sendNowEffect, sendNowKeys } from './chatKeys';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
 import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
 import { ChatCopyButton } from './ChatCopyButton';
@@ -207,7 +207,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   /** The sent message's transcript ID: when the host's copy of it renders, the chat follows the live end once more. */
   const followSent = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!followSent.current || !messages.some(message => message.id === followSent.current)) return;
+    const sent = followSent.current;
+    if (!sent || !messages.some(message => message.id === `user:${sent}` || message.id === steeredMessageId(sent))) return;
     followSent.current = undefined;
     followLiveEnd.current?.();
   }, [messages]);
@@ -319,7 +320,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       const request: ChatTabSend = { operationId, text, images: imageParts };
       // Send now only means something while a turn runs; otherwise it is a plain send.
       if (now && working) request.now = true;
-      followSent.current = `user:${operationId}`;
+      followSent.current = operationId;
       if (!await deliver(request, true)) return;
       // Typing while an approval waits tells the agent what to do instead (round 2): once the message is in.
       await Promise.all(waitingPermissions.map(permission => {
@@ -561,12 +562,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           <button type="button" className="chat-button chat-button-outline" onClick={() => setConfirmClear(false)}>Cancel</button>
           <button type="button" className="chat-button chat-button-primary" disabled={disabled} onClick={clearConversation}>Clear</button>
         </dialog>}
-        <ChatQueue queue={view?.queue ?? []} working={working} disabled={disabled} label={rendering.queued}
+        <ChatQueue queue={view?.queue ?? []} working={working} steers={view?.sendNowSteers} disabled={disabled} label={rendering.queued}
           onRemove={operationId => void act(() => client.unqueue(panelId, operationId))}
           onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
           onEdit={editQueued} />
         {view && <ChatStatusBar context={view.context} tasks={view.tasks}
-          queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
+          queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} sendNowSteers={view.sendNowSteers} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         <ComposerPrimitive.Root className="chat-composer" data-pane-part="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
@@ -607,7 +608,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 requestClear();
                 return;
               }
-              // Cmd/Ctrl+Enter sends now: while a turn runs it interrupts it; otherwise it is a plain send.
+              // Cmd/Ctrl+Enter sends now (sendNowEffect) while a turn runs; otherwise it is a plain send.
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
                 event.preventDefault();
                 sendNowNext.current = true;
@@ -636,7 +637,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 : <ChatModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />}
               {working
                 ? <>
-                  <ComposerPrimitive.Send aria-label="Queue message" title={`Queue message: sends after this turn (Enter). Send now: ${sendNowKeys()}`} className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
+                  <ComposerPrimitive.Send aria-label="Queue message" title={`Queue message: sends after this turn (Enter). Send now (${sendNowKeys()}): ${sendNowEffect(view?.sendNowSteers)}`} className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
                   <button type="button" aria-label="Stop agent turn" title="Stop" className="chat-send" onClick={() => void act(() => client.cancel(panelId))}><Square className="h-3.5 w-3.5 fill-current" /></button>
                 </>
                 : <ComposerPrimitive.Send aria-label="Send message" title="Send message" className="chat-send"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>}

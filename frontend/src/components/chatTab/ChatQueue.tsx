@@ -1,14 +1,17 @@
 import { useState, type ReactNode } from 'react';
 import { Pencil, X, Zap } from 'lucide-react';
 import type { ChatTabQueuedPrompt } from '../../../../shared/types/chatTab';
+import { sendNowEffect } from './chatKeys';
 
 /** The host keeps this many characters of a queued message as its preview; a longer one shows an ellipsis and cannot be edited from it. */
 const PREVIEW_LIMIT = 500;
 
 export interface ChatQueueProps {
   queue: readonly ChatTabQueuedPrompt[];
-  /** A turn is running, so Send now interrupts it. */
+  /** A turn is running, so Send now is offered. */
   working: boolean;
+  /** Send now delivers into the running turn instead of stopping it. */
+  steers?: boolean;
   disabled: boolean;
   /** Shown instead of the text, such as Autopilot's own lines; such a line is not editable. */
   label?: (text: string) => ReactNode | undefined;
@@ -19,9 +22,9 @@ export interface ChatQueueProps {
 
 /**
  * Messages waiting for the agent, in the order they will be sent (D-211): each can be
- * edited, removed, or sent now, which interrupts the running turn and sends it next.
+ * edited, removed, or sent now (see sendNowEffect).
  */
-export function ChatQueue({ queue, working, disabled, label, onRemove, onSendNow, onEdit }: ChatQueueProps) {
+export function ChatQueue({ queue, working, steers, disabled, label, onRemove, onSendNow, onEdit }: ChatQueueProps) {
   const [editing, setEditing] = useState<{ operationId: string; text: string }>();
   if (!queue.length) return null;
   const save = async () => {
@@ -54,7 +57,7 @@ export function ChatQueue({ queue, working, disabled, label, onRemove, onSendNow
         {!!item.imageCount && shown === undefined && !!item.text && <span className="chat-queue-label">+{item.imageCount} image{item.imageCount === 1 ? '' : 's'}</span>}
         <span className="chat-queue-label">{order}</span>
         {working && <button type="button" className="chat-queue-now" disabled={disabled} aria-label="Send now"
-          title="Stop the current turn and send this now" onClick={() => onSendNow(item.operationId)}>
+          title={`Send now: ${sendNowEffect(steers)}`} onClick={() => onSendNow(item.operationId)}>
           <Zap className="h-3.5 w-3.5" aria-hidden /><span className="chat-queue-now-label">Send now</span>
         </button>}
         {editable && <button type="button" className="chat-icon" aria-label="Edit queued message" title="Edit" disabled={disabled}
