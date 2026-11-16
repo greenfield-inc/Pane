@@ -120,7 +120,9 @@ describe('MachineHealthService', () => {
   it('answers the inventory read at once, with null until the background scan it starts has finished', async () => {
     let scans = 0;
     let finish = (_inventory: StorageInventory) => {};
+    let passes = 0;
     const { service } = harness({ scanInventory: () => { scans++; return new Promise(resolve => { finish = resolve; }); } });
+    service.setScheduledCleanup(async () => { passes++; });
     expect(service.getInventory()).toBeNull();
     expect(service.getInventory()).toBeNull();
     expect(scans).toBe(1);
@@ -129,6 +131,8 @@ describe('MachineHealthService', () => {
     await new Promise(resolve => setImmediate(resolve));
     expect(service.getInventory()).toBe(inventory);
     expect(scans).toBe(1);
+    // Reading never deletes: the cleanup pass runs only after a scheduled scan or an explicit refresh.
+    expect(passes).toBe(0);
   });
 
   it('rescans on a disk warning only when the last scan is over an hour old', async () => {

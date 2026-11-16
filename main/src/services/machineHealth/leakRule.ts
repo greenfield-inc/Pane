@@ -30,7 +30,7 @@ const MIN_SLICE_RISE_MB = 10;
 
 /** The rule from config.json's settings, each falling back to MACHINE_HEALTH_DEFAULTS. */
 export function leakRuleOf(settings: MachineHealthSettings | undefined): LeakRule {
-  const value = <K extends keyof MachineHealthSettings>(key: K) => settings?.[key] ?? MACHINE_HEALTH_DEFAULTS[key];
+  const value = <K extends keyof typeof MACHINE_HEALTH_DEFAULTS>(key: K) => settings?.[key] ?? MACHINE_HEALTH_DEFAULTS[key];
   return {
     windowMs: value('leakWindowMinutes') * MINUTE,
     sliceMs: value('leakSliceMinutes') * MINUTE,

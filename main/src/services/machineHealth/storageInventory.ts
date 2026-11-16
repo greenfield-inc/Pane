@@ -1,4 +1,4 @@
-import { readdir, realpath, stat } from 'fs/promises';
+import { lstat, readdir, realpath, stat } from 'fs/promises';
 import * as path from 'path';
 import type { DiskBuckets, PaneDiskUsage, ReclaimItem, StorageInventory } from '../../../../shared/types/machineHealth';
 import { agentTempFolderName, classifyPaneDataFile, isWslPath, replacedUpdates, type UpdateRecord } from './reclaimRules';
@@ -260,22 +260,52 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
 
 export interface RecheckDeps {
   now: () => number;
-  isArchived: (paneId: string) => boolean;
-  isPaused: (paneId: string) => boolean;
+  /** Pane's records as they are now. */
+  panes: () => InventoryPane[];
+  listGitWorktrees: (pane: InventoryPane) => Promise<Array<{ path: string; branch?: string }>>;
   measure?: (requests: readonly SizeRequest[]) => Promise<SizeResult[]>;
 }
 
 /**
  * Re-checks one item just before cleanup acts on it, so a cached inventory is
- * never trusted: the target still exists, its Pane is still archived when that
- * was the reason, and loose agent temp is still untouched for 2 days.
+ * never trusted: the target still exists, no Pane opened since uses it, its
+ * Pane is still archived or paused when that was the reason, an archived
+ * Pane's folder is still the worktree git made for it, and loose agent temp is
+ * still untouched for 2 days.
  */
 export async function recheckItem(item: ReclaimItem, deps: RecheckDeps): Promise<string | null> {
-  const [result] = await (deps.measure ?? measureSizes)([{ path: item.path }]);
-  if (!result?.exists) return 'It is already gone.';
-  const needsArchivedPane = item.kind === 'archived-pane-folder' || (item.kind === 'agent-temp' && item.sessionId);
-  if (needsArchivedPane && item.sessionId && !deps.isArchived(item.sessionId)) return 'Its Pane is no longer archived.';
-  if (item.kind === 'agent-temp' && !item.sessionId && deps.now() - result.newestMs < AGENT_TEMP_IDLE_MS) return 'Something in it changed in the last 2 days.';
-  if (item.kind === 'paused-scratch' && item.sessionId && !deps.isPaused(item.sessionId)) return 'Its Pane is no longer paused.';
-  return null;
+  if (item.kind === 'agent-temp' && !item.sessionId) {
+    const [result] = await (deps.measure ?? measureSizes)([{ path: item.path }]);
+    if (!result?.exists) return 'It is already gone.';
+    if (deps.now() - result.newestMs < AGENT_TEMP_IDLE_MS) return 'Something in it changed in the last 2 days.';
+  } else if (!(await lstat(item.path).then(() => true, () => false))) {
+    return 'It is already gone.';
+  }
+  const panes = deps.panes();
+  const owner = item.sessionId ? panes.find(pane => pane.id === item.sessionId) : undefined;
+  const openPanes = panes.flatMap(pane => (!pane.archived && pane.worktreePath ? [pane.worktreePath] : []));
+  switch (item.kind) {
+    case 'agent-temp':
+      if (item.sessionId && !owner?.archived) return 'Its Pane is no longer archived.';
+      if (openPanes.some(worktreePath => agentTempFolderName(worktreePath) === path.basename(item.path))) return 'A Pane that is open now uses it.';
+      return null;
+    case 'paused-scratch':
+      return owner?.paused ? null : 'Its Pane is no longer paused.';
+    case 'archived-pane-folder': {
+      if (!owner?.archived) return 'Its Pane is no longer archived.';
+      const full = path.resolve(item.path);
+      if (openPanes.some(worktreePath => path.resolve(worktreePath) === full)) return 'A Pane that is open now uses it.';
+      let listed;
+      try {
+        listed = (await deps.listGitWorktrees(owner)).find(entry => path.resolve(entry.path) === full);
+      } catch {
+        return 'Pane could not check it with git.';
+      }
+      const folder = await stat(full).catch(() => undefined);
+      const born = folder ? folder.birthtimeMs || folder.ctimeMs : Infinity;
+      return listed?.branch === owner.branch && born <= owner.updatedAt ? null : 'Git no longer shows it as that archived Pane\'s worktree.';
+    }
+    default:
+      return null;
+  }
 }

@@ -67,11 +67,9 @@ import { DB_CLEAN_OPEN_PREFERENCE } from '../services/machineHealth/reclaimRules
 import { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import { protectionOf } from '../services/machineHealth/paneProtections';
 import { fastCheckWorkingDirectory } from '../services/gitPlumbingCommands';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
-import { appScratchDirectory } from '../services/archiveRetention';
+import { withArchiveRepositoryLock } from '../services/archiveRepositoryLock';
+import { PaneError } from '../../../shared/paneError';
+import { appScratchDirectory, appScratchRoot } from '../services/archiveRetention';
 import { panePausedMark } from '../../../shared/types/panels';
 import { MACHINE_HEALTH_CHANGED_EVENT, MACHINE_HEALTH_INVENTORY_CHANGED_EVENT } from '../../../shared/types/machineHealth';
 import type { PaneCommandRegistry } from './commandRegistry';
@@ -428,6 +426,36 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   // A WSL project stores Linux paths; Node's fs reads them through the project's path resolver.
   const contextOf = (session: { project_id?: number | null }) => (session.project_id ? sessionManager.getProjectContextByProjectId(session.project_id) : null);
   const fileSystemPath = (session: { project_id?: number | null }, stored: string) => contextOf(session)?.pathResolver.toFileSystem(stored) ?? stored;
+  // Git runs through the project's command runner at the stored (Linux, for WSL) path.
+  const storedWorktrees = new Map<string, string>();
+  const inventoryPanes = () => databaseService.getAllSessionsIncludingArchived({ includeHidden: true }).flatMap(session => {
+    const context = contextOf(session);
+    if (!context) return [];
+    if (session.worktree_path) storedWorktrees.set(session.id, session.worktree_path);
+    return [{
+      id: session.id, name: session.name, worktreePath: session.worktree_path ? context.pathResolver.toFileSystem(session.worktree_path) : null,
+      projectPath: context.pathResolver.toFileSystem(context.project.path),
+      branch: session.worktree_name, archived: !!session.archived, updatedAt: parseSessionTimestampMs(session.updated_at), isMainRepo: !!session.is_main_repo,
+      ownedByPane: session.worktree_ownership !== 'external',
+      paused: !session.archived && !!panePausedMark(panelManager.getPanelsForSession(session.id)),
+    }];
+  });
+  // Only folders Pane made worktrees in: an adopted worktree's or a projectless session's parent is the person's own folder.
+  const worktreeRoots = () => [...new Set(databaseService.getAllSessionsIncludingArchived({ includeHidden: true })
+    .flatMap(session => (session.worktree_path && session.project_id && !session.is_main_repo && session.worktree_ownership !== 'external'
+      ? [path.dirname(fileSystemPath(session, session.worktree_path))] : [])))];
+  const installPath = () => installPathOf(process.execPath, !!options.app?.isPackaged);
+  const listGitWorktrees = async (pane: { id: string }) => {
+    const context = sessionManager.getProjectContext(pane.id);
+    if (!context) return [];
+    const { project, commandRunner, pathResolver } = context;
+    return (await worktreeManager.listWorktrees(project.path, commandRunner)).map(worktree => ({ ...worktree, path: pathResolver.toFileSystem(worktree.path) }));
+  };
+  const inventoryIgnoredDirs = async (pane: { id: string }) => {
+    const context = sessionManager.getProjectContext(pane.id);
+    const stored = storedWorktrees.get(pane.id);
+    return context && stored ? ignoredDirs(stored, context.commandRunner) : [];
+  };
   const machineHealth = new MachineHealthService({
     now: () => Date.now(),
     settings: () => configManager.getConfig().machineHealth,
@@ -440,50 +468,26 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     ],
     processes: () => resourceMonitorService.getSnapshot(),
     readFootprints: process.platform === 'darwin' ? readFootprints : undefined,
-    scanInventory: () => {
-      // Git runs through the project's command runner at the stored (Linux, for WSL) path.
-      const storedWorktrees = new Map<string, string>();
-      return scanStorage({
-        now: () => Date.now(),
-        paneDir: getAppDirectory(),
-        panes: () => databaseService.getAllSessionsIncludingArchived({ includeHidden: true }).flatMap(session => {
-          const context = contextOf(session);
-          if (!context) return [];
-          if (session.worktree_path) storedWorktrees.set(session.id, session.worktree_path);
-          return [{
-            id: session.id, name: session.name, worktreePath: session.worktree_path ? context.pathResolver.toFileSystem(session.worktree_path) : null,
-            projectPath: context.pathResolver.toFileSystem(context.project.path),
-            branch: session.worktree_name, archived: !!session.archived, updatedAt: parseSessionTimestampMs(session.updated_at), isMainRepo: !!session.is_main_repo,
-            ownedByPane: session.worktree_ownership !== 'external',
-            paused: !session.archived && !!panePausedMark(panelManager.getPanelsForSession(session.id)),
-          }];
-        }),
-        // Only folders Pane made worktrees in: an adopted worktree's or a projectless session's parent is the person's own folder.
-        worktreeRoots: () => [...new Set(databaseService.getAllSessionsIncludingArchived({ includeHidden: true })
-          .flatMap(session => (session.worktree_path && session.project_id && !session.is_main_repo && session.worktree_ownership !== 'external'
-            ? [path.dirname(fileSystemPath(session, session.worktree_path))] : [])))],
-        agentTempRoots: () => agentTempRoots(),
-        installPath: () => installPathOf(process.execPath, !!options.app?.isPackaged),
-        cleanOpenAt: () => Number(databaseService.getUserPreference(DB_CLEAN_OPEN_PREFERENCE)) || null,
-        archiveJobsInFlight: () => new Set(archiveCleanupManager.getTasks().filter(task => task.status !== 'completed').map(task => task.sessionId)),
-        readUpdates: () => readUpdateRecords(getAppDirectory()),
-        listGitWorktrees: async pane => {
-          const context = sessionManager.getProjectContext(pane.id);
-          if (!context) return [];
-          const { project, commandRunner, pathResolver } = context;
-          return (await worktreeManager.listWorktrees(project.path, commandRunner)).map(worktree => ({ ...worktree, path: pathResolver.toFileSystem(worktree.path) }));
-        },
-        ignoredDirs: async pane => {
-          const context = sessionManager.getProjectContext(pane.id);
-          const stored = storedWorktrees.get(pane.id);
-          return context && stored ? ignoredDirs(stored, context.commandRunner) : [];
-        },
-        processCwds,
-        otherTools: async () => [...otherToolPaths(), ...await wslDiskImages()],
-        appScratchDir: appScratchDirectory,
-      });
-    },
+    scanInventory: () => scanStorage({
+      now: () => Date.now(),
+      paneDir: getAppDirectory(),
+      panes: inventoryPanes,
+      worktreeRoots,
+      agentTempRoots: () => agentTempRoots(),
+      installPath,
+      cleanOpenAt: () => Number(databaseService.getUserPreference(DB_CLEAN_OPEN_PREFERENCE)) || null,
+      archiveJobsInFlight: () => new Set(archiveCleanupManager.getTasks().filter(task => task.status !== 'completed').map(task => task.sessionId)),
+      readUpdates: () => readUpdateRecords(getAppDirectory()),
+      listGitWorktrees,
+      ignoredDirs: inventoryIgnoredDirs,
+      processCwds,
+      otherTools: async () => [...otherToolPaths(), ...await wslDiskImages()],
+      appScratchDir: appScratchDirectory,
+    }),
   });
+  // Payload-free: readers re-read. The per-minute sample stays off the daemon stream.
+  machineHealth.on('level-changed', () => getPaneEventSink().send(MACHINE_HEALTH_CHANGED_EVENT));
+  machineHealth.on('inventory', () => getPaneEventSink().send(MACHINE_HEALTH_INVENTORY_CHANGED_EVENT));
   // Migration backups become removable once a later start opened the database cleanly.
   if (duties.housekeeping && !startupPanelBufferMigration.error) databaseService.setUserPreference(DB_CLEAN_OPEN_PREFERENCE, String(Date.now()));
   const daemonServices: DaemonHostServices = {
@@ -702,13 +706,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   autoPauser.sync();
   const machineCleanup = new CleanupEngine({
     now: () => Date.now(),
-    paneDir: getAppDirectory(),
     inventory: async () => machineHealth.getInventory() ?? machineHealth.scanInventory(),
-    recheck: item => recheckItem(item, {
-      now: () => Date.now(),
-      isArchived: id => !!databaseService.getSession(id)?.archived,
-      isPaused: id => !!panePausedMark(panelManager.getPanelsForSession(id)),
-    }),
+    recheck: item => recheckItem(item, { now: () => Date.now(), panes: inventoryPanes, listGitWorktrees }),
     protectionOf: paneId => protectionOf(paneId, {
       pinned: id => !!databaseService.getSession(id)?.is_favorite,
       focusedPaneId: () => (options.getMainWindow()?.isFocused() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined),
@@ -729,7 +728,24 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       return Number(fsStats.bavail) * Number(fsStats.bsize);
     },
     settings: () => configManager.getConfig().machineHealth,
-    pruneWorktrees: async projectPath => { await execFileAsync('git', ['worktree', 'prune'], { cwd: projectPath, timeout: 30_000 }); },
+    // The folders every reclaimable kind sits in (see scanStorage), plus each open Pane's `.pane` for its scratch.
+    trashParents: () => {
+      const install = installPath();
+      return [
+        getAppDirectory(), path.join(getAppDirectory(), 'updates'), appScratchRoot(), ...(install ? [path.dirname(install)] : []),
+        ...agentTempRoots(), ...worktreeRoots(),
+        ...inventoryPanes().flatMap(pane => (!pane.archived && pane.worktreePath ? [path.join(pane.worktreePath, '.pane')] : [])),
+      ];
+    },
+    moveWorktree: async (item, move) => {
+      const ctx = item.sessionId ? sessionManager.getProjectContext(item.sessionId) : null;
+      if (!ctx) throw new PaneError('ERR_MACHINE_CLEANUP_NO_PROJECT', 'Pane no longer has this Pane\'s project, so it cannot update git\'s worktree records. Nothing was moved.', 'Remove the folder with git worktree remove from its repository.');
+      await withArchiveRepositoryLock(ctx.project.path, ctx.commandRunner, async () => {
+        await move();
+        await ctx.commandRunner.execFile('git', ['worktree', 'prune'], ctx.project.path, { silent: true, timeout: 30_000 })
+          .catch(error => logger.warn(`[MachineHealth] git worktree prune failed in ${ctx.project.path}; git drops the record on its next gc.`, error instanceof Error ? error : undefined));
+      });
+    },
     log: message => logger.info(message),
   });
   if (duties.housekeeping) {

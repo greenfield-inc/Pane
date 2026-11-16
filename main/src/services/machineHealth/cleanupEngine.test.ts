@@ -1,13 +1,17 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getAppDirectory } from '../../utils/appDirectory';
 import type { MachineHealthSettings, ReclaimItem, StorageInventory } from '../../../../shared/types/machineHealth';
 import { CleanupEngine, type CleanupDeps } from './cleanupEngine';
 
 let root: string;
 beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'pane-cleanup-')); });
-afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+  rmSync(path.join(getAppDirectory(), 'agent-logs'), { recursive: true, force: true });
+});
 
 const folder = (rel: string, bytes = 1000) => {
   const full = path.join(root, rel);
@@ -23,14 +27,14 @@ function engine(items: ReclaimItem[], extra: Partial<CleanupDeps> = {}) {
   const settings: MachineHealthSettings = {};
   const deps: CleanupDeps = {
     now: () => 1,
-    paneDir: path.join(root, 'pane'),
     inventory: async (): Promise<StorageInventory> => ({ scannedAt: 0, durationMs: 0, items, panes: [], buckets: { paneWorktrees: 0, dependencies: 0, qaAndScratch: 0, agentTemp: 0, paneData: 0 } }),
     protectionOf: async () => null,
     processCwds: async () => [],
     recheck: async () => null,
     freeBytes: async () => 10_000,
     settings: () => settings,
-    pruneWorktrees: async () => {},
+    trashParents: () => [],
+    moveWorktree: async (_item, move) => move(),
     log: () => {},
     ...extra,
   };
@@ -89,18 +93,48 @@ describe('CleanupEngine', () => {
     expect(existsSync(scratch) && existsSync(temp)).toBe(true);
   });
 
-  it('finishes a delete that a crash interrupted, from the trash folder, on the next start', async () => {
-    const snapshot = folder('pane/updates/u-old');
-    const first = engine([item('update-snapshot', 1, snapshot)], { remove: async () => { throw new Error('Pane stopped'); } });
-    await first.cleanup.run({ source: 'schedule', tiers: [1] });
-    // The rename landed and was recorded, then the delete never finished.
-    expect(existsSync(snapshot)).toBe(false);
-    const trash = path.join(root, 'pane', 'updates', '.pane-trash');
-    expect(readdirSync(trash)).toHaveLength(1);
+  it('deletes what an interrupted run left in the trash on the next start', async () => {
+    const updates = path.join(root, 'pane', 'updates');
+    folder('pane/updates/.pane-trash/u-old-0a1b2c3d');
+    await engine([], { trashParents: () => [updates] }).cleanup.finishPendingDeletes();
+    expect(readdirSync(updates)).toEqual([]);
+  });
 
-    const next = engine([]);
-    await next.cleanup.finishPendingDeletes();
-    expect(existsSync(trash)).toBe(false);
+  it('returns once items are moved and fills in the space freed when the delete finishes', async () => {
+    const snapshot = folder('pane/updates/u-old');
+    let release = () => {};
+    const deleted = new Promise<void>(resolve => { release = resolve; });
+    let reads = 0;
+    const { cleanup } = engine([item('update-snapshot', 1, snapshot)], {
+      deleteGraceMs: 10,
+      // The first read is before the move; the one after the delete waits until released.
+      freeBytes: async () => (reads++ === 0 ? 10_000 : deleted.then(() => 14_000)),
+    });
+    const run = await cleanup.run({ source: 'cli', tiers: [1], kinds: ['update-snapshot'] });
+    expect(run).toMatchObject({ deleting: true, freedBytes: 0 });
+    expect(existsSync(snapshot)).toBe(false);
+    release();
+    await vi.waitFor(() => expect(cleanup.history()[0]).toMatchObject({ deleting: false, freedBytes: 4000 }));
+  });
+
+  it('keeps agent transcripts from a paused Pane\'s scratch before deleting it', async () => {
+    const scratch = folder('repo/worktrees/paused/.pane/scratch');
+    mkdirSync(path.join(scratch, 'qa', 'home', '.claude', 'projects', 'p'), { recursive: true });
+    writeFileSync(path.join(scratch, 'qa', 'home', '.claude', 'projects', 'p', 'qa.jsonl'), 'transcript');
+    const { cleanup } = engine([item('paused-scratch', 2, scratch, 'pane-1')]);
+    expect((await cleanup.run({ source: 'ui', tiers: [2], kinds: ['paused-scratch'] })).removed).toHaveLength(1);
+    expect(existsSync(scratch)).toBe(false);
+    expect(readFileSync(path.join(getAppDirectory(), 'agent-logs', 'claude', 'pane-1', 'claude-projects', '0', 'p', 'qa.jsonl'), 'utf8')).toBe('transcript');
+  });
+
+  it('skips folders when Pane cannot read which folders processes work in, and still removes backups', async () => {
+    const temp = folder('claude-temp/old');
+    const backup = folder('pane/backup.bak');
+    const { cleanup } = engine([item('agent-temp', 2, temp), item('migration-backup', 1, backup)], { processCwds: async () => null });
+    const run = await cleanup.run({ source: 'ui', tiers: [1, 2], kinds: ['agent-temp', 'migration-backup'] });
+    expect(run.skipped.map(entry => [path.basename(entry.path), entry.reason])).toEqual([['old', 'Pane could not check for running processes.']]);
+    expect(run.removed.map(entry => path.basename(entry.path))).toEqual(['backup.bak']);
+    expect(existsSync(temp)).toBe(true);
   });
 
   it('skips an item that changed since the inventory was taken', async () => {
@@ -111,6 +145,25 @@ describe('CleanupEngine', () => {
     expect(existsSync(temp)).toBe(true);
   });
 
+  it('checks an archived Pane\'s folder again inside the repository lock, so a Pane restored meanwhile keeps it', async () => {
+    const leftover = folder('repo/worktrees/restored');
+    let checks = 0;
+    // Clear when the run starts; restored by the time the lock is held.
+    const { cleanup } = engine([item('archived-pane-folder', 2, leftover, 'p1')], {
+      recheck: async () => (++checks === 1 ? null : 'A Pane that is open now uses this folder.'),
+    });
+    const run = await cleanup.run({ source: 'ui', tiers: [2], kinds: ['archived-pane-folder'] });
+    expect(run.skipped.map(entry => entry.reason)).toEqual(['A Pane that is open now uses this folder.']);
+    expect(existsSync(leftover)).toBe(true);
+  });
+
+  it('skips an item inside WSL, where Pane cannot see which folders Linux processes work in', async () => {
+    const wsl = item('archived-pane-folder', 2, String.raw`\\wsl.localhost\Ubuntu-24.04\repos\site\worktrees\old`, 'p1');
+    const { cleanup } = engine([wsl]);
+    const run = await cleanup.run({ source: 'ui', tiers: [2], kinds: ['archived-pane-folder'] });
+    expect(run.skipped.map(entry => entry.reason)).toEqual(['Pane cannot check for running processes inside WSL.']);
+  });
+
   it('refuses a request that names no items or kinds, unless it is the schedule', async () => {
     const temp = folder('claude-temp/old');
     const { cleanup } = engine([item('agent-temp', 2, temp)]);
@@ -118,14 +171,12 @@ describe('CleanupEngine', () => {
     expect(existsSync(temp)).toBe(true);
   });
 
-  it('never deletes a journal entry outside a trash folder, even through ..', async () => {
-    const keep = folder('Documents');
-    mkdirSync(path.join(root, 'pane'), { recursive: true });
-    writeFileSync(path.join(root, 'pane', 'machine-health-trash.json'), JSON.stringify([
-      path.join(root, 'pane', '.pane-trash', '..', '..', 'Documents'),
-      keep,
-    ]));
-    await engine([]).cleanup.finishPendingDeletes();
-    expect(existsSync(keep)).toBe(true);
+  it('never deletes through a link named like the trash folder', async () => {
+    const documents = folder('Documents');
+    const parent = path.join(root, 'claude-temp');
+    mkdirSync(parent, { recursive: true });
+    symlinkSync(documents, path.join(parent, '.pane-trash'), process.platform === 'win32' ? 'junction' : 'dir');
+    await engine([], { trashParents: () => [parent] }).cleanup.finishPendingDeletes();
+    expect(readdirSync(documents)).toEqual(['data.bin']);
   });
 });

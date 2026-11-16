@@ -184,15 +184,52 @@ describe('scanStorage', () => {
     expect(inventory.panes[0]).toMatchObject({ sessionId: 'new', agentTempBytes: 300 });
   });
 
-  it('rechecks an item before cleanup: gone, Pane restored, or touched recently', async () => {
+  it('offers the scratch of a paused Pane and never of an open one', async () => {
+    file('repo/worktrees/paused/.pane/scratch/qa/a.bin', 500);
+    file('repo/worktrees/working/.pane/scratch/qa/b.bin', 500);
+    const inventory = await scanStorage(deps([pane('p1', 'paused', { paused: true }), pane('p2', 'working')]));
+    expect(inventory.items.map(item => [item.kind, item.sessionId, path.relative(root, item.path)])).toEqual([
+      ['paused-scratch', 'p1', path.join('repo', 'worktrees', 'paused', '.pane', 'scratch')],
+    ]);
+  });
+
+  it('rechecks an item before cleanup: gone, Pane restored or unpaused, opened again, or touched recently', async () => {
     const loose = file('claude-temp/loose/a.bin', 10, 3);
     dirAge('claude-temp/loose', 3);
     const looseItem = { id: 'x', kind: 'agent-temp' as const, tier: 2 as const, path: path.dirname(loose), sizeBytes: 10, modifiedAt: 0, sessionId: null, reason: '' };
-    const recheck = { now: () => NOW, isArchived: () => true, measure: async (requests: Parameters<typeof measureSizesHere>[0]) => measureSizesHere(requests) };
+    const archived = pane('p2', 'old', { archived: true });
+    const recheck = { now: () => NOW, panes: () => [archived], listGitWorktrees: async () => [], measure: async (requests: Parameters<typeof measureSizesHere>[0]) => measureSizesHere(requests) };
     expect(await recheckItem(looseItem, recheck)).toBeNull();
     file('claude-temp/loose/new.bin', 10, 0);
     expect(await recheckItem(looseItem, recheck)).toBe('Something in it changed in the last 2 days.');
-    expect(await recheckItem({ ...looseItem, sessionId: 'p2' }, { ...recheck, isArchived: () => false })).toBe('Its Pane is no longer archived.');
+    expect(await recheckItem({ ...looseItem, sessionId: 'p2' }, { ...recheck, panes: () => [{ ...archived, archived: false }] })).toBe('Its Pane is no longer archived.');
     expect(await recheckItem({ ...looseItem, path: path.join(root, 'nope') }, recheck)).toBe('It is already gone.');
+    const scratch = { ...looseItem, kind: 'paused-scratch' as const, path: path.dirname(loose), sessionId: 'p1' };
+    expect(await recheckItem(scratch, { ...recheck, panes: () => [pane('p1', 'a', { paused: true })] })).toBeNull();
+    expect(await recheckItem(scratch, { ...recheck, panes: () => [pane('p1', 'a')] })).toBe('Its Pane is no longer paused.');
+  });
+
+  it('rechecks that an archived Pane\'s temp and folder still belong to it and to no Pane opened since', async () => {
+    // Birth times are real, so the archive time is set from the real clock.
+    const old = pane('p3', 'feat', { archived: true, updatedAt: Date.now() + DAY });
+    file('repo/worktrees/feat/a.txt', 600);
+    const tempPath = path.dirname(file(`claude-temp/${old.worktreePath.replace(/[^a-zA-Z0-9]/gu, '-')}/a.out`, 300));
+    const temp = { id: 't', kind: 'agent-temp' as const, tier: 2 as const, path: tempPath, sizeBytes: 300, modifiedAt: 0, sessionId: 'p3', reason: '' };
+    const leftover = { ...temp, id: 'f', kind: 'archived-pane-folder' as const, path: old.worktreePath, projectPath: old.projectPath };
+    const gitShows = async () => [{ path: old.worktreePath, branch: 'feat' }];
+    const recheck = { now: () => NOW, panes: () => [old], listGitWorktrees: gitShows };
+    expect(await recheckItem(temp, recheck)).toBeNull();
+    expect(await recheckItem(leftover, recheck)).toBeNull();
+
+    // A new Pane opened at the same path on the kept branch.
+    const reopened = { ...recheck, panes: () => [old, pane('p4', 'feat')] };
+    expect(await recheckItem(temp, reopened)).toBe('A Pane that is open now uses it.');
+    expect(await recheckItem(leftover, reopened)).toBe('A Pane that is open now uses it.');
+    expect(await recheckItem(leftover, { ...recheck, listGitWorktrees: async () => [{ path: old.worktreePath, branch: 'other' }] }))
+      .toBe('Git no longer shows it as that archived Pane\'s worktree.');
+    expect(await recheckItem(leftover, { ...recheck, panes: () => [{ ...old, updatedAt: Date.now() - 30 * DAY }] }))
+      .toBe('Git no longer shows it as that archived Pane\'s worktree.');
+    expect(await recheckItem(leftover, { ...recheck, listGitWorktrees: async () => { throw new Error('git failed'); } }))
+      .toBe('Pane could not check it with git.');
   });
 });

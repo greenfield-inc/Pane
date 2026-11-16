@@ -105,7 +105,7 @@ export const MACHINE_HEALTH_DEFAULTS = {
   leakMinGrowthMB: 500,
   leakMinGrowthPercent: 50,
   leakMinAgeMinutes: 30,
-} as const satisfies Required<MachineHealthSettings>;
+} as const satisfies Partial<Record<keyof MachineHealthSettings, number>>;
 
 /** Sent without a payload when the disk or memory level changes; readers re-read the snapshot. */
 export const MACHINE_HEALTH_CHANGED_EVENT = 'resource-monitor:machine-health-changed';

@@ -1,9 +1,12 @@
 import { randomBytes } from 'crypto';
-import { mkdir, readFile, realpath, rename, rm, rmdir, stat, writeFile } from 'fs/promises';
+import { realpath, stat } from 'fs/promises';
 import * as path from 'path';
 import { PaneError } from '../../../../shared/paneError';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { MachineHealthSettings, ReclaimItem, ReclaimKind, ReclaimTier, StorageInventory } from '../../../../shared/types/machineHealth';
+import { archiveErrorCode, archiveFs } from '../archiveCleanupFilesystem';
+import { preserveAgentLogs } from '../archiveRetention';
+import { deleteTrashEntry, renameWhileBusy, sweepTrashRoot } from '../worktreeTrash';
+import { isWslPath } from './reclaimRules';
 
 /** Where a cleanup came from: a person in Resources or a card, the schedule, or an agent through runpane. */
 type CleanupSource = 'ui' | 'card' | 'schedule' | 'cli';
@@ -33,25 +36,29 @@ export interface CleanupRun {
   skipped: CleanupEntry[];
   /** Measured from free space on the affected volumes, before and after; never below 0. */
   freedBytes: number;
+  /** True while removed items are still being deleted from the trash; freedBytes is filled in once they are. */
+  deleting?: boolean;
 }
 
 export interface CleanupDeps {
   now: () => number;
-  paneDir: string;
   /** The latest inventory; each item is re-checked with `recheck` before it is touched. */
   inventory: () => Promise<StorageInventory>;
   /** Why an item must not be touched now that the inventory may be old (gone, Pane restored, recently used), or null. */
   recheck: (item: ReclaimItem) => Promise<string | null>;
   /** Why the Pane must not be touched now (pinned, focused, agent busy, open card, uncommitted changes), or null. */
   protectionOf: (sessionId: string) => Promise<string | null>;
-  processCwds: () => Promise<string[]>;
+  /** Working directories of running processes, or null when Pane could not read them. */
+  processCwds: () => Promise<string[] | null>;
   freeBytes: (folder: string) => Promise<number>;
   settings: () => MachineHealthSettings | undefined;
-  /** Drop git's records of worktree folders that are gone. */
-  pruneWorktrees: (projectPath: string) => Promise<void>;
+  /** Folders whose `.pane-trash` may hold what an earlier cleanup moved; the next start deletes it. Every item's folder is one of them. */
+  trashParents: () => string[];
+  /** Runs `move` for an archived Pane's leftover worktree under its repository's lock, then drops git's record of the folder. */
+  moveWorktree: (item: ReclaimItem, move: () => Promise<void>) => Promise<void>;
   log: (message: string) => void;
-  /** Deletes a renamed target (default: recursive rm with retries). */
-  remove?: (target: string) => Promise<void>;
+  /** How long a run waits for its deletes before returning and finishing them in the background (default 20 s). */
+  deleteGraceMs?: number;
 }
 
 /** The tier 2 kinds and the setting that lets a schedule run each without asking. */
@@ -65,24 +72,21 @@ function automaticSwitch(kind: ReclaimKind): keyof MachineHealthSettings | undef
 }
 
 const TRASH_DIR = '.pane-trash';
-const JOURNAL = 'machine-health-trash.json';
 const HISTORY_LIMIT = 50;
+const DELETE_GRACE_MS = 20_000;
+/** How long a move keeps retrying while Windows still holds the folder. */
+const BUSY_RETRY_MS = 2_000;
+const BUSY_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
 
 const inside = (child: string, parent: string) => child === parent || child.startsWith(parent + path.sep);
-
-async function removeTree(target: string): Promise<void> {
-  // Windows can hold a just-closed handle briefly: retry EBUSY/EPERM as archive cleanup does.
-  await rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  // Drop the trash folder once it is empty; rmdir refuses while anything is left in it.
-  await rmdir(path.dirname(target)).catch(() => undefined);
-}
 
 /**
  * The one way machine health deletes anything. Every request re-reads the
  * inventory and re-checks protections at execution time. Each target is first
  * renamed into a `.pane-trash` folder beside it (same volume, so the rename is
- * atomic and a crash leaves it either in place or in the trash), recorded in a
- * journal, then deleted; the next start finishes any recorded delete.
+ * atomic and a crash leaves it either in place or in the trash), then deleted
+ * in the background; each start deletes whatever its trash folders still hold.
+ * Nothing is written before a move, so a full disk still frees space.
  */
 export class CleanupEngine {
   private runs: CleanupRun[] = [];
@@ -101,23 +105,21 @@ export class CleanupEngine {
     return next;
   }
 
-  /** Finish deletes a crash interrupted: everything the journal lists. Runs in turn with cleanups, never beside one. */
+  /** Deletes what earlier runs left in the trash (a crash, a quit, a failed delete). Runs in turn with cleanups, never beside one. */
   finishPendingDeletes(): Promise<void> {
-    const next = this.chain.then(() => this.finishPending());
+    const next = this.chain.then(() => this.sweep());
     this.chain = next.catch(() => undefined);
     return next;
   }
 
-  private async finishPending(): Promise<void> {
-    const pending = await this.readJournal();
-    for (const target of pending) {
-      try {
-        await (this.deps.remove ?? removeTree)(target);
-      } catch (error) {
-        this.deps.log(`[MachineHealth] could not finish deleting ${target}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+  private async sweep(): Promise<void> {
+    for (const parent of new Set(this.deps.trashParents())) {
+      const trash = path.join(parent, TRASH_DIR);
+      // lstat: a link named like the trash folder is not Pane's, so nothing behind it is deleted.
+      if (!(await archiveFs.lstat(trash).catch(() => undefined))?.isDirectory()) continue;
+      await sweepTrashRoot(trash);
+      await archiveFs.rmdir(trash).catch(() => undefined);
     }
-    await this.writeJournal([]);
   }
 
   private async execute(request: CleanupRequest): Promise<CleanupRun> {
@@ -156,9 +158,10 @@ export class CleanupEngine {
     if (items.length === 0) return this.record(run);
 
     // Compare real paths: lsof reports /private/tmp where the item says /tmp.
-    const cwds = await Promise.all((await this.deps.processCwds()).map(cwd => realpath(cwd).catch(() => cwd)));
+    const listed = await this.deps.processCwds();
+    const cwds = listed && await Promise.all(listed.map(cwd => realpath(cwd).catch(() => cwd)));
     const protections = new Map<string, string | null>();
-    const trashed: Array<{ item: ReclaimItem; trashPath: string }> = [];
+    const trashed: string[] = [];
     /** Free bytes before, per device, read at a folder on that device. */
     const volumes = new Map<number, { folder: string; before: number }>();
     for (const item of items) {
@@ -169,9 +172,19 @@ export class CleanupEngine {
         if (!protections.has(item.sessionId)) protections.set(item.sessionId, await this.deps.protectionOf(item.sessionId));
         reason = protections.get(item.sessionId) ?? null;
       }
-      const itemPath = await realpath(item.path).catch(() => item.path);
-      if (!reason && cwds.some(cwd => inside(cwd, itemPath))) reason = 'A running process is working in this folder.';
+      // A backup is a file: no process works in it.
+      if (!reason && item.kind !== 'migration-backup') {
+        const itemPath = await realpath(item.path).catch(() => item.path);
+        if (cwds === null) reason = 'Pane could not check for running processes.';
+        else if (isWslPath(item.path)) reason = 'Pane cannot check for running processes inside WSL.';
+        else if (cwds.some(cwd => inside(cwd, itemPath))) reason = 'A running process is working in this folder.';
+      }
       if (!reason) reason = await this.deps.recheck(item);
+      if (!reason && item.sessionId && (item.kind === 'paused-scratch' || item.kind === 'archived-pane-folder')) {
+        // Keep agent transcripts (an isolated QA home, for example) as archive does.
+        reason = await preserveAgentLogs(path.dirname(item.path), item.path, item.sessionId)
+          .then(() => null, error => `Pane could not keep its agent logs first (${error instanceof Error ? error.message : String(error)}).`);
+      }
       if (reason) {
         run.skipped.push({ ...entry, reason });
         continue;
@@ -180,64 +193,65 @@ export class CleanupEngine {
       const device = await stat(parent).then(info => info.dev, () => -1);
       if (!volumes.has(device)) volumes.set(device, { folder: parent, before: await this.deps.freeBytes(parent).catch(() => 0) });
       const trashPath = path.join(parent, TRASH_DIR, `${path.basename(item.path)}-${randomBytes(4).toString('hex')}`);
+      let late: string | null = null;
+      const move = async () => {
+        // Checked again right before the move (inside the repository lock for a worktree): a Pane restored
+        // during the log copy or the lock wait now owns this folder.
+        late = item.kind === 'archived-pane-folder' ? await this.deps.recheck(item) : null;
+        if (late) return;
+        await archiveFs.mkdir(path.dirname(trashPath), { recursive: true });
+        await renameWhileBusy(item.path, trashPath, BUSY_RETRY_MS);
+      };
       try {
-        await mkdir(path.dirname(trashPath), { recursive: true });
-        // Journal first: a crash right after the rename still finds the target on the next start.
-        await this.writeJournal([...await this.readJournal(), trashPath]);
-        await rename(item.path, trashPath);
+        await (item.kind === 'archived-pane-folder' ? this.deps.moveWorktree(item, move) : move());
+        if (late) {
+          run.skipped.push({ ...entry, reason: late });
+          continue;
+        }
       } catch (error) {
-        const code = error instanceof Error && 'code' in error ? String(error.code) : undefined;
-        run.skipped.push({ ...entry, reason: code === 'EBUSY' || code === 'EPERM' ? 'It is in use.' : `It could not be moved (${code ?? 'unknown error'}).` });
-        await this.writeJournal((await this.readJournal()).filter(pending => pending !== trashPath));
+        const code = archiveErrorCode(error);
+        run.skipped.push({ ...entry, reason: code && BUSY_CODES.has(code) ? 'It is in use.' : `It could not be moved (${code ?? (error instanceof Error ? error.message : String(error))}).` });
         continue;
       }
-      trashed.push({ item, trashPath });
+      trashed.push(trashPath);
       run.removed.push(entry);
     }
 
-    for (const { trashPath } of trashed) {
-      try {
-        await (this.deps.remove ?? removeTree)(trashPath);
-      } catch (error) {
-        this.deps.log(`[MachineHealth] delete of ${trashPath} failed; it is retried on the next start: ${error instanceof Error ? error.message : String(error)}`);
-        continue;
-      }
-      await this.writeJournal((await this.readJournal()).filter(pending => pending !== trashPath));
-    }
-    const projects = new Set(trashed.flatMap(({ item }) => (item.kind === 'archived-pane-folder' && item.projectPath ? [item.projectPath] : [])));
-    for (const projectPath of projects) await this.deps.pruneWorktrees(projectPath).catch(() => undefined);
-
-    for (const { folder, before } of volumes.values()) {
-      run.freedBytes += Math.max(0, (await this.deps.freeBytes(folder).catch(() => before)) - before);
+    if (trashed.length === 0) return this.record(run);
+    run.deleting = true;
+    const deleted = this.deleteTrashed(run, trashed, [...volumes.values()]);
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([deleted, new Promise(resolve => { grace = setTimeout(resolve, this.deps.deleteGraceMs ?? DELETE_GRACE_MS); })]);
+    clearTimeout(grace);
+    // Empty trash folders go in turn with cleanups, so none is removed while a run moves something into it.
+    const removeEmptyTrash = () => Promise.all([...new Set(trashed.map(trashPath => path.dirname(trashPath)))]
+      .map(folder => archiveFs.rmdir(folder).catch(() => undefined)));
+    if (run.deleting) {
+      void deleted.then(() => { this.chain = this.chain.then(removeEmptyTrash); });
+    } else {
+      await removeEmptyTrash();
     }
     return this.record(run);
+  }
+
+  /** Deletes what a run moved to the trash and measures the space freed; a delete that fails is retried on the next start. */
+  private async deleteTrashed(run: CleanupRun, trashed: string[], volumes: Array<{ folder: string; before: number }>): Promise<void> {
+    const results = await Promise.all(trashed.map(trashPath => deleteTrashEntry(trashPath)));
+    const failed = trashed.filter((_, index) => !results[index]);
+    if (failed.length > 0) this.deps.log(`[MachineHealth] could not delete ${failed.join(', ')}; the next start tries again.`);
+    for (const { folder, before } of volumes) {
+      run.freedBytes += Math.max(0, (await this.deps.freeBytes(folder).catch(() => before)) - before);
+    }
+    run.deleting = false;
+    this.deps.log(`[MachineHealth] cleanup (${run.source}) finished deleting ${trashed.length - failed.length} of ${trashed.length}; freed ${run.freedBytes} bytes.`);
   }
 
   private record(run: CleanupRun): CleanupRun {
     if (run.removed.length > 0 || run.skipped.length > 0) {
       this.runs = [run, ...this.runs].slice(0, HISTORY_LIMIT);
-      this.deps.log(`[MachineHealth] cleanup (${run.source}): removed ${run.removed.length}, skipped ${run.skipped.length}, freed ${run.freedBytes} bytes. `
+      this.deps.log(`[MachineHealth] cleanup (${run.source}): removed ${run.removed.length}, skipped ${run.skipped.length}, ${run.deleting ? 'still deleting' : `freed ${run.freedBytes} bytes`}. `
         + run.removed.map(entry => `${entry.kind} ${entry.path}`).join('; '));
     }
     return run;
-  }
-
-  private async readJournal(): Promise<string[]> {
-    try {
-      const pending = decodeBoundary(JSON.parse(await readFile(path.join(this.deps.paneDir, JOURNAL), 'utf8')), boundary.array(boundary.string));
-      // Only ever delete a name Pane gave inside a trash folder, whatever the file says: no `..`, no other folder.
-      return pending.filter(entry => path.isAbsolute(entry) && path.normalize(entry) === entry
-        && path.basename(path.dirname(entry)) === TRASH_DIR && /-[0-9a-f]{8}$/u.test(path.basename(entry)));
-    } catch {
-      return [];
-    }
-  }
-
-  private async writeJournal(pending: string[]): Promise<void> {
-    await mkdir(this.deps.paneDir, { recursive: true });
-    // Write then rename, so a crash leaves the old journal or the new one, never half of one.
-    const file = path.join(this.deps.paneDir, JOURNAL);
-    await writeFile(`${file}.tmp`, JSON.stringify(pending));
-    await rename(`${file}.tmp`, file);
   }
 }
