@@ -6,6 +6,7 @@ import { RECLAIM_KINDS, MACHINE_HEALTH_ASK_AGENT_CHANNEL, MACHINE_HEALTH_IGNORE_
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
 import { terminalPanelManager } from '../services/terminalPanelManager';
+import { bracketedPaste, normalizePromptNewlines, stripTrailingNewlines } from '../services/agents/promptDelivery';
 import { PaneError } from '../../../shared/paneError';
 import { logsManager } from '../services/panels/logPanel/logsManager';
 import { canRestartProcess } from '../services/machineHealth/memoryRelief';
@@ -42,6 +43,8 @@ const DAEMON_RESOURCE_MONITOR_CHANNELS = [
 
 /** How long an agent that missed the first 30 s may take to start before its request is dropped. */
 const LATE_AGENT_WAIT_MS = 10 * 60_000;
+/** Requests waiting for an agent that missed the first 30 s, by panel. */
+const lateRequests = new Map<string, string>();
 
 export function registerResourceMonitorHandlers(
   ipcMain: IpcMain,
@@ -153,7 +156,11 @@ export function registerResourceMonitorHandlers(
     if (!sessions) {
       throw new PaneError('ERR_MACHINE_HEALTH_UNAVAILABLE', 'Sessions are not running in this Pane process, so no agent was asked.', 'Restart Pane, then try Ask an agent again.');
     }
-    const submit = (panelId: string) => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: prompt, source: 'user', expectReport: false }]);
+    const submit = (panelId: string) => {
+      // A request sent now replaces one still waiting for this agent to start.
+      lateRequests.delete(panelId);
+      return commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: prompt, source: 'user', expectReport: false }]);
+    };
     const ready = async (panelId: string, timeoutMs?: number) =>
       decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:wait', [{ panelId, condition: 'ready', timeoutMs }]), boundary.object({ ok: boundary.boolean }))?.ok === true;
     /**
@@ -165,10 +172,29 @@ export function registerResourceMonitorHandlers(
         await submit(panelId);
         return true;
       }
+      void services.notifyService?.queue.ask({
+        question: { ui: 'info', title: 'The agent is still starting', context: 'Your cleanup request will appear in its input box when it is ready. Press Enter there to send it.' },
+        source: { name: 'Pane', agent: 'Pane' },
+      });
+      // One late delivery per agent: a later click while it waits only updates the request.
+      const waiting = lateRequests.has(panelId);
+      lateRequests.set(panelId, prompt);
+      if (waiting) return false;
       void (async () => {
         if (!(await ready(panelId, LATE_AGENT_WAIT_MS))) return;
-        if (panelType === 'chat') await submit(panelId);
-        else await commandRegistry.invoke('runpane:panels:input', [{ panelId, input: prompt, source: 'user' }]);
+        const request = lateRequests.get(panelId);
+        lateRequests.delete(panelId);
+        if (request === undefined) return;
+        if (panelType === 'chat') {
+          await commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: request, source: 'user', expectReport: false }]);
+          return;
+        }
+        // Never into a draft the person is typing.
+        const screen = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:screen', [{ panelId }]), boundary.object({ composer: boundary.object({ hasUndeliveredText: boundary.boolean }) }));
+        if (screen?.composer.hasUndeliveredText !== false) return;
+        // As runpane stages composer text: newlines stay text inside one bracketed paste, never Enter.
+        const text = stripTrailingNewlines(normalizePromptNewlines(request));
+        terminalPanelManager.writeToTerminal(panelId, terminalPanelManager.isBracketedPasteEnabled(panelId) ? bracketedPaste(text) : text.replace(/\n+/gu, ' '));
       })().catch(error => console.warn('[MachineHealth] Ask an agent: the late agent did not get the request:', error));
       return false;
     };

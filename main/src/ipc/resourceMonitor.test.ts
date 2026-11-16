@@ -8,6 +8,7 @@ import type { AppServices } from './types';
 import type { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
 import { registerResourceMonitorHandlers } from './resourceMonitor';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PaneRuntime } from '../core/runtime';
+import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { ConfigManager } from '../services/configManager';
 
 function partial<Contract>(value: Partial<Contract>): Contract {
@@ -56,9 +57,8 @@ describe('stopping or restarting a process from outside', () => {
 });
 
 describe('Ask an agent', () => {
-  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>, agent: { resume?: string; ready?: boolean[]; panelType?: string } = {}) {
+  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>, agent: { resume?: string; ready?: boolean[]; panelType?: string; draft?: boolean; prompt?: string } = {}) {
     const typed: Array<{ panelId: string; input: string }> = [];
-    const inputs: Array<{ panelId: string; input: string }> = [];
     const readiness = [...(agent.ready ?? [])];
     const created: Array<{ name: string }> = [];
     const view = (id: string, name: string) => ({ session: { id, name }, panel: { id: `panel-${id}`, type: agent.panelType ?? 'chat' }, internalSession: { worktreePath: '/tmp' } });
@@ -70,10 +70,10 @@ describe('Ask an agent', () => {
     const registry = new PaneCommandRegistry();
     registry.register('runpane:panels:resume', async () => ({ action: agent.resume ?? 'already-running' }));
     registry.register('runpane:panels:wait', async () => ({ ok: readiness.shift() ?? true }));
-    registry.register('runpane:panels:input', async request => { inputs.push(partial(request)); return { ok: true }; });
+    registry.register('runpane:panels:screen', async () => ({ composer: { hasUndeliveredText: agent.draft ?? false } }));
     registry.register('runpane:panels:submit', async request => { typed.push(partial(request)); return { ok: true }; });
     registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions }), registry);
-    return { ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: 'Free memory.' }]), typed, created, inputs };
+    return { ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: agent.prompt ?? 'Free memory.' }]), typed, created };
   }
 
   it('hands the request to the numbered Session that replaced an archived one, and starts no other', async () => {
@@ -83,7 +83,7 @@ describe('Ask an agent', () => {
     expect(created).toEqual([]);
   });
 
-  afterEach(() => { resetPaneRuntimeForTests(); });
+  afterEach(() => { resetPaneRuntimeForTests(); vi.restoreAllMocks(); });
 
   it('starts the next numbered Session when the name belongs to an archived one', async () => {
     // Creating reads the preferred shell to decide how the request reaches the new agent.
@@ -93,10 +93,22 @@ describe('Ask an agent', () => {
     expect(created).toEqual([{ name: 'Clean up devbox 2' }]);
   });
 
-  it('shows the Session when its agent is slow to start, and later leaves the request in the agent\'s input box for the person to send', async () => {
-    const { ask, typed, inputs } = asker([{ id: 'one', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, true], panelType: 'terminal' });
+  it('shows the Session when its agent is slow to start, and later pastes the request into its input box unsent', async () => {
+    const writes = vi.spyOn(terminalPanelManager, 'writeToTerminal').mockImplementation(() => undefined);
+    vi.spyOn(terminalPanelManager, 'isBracketedPasteEnabled').mockReturnValue(true);
+    const { ask, typed } = asker([{ id: 'one', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, true], panelType: 'terminal', prompt: 'Free memory.\n\nThe card listed:\n- node' });
     await expect(ask()).resolves.toEqual({ sessionId: 'one', panelId: 'panel-one', typed: false });
-    await vi.waitFor(() => expect(inputs).toMatchObject([{ panelId: 'panel-one', input: 'Free memory.' }]));
+    // One bracketed paste: the newlines stay text and nothing presses Enter.
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledWith('panel-one', '\x1b[200~Free memory.\n\nThe card listed:\n- node\x1b[201~'));
+    expect(writes).toHaveBeenCalledTimes(1);
     expect(typed).toEqual([]);
+  });
+
+  it('leaves a draft the person is typing alone when the late agent gets ready', async () => {
+    const writes = vi.spyOn(terminalPanelManager, 'writeToTerminal').mockImplementation(() => undefined);
+    const { ask } = asker([{ id: 'one', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, true], panelType: 'terminal', draft: true });
+    await expect(ask()).resolves.toMatchObject({ typed: false });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(writes).not.toHaveBeenCalled();
   });
 });
