@@ -64,7 +64,7 @@ export interface UpdatePreflight {
  * Point at the one-time update that brings the command instead.
  */
 export const UPDATE_HOST_UNSUPPORTED = 'ERR_UPDATE_HOST_UNSUPPORTED';
-function updateHostUnsupported(): RunpaneError {
+export function updateHostUnsupported(): RunpaneError {
   return new RunpaneError(
     UPDATE_HOST_UNSUPPORTED,
     'The running Pane is older than runpane update: it has no update command (runpane:update:host), so runpane cannot update it in place. Nothing was changed.',

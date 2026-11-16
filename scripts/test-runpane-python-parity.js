@@ -272,3 +272,32 @@ print(json.dumps(next(versions, 'all versions read')))
   assert.match(stdout, /"phase": "complete"/);
   assert.equal(JSON.parse(stdout.split('\n').slice(-1)[0]), 'all versions read');
 });
+
+test('Python update without the engine reports a Pane older than runpane update like the npm CLI', () => {
+  const output = JSON.parse(runPython(`
+import json, sys, tempfile
+from runpane import update
+from runpane.cli import parse_args
+results = []
+for channels in json.load(sys.stdin):
+    calls = []
+    def fake(channel, *args, **kwargs):
+        calls.append(channel)
+        if channel not in channels:
+            raise update.PaneDaemonClientError('No Pane daemon command registered for channel "%s".' % channel, code='ERR_UNKNOWN_CHANNEL', next='Update Pane with \`runpane update\`, then restart it.')
+        return {'version': '2.4.201'}
+    update.invoke_daemon = fake
+    try:
+        update.run_update(parse_args(['update', '--json', '--pane-dir', tempfile.mkdtemp()]))
+        results.append('updated')
+    except update.PaneDaemonClientError as error:
+        results.append({'code': error.code, 'message': str(error), 'next': error.next, 'calls': calls})
+print(json.dumps(results))
+`, [[], ['runpane:update:host']]));
+  const { updateHostUnsupported } = require(path.join(root, 'packages/runpane/dist/updatePreflight'));
+  const expected = updateHostUnsupported();
+  assert.deepEqual(output[0], { code: expected.code, message: expected.message, next: expected.next, calls: ['runpane:update:in-app', 'runpane:update:host'] });
+  assert.doesNotMatch(output[0].next, /Update Pane with `runpane update`/);
+  // A Pane with the host but not the handoff keeps its Settings advice.
+  assert.equal(output[1].code, 'ERR_UPDATE_IN_APP_UNAVAILABLE');
+});
