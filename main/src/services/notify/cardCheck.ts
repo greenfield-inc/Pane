@@ -109,11 +109,17 @@ export function assertCard(card: CardFields): string[] {
   return warnings;
 }
 
+/** A card's links and context once its links fit. */
+export interface FittedLinks {
+  links: NotifyLink[];
+  context?: string;
+}
+
 /**
  * The links a card shows (the first NOTIFY_LINKS_MAX) and its context, which names the rest on a
  * last line, so a link with no room is never dropped unseen.
  */
-export function fitLinks(links: NotifyLink[], context: string | undefined): { links: NotifyLink[]; context?: string } {
+export function fitLinks(links: NotifyLink[], context: string | undefined): FittedLinks {
   if (links.length <= NOTIFY_LINKS_MAX) return { links, context };
   const more = `More links: ${links.slice(NOTIFY_LINKS_MAX).map(link => link.label).join(', ')}`;
   return { links: links.slice(0, NOTIFY_LINKS_MAX), context: context?.trim() ? `${context.trimEnd()}\n\n${more}` : more };
