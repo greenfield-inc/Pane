@@ -19,14 +19,18 @@ interface ArchivedSessionToast {
   panes: OrchestrationSessionArchivedPanes;
 }
 
-type UnsafePanesChoice = 'keep' | 'archive';
+/**
+ * What to archive. `keep` archives the Session and its Panes without work in progress, keeping any
+ * that have some (the plain confirm, with none, sends `keep`); `archive` takes those Panes too.
+ */
+type ArchiveChoice = 'keep' | 'archive';
 
-/** Archiving a Session that has Panes with work in progress waits on the person's choice here. */
+/** Archiving a Session waits on the person's choice here. */
 export interface SessionArchiveConfirm {
   sessionName: string;
   /** Every Pane the archive would take along; `blocked` marks the ones with work in progress. */
   panes: OrchestrationSessionArchivePane[];
-  choose: (choice: UnsafePanesChoice | null) => void;
+  choose: (choice: ArchiveChoice | null) => void;
 }
 
 export const useSessionArchiveConfirmStore = createStore<{ confirm: SessionArchiveConfirm | null }>(() => ({ confirm: null }));
@@ -36,7 +40,7 @@ useOrchestrationSessionStore.subscribe((state, previous) => {
   if (state.hostRevision !== previous.hostRevision) useSessionArchiveConfirmStore.getState().confirm?.choose(null);
 });
 
-function askUnsafePanes(sessionName: string, panes: OrchestrationSessionArchivePane[]): Promise<UnsafePanesChoice | null> {
+function askArchive(sessionName: string, panes: OrchestrationSessionArchivePane[]): Promise<ArchiveChoice | null> {
   // A second archive replaces a dialog still open, which then counts as cancelled.
   useSessionArchiveConfirmStore.getState().confirm?.choose(null);
   return new Promise(resolve => {
@@ -59,9 +63,9 @@ export const setArchivedToast = (toast: ArchivedSessionToast | null) => useArchi
 export const clearArchivedToast = () => setArchivedToast(null);
 
 /**
- * Archives a Session with its Panes and offers Undo. When a Pane has work in progress (an agent
- * mid-turn or waiting, unsent input, unsaved work), the person first chooses to archive it too or
- * keep it open, or cancels. The host archives only the Panes the person approved, and keeps one
+ * Archives a Session with its Panes and offers Undo. The person confirms first; when a Pane has work
+ * in progress (an agent mid-turn or waiting, unsent input, unsaved work), they choose to archive it
+ * too or keep it open, or cancel. The host archives only the Panes the person approved, and keeps one
  * that was safe in the preview but no longer is. Archiving the open Session lands on Home first,
  * never on a Session the server or the auto-selection picks, so a person who opens something else
  * while the request is in flight keeps what they opened. Throws when the host refuses.
@@ -73,7 +77,7 @@ export async function archiveOrchestrationSession(sessionId: string, sessionName
   if (!preview.success || !preview.data) throw new Error(preview.error ?? 'Could not check the Session\'s Panes');
   if (hostChanged()) return;
   const { panes } = preview.data;
-  const choice = panes.some(pane => pane.blocked) ? await askUnsafePanes(sessionName, panes) : 'keep';
+  const choice = await askArchive(sessionName, panes);
   if (!choice || hostChanged()) return;
   const wasOpen = useNavigationStore.getState().activeView === 'pane-chat' && useOrchestrationSessionStore.getState().selectedSessionId === sessionId;
   if (wasOpen) {

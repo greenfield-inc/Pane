@@ -4,6 +4,7 @@ import { onOpenNewDialogRequest } from '../utils/openNewDialog';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
+import { confirmPaneArchive } from './archiveConfirm';
 import { ArchiveProgress } from './ArchiveProgress';
 import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Inbox, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
@@ -471,23 +472,19 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
     navigateToSessions();
   }, [navigateToSessions, setActiveSession, setSidebarNavigationScope]);
 
+  // The rail icon a menu opened from, so focus returns to it when the archive confirm closes.
+  const compactMenuOpener = useRef<HTMLElement | null>(null);
   const openCompactSessionMenu = useCallback((event: React.MouseEvent, session: Session) => {
     event.preventDefault();
     event.stopPropagation();
+    compactMenuOpener.current = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     setCompactSessionMenu({ session, x: event.clientX, y: event.clientY });
   }, []);
 
-  const archiveCompactSession = useCallback(async () => {
+  const archiveCompactSession = useCallback(() => {
     if (!compactSessionMenu) return;
-    const { id } = compactSessionMenu.session;
     setCompactSessionMenu(null);
-    try {
-      const response = await API.sessions.delete(id);
-      if (!response.success) showActionError('Could not archive the Pane', response.error);
-    } catch (error) {
-      console.error('Failed to archive session:', error);
-      showActionError('Could not archive the Pane', error);
-    }
+    confirmPaneArchive(compactSessionMenu.session, { returnFocus: compactMenuOpener.current });
   }, [compactSessionMenu]);
 
   const toggleCompactSessionPinned = useCallback(async () => {
@@ -954,7 +951,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           menu={compactSessionMenu}
           onClose={() => setCompactSessionMenu(null)}
           onTogglePinned={() => void toggleCompactSessionPinned()}
-          onArchive={() => void archiveCompactSession()}
+          onArchive={archiveCompactSession}
         />
       </>
     );
