@@ -33,6 +33,19 @@ describe('Session workspace instructions', () => {
     await expect(fs.readFile(path.join(first, 'notes.md'), 'utf8')).resolves.toBe('Keep this artifact.');
   });
 
+  it('asks the agent to name only a Session that still has its default name', async () => {
+    const base: OrchestrationSessionRecord = {
+      id: 'unnamed', name: 'New chat', agent: 'claude', internalSessionId: 'owner',
+      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor', opencode: 'opencode' },
+      goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+      associations: [], activity: [], revision: 1, createdAt: '2026-11-16', updatedAt: '2026-11-16',
+    };
+    const agentsFor = async (record: OrchestrationSessionRecord) =>
+      fs.readFile(path.join(prepareSessionWorkspace(record.id, undefined, record), 'AGENTS.md'), 'utf8');
+    expect(await agentsFor({ ...base, nameIsDefault: true })).toContain('runpane sessions update --session unnamed');
+    expect(await agentsFor({ ...base, id: 'named', name: 'Billing exports' })).not.toContain('runpane sessions update');
+  });
+
   it.each(['runtime-context.md', '.pane-runtime/runpane', '.pane-runtime/notes.txt', 'notes.txt'])('retains failed WSL scaffolds with user content in %s', async fileName => {
     const record: OrchestrationSessionRecord = {
       id: 'failed-wsl', name: 'WSL', agent: 'codex', internalSessionId: 'owner', runtime: 'wsl', wslDistribution: 'Ubuntu',

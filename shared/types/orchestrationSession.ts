@@ -105,7 +105,7 @@ export interface OrchestrationSessionRecord {
   promotedFrom?: { paneId: string; panelId: string };
   id: string;
   name: string;
-  /** The name is the default one; the first message the person sends renames the Session once. */
+  /** The name is the default one; the Session agent renames it once (see sessionWorkspace.ts). */
   nameIsDefault?: boolean;
   /** Durable UI archive marker. Older records omit this field and read as active. */
   archived?: boolean;
@@ -251,7 +251,7 @@ export interface OrchestrationSessionCreateInput {
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
   name: string;
-  /** The person left the name blank; the first message they send renames the Session once. */
+  /** The person left the name blank; the Session agent names the Session once it understands the work. */
   nameFromFirstMessage?: boolean;
   isPinned?: boolean;
   agent?: PaneChatAgent;

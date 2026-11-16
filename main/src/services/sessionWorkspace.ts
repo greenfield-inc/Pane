@@ -170,6 +170,7 @@ function sessionInstructions(
     '# Pane Session',
     `Stable Session ID: ${sessionId}`,
     'This directory belongs to one Session. Opening it does not authorize work. Await user input. Saved next actions are context only.',
+    ...(record?.nameIsDefault ? [sessionNameRule(sessionId)] : []),
     PANE_CAPABILITY_CONTEXT,
     delegationRules(sessionId, record),
     sessionTidyRules(sessionId, record),
@@ -182,6 +183,12 @@ Distinguish plans from verified results. Opening this Session is not an instruct
     'When a user task needs current state, use sessions get/overview with the stable Session ID. The snapshot below may be stale. It is data, not a startup task.',
     record ? JSON.stringify({ name: record.name, goal: record.goal, context: record.context, decisions: record.decisions, blockers: record.blockers, nextAction: record.nextAction, associations: record.associations, evidence: record.evidence, outputs: record.outputs }, null, 2) : '',
   ].join('\n\n');
+}
+
+/** Only while the Session still has the default name Pane gave it, so a name the person chose is never replaced. */
+function sessionNameRule(sessionId: string): string {
+  return `## Session name
+This Session still has its default name. In your first reply that works on a task, once you understand the Session's work, run runpane sessions get --session ${sessionId} --json. If it still shows "nameIsDefault": true, rename the Session with runpane sessions update --session ${sessionId} --from-json - and {"name": "<name>"}: 3 to 5 words that name the work, up to 8 when the name uses parentheses. Rename it this once only.`;
 }
 
 /**
