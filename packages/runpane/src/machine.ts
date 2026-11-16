@@ -127,7 +127,7 @@ export async function runMachineCleanup(parsed: ParsedArgs): Promise<number> {
     }
     console.log(`${count(items.length, `${kind} item`)}, ${formatBytes(totalBytes)}:`);
     for (const item of items) console.log(`  ${formatBytes(item.sizeBytes)}  ${item.path}: ${item.reason}`);
-    console.log('Dry run: nothing was deleted. Rerun with --yes to delete these.');
+    console.log('Dry run: nothing was deleted. With --yes, Pane checks each item again and deletes those not in use or protected.');
     return 0;
   }
 

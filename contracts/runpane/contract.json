@@ -4353,7 +4353,7 @@
         "The MCP server ships in the npm package and inside the Pane app. The Python package does not include it.",
         "",
         "Options:",
-        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, workspace, git, docs, links, admin",
+        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, workspace, machine, git, docs, links, admin",
         "  --read-only                    Serve only read-only tools"
       ],
       "relay": [
@@ -5767,7 +5767,7 @@
         "",
         "Shows this machine's health and frees the disk space Pane made.",
         "Tier 1: Pane made it and nothing uses it now; Pane removes it by itself.",
-        "Tier 2: Pane made it; Pane asks before it deletes.",
+        "Tier 2: may still be wanted (archived Pane folders, paused Panes' scratch, agent temp folders); Pane asks before it deletes.",
         "Tier 3: not Pane's: another tool's data, a database copy Pane did not write, or a worktree Pane did not create.",
         "Pane never deletes tier 3; machine health says how to free each one.",
         "",
@@ -7805,7 +7805,7 @@
         "",
         "Shows this machine's health and frees the disk space Pane made.",
         "Tier 1: Pane made it and nothing uses it now; Pane removes it by itself.",
-        "Tier 2: Pane made it; Pane asks before it deletes.",
+        "Tier 2: may still be wanted (archived Pane folders, paused Panes' scratch, agent temp folders); Pane asks before it deletes.",
         "Tier 3: not Pane's: another tool's data, a database copy Pane did not write, or a worktree Pane did not create.",
         "Pane never deletes tier 3; machine health says how to free each one.",
         "",
@@ -20588,7 +20588,7 @@
             "name": "--toolsets",
             "value": "<name,...>",
             "required": false,
-            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, git, docs, links, admin."
+            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, machine, git, docs, links, admin."
           },
           {
             "name": "--read-only",
@@ -26818,7 +26818,7 @@
       "machine health": {
         "name": "machine health",
         "summary": "Show this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free, by tier.",
-        "details": "Reads this machine's latest health snapshot and the last storage scan; it deletes nothing. disk lists each watched volume with free and total bytes; memory gives the level and the OS signal it came from; panes lists each Pane's processes and their memory; leaks lists processes whose memory keeps growing. inventory.items lists what can be freed, each with kind, tier, size and reason. Tier 1: Pane made it and nothing uses it now (replaced update snapshots, old migration backups); Pane also removes these by itself. Tier 2: Pane made it and asks first (archived Pane folders, agent temp folders, scratch of paused Panes). Tier 3: not Pane's (other tools' data, database copies Pane did not write, worktrees Pane did not create); Pane never deletes these, and each item's howToFree says how to free it.",
+        "details": "Reads this machine's latest health snapshot and the last storage scan; it deletes nothing. disk lists each watched volume with free and total bytes; memory gives the level and the OS signal it came from; panes lists each Pane's processes and their memory; leaks lists processes whose memory keeps growing. inventory.items lists what can be freed, each with kind, tier, size and reason. Tier 1: Pane made it and nothing uses it now (replaced update snapshots, old migration backups); Pane also removes these by itself. Tier 2: may still be wanted, so Pane asks first (archived Pane folders, scratch of paused Panes, agent temp folders). Tier 3: not Pane's (other tools' data, database copies Pane did not write, worktrees Pane did not create); Pane never deletes these, and each item's howToFree says how to free it.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -26848,7 +26848,7 @@
       "machine cleanup": {
         "name": "machine cleanup",
         "summary": "Free disk space that Pane made: list one kind of tier 1 or 2 item with its size (a dry run), or delete them with --yes.",
-        "details": "Without --yes it is a dry run: it lists the tier 1 and 2 items of --kind from the last scan and their total size, and deletes nothing. With --yes, Pane re-checks each item (it may be gone, in use, or protected because its Pane is pinned, focused, busy or has uncommitted changes), deletes the rest, and returns what it removed, what it skipped and why, and the bytes freed. A tier 3 kind is refused with ERR_MACHINE_CLEANUP_NOT_PANES, and `next` says how to free it with the tool that owns it. Tier 1: Pane made it and nothing uses it now (replaced update snapshots, old migration backups); Pane also removes these by itself. Tier 2: Pane made it and asks first (archived Pane folders, agent temp folders, scratch of paused Panes). Tier 3: not Pane's (other tools' data, database copies Pane did not write, worktrees Pane did not create); Pane never deletes these, and each item's howToFree says how to free it.",
+        "details": "Without --yes it is a dry run: it lists the tier 1 and 2 items of --kind from the last scan and their total size, and deletes nothing. With --yes, Pane re-checks each item (it may be gone, in use, or protected because its Pane is pinned, focused, busy or has uncommitted changes), deletes the rest, and returns what it removed, what it skipped and why, and the bytes freed. A tier 3 kind is refused with ERR_MACHINE_CLEANUP_NOT_PANES, and `next` says how to free it with the tool that owns it. Tier 1: Pane made it and nothing uses it now (replaced update snapshots, old migration backups); Pane also removes these by itself. Tier 2: may still be wanted, so Pane asks first (archived Pane folders, scratch of paused Panes, agent temp folders). Tier 3: not Pane's (other tools' data, database copies Pane did not write, worktrees Pane did not create); Pane never deletes these, and each item's howToFree says how to free it.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -26890,14 +26890,14 @@
         "examples": [
           "runpane machine cleanup --kind update-snapshot --json",
           "runpane machine cleanup --kind update-snapshot --yes --json",
-          "runpane workspace <machine> machine cleanup --kind agent-temp --yes --json"
+          "runpane workspace <machine> machine cleanup --kind update-snapshot --yes --json"
         ],
         "jsonSchemas": [
           "machineCleanupResult"
         ],
         "notes": [
           "Clean machines only through this command, never with rm or another raw delete.",
-          "Run it without --yes first, and show the person the list and total size before you delete tier 2 items."
+          "Run it without --yes first. Add --yes yourself only for a tier 1 kind; for a tier 2 kind, show the person the list and total size and wait for their OK."
         ]
       }
     },

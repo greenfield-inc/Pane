@@ -20,6 +20,10 @@ CLEANUP_CHANNEL = "resource-monitor:machine-cleanup"
 RECLAIM_KINDS: List[str] = list(RUNPANE_CONTRACT["enums"]["reclaimKinds"])
 FOREIGN_KINDS = set(RUNPANE_CONTRACT["enums"]["foreignReclaimKinds"])
 TOP_PANES = 5
+# The fields the --json output carries, as the npm CLI decodes them, so both print the same JSON.
+ITEM_FIELDS = ("id", "kind", "tier", "path", "sizeBytes", "modifiedAt", "sessionId", "reason", "projectPath", "howToFree")
+RUN_FIELDS = ("at", "source", "removed", "skipped", "freedBytes")
+ENTRY_FIELDS = ("id", "kind", "path", "sizeBytes", "reason")
 TIER_TITLES = {
     1: "Tier 1, Pane removes these by itself",
     2: "Tier 2, Pane asks first",
@@ -48,7 +52,7 @@ def run_machine_cleanup(parsed: Any) -> int:
         items = [item for item in of_kind if item.get("tier") != 3]
         total_bytes = sum(item["sizeBytes"] for item in items)
         if parsed.json:
-            print_json({"ok": True, "dryRun": True, "kind": kind, "items": items, "totalBytes": total_bytes})
+            print_json({"ok": True, "dryRun": True, "kind": kind, "items": [pick(item, ITEM_FIELDS) for item in items], "totalBytes": total_bytes})
             return 0
         if not items:
             print(f"No {kind} items to delete in the last scan ({iso_time(inventory['scannedAt'])}).")
@@ -56,12 +60,15 @@ def run_machine_cleanup(parsed: Any) -> int:
         print(f"{count(len(items), f'{kind} item')}, {format_bytes(total_bytes)}:")
         for item in items:
             print(f"  {format_bytes(item['sizeBytes'])}  {item['path']}: {item['reason']}")
-        print("Dry run: nothing was deleted. Rerun with --yes to delete these.")
+        print("Dry run: nothing was deleted. With --yes, Pane checks each item again and deletes those not in use or protected.")
         return 0
 
     run = invoke_daemon(CLEANUP_CHANNEL, [{"kinds": [kind], "source": "cli"}], pane_dir=parsed.pane_dir)
     if parsed.json:
-        print_json({"ok": True, "dryRun": False, "kind": kind, "run": run})
+        result = pick(run, RUN_FIELDS)
+        result["removed"] = [pick(entry, ENTRY_FIELDS) for entry in run.get("removed") or []]
+        result["skipped"] = [pick(entry, ENTRY_FIELDS) for entry in run.get("skipped") or []]
+        print_json({"ok": True, "dryRun": False, "kind": kind, "run": result})
         return 0
     removed = run.get("removed") or []
     skipped = run.get("skipped") or []
@@ -169,6 +176,10 @@ def count(n: int, one: str, many: str = "") -> str:
 
 def iso_time(ms: float) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def pick(value: Dict[str, Any], fields: tuple) -> Dict[str, Any]:
+    return {field: value[field] for field in fields if field in value}
 
 
 def print_json(value: Any) -> None:

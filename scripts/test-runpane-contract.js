@@ -5148,6 +5148,7 @@ async function checkMachineParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
   const { runMachineHealth, runMachineCleanup } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'machine.js'));
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
   const GB = 1024 ** 3;
   const replaced = { kind: 'update-snapshot', tier: 1, modifiedAt: 1, sessionId: null, reason: 'A replaced update snapshot.' };
   const foreignPath = '/pd/sessions.db.before-repair';
@@ -5185,10 +5186,11 @@ async function checkMachineParity() {
     skipped: [{ id: 'update-snapshot:/pd/updates/older', kind: 'update-snapshot', path: '/pd/updates/older', sizeBytes: 524_288, reason: 'Recently used.' }],
     freedBytes: 1.5 * GB,
   };
+  // A newer Pane may send fields this CLI does not know; both CLIs leave them out of cleanup's JSON.
   const replies = {
     'resource-monitor:machine-health': snapshot,
-    'resource-monitor:machine-inventory': inventory,
-    'resource-monitor:machine-cleanup': run,
+    'resource-monitor:machine-inventory': { ...inventory, items: inventory.items.map(item => ({ ...item, addedLater: true })) },
+    'resource-monitor:machine-cleanup': { ...run, addedLater: true, removed: run.removed.map(entry => ({ ...entry, addedLater: true })) },
   };
   const scenarios = [
     ['machine', 'health'],
@@ -5208,9 +5210,10 @@ async function checkMachineParity() {
   try {
     for (const args of scenarios) {
       const result = { calls: [], stdout: [], error: null };
-      daemonClient.invokeDaemon = async (channel, callArgs) => {
+      // Decodes with the caller's schema, as the real client does.
+      daemonClient.invokeDaemon = async (channel, callArgs, schema) => {
         result.calls.push({ channel, args: callArgs });
-        return replies[channel];
+        return decodeBoundary(replies[channel], schema);
       };
       console.log = (line) => result.stdout.push(...String(line).split('\n'));
       const parsed = parseRunpaneArgs(args);
@@ -5276,14 +5279,14 @@ print(json.dumps(results))
     `    Free it: ${howToFree}`,
   ]) assert.ok(health.stdout.includes(line), `machine health prints: ${line}\n${health.stdout.join('\n')}`);
   assert.ok(health.stdout.indexOf('  big: 2.0 GB, 12.3% CPU, 1 process') < health.stdout.indexOf('  small: 100.0 MB, 0.0% CPU, 0 processes'));
-  assert.deepStrictEqual(healthJson.stdout, { ok: true, snapshot, inventory });
+  assert.deepStrictEqual(healthJson.stdout, { ok: true, snapshot, inventory: replies['resource-monitor:machine-inventory'] });
 
   assert.deepStrictEqual(dryRun.calls, [{ channel: 'resource-monitor:machine-inventory', args: [{ refresh: false }] }]);
   assert.deepStrictEqual(dryRun.stdout, [
     '2 update-snapshot items, 1.5 GB:',
     '  1.5 GB  /pd/updates/old: A replaced update snapshot.',
     '  512.0 KB  /pd/updates/older: A replaced update snapshot.',
-    'Dry run: nothing was deleted. Rerun with --yes to delete these.',
+    'Dry run: nothing was deleted. With --yes, Pane checks each item again and deletes those not in use or protected.',
   ]);
   assert.deepStrictEqual(dryRunJson.stdout, { ok: true, dryRun: true, kind: 'update-snapshot', items: inventory.items.slice(0, 2), totalBytes: 1.5 * GB + 524_288 });
 
