@@ -389,9 +389,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     }, (error: Error) => console.error('[BrowserPanel] Failed to copy URL:', error));
   };
 
-  // Main maps a host port to where this computer reaches it, as for terminal links.
+  // The page the tab shows now, in host form: main maps a host port to where this computer reaches it.
+  const externalUrl = shownUrl || url;
+  const canOpenExternal = Boolean(externalUrl) && !hasFileProtocol(externalUrl);
   const handleOpenExternal = () => {
-    void window.electronAPI.openExternal(url).then(result => {
+    void window.electronAPI.openExternal(externalUrl).then(result => {
       if (!result.success) setUrlError(result.error || 'Pane could not open this page in your browser');
     });
   };
@@ -665,10 +667,10 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
         <button
           type="button"
           onClick={handleOpenExternal}
-          disabled={!url || isFileUrl}
+          disabled={!canOpenExternal}
           className={cn(
             'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
-            (!url || isFileUrl) && 'opacity-30 cursor-not-allowed'
+            !canOpenExternal && 'opacity-30 cursor-not-allowed'
           )}
           title="Open in your browser"
         >
