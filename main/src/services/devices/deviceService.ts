@@ -40,6 +40,9 @@ interface DeviceState { made: Record<string, MadeDevice> }
 /** The hub's device list entries Pane reads. */
 const simctlDevicesSchema = boundary.object({ devices: boundary.record(boundary.array(boundary.object({ udid: boundary.string, name: boundary.string, state: boundary.string, isAvailable: boundary.optional(boundary.boolean) }))) });
 
+/** The hub's answer to boot, shutdown and remove. */
+const hubActionSchema = boundary.object({ ok: boundary.boolean, errors: boundary.optional(boundary.array(boundary.object({ message: boundary.optional(boundary.string) }))) });
+
 const hubDevicesSchema = boundary.object({
   simulators: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, version: boundary.optional(boundary.string), booted: boundary.boolean, physical: boundary.optional(boundary.boolean) })),
   emulators: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, version: boundary.optional(boundary.string), booted: boundary.boolean, serial: boundary.optional(boundary.string) })),
@@ -688,12 +691,30 @@ export class DeviceService {
   private async remove(device: HubDevice): Promise<void> {
     const hub = await this.ensureHub();
     if (device.booted) await this.shutdown(device);
-    const removed = decodeBoundary(await (await hub.request('/api/devices/remove', { platform: device.platform, id: device.id, name: device.name })).json(), boundary.object({ ok: boundary.boolean, error: boundary.optional(boundary.string) }));
-    // Keep the record when the delete fails, so the next sweep tries again.
-    if (!removed.ok) throw new PaneError('ERR_DEVICE_REMOVE_FAILED', `Pane could not delete ${device.name}: ${removed.error ?? 'the hub gave no reason'}.`, 'Try `runpane devices free --all` again in a minute.');
+    if (device.platform === 'android') {
+      // The hub's remove shuts the emulator down by serial first, which fails once it is off.
+      await this.deleteAvd(device.name);
+    } else {
+      const removed = decodeBoundary(await (await hub.request('/api/devices/remove', { platform: device.platform, id: device.id, name: device.name })).json(), hubActionSchema);
+      // Keep the record when the delete fails, so the next sweep tries again.
+      if (!removed.ok) throw new PaneError('ERR_DEVICE_REMOVE_FAILED', `Pane could not delete ${device.name}: ${removed.errors?.[0]?.message ?? 'the hub gave no reason'}.`, 'Try `runpane devices free --all` again in a minute.');
+    }
     const state = this.readState();
     delete state.made[device.id];
     this.writeState(state);
+  }
+
+  /** Deletes one of Pane's AVDs with avdmanager (a .bat on Windows, run through cmd). */
+  private async deleteAvd(name: string): Promise<void> {
+    const capabilities = await this.probe();
+    if (!capabilities.android.ready || !/^Pane_Android(_\d+)?$/.test(name)) throw new PaneError('ERR_DEVICE_REMOVE_FAILED', `Pane could not delete ${name}: it deletes only its own emulators, with the Android SDK's avdmanager.`, 'Delete it in Android Studio\'s Device Manager.');
+    const env = capabilities.android.javaHome ? { ...process.env, JAVA_HOME: capabilities.android.javaHome } : process.env;
+    try {
+      if (process.platform === 'win32') await execFileAsync('cmd.exe', ['/d', '/s', '/c', `"${capabilities.android.avdmanager}" delete avd -n ${name}`], { env, timeout: 120_000, windowsVerbatimArguments: true });
+      else await execFileAsync(capabilities.android.avdmanager, ['delete', 'avd', '-n', name], { env, timeout: 120_000 });
+    } catch (cause) {
+      throw new PaneError('ERR_DEVICE_REMOVE_FAILED', `Pane could not delete ${name}: ${reasonOf(cause)}`, 'Try `runpane devices free --all` again in a minute.');
+    }
   }
 
   private scheduleSweep(): void {
