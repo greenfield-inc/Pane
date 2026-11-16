@@ -98,6 +98,11 @@ export class DeviceLifecycle {
     return [...this.leases.values()].filter(lease => lease.paneId === paneId).map(lease => lease.id);
   }
 
+  /** Every Pane holding a device now. */
+  holders(): string[] {
+    return [...new Set([...this.leases.values()].map(lease => lease.paneId))];
+  }
+
   /** A device call from `paneId`: its leases stay alive. */
   touch(paneId: string): void {
     const now = this.options.now();
@@ -125,9 +130,8 @@ export class DeviceLifecycle {
   }
 
   /** The person pressed Take over: the lease moves to `paneId`. Returns the Pane that lost it. */
-  takeOver(paneId: string, id: string): string | undefined {
+  takeOver(paneId: string, id: string, platform: DevicePlatform): string | undefined {
     const previous = this.leases.get(id);
-    const platform = previous?.platform ?? 'ios';
     this.lease(paneId, id, platform, { bootedByPane: this.bootedByPane.has(id) });
     return previous?.paneId;
   }
@@ -137,11 +141,13 @@ export class DeviceLifecycle {
     const now = this.options.now();
     const ended: EndedLease[] = [];
     const shutdown: string[] = [];
+    const pane = (id: string) => devices.find(device => device.id === id)?.paneMade === true || this.bootedByPane.has(id);
     for (const lease of [...this.leases.values()]) {
       if (lease.visibleIn.size === 0 && now - lease.lastCallAt >= DEVICE_IDLE_MS) {
         this.leases.delete(lease.id);
         ended.push({ paneId: lease.paneId, id: lease.id });
-        shutdown.push(lease.id);
+        // A device the person booted keeps running; Pane shuts down only what it made or booted.
+        if (pane(lease.id)) shutdown.push(lease.id);
       }
     }
     for (const device of devices) {

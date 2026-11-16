@@ -52,7 +52,7 @@ describe('DeviceLifecycle', () => {
   it('moves the lease on take over and reports who lost it', () => {
     const { life } = setup();
     life.lease('pane-a', 'D1');
-    expect(life.takeOver('pane-b', 'D1')).toBe('pane-a');
+    expect(life.takeOver('pane-b', 'D1', 'ios')).toBe('pane-a');
     expect(life.holderOf('D1')).toBe('pane-b');
     expect(life.leaseOf('pane-a', 'ios')).toBeUndefined();
   });
@@ -65,6 +65,13 @@ describe('DeviceLifecycle', () => {
     advance(2 * MINUTE);
     expect(life.sweep([iphone('D1', { booted: true })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'D1' }], shutdown: ['D1'] });
     expect(life.holderOf('D1')).toBeUndefined();
+  });
+
+  it('ends an idle lease on a simulator the person booted, but leaves it running', () => {
+    const { life, advance } = setup();
+    life.lease('pane-a', 'MINE');
+    advance(11 * MINUTE);
+    expect(life.sweep([iphone('MINE', { paneMade: false, booted: true })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'MINE' }], shutdown: [] });
   });
 
   it('keeps a lease whose device tab is on screen, however long since the last call', () => {

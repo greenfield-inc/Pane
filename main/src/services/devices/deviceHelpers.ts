@@ -15,6 +15,8 @@ const execFileAsync = promisify(execFile);
  * (T3 Code ships this pair); a new pin is a new folder, so an update never mixes versions.
  */
 const DEVICE_HELPER_PINS = { agentDevice: '0.21.36', hub: '0.22.1' } as const;
+/** Every dependency resolves as it was just after the newer pin's release, so first use installs the tree Pane was tested with. */
+const RESOLVED_BEFORE = '2026-11-11T00:00:00Z';
 
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
 const HUB_START_TIMEOUT_MS = 60_000;
@@ -84,7 +86,7 @@ export class DeviceHelpers {
     const folder = this.folder;
     rmSync(folder, { recursive: true, force: true });
     mkdirSync(folder, { recursive: true });
-    const install = hostCommand(npm, ['install', '--prefix', folder, '--no-audit', '--no-fund',
+    const install = hostCommand(npm, ['install', '--prefix', folder, '--no-audit', '--no-fund', `--before=${RESOLVED_BEFORE}`,
       `agent-device@${DEVICE_HELPER_PINS.agentDevice}`, `expo-device-hub@${DEVICE_HELPER_PINS.hub}`], this.options.platform);
     try {
       await execFileAsync(install.executable, install.args, { timeout: INSTALL_TIMEOUT_MS, windowsVerbatimArguments: install.windowsVerbatimArguments, maxBuffer: 16 * 1024 * 1024 });
@@ -188,13 +190,28 @@ export function startHub(script: string, options: { node: NodeRunner; env: NodeJ
 }
 
 /** The flags that would point agent-device at another device, session or daemon. */
-const RETARGET_FLAGS = ['--session', '--device', '--udid', '--serial', '--platform', '--target', '--state-dir', '--daemon-base-url', '--daemon-auth-token', '--daemon-transport', '--daemon-server-mode', '--tenant', '--run-id', '--lease-id', '--config', '--remote-config'];
+const RETARGET_FLAGS = ['--session', '--device', '--udid', '--serial', '--platform', '--target', '--state-dir', '--daemon-base-url', '--daemon-auth-token', '--daemon-transport', '--daemon-server-mode', '--tenant', '--run-id', '--lease-id', '--config', '--remote-config', '--ios-simulator-device-set', '--android-device-allowlist', '--session-isolation'];
+/** Flag families that reach a remote daemon, a provider or a proxy instead of the leased device. */
+const RETARGET_FLAG_PATTERN = /^--(?:.*-)?(?:daemon|remote|provider|proxy|tenant|lease|session)(?:-|$)/;
+/**
+ * Commands that act on the daemon and sessions every Pane shares, or on connections, rather than
+ * the leased device. `batch` steps can carry their own target, so steps run as separate calls.
+ */
+const SHARED_COMMANDS = new Set(['daemon', 'session', 'connect', 'connection', 'disconnect', 'proxy', 'mcp', 'auth', 'plugins', 'artifacts', 'device', 'takeover', 'batch']);
 
 /** Refuses agent-device arguments that would retarget it away from the leased device. */
 export function refuseRetarget(args: readonly string[]): void {
+  const command = args.find(arg => !arg.startsWith('-'));
+  if (command && SHARED_COMMANDS.has(command)) {
+    throw new PaneError(
+      'ERR_DEVICE_ACT_COMMAND',
+      `device_act refused \`${command}\`: it acts on agent-device's shared daemon, sessions or connections, which every Pane uses, not on this Pane's device. Nothing ran.`,
+      command === 'batch' ? 'Run each step as its own device_act call.' : 'Use device_act for commands on this Pane\'s device, such as open, snapshot -i and press.',
+    );
+  }
   for (const arg of args) {
     const flag = arg.split('=')[0];
-    if (RETARGET_FLAGS.includes(flag)) {
+    if (RETARGET_FLAGS.includes(flag) || RETARGET_FLAG_PATTERN.test(flag)) {
       throw new PaneError(
         'ERR_DEVICE_ACT_FLAG',
         `device_act refused ${flag}: Pane points agent-device at the device this Pane holds, so flags that pick another device, session or daemon are not allowed. Nothing ran.`,

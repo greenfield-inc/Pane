@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { lstat, readdir } from 'fs/promises';
 import path from 'path';
 import { promisify } from 'util';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
@@ -105,13 +106,17 @@ export class DeviceService {
   private selectedEmulator?: string;
   /** The last frame read of each device, kept for its off and closed states. */
   private readonly lastFrames = new Map<string, Buffer>();
+  /** The platform each Pane opened last: calls without a platform act on it. */
+  private readonly lastOpened = new Map<string, DevicePlatform>();
+  /** The pick-and-lease in progress for each platform. */
+  private readonly picking = new Map<DevicePlatform, Promise<void>>();
 
   constructor(private readonly options: DeviceServiceOptions) {
     this.now = options.now ?? Date.now;
     this.node = options.node ?? paneNode();
     this.helpers = new DeviceHelpers({ root: options.root, findExecutable: options.findExecutable, machineName: options.machineName });
     this.lifecycle = new DeviceLifecycle({ now: this.now, cap: () => Math.min(4, Math.max(1, options.maxBooted())) });
-    this.jobs = new DeviceJobs({ shell: () => process.platform === 'win32' ? { executable: 'cmd.exe', args: (command) => ['/d', '/s', '/c', command] } : { executable: process.env.SHELL || '/bin/sh', args: (command) => ['-lc', command] } });
+    this.jobs = new DeviceJobs({ shell: () => process.platform === 'win32' ? { executable: 'cmd.exe', args: (command) => ['/d', '/s', '/c', `"${command}"`], verbatim: true } : { executable: process.env.SHELL || '/bin/sh', args: (command) => ['-lc', command] } });
     for (const [id, made] of Object.entries(this.readState().made)) for (const paneId of made.users) this.lifecycle.restoreUser(id, paneId);
   }
 
@@ -136,19 +141,28 @@ export class DeviceService {
     const capabilities = await this.probe();
     this.requireReady(capabilities, request.platform);
     const deadline = this.now() + BUSY_WAIT_MS;
-    for (;;) {
-      const devices = await this.devices({ inventory: true, onInstall: () => onPhase?.('installing') });
-      const chosen = request.device ? this.named(devices, request) : await this.choose(caller, request.platform, devices, deadline);
-      if (!chosen) continue;
-      const holder = this.lifecycle.holderOf(chosen.id);
-      if (holder && holder !== caller.paneId) {
-        if (this.now() < deadline) { await sleep(2_000); continue; }
-        throw this.busy(chosen, holder);
-      }
-      if (holder !== caller.paneId) {
+    let leased: { chosen: HubDevice; fresh: boolean } | undefined;
+    while (!leased) {
+      // One Pane at a time picks and leases per platform, so two opens never both create or both take the last slot.
+      leased = await this.oneAtATime(request.platform, async () => {
+        const devices = await this.devices({ inventory: true, onInstall: () => onPhase?.('installing') });
+        const chosen = request.device ? this.named(devices, request) : await this.choose(caller, request.platform, devices, deadline);
+        if (!chosen) return undefined;
+        const holder = this.lifecycle.holderOf(chosen.id);
+        if (holder && holder !== caller.paneId) {
+          if (this.now() < deadline) return undefined;
+          throw this.busy(chosen, holder);
+        }
+        if (holder === caller.paneId) return { chosen, fresh: false };
         this.lifecycle.lease(caller.paneId, chosen.id, chosen.platform, { bootedByPane: !chosen.booted && !chosen.paneMade });
         this.options.onChange?.({ kind: 'held', id: chosen.id, paneId: caller.paneId });
-      }
+        return { chosen, fresh: true };
+      });
+      if (!leased) await sleep(2_000);
+    }
+    const { chosen, fresh } = leased;
+    this.scheduleSweep();
+    try {
       const previousPane = this.markUsed(chosen.id, caller.paneId);
       const booting = !chosen.booted || this.needsSlim(chosen, capabilities);
       if (booting) {
@@ -160,18 +174,32 @@ export class DeviceService {
         await this.wipeApps(chosen, capabilities).catch((cause) => this.options.log?.(`[devices] clearing apps on ${chosen.id} failed: ${reasonOf(cause)}`));
       }
       // agent-device's session for this Pane: started on a new lease or boot, kept on a repeat open.
-      if (holder !== caller.paneId || booting) await this.openSession(caller.paneId, chosen);
-      this.scheduleSweep();
-      return { device: this.summary({ ...chosen, booted: true }) };
+      if (fresh || booting) await this.openSession(caller.paneId, chosen);
+    } catch (cause) {
+      // A device that did not start is not held, so other Panes can open it.
+      if (fresh) {
+        this.lifecycle.release(caller.paneId, chosen.id);
+        this.options.onChange?.({ kind: 'released', id: chosen.id, paneId: caller.paneId, reason: 'closed' });
+      }
+      throw cause;
     }
+    this.lastOpened.set(caller.paneId, request.platform);
+    return { device: this.summary({ ...chosen, booted: true }) };
   }
 
+  /** Runs `work` after every earlier call for `platform` has finished. */
+  private oneAtATime<Result>(platform: DevicePlatform, work: () => Promise<Result>): Promise<Result> {
+    const result = (this.picking.get(platform) ?? Promise.resolve()).then(work);
+    this.picking.set(platform, result.then(() => undefined, () => undefined));
+    return result;
+  }
+
+  /** The device to lease, undefined to wait and pick again, or a busy error once the wait is over. */
   private async choose(caller: DeviceCaller, platform: DevicePlatform, devices: HubDevice[], deadline: number): Promise<HubDevice | undefined> {
     const pick = this.lifecycle.pick(caller.paneId, platform, devices);
     if (pick.kind === 'device') return devices.find(device => device.id === pick.id);
-    if (pick.kind === 'create') return this.create(platform);
+    if (pick.kind === 'create') return this.create(platform, devices);
     if (this.now() >= deadline) throw this.busy(devices.find(device => device.id === pick.id) ?? { id: pick.id, name: PANE_DEVICE_NAMES[platform] }, pick.holder);
-    await sleep(2_000);
     return undefined;
   }
 
@@ -199,7 +227,7 @@ export class DeviceService {
     throw new PaneError(platform === 'ios' ? 'ERR_DEVICE_NO_XCODE' : 'ERR_DEVICE_NO_ANDROID_SDK', `${this.options.machineName()} cannot run ${platform === 'ios' ? 'iOS simulators' : 'Android emulators'}: ${state.reason}`, state.reason);
   }
 
-  private async create(platform: DevicePlatform): Promise<HubDevice> {
+  private async create(platform: DevicePlatform, devices: readonly HubDevice[]): Promise<HubDevice> {
     const hub = await this.ensureHub();
     const options = decodeBoundary(await (await hub.request('/api/new-device-options')).json(), boundary.object({
       ios: boundary.object({ runtimes: boundary.array(boundary.object({ value: boundary.string, label: boundary.string, models: boundary.array(boundary.object({ value: boundary.string, label: boundary.string, supported: boundary.optional(boundary.boolean) })) })) }),
@@ -220,8 +248,11 @@ export class DeviceService {
       );
     }
     // The pool's devices: "Pane iPhone", then "Pane iPhone 2" when the cap allows more at once.
-    const pooled = Object.values(this.readState().made).filter(made => made.platform === platform).length;
-    const name = pooled === 0 ? PANE_DEVICE_NAMES[platform] : `${PANE_DEVICE_NAMES[platform]}${platform === 'ios' ? ' ' : '_'}${pooled + 1}`;
+    const taken = new Set([...Object.values(this.readState().made).map(made => made.name), ...devices.map(device => device.name)]);
+    const nameFor = (index: number) => index === 1 ? PANE_DEVICE_NAMES[platform] : `${PANE_DEVICE_NAMES[platform]}${platform === 'ios' ? ' ' : '_'}${index}`;
+    let index = 1;
+    while (taken.has(nameFor(index))) index += 1;
+    const name = nameFor(index);
     const created = decodeBoundary(await (await hub.request('/api/devices/create', { platform, name, runtime: runtime.value, deviceType: model.value })).json(), boundary.object({ ok: boundary.boolean, id: boundary.optional(boundary.string), error: boundary.optional(boundary.string) }));
     // The hub answers an emulator's serial once it boots; Pane keys emulators by AVD name.
     const id = !created.ok ? undefined : platform === 'android' ? name : created.id;
@@ -264,13 +295,16 @@ export class DeviceService {
 
   /** The leased device of `paneId` on this machine, or a refusal naming device_open. */
   held(paneId: string, platform?: DevicePlatform): string {
-    const id = this.lifecycle.leaseOf(paneId, platform);
-    if (!id) throw new PaneError('ERR_DEVICE_NOT_OPEN', 'This Pane has no device open, so there is nothing to act on.', 'Call device_open first.');
+    // Without a platform, the device this Pane opened last.
+    const id = platform ? this.lifecycle.leaseOf(paneId, platform) : this.lifecycle.leaseOf(paneId, this.lastOpened.get(paneId)) ?? this.lifecycle.leaseOf(paneId);
+    if (!id) {
+      throw new PaneError('ERR_DEVICE_NOT_OPEN', `This Pane has no ${platform === 'ios' ? 'iOS ' : platform === 'android' ? 'Android ' : ''}device open, so there is nothing to act on.`, platform ? `Call device_open with platform ${platform} first.` : 'Call device_open first.');
+    }
     return id;
   }
 
-  async screenshot(caller: DeviceCaller): Promise<DeviceScreenshot> {
-    const device = await this.leasedDevice(caller.paneId);
+  async screenshot(caller: DeviceCaller, platform?: DevicePlatform): Promise<DeviceScreenshot> {
+    const device = await this.leasedDevice(caller.paneId, platform);
     const folder = path.join(this.options.root, 'screenshots');
     mkdirSync(folder, { recursive: true });
     const file = path.join(folder, `${caller.paneId}-${this.now()}.png`);
@@ -282,21 +316,25 @@ export class DeviceService {
     return shot;
   }
 
-  async act(caller: DeviceCaller, args: readonly string[]): Promise<{ exitCode: number; output: string }> {
+  async act(caller: DeviceCaller, args: readonly string[], platform?: DevicePlatform): Promise<{ exitCode: number; output: string }> {
     if (args.length === 0) throw new PaneError('ERR_DEVICE_ACT_EMPTY', 'device_act needs an agent-device command, such as ["snapshot", "-i"].', 'Pass the command as args.');
     refuseRetarget(args);
-    const device = await this.leasedDevice(caller.paneId);
+    const device = await this.leasedDevice(caller.paneId, platform);
     const result = await runAgentDevice(this.paths().agentDevice, args, this.target(caller.paneId, device), { node: this.node, stateDir: this.stateDir() });
     return { exitCode: result.code, output: `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`.trim() };
   }
 
   /** Runs `command` for `owner` in `cwd`: the worktree here, or a synced checkout on a Mac. */
   run(owner: string, command: string, cwd: string, options: { background: boolean; waitMs: number }): Promise<DeviceJobResult> {
+    // A build is use of the device; the sweep also counts a running job as use.
+    this.lifecycle.touch(owner);
     return this.jobs.start(owner, command, cwd, options.background ? Math.min(options.waitMs, 5_000) : options.waitMs);
   }
 
-  async close(caller: DeviceCaller): Promise<{ closed: string[]; jobsStopped: number }> {
-    const ids = this.lifecycle.leasesOf(caller.paneId);
+  /** Ends the Pane's lease on `platform`'s device, or on all of them; its jobs stop with its last lease. */
+  async close(caller: DeviceCaller, platform?: DevicePlatform): Promise<{ closed: string[]; jobsStopped: number }> {
+    const one = platform ? this.lifecycle.leaseOf(caller.paneId, platform) : undefined;
+    const ids = platform ? (one ? [one] : []) : this.lifecycle.leasesOf(caller.paneId);
     const devices = ids.length > 0 ? await this.devices() : [];
     for (const id of ids) {
       const device = devices.find(candidate => candidate.id === id);
@@ -304,19 +342,19 @@ export class DeviceService {
       this.lifecycle.release(caller.paneId, id);
       this.options.onChange?.({ kind: 'released', id, paneId: caller.paneId, reason: 'closed' });
     }
-    const jobsStopped = await this.jobs.stopAll(caller.paneId);
-    this.scheduleSweep();
+    const jobsStopped = this.lifecycle.leasesOf(caller.paneId).length === 0 ? await this.jobs.stopAll(caller.paneId) : 0;
+    if (ids.length > 0) this.scheduleSweep();
     return { closed: ids, jobsStopped };
   }
 
   /** The person pressed Take over in `paneId`'s device tab. */
-  async takeOver(caller: DeviceCaller, id: string): Promise<void> {
+  async takeOver(caller: DeviceCaller, id: string, platform: DevicePlatform): Promise<void> {
     const previous = this.lifecycle.holderOf(id);
     if (previous && previous !== caller.paneId) {
       const device = (await this.devices()).find(candidate => candidate.id === id);
       if (device) await this.agentDevice(previous, device, ['close']).catch(() => undefined);
     }
-    this.lifecycle.takeOver(caller.paneId, id);
+    this.lifecycle.takeOver(caller.paneId, id, platform);
     if (previous && previous !== caller.paneId) this.options.onChange?.({ kind: 'released', id, paneId: previous, reason: 'taken' });
     const held: DeviceChange = { kind: 'held', id, paneId: caller.paneId };
     if (previous) held.previous = previous;
@@ -327,7 +365,7 @@ export class DeviceService {
   async paneArchived(paneId: string): Promise<void> {
     await this.jobs.stopAll(paneId);
     if (!this.hub && this.lifecycle.leasesOf(paneId).length === 0 && !this.hasUser(paneId)) return;
-    const devices = await this.devices();
+    const devices = await this.devices({ inventory: true });
     const { erase, ended } = this.lifecycle.archived(paneId, devices);
     for (const lease of ended) this.options.onChange?.({ kind: 'released', id: lease.id, paneId, reason: 'archived' });
     const state = this.readState();
@@ -427,8 +465,8 @@ export class DeviceService {
     }
   }
 
-  /** Usage for machine health: Pane's devices, booted devices, helper memory and checkouts. */
-  async usage(checkouts: () => { path: string; bytes: number }[] = () => []): Promise<DeviceUsage> {
+  /** Usage for machine health: every device, the runtimes they come from, helper memory and Pane's build checkouts. */
+  async usage(): Promise<DeviceUsage> {
     const capabilities = await this.probe();
     const running = this.hub !== undefined;
     const devices = running || this.hasMadeDevices() ? await this.devices({ inventory: true }) : await this.machineDevices().then(entries => entries.map(entry => ({ id: entry.id, platform: entry.platform, name: entry.name, os: entry.version ?? '', paneMade: false, booted: entry.booted }))).catch(() => []);
@@ -439,7 +477,8 @@ export class DeviceService {
       // Every simulator and emulator here, Pane's and the person's, so machine health sees them all (D-84).
       devices: await Promise.all(devices.map(device => this.deviceUsage(device, capabilities, folders))),
       helpers: hub?.pid ? [{ name: 'expo-device-hub', pid: hub.pid, memoryBytes: await processMemory(hub.pid) }] : [],
-      checkouts: checkouts(),
+      checkouts: await Promise.all(this.checkoutFolders().map(async folder => ({ path: folder, bytes: await folderBytes(folder) }))),
+      runtimes: await this.runtimes(capabilities),
       slimSim: capabilities.simslim !== undefined,
     };
     return report;
@@ -456,6 +495,42 @@ export class DeviceService {
       if (folder) usage.diskBytes = await folderBytes(folder);
     }
     return usage;
+  }
+
+  /** Build checkouts linked computers sync to this machine (on a Mac, for iOS). */
+  private checkoutFolders(): string[] {
+    const root = path.join(this.options.root, 'checkouts');
+    if (!existsSync(root)) return [];
+    return readdirSync(root, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => path.join(root, entry.name));
+  }
+
+  /** The iOS runtimes and Android system images devices are made from. */
+  private async runtimes(capabilities: DeviceCapabilities): Promise<DeviceUsage['runtimes']> {
+    const found: DeviceUsage['runtimes'] = [];
+    if (capabilities.ios.ready) {
+      try {
+        const { stdout } = await execFileAsync(capabilities.ios.xcrun, ['simctl', 'runtime', 'list', '-j'], { maxBuffer: 16 * 1024 * 1024, timeout: 60_000 });
+        const listed = decodeBoundary(JSON.parse(stdout), boundary.record(boundary.object({ version: boundary.string, sizeBytes: boundary.optional(boundary.number), platformIdentifier: boundary.string })));
+        for (const runtime of Object.values(listed)) {
+          if (!runtime.platformIdentifier.includes('iphone')) continue;
+          const entry: DeviceUsage['runtimes'][number] = { platform: 'ios', name: `iOS ${runtime.version}` };
+          if (runtime.sizeBytes !== undefined) entry.bytes = runtime.sizeBytes;
+          found.push(entry);
+        }
+      } catch (cause) {
+        this.options.log?.(`[devices] listing iOS runtimes failed: ${reasonOf(cause)}`);
+      }
+    }
+    if (capabilities.android.ready) {
+      const images = path.join(capabilities.android.sdk, 'system-images');
+      if (existsSync(images)) {
+        for (const api of readdirSync(images, { withFileTypes: true }).filter(entry => entry.isDirectory())) {
+          const folder = path.join(images, api.name);
+          found.push({ platform: 'android', name: api.name, bytes: await folderBytes(folder) });
+        }
+      }
+    }
+    return found;
   }
 
   /** Each simulator's folder, from simctl (its dataPath's parent), wherever CoreSimulator keeps it. */
@@ -480,9 +555,25 @@ export class DeviceService {
     await this.stopIfIdle();
   }
 
-  /** Shuts down unleased devices (`idle`), or also erases and deletes Pane's unleased devices (`all`). */
-  async free(mode: 'idle' | 'all'): Promise<{ shutdown: string[]; deleted: string[] }> {
-    if (!this.hub && !this.hasMadeDevices()) return { shutdown: [], deleted: [] };
+  /**
+   * Shuts down unleased devices (`idle`), or also deletes Pane's unleased devices and the build
+   * checkouts no Pane holds a device for (`all`), reporting the disk freed.
+   */
+  async free(mode: 'idle' | 'all'): Promise<{ shutdown: string[]; deleted: string[]; checkouts: string[]; freedBytes: number }> {
+    const checkouts: string[] = [];
+    let freedBytes = 0;
+    if (mode === 'all') {
+      // A checkout is `<computer>-<pane>`; the Mac keys that Pane's lease and jobs `<computer>:<pane>`.
+      const live = new Set([...this.lifecycle.holders(), ...this.jobs.running().map(job => job.owner)].map(owner => owner.replace(':', '-')));
+      for (const folder of this.checkoutFolders()) {
+        if (live.has(path.basename(folder))) continue;
+        freedBytes += await folderBytes(folder);
+        rmSync(folder, { recursive: true, force: true });
+        rmSync(`${folder}.bundle`, { force: true });
+        checkouts.push(folder);
+      }
+    }
+    if (!this.hub && !this.hasMadeDevices()) return { shutdown: [], deleted: [], checkouts, freedBytes };
     const devices = await this.devices({ inventory: true });
     const unleased = devices.filter(device => device.paneMade && !this.lifecycle.holderOf(device.id));
     const shutdown: string[] = [];
@@ -492,9 +583,14 @@ export class DeviceService {
     }
     const deleted: string[] = [];
     if (mode === 'all') {
+      const capabilities = await this.probe();
+      const folders = await this.simulatorFolders(capabilities);
       for (const device of unleased.filter(candidate => candidate.paneMade)) {
         try {
+          const folder = device.platform === 'ios' ? folders.get(device.id) : path.join(this.options.probeEnvironment().home, '.android', 'avd', `${device.name}.avd`);
+          const bytes = folder ? await folderBytes(folder) : 0;
           await this.remove({ ...device, booted: false });
+          freedBytes += bytes;
           deleted.push(device.id);
         } catch (cause) {
           this.options.log?.(`[devices] delete ${device.id} failed: ${reasonOf(cause)}`);
@@ -502,11 +598,13 @@ export class DeviceService {
       }
     }
     await this.stopIfIdle();
-    return { shutdown, deleted };
+    return { shutdown, deleted, checkouts, freedBytes };
   }
 
   /** Runs the lifecycle: idle leases, warm windows, stale devices, and stopping the helpers. */
   async sweep(): Promise<void> {
+    // A running build or Metro is use of the Pane's device.
+    for (const owner of new Set(this.jobs.running().map(job => job.owner))) this.lifecycle.touch(owner);
     const devices = await this.devices({ inventory: true });
     const { ended, shutdown } = this.lifecycle.sweep(devices);
     for (const lease of ended) {
@@ -534,8 +632,8 @@ export class DeviceService {
 
   // ---- internals
 
-  private async leasedDevice(paneId: string): Promise<HubDevice> {
-    const id = this.held(paneId);
+  private async leasedDevice(paneId: string, platform?: DevicePlatform): Promise<HubDevice> {
+    const id = this.held(paneId, platform);
     this.lifecycle.touch(paneId);
     this.markUsed(id, paneId);
     const device = (await this.devices()).find(candidate => candidate.id === id);
@@ -572,6 +670,10 @@ export class DeviceService {
     return paths;
   }
 
+  private hubStateDir(): string {
+    return path.join(this.options.root, 'hub-state');
+  }
+
   private stateDir(): string {
     return path.join(this.options.root, 'agent-device');
   }
@@ -580,7 +682,11 @@ export class DeviceService {
     this.hub ??= (async () => {
       const paths = await this.helpers.ensure(() => { onInstall?.(); this.options.onInstall?.(); });
       const capabilities = await this.probe();
-      const env: NodeJS.ProcessEnv = {};
+      // The hub publishes its port and token to a state file; keep it in Pane's own folder, not the shared temp folder.
+      const hubState = this.hubStateDir();
+      rmSync(hubState, { recursive: true, force: true });
+      mkdirSync(hubState, { recursive: true, mode: 0o700 });
+      const env: NodeJS.ProcessEnv = { EXPO_DEVICE_HUB_STATE_DIR: hubState };
       if (capabilities.android.ready) {
         env.ANDROID_HOME = capabilities.android.sdk;
         env.ANDROID_SDK_ROOT = capabilities.android.sdk;
@@ -616,7 +722,11 @@ export class DeviceService {
     ];
     if (!options.inventory) return devices;
     const known = new Set(devices.map(device => `${device.platform}:${device.id}`));
-    const unlisted = (await this.machineDevices()).filter(entry => !known.has(`${entry.platform}:${entry.id}`));
+    const machine = await this.machineDevices().catch((cause) => {
+      this.options.log?.(`[devices] listing this machine's devices failed: ${reasonOf(cause)}`);
+      return [];
+    });
+    const unlisted = machine.filter(entry => !known.has(`${entry.platform}:${entry.id}`));
     return [...devices, ...unlisted.map(entry => record(entry.platform, entry))];
   }
 
@@ -739,6 +849,7 @@ export class DeviceService {
     const hub = this.hub;
     this.hub = undefined;
     if (hub) await (await hub.catch(() => undefined))?.stop();
+    rmSync(this.hubStateDir(), { recursive: true, force: true });
     // agent-device's daemon keeps its pid in its state folder.
     const daemon = path.join(this.stateDir(), 'daemon.json');
     if (existsSync(daemon)) {
@@ -822,6 +933,7 @@ export interface DeviceUsage {
   devices: { id: string; platform: DevicePlatform; name: string; os: string; paneMade: boolean; booted: boolean; heldBy?: string; lastUsedAt?: string; memoryBytes?: number; diskBytes?: number }[];
   helpers: { name: string; pid: number; memoryBytes: number }[];
   checkouts: { path: string; bytes: number }[];
+  runtimes: { platform: DevicePlatform; name: string; bytes?: number }[];
   slimSim: boolean;
 }
 
@@ -893,11 +1005,23 @@ async function iosMemory(udid: string, simslim: string | undefined): Promise<num
 }
 
 async function folderBytes(folder: string): Promise<number> {
-  if (process.platform === 'win32' || !existsSync(folder)) return 0;
+  if (!existsSync(folder)) return 0;
+  if (process.platform === 'win32') return walkBytes(folder);
   try {
     const { stdout } = await execFileAsync('du', ['-sk', folder], { timeout: 60_000 });
     return (Number(stdout.trim().split(/\s+/)[0]) || 0) * 1024;
   } catch {
     return 0;
   }
+}
+
+/** A folder's size without `du` (Windows): every file under it, links not followed. */
+async function walkBytes(folder: string): Promise<number> {
+  let total = 0;
+  for (const entry of await readdir(folder, { withFileTypes: true }).catch(() => [])) {
+    const full = path.join(folder, entry.name);
+    if (entry.isDirectory()) total += await walkBytes(full);
+    else total += (await lstat(full).catch(() => undefined))?.size ?? 0;
+  }
+  return total;
 }

@@ -29,7 +29,8 @@ interface Job {
 export class DeviceJobs {
   private readonly jobs = new Map<string, Job>();
 
-  constructor(private readonly options: { shell: () => { executable: string; args: (command: string) => string[] } }) {}
+  /** `verbatim`: pass args to the shell unquoted (cmd.exe's `/s /c "<command>"`, which Node would escape). */
+  constructor(private readonly options: { shell: () => { executable: string; args: (command: string) => string[]; verbatim?: boolean } }) {}
 
   /** Starts `command` in `cwd` and waits up to `waitMs` for it to exit. */
   async start(owner: string, command: string, cwd: string, waitMs: number, env: NodeJS.ProcessEnv = {}): Promise<DeviceJobResult> {
@@ -40,6 +41,7 @@ export class DeviceJobs {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
       windowsHide: true,
+      windowsVerbatimArguments: shell.verbatim === true,
     });
     const job: Job = { id: randomUUID(), owner, child, tail: '', exited: Promise.resolve() };
     const append = (chunk: Buffer) => {
