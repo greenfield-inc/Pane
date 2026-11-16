@@ -83,13 +83,14 @@ export async function fetchRelease(version: string, timeoutMs?: number): Promise
     const response = await fetch(`${GITHUB_API_BASE}/${normalized}`, {
       headers: {
         accept: 'application/vnd.github+json',
-        'user-agent': 'runpane-installer'
+        'user-agent': 'runpane-installer',
+        ...githubAuthHeaders()
       },
       signal: controller?.signal
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch Pane release ${version}: ${response.status} ${response.statusText}`);
+      throw new Error(`Failed to fetch Pane release ${version}: ${response.status} ${response.statusText}`.trimEnd());
     }
 
     const release = decodeBoundary(await response.json(), githubReleaseSchema);
@@ -107,6 +108,23 @@ export async function fetchRelease(version: string, timeoutMs?: number): Promise
       clearTimeout(timeout);
     }
   }
+}
+
+/**
+ * The GitHub token from `GH_TOKEN`, else `GITHUB_TOKEN`, so API calls count against the person's
+ * 5,000 an hour instead of the 60 an hour GitHub gives each unauthenticated address. Never printed.
+ */
+export function githubToken(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  for (const name of ['GH_TOKEN', 'GITHUB_TOKEN']) {
+    const value = env[name]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function githubAuthHeaders(): Record<string, string> {
+  const token = githubToken();
+  return token ? { authorization: `Bearer ${token}` } : {};
 }
 
 export function findArtifact(

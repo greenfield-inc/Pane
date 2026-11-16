@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Mapping, Optional
 
 from .platforms import PanePlatform, arch_aliases, default_format, platform_param
 
@@ -51,16 +52,35 @@ def resolve_release(
 
 def fetch_release(version: str, timeout_seconds: float = 30) -> Dict[str, Any]:
     normalized = "latest" if version == "latest" else f"tags/{version if version.startswith('v') else 'v' + version}"
-    req = urllib.request.Request(
-        f"{GITHUB_API_BASE}/{normalized}",
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "runpane-installer"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
-        release = json.loads(response.read().decode("utf-8"))
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "runpane-installer"}
+    headers.update(github_auth_headers())
+    req = urllib.request.Request(f"{GITHUB_API_BASE}/{normalized}", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
+            release = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        # Same wording as the npm CLI, so `doctor --json` matches.
+        raise RuntimeError(f"Failed to fetch Pane release {version}: {error.code} {error.reason or ''}".rstrip()) from None
 
     if release.get("draft") or release.get("prerelease"):
         raise RuntimeError(f"Release {release.get('tag_name')} is not a stable public release.")
     return release
+
+
+def github_token(env: Optional[Mapping[str, str]] = None) -> Optional[str]:
+    """The GitHub token from GH_TOKEN, else GITHUB_TOKEN, so API calls count against the person's
+    5,000 an hour instead of the 60 an hour GitHub gives each unauthenticated address. Never printed."""
+    source = os.environ if env is None else env
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        value = (source.get(name) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def github_auth_headers() -> Dict[str, str]:
+    token = github_token()
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 
 def find_artifact(release: Dict[str, Any], platform: PanePlatform, format_name: str) -> Dict[str, Any]:
