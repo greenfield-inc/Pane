@@ -1295,6 +1295,11 @@ export class TerminalPanelManager extends EventEmitter {
    * Returns a map of sessionId → array of PTY PIDs for that session.
    * Used by resource monitoring to discover which processes belong to which session.
    */
+  /** Each running terminal's shell, with its Pane and tab. */
+  getPanelPids(): Array<{ pid: number; sessionId: string; panelId: string }> {
+    return [...this.terminals.values()].map(terminal => ({ pid: terminal.pty.pid, sessionId: terminal.sessionId, panelId: terminal.panelId }));
+  }
+
   getSessionPids(): Map<string, number[]> {
     const result = new Map<string, number[]>();
     for (const [, terminal] of this.terminals) {

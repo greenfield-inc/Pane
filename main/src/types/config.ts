@@ -1,4 +1,5 @@
 import type { DeviceSettings } from '../../../shared/types/devices';
+import type { MachineHealthSettings } from '../../../shared/types/machineHealth';
 import type { PaneSecretMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
@@ -108,6 +109,8 @@ export interface AppConfig {
   // Pause: selecting a paused Pane or Session chat resumes it (default off)
   resumePausedOnOpen?: boolean;
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
+  // Machine health thresholds and switches (defaults in main/src/services/machineHealth/settings.ts)
+  machineHealth?: MachineHealthSettings;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   // Days Pane keeps archived Session folders and Pane-owned scratch before deleting them (default ARCHIVE_RETENTION_DAYS)
@@ -276,6 +279,7 @@ export interface UpdateConfigRequest {
   keepAwakeOnBattery?: boolean;
   backgroundActivity?: BackgroundActivityProfile;
   resumePausedOnOpen?: boolean;
+  machineHealth?: MachineHealthSettings;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   archiveRetentionDays?: number;

@@ -14,6 +14,7 @@ import type { LoopManager } from '../services/loops/loopManager';
 import type { SessionInbox } from '../services/sessionInbox';
 import type { ExpectedReportTracker } from '../services/expectedReports';
 import type { NotifyService } from '../services/notify/notifyService';
+import type { MachineHealthService } from '../services/machineHealth/machineHealthService';
 import type { ApprovalStore } from '../services/approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 
@@ -38,6 +39,8 @@ export interface DaemonHostServices extends CoreServices {
   approvalImport?: JsonStoreImportOutcome;
   expectedReportTracker?: ExpectedReportTracker;
   notifyService?: NotifyService;
+  /** Free disk, memory pressure and per-Pane process cost, sampled every minute. */
+  machineHealth?: MachineHealthService;
 }
 
 export interface AppServices extends DaemonHostServices {

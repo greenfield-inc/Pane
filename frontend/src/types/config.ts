@@ -1,4 +1,5 @@
 import type { DeviceSettings } from '../../../shared/types/devices';
+import type { MachineHealthSettings } from '../../../shared/types/machineHealth';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { CustomLink } from '../../../shared/types/customLinks';
@@ -111,6 +112,8 @@ export interface AppConfig {
   // Pause: selecting a paused Pane or Session chat resumes it (default off)
   resumePausedOnOpen?: boolean;
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
+  // Machine health thresholds and switches (defaults in main/src/services/machineHealth/settings.ts)
+  machineHealth?: MachineHealthSettings;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   archiveRetentionDays?: number;
@@ -257,6 +260,7 @@ export interface UpdateConfigRequest {
   keepAwakeOnBattery?: boolean;
   backgroundActivity?: AppConfig['backgroundActivity'];
   resumePausedOnOpen?: boolean;
+  machineHealth?: MachineHealthSettings;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   archiveRetentionDays?: number;

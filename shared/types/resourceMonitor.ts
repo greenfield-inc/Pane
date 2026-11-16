@@ -11,6 +11,12 @@ export interface ChildProcessInfo {
   name: string;
   cpuPercent: number;
   memoryMB: number;
+  /** Start time as the OS reports it; with the pid it names one process lifetime. */
+  started: string;
+  /** The tab that started it, when Pane knows. */
+  panelId: string | null;
+  /** Found by its PANE_SESSION_ID after it left its tab's process tree. */
+  escaped: boolean;
 }
 
 export interface SessionResourceInfo {

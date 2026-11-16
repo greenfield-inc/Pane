@@ -8,29 +8,16 @@ import type {
   SessionResourceInfo,
   ResourceSnapshot,
 } from '../../../shared/types/resourceMonitor';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { createRequire } from 'node:module';
-
-const loadResourceDependency = createRequire(__filename);
+import { attributeProcesses, readEscapedEnvTags, readProcessRows, type EnvTag, type ProcessRoot, type ProcessRow } from './machineHealth/processAttribution';
 
 const execFileAsync = promisify(execFile);
 
-interface RawProcessStats {
-  name: string;
-  cpuTimeSeconds: number; // Cumulative CPU time in seconds
-  memoryMB: number;
-}
+/** How often escaped processes' environments are re-read. */
+const ENV_SCAN_INTERVAL_MS = 5 * 60_000;
 
 interface CpuSample {
   cpuTimeSeconds: number;
   timestamp: number;
-}
-
-interface WindowsBatchItem {
-  Id: number;
-  Name: string;
-  CpuSeconds: number;
-  MemoryMB: number;
 }
 
 export interface WslProcessSample {
@@ -91,6 +78,11 @@ export function parseWslEnvironScan(stdout: string): WslProcessSample[] {
 
 interface ResourceMonitorInitializationOptions {
   app?: App | null;
+  /** Every process Pane started directly, with its Pane and tab. */
+  processRoots?: () => ProcessRoot[];
+  /** Panes in this instance's database; escaped processes of other Pane instances are ignored. */
+  knownSessionIds?: () => ReadonlySet<string>;
+  readRows?: () => Promise<ProcessRow[]>;
   getSessionById?: (sessionId: string) => { name?: string; initial_prompt?: string } | undefined;
   getSessionWslDistro?: (sessionId: string) => string | null;
 }
@@ -102,9 +94,17 @@ export class ResourceMonitorService {
   private previousCpuSamples = new Map<string, CpuSample>();
   private needsCpuWarmup = false;
   private wslScanFailedDistros = new Set<string>();
+  private processRoots: (() => ProcessRoot[]) | null = null;
+  private knownSessionIds: (() => ReadonlySet<string>) | null = null;
+  private readRows: () => Promise<ProcessRow[]> = readProcessRows;
+  private envTags = new Map<string, { pid: number; tag: EnvTag }>();
+  private envTagsReadAt = -Infinity;
 
   initialize(options: ResourceMonitorInitializationOptions = {}): void {
     this.app = options.app ?? null;
+    this.processRoots = options.processRoots ?? null;
+    this.knownSessionIds = options.knownSessionIds ?? null;
+    this.readRows = options.readRows ?? readProcessRows;
     this.getSessionById = options.getSessionById ?? null;
     this.getSessionWslDistro = options.getSessionWslDistro ?? null;
   }
@@ -120,68 +120,6 @@ export class ResourceMonitorService {
       cpuPercent: m.cpu.percentCPUUsage,
       memoryMB: Math.round((m.memory.workingSetSize / 1024) * 100) / 100, // KB → MB
     }));
-  }
-
-  private async getChildPids(parentPid: number): Promise<number[]> {
-    try {
-      if (os.platform() === 'win32') {
-        const { stdout } = await execFileAsync(
-          'powershell',
-          ['-NoProfile', '-Command', `Get-CimInstance Win32_Process -Filter 'ParentProcessId=${parentPid}' | Select-Object -ExpandProperty ProcessId`],
-          { encoding: 'utf8', timeout: 5000 }
-        );
-        return stdout.split('\n').map(l => parseInt(l.trim(), 10)).filter(n => !isNaN(n));
-      } else if (os.platform() === 'darwin') {
-        const { stdout } = await execFileAsync('pgrep', ['-P', String(parentPid)], { encoding: 'utf8', timeout: 5000 });
-        return stdout.split('\n').map(l => parseInt(l.trim(), 10)).filter(n => !isNaN(n));
-      } else {
-        const { stdout } = await execFileAsync('ps', ['-o', 'pid=', '--ppid', String(parentPid)], { encoding: 'utf8', timeout: 5000 });
-        return stdout.split('\n').map(l => parseInt(l.trim(), 10)).filter(n => !isNaN(n));
-      }
-    } catch {
-      return [];
-    }
-  }
-
-  private async getAllDescendantPids(parentPid: number): Promise<number[]> {
-    const children = await this.getChildPids(parentPid);
-    const all: number[] = [...children];
-    for (const child of children) {
-      all.push(...await this.getAllDescendantPids(child));
-    }
-    return all;
-  }
-
-  /**
-   * Parse a cputime string from `ps -o cputime=` into total seconds.
-   * Formats: "MM:SS", "HH:MM:SS", "D-HH:MM:SS"
-   */
-  private parseCputime(cputime: string): number {
-    const trimmed = cputime.trim();
-    if (!trimmed) return 0;
-
-    let days = 0;
-    let rest = trimmed;
-
-    // Check for "D-" day prefix
-    const dayMatch = rest.match(/^(\d+)-(.+)$/);
-    if (dayMatch) {
-      days = parseInt(dayMatch[1], 10);
-      rest = dayMatch[2];
-    }
-
-    const parts = rest.split(':').map(p => parseInt(p, 10));
-    let hours = 0, minutes = 0, seconds = 0;
-
-    if (parts.length === 3) {
-      [hours, minutes, seconds] = parts;
-    } else if (parts.length === 2) {
-      [minutes, seconds] = parts;
-    } else {
-      return 0;
-    }
-
-    return days * 86400 + hours * 3600 + minutes * 60 + seconds;
   }
 
   /**
@@ -214,99 +152,6 @@ export class ResourceMonitorService {
         this.previousCpuSamples.delete(key);
       }
     }
-  }
-
-  private async getUnixProcessStats(pid: number): Promise<RawProcessStats> {
-    try {
-      const { stdout } = await execFileAsync('ps', ['-o', 'comm=,cputime=,rss=', '-p', String(pid)], { encoding: 'utf8', timeout: 5000 });
-      const line = stdout.trim();
-      if (!line) return { name: 'unknown', cpuTimeSeconds: 0, memoryMB: 0 };
-      const parts = line.split(/\s+/);
-      const rss = parseInt(parts[parts.length - 1], 10) || 0;
-      const cputime = parts[parts.length - 2] || '0:00';
-      const name = parts.slice(0, -2).join(' ') || 'unknown';
-      return { name, cpuTimeSeconds: this.parseCputime(cputime), memoryMB: rss / 1024 };
-    } catch {
-      return { name: 'unknown', cpuTimeSeconds: 0, memoryMB: 0 };
-    }
-  }
-
-  private async getUnixBatchRawStats(pids: number[]): Promise<Map<number, RawProcessStats>> {
-    const result = new Map<number, RawProcessStats>();
-    if (pids.length === 0) return result;
-    // Batch all PIDs into a single ps call
-    try {
-      const { stdout } = await execFileAsync('ps', ['-o', 'pid=,comm=,cputime=,rss=', '-p', pids.join(',')], { encoding: 'utf8', timeout: 5000 });
-      for (const line of stdout.trim().split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const parts = trimmed.split(/\s+/);
-        const pid = parseInt(parts[0], 10);
-        if (isNaN(pid)) continue;
-        const rss = parseInt(parts[parts.length - 1], 10) || 0;
-        const cputime = parts[parts.length - 2] || '0:00';
-        const name = parts.slice(1, -2).join(' ') || 'unknown';
-        result.set(pid, { name, cpuTimeSeconds: this.parseCputime(cputime), memoryMB: rss / 1024 });
-      }
-    } catch {
-      // Fallback: try individual lookups for any PIDs not found
-      const promises = pids.map(async pid => {
-        const stats = await this.getUnixProcessStats(pid);
-        result.set(pid, stats);
-      });
-      await Promise.all(promises);
-    }
-    return result;
-  }
-
-  private async getWindowsBatchRawStats(pids: number[]): Promise<Map<number, RawProcessStats>> {
-    const result = new Map<number, RawProcessStats>();
-    if (pids.length === 0) return result;
-    try {
-      const pidList = pids.join(',');
-      const psCmd = `Get-Process -Id @(${pidList}) -ErrorAction SilentlyContinue | ForEach-Object { [PSCustomObject]@{ Id=$_.Id; Name=$_.ProcessName; CpuSeconds=[math]::Round($_.CPU,2); MemoryMB=[math]::Round($_.WorkingSet64/1MB,1) } } | ConvertTo-Json -Compress`;
-      const { stdout } = await execFileAsync(
-        'powershell',
-        ['-NoProfile', '-Command', psCmd],
-        { encoding: 'utf8', timeout: 10000 }
-      );
-      const itemSchema = boundary.object({
-        Id: boundary.number,
-        Name: boundary.string,
-        CpuSeconds: boundary.number,
-        MemoryMB: boundary.number,
-      });
-      const parsed = JSON.parse(stdout);
-      let items: WindowsBatchItem[];
-      try {
-        items = decodeBoundary(parsed, boundary.array(itemSchema));
-      } catch {
-        items = [decodeBoundary(parsed, itemSchema)];
-      }
-      for (const item of items) {
-        result.set(item.Id, {
-          name: item.Name || 'unknown',
-          cpuTimeSeconds: item.CpuSeconds || 0,
-          memoryMB: item.MemoryMB || 0,
-        });
-      }
-    } catch {
-      // PowerShell call failed — return empty results
-    }
-    return result;
-  }
-
-  /**
-   * Convert raw process stats (cumulative CPU time) into final stats (delta-based CPU %).
-   */
-  private resolveProcessStats(pids: number[], rawStats: Map<number, RawProcessStats>, now: number): ChildProcessInfo[] {
-    return pids
-      .map(pid => {
-        const raw = rawStats.get(pid) || { name: 'unknown', cpuTimeSeconds: 0, memoryMB: 0 };
-        const cpuPercent = this.computeDeltaCpu(String(pid), raw.cpuTimeSeconds, now);
-        return { pid, name: raw.name, cpuPercent, memoryMB: raw.memoryMB };
-      })
-      .filter(c => c.cpuPercent > 0 || c.memoryMB > 0.1);
   }
 
   /**
@@ -360,73 +205,44 @@ export class ResourceMonitorService {
 
   private async getSessionMetrics(): Promise<SessionResourceInfo[]> {
     const now = Date.now();
-
-    // Lazy imports to avoid circular dependency at module load time
-    // SAFETY: This require targets the statically typed local module and selects its exported singleton.
-    const { terminalPanelManager } = loadResourceDependency('./terminalPanelManager') as { terminalPanelManager: { getSessionPids(): Map<string, number[]> } };
-    // SAFETY: This require targets the statically typed local module and selects its exported registry class.
-    const { CliToolRegistry } = loadResourceDependency('./cliToolRegistry') as { CliToolRegistry: { getInstance(): { getAllManagers(): { getSessionPids(): Map<string, number[]> }[] } } };
-
-    // Collect PIDs from all sources: terminal panels + CLI managers (Claude, Codex, etc.)
-    const sessionPids = new Map<string, number[]>();
-
-    // Terminal panel PIDs (bash shells)
-    for (const [sessionId, pids] of terminalPanelManager.getSessionPids()) {
-      sessionPids.set(sessionId, [...pids]);
-    }
-
-    // CLI manager PIDs (Claude Code, Codex, and any future CLI tools)
+    const roots = this.processRoots?.() ?? [];
+    const sessionIds = [...new Set(roots.map(root => root.sessionId))];
+    let rows: ProcessRow[] = [];
     try {
-      const registry = CliToolRegistry.getInstance();
-      for (const manager of registry.getAllManagers()) {
-        for (const [sessionId, pids] of manager.getSessionPids()) {
-          const existing = sessionPids.get(sessionId) || [];
-          existing.push(...pids);
-          sessionPids.set(sessionId, existing);
-        }
-      }
-    } catch {
-      // Registry may not be initialized yet during startup
+      rows = await this.readRows();
+    } catch (error) {
+      console.warn('[ResourceMonitor] process table read failed:', error instanceof Error ? error.message : error);
     }
+    const claimed = new Set<number>();
+    for (const list of attributeProcesses(rows, roots, new Map()).values()) for (const proc of list) claimed.add(proc.pid);
+    const envTags = await this.escapedEnvTags(rows, claimed, now);
+    const known = this.knownSessionIds?.() ?? new Set(sessionIds);
+    const bySession = attributeProcesses(rows, roots, envTags, known);
 
     const sessions: SessionResourceInfo[] = [];
     const allTrackedKeys = new Set<string>();
 
     // WSL sessions on Windows: one batched in-distro scan per distro
-    const wslSamplesBySession = await this.getWslSamplesBySession([...sessionPids.keys()]);
+    const wslSamplesBySession = await this.getWslSamplesBySession([...new Set([...sessionIds, ...bySession.keys()])]);
 
-    for (const [sessionId, ptyPids] of sessionPids) {
+    for (const sessionId of new Set([...bySession.keys(), ...wslSamplesBySession.keys()])) {
       const session = this.getSessionById?.(sessionId);
       const sessionName = session?.name || session?.initial_prompt?.slice(0, 30) || sessionId;
-
-      const allPids: number[] = [];
-      for (const ptyPid of ptyPids) {
-        allPids.push(ptyPid);
-        allPids.push(...await this.getAllDescendantPids(ptyPid));
-      }
-
-      // Track all PIDs for cache cleanup
-      for (const pid of allPids) allTrackedKeys.add(String(pid));
-
-      let children: ChildProcessInfo[];
-      if (os.platform() === 'win32') {
-        const rawStats = await this.getWindowsBatchRawStats(allPids);
-        children = this.resolveProcessStats(allPids, rawStats, now);
-      } else {
-        const rawStats = await this.getUnixBatchRawStats(allPids);
-        children = this.resolveProcessStats(allPids, rawStats, now);
+      const children: ChildProcessInfo[] = [];
+      for (const proc of bySession.get(sessionId) ?? []) {
+        const key = `${proc.pid}:${proc.started}`;
+        allTrackedKeys.add(key);
+        const cpuPercent = this.computeDeltaCpu(key, proc.cpuSeconds, now);
+        children.push({ pid: proc.pid, name: proc.name, cpuPercent, memoryMB: proc.rssMB, started: proc.started, panelId: proc.panelId, escaped: proc.escaped });
       }
 
       // WSL processes appear alongside the wsl.exe relay already attributed above
-      const wslEntries = wslSamplesBySession.get(sessionId);
-      if (wslEntries) {
-        for (const { distro, sample } of wslEntries) {
-          const key = `wsl:${distro}:${sample.pid}`;
-          allTrackedKeys.add(key);
-          const cpuPercent = this.computeDeltaCpu(key, sample.cpuTimeSeconds, now);
-          if (cpuPercent > 0 || sample.memoryMB > 0.1) {
-            children.push({ pid: sample.pid, name: `${sample.name} (${distro})`, cpuPercent, memoryMB: sample.memoryMB });
-          }
+      for (const { distro, sample } of wslSamplesBySession.get(sessionId) ?? []) {
+        const key = `wsl:${distro}:${sample.pid}`;
+        allTrackedKeys.add(key);
+        const cpuPercent = this.computeDeltaCpu(key, sample.cpuTimeSeconds, now);
+        if (cpuPercent > 0 || sample.memoryMB > 0.1) {
+          children.push({ pid: sample.pid, name: `${sample.name} (${distro})`, cpuPercent, memoryMB: sample.memoryMB, started: key, panelId: null, escaped: false });
         }
       }
 
@@ -446,6 +262,21 @@ export class ResourceMonitorService {
     this.cleanupCpuSampleCache(allTrackedKeys);
 
     return sessions;
+  }
+
+  /** Escaped processes rarely change, and reading environments costs a process call: refresh every 5 minutes. */
+  private async escapedEnvTags(rows: ProcessRow[], claimed: Set<number>, now: number): Promise<Map<number, EnvTag>> {
+    if (now - this.envTagsReadAt >= ENV_SCAN_INTERVAL_MS) {
+      this.envTagsReadAt = now;
+      const tags = await readEscapedEnvTags(rows, claimed);
+      this.envTags = new Map([...tags].map(([pid, tag]) => [`${pid}:${rows.find(row => row.pid === pid)?.started ?? ''}`, { pid, tag }]));
+    }
+    const live = new Map<number, EnvTag>();
+    const started = new Map(rows.map(row => [row.pid, row.started]));
+    for (const [key, { pid, tag }] of this.envTags) {
+      if (`${pid}:${started.get(pid) ?? ''}` === key) live.set(pid, tag);
+    }
+    return live;
   }
 
   async getSnapshot(): Promise<ResourceSnapshot> {
