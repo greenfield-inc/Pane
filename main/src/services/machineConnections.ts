@@ -1,3 +1,4 @@
+import type { WebSocket } from 'ws';
 import os from 'os';
 import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/remotePaneClient';
 import { primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
@@ -25,7 +26,7 @@ import {
 const RETRY_AFTER_GIVE_UP_MS = 60_000;
 
 type RemoteClientOptions = NonNullable<ConstructorParameters<typeof RemotePaneClient>[1]>;
-export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume'>;
+export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream'>;
 export type CreateMachineClient = (profile: RemotePaneConnectionProfile, options: RemoteClientOptions) => MachineClient;
 
 export interface MachineConnectionsDeps {
@@ -155,6 +156,13 @@ export class MachineConnections {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** One raw byte stream to a loopback port on a saved machine, without switching to it (a linked Mac's device hub). Main only. */
+  openPortStream(machineId: string, port: number): WebSocket {
+    const machine = this.machines.get(machineId);
+    if (!machine) throw unknownMachine(machineId);
+    return machine.client.openPortStream(port);
   }
 
   /** A saved machine's current state, or undefined for an unknown id. */

@@ -13,6 +13,9 @@ import { defaultProbeEnvironment } from '../services/devices/deviceProbe';
 import { DeviceBusyError, DeviceService, type DeviceCaller, type DeviceChange } from '../services/devices/deviceService';
 import { findExecutableInPath } from '../utils/shellPath';
 import { DeviceInputSockets, inputMessages } from '../services/devices/deviceInput';
+import { refuseRetarget } from '../services/devices/deviceHelpers';
+import { MacUnavailableError, RemoteDevices } from '../services/devices/remoteDevices';
+import { registerMacDeviceHandler, remotePaneName } from './macDevices';
 import { registerMediaRoute } from '../services/mediaPreview';
 import { getAppDirectory } from '../utils/appDirectory';
 import type { AppServices } from './types';
@@ -20,7 +23,7 @@ import type { AppServices } from './types';
 const RUN_WAIT_MS = 120_000;
 
 /** What device_run returns: the contract's devicesRunResult. */
-interface DeviceRunResult { ok: true; synced?: boolean; cwd: string; machine: string; jobId: string; state: 'running' | 'exited'; exitCode?: number; logTail: string }
+interface DeviceRunResult { ok: true; synced?: boolean; cwd?: string; machine: string; jobId?: string; state?: 'running' | 'exited'; exitCode?: number; logTail?: string }
 
 const openSchema = boundary.object({ platform: boundary.enumeration('ios', 'android'), device: boundary.optional(boundary.string) });
 const actSchema = boundary.object({ args: boundary.array(boundary.string) });
@@ -50,7 +53,26 @@ function decode<Value>(value: PaneCommandValue, schema: Parameters<typeof decode
 }
 
 let service: DeviceService | undefined;
+let remote: RemoteDevices | undefined;
 let machines: MachineConnections | undefined;
+
+/** iOS on a linked Mac for a computer without Xcode. */
+function remoteDevices(services: AppServices): RemoteDevices {
+  remote ??= new RemoteDevices({
+    macs: () => savedMacs(services),
+    pinned: () => deviceSettings(services).iosMachineId,
+    invoke: (machineId, channel, args) => {
+      if (!machines) throw new PaneError('ERR_DEVICE_MAC_OFFLINE', 'Pane has not connected to its saved computers yet.', 'Wait a moment, then try again.');
+      return machines.invokeOn(machineId, channel, args).then(result => decodeBoundary(result ?? null, boundary.json));
+    },
+    openPortStream: (machineId, port) => {
+      if (!machines) throw new PaneError('ERR_DEVICE_MAC_OFFLINE', 'Pane has not connected to its saved computers yet.', 'Wait a moment, then try again.');
+      return machines.openPortStream(machineId, port);
+    },
+    self: () => ({ id: services.configManager.getConfig().machineId ?? localMachineName(), name: localMachineName() }),
+  }, path.join(getAppDirectory(), 'devices'));
+  return remote;
+}
 
 /** Main hands over the saved machines' connections once they exist; iOS on a PC routes through them. */
 export function setDeviceMachines(connections: MachineConnections): void {
@@ -67,7 +89,7 @@ function savedMacs(services: Pick<AppServices, 'configManager'>): DeviceMac[] {
 let appServices: AppServices | undefined;
 
 function paneNameOf(services: AppServices, paneId: string): string {
-  return services.sessionManager.getSession(paneId)?.name ?? paneId;
+  return services.sessionManager.getSession(paneId)?.name ?? remotePaneName(paneId) ?? paneId;
 }
 
 /** The devices service on this machine; created on the first device call. */
@@ -199,18 +221,55 @@ async function ensureDeviceTab(caller: DeviceCaller, platform: DevicePlatform, i
   });
 }
 
+/** iOS for a computer without Xcode: the device opens on a linked Mac Pane picks (or the pinned one). */
+async function openOnMac(services: AppServices, caller: DeviceCaller, device: string | undefined) {
+  const panel = await ensureDeviceTab(caller, 'ios', { phase: 'booting' });
+  try {
+    const { lease, device: summary } = await remoteDevices(services).open(caller.paneId, caller.paneName, 'ios', device);
+    const why = lease.reason === 'pinned'
+      ? `Runs on ${lease.macName}, pinned in Settings > Devices. This computer has no Xcode.`
+      : `Runs on ${lease.macName}. This computer has no Xcode.`;
+    await setPanelState(panel, { deviceId: summary.id, name: summary.name, os: summary.os, machine: lease.macName, machineId: lease.macId, machineReason: { kind: lease.reason, text: why }, phase: 'live', heldBy: undefined }, summary.name);
+    const marker: DeviceOpenMarker = { kind: 'pane-device', panelId: panel.id, name: summary.name, machine: lease.macName };
+    if (summary.os) marker.os = summary.os;
+    return {
+      ok: true,
+      device: summary,
+      machine: {
+        name: lease.macName,
+        reason: lease.reason === 'pinned'
+          ? `${lease.macName} is pinned in Settings > Devices to run iOS for this computer, which has no Xcode.`
+          : `This computer has no Xcode, so Pane picked ${lease.macName}, the first online Mac with Xcode.`,
+      },
+      panelId: panel.id,
+      paneDevice: marker,
+      next: `See it with device_screenshot and drive it with device_act as on this computer. device_run syncs this worktree (uncommitted edits included) to Pane's checkout on ${lease.macName} and runs the command there, such as \`npx expo run:ios\`; pass --background for Metro. Call device_close when done.`,
+    };
+  } catch (cause) {
+    if (cause instanceof PaneError && cause.code === 'ERR_DEVICE_NO_MAC') await setPanelState(panel, { phase: 'no-mac' });
+    else if (cause instanceof MacUnavailableError) await setPanelState(panel, { phase: 'mac-offline', macName: cause.macName });
+    else if (cause instanceof PaneError && cause.code === 'ERR_DEVICE_BUSY') await setPanelState(panel, { phase: 'in-use' });
+    else await setPanelState(panel, { phase: 'error' });
+    throw cause;
+  }
+}
+
 export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   appServices = services;
   const devices = () => deviceService(services);
 
   commandRegistry.register('runpane:devices:list', async () => {
     deviceCaller(services);
-    return { ok: true, devices: await devices().list() };
+    const local = await devices().list();
+    // Without Xcode here, iOS comes from the Mac Pane would pick.
+    const onMac = (await devices().probe()).ios.ready ? [] : await remoteDevices(services).list();
+    return { ok: true, devices: [...local, ...onMac] };
   });
 
   commandRegistry.register('runpane:devices:open', async (request: PaneCommandValue) => {
     const caller = deviceCaller(services);
     const { platform, device } = decode(request, openSchema, 'devices open');
+    if (platform === 'ios' && !(await devices().probe()).ios.ready) return openOnMac(services, caller, device);
     const panel = await ensureDeviceTab(caller, platform, { phase: devices().helpersInstalled() ? 'booting' : 'installing' });
     try {
       const opened = await devices().open(caller, device ? { platform, device } : { platform }, (phase) => { void setPanelState(panel, { phase }); });
@@ -238,21 +297,38 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
 
   commandRegistry.register('runpane:devices:screenshot', async () => {
     const caller = deviceCaller(services);
-    const shot = await devices().screenshot(caller);
+    const onMac = remote?.leaseOf(caller.paneId);
+    const shot = onMac ? await remoteDevices(services).screenshot(caller.paneId) : await devices().screenshot(caller);
     return { ok: true, ...shot, mimeType: 'image/png' };
   });
 
   commandRegistry.register('runpane:devices:act', async (request: PaneCommandValue) => {
     const caller = deviceCaller(services);
     const { args } = decode(request, actSchema, 'devices act');
-    return { ok: true, ...(await devices().act(caller, args)) };
+    refuseRetarget(args);
+    const onMac = remote?.leaseOf(caller.paneId);
+    return { ok: true, ...(onMac ? await remoteDevices(services).act(caller.paneId, args) : await devices().act(caller, args)) };
   });
 
   commandRegistry.register('runpane:devices:run', async (request: PaneCommandValue) => {
     const caller = deviceCaller(services);
     const { command, background, waitMs } = decode(request, runSchema, 'devices run');
-    devices().held(caller.paneId);
     const session = services.sessionManager.getSession(caller.paneId);
+    const onMac = remote?.leaseOf(caller.paneId);
+    if (onMac) {
+      // Builds for a Mac run in Pane's checkout there, synced from this worktree (uncommitted edits included).
+      const ran = await remoteDevices(services).run(caller.paneId, session?.worktreePath ?? process.cwd(), command, { background: background === true, waitMs: waitMs ?? RUN_WAIT_MS });
+      const result: DeviceRunResult = { ok: true, synced: ran.synced, machine: onMac.macName };
+      if (ran.job) {
+        result.cwd = ran.job.cwd;
+        result.jobId = ran.job.jobId;
+        result.state = ran.job.state;
+        result.logTail = ran.job.logTail;
+        if (ran.job.exitCode !== undefined) result.exitCode = ran.job.exitCode;
+      }
+      return result;
+    }
+    devices().held(caller.paneId);
     if (!command) return { ok: true, synced: false, cwd: session?.worktreePath };
     const { jobId, state, exitCode, logTail } = await devices().run(caller.paneId, command, session?.worktreePath ?? process.cwd(), { background: background === true, waitMs: waitMs ?? RUN_WAIT_MS });
     const result: DeviceRunResult = { ok: true, cwd: session?.worktreePath ?? process.cwd(), machine: localMachineName(), jobId, state, logTail };
@@ -262,6 +338,11 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
 
   commandRegistry.register('runpane:devices:close', async () => {
     const caller = deviceCaller(services);
+    if (remote?.leaseOf(caller.paneId)) {
+      const closed = await remoteDevices(services).close(caller.paneId);
+      for (const panel of devicePanels(caller.paneId)) await setPanelState(panel, { phase: 'closed' });
+      return { ok: true, ...closed };
+    }
     return { ok: true, ...(await devices().close(caller)) };
   });
 
@@ -279,9 +360,11 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
   registerDeviceTabChannels(ipcMain, services, commandRegistry);
 
   services.sessionManager.on('session-deleted', ({ id }: { id: string }) => {
-    if (!service) return;
-    service.paneArchived(id).catch((cause) => console.warn(`[devices] archive cleanup for ${id} failed: ${reasonOf(cause)}`));
+    service?.paneArchived(id).catch((cause) => console.warn(`[devices] archive cleanup for ${id} failed: ${reasonOf(cause)}`));
+    remote?.archived(id).catch((cause) => console.warn(`[devices] archive cleanup on the Mac for ${id} failed: ${reasonOf(cause)}`));
   });
+
+  registerMacDeviceHandler(commandRegistry, devices, path.join(getAppDirectory(), 'devices'));
 }
 
 type IpcResponse<Data> = { success: true; data: Data } | { success: false; error: string };
@@ -312,32 +395,42 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
 
   /** The person's touches and buttons, sent from main so the hub token never reaches the renderer. */
   commandRegistry.register('devices:input', (panelId: PaneCommandValue, input: PaneCommandValue) => respond(async () => {
-    const { state } = panelOf(panelId);
+    const { panel, state } = panelOf(panelId);
     if (!state.deviceId || state.phase !== 'live') return false;
     const decoded = decodeBoundary(input, inputSchema);
-    inputSockets.send(state.deviceId, await devices().stream(state.deviceId), inputMessages(decoded, state.platform));
+    const stream = state.machineId ? await remoteDevices(services).stream(panel.sessionId) : await devices().stream(state.deviceId);
+    inputSockets.send(`${state.machineId ?? 'local'}:${state.deviceId}`, stream, inputMessages(decoded, state.platform));
     return true;
   }));
 
   /** `pane-media://device/<panelId>`: the device's live MJPEG stream, proxied with the hub token. */
   registerMediaRoute('device', async (request, url) => {
-    const { state } = panelOf(url.pathname.slice(1));
+    const { panel, state } = panelOf(url.pathname.slice(1));
     if (!state.deviceId || state.phase !== 'live') return new Response(null, { status: 404 });
-    const upstream = await devices().openStream(state.deviceId, request.signal);
+    let upstream: Response;
+    if (state.machineId) {
+      // A linked Mac's hub, through the one-port tunnel; the token stays in main.
+      const { streamUrl, token } = await remoteDevices(services).stream(panel.sessionId);
+      upstream = await fetch(streamUrl, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });
+    } else {
+      upstream = await devices().openStream(state.deviceId, request.signal);
+    }
     if (!upstream.ok || !upstream.body) return new Response(null, { status: 502 });
     return new Response(upstream.body, { headers: { 'Content-Type': upstream.headers.get('content-type') ?? 'multipart/x-mixed-replace; boundary=frame', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
   });
 
   /** One frame as a data URL: the chat card's thumbnail, and the frame view on phones and in the browser app. */
   commandRegistry.register('devices:frame', (panelId: PaneCommandValue) => respond(async () => {
-    const { state } = panelOf(panelId);
+    const { panel, state } = panelOf(panelId);
     if (!state.deviceId) throw new PaneError('ERR_DEVICE_NOT_OPEN', 'This tab has no device yet.', 'Wait for it to boot.');
-    return `data:image/jpeg;base64,${(await devices().latestFrame(state.deviceId)).toString('base64')}`;
+    const frame = state.machineId ? await remoteDevices(services).frame(panel.sessionId) : await devices().latestFrame(state.deviceId);
+    return `data:image/jpeg;base64,${frame.toString('base64')}`;
   }));
 
-  commandRegistry.register('devices:visible', (panelId: PaneCommandValue, clientId: PaneCommandValue, visible: PaneCommandValue) => respond(() => {
+  commandRegistry.register('devices:visible', (panelId: PaneCommandValue, clientId: PaneCommandValue, visible: PaneCommandValue) => respond(async () => {
     const { panel, state } = panelOf(panelId);
-    if (state.deviceId && service) service.lifecycle.setVisible(panel.sessionId, state.deviceId, String(clientId), visible === true);
+    if (state.machineId) await remoteDevices(services).visible(panel.sessionId, visible === true);
+    else if (state.deviceId && service) service.lifecycle.setVisible(panel.sessionId, state.deviceId, String(clientId), visible === true);
     return true;
   }));
 
@@ -354,15 +447,22 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     const { panel, state } = panelOf(panelId);
     const session = services.sessionManager.getSession(panel.sessionId);
     const caller = { paneId: panel.sessionId, paneName: session?.name ?? panel.sessionId };
-    if (action === 'shutdown') {
-      await devices().close(caller);
-      await devices().free('idle');
-      await setPanelState(panel, { phase: 'off' });
+    if (state.machineId) {
+      // On a linked Mac: Shut down ends the lease there (the Mac shuts it down after its warm window); Boot opens it again.
+      await remoteDevices(services).close(caller.paneId).catch(() => undefined);
+      if (action === 'shutdown') {
+        await setPanelState(panel, { phase: 'off' });
+        return true;
+      }
+      await setPanelState(panel, { phase: 'booting' });
+      const { lease, device } = await remoteDevices(services).open(caller.paneId, caller.paneName, state.platform, state.deviceId);
+      await setPanelState(panel, { deviceId: device.id, machineId: lease.macId, phase: 'live', heldBy: undefined });
       return true;
     }
-    if (action === 'restart') {
-      await devices().close(caller);
-      await devices().free('idle');
+    if (state.deviceId && (action === 'shutdown' || action === 'restart')) await devices().shutdownDevice(state.deviceId);
+    if (action === 'shutdown') {
+      await setPanelState(panel, { phase: 'off' });
+      return true;
     }
     await setPanelState(panel, { phase: 'booting' });
     const opened = await devices().open(caller, state.deviceId ? { platform: state.platform, device: state.deviceId } : { platform: state.platform });
@@ -395,5 +495,6 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
 
 export async function disposeDevices(): Promise<void> {
   inputSockets.closeAll();
+  await remote?.dispose();
   await service?.dispose();
 }

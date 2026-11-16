@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { hostCommand } from '../agentChat/hostCommand';
+import { addDeviceHubPort, removeDeviceHubPort } from './deviceHubPorts';
 
 const execFileAsync = promisify(execFile);
 
@@ -152,6 +153,8 @@ export function startHub(script: string, options: { node: NodeRunner; env: NodeJ
       output = '';
       const port = Number(match[1]);
       const token = match[2];
+      addDeviceHubPort(port);
+      child.once('exit', () => removeDeviceHubPort(port));
       const base = `http://127.0.0.1:${port}`;
       resolve({
         port,

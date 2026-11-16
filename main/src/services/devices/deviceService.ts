@@ -426,6 +426,20 @@ export class DeviceService {
     return usage;
   }
 
+  /** Shuts one device down now (the device tab's Shut down), ending any lease on it. */
+  async shutdownDevice(id: string): Promise<void> {
+    const device = (await this.devices()).find(candidate => candidate.id === id);
+    if (!device?.booted) return;
+    const holder = this.lifecycle.holderOf(id);
+    if (holder) {
+      await this.agentDevice(holder, device, ['close']).catch(() => undefined);
+      this.lifecycle.release(holder, id);
+      this.options.onChange?.({ kind: 'released', id, paneId: holder, reason: 'closed' });
+    }
+    await this.shutdown(device);
+    await this.stopIfIdle();
+  }
+
   /** Shuts down unleased devices (`idle`), or also erases and deletes Pane's unleased devices (`all`). */
   async free(mode: 'idle' | 'all'): Promise<{ shutdown: string[]; deleted: string[] }> {
     if (!this.hub && !this.hasMadeDevices()) return { shutdown: [], deleted: [] };
