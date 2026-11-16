@@ -14,6 +14,7 @@ const execFileAsync = promisify(execFile);
 
 const BUSY_WAIT_MS = 60_000;
 const SWEEP_MS = 30_000;
+const SHUTDOWN_WAIT_MS = 60_000;
 const JPEG_START = Buffer.from([0xff, 0xd8]);
 const JPEG_END = Buffer.from([0xff, 0xd9]);
 const PANE_DEVICE_NAMES = { ios: 'Pane iPhone', android: 'Pane_Android' } satisfies Record<DevicePlatform, string>;
@@ -489,8 +490,12 @@ export class DeviceService {
     const deleted: string[] = [];
     if (mode === 'all') {
       for (const device of unleased.filter(candidate => candidate.paneMade)) {
-        await this.remove({ ...device, booted: false }).catch(() => undefined);
-        deleted.push(device.id);
+        try {
+          await this.remove({ ...device, booted: false });
+          deleted.push(device.id);
+        } catch (cause) {
+          this.options.log?.(`[devices] delete ${device.id} failed: ${reasonOf(cause)}`);
+        }
       }
     }
     await this.stopIfIdle();
@@ -655,6 +660,11 @@ export class DeviceService {
     // Keep its last screen for the tab's off state and the chat card.
     await this.frame(device.id).catch(() => undefined);
     await hub.request('/api/devices/shutdown', { platform: device.platform, id: device.serial ?? device.id, name: device.name });
+    // The hub answers before the device stops; erasing or deleting it earlier fails on locked files.
+    const deadline = this.now() + SHUTDOWN_WAIT_MS;
+    while ((await this.devices()).some(candidate => candidate.id === device.id && candidate.booted) && this.now() < deadline) {
+      await sleep(1_000);
+    }
     this.options.onChange?.({ kind: 'shutdown', id: device.id });
   }
 
@@ -678,7 +688,9 @@ export class DeviceService {
   private async remove(device: HubDevice): Promise<void> {
     const hub = await this.ensureHub();
     if (device.booted) await this.shutdown(device);
-    await hub.request('/api/devices/remove', { platform: device.platform, id: device.id, name: device.name });
+    const removed = decodeBoundary(await (await hub.request('/api/devices/remove', { platform: device.platform, id: device.id, name: device.name })).json(), boundary.object({ ok: boundary.boolean, error: boundary.optional(boundary.string) }));
+    // Keep the record when the delete fails, so the next sweep tries again.
+    if (!removed.ok) throw new PaneError('ERR_DEVICE_REMOVE_FAILED', `Pane could not delete ${device.name}: ${removed.error ?? 'the hub gave no reason'}.`, 'Try `runpane devices free --all` again in a minute.');
     const state = this.readState();
     delete state.made[device.id];
     this.writeState(state);
