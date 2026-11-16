@@ -1,6 +1,6 @@
 {
   "packageName": "com.runpane.glasses",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "name": "Pane",
   "description": "Answer your coding agents from your glasses: Pane's cards, terminals and new Sessions from every computer you pair, over Tailscale or Pane's relay.",
   "tagline": "Answer your coding agents from your glasses",
