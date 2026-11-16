@@ -302,8 +302,8 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
 }
 
 /** A setup queue with a free slot: setup runs at once and is already done. */
-function idleSetupQueue(): Pick<TaskQueue, 'setupQueuePosition' | 'waitForSetup'> {
-  return { setupQueuePosition: vi.fn(() => undefined), waitForSetup: vi.fn(async () => {}) };
+function idleSetupQueue(): Pick<TaskQueue, 'setupQueuePosition' | 'waitForSetup' | 'waitForSetupWithin'> {
+  return { setupQueuePosition: vi.fn(() => undefined), waitForSetup: vi.fn(async () => {}), waitForSetupWithin: vi.fn(async () => 'finished' as const) };
 }
 
 const tempDirs: string[] = [];
@@ -5963,6 +5963,70 @@ describe('runpane IPC handlers', () => {
     finishSetup();
 
     await vi.waitFor(() => expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({ sessionId: session.id, type: 'terminal' })));
+  });
+
+  it('returns the Pane when setup outlasts the create timeout and launches its agent with the prompt after setup', async () => {
+    vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+    let finishSetup: () => void = () => {};
+    const services = createServices({
+      // SAFETY: This queue double implements the create and setup-queue methods the create handler uses.
+      taskQueue: {
+        createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })),
+        setupQueuePosition: vi.fn(() => undefined),
+        waitForSetupWithin: vi.fn(async () => 'running' as const),
+        waitForSetup: vi.fn(() => new Promise<void>(resolve => { finishSetup = resolve; })),
+      } as never,
+    });
+
+    const result = await createRegistry(services).invoke('runpane:panes:create', [{
+      repo: { id: project.id },
+      timeoutMs: 5_000,
+      panes: [{ name: 'slow-install', tool: { command: 'codex', initialInput: 'Fix the bug' } }],
+    }]);
+
+    expect(result).toMatchObject({
+      ok: true,
+      items: [{
+        ok: true,
+        paneId: session.id,
+        nextCommand: `runpane panels list --pane ${session.id} --json`,
+        setupPending: { message: 'Setup is still running after the 5s create timeout. Its agent starts after setup.' },
+      }],
+    });
+    expect(result.items[0]).not.toHaveProperty('panelId');
+    expect(result.items[0]).not.toHaveProperty('error');
+    expect(panelManager.createPanel).not.toHaveBeenCalled();
+
+    finishSetup();
+
+    await vi.waitFor(() => expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({ sessionId: session.id, type: 'terminal' })));
+  });
+
+  it('starts no agent when setup that outlasted the create timeout then fails', async () => {
+    vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+    let failSetup: (error: Error) => void = () => {};
+    const services = createServices({
+      // SAFETY: This queue double implements the create and setup-queue methods the create handler uses.
+      taskQueue: {
+        createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })),
+        setupQueuePosition: vi.fn(() => undefined),
+        waitForSetupWithin: vi.fn(async () => 'running' as const),
+        waitForSetup: vi.fn(() => new Promise<void>((_resolve, reject) => { failSetup = reject; })),
+      } as never,
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await createRegistry(services).invoke('runpane:panes:create', [{
+      repo: { id: project.id },
+      panes: [{ name: 'broken-install', tool: { agent: 'codex' } }],
+    }]);
+    expect(result).toMatchObject({ ok: true, items: [{ ok: true, setupPending: expect.anything() }] });
+
+    failSetup(new Error('pnpm install failed'));
+
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('did not launch after setup'), expect.any(Error)));
+    expect(panelManager.createPanel).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 
   it('reports the base a created Pane started from, with its stale-base notice', async () => {

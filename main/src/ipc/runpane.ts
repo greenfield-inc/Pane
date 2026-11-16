@@ -40,7 +40,7 @@ import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { fastCheckWorkingDirectory, hasUntrackedWork, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
-import { queuedSetupMessage } from '../services/taskQueue';
+import { queuedSetupMessage, type TaskQueue } from '../services/taskQueue';
 import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 import { presentStoppedPanel, projectWorkspaceEntry } from '../services/workspaceJournal';
 import { importSessionInboxFile, SessionInbox } from '../services/sessionInbox';
@@ -3341,15 +3341,14 @@ async function createPaneItem(
     // A queued setup can wait longer than any caller should block, so report the
     // Pane now and launch its agent once setup finishes.
     const setupPosition = taskQueue.setupQueuePosition(session.id);
-    if (setupPosition !== undefined) {
-      void taskQueue.waitForSetup(session.id)
-        .then(async () => {
-          await createTerminalPanelForSession(services, session, tool, {
-            activate: options.activate, agentSessionId: item.resume, expectReport: shouldExpectReport(options, Boolean(tool.initialInput)),
-            openedBy: panelOpener(options.source, options.callerPanelId),
-          });
-        })
-        .catch(error => console.error(`[Runpane] Pane ${session.id} did not launch after queued setup:`, error));
+    const setupState = setupPosition === undefined
+      ? await taskQueue.waitForSetupWithin(session.id, Math.max(0, createDeadline - Date.now()))
+      : 'running';
+    if (setupState === 'running') {
+      launchAgentAfterSetup(services, session, tool, item, options, taskQueue);
+      const pending = setupPosition === undefined
+        ? { setupPending: { message: `Setup is still running after the ${Math.round((options.timeoutMs ?? DEFAULT_PANE_CREATE_TIMEOUT_MS) / 1000)}s create timeout. Its agent starts after setup.` } }
+        : { setupQueue: { position: setupPosition, message: `${queuedSetupMessage(setupPosition)}. Its agent starts after setup.` } };
       return {
         ok: true,
         index,
@@ -3360,15 +3359,11 @@ async function createPaneItem(
         worktreePath: session.worktreePath,
         nextCommand: `runpane panels list --pane ${session.id} --json`,
         tool: describeTool(tool),
-        setupQueue: {
-          position: setupPosition,
-          message: `${queuedSetupMessage(setupPosition)}. Its agent starts after setup.`,
-        },
+        ...pending,
         association,
         base: sessionResult.base,
       };
     }
-    await taskQueue.waitForSetup(session.id, Math.max(0, createDeadline - Date.now()));
 
     const { panel, readiness, initialInput, promptFile, attachments, warnings } = await createTerminalPanelForSession(services, session, tool, {
       expectReport: shouldExpectReport(options, Boolean(tool.initialInput)),
@@ -3410,6 +3405,25 @@ async function createPaneItem(
       : undefined;
     return createFailureItem(index, item, ownerError ?? error, createdSessionId, createdWorktreePath);
   }
+}
+
+/** Starts the Pane's agent, with its prompt or initial input, once setup finishes; a failed setup starts nothing. */
+function launchAgentAfterSetup(
+  services: AppServices,
+  session: Session,
+  tool: RunpaneResolvedTool,
+  item: RunpanePaneCreateItem,
+  options: PaneCreateItemOptions,
+  taskQueue: Pick<TaskQueue, 'waitForSetup'>,
+): void {
+  void taskQueue.waitForSetup(session.id)
+    .then(async () => {
+      await createTerminalPanelForSession(services, session, tool, {
+        activate: options.activate, agentSessionId: item.resume, expectReport: shouldExpectReport(options, Boolean(tool.initialInput)),
+        openedBy: panelOpener(options.source, options.callerPanelId),
+      });
+    })
+    .catch(error => console.error(`[Runpane] Pane ${session.id} did not launch after setup:`, error));
 }
 
 async function branchOwnerError(services: AppServices, repo: Project, branch: string): Promise<RunpaneCodedError | undefined> {

@@ -749,6 +749,8 @@ export interface RunpanePaneCreateSuccessItem {
   expectedReport?: TerminalExpectedReport;
   /** Set when the Pane's setup waits for a slot; its agent starts after setup, so there is no panel yet. */
   setupQueue?: { position: number; message: string };
+  /** Set when setup (dependency install, build script) outlasts the create timeout; its agent starts after setup, so there is no panel yet. */
+  setupPending?: { message: string };
   /** Set for a Pane with its own worktree: the base it started from and whether that base was refreshed. */
   base?: RunpanePaneBase;
 }
