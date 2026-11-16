@@ -406,6 +406,7 @@ describe('Approvals items, through the registered handlers', () => {
     ['loose', { id: 'loose', name: 'docs' }],
     ['run-1', { id: 'run-1', name: 'deal-watch · Nov 16 09:00' }],
     ['run-2', { id: 'run-2', name: 'deal-watch · Nov 17 09:00' }],
+    ['run-3', { id: 'run-3', name: 'deal-watch · Nov 18 09:00' }],
   ]);
   const launch = { id: 'session-1', name: 'Launch', paneId: 'session-pane' };
   const later = { id: 'session-2', name: 'Later', paneId: 'later-pane' };
@@ -477,6 +478,39 @@ describe('Approvals items, through the registered handlers', () => {
     // Once the person answers, the card stays answered: a later run can no longer reopen it.
     await pane.notify.run({ type: 'answer', id, answer: { choice: 'Got it' } });
     await expect(update('run-2')).rejects.toMatchObject({ code: expect.stringMatching(/^ERR_NOTIFY_/u) });
+    pane.notify.dispose();
+  });
+
+  it('acts on the run\'s own Q-n card before another run\'s, and else on the newest (#1451 FU-2)', async () => {
+    const db = createLoopTestDb();
+    let run = 0;
+    const loops = new LoopManager({
+      repo: new LoopRepository(() => db),
+      startRun: async () => ({ sessionId: `run-${++run}` }),
+      archiveRun: async () => true,
+      projectExists: () => true,
+      prepareSession: async target => target,
+    });
+    const loop = await loops.save({ name: 'deal-watch', projectId: 1, cron: '0 9 * * *', agent: 'claude', enabled: false });
+    for (let index = 0; index < 3; index += 1) await loops.runNow(loop.id);
+    const pane = await startWithSessions(undefined, loops);
+    const ask = (paneId: string, title: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      ui: 'options', caller: { paneId, panelId: `${paneId}-tab` }, title, context: 'Deals.', choices: [{ label: 'Got it' }, { label: 'Not interested' }], returnAfterMs: 1,
+    }]);
+    // Two runs each asked a Q-1, both still waiting.
+    await ask('run-1', 'Q-1: 3 new deals?');
+    await ask('run-2', 'Q-1: 4 new deals?');
+    const update = (paneId: string, title: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      update: 'Q-1', whatChanged: 'More deals', title, caller: { paneId, panelId: `${paneId}-tab` }, returnAfterMs: 1,
+    }]);
+    const titles = () => pane.notify.snapshot().items.map(item => `${item.source.paneId}: ${item.title}`).sort();
+
+    // Run 2 updates its own Q-1, never run 1's older one.
+    await update('run-2', 'Q-1: 5 new deals?');
+    expect(titles()).toEqual(['run-1: Q-1: 3 new deals?', 'run-2: Q-1: 5 new deals?']);
+    // A run with no Q-1 of its own takes the newest one the loop posted.
+    await update('run-3', 'Q-1: 6 new deals?');
+    expect(titles()).toEqual(['run-1: Q-1: 3 new deals?', 'run-2: Q-1: 6 new deals?']);
     pane.notify.dispose();
   });
 
