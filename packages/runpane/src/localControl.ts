@@ -3713,7 +3713,12 @@ export async function runPanelsOutput(parsed: ParsedArgs): Promise<number> {
   if (result.text && !result.text.endsWith('\n')) {
     output.write('\n');
   }
+  if (result.hasMore) console.error(olderOutputNote(result.limit));
   return 0;
+}
+
+function olderOutputNote(limit: number): string {
+  return `(older output not shown; raise --limit above ${limit} to see more)`;
 }
 
 export async function runPanelsInput(parsed: ParsedArgs): Promise<number> {
@@ -3755,6 +3760,7 @@ export async function runPanelsScreen(parsed: ParsedArgs): Promise<number> {
   if (text && !text.endsWith('\n')) {
     output.write('\n');
   }
+  if (result.hasMore) console.error(olderOutputNote(result.limit));
   return 0;
 }
 
