@@ -250,7 +250,8 @@ are lost. Two gaps remain:
 ## Security
 
 The glasses app is a web page inside the Even app, or a miniapp inside the Glassly app, which sends
-the Even app's origin. Each computer lets it in only when all of these hold:
+the Even app's origin on HTTP requests and no origin on its voice WebSocket. Each computer lets it in
+only when all of these hold:
 
 - Over Tailscale, the request comes through Tailscale Serve on your tailnet with **your**
   Tailscale login. Other people on your tailnet are refused even with a valid glasses token.
