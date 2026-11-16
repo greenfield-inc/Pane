@@ -280,8 +280,10 @@ To see what uses a machine's disk and memory, run
 `runpane machine health --json`: it lists levels, Pane processes and every
 reclaimable item with its tier. Delete only through
 `runpane machine cleanup --kind <kind>`: without `--yes` it is a dry run, and
-it refuses tier 3 (what Pane did not make). Never delete with `rm`. Ask the
-user before stopping a process or archiving a Pane. Put QA roots, test
+it refuses tier 3 (what Pane did not make). Never delete with `rm`. Run `--yes`
+by yourself only on a tier 1 kind; for a tier 2 kind, show the user the dry-run
+list and total and run `--yes` only after they agree. Ask the user before
+stopping a process or archiving a Pane. Put QA roots, test
 instances and downloads in the Pane's scratch folder (`$PANE_SCRATCH_DIR`) so
 they go when the Pane is archived.
 
