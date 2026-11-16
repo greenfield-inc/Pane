@@ -37,12 +37,13 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
     );
   }
 
-  const profile = machine.profile;
+  const computer = machine.computer;
   const localName = local.name === THIS_COMPUTER ? 'this computer' : local.name;
   const address = machine.tailnet ? machine.tailnet.dnsName : machine.profile ? phoneAddress(machine.profile.baseUrl) : null;
   const colorName = MACHINE_COLOR_NAMES[machine.slot];
-  const header = machine.active && machine.kind === 'tailnet' && controller.connectionState.status === 'connected'
-    ? [machine.os, 'Connected over Tailscale'].filter(Boolean).join(' · ')
+  const inUse = machine.routes?.find((route) => route.inUse);
+  const header = machine.active && inUse && controller.connectionState.status === 'connected'
+    ? [machine.os, `Connected over ${inUse.label}`].filter(Boolean).join(' · ')
     : machine.subtitle;
   const status = machine.active && machine.kind !== 'local'
     ? { value: machine.presence === 'solid' ? 'Connected' : machine.stateText, detail: 'Agents run here' }
@@ -66,9 +67,9 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
     else setError(outcome.error);
   };
 
-  const forget = async (profileId: string) => {
+  const forget = async (computerId: string) => {
     // Main switches to this computer first when the machine is the active one.
-    if (await controller.deleteProfile(profileId)) onBack();
+    if (await controller.forgetComputer(computerId)) onBack();
   };
 
   return (
@@ -131,8 +132,8 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
             {machine.action === 'retry' ? 'Retry' : 'Switch'}
           </Button>
         ) : <span />}
-        {profile && (
-          <Button type="button" variant="ghost" size="sm" className="text-status-error" disabled={controller.busy} onClick={() => void forget(profile.id)}>
+        {computer && (
+          <Button type="button" variant="ghost" size="sm" className="text-status-error" disabled={controller.busy} onClick={() => void forget(computer.id)}>
             Forget {machine.name}
           </Button>
         )}
@@ -146,7 +147,7 @@ function DetailsFrame({ onBack, children }: { onBack: () => void; children: Reac
     <section className="mx-auto w-full max-w-3xl space-y-6 pb-8">
       <button type="button" className="flex items-center gap-1 text-sm text-interactive-text hover:underline" onClick={onBack}>
         <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-        Remote Access
+        Computers
       </button>
       {children}
     </section>

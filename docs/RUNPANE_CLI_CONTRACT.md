@@ -321,6 +321,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `agent-context`: Print token-efficient Pane command context for coding agents.
 - `mcp`: Run the Pane MCP server over stdio so coding agents can call runpane commands as tools.
 - `relay`: Run your own Pane relay: starts this platform's prebuilt pane-relay with your flags; init prints and checks the DNS records it needs.
+- `link`: Link this computer with the one that made a one-time link, so each can reach the other.
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
 - `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
@@ -337,11 +338,11 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panes list`: List Pane sessions in a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `workspace state`: Read one workspace snapshot of every Pane and CLI panel.
-- `workspace list`: List the machines on your tailnet, each with its owner, and whether each answers workspaces.
+- `workspace list`: List your computers saved in Pane and the machines on your tailnet, one entry per computer, and whether each answers workspaces.
 - `workspace enable`: Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).
 - `workspace disable`: Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.
-- `workspace read`: Print a file from a machine on your tailnet; any path form works (C:\..., /mnt/c/..., /home/..., ~/...).
-- `workspace write`: Write --content or stdin to a file on a machine on your tailnet, creating parent folders.
+- `workspace read`: Print a file from another of your machines; any path form works (C:\..., /mnt/c/..., /home/..., ~/...).
+- `workspace write`: Write --content or stdin to a file on another of your machines, creating parent folders.
 - `workspace exec`: Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.
 - `handoff`: Hand your task to another agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. A same-agent handoff from a Pane tab carries and resumes your own session (a fork on this machine) and checks it continued; otherwise a fresh agent starts with the note. From a Session's terminal, create the Session on another machine instead.
 - `ask`: Ask any agent and model one read-only question, on this or another machine, and get its answer: no tab is opened and nothing is left behind.
@@ -448,6 +449,7 @@ runpane agent-context --command <command> [--json]
 runpane mcp [--toolsets <name,...>] [--read-only]
 runpane relay [pane-relay flags...]
 runpane relay init --domain <relay domain> [--public-ip <IPv4>] [--resolver <ip[:port]>]
+runpane link <link> [--yes] [--json] [--pane-dir <path>]
 runpane repos list [--json] [--pane-dir <path>]
 runpane repos add --path <path> [--name <name>] [--json] [--yes] [--pane-dir <path>]
 runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]

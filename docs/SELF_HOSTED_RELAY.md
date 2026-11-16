@@ -86,7 +86,7 @@ You need:
    `curl https://relay.example.com/healthz` and
    `dig @203.0.113.10 relay.example.com A`.
 
-5. **Point Pane at it.** On each computer: **Settings › Remote Access › More ›
+5. **Point Pane at it.** On each computer: **Settings › Remote Access › Phones and glasses ›
    Relay address**, enter `relay.example.com` and press Enter. The computer
    reconnects through your relay, gets a certificate for
    `<id>.relay.example.com`, and new QR codes use your domain. Phones paired

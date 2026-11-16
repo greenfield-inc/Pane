@@ -13,6 +13,7 @@ import { runHandoff } from './handoff';
 import { runAsk, runModels } from './ask';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
+import { runLink } from './pairingLink';
 import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
 import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
@@ -101,8 +102,8 @@ import { runRelay } from './relay';
 import { handOffToManagedCli } from './managedCli';
 import { assertSupportedCliRuntime } from './nodeRuntime';
 import {
-  readMachines,
   readWorkspaceSummary,
+  requireTailnet,
   resolveMachine,
   runWorkspaceExec,
   runWorkspaceList,
@@ -177,8 +178,7 @@ async function runOnMachine(machineQuery: string, command: string[]): Promise<nu
   if (THIS_MACHINE_ONLY.has(parsed.command)) {
     throw new Error(`runpane ${parsed.command} runs on this machine only. On ${machineQuery}, use: runpane workspace ${machineQuery} exec -- runpane ${command.join(' ')}`);
   }
-  const tailnet = await readMachines(parsed.paneDir);
-  if (!tailnet.ok) throw new Error(`runpane workspace needs Tailscale or a computer linked by QR pairing: ${tailnet.reason}. ${tailnet.fix}`);
+  const tailnet = await requireTailnet(parsed.paneDir);
   const machine = resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines]);
   routeDaemonCallsTo(workspaceTarget(machine), machine.self);
   try {
@@ -333,6 +333,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'ask': async (parsed) => runAsk(parsed),
   'models': async (parsed) => runModels(parsed),
   'relay': async (parsed) => runRelay(parsed.execCommand ?? []),
+  'link': async (parsed) => runLink(parsed),
   'pr watch': async parsed => runPrWatchCommand(parsed),
   'pr unwatch': async parsed => runPrWatchCommand(parsed),
   'pr list': async parsed => runPrWatchCommand(parsed),

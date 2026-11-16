@@ -45,6 +45,9 @@ remote PWA / mobile ──HTTP + SSE──▶ daemon ◀──socket── runpa
   and codeless desktop remote mode (`workspaceHost.ts`,
   `services/tailnetMachines.ts`, [RUNPANE_WORKSPACES.md](RUNPANE_WORKSPACES.md)).
   Who it admits is the visibility and optional password in `auth.ts`.
+  A desktop saves each computer it reaches once, with its routes in order
+  (`shared/types/remoteComputers.ts`), and `daemon/client/remotePaneClient.ts`
+  connects on the nearest route that answers ([Routes](QR_PAIRING.md#routes)).
   `pnpm daemon:headless` runs it
   without a window. Remote setup and lifecycle:
   [SELF_HOSTED_REMOTE_DAEMON.md](SELF_HOSTED_REMOTE_DAEMON.md) and

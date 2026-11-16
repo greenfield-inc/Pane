@@ -3,6 +3,8 @@ import { Plus, Radio, Settings } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { MachineMarkEditor } from './machines/MachineMarkEditor';
+import { RoutePills } from './settings/computers/RoutePills';
+import { useAddDeviceStore } from './addDevice/addDeviceStore';
 import { showActionError } from '../stores/errorStore';
 import type { MachineEntry } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
@@ -17,7 +19,6 @@ interface RemoteHostSwitcherProps {
   /** A machine that needs its password opens Remote Access with its password field. */
   onNeedsPassword: (machine: MachineEntry) => void;
   onOpenChange?: (open: boolean) => void;
-  onAddMachine: () => void;
   onOpenRemoteAccess: () => void;
   /** The first item: every saved machine's rows in one sidebar. */
   allMachines?: { selected: boolean; machines: MachineEntry[]; onSelect: () => void };
@@ -37,7 +38,7 @@ function typingTarget(target: EventTarget | null): boolean {
     || target.closest('[role="dialog"]') !== null;
 }
 
-/** Picks which machine runs agents: this computer, a saved host, or any machine on Tailscale. */
+/** Picks which computer runs agents: this computer, a saved computer with its routes as pills, or any machine on Tailscale. */
 export function RemoteHostSwitcher({
   trigger,
   position,
@@ -47,7 +48,6 @@ export function RemoteHostSwitcher({
   onSelect,
   onNeedsPassword,
   onOpenChange,
-  onAddMachine,
   onOpenRemoteAccess,
   allMachines,
 }: RemoteHostSwitcherProps) {
@@ -60,7 +60,14 @@ export function RemoteHostSwitcher({
 
   const items: DropdownItem[] = machines.map((machine) => ({
     id: machine.id,
-    label: <span className="font-medium">{machine.name}</span>,
+    // The pills sit on the name's line, clear of the pencil that shows on hover.
+    label: (
+      <span className="flex min-w-0 items-center gap-3">
+        <span className="min-w-[5rem] flex-1 truncate font-medium">{machine.name}</span>
+        {/* Many routes wrap onto a second line instead of running under the pencil. */}
+        <RoutePills routes={machine.routes ?? []} className="min-w-0 flex-initial" />
+      </span>
+    ),
     description: machine.subtitle,
     // A disabled row dims its mark and name, so the mark stays solid inside it.
     leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
@@ -114,7 +121,7 @@ export function RemoteHostSwitcher({
       header="Agents run on"
       position={position}
       width="auto"
-      menuClassName="w-[300px]"
+      menuClassName="w-[520px] max-w-[calc(100vw-2rem)]"
       menuLabel="Agents run on"
       onOpenChange={(next) => { setOpen(next); onOpenChange?.(next); }}
       itemClassName="py-1.5"
@@ -123,7 +130,7 @@ export function RemoteHostSwitcher({
           {hostingSummary && (
             <DropdownMenuItem icon={Radio} label={hostingSummary} onClick={() => { close(); onOpenRemoteAccess(); }} />
           )}
-          <DropdownMenuItem icon={Plus} label="Add a machine…" onClick={() => { close(); onAddMachine(); }} />
+          <DropdownMenuItem icon={Plus} label="Add a device…" onClick={() => { close(); useAddDeviceStore.getState().open('computer'); }} />
           <DropdownMenuItem icon={Settings} label="Remote Access settings…" onClick={() => { close(); onOpenRemoteAccess(); }} />
         </>
       )}

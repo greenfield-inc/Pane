@@ -152,18 +152,18 @@ Pane lists every host in your SSH config (`~/.ssh/config`, or `C:\Users\<you>\.s
 
 Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: the host machine runs the repos, terminals, git state, files, agent credentials, and compute.
 
-### Pair a phone with a QR code
+### Add a phone or another computer
 
-On the computer, open Pane and choose **Use Pane on your phone** on Home. Point your phone's camera at the code and tap the link: it opens the Pane app, or Pane in the phone's browser. It works on any network, with terminals, alerts and dev server previews. Every computer the Pane app pairs with links to its other computers, so they reach each other for **Switch to**, ports and `runpane workspace`; a phone's browser reaches the computer whose code it scanned. Pane's servers pass the encrypted connection along without reading it, or you can [run your own relay](docs/SELF_HOSTED_RELAY.md). See [Pair a phone with a QR code](docs/QR_PAIRING.md).
+On the computer, open Pane and choose **Pair a phone** on Home, or **Add a device** in Settings › Remote Access. Point your phone's camera at the code and tap the link: it opens the Pane app, or Pane in the phone's browser. For another computer, copy a one-time link from **Add a device › Computer** and open it there. It works on any network, with terminals, alerts and dev server previews. Linked computers reach each other for remote mode, ports and `runpane workspace`, and each shows once in Settings › Remote Access › Computers, where Pane reaches it on the nearest route that answers: same network, Tailscale, SSH, a public URL or Pane's relay. Pane's servers pass the encrypted connection along without reading it, or you can [run your own relay](docs/SELF_HOSTED_RELAY.md). See [Add a device](docs/QR_PAIRING.md).
 
 ### Connect with a code or Tailscale
 
 The original setup path, with a `pane-remote://...` code over Tailscale or SSH:
 
 1. Install Pane normally on the machine that should host your projects and agents.
-2. Open `Settings > Remote Access` on that host machine.
-3. Set it up as a remote host and copy the generated `pane-remote://...` connection code.
-4. On another desktop, open Pane, go to `Settings > Remote Access`, paste the code under **Add connection**, and connect.
+2. Open `Settings > Remote Access > Tailscale` on that host machine.
+3. Click **Set Up Host** and copy the generated `pane-remote://...` connection code.
+4. On another desktop, open Pane, go to `Settings > Remote Access > Tailscale`, paste the code under **Paste a connection code**, and connect.
 5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), paste the same code, and connect.
 
 A connected desktop reaches the host's dev servers at their usual `localhost` address: browser tabs, terminal links and live reload work as on the host. See [Forwarded ports](docs/SELF_HOSTED_REMOTE_DAEMON.md#forwarded-ports).
@@ -227,7 +227,7 @@ Integration keys (voice dictation, iPhone notifications) set on one host reach y
 
 Your agent can work across your Macs, Windows PCs, and Linux machines. Read a file on your desktop, run a command on your build machine, or check the agents running on your laptop — from the same terminal.
 
-Workspaces use your Tailscale login, without SSH keys or pairing codes. Install and sign in to Tailscale on both machines, enable HTTPS Certificates in the Tailscale admin console (see [setup](docs/RUNPANE_WORKSPACES.md#turning-it-on)), and keep Pane running on the machine you want to reach. Workspaces are on by default for the normal desktop install; `runpane workspace list` shows which machines are answering. Other people's machines on your tailnet appear too, labeled with their owner, and answer when their owner sets Who can connect to Everyone on tailnet. Tagged devices are refused.
+On Tailscale, workspaces use your Tailscale login, with no SSH keys or pairing codes. Install and sign in to Tailscale on both machines, enable HTTPS Certificates in the Tailscale admin console (see [setup](docs/RUNPANE_WORKSPACES.md#turning-it-on)), and keep Pane running on the machine you want to reach. Workspaces are on by default for the normal desktop install; `runpane workspace list` shows which machines are answering. Other people's machines on your tailnet appear too, labeled with their owner, and answer when their owner sets Who can connect to Everyone on tailnet. Tagged devices are refused. Computers you linked in Pane appear too, one entry each, and answer with Tailscale off; link one with no screen with `runpane link '<link>'`.
 
 Use the npm CLI (`npm i -g runpane`); the Python wrapper does not run workspace commands. Replace `devbox` with a machine name from the list:
 

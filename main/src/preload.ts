@@ -58,7 +58,8 @@ import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
-import type { RelayStatus } from '../../shared/types/relay';
+import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../shared/types/relay';
+import type { SshRouteProgress } from './daemon/sshRouteSetup';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -993,11 +994,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('relay:status-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('relay:status-changed', wrappedCallback);
     },
-    /** A phone used this computer's pairing code. */
-    onRelayPaired: (callback: (event: { clientId: string; label: string }) => void) => {
-      const wrappedCallback = (_event: Electron.IpcRendererEvent, paired: { clientId: string; label: string }) => callback(paired);
+    /** A phone or computer used this computer's pairing code or link. */
+    onRelayPaired: (callback: (event: RelayPairedEvent) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, paired: RelayPairedEvent) => callback(paired);
       ipcRenderer.on('relay:paired', wrappedCallback);
       return () => ipcRenderer.removeListener('relay:paired', wrappedCallback);
+    },
+    /** A `pane://pair` link reached this Pane: the renderer shows its confirm page. */
+    onRelayLinkOpened: (callback: (event: RelayLinkOpenedEvent) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, opened: RelayLinkOpenedEvent) => callback(opened);
+      ipcRenderer.on('relay:link-opened', wrappedCallback);
+      return () => ipcRenderer.removeListener('relay:link-opened', wrappedCallback);
+    },
+    /** A step of Add a device › SSH connecting a host. */
+    onSshRouteProgress: (callback: (progress: SshRouteProgress) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: SshRouteProgress) => callback(progress);
+      ipcRenderer.on('ssh:route-progress', wrappedCallback);
+      return () => ipcRenderer.removeListener('ssh:route-progress', wrappedCallback);
     },
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkTarget) => callback(target);

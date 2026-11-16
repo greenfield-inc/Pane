@@ -1,4 +1,5 @@
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
+import { AddDeviceHost } from './components/addDevice/AddDeviceDialog';
 import { ConnectionChecklist } from './components/ConnectionChecklist';
 import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from './hooks/useConnectionPresence';
@@ -983,6 +984,7 @@ function App() {
           <TailnetHttpsBanner />
         </div>
         <RemoteConnectionBanner onSettings={() => openSettings({ category: 'remote-access' })} />
+        <AddDeviceHost />
         <div className="pane-main-layout relative flex flex-1 min-h-0">
         <MainProcessLogger />
         {isSettingsOpen && (
@@ -1015,7 +1017,6 @@ function App() {
             onAboutClick={() => setIsAboutOpen(true)}
             onSettingsClick={() => openSettings()}
             onRemoteSettingsClick={() => openSettings({ category: 'remote-access' })}
-            onAddMachineClick={() => openSettings({ category: 'remote-access', setting: 'remote-add-code' })}
             onMachinePasswordRequest={(machine) => openSettings({ category: 'remote-access', setting: 'remote-machines', machine })}
             width={sidebarWidth}
             maximized={sidebarMaximized}

@@ -73,7 +73,7 @@ describe('codeless machine connections', () => {
         tailnetDomain: 'tail1.ts.net',
       },
     });
-    expect(config().remoteDaemon?.client.profiles).toHaveLength(1);
+    expect(config().remoteDaemon?.client.computers).toHaveLength(1);
 
     await expect(call('remote-daemon:list-tailnet-machines')).resolves.toMatchObject({
       success: true,
@@ -85,7 +85,10 @@ describe('codeless machine connections', () => {
   it('saves a machine with no password as a codeless profile that has no token', async () => {
     const { call, config } = setup();
     await call('remote-daemon:save-tailnet-machine', { name: 'my-mac' });
-    expect(config().remoteDaemon?.client.profiles).toEqual([expect.objectContaining({ id: 'tailnet-tail1.ts.net-my-mac', token: '', tailnetMachine: 'my-mac', tailnetDomain: 'tail1.ts.net' })]);
+    expect(config().remoteDaemon?.client.computers).toEqual([expect.objectContaining({
+      id: 'tailnet-tail1.ts.net-my-mac',
+      routes: [expect.objectContaining({ kind: 'tailscale', token: '', tailnetMachine: 'my-mac', tailnetDomain: 'tail1.ts.net' })],
+    })]);
   });
 
   it('refuses to save a machine that is not on the current tailnet', async () => {

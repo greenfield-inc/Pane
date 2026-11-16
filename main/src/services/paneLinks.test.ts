@@ -14,6 +14,7 @@ function setup() {
   const focused: PaneCommandValue[] = [];
   const navigated: PaneLinkNavigation[] = [];
   const shown: string[] = [];
+  const pairLinks: string[] = [];
   const notify = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [] });
   registry.register('runpane:panes:focus', (request: PaneCommandValue) => {
     focused.push(request);
@@ -26,13 +27,14 @@ function setup() {
       const itemId = notify.waitingCardFrom(paneId, panelId);
       if (itemId) shown.push(itemId);
     },
+    openPairLink: (link) => { pairLinks.push(link); },
   });
   const open = (link: PaneCommandValue) => registry.invoke(OPEN_PANE_LINK_CHANNEL, [link]);
   const ask = (source: { paneId: string; panelId: string }, title: string) => {
     void notify.ask({ question: { ui: 'approve', title }, source: { ...source, name: 'auth-refactor', agent: 'Claude' } });
     return notify.snapshot().items.find((item) => item.title === title)?.id;
   };
-  return { focused, navigated, shown, open, ask };
+  return { focused, navigated, shown, pairLinks, open, ask };
 }
 
 describe('pane:// links', () => {
@@ -83,6 +85,18 @@ describe('pane:// links', () => {
       { kind: 'session', sessionId },
       { kind: 'session', sessionId: 'legacy-pane-chat' },
     ]);
+  });
+
+  it("opens the confirm page for another computer's one-time link", async () => {
+    const { focused, navigated, pairLinks, open } = setup();
+    const link = 'pane://pair#s=Zm9vYmFyYmF6&c=macmacmacmacmac0&n=Mac&d=runpane.net';
+
+    expect(await open(link)).toMatchObject({ success: true });
+    expect(await open('pane://pair#c=macmacmacmacmac0&n=Mac')).toMatchObject({ success: false });
+
+    expect(pairLinks).toEqual([link]);
+    expect(focused).toEqual([]);
+    expect(navigated).toEqual([]);
   });
 
   it.each([

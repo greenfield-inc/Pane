@@ -629,6 +629,18 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "link",
+      "summary": "Link this computer with the one that made a one-time link, so each can reach the other.",
+      "usage": [
+        "runpane link <link> [--yes] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "linkRedeemResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "repos list",
       "summary": "List repositories saved in the running Pane app.",
       "usage": [
@@ -881,7 +893,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace list",
-      "summary": "List the machines on your tailnet, each with its owner, and whether each answers workspaces.",
+      "summary": "List your computers saved in Pane and the machines on your tailnet, one entry per computer, and whether each answers workspaces.",
       "usage": [
         "runpane workspace list [--json] [--pane-dir <path>]"
       ],
@@ -924,7 +936,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace read",
-      "summary": "Print a file from a machine on your tailnet; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+      "summary": "Print a file from another of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
       "usage": [
         "runpane workspace [<machine>] read <path> [--json]"
       ],
@@ -943,7 +955,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace write",
-      "summary": "Write --content or stdin to a file on a machine on your tailnet, creating parent folders.",
+      "summary": "Write --content or stdin to a file on another of your machines, creating parent folders.",
       "usage": [
         "runpane workspace [<machine>] write <path> [--content <text>] [--json]"
       ],
@@ -3347,6 +3359,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agent-context [--json]",
         "  runpane mcp [--toolsets <name,...>] [--read-only]",
         "  runpane relay [pane-relay flags...]",
+        "  runpane link <link> [--yes] [--json]",
         "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
@@ -3781,7 +3794,7 @@ export const RUNPANE_CONTRACT = {
         "  --json                         Print machine-readable output"
       ],
       "workspace": [
-        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale or the routes Pane saved for them.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -3793,7 +3806,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane workspace <machine> <runpane command>      (any command that talks to Pane, e.g. sessions list --json)",
         "  runpane workspace enable|disable",
         "",
-        "<machine> is a Tailscale name, unique prefix, or IP. Your own machines are reachable, and a teammate's machine when its owner set Who can connect to Everyone on tailnet.",
+        "<machine> is a name from workspace list, an id it is saved under in Pane (such as its relay id), a unique prefix, or a Tailscale IP. Your own machines are reachable, and a teammate's machine when its owner set Who can connect to Everyone on tailnet.",
+        "A computer saved in Pane is tried route by route (same network, Tailscale, SSH, public URL, Pane relay, in its order); one that does not connect gives way to the next.",
         "Without <machine>, read, write, and exec route a path that cannot exist here (C:\\... on a Mac) to the one joined machine it fits.",
         "Commands that only run here (doctor, agent-context, mcp, docs) run there with: runpane workspace <machine> exec -- 'runpane doctor'"
       ],
@@ -4115,6 +4129,19 @@ export const RUNPANE_CONTRACT = {
         "  npx --yes runpane@latest relay --dev",
         "",
         "Guide: docs/SELF_HOSTED_RELAY.md"
+      ],
+      "link": [
+        "Usage:",
+        "  runpane link <link> [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "Link this computer with the one that made a one-time link, so each can reach the other.",
+        "Copy the link in Pane on the other computer: Add a device › Computer.",
+        "A computer that already has linked computers asks before the two groups join.",
+        "",
+        "Options:",
+        "  --yes                           Join without asking; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
       "agents doctor": [
         "Usage:",
@@ -5402,6 +5429,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agent-context [--json]",
         "  runpane mcp [--toolsets <name,...>] [--read-only]",
         "  runpane relay [pane-relay flags...]",
+        "  runpane link <link> [--yes] [--json]",
         "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
@@ -5819,7 +5847,7 @@ export const RUNPANE_CONTRACT = {
         "  --json"
       ],
       "workspace": [
-        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale or the routes Pane saved for them.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -6127,6 +6155,19 @@ export const RUNPANE_CONTRACT = {
         "",
         "`runpane relay` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest relay"
+      ],
+      "link": [
+        "Usage:",
+        "  runpane link <link> [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "Link this computer with the one that made a one-time link, so each can reach the other.",
+        "Copy the link in Pane on the other computer: Add a device › Computer.",
+        "A computer that already has linked computers asks before the two groups join.",
+        "",
+        "Options:",
+        "  --yes                           Join without asking; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
       "agents doctor": [
         "Usage:",
@@ -9061,6 +9102,12 @@ export const RUNPANE_CONTRACT = {
         "--questions",
         "[{\"title\":\"A\",\"choices\":[{\"label\":\"x\"}]},{\"title\":\"B\",\"choices\":[{\"label\":\"y\"}]}]",
         "--json"
+      ],
+      [
+        "link",
+        "https://runpane.net/pair#s=secret&c=k7xq2m4n8p3r5t6v&n=parsa-devbox",
+        "--yes",
+        "--json"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -9765,7 +9812,8 @@ export const RUNPANE_CONTRACT = {
                 "enum": [
                   "macOS",
                   "Windows",
-                  "Linux"
+                  "Linux",
+                  "unknown"
                 ]
               },
               "online": {
@@ -15206,6 +15254,31 @@ export const RUNPANE_CONTRACT = {
       },
       "additionalProperties": false
     },
+    "linkRedeemResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "maker",
+        "linked"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "maker": {
+          "type": "string",
+          "description": "The computer that made the link."
+        },
+        "linked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The computers this one is now linked with."
+        }
+      },
+      "additionalProperties": false
+    },
     "docsSearchResult": {
       "type": "object",
       "required": [
@@ -16678,7 +16751,7 @@ export const RUNPANE_CONTRACT = {
       "properties": {
         "name": {
           "type": "string",
-          "description": "Tailscale machine name; pass it as `machine`."
+          "description": "Machine name; pass it as `machine`."
         },
         "dnsName": {
           "type": "string"
@@ -16828,6 +16901,47 @@ export const RUNPANE_CONTRACT = {
               "error": {
                 "type": "string",
                 "description": "Why it does not answer."
+              },
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Other names a saved computer answers to: its Pane id, install id, relay id, and route host names."
+              },
+              "routes": {
+                "type": "array",
+                "description": "A saved computer's routes, in the order runpane tries them. Absent for a tailnet machine Pane has not saved.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "baseUrl",
+                    "answered"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "lan",
+                        "tailscale",
+                        "ssh",
+                        "public",
+                        "relay"
+                      ]
+                    },
+                    "baseUrl": {
+                      "type": "string"
+                    },
+                    "fingerprint": {
+                      "type": "string",
+                      "description": "The key this route accepts (relay and same-network routes)."
+                    },
+                    "answered": {
+                      "type": "boolean",
+                      "description": "This route answered the check."
+                    }
+                  }
+                }
               }
             }
           }
@@ -19037,6 +19151,47 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "The Python package prints how to run it with npx.",
           "Fails with ERR_RELAY_UNSUPPORTED_PLATFORM on a platform with no prebuilt binary, ERR_RELAY_DOWNLOAD_FAILED when the release cannot be reached or lists no binary for this platform, and ERR_RELAY_CHECKSUM_MISMATCH when the download differs from pane-relay-sha256.txt; nothing is cached then."
+        ]
+      },
+      "link": {
+        "name": "link",
+        "summary": "Link this computer with the one that made a one-time link, so each can reach the other.",
+        "details": "Redeems a link copied from Pane on another computer (Add a device › Computer) through this computer's running Pane, the way opening the link does. The computer that made the link, and every computer already linked with it, become reachable from this one with runpane workspace, and this one from them. For a computer with no screen.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<link>",
+            "required": true,
+            "description": "The link, https://<relay>/pair#s=…&c=…&n=…, as copied. Any expiry (10 minutes, 1 hour or 24 hours)."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Join two groups of computers without asking; required in non-interactive shells when this computer already has linked computers."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane link 'https://runpane.net/pair#s=…&c=…&n=…'",
+          "runpane link 'https://runpane.net/pair#s=…&c=…&n=…' --yes --json"
+        ],
+        "jsonSchemas": [
+          "linkRedeemResult"
+        ],
+        "notes": [
+          "A computer with nothing linked links without asking. One that already reaches computers asks first, naming both sides, because the two groups become one.",
+          "Each link works once. A used link fails with \"This code was already used\", an old one with \"This code expired\"."
         ]
       },
       "repos list": {
@@ -23046,8 +23201,8 @@ export const RUNPANE_CONTRACT = {
       },
       "workspace list": {
         "name": "workspace list",
-        "summary": "List the machines on your tailnet, each with its owner, and whether each answers workspaces.",
-        "details": "Shows this machine's workspace state, then each other Mac, Windows, and Linux machine on your tailnet with its OS, online state, and shell. Your own machines come first; other people's machines carry their owner's login and answer only when their owner lets you in.",
+        "summary": "List your computers saved in Pane and the machines on your tailnet, one entry per computer, and whether each answers workspaces.",
+        "details": "Shows this machine's workspace state, then one entry per computer: those saved in Pane (Settings › Remote Access › Computers) with their routes in the order runpane tries them, and the other Mac, Windows, and Linux machines on your tailnet. Each shows its OS, online state, shell, and the route that answered. Your own machines come first; other people's machines carry their owner's login and answer only when their owner lets you in.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -23061,7 +23216,8 @@ export const RUNPANE_CONTRACT = {
           "runpane workspace list --json"
         ],
         "notes": [
-          "A machine has joined when Pane runs there with workspaces on; it answers on https://<machine>.<tailnet>.ts.net:8443."
+          "A saved computer is tried route by route; one that does not connect within 2.5 seconds gives way to the next, so Tailscale being off falls back to the relay.",
+          "A tailnet machine Pane has not saved answers on https://<machine>.<tailnet>.ts.net:8443 when Pane runs there with workspaces on."
         ],
         "jsonSchemas": [
           "workspaceListResult"
@@ -23109,7 +23265,7 @@ export const RUNPANE_CONTRACT = {
       },
       "workspace read": {
         "name": "workspace read",
-        "summary": "Print a file from a machine on your tailnet; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+        "summary": "Print a file from another of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
         "details": "Reads the same way on every OS. On Windows, /mnt/c/... reaches C:\\... and WSL paths such as /home/<user>/... are read through \\\\wsl.localhost\\<distro>\\. Directories list their entries.",
         "requiresPaneDaemon": false,
         "mutates": false,
@@ -23117,7 +23273,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "<machine>",
             "required": false,
-            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+            "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
           },
           {
             "name": "<path>",
@@ -23143,7 +23299,7 @@ export const RUNPANE_CONTRACT = {
       },
       "workspace write": {
         "name": "workspace write",
-        "summary": "Write --content or stdin to a file on a machine on your tailnet, creating parent folders.",
+        "summary": "Write --content or stdin to a file on another of your machines, creating parent folders.",
         "details": "Takes the same path forms as workspace read. The content replaces the file.",
         "requiresPaneDaemon": false,
         "mutates": true,
@@ -23151,7 +23307,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "<machine>",
             "required": false,
-            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+            "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
           },
           {
             "name": "<path>",
@@ -23190,7 +23346,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "<machine>",
             "required": false,
-            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to let a --cwd that cannot exist here pick the one joined machine it fits."
+            "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to let a --cwd that cannot exist here pick the one joined machine it fits."
           },
           {
             "name": "--cwd",

@@ -218,6 +218,8 @@ export interface ParsedArgs {
   cwd?: string;
   /** `workspace write --content`; without it, write reads stdin. */
   writeContent?: string;
+  /** `runpane link <link>`: a one-time link from another computer's Pane. */
+  pairingLink?: string;
   /** `runpane handoff <destination...>` */
   handoffDestination?: string;
   handoffTemplate?: boolean;
@@ -527,8 +529,9 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
   return args.splice(1, 1)[0];
 }
 
-/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item'> {
+/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one; link takes the link. */
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink'> {
+  if (command === 'link') return args[0] !== undefined && !args[0].startsWith('-') ? { pairingLink: args.shift() ?? '' } : {};
   if (AUTOPILOT_ITEM_COMMANDS.has(command)) {
     return args[0] !== undefined && !args[0].startsWith('-') ? { item: args.shift() ?? '' } : {};
   }

@@ -1,4 +1,5 @@
 import { isDaemonOwnedChannel } from '../daemon/daemonChannels';
+import { runsOnThisComputer } from '../../../shared/types/daemon';
 import { rejectWithPaneErrorText, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -19,6 +20,7 @@ interface PaneDaemonBridgeRouter {
 export function createDaemonBridgeRouter(commandRegistry: PaneCommandRegistry): PaneDaemonBridgeRouter {
   return {
     async invoke(channel: string, args: PaneCommandValue[]): Promise<PaneCommandValue> {
+      if (runsOnThisComputer(channel)) return commandRegistry.invoke(channel, args);
       return remotePaneClientController.invoke(channel, args, () => commandRegistry.invoke(channel, args));
     },
   };

@@ -1,5 +1,4 @@
 import os from 'os';
-import { normalizeRemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
 import { getPaneEventSink } from '../../core/runtime';
 import { systemSecretBackend } from '../../services/paneSecrets';
 import { KeychainItemMissing } from '../../services/keychain';
@@ -10,7 +9,9 @@ import type { PairingRoute } from '../httpApiServer';
 import { registerRelayCommands } from './relayCommands';
 import { RelayPreviews } from './relayPreviews';
 import { RelayService, type RelaySecretStore } from './relayService';
-import { createComputerCaller, RelayLinks } from './relayLinks';
+import { createComputerCaller, createComputerPoster, RelayLinks } from './relayLinks';
+import { ComputerLinking, createPairingRoute } from './computerLinking';
+import { buildRoutesReport } from '../computerCommands';
 import { disconnectActiveRemoteHostClients } from '../remoteTransportController';
 import { remoteHostRuntimeStateStore } from '../remoteHostRuntimeState';
 import { readFileSync } from 'fs';
@@ -19,6 +20,7 @@ import { setRelayPushChannel } from '../mobilePushSender';
 export interface RelayHost {
   service: RelayService;
   links: RelayLinks;
+  linking: ComputerLinking;
   previews: RelayPreviews;
   pairing: PairingRoute;
   suspend(): void;
@@ -65,6 +67,23 @@ export async function createRelayHost(deps: {
     clientActive: (clientId) => remote()?.host.clients.some((client) => client.id === clientId) ?? false,
   });
   let proxy: PreviewProxy | null = null;
+  const dial = process.env.PANE_RELAY_DIAL ? /^(.+):(\d+)$/u.exec(process.env.PANE_RELAY_DIAL) : null;
+  const dialOptions = {
+    dial: dial ? { host: dial[1], port: Number(dial[2]) } : undefined,
+    extraCa: process.env.PANE_RELAY_EXTRA_CA ? readFileSync(process.env.PANE_RELAY_EXTRA_CA, 'utf8') : undefined,
+  };
+  const call = createComputerCaller(dialOptions);
+  const links = new RelayLinks({
+    config: configManager,
+    self: () => service?.computerInfo(),
+    call,
+    disconnect: (ids) => {
+      disconnectActiveRemoteHostClients(ids);
+      for (const id of ids) previews.revokeClient(id);
+    },
+    connectedClientIds: () => new Set(remoteHostRuntimeStateStore.getState().connectedClients.map((client) => client.clientId).filter((id): id is string => id !== null)),
+    log: deps.log,
+  });
   service = new RelayService({
     settings: () => remote()?.relay,
     onSettingsChanged: (listener) => {
@@ -86,37 +105,22 @@ export async function createRelayHost(deps: {
     },
     previewPort: () => proxy?.port ?? null,
     displayName: computerDisplayName,
-    addClient: async (record) => {
-      // Pairing the same phone again replaces its earlier token here.
-      const replaced = (remote()?.host.clients ?? []).filter((client) => client.kind === undefined && record.phoneId !== undefined && client.phoneId === record.phoneId).map((client) => client.id);
-      await configManager.updateConfigWith((current) => {
-        const config = normalizeRemoteDaemonConfig(current.remoteDaemon);
-        return { remoteDaemon: { ...config, host: { ...config.host, clients: [...config.host.clients.filter((client) => !replaced.includes(client.id)), record] } } };
-      });
-      if (replaced.length) disconnectActiveRemoteHostClients(replaced);
-    },
+    // Pairing the same phone or computer again replaces its earlier token here.
+    addClient: (record) => links.addClient(record),
     log: deps.log,
   });
   const relay = service;
-  const dial = process.env.PANE_RELAY_DIAL ? /^(.+):(\d+)$/u.exec(process.env.PANE_RELAY_DIAL) : null;
-  const links = new RelayLinks({
-    config: configManager,
+  const linking = new ComputerLinking({
+    links,
     self: () => relay.computerInfo(),
-    call: createComputerCaller({
-      dial: dial ? { host: dial[1], port: Number(dial[2]) } : undefined,
-      extraCa: process.env.PANE_RELAY_EXTRA_CA ? readFileSync(process.env.PANE_RELAY_EXTRA_CA, 'utf8') : undefined,
-    }),
-    disconnect: (ids) => {
-      disconnectActiveRemoteHostClients(ids);
-      for (const id of ids) previews.revokeClient(id);
-    },
-    connectedClientIds: () => new Set(remoteHostRuntimeStateStore.getState().connectedClients.map((client) => client.clientId).filter((id): id is string => id !== null)),
+    routesReport: buildRoutesReport,
+    post: createComputerPoster(dialOptions),
+    call,
     log: deps.log,
   });
   proxy = await servePreviews(previews.route, deps.files);
-  registerRelayCommands(deps.commandRegistry, relay, previews, links, configManager);
+  registerRelayCommands(deps.commandRegistry, relay, previews, links, linking, configManager);
   relay.onStatus((status) => getPaneEventSink().send('relay:status-changed', status));
-  relay.onPaired((event) => getPaneEventSink().send('relay:paired', event));
   relay.start();
   // A computer without the Pane app's push keys sends its phones' alerts through its relay.
   setRelayPushChannel({
@@ -129,14 +133,13 @@ export async function createRelayHost(deps: {
     service: relay,
     previews,
     links,
-    pairing: {
-      exchange: async (request) => {
-        const result = await relay.exchangeSecret(request);
-        if (!result.ok) return result;
-        return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, request.known ?? []) };
-      },
-      clientAddress: (remoteAddress, remotePort) => relay.clientAddress(remoteAddress, remotePort),
-    },
+    linking,
+    pairing: createPairingRoute({
+      host: relay,
+      links,
+      routesReport: buildRoutesReport,
+      onPaired: (event) => getPaneEventSink().send('relay:paired', event),
+    }),
     suspend: () => relay.suspend(),
     resume: () => relay.resume(),
     stop: async () => {

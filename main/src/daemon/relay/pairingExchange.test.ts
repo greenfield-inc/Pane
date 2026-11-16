@@ -62,12 +62,76 @@ describe('QR pairing exchange', () => {
     expect(await exchange.exchange({ secret, label: 'Phone', source: PHONE })).toMatchObject({ ok: true });
   });
 
-  it('tells the dialog when its code was used, so it can show a fresh one', async () => {
+  it('gives each link its own expiry: 10 minutes, 1 hour or 24 hours', async () => {
+    const { exchange, advance } = setup();
+    const tenMinutes = exchange.createSecret('10m').secret;
+    const hour = exchange.createSecret('1h').secret;
+    const day = exchange.createSecret('24h').secret;
+    const dayLate = exchange.createSecret('24h').secret;
+
+    advance(11 * 60_000);
+    expect(await exchange.exchange({ secret: tenMinutes, label: 'Phone', source: PHONE })).toMatchObject({ ok: false, code: 'ERR_PAIRING_CODE_EXPIRED' });
+    advance(39 * 60_000); // 50 minutes
+    expect(await exchange.exchange({ secret: hour, label: 'Phone', source: PHONE })).toMatchObject({ ok: true });
+
+    const hourLate = exchange.createSecret('1h').secret;
+    advance(61 * 60_000);
+    expect(await exchange.exchange({ secret: hourLate, label: 'Phone', source: PHONE })).toMatchObject({ ok: false, code: 'ERR_PAIRING_CODE_EXPIRED' });
+
+    advance(23 * 60 * 60_000 - 111 * 60_000); // 23 hours after the day links were made
+    expect(await exchange.exchange({ secret: day, label: 'Phone', source: PHONE })).toMatchObject({ ok: true });
+    advance(60 * 60_000 + 1);
+    expect(await exchange.exchange({ secret: dayLate, label: 'Phone', source: PHONE })).toMatchObject({ ok: false, code: 'ERR_PAIRING_CODE_EXPIRED' });
+  });
+
+  it('still says a 24-hour link was already used when it is tried again near its end', async () => {
+    const { exchange, advance } = setup();
+    const { secret } = exchange.createSecret('24h');
+    advance(60_000);
+    expect(await exchange.exchange({ secret, label: 'Phone', source: PHONE })).toMatchObject({ ok: true });
+    advance(23 * 60 * 60_000);
+    expect(await exchange.exchange({ secret, label: 'Phone', source: PHONE })).toMatchObject({ ok: false, code: 'ERR_PAIRING_CODE_USED', message: expect.stringContaining('This code was already used') });
+  });
+
+  it('checks a secret without spending it, behind the same lockout', async () => {
     const { exchange } = setup();
-    const used: string[] = [];
-    exchange.onPaired((event) => used.push(event.label));
-    const { secret } = exchange.createSecret();
-    await exchange.exchange({ secret, label: 'Pixel 9', source: PHONE });
-    expect(used).toEqual(['Pixel 9']);
+    const { secret, expiresAt } = exchange.createSecret('1h');
+    expect(exchange.check(secret, PHONE)).toEqual({ ok: true, expiresAt });
+    expect(exchange.check(secret, PHONE)).toEqual({ ok: true, expiresAt });
+    expect(await exchange.exchange({ secret, label: 'Phone', source: PHONE })).toMatchObject({ ok: true });
+    expect(exchange.check(secret, PHONE)).toMatchObject({ ok: false, code: 'ERR_PAIRING_CODE_USED' });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) exchange.check(`wrong-${attempt}`, ATTACKER);
+    expect(exchange.check(exchange.createSecret().secret, ATTACKER)).toMatchObject({ ok: false, code: 'ERR_PAIRING_LOCKED' });
+  });
+
+  it('keeps 16 secrets waiting: a new one retires the oldest 10-minute one before a longer link', async () => {
+    const { exchange } = setup();
+    const longLink = exchange.createSecret('24h').secret;
+    const firstCode = exchange.createSecret('10m').secret;
+    for (let made = 2; made < 16; made += 1) exchange.createSecret('10m');
+    exchange.createSecret('10m');
+    expect(await exchange.exchange({ secret: firstCode, label: 'Phone', source: PHONE })).toMatchObject({ ok: false, code: 'ERR_PAIRING_CODE_USED' });
+    expect(await exchange.exchange({ secret: longLink, label: 'Phone', source: PHONE })).toMatchObject({ ok: true });
+  });
+
+  it('keeps a waiting link through a Pane restart, and it still works only once', async () => {
+    let file: string | null = null;
+    let now = Date.parse('2026-11-15T09:00:00Z');
+    const start = () => new PairingExchange({ now: () => now, addClient: async () => {}, store: { read: () => file, write: (text) => { file = text; } } });
+    const { secret } = start().createSecret('24h');
+    expect(file).not.toContain(secret);
+
+    now += 23 * 60 * 60_000;
+    const restarted = start();
+    await expect(restarted.exchange({ secret, label: 'Studio Mac', source: PHONE })).resolves.toMatchObject({ ok: true });
+    await expect(start().exchange({ secret, label: 'Studio Mac', source: PHONE })).resolves.toMatchObject({ ok: false, code: 'ERR_PAIRING_CODE_USED' });
+  });
+
+  it('records a computer that redeems a secret as a linked computer', async () => {
+    const { exchange, saved } = setup();
+    const { secret } = exchange.createSecret('1h');
+    await exchange.exchange({ secret, label: 'Build Box', computerId: 'buildbox0000000a', source: PHONE });
+    expect(saved[0]).toMatchObject({ label: 'Build Box', kind: 'computer', computerId: 'buildbox0000000a' });
   });
 });

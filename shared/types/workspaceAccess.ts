@@ -19,7 +19,7 @@ export interface WorkspaceAccessConfig {
   password?: WorkspacePasswordHash;
   /**
    * Exact Origins the owner allowed for the Pane glasses app on this machine, beside the ones Pane
-   * ships with. Added from Settings › Remote Access › Devices on this machine only.
+   * ships with. Added from Settings › Remote Access › Phones and glasses on this machine only.
    */
   glassesOrigins?: string[];
   /**
@@ -59,6 +59,8 @@ export interface WorkspaceMachineDescription {
   visibility: Exclude<WorkspaceVisibility, 'off'>;
   passwordProtected: boolean;
   paneVersion: string;
+  /** Its install id (`AppConfig.machineId`), so a client joins it to the same computer's other routes. Older Panes omit it. */
+  machineId?: string;
 }
 
 export type TailnetMachineState =
@@ -89,7 +91,9 @@ export interface TailnetMachine {
   state: TailnetMachineState;
   visibility?: Exclude<WorkspaceVisibility, 'off'>;
   paneVersion?: string;
-  /** A saved connection exists for this machine. */
+  /** Its install id, from its description. */
+  machineId?: string;
+  /** The saved computer this machine is. */
   profileId?: string;
 }
 

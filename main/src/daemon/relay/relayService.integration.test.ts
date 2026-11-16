@@ -12,7 +12,9 @@ import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../
 import { PaneCommandRegistry } from '../commandRegistry';
 import { PaneRemoteHttpApiServer } from '../httpApiServer';
 import { RelayService } from './relayService';
-import { createComputerCaller, RelayLinks, relayComputerSchema } from './relayLinks';
+import { createComputerCaller, createComputerPoster, RelayLinks, relayComputerSchema } from './relayLinks';
+import { ComputerLinking, createPairingRoute } from './computerLinking';
+import { computerRelayId } from '../../../../shared/types/remoteComputers';
 import { registerRelayCommands } from './relayCommands';
 import { RelayPreviews } from './relayPreviews';
 import { integrationEnvSet } from './__fixtures__/integrationEnv';
@@ -176,30 +178,25 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       },
       previewPort: () => null,
       displayName: () => name,
-      addClient: async (record) => { config = { ...config, host: { ...config.host, clients: [...config.host.clients, record] } }; },
+      addClient: (record) => links.addClient(record),
       env,
     });
-    const links = new RelayLinks({
+    const call = createComputerCaller({ dial, extraCa });
+    const links: RelayLinks = new RelayLinks({
       config: configManager,
       self: () => service.computerInfo(),
-      call: createComputerCaller({ dial, extraCa }),
+      call,
       disconnect: (ids) => server?.disconnectClients(ids),
       connectedClientIds: () => new Set(),
     });
+    const linking = new ComputerLinking({ links, self: () => service.computerInfo(), routesReport: () => undefined, post: createComputerPoster({ dial, extraCa }), call });
     const registry = new PaneCommandRegistry();
     registry.register('sessions:get-all-with-projects', () => [{ id: `${name} session` }]);
     registerRelayCommands(registry, service, new RelayPreviews({
       id: () => null, domain: () => null, isForwardedPort: () => false, clientActive: () => false,
-    }), links, configManager);
+    }), links, linking, configManager);
     server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config }) }, {
-      pairing: {
-        exchange: async (request) => {
-          const result = await service.exchangeSecret(request);
-          if (!result.ok) return result;
-          return { ...result, linked: await links.grantsFor({ label: result.client.label, phoneId: request.phoneId }, request.known ?? []) };
-        },
-        clientAddress: (remoteAddress, remotePort) => service.clientAddress(remoteAddress, remotePort),
-      },
+      pairing: createPairingRoute({ host: service, links, routesReport: () => undefined, onPaired: () => undefined }),
     });
     await server.start();
     service.start();
@@ -322,8 +319,8 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
       everywhereSchema,
     );
     expect(unlink.notReached).toEqual([]);
-    expect(studio.config().client.profiles.some((profile) => profile.relay)).toBe(false);
-    expect(laptop.config().client.profiles.some((profile) => profile.relay)).toBe(false);
+    expect(studio.config().client.computers.some((computer) => computerRelayId(computer))).toBe(false);
+    expect(laptop.config().client.computers.some((computer) => computerRelayId(computer))).toBe(false);
     expect(laptop.config().host.clients.some((client) => client.kind === 'computer')).toBe(false);
     // Ana's own pairings stay.
     expect((await invoke(b.host, tokenB, 'sessions:get-all-with-projects')).status).toBe(200);
@@ -349,7 +346,7 @@ describe.skipIf(!integrationEnvSet(['PANE_RELAY_BIN', 'PEBBLE_BIN', 'PEBBLE_DIR'
     expect((await invoke(a.host, tokenA, 'sessions:get-all-with-projects')).status).toBe(200);
 
     // The app then offers to link the laptop with the studio it already has; they are linked, so nothing is replaced.
-    const studioToLaptop = studio.config().client.profiles.find((profile) => profile.relay?.computerId === laptopInfo.id)?.token;
+    const studioToLaptop = studio.links.linked().find((profile) => profile.relay.computerId === laptopInfo.id)?.token;
     const relink = await invoke(b.host, String(again.json.token), 'relay:client:mint-link', [{ peer: studioInfo }]);
     expect(relink.json).toMatchObject({ ok: false, error: { code: 'ERR_RELAY_ALREADY_LINKED' } });
     expect((await invoke(b.host, String(studioToLaptop), 'sessions:get-all-with-projects')).status).toBe(200);

@@ -15,7 +15,7 @@ export interface ComputerAddress {
 
 /**
  * What a person typed into "Find your computers": the address Pane shows under Settings ›
- * Remote Access › Address on a computer. A phone can't read `tailscale status`, so one computer's
+ * Remote Access › Tailscale › Address on a computer. A phone can't read `tailscale status`, so one computer's
  * full Tailscale name is how it finds the rest.
  */
 export function parseComputerAddress(input: string): ComputerAddress | { error: string } {

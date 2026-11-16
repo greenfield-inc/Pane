@@ -3,7 +3,7 @@ import { ConfigManager } from './configManager';
 import { MachineConnections, type CreateMachineClient, type MachineClient } from './machineConnections';
 import { SharedCredentialSync } from './sharedCredentialSync';
 import { readingMachines } from '../daemon/readingMachines';
-import { createDefaultRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import type { MachineConnectionsEvent } from '../../../shared/types/machineConnections';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
@@ -30,7 +30,8 @@ function setup(ids: string[]) {
   vi.spyOn(configManager, 'getConfig').mockReturnValue({
     gitRepoPath: '',
     verbose: false,
-    remoteDaemon: { ...defaults, client: { ...defaults.client, profiles: ids.map(profile) } },
+    // Saved before computers: each entry converts to one computer.
+    remoteDaemon: normalizeRemoteDaemonConfig({ ...defaults, client: { ...defaults.client, computers: undefined, profiles: ids.map(profile) } }),
   });
   const clients = new Map<string, FakeClient>();
   const invokeLocal = vi.fn(async () => ({ success: true }));

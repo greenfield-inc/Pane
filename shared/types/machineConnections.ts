@@ -24,6 +24,8 @@ export interface MachineState {
   onlineSince?: string;
   /** The machine's install id ("Show cards on" names it by this): this computer's own, or a saved machine's from its last connection. Absent until it answers, and from releases before it. */
   installId?: string;
+  /** The route a saved computer's connection is on (`ComputerRoute.id`): the dot on its pill. */
+  routeId?: string;
   /** Whether the machine's Pane sends its Session members' reports; absent until it first answers. */
   workspaceEntries?: boolean;
 }

@@ -4,6 +4,7 @@ import { type LookupFunction } from 'net';
 import { hostname as getOsHostname } from 'os';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
+import { primaryProfile } from '../../../../shared/types/remoteComputers';
 import type { PaneEventSink } from '../../core/eventSink';
 import { RemotePaneClient, RemotePaneClientController } from './remotePaneClient';
 import { boundary, decodeBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
@@ -521,6 +522,92 @@ describe('RemotePaneClient', () => {
   });
 });
 
+describe('RemotePaneClient routes (D-51)', () => {
+  const routeProfile = (baseUrl: string) => ({ id: 'mac', label: 'Mac', baseUrl, token: 'link-token', transport: 'http+sse' as const });
+
+  it('moves to the next route when the one in use goes silent, without an error, and back once it answers', async () => {
+    const near = await createTestRemoteServer();
+    const far = await createTestRemoteServer();
+    activeServers.push(near, far);
+    near.setHeartbeatInterval(20);
+    far.setHeartbeatInterval(20);
+    const statuses: string[] = [];
+    let resyncs = 0;
+    const client = new RemotePaneClient(routeProfile(near.baseUrl), {
+      // Each route change refetches host state, terminals included, as a reconnect does.
+      onResyncRequired: () => { resyncs += 1; },
+      routes: [
+        { routeId: 'tailscale:near', kind: 'tailscale', profile: routeProfile(near.baseUrl) },
+        { routeId: 'relay:far', kind: 'relay', profile: routeProfile(far.baseUrl) },
+      ],
+      // Scaled: the 8 s silence limit and the 60 s recheck.
+      failoverStaleTimeoutMs: 100,
+      heartbeatStaleTimeoutMs: 5_000,
+      routeRecheckMs: 100,
+      onConnectionStateChange: (status) => statuses.push(status),
+    });
+    await client.connect();
+    expect(client.routeId).toBe('tailscale:near');
+
+    // Tailscale blocked: the stream goes quiet and the address stops serving.
+    near.setHeartbeatInterval(0);
+    near.setEventsReady(false);
+    await waitFor(() => client.routeId === 'relay:far' && statuses.at(-1) === 'connected', 2_000);
+    expect(statuses).not.toContain('error');
+    expect(client.profile.baseUrl).toBe(far.baseUrl);
+    expect(resyncs).toBe(2);
+
+    near.setEventsReady(true);
+    near.setHeartbeatInterval(20);
+    await waitFor(() => client.routeId === 'tailscale:near' && statuses.at(-1) === 'connected', 2_000);
+    expect(resyncs).toBe(3);
+    await client.disconnect();
+  });
+
+  it('stays connected for the full heartbeat limit when no other route answers', async () => {
+    const near = await createTestRemoteServer();
+    const far = await createTestRemoteServer();
+    activeServers.push(near);
+    near.setHeartbeatInterval(20);
+    const statuses: Array<{ status: string; at: number }> = [];
+    const client = new RemotePaneClient(routeProfile(near.baseUrl), {
+      routes: [
+        { routeId: 'lan:near', kind: 'lan', profile: routeProfile(near.baseUrl) },
+        { routeId: 'relay:far', kind: 'relay', profile: routeProfile(far.baseUrl) },
+      ],
+      // Scaled: the 8 s silence limit and today's 20 s heartbeat limit.
+      failoverStaleTimeoutMs: 100,
+      heartbeatStaleTimeoutMs: 800,
+      onConnectionStateChange: (status) => statuses.push({ status, at: Date.now() }),
+    });
+    await client.connect();
+    await far.close();
+
+    near.setHeartbeatInterval(0);
+    const silentAt = Date.now();
+    await waitFor(() => statuses.some(({ status }) => status === 'reconnecting'), 3_000);
+    const droppedAfter = statuses.find(({ status }) => status === 'reconnecting')!.at - silentAt;
+    expect(droppedAfter).toBeGreaterThanOrEqual(700);
+    await client.disconnect();
+  });
+
+  it('connects on the next route when the nearest does not answer', async () => {
+    const near = await createTestRemoteServer();
+    const far = await createTestRemoteServer();
+    activeServers.push(near, far);
+    near.setEventsReady(false);
+    const client = new RemotePaneClient(routeProfile(near.baseUrl), {
+      routes: [
+        { routeId: 'lan:near', kind: 'lan', profile: routeProfile(near.baseUrl) },
+        { routeId: 'relay:far', kind: 'relay', profile: routeProfile(far.baseUrl) },
+      ],
+    });
+    await client.connect({ retryOnInitialFailure: false });
+    expect(client.routeId).toBe('relay:far');
+    await client.disconnect();
+  });
+});
+
 describe('RemotePaneClient writes through a drop', () => {
   const profileFor = (server: TestRemoteServer, id: string) => ({ id, label: 'host', baseUrl: server.baseUrl, token: 'secret-token', transport: 'http+sse' as const });
 
@@ -1014,6 +1101,85 @@ describe('RemotePaneClientController', () => {
     controller.suspend();
     controller.resume();
     await waitFor(() => controller.getConnectionState().status === 'connected' && !controller.getConnectionState().check);
+    await controller.switchToLocalMode();
+  });
+
+  it('switches over the next route when the first is Tailscale and Tailscale is signed out here', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    remoteConfig.client.computers = [{
+      id: 'studio-mac',
+      label: 'studio-mac',
+      routes: [
+        { id: 'tailscale:https://studio-mac.tail1234.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://studio-mac.tail1234.ts.net:8443', token: 'link-token', tailnetMachine: 'studio-mac', tailnetDomain: 'tail1234.ts.net' },
+        { id: `public:${server.baseUrl}`, kind: 'public', source: 'link', baseUrl: server.baseUrl, token: 'link-token' },
+      ],
+    }];
+    const controller = createController();
+    const checklistRoutes: string[] = [];
+    controller.initialize({
+      configManager: createConfigManagerStub(remoteConfig),
+      rendererEventSink: { send() {
+        const route = controller.getConnectionState().check?.route;
+        if (route && checklistRoutes.at(-1) !== route) checklistRoutes.push(route);
+      } },
+      resolveTailnetMachineUrl: async () => { throw new Error('Tailscale is signed out. Open Tailscale and sign in.'); },
+      checkDependencies: { lookupTailnetMachine: async () => ({ kind: 'tailscale-down', reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' }) },
+    });
+
+    await controller.activateProfile({
+      id: 'studio-mac', label: 'studio-mac', baseUrl: 'https://studio-mac.tail1234.ts.net:8443', token: 'link-token', transport: 'http+sse', tailnetMachine: 'studio-mac', tailnetDomain: 'tail1234.ts.net',
+    });
+
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(controller.getConnectionState()).toMatchObject({ activeRouteId: `public:${server.baseUrl}` });
+    // The checklist names each route it tries.
+    expect(checklistRoutes).toEqual(['Tailscale', 'Public URL']);
+  });
+
+  it('switches over the next route when the computer\'s Same network address is on another network', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    // 172.31.250.0/24 is on no interface of this computer, so the Same network route is skipped.
+    const lan = { id: 'lan:https://l172-31-250-9.k7xq2m4n8p3r5t6v.runpane.net:42138', kind: 'lan' as const, source: 'found' as const, baseUrl: 'https://l172-31-250-9.k7xq2m4n8p3r5t6v.runpane.net:42138', token: 'link-token' };
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    const studio = { id: 'studio-mac', label: 'Studio Mac', routes: [lan, { id: `public:${server.baseUrl}`, kind: 'public' as const, source: 'link' as const, baseUrl: server.baseUrl, token: 'link-token' }] };
+    remoteConfig.client.computers = [studio];
+    const controller = createController();
+    const checklistRoutes: string[] = [];
+    controller.initialize({ configManager: createConfigManagerStub(remoteConfig), rendererEventSink: { send() {
+      const route = controller.getConnectionState().check?.route;
+      if (route && checklistRoutes.at(-1) !== route) checklistRoutes.push(route);
+    } } });
+
+    await controller.activateProfile(primaryProfile(studio));
+
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(controller.getConnectionState()).toMatchObject({ activeRouteId: `public:${server.baseUrl}` });
+    expect(checklistRoutes.at(-1)).toBe('Public URL');
+    await controller.switchToLocalMode();
+  });
+
+  it('opens the SSH tunnel of a computer whose only route is SSH before switching to it', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const sshRoute = { id: 'ssh:http://127.0.0.1:1', kind: 'ssh' as const, source: 'ssh' as const, baseUrl: 'http://127.0.0.1:1', token: 'link-token', ssh: { host: 'build-box', remotePort: 42137 } };
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    remoteConfig.client.computers = [{ id: 'build-box', label: 'build-box', routes: [sshRoute] }];
+    const opened: string[] = [];
+    const controller = createController();
+    controller.initialize({
+      configManager: createConfigManagerStub(remoteConfig),
+      rendererEventSink: { send() {} },
+      // The tunnel comes up on a new local port after a restart; the saved one is dead.
+      prepareSshRoute: async (route) => { opened.push(route.ssh?.host ?? ''); return server.baseUrl; },
+    });
+
+    await controller.activateProfile({ id: 'build-box', label: 'build-box', baseUrl: sshRoute.baseUrl, token: 'link-token', transport: 'http+sse' });
+
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    expect(opened).toContain('build-box');
     await controller.switchToLocalMode();
   });
 
