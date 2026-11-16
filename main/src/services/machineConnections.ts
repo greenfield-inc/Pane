@@ -1,4 +1,5 @@
 import type { WebSocket } from 'ws';
+import { MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL } from '../../../shared/types/machineHealth';
 import os from 'os';
 import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/remotePaneClient';
 import { primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
@@ -15,7 +16,9 @@ import { readingMachines } from '../daemon/readingMachines';
 import {
   LOCAL_MACHINE_ID,
   MACHINE_EVENT_CHANNELS,
+  MACHINE_HEALTH_ACTIONS,
   MACHINE_READ_CHANNELS,
+  type MachineHealthAction,
   type MachineConnectionsEvent,
   type MachineEventChannel,
   type MachineLatency,
@@ -57,11 +60,19 @@ interface Invocation {
 }
 
 const readChannels = new Set<string>(MACHINE_READ_CHANNELS);
+const MACHINE_HEALTH_ACTION_CHANNELS = {
+  cleanup: MACHINE_HEALTH_CLEANUP_CHANNEL,
+  'pause-idle': MACHINE_HEALTH_PAUSE_IDLE_CHANNEL,
+  'archive-finished': MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL,
+  'stop-processes': MACHINE_HEALTH_STOP_PROCESSES_CHANNEL,
+  'restart-process': MACHINE_HEALTH_RESTART_PROCESS_CHANNEL,
+  'ignore-leak': MACHINE_HEALTH_IGNORE_LEAK_CHANNEL,
+} as const satisfies Record<MachineHealthAction, string>;
 const eventChannels = new Set<string>(MACHINE_EVENT_CHANNELS);
 const isMachineEventChannel = (channel: string): channel is MachineEventChannel => eventChannels.has(channel);
 const itemSchema = boundary.object({ kind: boundary.enumeration('pane', 'session'), id: boundary.nonEmptyString });
 const commandTypeSchema = boundary.object({
-  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session', 'preview-switch-to-chat', 'switch-to-chat', 'submit-to-agent'),
+  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session', 'preview-switch-to-chat', 'switch-to-chat', 'submit-to-agent', 'machine-health'),
 });
 const commandSchemas = {
   notify: boundary.object({ command: boundary.jsonObject }),
@@ -75,6 +86,7 @@ const commandSchemas = {
   'create-session': boundary.object({ input: boundary.jsonObject }),
   'preview-switch-to-chat': boundary.object({ sessionId: boundary.nonEmptyString }),
   'switch-to-chat': boundary.object({ sessionId: boundary.nonEmptyString, panelIds: boundary.array(boundary.nonEmptyString) }),
+  'machine-health': boundary.object({ action: boundary.enumeration(...MACHINE_HEALTH_ACTIONS), request: boundary.jsonObject }),
   'submit-to-agent': boundary.object({ panelId: boundary.nonEmptyString, input: boundary.nonEmptyString }),
 };
 
@@ -344,7 +356,7 @@ function toInvocation(command: PaneCommandValue): Invocation {
   if (!type) {
     const named = decodeOptionalBoundary(command, boundary.object({ type: boundary.string }))?.type;
     throw new PaneError('ERR_MACHINE_COMMAND_REFUSED',
-      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, pause, resume, archive, rename, create, switching a Session to chat and asking a Session's agent to hand it off are allowed. Nothing was sent.`,
+      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, pause, resume, archive, rename, create, switching a Session to chat, asking a Session's agent to hand it off and machine health actions are allowed. Nothing was sent.`,
       'Switch to that machine to do this there.');
   }
   try {
@@ -391,6 +403,11 @@ function toInvocation(command: PaneCommandValue): Invocation {
       case 'switch-to-chat': {
         const { sessionId, panelIds } = decodeBoundary(command, commandSchemas['switch-to-chat']);
         return { channel: 'chat-tab:switch-session', args: [sessionId, panelIds] };
+      }
+      case 'machine-health': {
+        // The host decodes the request and applies its own tiers and protections.
+        const { action, request } = decodeBoundary(command, commandSchemas['machine-health']);
+        return { channel: MACHINE_HEALTH_ACTION_CHANNELS[action], args: [request] };
       }
       case 'submit-to-agent': {
         // Sent as the person's message, the way the move dialog sends it to the host on screen.

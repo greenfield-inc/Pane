@@ -135,6 +135,20 @@ describe('MachineConnections', () => {
       .rejects.toThrow(/Pane can't send "submit-to-agent" to another machine/);
   });
 
+  it('runs a machine health cleanup on the named machine through that machine\'s own engine', async () => {
+    const { machines, client, connect } = setup(['studio-mac', 'build-box']);
+    connect('build-box');
+
+    await machines.run('build-box', { type: 'machine-health', action: 'cleanup', request: { kinds: ['agent-temp'], source: 'ui' } });
+    await machines.run('build-box', { type: 'machine-health', action: 'pause-idle', request: { source: 'card' } });
+
+    expect(client('build-box').invoke.mock.calls).toEqual([
+      ['resource-monitor:machine-cleanup', [{ kinds: ['agent-temp'], source: 'ui' }]],
+      ['resource-monitor:machine-pause-idle', [{ source: 'card' }]],
+    ]);
+    expect(client('studio-mac').invoke).not.toHaveBeenCalled();
+  });
+
   it('sets a Pane\'s pin to the requested state in one host call', async () => {
     const { machines, client, connect } = setup(['build-box']);
     connect('build-box');
