@@ -114,7 +114,7 @@ export default function GlassesSettingsScreen() {
       {openError ? <Text variant="rowDetail" tone="danger" style={styles.inset}>{openError}</Text> : null}
 
       {isPaired || pending.length > 0 ? (
-        <ListSection footer={pending.length > 0 ? `Revoke pending on ${pending.map(dnsName => dnsName.split('.')[0]).join(', ')}; it finishes when ${pending.length === 1 ? 'it answers' : 'they answer'}. Each computer can also revoke in Settings › Remote Access › Glasses.` : undefined}>
+        <ListSection footer={pending.length > 0 ? `Revoke pending on ${pending.map(dnsName => dnsName.split('.')[0]).join(', ')}; it finishes when ${pending.length === 1 ? 'it answers' : 'they answer'}. Each computer can also revoke in Settings › Remote Access › Phones and glasses.` : undefined}>
           <ListRow testID="glasses-revoke" title="Revoke glasses" destructive onPress={confirmRevoke} />
         </ListSection>
       ) : null}

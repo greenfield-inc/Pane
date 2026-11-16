@@ -5,8 +5,9 @@ import { voiceStreamUrl } from '../src/voice';
 
 /**
  * The Even app blocks every request whose origin isn't in app.json's network whitelist, and the
- * WebView reports a block only as a network error. Read the way Even Hub reads an entry: the
- * scheme and port must match, and `*.` stands for any subdomain.
+ * WebView reports a block only as a network error. Even Hub doesn't document how it matches an
+ * entry, so this encodes the assumed rule: the scheme and port must match (no port means 443), and
+ * `*.` stands for any subdomain. Real G2 glasses have confirmed it only for `*.ts.net:8443`.
  */
 const whitelist: string[] = JSON.parse(readFileSync(new URL('../app.json', import.meta.url), 'utf8'))
   .permissions.find((permission: { name: string }) => permission.name === 'network').whitelist;
@@ -14,9 +15,10 @@ const whitelist: string[] = JSON.parse(readFileSync(new URL('../app.json', impor
 function allowed(address: string): boolean {
   const target = new URL(address);
   return whitelist.some((entry) => {
+    const wildcard = entry.includes('*.');
     const rule = new URL(entry.replace('*.', 'wildcard.'));
-    const host = rule.hostname.startsWith('wildcard.') ? rule.hostname.slice('wildcard'.length) : rule.hostname;
-    const hostMatches = entry.includes('*.') ? target.hostname.endsWith(host) : target.hostname === host;
+    const host = wildcard ? rule.hostname.slice('wildcard'.length) : rule.hostname;
+    const hostMatches = wildcard ? target.hostname.endsWith(host) : target.hostname === host;
     return rule.protocol === target.protocol && rule.port === target.port && hostMatches;
   });
 }

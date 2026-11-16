@@ -280,7 +280,7 @@ raises or answers cards on a schedule (see the top of `glasses/dev/ambient.ts`).
 
 A new kind of computer address needs an entry in the `network` whitelist in `glasses/app.json`:
 `glasses/test/appJson.test.ts` checks that every address form a pairing code accepts is on it. To
-publish, raise `version` in `glasses/app.json`, run `pnpm --filter @pane/glasses pack`, and upload
+publish, raise `version` in `glasses/app.json`, run `pnpm --filter @pane/glasses run pack`, and upload
 `glasses/pane.ehpk` in the Even Hub developer portal.
 
 Joining other computers is `glasses/src/autoJoin.ts`; the host side is the `runpane:glasses:vouch`
