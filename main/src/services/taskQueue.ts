@@ -659,20 +659,23 @@ export class TaskQueue {
     }
   }
 
-  /** Awaited so the install holds its setup slot; the terminal shows how it went. */
   /** Machine health: while memory is tight, dependency installs run one at a time. */
   setInstallsOneAtATime(whenTrue: () => boolean): void {
     this.installsOneAtATime = whenTrue;
   }
 
+  /** Awaited so the install holds its setup slot; the terminal shows how it went. */
   private async installDependencies(sessionId: string, installCommand: string, worktreePath: string, ctx: ProjectContext): Promise<void> {
-    if (!this.installsOneAtATime()) return this.runInstall(sessionId, installCommand, worktreePath, ctx);
     const previous = this.installChain;
     let release = () => {};
-    this.installChain = new Promise<void>(resolve => { release = resolve; });
+    const mine = new Promise<void>(resolve => { release = resolve; });
+    // Every install joins the chain, so one that started before memory got tight still holds back the next.
+    this.installChain = Promise.all([previous, mine]).then(() => undefined);
     try {
-      await this.writeSetupLines(sessionId, worktreePath, ctx, ['Memory is tight, so dependency installs run one at a time.']);
-      await previous;
+      if (this.installsOneAtATime()) {
+        await this.writeSetupLines(sessionId, worktreePath, ctx, ['Memory is tight, so dependency installs run one at a time.']);
+        await previous;
+      }
       await this.runInstall(sessionId, installCommand, worktreePath, ctx);
     } finally {
       release();
