@@ -669,6 +669,8 @@ Pane: one per feature (one worktree, one branch). Before creating one, find the 
 
 When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question "<question>"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.
 
+To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).
+
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 
 Devices: the `device_*` MCP tools (or `runpane devices`) open an iOS simulator or Android emulator as a tab in the calling Pane, then drive it. `runpane docs read --doc docs/DEVICES.md` has the rest.
