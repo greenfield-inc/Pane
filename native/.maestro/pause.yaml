@@ -84,9 +84,9 @@ name: Pause journeys
 - tapOn:
     text: "Archive"
     rightOf: "Cancel"
+# Search covers the archive: the Pane now shows there, with Restore.
 - extendedWaitUntil:
-    visible:
-      id: panes-no-results
+    visible: "Restore ${output.pane}"
     timeout: 20000
 - tapOn:
     id: panes-search-clear

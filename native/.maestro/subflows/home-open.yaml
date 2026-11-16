@@ -3,6 +3,16 @@ appId: com.dcouple.pane.mobile
 ---
 - tapOn:
     id: home-tile-all
+# Pinned sits above these rows and can push them under the bottom bar. At the end of the list
+# every row is clear of it: scroll to Archived, the last row, then once more.
+- scrollUntilVisible:
+    element:
+      id: home-open-archived
+    timeout: 10000
+- swipe:
+    start: 50%, 60%
+    end: 50%, 30%
+- waitForAnimationToEnd
 - tapOn:
     id: home-open-${SECTION}
 - waitForAnimationToEnd
