@@ -158,8 +158,10 @@ export function registerResourceMonitorHandlers(
       await commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: prompt, source: 'user', expectReport: false }]);
     };
     const key = (sessionName: string) => sessionName.trim().toLocaleLowerCase();
+    // The machine's Session, or the numbered one that replaced it after it was archived.
+    const ours = (sessionName: string) => key(sessionName) === key(name) || (key(sessionName).startsWith(`${key(name)} `) && /^\d+$/.test(key(sessionName).slice(key(name).length + 1)));
     const { sessions: all } = await sessions.list();
-    const open = all.find(session => key(session.name) === key(name) && session.archived !== true);
+    const open = all.find(session => ours(session.name) && session.archived !== true);
     if (open) {
       const view = await sessions.getView({ sessionId: open.id });
       const resumed = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId: view.panel.id }]), boundary.object({ action: boundary.string }));

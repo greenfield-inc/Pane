@@ -1,11 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IpcMain } from 'electron';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import type { MachineHealthService } from '../services/machineHealth/machineHealthService';
 import type { MemoryRelief } from '../services/machineHealth/memoryRelief';
-import { MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, type HealthProcess, type MachineHealthSnapshot } from '../../../shared/types/machineHealth';
+import { MACHINE_HEALTH_ASK_AGENT_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, type HealthProcess, type MachineHealthSnapshot } from '../../../shared/types/machineHealth';
 import type { AppServices } from './types';
+import type { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
 import { registerResourceMonitorHandlers } from './resourceMonitor';
+import { resetPaneRuntimeForTests, setPaneRuntime, type PaneRuntime } from '../core/runtime';
+import type { ConfigManager } from '../services/configManager';
 
 function partial<Contract>(value: Partial<Contract>): Contract {
   // SAFETY: Each fixture supplies every member the stop and restart handlers read.
@@ -49,5 +52,41 @@ describe('stopping or restarting a process from outside', () => {
     const { registry, stopProcesses } = host();
     await registry.invoke(MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, [{ processes: [{ pid: devServer.pid, started: devServer.started }], source: 'cli' }]);
     expect(stopProcesses).toHaveBeenCalledWith([devServer], 'cli');
+  });
+});
+
+describe('Ask an agent', () => {
+  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>) {
+    const typed: Array<{ panelId: string; input: string }> = [];
+    const created: Array<{ name: string }> = [];
+    const view = (id: string, name: string) => ({ session: { id, name }, panel: { id: `panel-${id}`, type: 'chat' }, internalSession: { worktreePath: '/tmp' } });
+    const sessions = partial<OrchestrationSessionManager>({
+      list: async () => partial({ sessions: saved.map(session => partial(session)) }),
+      getView: async ({ sessionId }) => partial(view(sessionId ?? '', saved.find(session => session.id === sessionId)?.name ?? '')),
+      create: async input => { created.push({ name: input.name }); return partial(view('new', input.name)); },
+    });
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:panels:resume', async () => ({ action: 'already-running' }));
+    registry.register('runpane:panels:wait', async () => ({ ok: true }));
+    registry.register('runpane:panels:submit', async request => { typed.push(partial(request)); return { ok: true }; });
+    registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions }), registry);
+    return { ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: 'Free memory.' }]), typed, created };
+  }
+
+  it('hands the request to the numbered Session that replaced an archived one, and starts no other', async () => {
+    const { ask, typed, created } = asker([{ id: 'old', name: 'Clean up devbox', archived: true }, { id: 'two', name: 'Clean up devbox 2' }]);
+    await expect(ask()).resolves.toEqual({ sessionId: 'two', panelId: 'panel-two' });
+    expect(typed).toMatchObject([{ panelId: 'panel-two', input: 'Free memory.' }]);
+    expect(created).toEqual([]);
+  });
+
+  afterEach(() => { resetPaneRuntimeForTests(); });
+
+  it('starts the next numbered Session when the name belongs to an archived one', async () => {
+    // Creating reads the preferred shell to decide how the request reaches the new agent.
+    setPaneRuntime(partial<PaneRuntime>({ getConfigManager: () => partial<ConfigManager>({ getPreferredShell: () => 'auto' }) }));
+    const { ask, created } = asker([{ id: 'old', name: 'Clean up devbox', archived: true }, { id: 'x', name: 'Clean up devbox tools' }]);
+    await expect(ask()).resolves.toEqual({ sessionId: 'new', panelId: 'panel-new' });
+    expect(created).toEqual([{ name: 'Clean up devbox 2' }]);
   });
 });
