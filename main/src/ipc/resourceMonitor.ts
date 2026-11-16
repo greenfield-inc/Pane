@@ -46,6 +46,16 @@ const DAEMON_RESOURCE_MONITOR_CHANNELS = [
 const LATE_AGENT_WAIT_MS = 10 * 60_000;
 /** Requests waiting for an agent that missed the first 30 s, by panel. */
 const lateRequests = new Map<string, string>();
+/**
+ * Finding or creating the machine's Session runs one request at a time: a quick second click would
+ * otherwise race the first create and fail with "A Session named ... already exists".
+ */
+let sessionLookup: Promise<unknown> = Promise.resolve();
+function oneAtATime<Result>(task: () => Promise<Result>): Promise<Result> {
+  const run = sessionLookup.then(task, task);
+  sessionLookup = run.catch(() => undefined);
+  return run;
+}
 
 export function registerResourceMonitorHandlers(
   ipcMain: IpcMain,
@@ -219,10 +229,24 @@ export function registerResourceMonitorHandlers(
     const key = (sessionName: string) => sessionName.trim().toLocaleLowerCase();
     // The machine's Session, or the numbered one that replaced it after it was archived.
     const ours = (sessionName: string) => key(sessionName) === key(name) || (key(sessionName).startsWith(`${key(name)} `) && /^\d+$/.test(key(sessionName).slice(key(name).length + 1)));
-    const { sessions: all } = await sessions.list();
-    const open = all.find(session => ours(session.name) && session.archived !== true);
-    if (open) {
-      const view = await sessions.getView({ sessionId: open.id });
+    const found = await oneAtATime(async () => {
+      const { sessions: all } = await sessions.list();
+      const open = all.find(session => ours(session.name) && session.archived !== true);
+      if (open) return { created: false, atLaunch: false, view: await sessions.getView({ sessionId: open.id }) };
+      // An archived Session keeps its name, so the new one takes the next free number.
+      let fresh = name;
+      for (let n = 2; all.some(session => key(session.name) === key(fresh)); n += 1) fresh = `${name} ${n}`;
+      // As the Pane Chat offer does: the request rides on the agent's launch line when the shell allows it.
+      const atLaunch = terminalPanelManager.launchShellIsPosix();
+      const view = await sessions.create({
+        name: fresh, launchCommand: '', customResume: null,
+        openingPrompt: atLaunch ? `${PANE_ONE_TIME_PROMPT_OPENING}, when you clicked Ask an agent in Resources: ${prompt}` : undefined,
+      });
+      if (view.panel.type === 'terminal') await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
+      return { created: true, atLaunch, view };
+    });
+    const { view } = found;
+    if (!found.created) {
       const resumed = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId: view.panel.id }]), boundary.object({ action: boundary.string }));
       // A running agent queues the request behind its turn; one just started gets it once it is ready.
       if (resumed?.action === 'already-running') {
@@ -231,18 +255,8 @@ export function registerResourceMonitorHandlers(
       }
       return { sessionId: view.session.id, panelId: view.panel.id, typed: await typeWhenReady(view.panel.id, view.panel.type) };
     }
-    // An archived Session keeps its name, so the new one takes the next free number.
-    let fresh = name;
-    for (let n = 2; all.some(session => key(session.name) === key(fresh)); n += 1) fresh = `${name} ${n}`;
-    // As the Pane Chat offer does: the request rides on the agent's launch line when the shell allows it.
-    const atLaunch = terminalPanelManager.launchShellIsPosix();
-    const view = await sessions.create({
-      name: fresh, launchCommand: '', customResume: null,
-      openingPrompt: atLaunch ? `${PANE_ONE_TIME_PROMPT_OPENING}, when you clicked Ask an agent in Resources: ${prompt}` : undefined,
-    });
-    if (view.panel.type === 'terminal') await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
     // PowerShell and cmd cannot carry it on the launch line: type it once the agent is ready.
-    const typed = atLaunch || await typeWhenReady(view.panel.id, view.panel.type);
+    const typed = found.atLaunch || await typeWhenReady(view.panel.id, view.panel.type);
     return { sessionId: view.session.id, panelId: view.panel.id, typed };
   });
 

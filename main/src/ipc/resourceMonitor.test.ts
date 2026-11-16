@@ -67,7 +67,14 @@ describe('Ask an agent', () => {
     const sessions = partial<OrchestrationSessionManager>({
       list: async () => partial({ sessions: saved.map(session => partial(session)) }),
       getView: async ({ sessionId }) => partial(view(sessionId ?? '', saved.find(session => session.id === sessionId)?.name ?? '')),
-      create: async input => { created.push({ name: input.name }); return partial(view('new', input.name)); },
+      create: async input => {
+        // As the real manager does: a name already taken is refused. The await lets a racing click in.
+        await new Promise(resolve => setTimeout(resolve, 5));
+        if (saved.some(session => session.name === input.name)) throw new Error(`A Session named ${input.name} already exists`);
+        saved.push({ id: 'new', name: input.name });
+        created.push({ name: input.name });
+        return partial(view('new', input.name));
+      },
     });
     const registry = new PaneCommandRegistry();
     registry.register('runpane:panels:resume', async () => ({ action: agent.resume ?? 'already-running' }));
@@ -130,6 +137,15 @@ describe('Ask an agent', () => {
     const { askUnnamed, created } = asker([], { hostname: 'buildbox' });
     await expect(askUnnamed()).resolves.toMatchObject({ sessionId: 'new', panelId: 'panel-new' });
     expect(created).toEqual([{ name: 'Clean up buildbox' }]);
+  });
+
+  it('runs a quick second click after the first create, so it reuses that Session instead of failing (F-3)', async () => {
+    setPaneRuntime(partial<PaneRuntime>({ getConfigManager: () => partial<ConfigManager>({ getPreferredShell: () => 'auto' }) }));
+    const { ask, created } = asker([]);
+    const [first, second] = await Promise.all([ask(), ask()]);
+    expect(first).toMatchObject({ sessionId: 'new' });
+    expect(second).toMatchObject({ sessionId: 'new' });
+    expect(created).toEqual([{ name: 'Clean up devbox' }]);
   });
 
   it('forgets a late request when the 10-minute wait gives up, so the next slow start gets its own (F-7)', async () => {
