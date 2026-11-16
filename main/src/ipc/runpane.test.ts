@@ -7938,6 +7938,31 @@ describe('runpane IPC handlers', () => {
       expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
     });
 
+    it('frees a tab whose agent exited to the shell for new work, journalling the report it owed', async () => {
+      stored = structuredClone(terminalPanel);
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      const workspaceJournal = new WorkspaceJournal();
+      const services = createServices({ workspaceJournal });
+      const registry = createRegistry(services);
+      const first = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task A', expectReport: true }]);
+      // The agent's launch failed or it crashed: its shell is back in the foreground, and no panel exit was journalled.
+      vi.mocked(terminalPanelManager.hasLaunchCommandExited).mockResolvedValue(true);
+
+      const second = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task B', expectReport: true }]);
+
+      expect(second.expectedReport).toEqual({ since: expect.any(String) });
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toEqual(second.expectedReport);
+      expect(workspaceJournal.readAfter(0, { kinds: ['agent.report.missing'] }).entries).toEqual([expect.objectContaining({
+        paneId: session.id,
+        panelId: terminalPanel.id,
+        reason: 'exited',
+        expectedSince: first.expectedReport?.since,
+      })]);
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, expect.stringContaining('Task B'));
+      // Expectations are saved under PANE_DIR, which the tests in this file share.
+      workspaceJournal.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
+    });
+
     it('delivers a reply to a worker that owes a report and keeps waiting for that report', async () => {
       stored = structuredClone(terminalPanel);
       vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });

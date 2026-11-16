@@ -1716,6 +1716,7 @@ export function registerRunpaneHandlers(
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
       if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
+      await releaseReportOfExitedAgent(services, panel);
       const since = new Date().toISOString();
       let expectedReport: TerminalExpectedReport | undefined;
       try {
@@ -2617,6 +2618,21 @@ async function readPanelLastOutput(panelId: string, sessionManager: AppServices[
   if (!screenText) return undefined;
   const lines = screenText.split('\n').map(line => line.trimEnd()).filter(line => line.trim().length > 0);
   return { text: lines.slice(-LAST_OUTPUT_SCREEN_LINES).join('\n'), source: 'screen' };
+}
+
+/**
+ * An agent that exited back to its tab's shell (a failed launch, a crash) can no longer report, and
+ * no panel exit says so. Settle what it owed before new work arrives, so the tab can be reused.
+ */
+async function releaseReportOfExitedAgent(services: AppServices, panel: ToolPanel): Promise<void> {
+  const tracker = services.expectedReportTracker;
+  if (!tracker?.expectation(panel.id) || !await terminalPanelManager.hasLaunchCommandExited(panel.id)) return;
+  const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
+  await tracker.releaseExited(panel.id, {
+    paneId: panel.sessionId,
+    panelTitle: panel.title,
+    agentType: terminalPanelManager.getTerminalSnapshot(panel.id)?.agentType ?? optionalString(customState.agentType),
+  });
 }
 
 /**
