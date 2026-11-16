@@ -10,6 +10,7 @@ import { registerResourceMonitorHandlers } from './resourceMonitor';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PaneRuntime } from '../core/runtime';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { ConfigManager } from '../services/configManager';
+import type { NotifyService } from '../services/notify/notifyService';
 
 function partial<Contract>(value: Partial<Contract>): Contract {
   // SAFETY: Each fixture supplies every member the stop and restart handlers read.
@@ -61,6 +62,7 @@ describe('Ask an agent', () => {
     const typed: Array<{ panelId: string; input: string }> = [];
     const readiness = [...(agent.ready ?? [])];
     const created: Array<{ name: string }> = [];
+    const cards: Array<{ context?: string }> = [];
     const view = (id: string, name: string) => ({ session: { id, name }, panel: { id: `panel-${id}`, type: agent.panelType ?? 'chat' }, internalSession: { worktreePath: '/tmp' } });
     const sessions = partial<OrchestrationSessionManager>({
       list: async () => partial({ sessions: saved.map(session => partial(session)) }),
@@ -76,8 +78,9 @@ describe('Ask an agent', () => {
     });
     registry.register('runpane:panels:screen', async () => ({ composer: { hasUndeliveredText: agent.draft ?? false } }));
     registry.register('runpane:panels:submit', async request => { typed.push(partial(request)); return { ok: true }; });
-    registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions }), registry);
-    return { ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: agent.prompt ?? 'Free memory.' }]), typed, created };
+    const notifyService = partial<NotifyService>({ queue: partial<NotifyService['queue']>({ ask: async (input: { question: { context?: string } }) => { cards.push({ context: input.question.context }); return partial({}); } }) });
+    registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions, notifyService }), registry);
+    return { ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: agent.prompt ?? 'Free memory.' }]), typed, created, cards };
   }
 
   it('hands the request to the numbered Session that replaced an archived one, and starts no other', async () => {
@@ -136,5 +139,18 @@ describe('Ask an agent', () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     await expect(ask()).resolves.toMatchObject({ typed: false });
     await vi.waitFor(() => expect(writes).toHaveBeenCalledWith('panel-threw', '\x1b[200~Free memory.\x1b[201~'));
+  });
+
+  it('tells a chat tab\'s person the request is sent for them, and a terminal\'s to press Enter (F-8)', async () => {
+    const chat = asker([{ id: 'chat', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, false], panelType: 'chat' });
+    await chat.ask();
+    expect(chat.cards).toHaveLength(1);
+    expect(chat.cards[0]?.context).not.toMatch(/Press Enter/u);
+    expect(chat.cards[0]?.context).toMatch(/sent to the agent when it is ready/u);
+
+    vi.spyOn(terminalPanelManager, 'writeToTerminal').mockImplementation(() => undefined);
+    const terminal = asker([{ id: 'term', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, false], panelType: 'terminal' });
+    await terminal.ask();
+    expect(terminal.cards[0]?.context).toMatch(/Press Enter there to send it/u);
   });
 });

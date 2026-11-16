@@ -173,7 +173,14 @@ export function registerResourceMonitorHandlers(
         return true;
       }
       void services.notifyService?.queue.ask({
-        question: { ui: 'info', title: 'The agent is still starting', context: 'Your cleanup request will appear in its input box when it is ready. Press Enter there to send it.' },
+        question: {
+          ui: 'info',
+          title: 'The agent is still starting',
+          // A chat tab sends the queued request itself; a terminal agent leaves it for the person.
+          context: panelType === 'chat'
+            ? 'Your cleanup request is queued and will be sent to the agent when it is ready.'
+            : 'Your cleanup request will appear in its input box when it is ready. Press Enter there to send it.',
+        },
         source: { name: 'Pane', agent: 'Pane' },
       });
       // One late delivery per agent: a later click while it waits only updates the request.
