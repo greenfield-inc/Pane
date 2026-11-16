@@ -231,7 +231,8 @@ Run a relay on your own machine and domain in a few minutes with Docker
 Access › Phones and glasses › Relay address** to its domain. Pane connects
 there instead of Pane's servers, and everything above works the same, on the
 same Wi-Fi and from anywhere. Computers link only with computers on the same
-relay.
+relay. Glasses can't use your own relay's domain: pair them with those computers
+over Tailscale ([Even G2 glasses](EVEN_G2_GLASSES.md)).
 
 ## Tailscale
 
