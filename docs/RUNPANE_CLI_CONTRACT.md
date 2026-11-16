@@ -139,6 +139,9 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name testing-account --ttl 30m --wait 1800000 --note "call QA" --json
 runpane lock release --name testing-account --json
 runpane lock list --json
+runpane machine health --json
+runpane machine cleanup --kind update-snapshot --json
+runpane machine cleanup --kind update-snapshot --yes --json
 runpane loops create --repo active --name nightly-bug-sweep --cron "0 3 * * *" --agent claude --prompt "Fix one bug from yesterday's issues" --yes --json
 runpane loops list --json
 runpane loops run --loop <loop-id> --yes --json
@@ -263,6 +266,8 @@ The desktop app treats one consumer name specially: while a `runpane watch --as 
 `sessions overview` read a live status, activity, git, and pull request overview for a named Session. Each panel in `panes[].panels[]` carries its own latest `runpane report` as `report`, so one call shows what every worker last reported and when (`reportedAt`, next to the panel's `state` and `lastActivityAt`). When a report's summary is a complete JSON object, such as a status file sent with `--summary-file`, `report.data` holds it exactly as the worker gave it; Pane never reads, renames or validates its fields. A summary that is not a JSON object (plain text, an array, a scalar or invalid JSON), is nested more than 64 levels deep, or was truncated (`summaryTruncated`), has no `data`. A panel that never reported has no `report`. `panes[].report` is still the newest report among the Pane's panels. Each panel also has `type` (`terminal`, `browser`, `editor`, `explorer`, `diff`, ...): a Pane linked whole lists every tab, with `explorer` and `diff` last, and a link that names tabs lists exactly those.
 
 `runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.
+
+`runpane machine health` shows this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free by tier. `runpane machine cleanup --kind <kind>` lists one kind of tier 1 or 2 item (a dry run) and deletes them with `--yes`; tier 3 items are not Pane's, so it refuses them and says how to free them. Agents free disk only through this command, never with rm.
 
 `runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).
 
@@ -424,6 +429,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock acquire`: Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.
 - `lock release`: Release a named lock you hold, or force-release another owner's lock.
 - `lock list`: List held named locks, optionally only one Session's.
+- `machine health`: Show this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free, by tier.
+- `machine cleanup`: Free disk space that Pane made: list one kind of tier 1 or 2 item with its size (a dry run), or delete them with --yes.
 - `sessions unpin`: Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.
 - `sessions pin`: Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.
 - `sessions pause`: Pause a Session: stop the terminal tabs of its chat and every Pane in it, keeping their conversations. Chat tabs keep running.
@@ -575,6 +582,8 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+runpane machine health [--json] [--pane-dir <path>]
+runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]
 runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions pause --session <id|name> [--json] [--pane-dir <path>]
@@ -800,6 +809,7 @@ These flags are consumed by local daemon-control commands:
 --platform <ios|android>
 --device <name-or-id>
 --wait-ms <milliseconds>
+--kind <kind>
 --json
 --wait-ready
 --no-focus

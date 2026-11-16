@@ -232,6 +232,14 @@
         },
         "agents": {
           "$ref": "#/$defs/stringList"
+        },
+        "reclaimKinds": {
+          "description": "Kinds of item machine health lists for cleanup; runpane machine cleanup --kind takes one.",
+          "$ref": "#/$defs/stringList"
+        },
+        "foreignReclaimKinds": {
+          "description": "The tier 3 kinds: not Pane's, so runpane machine cleanup refuses them.",
+          "$ref": "#/$defs/stringList"
         }
       },
       "additionalProperties": false
@@ -1046,6 +1054,9 @@
         "lock acquire",
         "lock release",
         "lock list",
+        "machine",
+        "machine health",
+        "machine cleanup",
         "loops",
         "loops list",
         "loops create",
@@ -1426,6 +1437,15 @@
           "$ref": "#/$defs/helpLines"
         },
         "lock list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "machine": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "machine health": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "machine cleanup": {
           "$ref": "#/$defs/helpLines"
         },
         "loops": {
