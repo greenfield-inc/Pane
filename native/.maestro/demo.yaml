@@ -15,16 +15,15 @@ name: Try the demo
     visible:
       id: approval-card
     timeout: 10000
-# Its place in the queue; the demo's count changes as sample data grows.
-- assertVisible: "\\d+ of \\d+"
+- assertVisible: "2 of 5"
 - tapOn:
     id: notify-choice-0
 - assertVisible:
     id: notify-sent
 - extendedWaitUntil:
-    notVisible:
-      id: notify-sent
+    visible: "2 of 4"
     timeout: 15000
+- assertVisible: "Apply migration 0042 to staging?"
 - tapOn:
     id: approval-back
 - extendedWaitUntil:

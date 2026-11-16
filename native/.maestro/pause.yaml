@@ -114,6 +114,11 @@ name: Pause journeys
     start: 5%, 50%
     end: 90%, 50%
     duration: 400
+# Home lists Session rows under a search.
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: ${output.session}
 - extendedWaitUntil:
     visible: "Open Session ${output.session}"
     timeout: 15000
