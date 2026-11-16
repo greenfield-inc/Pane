@@ -384,7 +384,9 @@ orchestrator's `inbox ack` leaves the card open, and the answer to the new
 version reaches the orchestrator as `correction: Q-n → <answer> (by you)`.
 
 **What the reader runs.** Only the reader may; anyone else gets
-`ERR_NOTIFY_NOT_READER` with a `next`. A worker in a Session may run both:
+`ERR_NOTIFY_NOT_READER` with a `next`. While a card waits, a later run of the
+loop that posted it reads it too, since each run of a project loop is a new
+Pane. A worker in a Session may run both:
 they aren't new asks.
 
 ```sh
@@ -396,9 +398,11 @@ runpane notify --update Q-20 --asked "Can it be undone?" \
 
 `--took` and `--update` take an item id or Q-n and no `--ui`. `--took Q-20
 answer` changes nothing: the reply is already the answer. `--update` reopens an
-answered approval as its new version, and needs
-`--asked` (the person's question) and `--what-changed` (one line per change),
-and replaces whichever of `--title`, `--context`, `--choices`, `--questions`
+answered approval as its new version. It needs `--what-changed` (one line per
+change), and `--asked` (the person's question) when it answers a question they
+typed; an update of your own, such as a loop's next run refreshing its card,
+leaves `--asked` out and shows no "You asked". It replaces whichever of
+`--title`, `--context`, `--choices`, `--questions`
 and `--links` it passes. A reworded choice carries `"was"`, its old label.
 `--update` then waits for the answer like any notify call (`waiting`,
 `unavailable` and `--return-after` work the same). It never adds a second
@@ -417,7 +421,7 @@ so older items simply have none.
 | Reply waiting for a busy reader | "<reader> is reading your reply…", naming the reader for every kind ("okta-sso-account", "The Doozy orchestrator", "Autopilot") |
 | Reply delivered | "Taken as your answer", with **It was a question** |
 | Taken as a question | "Taken as a question: <reader> is getting more context", with its status when the reader gave one, and **It was my answer** |
-| Updated | "Updated · ready again": your question quoted ("You asked"), What changed and by whom, choices marked NEW, REWORDED (the old label struck) or REMOVED, and a collapsed **Earlier version** |
+| Updated | "Updated · ready again": your question quoted ("You asked", when the update answers one), What changed and by whom, choices marked NEW, REWORDED (the old label struck) or REMOVED, and a collapsed **Earlier version** |
 | No reader | "No agent can read replies right now. You can still pick an option." |
 | A chat tab's built-in question | "Sent to <agent>": the typed reply is its answer, so there is no fix |
 | A chat tab's built-in question that takes only its choices | No reply box: pick one of its options |

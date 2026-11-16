@@ -6427,7 +6427,7 @@ async function checkNotifyParity() {
         return { result: { approved: true } };
       }, () => runCliOnce(runtime, ['notify', '--resume', 'n-1', '--json'], paneDir, 20_000, outsidePane));
       assert.deepStrictEqual(JSON.parse(resumed.stdout), { approved: true });
-      // --took takes its id and then answer or question; --update needs asked and whatChanged.
+      // --took takes its id and then answer or question; --update needs whatChanged, and asked when it answers a typed question.
       const took = await withFakeDaemon(paneDir, (frame) => {
         frames[runtime].push(frame);
         return { result: { took: 'answer', id: 'n-1' } };
@@ -6550,7 +6550,6 @@ async function checkNotifyParity() {
     ['update', ['--update', 'Q-20', '--ui', 'ask', '--asked', 'Why?', '--what-changed', 'x'], "update changes only title, context, choices, questions and links, and keeps the approval's ui; remove ui."],
     ['update', ['--update', 'Q-20', '--detail', 'x', '--relays', 'in-1', '--asked', 'Why?', '--what-changed', 'x'], "update changes only title, context, choices, questions and links, and keeps the approval's ui; remove detail, relays."],
     ['update', ['--update', ' ', '--asked', 'Why?', '--what-changed', 'x'], "update must be the approval's id or Q-n, such as --update Q-20."],
-    ['asked', ['--update', 'Q-20', '--what-changed', 'x'], "asked is required with update: the person's question, as they typed it."],
     ['whatChanged', ['--update', 'Q-20', '--asked', 'Why?'], 'whatChanged is required with update: one line per change, such as "Added: it can be undone from Settings".'],
     ['asked', ['--ui', 'ask', '--title', 'x', '--asked', 'Why?'], 'asked goes with --update <id|Q-n>, which saves a new version of an approval.'],
     ['title', ['--update', 'Q-20', '--asked', 'Why?', '--what-changed', 'x', '--title', ' '], 'title must be non-empty text; leave it out to keep the current one.'],

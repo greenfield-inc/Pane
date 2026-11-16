@@ -170,6 +170,8 @@ export interface NotifyQueueEnvironment {
   };
   /** The Session a Pane (and tab) works in, filed on each new item; Approvals groups by it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
+  /** Both Panes run for the same loop: a later run may --update or --took an earlier run's card. */
+  sameLoop?: (callerPaneId: string, askerPaneId: string) => boolean;
   /** The machines saved on this screen (Settings → Remote), read from config: listed before their connections start. */
   savedMachineIds?: () => string[];
   /** The project a Pane belongs to, filed on each new item. */
@@ -228,6 +230,7 @@ export interface NotifyReaderCaller {
 
 /** `runpane notify --update`: the new version's fields; any question field passed replaces that field. */
 export interface NotifyUpdate {
+  /** The person's typed question this version answers; empty for the asker's own update. */
   asked: string;
   whatChanged: string;
   title?: string;
@@ -996,9 +999,13 @@ export class NotifyQueue extends EventEmitter {
    */
   update(caller: NotifyReaderCaller, ref: string, update: NotifyUpdate, returnAfterMs?: number, signal?: AbortSignal): Promise<NotifyResult> {
     const entry = this.forReader(caller, ref, 'update');
-    // A reply taken as the answer was a question after all: the new version waits on the person again.
-    if (entry.item.state !== 'waiting') this.reopenTakenReply(entry);
     const { item } = entry;
+    // A version that answers the person's typed question quotes it; the asker's own update has none to quote.
+    if (item.reply && !update.asked.trim()) {
+      throw new PaneError('ERR_NOTIFY_INVALID', `${refOf(item)} has a question the person typed, and this update didn't say what it was. Nothing was changed.`, 'Run it again with --asked "<their question, as they typed it>".');
+    }
+    // A reply taken as the answer was a question after all: the new version waits on the person again.
+    if (item.state !== 'waiting') this.reopenTakenReply(entry);
     const now = Date.now();
     const earlier: NotifyVersion = { version: item.version ?? 1, title: item.title, at: item.revision?.at ?? item.createdAt };
     if (item.context !== undefined) earlier.context = item.context;
@@ -1102,23 +1109,28 @@ export class NotifyQueue extends EventEmitter {
     if (candidates.length === 0) {
       throw new PaneError('ERR_NOTIFY_GONE', `There's no waiting approval ${wanted} on ${this.machine()}: it was answered or closed. Nothing was changed.`, 'Check the id or Q-n in the reply: line, or read the answer you already have.');
     }
-    const mine = candidates.filter(entry => this.mayRead(entry, caller, wanted));
+    // The caller's own card first; a card it reads only as another run of the same loop comes
+    // after, newest first, so a run never acts on an older run's card that shares its Q-n.
+    const own = candidates.filter(entry => this.mayRead(entry, caller, wanted, false));
+    if (own.length > 0) return pickOwn(own);
+    const mine = candidates.filter(entry => this.mayRead(entry, caller, wanted)).sort((a, b) => b.item.createdAt - a.item.createdAt);
     if (mine.length === 0) {
       const reader = candidates[0].item.reply?.reader?.name ?? candidates[0].item.source.name;
       throw new PaneError('ERR_NOTIFY_NOT_READER', `Only the agent reading ${wanted}'s reply (${reader}) can run --${what} on it, and this tab isn't it. Nothing was changed.`, 'Leave it to its reader. To ask the person something else, call notify as usual.');
     }
-    const waiting = mine.filter(entry => entry.item.state === 'waiting');
-    if (waiting.length) return waiting.find(entry => entry.item.reply) ?? waiting[0];
-    // Answered cards that share a Q-n (a loop asks Q-1 every run): the newest is the one just read.
-    return mine.reduce((newest, entry) => ((entry.item.resolvedAt ?? 0) > (newest.item.resolvedAt ?? 0) ? entry : newest));
+    // A loop's other runs reach only waiting cards (mayRead), so an answered card is never one of these.
+    return mine[0];
   }
 
-  private mayRead(entry: Entry, caller: NotifyReaderCaller, ref: string): boolean {
+  /** `viaLoop`: also a card another run of the caller's loop asked, while it waits. */
+  private mayRead(entry: Entry, caller: NotifyReaderCaller, ref: string, viaLoop = true): boolean {
     const { item } = entry;
     const reader = item.reply?.reader;
     // The open call the reply went back to holds its continuation id, and nobody else was given it:
     // that call's agent continues with it, from a terminal outside Pane as from a tab (D-294).
     if (reader && !reader.panelId && entry.continuation !== undefined && entry.continuation === ref) return true;
+    // Only while it waits: a card the person answered stays answered, whichever run comes next.
+    if (viaLoop && item.state === 'waiting' && caller.paneId && item.source.paneId && this.env.sameLoop?.(caller.paneId, item.source.paneId)) return true;
     const panelId = caller.panelId;
     if (!panelId) return false;
     if (reader?.panelId) return reader.panelId === panelId || panelId === item.source.panelId;
@@ -2174,6 +2186,16 @@ function picksText(picks: readonly string[]): string {
 /** What a reader with an open call does if the reply was a question: it names the reply's id, which only this call was given. */
 function tookNext(item: NotifyItem, replyId: string): string {
   return `The person replied, and Pane recorded the reply as the answer to ${refOf(item)}. If it asks about it instead, run \`runpane notify --took ${replyId} question\`, find out, then \`runpane notify --update ${replyId} --asked "<their question>" --what-changed "<one line per change>"\`. Use this reply id, not the Q-n: it is what lets this call continue.`;
+}
+
+/**
+ * The caller's own card for a Q-n: a waiting one (the one with a reply first), else the newest
+ * answered one, since a tab that asks the same Q-n again means the card it just read.
+ */
+function pickOwn(own: Entry[]): Entry {
+  const waiting = own.filter(entry => entry.item.state === 'waiting');
+  if (waiting.length) return waiting.find(entry => entry.item.reply) ?? waiting[0];
+  return own.reduce((newest, entry) => ((entry.item.resolvedAt ?? 0) > (newest.item.resolvedAt ?? 0) ? entry : newest));
 }
 
 /** A reply is with its reader, or its reader took it as a question: the pager and strip move past it. */

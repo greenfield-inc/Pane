@@ -105,13 +105,47 @@ on a card or on Resources, hands the items to the agent of a Session named
 The agent runs on the machine the window is on when the items are about that
 machine, and on this computer otherwise (the window switches back to it).
 
+## Other apps
+
+On Resources, the chevron beside **Other apps** under Memory opens the apps
+running outside Pane, biggest memory first, each with its memory and CPU. On
+macOS an app is its `.app` bundle with all its helpers, and each iOS simulator
+runtime counts as one app. A program outside a bundle (`node`, `claude`), and
+every program on Windows and Linux, is grouped by executable name: the group
+takes in every process of that name outside Pane, including ones started in
+other terminals. Everything another Pane instance runs counts with that Pane.
+Pane reads this list when you open it and with each refresh after that; it is
+not part of the per-minute sample. Locked processes under 1 MB are left out.
+
+The stop button beside an app ends all of its processes after you confirm
+once: Pane asks each to quit, then forces whatever still runs after 3 seconds
+(Windows ends them at once). Unsaved work in that app may be lost; for a group
+named by executable, the confirm says it reaches other terminals too. A lock
+replaces the button, with the reason, for:
+
+- system processes: another user's or the system's; macOS's own (an
+  executable under `/System`, `/usr` but not `/usr/local`, `/bin`, `/sbin` or
+  `/Library/Apple`, except the apps in `/System/Applications` and Safari);
+  Windows' own (under `C:\Windows`, or another session's); and on Linux the
+  desktop session (display servers, session managers, compositors and window
+  managers such as `ksmserver`, `sway` or `gnome-shell`, and their services);
+- on macOS, a process named without a path whose executable Pane can't read;
+- the iOS simulator: some of its helpers run outside the runtime, so quit it
+  from the Simulator app or with `xcrun simctl shutdown all`;
+- Pane itself, including another Pane instance and everything it runs;
+- any app Pane runs inside, such as the terminal that started it.
+
+The machine checks these again when the stop arrives, so a linked machine
+refuses them too. Pane never stops an app by itself.
+
 ## Other machines
 
 The Resources header switches between this computer and every machine you
 linked. Each machine samples itself; Resources reads it over the link, and a
 cleanup you start runs on that machine, through its own checks, and its
 buttons say "Runs on" that machine. A machine on an older Pane shows "Update
-Pane on this machine to see its health", and an offline machine keeps its last
+Pane on this machine to see its health" (or, for a Pane from before the app
+list, "Update Pane on this machine to list its apps"), and an offline machine keeps its last
 numbers with their age, with its buttons off. Each machine's cards also show
 on every linked machine, titled with their machine's name.
 

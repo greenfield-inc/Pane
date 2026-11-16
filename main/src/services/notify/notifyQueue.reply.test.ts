@@ -200,6 +200,19 @@ describe('NotifyQueue replies (the reply contract)', () => {
     expect(queue.took({}, result.replyId, 'answer')).toMatchObject({ took: 'answer', id: 'q50' });
   });
 
+  it('an update answering a typed question must quote it; the asker\'s own update quotes nothing', async () => {
+    const queue = restoredQ20();
+    // The asker refreshes its own card (a loop's next run, say): no question of the person's to quote.
+    queue.update({ panelId: 'orch' }, 'Q-20', { asked: '', whatChanged: 'Two more items' });
+    expect(item(queue, 'q20')).toMatchObject({ version: 2, revision: { asked: '', whatChanged: ['Two more items'] } });
+
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Which two?' } });
+    await vi.advanceTimersByTimeAsync(1);
+    queue.took({ panelId: 'orch' }, 'Q-20', 'question');
+    expect(() => queue.update({ panelId: 'orch' }, 'Q-20', { asked: ' ', whatChanged: 'Named them' })).toThrow(/didn't say what it was/);
+    expect(item(queue, 'q20')).toMatchObject({ version: 2 });
+  });
+
   it('J7: --took question, then --update makes v2 with the question, what changed and v1 kept', async () => {
     const queue = restoredQ20();
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Can the switch be turned off again if the test goes badly?' } });
@@ -408,6 +421,23 @@ describe('NotifyQueue replies (the reply contract)', () => {
     await second;
     expect(queue.took({ panelId: 'orch' }, 'Q-1', 'question')).toMatchObject({ took: 'question', id: 'run-2' });
     expect(item(queue, 'run-1')?.state).toBe('answered');
+  });
+
+  it('a loop\'s later run cannot reopen a card the person answered by typing, but still reaches its own and a waiting one', async () => {
+    const queue = queueWith({ sameLoop: () => true });
+    const run1: NotifySource = { name: 'nightly', agent: 'Claude', paneId: 'run-1', panelId: 'r1' };
+    const run2: NotifySource = { name: 'nightly', agent: 'Claude', paneId: 'run-2', panelId: 'r2' };
+    const asked = queue.ask({ question: { ui: 'ask', title: 'Q-1: ship tonight?' }, source: run1, id: 'first' });
+    queue.run({ type: 'answer', id: 'first', answer: { picks: [], text: 'yes, after the backup' } });
+    await asked;
+    expect(() => queue.took({ paneId: 'run-2', panelId: 'r2' }, 'Q-1', 'question')).toThrow(/Only the agent reading/);
+    expect(item(queue, 'first')).toMatchObject({ state: 'answered', answerSummary: 'yes, after the backup' });
+    // Its own card with the same Q-n is still its own to reopen.
+    const own = queue.ask({ question: { ui: 'ask', title: 'Q-1: ship tonight?' }, source: run2, id: 'second' });
+    queue.run({ type: 'answer', id: 'second', answer: { picks: [], text: 'which build?' } });
+    await own;
+    expect(queue.took({ paneId: 'run-2', panelId: 'r2' }, 'Q-1', 'question')).toMatchObject({ took: 'question', id: 'second' });
+    expect(item(queue, 'first')?.state).toBe('answered');
   });
 
   it('an agent cannot reopen a reply the person marked as their answer', async () => {

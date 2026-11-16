@@ -228,7 +228,6 @@ function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPan
           showUnviewedCompleted={false}
           agentDisplayStatus={row.status}
           rowLayout="single"
-          isLoopRun={false}
           notifyWaiting={row.waiting}
         />
       </div>

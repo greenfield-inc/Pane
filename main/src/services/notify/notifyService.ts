@@ -69,6 +69,8 @@ export interface NotifyServiceDependencies {
   wslDistros?: () => string[];
   /** The Session a Pane (and tab) works in; Approvals files each item under it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
+  /** Both Panes run for the same loop: a later run may --update or --took an earlier run's card. */
+  sameLoop?: (callerPaneId: string, askerPaneId: string) => boolean;
   /** The project a Pane belongs to. */
   projectOf?: (paneId: string) => string | undefined;
   /** Every open Session by id, read once per fallback refresh. */
@@ -157,6 +159,7 @@ export class NotifyService {
       machineId: deps.configManager.getConfig().machineId,
       secrets: deps.secrets,
       sessionOf: deps.sessionOf,
+      sameLoop: deps.sameLoop,
       savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.computers ?? []).map(computer => computer.id),
       projectOf: deps.projectOf,
       store: deps.store,
