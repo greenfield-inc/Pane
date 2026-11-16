@@ -799,7 +799,7 @@ describe('OrchestrationSessionManager', () => {
 
     expect((await restarted.getView({ sessionId: healthy.session.id })).panel.id).toBe(healthy.panel.id);
     expect(fixture.store.read().sessions.find(record => record.id === broken.session.id)?.activity.at(-1)?.message)
-      .toMatch(/^Session could not be restored: Session instruction markers are incomplete/);
+      .toMatch(/^Session could not be restored: Session instruction file .*AGENTS\.md: Pane's markers in it don't pair up/);
   });
 
   it('keeps an inactive agent conversation across restart when the active agent has custom resume', async () => {

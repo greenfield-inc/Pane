@@ -626,8 +626,10 @@ Pane writes only those lines, plus a line
 break before them when the file didn't end with one; the rest of the file keeps
 every byte. It creates the file only when the agent's config folder exists and
 never deletes it. It leaves alone a file that is a symlink or not a regular
-file, isn't UTF-8, or has a stray marker, and one that another program keeps
-saving while Pane writes. Settings → Approvals → Agent instructions shows each
+file, isn't UTF-8, or has a stray marker, one that another program emptied in
+the last two seconds (it may be partway through saving it), and
+one that another program keeps saving while Pane writes; it tries again at the
+next launch. Settings → Approvals → Agent instructions shows each
 file's state.
 
 To remove the block, turn Approvals off in Settings → Approvals. Pane writes it

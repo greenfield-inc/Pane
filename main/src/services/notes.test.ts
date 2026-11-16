@@ -84,19 +84,35 @@ describe('Notes', () => {
     expect(fs.readFileSync(scenePath.replace('.excalidraw', '.png')).subarray(-12).toString('hex')).toBe('0000000049454e44ae426082');
     notes.remove(saved.id, saved.revision);
     exportNoteMemories(root, file, notes.list(saved.scope));
-    expect(fs.readFileSync(file, 'utf8')).toBe('---\nalwaysApply: true\n---\n\n\n');
+    expect(fs.readFileSync(file, 'utf8')).toBe('---\nalwaysApply: true\n---\n\n');
   });
 
   it('adds Cursor session context without replacing existing user hooks or duplicating its own hook', () => {
     const { root } = notebook();
     const file = path.join(root, 'hooks.json');
-    fs.writeFileSync(file, JSON.stringify({ version: 1, custom: 'keep', hooks: { stop: [{ command: 'user-check' }], sessionStart: [{ command: 'user-start' }] } }));
+    fs.writeFileSync(file, JSON.stringify({ version: 1, custom: 'keep', hooks: { stop: [{ command: 'user-check' }], sessionStart: [{ command: 'user-start' }] } }, null, 2));
     exportCursorMemoryHook(root, 'Read the saved payment note.', 'darwin');
     exportCursorMemoryHook(root, 'Read the updated payment note.', 'darwin');
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toEqual({ version: 1, custom: 'keep', hooks: {
       stop: [{ command: 'user-check' }], sessionStart: [{ command: 'user-start' }, { command: "cat './pane-notes-context.json'" }],
     } });
     expect(JSON.parse(fs.readFileSync(path.join(root, 'pane-notes-context.json'), 'utf8'))).toEqual({ additional_context: 'Read the updated payment note.' });
+  });
+
+  it('leaves a hooks.json in its own layout alone instead of reformatting it', () => {
+    const { root } = notebook();
+    const file = path.join(root, 'hooks.json');
+    const own = '{"version": 1, "hooks": {"stop": [{"command": "user-check"}]}}\n';
+    fs.writeFileSync(file, own);
+    expect(() => exportCursorMemoryHook(root, 'Read the saved payment note.', 'darwin')).toThrow('hooks.sessionStart');
+    expect(fs.readFileSync(file, 'utf8')).toBe(own);
+  });
+
+  it.skipIf(process.platform === 'win32')('creates instruction files only the person can read, since notes are private', () => {
+    const { root, notes } = notebook();
+    const file = path.join(root, 'new home', 'CLAUDE.md');
+    exportNoteMemories(root, file, [notes.create({ kind: 'global', id: 'user' }, 'Private')]);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it('keeps another Pane data directory from replacing or removing owned memory', () => {
@@ -123,6 +139,24 @@ describe('Notes', () => {
     expect(fs.readFileSync(target, 'utf8')).toContain('My instructions\n');
     expect(fs.readFileSync(target, 'utf8')).toContain('### Symlink memory');
     if (process.platform !== 'win32') expect(fs.statSync(target).mode & 0o777).toBe(0o640);
+  });
+
+  it.each([
+    ['text with a final line break', '# Mine\n\nKeep this.\n'],
+    ['text without a final line break', '# Mine\n\nKeep this.'],
+    ['CRLF text', '# Mine\r\n\r\nKeep this.\r\n'],
+    ['a byte order mark', '\uFEFF# Mine\n'],
+  ])('gives back an instruction file with %s byte for byte after memories are added and removed', (_name, own) => {
+    const { root, notes } = notebook();
+    const file = path.join(root, 'CLAUDE.md');
+    fs.writeFileSync(file, own);
+    const note = notes.create({ kind: 'global', id: 'user' }, 'Checkout');
+
+    exportNoteMemories(root, file, [note]);
+    expect(fs.readFileSync(file, 'utf8').startsWith(own)).toBe(true);
+    expect(fs.readFileSync(file, 'utf8')).toContain('### Checkout');
+    exportNoteMemories(root, file, []);
+    expect(fs.readFileSync(file, 'utf8')).toBe(own);
   });
 
   it('delivers Unicode Cursor memory through legacy Windows code pages', () => {
