@@ -34,6 +34,8 @@ export const PANE_UNSNAPSHOTTED_FOLDERS = [
   'projects',
   // Agents' temporary files ($PANE_SCRATCH_DIR), which can hold whole clones; archive retention deletes them.
   'scratch',
+  // Device tools Pane installs with npm, build checkouts for linked computers, and screenshots: fetched or rebuilt on the next device call.
+  'devices',
 ] as const;
 
 const stateFolders = new Set<string>(PANE_STATE_FOLDERS);
