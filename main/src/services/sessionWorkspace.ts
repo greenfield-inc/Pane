@@ -49,7 +49,7 @@ const MARKERS: BlockMarkers = { begin: START, end: END, repair: 'try again' };
 /** Only the marked generated section is replaced; user instructions survive. */
 function writeManagedInstructions(filePath: string, content: string): void {
   try {
-    writeOwnedBlock(filePath, MARKERS, [START, ...escapeMarkers(content).split('\n'), END]);
+    writeOwnedBlock(filePath, MARKERS, [START, ...escapeMarkers(content).split('\n'), END], { createMode: 0o600 });
   } catch (error) {
     if (error instanceof LeftAlone) throw new Error(`Session instruction file ${filePath}: ${error.message}`);
     throw error;

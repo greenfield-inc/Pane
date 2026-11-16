@@ -118,9 +118,11 @@ describe('agentContextManager', () => {
     const own = `# Repo Rules\n${PANE_AGENT_CONTEXT_START}\nhalf a section\n\n# My own section\nKeep this line.\n`;
     await fs.writeFile(agentsPath, own, 'utf8');
 
-    expect(await toggle(enabledConfig(), projectPath)).toBe(false);
-    expect(await toggle(disabledConfig(), projectPath)).toBe(false);
+    // Left alone is a settled outcome, so the cleanup that runs at launch doesn't fail every time.
+    expect(await toggle(enabledConfig(), projectPath)).toBe(true);
+    expect(await toggle(disabledConfig(), projectPath)).toBe(true);
     await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(own);
+    await expect(ensureProjectAgentContext({ path: projectPath }, enabledConfig())).resolves.toMatchObject({ changed: false, skipped: 'unsafe-file' });
   });
 
   it('retries removal when a saved project becomes available again', async () => {

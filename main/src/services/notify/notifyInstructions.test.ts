@@ -148,6 +148,15 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     expect(text(claudeFile)).toBe('# My rules\nNever deploy without asking me.\n');
   });
 
+  it('puts the block back when Notify is turned off and straight back on', () => {
+    expect(sync(true)[0].state).toBe('written');
+    sync(false);
+    expect(text(claudeFile)).toBe('');
+
+    expect(sync(true)[0].state).toBe('written');
+    expect(text(claudeFile).startsWith(BEGIN)).toBe(true);
+  });
+
   it('leaves a file alone when Pane\'s markers don\'t pair up', () => {
     const own = `# Mine\n${BEGIN}\nhalf a block\n`;
     fs.writeFileSync(claudeFile, own);

@@ -21,26 +21,44 @@ const BOM = '﻿';
 /** Another program saves while Pane writes rarely more than once; past this, Pane tries at its next update. */
 const WRITE_ATTEMPTS = 3;
 /** An empty file saved this recently may be one another program truncated and is still writing. */
-const JUST_SAVED_MS = 2000;
+const JUST_SAVED_NS = 2_000_000_000n;
+/** The empty file Pane itself last left at each path (inode and modified time), which the guard lets through. */
+const emptiedByPane = new Map<string, { ino: bigint; mtimeNs: bigint }>();
+
+export interface WriteOptions {
+  /** Permission bits for a file Pane creates; an existing file keeps its own. */
+  createMode?: number;
+}
 
 /**
  * Makes `block` (the marker lines included) the file's Pane-owned lines, or removes them when
  * `block` is undefined: appended at the end when new, replaced where they stand otherwise. Creates a
  * missing file, never deletes one. Returns whether the file changed. Throws LeftAlone for a symlink,
  * anything but a regular file, a file that isn't UTF-8, a file whose markers don't pair up, and an
- * empty file saved in the last moments.
+ * empty file another program saved in the last moments.
  */
-export function writeOwnedBlock(file: string, markers: BlockMarkers, block: string[] | undefined): boolean {
+export function writeOwnedBlock(file: string, markers: BlockMarkers, block: string[] | undefined, { createMode = 0o644 }: WriteOptions = {}): boolean {
   for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt += 1) {
     const current = readFile(file);
-    if (block && current?.text === '' && Date.now() - current.mtimeMs < JUST_SAVED_MS) {
+    if (block && current?.text === '' && BigInt(Date.now()) * 1_000_000n - current.mtimeNs < JUST_SAVED_NS && !isPanesOwnEmpty(file, current)) {
       throw new LeftAlone('It is empty and was saved just now, so another program may still be writing it. Pane tries again at its next update.');
     }
     const next = editText(current?.text ?? '', markers, block);
     if (next === (current?.text ?? '')) return false;
-    if (commit(file, current, next)) return true;
+    if (commit(file, current, next, createMode)) {
+      if (next === '') {
+        const written = fs.lstatSync(file, { bigint: true });
+        emptiedByPane.set(file, { ino: written.ino, mtimeNs: written.mtimeNs });
+      }
+      return true;
+    }
   }
   throw new LeftAlone('It kept changing while Pane wrote to it, so Pane left it as it was. Pane tries again at its next update.');
+}
+
+function isPanesOwnEmpty(file: string, read: ReadFile): boolean {
+  const own = emptiedByPane.get(file);
+  return own !== undefined && own.ino === read.ino && own.mtimeNs === read.mtimeNs;
 }
 
 interface ReadFile {
@@ -48,7 +66,7 @@ interface ReadFile {
   /** Which file the text came from, so Pane notices one saved in its place. */
   ino: bigint;
   mode: number;
-  mtimeMs: number;
+  mtimeNs: bigint;
 }
 
 /** The file's text; undefined when it is missing. */
@@ -83,7 +101,7 @@ function readFile(file: string): ReadFile | undefined {
   }
   const text = bytes.toString('utf8');
   if (!Buffer.from(text, 'utf8').equals(bytes)) throw new LeftAlone("It isn't UTF-8 text, so Pane leaves it alone.");
-  return { text, ino: entry.ino, mode: Number(entry.mode & 0o777n), mtimeMs: Number(entry.mtimeMs) };
+  return { text, ino: entry.ino, mode: Number(entry.mode & 0o777n), mtimeNs: entry.mtimeNs };
 }
 
 /** Errors from link() on a filesystem without hard links (a WSL home over \\wsl.localhost, FAT or exFAT). */
@@ -93,10 +111,10 @@ const NO_HARD_LINKS = new Set(['ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'ENOSYS', 'EINV
  * Puts `next` in place of the file Pane read. Returns false when another program changed or
  * replaced it meanwhile; their version is then back in place for Pane to start over from.
  */
-function commit(file: string, read: ReadFile | undefined, next: string): boolean {
+function commit(file: string, read: ReadFile | undefined, next: string, createMode: number): boolean {
   const stamp = `${process.pid}.${Date.now()}`;
   const tmp = `${file}.${stamp}.tmp`;
-  fs.writeFileSync(tmp, next, { mode: read?.mode ?? 0o644, flag: 'wx' });
+  fs.writeFileSync(tmp, next, { mode: read?.mode ?? createMode, flag: 'wx' });
   try {
     if (!read) {
       // link() refuses to replace a file someone created since Pane looked.
@@ -111,7 +129,7 @@ function commit(file: string, read: ReadFile | undefined, next: string): boolean
       }
       // No hard links here: an exclusive create refuses just the same.
       try {
-        fs.writeFileSync(file, next, { mode: 0o644, flag: 'wx' });
+        fs.writeFileSync(file, next, { mode: createMode, flag: 'wx' });
         return true;
       } catch (error) {
         // SAFETY: fs.writeFileSync throws only Node system errors, which carry `code`.

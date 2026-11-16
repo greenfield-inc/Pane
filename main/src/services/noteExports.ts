@@ -55,5 +55,5 @@ export function exportNoteMemories(root: string, file: string, notes: Note[], pr
   if (!status && body && path.extname(file) === '.mdc') writeNoteFile(file, '---\nalwaysApply: true\n---\n\n');
   writeOwnedBlock(target, MARKERS, body
     ? [START, '## Pane memories', '', `<!-- pane-memories:store ${owner} -->`, ...body.split('\n'), END]
-    : undefined);
+    : undefined, { createMode: 0o600 });
 }

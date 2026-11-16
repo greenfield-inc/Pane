@@ -68,6 +68,11 @@ describe('Session workspace instructions', () => {
     expect(await fs.readFile(file, 'utf8')).toBe(edited);
   });
 
+  it.skipIf(process.platform === 'win32')('creates Session instruction files only the person can read', async () => {
+    const cwd = prepareSessionWorkspace('private');
+    for (const name of ['AGENTS.md', 'CLAUDE.md']) expect((await fs.stat(path.join(cwd, name))).mode & 0o777).toBe(0o600);
+  });
+
   it('prepares Sessions under a repository such as a dotfiles home, and stops git discovery above them', async () => {
     const home = path.join(root, 'home');
     await fs.mkdir(path.join(home, '.git'), { recursive: true });

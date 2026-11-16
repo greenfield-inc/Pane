@@ -6,7 +6,7 @@ import { PathResolver } from '../utils/pathResolver';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
-import { writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
+import { LeftAlone, writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
 
 export const PANE_AGENT_CONTEXT_START = '<!-- pane-agent-context:start -->';
 export const PANE_AGENT_CONTEXT_END = '<!-- pane-agent-context:end -->';
@@ -40,7 +40,7 @@ export async function ensureProjectAgentContext(
   if (!filePath) {
     return { changed: false, skipped: 'unsafe-file' };
   }
-  return { changed: writeOwnedBlock(filePath, MARKERS, renderManagedAgentContextBlock()), filePath };
+  return writeLeavingAlone(filePath, renderManagedAgentContextBlock()) ?? { changed: true, filePath };
 }
 
 /**
@@ -97,10 +97,22 @@ async function removeProjectAgentContext(root: string): Promise<AgentContextWrit
     return { changed: false, skipped: 'disabled' };
   }
 
-  if (!writeOwnedBlock(filePath, MARKERS, undefined)) {
-    return { changed: false, filePath, skipped: 'disabled' };
+  return writeLeavingAlone(filePath, undefined) ?? { changed: true, filePath, removed: true };
+}
+
+/**
+ * Writes or removes Pane's section; undefined when the file changed. A file Pane must leave alone
+ * (a stray marker, not UTF-8) is a settled outcome, not a failure to retry at every launch.
+ */
+function writeLeavingAlone(filePath: string, block: string[] | undefined): AgentContextWriteResult | undefined {
+  try {
+    if (writeOwnedBlock(filePath, MARKERS, block)) return undefined;
+    return block ? { changed: false, filePath } : { changed: false, filePath, skipped: 'disabled' };
+  } catch (error) {
+    if (!(error instanceof LeftAlone)) throw error;
+    console.warn(`[AgentContext] ${filePath}: ${error.message}`);
+    return { changed: false, filePath, skipped: 'unsafe-file' };
   }
-  return { changed: true, filePath, removed: true };
 }
 
 async function resolveAgentsFilePath(root: string): Promise<string | undefined> {
