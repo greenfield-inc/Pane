@@ -25,6 +25,17 @@ export function quoteShellWord(value: string, shellType: string | undefined): st
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * Quote a value as one literal argument the shell hands to a native program, such as an agent's
+ * CLI. Like quoteShellWord, but also undefined for PowerShell when the value holds `"`: Windows
+ * PowerShell (and pwsh before 7.3) drops embedded double quotes when it builds a native command line.
+ */
+export function quoteNativeArgument(value: string, shellType: string | undefined): string | undefined {
+  const shell = shellName(shellType);
+  if ((shell === 'powershell' || shell === 'pwsh') && value.includes('"')) return undefined;
+  return quoteShellWord(value, shellType);
+}
+
 /** Whether the shell reads POSIX quoting: true for bash, zsh, sh and an unknown or missing shell. */
 export function isPosixShell(shellType: string | undefined): boolean {
   return !['powershell', 'pwsh', 'cmd', 'fish'].includes(shellName(shellType));
