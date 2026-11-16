@@ -1,6 +1,6 @@
 import { memo, useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { ChatBlocksContext } from './chatRendering';
-import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Terminal, Wrench, XCircle } from 'lucide-react';
+import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Smartphone, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { markdownBlocks } from './markdownBlocks';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +9,9 @@ import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { imageOf, messageTime, planEntryKeys, stoppedText, turnDisplay, type WorkerNote, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 import { responseText, userMarkdown } from '../../../../shared/chatTabMarkdown';
 import { ChatCopyButton } from './ChatCopyButton';
+import { DeviceCard } from './DeviceCard';
+import { useDeviceTab } from './useDeviceTab';
+import { deviceMarkerOf } from '../../../../shared/deviceMarker';
 
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
@@ -85,7 +88,30 @@ function Output({ text, live }: { text: string; live: boolean }) {
   return <pre className="chat-step-output" aria-live={live ? 'polite' : undefined}>{shown}</pre>;
 }
 
+/** device_open's step: "Opened iPhone 17 Pro · iOS 27 · This Mac" and the device's live card. */
+function DeviceStepRow({ anchorId, marker }: { anchorId: string; marker: NonNullable<ReturnType<typeof deviceMarkerOf>> }) {
+  return <div className="chat-step" data-anchor-id={anchorId} data-kind="device" data-state="done">
+    <div className="chat-step-line">
+      <span className="chat-step-icon" data-state="done"><Smartphone aria-hidden="true" /></span>
+      <span className="chat-step-verb">Opened</span>
+      <span className="chat-step-label">{[marker.name, marker.os, marker.machine].filter(Boolean).join(' · ')}</span>
+    </div>
+    <DeviceCard marker={marker} />
+  </div>;
+}
+
+/** The device_open steps in a turn's activity, so a live device's card stays in view after the turn folds. */
+function deviceMarkers(items: readonly TurnItem[]) {
+  return items.flatMap(item => item.type === 'steps' ? item.groups.flatMap(group => group.steps.length === 1 ? [deviceMarkerOf(group.steps[0].output)] : []) : []).filter(marker => marker !== undefined);
+}
+
 function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
+  const marker = group.steps.length === 1 && group.steps[0].status === 'completed' ? deviceMarkerOf(group.steps[0].output) : undefined;
+  if (marker) return <DeviceStepRow anchorId={group.id} marker={marker} />;
+  return <StepGroupLine group={group} waiting={waiting} actions={actions} />;
+}
+
+function StepGroupLine({ group, waiting, actions }: { group: StepGroup; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
   const state = groupState(group, waiting);
   const [open, setOpen] = useState(false);
   const single = group.steps.length === 1 ? group.steps[0] : undefined;
@@ -162,6 +188,12 @@ function UserMessage({ turn }: { turn: ChatTurn }) {
   </div>;
 }
 
+/** A folded turn keeps its device's card in view while the device is live; a closed one folds away. */
+function PinnedDeviceCard({ marker }: { marker: NonNullable<ReturnType<typeof deviceMarkerOf>> }) {
+  const live = useDeviceTab(marker.panelId).state?.phase === 'live';
+  return live ? <div className="chat-steps"><DeviceStepRow anchorId={`device:${marker.panelId}`} marker={marker} /></div> : null;
+}
+
 /** A worker the latest turn has news of, as one compact line with Open (D-201). */
 export function WorkerNoteLine({ note, onOpen }: { note: WorkerNote; onOpen?: (paneId: string) => void }) {
   return <p className="chat-worker-note" data-state={note.worker.state}>
@@ -196,6 +228,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
     <UserMessage turn={turn} />
     <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {fold}
+    {!open && deviceMarkers(activity).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} />)}
     <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}
