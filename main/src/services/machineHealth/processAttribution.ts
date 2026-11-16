@@ -39,7 +39,7 @@ export interface EnvTag {
 export type AttributedProcess = Omit<HealthProcess, 'cpuPercent'> & { cpuSeconds: number; startedAt: number };
 
 /** `[D-]HH:MM:SS[.ff]` or `MM:SS[.ff]` from `ps -o time=` into seconds. */
-function parseCpuTime(text: string): number {
+export function parseCpuTime(text: string): number {
   const [daysPart, clock] = text.includes('-') ? text.split('-') : ['0', text];
   const parts = clock.split(':').map(Number);
   while (parts.length < 3) parts.unshift(0);
