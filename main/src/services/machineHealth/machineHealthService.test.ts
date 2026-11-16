@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { HealthLevel, LeakWarning } from '../../../../shared/types/machineHealth';
+import type { HealthLevel, LeakWarning, StorageInventory } from '../../../../shared/types/machineHealth';
 import type { ResourceSnapshot } from '../../../../shared/types/resourceMonitor';
 import { MachineHealthService, type LevelChange, type MachineHealthDeps } from './machineHealthService';
 
@@ -31,6 +31,7 @@ function harness(extra: Partial<MachineHealthDeps> = {}) {
     memory: () => ({ totalBytes: 32 * GB, freeBytes: 8 * GB }),
     cpuTimes: () => ({ idle: 0, total: 0 }),
     processes,
+    scanInventory: async () => { throw new Error('not scanned in these tests'); },
     ...extra,
   });
   const changes: LevelChange[] = [];
@@ -115,5 +116,48 @@ describe('MachineHealthService', () => {
     // Between footprint reads the warning stands.
     state.now += 30_000;
     expect((await service.sample()).leaks).toHaveLength(1);
+  });
+  it('answers the inventory read at once, with null until the background scan it starts has finished', async () => {
+    let scans = 0;
+    let finish = (_inventory: StorageInventory) => {};
+    const { service } = harness({ scanInventory: () => { scans++; return new Promise(resolve => { finish = resolve; }); } });
+    expect(service.getInventory()).toBeNull();
+    expect(service.getInventory()).toBeNull();
+    expect(scans).toBe(1);
+    const inventory: StorageInventory = { scannedAt: T0, durationMs: 0, items: [], panes: [], buckets: { paneWorktrees: 0, dependencies: 0, qaAndScratch: 0, agentTemp: 0, paneData: 0 } };
+    finish(inventory);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(service.getInventory()).toBe(inventory);
+    expect(scans).toBe(1);
+  });
+
+  it('rescans on a disk warning only when the last scan is over an hour old', async () => {
+    let scans = 0;
+    const { state, service } = harness({
+      scanInventory: async () => {
+        scans++;
+        return { scannedAt: state.now, durationMs: 0, items: [], panes: [], buckets: { paneWorktrees: 0, dependencies: 0, qaAndScratch: 0, agentTemp: 0, paneData: 0 } };
+      },
+    });
+    service.start();
+    try {
+      await service.sample();
+      await service.scanInventory();
+      const flap = async () => {
+        state.freeGB = 19;
+        await service.sample();
+        state.freeGB = 21;
+        await service.sample();
+        await new Promise(resolve => setImmediate(resolve));
+      };
+      await flap();
+      await flap();
+      expect(scans).toBe(1);
+      state.now += 61 * MIN;
+      await flap();
+      expect(scans).toBe(2);
+    } finally {
+      service.stop();
+    }
   });
 });

@@ -631,6 +631,14 @@
             }
           }
         },
+        "tempDirs": {
+          "description": "Folders that hold the CLI's per-session temp files, named after each session's working directory. {tmp} is /tmp on macOS and Linux and the OS temp folder on Windows; {uid} is the user id. Machine health attributes these folders to Panes and offers to clear those of finished work.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "transcriptDirs": {
           "description": "Folders, relative to the home the CLI runs with (POSIX separators), that hold its session transcripts. Before Pane deletes a folder it owns, it moves these out of it into <pane-dir>/agent-logs/<agent>/.",
           "type": "array",
