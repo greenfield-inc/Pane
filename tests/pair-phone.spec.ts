@@ -38,12 +38,12 @@ async function openHome(page: Page, options: ElectronApiMockOptions = {}, theme:
     const button = page.getByRole('dialog').getByRole('button', { name, exact: true });
     if (await button.isVisible({ timeout: 1500 }).catch(() => false)) await button.click();
   }
-  await expect(page.getByRole('heading', { name: 'Use Pane on your phone' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Use Pane from your phone, another computer, or glasses' })).toBeVisible();
 }
 
-/** Home's "Pair a phone" opens Add a device on its Phone tab. */
+/** Home's "Pair a device" opens Add a device on its Phone tab. */
 async function openPairDialog(page: Page) {
-  await page.getByRole('button', { name: 'Pair a phone' }).click();
+  await page.getByRole('button', { name: 'Pair a device' }).click();
   const dialog = page.getByRole('dialog', { name: 'Add a device' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('tab', { name: 'Phone' })).toHaveAttribute('aria-selected', 'true');

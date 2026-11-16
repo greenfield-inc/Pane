@@ -116,7 +116,7 @@ export function SessionsStepFooter({ sessions, busy, onYes, onNotNow }: Sessions
   );
 }
 
-/** The last first-run step: what a paired phone gives you. Its button opens the Pair a phone dialog. */
+/** The last first-run step: what a paired phone gives you. Its Pair a phone button opens Add a device on its Phone tab. */
 export function PhoneStepBody() {
   return (
     <div className="space-y-3">
