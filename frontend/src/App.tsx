@@ -48,6 +48,7 @@ import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
 import { onOpenFirstRunRequest } from './utils/openFirstRun';
+import { dropLaunchOutline, revealApp } from './utils/launchOutline';
 import { prepareLaunchChat, restoreHostNavigation, restoreLaunchChat, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { useRegionNavigation } from './hooks/useRegionNavigation';
 import { KeySequenceHint } from './components/KeySequenceHint';
@@ -808,6 +809,7 @@ function App() {
         if (restored) {
           useRestartToUpdateStore.getState().showRestoreResult(restored);
           if (!useConfigStore.getState().config) await useConfigStore.getState().fetchConfig();
+          dropLaunchOutline();
           if (!cancelled) await restoreHostNavigation(() => true, restored.navigation);
           // Panes whose agents could not resume stay interrupted; offer them as on any launch.
           if (cancelled || restored.panesFailed === 0) return;
@@ -837,10 +839,13 @@ function App() {
     };
   }, [isLoaded]);
 
-  // Main keeps the window hidden until the first frame with sessions is painted.
+  // The first frame with sessions replaces the launch outline (index.html), and main may now send menu actions and links.
   useEffect(() => {
     if (!isLoaded) return;
-    const frame = requestAnimationFrame(() => window.electronAPI?.notifyRendererReady?.());
+    const frame = requestAnimationFrame(() => {
+      revealApp();
+      window.electronAPI?.notifyRendererReady?.();
+    });
     return () => cancelAnimationFrame(frame);
   }, [isLoaded]);
 
