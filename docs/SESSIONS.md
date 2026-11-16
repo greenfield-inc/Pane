@@ -1365,6 +1365,16 @@ panel <panel-id> ready|exited`) and clears the expectation. The entry's
 20 lines on its screen (`lastOutputSource: transcript|screen`), cut to 2,000
 characters with the end kept. A report clears the expectation.
 
+An agent tab runs its agent inside a shell, so an agent that exits back to
+that shell (a launch that failed, a crash) ends no panel and journals no
+`panel.exited`. Its expectation would then refuse every later dispatch with
+`ERR_RUNPANE_REPORT_OUTSTANDING`. Instead, a `panels submit` to a tab whose
+launch command has exited settles it first (`releaseExited()` in
+`expectedReports.ts`): Pane journals the `agent.report.missing` the agent owed
+(`reason: exited`), or drops a reservation whose work was never sent, then
+delivers the new work. A live agent that owes a report still refuses new
+report-expected work.
+
 An agent can end its turn while work it started keeps running. Pane reads
 that from the screen: Claude Code counts running background shells in its
 footer (`⏵⏵ bypass permissions on · 1 shell`) and lists each running
