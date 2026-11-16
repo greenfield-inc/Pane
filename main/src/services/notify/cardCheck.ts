@@ -1,5 +1,5 @@
 import { PaneError } from '../../../../shared/paneError';
-import type { NotifyChoice, NotifyLink, NotifySubQuestion } from '../../../../shared/types/notify';
+import { NOTIFY_LINKS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
 
 /**
  * The approval card contract (D-342.2, D-347): a title of about 80 to 100 characters on one line,
@@ -107,4 +107,14 @@ export function assertCard(card: CardFields): string[] {
   const { refusal, warnings } = checkCard(card);
   if (refusal) throw new PaneError(refusal.code, refusal.message, refusal.next);
   return warnings;
+}
+
+/**
+ * The links a card shows (the first NOTIFY_LINKS_MAX) and its context, which names the rest on a
+ * last line, so a link with no room is never dropped unseen.
+ */
+export function fitLinks(links: NotifyLink[], context: string | undefined): { links: NotifyLink[]; context?: string } {
+  if (links.length <= NOTIFY_LINKS_MAX) return { links, context };
+  const more = `More links: ${links.slice(NOTIFY_LINKS_MAX).map(link => link.label).join(', ')}`;
+  return { links: links.slice(0, NOTIFY_LINKS_MAX), context: context?.trim() ? `${context.trimEnd()}\n\n${more}` : more };
 }

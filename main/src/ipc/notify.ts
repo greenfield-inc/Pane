@@ -25,7 +25,7 @@ import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { statusCard } from '../services/notify/workerContext';
 import { admitCard } from '../services/notify/cardAdmit';
-import { checkCard } from '../services/notify/cardCheck';
+import { checkCard, fitLinks } from '../services/notify/cardCheck';
 import { summaryPage } from '../services/notify/summaryPage';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage } from '../../../shared/types/notify';
@@ -774,13 +774,14 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
     if (request.ui !== undefined) throw invalid('update keeps the approval\'s ui; leave ui out.');
     if (!request.asked?.trim()) throw invalid('update needs asked: the person\'s question, as they asked it.');
     if (!request.whatChanged?.trim()) throw invalid('update needs whatChanged: one line per change.');
-    if ((request.title?.length ?? 0) > MAX_TEXT || (request.context?.length ?? 0) > MAX_TEXT || request.asked.length > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, context, asked and whatChanged take up to ${MAX_TEXT} characters.`);
+    if ((request.title?.length ?? 0) > MAX_TEXT || request.asked.length > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, asked and whatChanged take up to ${MAX_TEXT} characters.`);
     if (request.choices && request.questions) throw invalid('pass choices or questions, not both.');
     if (request.choices) checkChoices(request.choices, 'choices');
     if (request.questions) checkQuestions(request.questions);
     if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
     // The new version's context reads like a new card's; the card keeps its ui, and its links unless given.
     readStatusContext(request, false);
+    checkContext(request);
     return request;
   }
   if (request.asked !== undefined || request.whatChanged !== undefined) throw invalid('asked and whatChanged only go with update.');
@@ -795,7 +796,7 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
     throw invalid(`secret only goes with ui: secret, not ${ui}.`);
   }
   if (!request.title?.trim()) throw invalid('title is required.');
-  if (request.title.length > MAX_TEXT || (request.context?.length ?? 0) > MAX_TEXT) throw invalid(`title and context take up to ${MAX_TEXT} characters.`);
+  if (request.title.length > MAX_TEXT) throw invalid(`title takes up to ${MAX_TEXT} characters.`);
   if ((request.detail?.length ?? 0) > MAX_DETAIL) throw invalid(`detail takes up to ${MAX_DETAIL} characters.`);
   if (ui === 'options' && request.questions) {
     if (request.choices) throw invalid('pass choices or questions, not both.');
@@ -815,7 +816,13 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.action && !/^https?:\/\//i.test(request.action.url)) throw invalid('action.url must be an http(s) URL.');
   if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
   readStatusContext(request, true);
+  checkContext(request);
   return request;
+}
+
+/** The context the card shows, after a status file sent as the context became its card. */
+function checkContext(request: NotifyRequest): void {
+  if ((request.context?.length ?? 0) > MAX_TEXT) throw invalid(`context takes up to ${MAX_TEXT} characters.`);
 }
 
 /**
@@ -845,7 +852,9 @@ function readStatusContext(request: NotifyRequest, newCard: boolean): void {
   if (card.summaryPage) request.summaryPage = request.caller.cwd && !path.isAbsolute(card.summaryPage) ? path.resolve(request.caller.cwd, card.summaryPage) : card.summaryPage;
   if (card.links) {
     const files = card.links.map(link => ('path' in link && request.caller.cwd && !path.isAbsolute(link.path) ? { ...link, path: path.resolve(request.caller.cwd, link.path) } : link));
-    request.links = [...request.links ?? [], ...files].slice(0, NOTIFY_LINKS_MAX);
+    const fitted = fitLinks([...request.links ?? [], ...files], request.context);
+    request.links = fitted.links;
+    if (fitted.context !== undefined) request.context = fitted.context;
   }
 }
 

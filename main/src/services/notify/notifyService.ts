@@ -8,7 +8,6 @@ import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
 import {
   DEFAULT_NOTIFY_SETTINGS,
-  NOTIFY_LINKS_MAX,
   type NotifyCaller,
   type NotifyAgentAction,
   type NotifyCommand,
@@ -29,6 +28,7 @@ import {
 } from '../../../../shared/types/notify';
 import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed } from './notifyQueue';
 import { PaneError } from '../../../../shared/paneError';
+import { fitLinks } from './cardCheck';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
@@ -257,7 +257,7 @@ export class NotifyService {
       const card = workerCard(entry.report?.summary, question, { quietly: true, summaryPath: entry.report?.summaryPath });
       // D-81: the worker's status file, which its report named, opens beside the card.
       const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
-      const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);
+      const { links, context } = fitLinks([...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)], card.context);
       // A worker on another machine names it: the card says where to go to see its tab.
       const machine = this.deps.memberMachine?.(entry.paneId);
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: machine ? `${entry.paneName} on ${machine}` : entry.paneName, agent: agentName(entry.agentType) };
@@ -270,7 +270,7 @@ export class NotifyService {
         // The Session it was filed in, even after the worker has moved or the Session closed.
         connected: { kind: 'session', id: entry.sessionId, name: session?.name ?? 'Closed Session', paneId: session?.paneId ?? '' },
         links: links.length ? links : undefined,
-        context: card.context,
+        context,
         choices: card.choices,
         questions: card.questions,
         asSent: card.asSent,
