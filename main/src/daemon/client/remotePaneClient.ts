@@ -662,19 +662,45 @@ export class RemotePaneClient {
   }
 
   /**
-   * The round trip to the host over the route in use, in whole ms: the faster of two GET /health on
-   * a kept-alive connection, so a new connection's handshake does not count. Null when it does not answer.
+   * The round trip to the host over the route in use, in whole ms: two GET /health on one kept-alive
+   * connection, timing the second, so the TCP and TLS handshakes do not count. Null when it does not answer.
    */
   async measureLatency(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<number | null> {
     const endpoint = new URL('health', this.normalizedBaseUrl);
-    let fastest = Number.POSITIVE_INFINITY;
+    const options = this.buildRequestOptions(endpoint, { method: 'GET' });
+    // Node never reuses a socket for a request that carries its own key pin, so the pin moves onto an agent of its own.
+    // The direct path's agent already keeps its connection.
+    if (options.agent) return this.timeTwoGets(endpoint, options, timeoutMs);
+    const { checkServerIdentity, ...rest } = options;
+    const agentOptions: https.AgentOptions = { keepAlive: true, maxSockets: 1 };
+    if (checkServerIdentity) agentOptions.checkServerIdentity = checkServerIdentity;
+    const agent = endpoint.protocol === 'https:' ? new https.Agent(agentOptions) : new http.Agent(agentOptions);
+    try {
+      return await this.timeTwoGets(endpoint, { ...rest, agent }, timeoutMs);
+    } finally {
+      agent.destroy();
+    }
+  }
+
+  private async timeTwoGets(endpoint: URL, options: RemoteRequestOptions, timeoutMs: number): Promise<number | null> {
+    let elapsed = 0;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const startedAt = performance.now();
-      const result = await this.timedGet(endpoint, {}, timeoutMs, this.currentProfile, { reuseConnection: true });
-      if (!('statusCode' in result) || PROXY_BACKEND_DOWN_STATUSES.has(result.statusCode)) break;
-      fastest = Math.min(fastest, performance.now() - startedAt);
+      const answered = await new Promise<boolean>((resolve) => {
+        const request = createRequest(endpoint, options, (response) => {
+          const ok = !PROXY_BACKEND_DOWN_STATUSES.has(response.statusCode ?? 0);
+          // Read to the end, so the connection is free for the second request.
+          response.on('end', () => resolve(ok)).resume();
+        });
+        const deadline = setTimeout(() => request.destroy(new Error('no answer')), timeoutMs);
+        request.on('error', () => resolve(false));
+        request.on('close', () => clearTimeout(deadline));
+        request.end();
+      });
+      if (!answered) return null;
+      elapsed = performance.now() - startedAt;
     }
-    return Number.isFinite(fastest) ? Math.max(1, Math.round(fastest)) : null;
+    return Math.max(1, Math.round(elapsed));
   }
 
   /** Whether the host accepts this profile's sign-in, without opening an event stream. */
@@ -691,11 +717,10 @@ export class RemotePaneClient {
     headers: http.OutgoingHttpHeaders,
     timeoutMs: number,
     profile: RemotePaneConnectionProfile = this.currentProfile,
-    { reuseConnection = false }: { reuseConnection?: boolean } = {},
   ): Promise<{ statusCode: number } | { code: string | undefined; message: string }> {
     const options = this.buildRequestOptions(endpoint, { method: 'GET', headers }, profile);
     // A probe tests the route itself, so it opens its own connection: a kept-alive socket from before a network change may be dead.
-    if (!reuseConnection) options.agent ??= false;
+    options.agent ??= false;
     return new Promise((resolve) => {
       const request = createRequest(endpoint, options, (response) => {
         response.resume();
