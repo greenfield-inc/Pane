@@ -225,7 +225,7 @@ export const MACHINE_HEALTH_STOP_PROCESSES_CHANNEL = 'resource-monitor:machine-s
 export const MACHINE_HEALTH_RESTART_PROCESS_CHANNEL = 'resource-monitor:machine-restart-process';
 /** No leak warning for this process until it exits: `{ pid, started }`. */
 export const MACHINE_HEALTH_IGNORE_LEAK_CHANNEL = 'resource-monitor:machine-ignore-leak';
-/** Opens Pane Chat on this machine and sends it `{ prompt }`; the card's "Ask an agent". */
+/** Hands `{ prompt }` to the agent of the open Session named `{ name }`, starting one if none is open; every machine health "Ask an agent". Returns `{ sessionId, panelId }`. */
 export const MACHINE_HEALTH_ASK_AGENT_CHANNEL = 'resource-monitor:machine-ask-agent';
 /** Recent cleanup runs on this machine, newest first; held in memory since the last start. */
 export const MACHINE_HEALTH_HISTORY_CHANNEL = 'resource-monitor:machine-cleanup-history';

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Archive, Box, ChevronDown, ChevronUp, Clock, FlaskConical, FolderX, HardDrive, MemoryStick, Moon, RefreshCw, Sparkles, Square, TrendingUp } from 'lucide-react';
 import type { HealthProcess, MachineHealthSnapshot, PaneUsage, ReclaimItem, ReclaimKind } from '../../../../shared/types/machineHealth';
-import { MACHINE_HEALTH_ASK_AGENT_CHANNEL } from '../../../../shared/types/machineHealth';
+import { askAgentToCleanUp } from './healthCardActions';
 import { configuredAgent, CONFIGURED_AGENT_IDS } from '../../../../shared/agents';
 import { cn } from '../../utils/cn';
 import { showActionError } from '../../stores/errorStore';
@@ -546,14 +546,8 @@ export function ResourcesView() {
 
   const askAgent = async () => {
     if (!data) return;
-    // The saved machine id is what `runpane workspace` resolves; the OS hostname may not be.
-    const where = remote ? ` This is about the linked machine ${label}; run each runpane command there as \`runpane workspace ${machineId} <command>\`.` : '';
-    try {
-      await window.electronAPI.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, { prompt: `Help me free disk and memory on ${remote ? label : data.snapshot.hostname}.${where} Run \`runpane machine health --json\` to see what Pane can free, by tier. Clean up only through \`runpane machine cleanup --kind <kind>\`: run it without --yes first to see the list and total. For a tier 1 kind, then run it with --yes. For a tier 2 kind, show me that list and total and run --yes only after I agree. Never delete files with rm, and ask me before you stop a process or archive a Pane.` });
-      useNavigationStore.getState().navigateToPaneChat();
-    } catch (error) {
-      showActionError('Could not ask an agent', error);
-    }
+    const name = remote ? label : data.snapshot.hostname;
+    await askAgentToCleanUp({ machineId, machineName: name, prompt: `Help me free disk and memory on ${name}. Run \`runpane machine health --json\` to see what Pane can free, by tier. Clean up only through \`runpane machine cleanup --kind <kind>\`: run it without --yes first to see the list and total. For a tier 1 kind, then run it with --yes. For a tier 2 kind, show me that list and total and run --yes only after I agree. Never delete files with rm, and ask me before you stop a process or archive a Pane.` });
   };
 
   return (
@@ -580,7 +574,8 @@ export function ResourcesView() {
         )}
         {!data && !problem && <p className="text-sm text-text-secondary">Reading this machine's health…</p>}
         {data && (
-          <div className={cn('flex flex-col gap-5', offline && 'opacity-60')}>
+          // Keyed by machine: switching machines starts every section fresh for the new one.
+          <div key={machineId} className={cn('flex flex-col gap-5', offline && 'opacity-60')}>
             <DiskSection data={data} />
             <MemorySection data={data} hours={data.relief.idle.hours ?? (remote ? null : pauseHours)} runsOn={runsOn} readOnlyReason={readOnlyReason} busy={pausing} onPause={async () => {
               setPausing(true);
@@ -593,8 +588,8 @@ export function ResourcesView() {
                 setPausing(false);
               }
             }} />
-            <Recommendations key={machineId} data={data} machineId={machineId} reload={() => reload()} readOnlyReason={readOnlyReason} runsOn={runsOn} />
-            <PerPane key={machineId} data={data} machineId={machineId} />
+            <Recommendations data={data} machineId={machineId} reload={() => reload()} readOnlyReason={readOnlyReason} runsOn={runsOn} />
+            <PerPane data={data} machineId={machineId} />
             <NotManaged data={data} />
             <History data={data} />
             {!data.inventory && !data.pending && !offline && <p className="text-sm text-text-secondary">Pane has not measured storage on this machine yet. <button type="button" className="underline" onClick={() => { void reload(true); }}>Measure now</button></p>}

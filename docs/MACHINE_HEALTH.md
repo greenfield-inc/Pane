@@ -99,8 +99,11 @@ item by item.
 
 A card shows once and again only after 6 hours or when it gets worse; Not now
 holds it for 24 hours. When disk or memory turns critical, a desktop
-notification also fires, following your notification settings. Ask an agent
-opens Pane Chat with the card's items.
+notification also fires, following your notification settings. Ask an agent,
+on a card or on Resources, hands the items to the agent of a Session named
+"Clean up <machine>", starting that Session when none is open, and shows it.
+The agent runs on the machine the window is on when the items are about that
+machine, and on this computer otherwise (the window switches back to it).
 
 ## Other machines
 
