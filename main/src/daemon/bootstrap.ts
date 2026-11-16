@@ -6,7 +6,7 @@ import { tabListener } from '../services/tabListener';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
-import { powerMonitor, type App, type BrowserWindow } from 'electron';
+import { nativeImage, powerMonitor, type App, type BrowserWindow } from 'electron';
 import { runStartupRetentionSweep, startupPanelBufferMigration } from '../services/database';
 import { ConfigManager } from '../services/configManager';
 import { Logger } from '../utils/logger';
@@ -848,8 +848,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     now: () => Date.now(),
     read: readAppProcesses,
     paneProcesses: () => new Set(machineHealth.latestSnapshot()?.panes.flatMap(pane => pane.processes.map(proc => proc.pid)) ?? []),
+    // macOS answers getFileIcon with a generic placeholder for app bundles; its thumbnail is the real icon.
     iconOf: process.platform === 'linux' ? undefined : async iconPath => {
-      const icon = await options.app.getFileIcon(iconPath, { size: 'normal' });
+      const icon = process.platform === 'darwin'
+        ? await nativeImage.createThumbnailFromPath(iconPath, { width: 32, height: 32 })
+        : await options.app.getFileIcon(iconPath, { size: 'normal' });
       return icon.isEmpty() ? undefined : icon.toDataURL();
     },
     stop: identities => stopProcessIdentities(identities),
