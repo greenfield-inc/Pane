@@ -225,5 +225,47 @@ export const MACHINE_HEALTH_STOP_PROCESSES_CHANNEL = 'resource-monitor:machine-s
 export const MACHINE_HEALTH_RESTART_PROCESS_CHANNEL = 'resource-monitor:machine-restart-process';
 /** No leak warning for this process until it exits: `{ pid, started }`. */
 export const MACHINE_HEALTH_IGNORE_LEAK_CHANNEL = 'resource-monitor:machine-ignore-leak';
+/** Opens Pane Chat on this machine and sends it `{ prompt }`; the card's "Ask an agent". */
+export const MACHINE_HEALTH_ASK_AGENT_CHANNEL = 'resource-monitor:machine-ask-agent';
 /** Recent cleanup runs on this machine, newest first; held in memory since the last start. */
 export const MACHINE_HEALTH_HISTORY_CHANNEL = 'resource-monitor:machine-cleanup-history';
+
+/** One row on a machine health card: a process, a Pane, or a reclaimable item. */
+export interface HealthCardRow {
+  label: string;
+  detail: string;
+  /** Memory (memory and leak cards) or disk bytes (disk and finished cards). */
+  bytes: number;
+  /** finished cards: why the Pane is finished, or why it is skipped. */
+  note?: string;
+  skipped?: boolean;
+}
+
+/**
+ * Carried on a Pane-raised Notify card (`NotifyItem.machineHealth`) so newer screens draw the
+ * machine health dialog; an older Pane drops the field and shows a plain card whose choices
+ * still answer it.
+ */
+export interface MachineHealthCard {
+  kind: 'disk' | 'memory' | 'leak' | 'finished';
+  level: HealthLevel;
+  /** The machine that raised it, and its id in the machine list ('local' on itself). */
+  machine: string;
+  hostname: string;
+  freeBytes?: number;
+  totalBytes?: number;
+  usedBytes?: number;
+  swapUsedBytes?: number | null;
+  rows: HealthCardRow[];
+  /** memory cards: what "Pause idle Panes" stops. */
+  pauseOffer?: { paneCount: number; memoryMB: number; hours: number };
+  /** leak cards: the process and its memory across the window. */
+  leak?: { pid: number; started: string; growthMB: number; windowMs: number; series: number[]; canRestart: boolean };
+  /** Total bytes the primary action frees. */
+  freesBytes?: number;
+  /** The prompt "Ask an agent" sends to Pane Chat. */
+  agentPrompt: string;
+}
+
+/** Sent to this machine's screens to open a view: Resources (on a machine) or Pane Chat. */
+export const MACHINE_HEALTH_NAVIGATE_EVENT = 'resource-monitor:navigate';

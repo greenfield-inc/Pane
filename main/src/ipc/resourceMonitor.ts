@@ -2,7 +2,7 @@ import type { IpcMain } from 'electron';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import { resourceMonitorService } from '../services/resourceMonitorService';
-import { RECLAIM_KINDS, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RELIEF_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_HISTORY_CHANNEL, MACHINE_HEALTH_INVENTORY_CHANNEL, MACHINE_HEALTH_SNAPSHOT_CHANNEL } from '../../../shared/types/machineHealth';
+import { RECLAIM_KINDS, MACHINE_HEALTH_ASK_AGENT_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RELIEF_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_HISTORY_CHANNEL, MACHINE_HEALTH_INVENTORY_CHANNEL, MACHINE_HEALTH_SNAPSHOT_CHANNEL } from '../../../shared/types/machineHealth';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import { logsManager } from '../services/panels/logPanel/logsManager';
@@ -34,6 +34,7 @@ const DAEMON_RESOURCE_MONITOR_CHANNELS = [
   MACHINE_HEALTH_STOP_PROCESSES_CHANNEL,
   MACHINE_HEALTH_RESTART_PROCESS_CHANNEL,
   MACHINE_HEALTH_IGNORE_LEAK_CHANNEL,
+  MACHINE_HEALTH_ASK_AGENT_CHANNEL,
 ] as const;
 
 export function registerResourceMonitorHandlers(
@@ -124,6 +125,16 @@ export function registerResourceMonitorHandlers(
     const identity = decodeBoundary(value, identitySchema);
     machineHealth().ignoreLeak(identity.pid, identity.started);
     return { ignored: identity.pid };
+  });
+
+  commandRegistry.register(MACHINE_HEALTH_ASK_AGENT_CHANNEL, async (value: PaneCommandValue) => {
+    const { prompt } = decodeBoundary(value, boundary.object({ prompt: boundary.nonEmptyString }));
+    if (!services.paneChatManager) {
+      throw new PaneError('ERR_MACHINE_HEALTH_UNAVAILABLE', 'Pane Chat is not running in this Pane process, so nothing was sent.', 'Open Pane Chat, then try Ask an agent again.');
+    }
+    const chat = await services.paneChatManager.getOrCreate();
+    await commandRegistry.invoke('runpane:panels:submit', [{ panelId: chat.panel.id, input: prompt }]);
+    return { panelId: chat.panel.id };
   });
 
   commandRegistry.bindChannels(ipcMain, DAEMON_RESOURCE_MONITOR_CHANNELS);

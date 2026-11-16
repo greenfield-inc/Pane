@@ -168,6 +168,29 @@ const replySchema = boundary.object({
   fixed: boundary.optional(boundary.enumeration('answer', 'question')),
 });
 const revisionSchema = boundary.object({ asked: boundary.string, whatChanged: boundary.array(boundary.string), by: boundary.string, at: boundary.number });
+const healthCardRowSchema = boundary.object({
+  label: boundary.string, detail: boundary.string, bytes: boundary.number,
+  note: boundary.optional(boundary.string), skipped: boundary.optional(boundary.boolean),
+});
+/** A machine health card's dialog data; an older Pane leaves it out of its schema and shows the plain card. */
+const machineHealthCardSchema = boundary.object({
+  kind: boundary.enumeration('disk', 'memory', 'leak', 'finished'),
+  level: boundary.enumeration('ok', 'warning', 'critical'),
+  machine: boundary.string,
+  hostname: boundary.string,
+  freeBytes: boundary.optional(boundary.number),
+  totalBytes: boundary.optional(boundary.number),
+  usedBytes: boundary.optional(boundary.number),
+  swapUsedBytes: boundary.optional(boundary.nullable(boundary.number)),
+  rows: boundary.array(healthCardRowSchema),
+  pauseOffer: boundary.optional(boundary.object({ paneCount: boundary.number, memoryMB: boundary.number, hours: boundary.number })),
+  leak: boundary.optional(boundary.object({
+    pid: boundary.number, started: boundary.string, growthMB: boundary.number, windowMs: boundary.number,
+    series: boundary.array(boundary.number), canRestart: boundary.boolean,
+  })),
+  freesBytes: boundary.optional(boundary.number),
+  agentPrompt: boundary.string,
+});
 const notifyItemSchema = boundary.object({
   id: boundary.nonEmptyString,
   ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
@@ -178,6 +201,7 @@ const notifyItemSchema = boundary.object({
   replyIsAnswer: boundary.optional(boundary.boolean),
   asSent: boundary.optional(boundary.object({ title: boundary.string, context: boundary.optional(boundary.string) })),
   summaryPage: boundary.optional(boundary.string),
+  machineHealth: boundary.optional(machineHealthCardSchema),
   statusFile: boundary.optional(boundary.string),
   optionsOnly: boundary.optional(boundary.boolean),
   detail: boundary.optional(boundary.string),

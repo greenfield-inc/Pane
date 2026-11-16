@@ -1,3 +1,4 @@
+import type { MachineHealthCard } from './machineHealth';
 /**
  * Pane Notify: agents call the `notify` MCP tool (or `runpane notify`) and Pane shows the
  * question wherever the person is, then returns the answer as the tool result.
@@ -100,6 +101,8 @@ export interface NotifyQuestion {
    * or `summary` in its needs_you). Absent: Pane writes the Summary from the card (P4).
    */
   summaryPage?: string;
+  /** Set by Pane for its own machine health cards: the data their dialog shows. */
+  machineHealth?: MachineHealthCard;
   /** Set by the host for a worker's card: its status file, read for "where it stands" on the Summary. */
   statusFile?: string;
   /**
