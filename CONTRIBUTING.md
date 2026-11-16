@@ -156,7 +156,11 @@ To test approvals' timers without waiting, start a dev build with
   `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
-  CI runs: smoke, health check, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
+  CI runs: the specs in `testMatch` in `playwright.ci.minimal.config.ts`, among
+  them smoke, health check, accessibility, settings, the remote sidebar, file
+  editor and preview lifecycles, and the Session journeys
+  (`orchestration-sessions.spec.ts`). A spec left out of that list never runs in
+  CI, so add a new one there.
 - `pnpm test:chat-tabs` runs the chat tab journeys: it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
