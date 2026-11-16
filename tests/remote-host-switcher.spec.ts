@@ -105,17 +105,18 @@ test('the menu shows a computer once, with only the route it is on and its laten
 
 test('a machine shows "…" until its latency answers, and an offline machine is not measured', async ({ page }) => {
   await installElectronApiMock(page, {
-    computers: [buildBox, { ...buildBox, id: 'studio', label: 'Studio Mac', os: 'macOS' }],
+    computers: [buildBox, { ...buildBox, id: 'studio', label: 'Studio Mac', os: 'macOS' }, { ...buildBox, id: 'far', label: 'Far Box', os: 'Linux' }],
     tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale.' },
     machineConnections: {
       machines: [
         { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
         { id: 'build-box', label: 'Build Box', kind: 'remote', status: 'online', offlineSince: null, routeId: 'relay:https://bb.runpane.net' },
         { id: 'studio', label: 'Studio Mac', kind: 'remote', status: 'offline', offlineSince: '2026-11-15T09:00:00.000Z' },
+        { id: 'far', label: 'Far Box', kind: 'remote', status: 'online', offlineSince: null, routeId: 'relay:https://bb.runpane.net' },
       ],
       reads: {},
     },
-    machineLatency: { 'build-box': 'pending' },
+    machineLatency: { 'build-box': 'pending', far: 1510 },
   });
   await page.goto('/');
   await page.getByRole('button', { name: /Switch machine$/ }).click();
@@ -125,7 +126,11 @@ test('a machine shows "…" until its latency answers, and an offline machine is
   const studio = page.getByRole('menuitemradio', { name: /Studio Mac/ });
   await expect(studio).toContainText('macOS · Last seen');
   await expect(studio.getByLabel(/in use$/)).toHaveCount(0);
-  expect(await latencyCalls(page)).toEqual(['build-box']);
+  // A slow route reads in seconds and stays on one line.
+  const far = page.getByRole('menuitemradio', { name: /Far Box/ }).getByLabel('1510 milliseconds');
+  await expect(far).toHaveText('1.5 s');
+  expect((await far.boundingBox())?.height).toBeLessThan(20);
+  expect(await latencyCalls(page)).toEqual(['build-box', 'far']);
 });
 
 test('a saved computer agents do not run on shows its live state and the route it is on, with All machines off', async ({ page }) => {

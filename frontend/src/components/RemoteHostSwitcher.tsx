@@ -49,12 +49,13 @@ type Latencies = Record<string, number | null | undefined>;
 function MachineLine({ machine, latency }: { machine: MachineEntry; latency: number | null | undefined }) {
   const route = routeInUse(machine);
   if (!route) return <>{machine.subtitle}</>;
-  const text = latency === undefined ? '…' : latency === null ? '—' : `${latency} ms`;
+  // From one second up, seconds keep the text inside its box ("1.5 s", not "1510 ms").
+  const text = latency === undefined ? '…' : latency === null ? '—' : latency >= 1000 ? `${(latency / 1000).toFixed(1)} s` : `${latency} ms`;
   return (
     <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
       <RoutePillView route={route} />
       <span
-        className="w-11 flex-none tabular-nums text-text-secondary"
+        className="w-11 flex-none whitespace-nowrap tabular-nums text-text-secondary"
         aria-label={latency === undefined ? 'Measuring latency' : latency === null ? 'No answer' : `${latency} milliseconds`}
       >{text}</span>
       {machine.os && <span className="truncate">{machine.os}</span>}
