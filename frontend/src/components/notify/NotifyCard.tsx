@@ -11,7 +11,7 @@ import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
 import { ClampedText } from './ClampedText';
 import { HealthCardBody } from '../machineHealth/HealthCardBody';
-import { askAgentAbout, isHealthCard, remoteMachineName, reviewHealthCard, type HealthNotifyItem } from '../machineHealth/healthCardActions';
+import { isHealthCard, remoteMachineName, reviewHealthCard, type HealthNotifyItem } from '../machineHealth/healthCardActions';
 
 /** The compact strip shows this many choices, then More. */
 const COMPACT_CHOICE_LIMIT = 4;
@@ -1155,7 +1155,7 @@ function InfoLine({ item, onCommand, hideAt = null, hideAfterMs = 6000, onOpenUr
   );
 }
 
-/** A machine health card on a Notify surface: the same body as the in-window dialog. */
+/** A machine health card on a Notify surface: the same body as the in-window dialog. Ask an agent runs in the main window, which shows the Session. */
 function HealthNotifyCard({ item, form, onCommand, className }: NotifyCardProps & { item: HealthNotifyItem }) {
   return (
     <div className={cn('rounded-xl border border-border-primary bg-surface-primary p-4', className)}>
@@ -1164,7 +1164,7 @@ function HealthNotifyCard({ item, form, onCommand, className }: NotifyCardProps 
         compact={form === 'strip'}
         machineName={remoteMachineName(item)}
         onAnswer={choice => onCommand({ type: 'answer', id: item.id, answer: { choice } })}
-        onAskAgent={() => { void askAgentAbout(item); }}
+        onAskAgent={() => onCommand({ type: 'ask-agent', id: item.id })}
         onReview={form === 'strip' ? undefined : () => { void reviewHealthCard(item); }}
       />
     </div>

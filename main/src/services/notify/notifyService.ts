@@ -409,6 +409,7 @@ export class NotifyService {
       case 'open-inbox': this.navigate('inbox'); return;
       case 'show-details': await this.updateSettings({ showDetails: command.shown }); return;
       case 'open-in-pane': await this.openInPane(command.id); return;
+      case 'ask-agent': this.askAgentInMainWindow(command.id); return;
       case 'open-link': await this.openLink(command.id, command.index, command.paneId); return;
       default:
         if ('id' in command && command.id && this.queue.remoteTarget(command.id)) await this.runOnMachine(command);
@@ -446,7 +447,7 @@ export class NotifyService {
    * A command for a saved machine's question: it goes to that machine only, under the id the
    * machine knows the question by. What stays on this screen runs here.
    */
-  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' }>): Promise<void> {
+  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'ask-agent' }>): Promise<void> {
     const target = this.queue.remoteTarget(command.id);
     if (!target) return;
     if (command.type === 'close' || command.type === 'reopen' || command.type === 'override') {
@@ -600,6 +601,16 @@ export class NotifyService {
     throw new PaneError('ERR_APPROVALS_LINK_OPEN',
       `Pane couldn't open ${link.label} as a tab (${failure instanceof Error ? failure.message : 'the card names no Pane'}). Nothing was opened.`,
       'url' in link ? 'Open the address in your browser.' : 'Check the file still exists inside the asking Pane\'s folder.');
+  }
+
+  /**
+   * A health card's Ask an agent clicked in a floating window: the main window comes forward and
+   * asks there, where the active machine and the Session it opens are.
+   */
+  private askAgentInMainWindow(itemId: string): void {
+    if (!this.queue.snapshot().items.some(candidate => candidate.id === itemId && candidate.machineHealth)) return;
+    this.windows.closeRound();
+    this.navigate({ askAgent: itemId });
   }
 
   private navigate(target: NotifyNavigateTarget): void {

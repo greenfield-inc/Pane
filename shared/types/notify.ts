@@ -594,6 +594,8 @@ export type NotifyCommand =
   /** Round →: move to the back of the queue. */
   | { type: 'skip'; id: string }
   | { type: 'open-in-pane'; id: string }
+  /** A machine health card's Ask an agent from a floating window: the main window runs it. */
+  | { type: 'ask-agent'; id: string }
   /** Approvals: open the item's link `index` as a tab of `paneId` (the Pane shown beside it), else of the asking Pane. */
   | { type: 'open-link'; id: string; index: number; paneId?: string }
   | { type: 'hover-info'; id: string; hovering: boolean }
@@ -625,7 +627,7 @@ export interface NotifyFixCommand {
  * Where main asks the window to go. `toggle-inbox` is the Notify shortcut
  * pressed while Pane is in front: Approvals, or back to where you were (D-251).
  */
-export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string };
+export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string } | { askAgent: string };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {

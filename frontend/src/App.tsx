@@ -1,4 +1,5 @@
 import { HealthCardDialog } from './components/machineHealth/HealthCardDialog';
+import { askAgentAbout, isHealthCard } from './components/machineHealth/healthCardActions';
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
 import { AddDeviceHost } from './components/addDevice/AddDeviceDialog';
 import { ConnectionChecklist } from './components/ConnectionChecklist';
@@ -230,7 +231,17 @@ function App() {
       toggleApprovals();
       return;
     }
-    openApprovals(target === 'inbox' ? undefined : target.approval);
+    if (target === 'inbox') {
+      openApprovals();
+      return;
+    }
+    if ('askAgent' in target) {
+      // A health card's Ask an agent from a floating window: this window knows the active machine.
+      const item = useNotifyStore.getState().snapshot?.items.find(candidate => candidate.id === target.askAgent);
+      if (item && isHealthCard(item)) void askAgentAbout(item);
+      return;
+    }
+    openApprovals(target.approval);
   }), [closeSettings, openSettings]);
 
   /**
