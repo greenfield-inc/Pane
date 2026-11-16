@@ -2,14 +2,11 @@ import { randomBytes } from 'crypto';
 import { realpath, stat } from 'fs/promises';
 import * as path from 'path';
 import { PaneError } from '../../../../shared/paneError';
-import type { MachineHealthSettings, ReclaimItem, ReclaimKind, ReclaimTier, StorageInventory } from '../../../../shared/types/machineHealth';
+import type { CleanupEntry, CleanupRun, CleanupSource, MachineHealthSettings, ReclaimItem, ReclaimKind, ReclaimTier, StorageInventory } from '../../../../shared/types/machineHealth';
 import { archiveErrorCode, archiveFs } from '../archiveCleanupFilesystem';
 import { preserveAgentLogs } from '../archiveRetention';
 import { deleteTrashEntry, renameWhileBusy, sweepTrashRoot } from '../worktreeTrash';
 import { isWslPath } from './reclaimRules';
-
-/** Where a cleanup came from: a person in Resources or a card, the schedule, or an agent through runpane. */
-type CleanupSource = 'ui' | 'card' | 'schedule' | 'cli';
 
 export interface CleanupRequest {
   source: CleanupSource;
@@ -19,25 +16,6 @@ export interface CleanupRequest {
   ids?: string[];
   /** Only items of these kinds. */
   kinds?: ReclaimKind[];
-}
-
-interface CleanupEntry {
-  id: string;
-  kind: ReclaimKind;
-  path: string;
-  sizeBytes: number;
-  reason?: string;
-}
-
-export interface CleanupRun {
-  at: number;
-  source: CleanupSource;
-  removed: CleanupEntry[];
-  skipped: CleanupEntry[];
-  /** Measured from free space on the affected volumes, before and after; never below 0. */
-  freedBytes: number;
-  /** True while removed items are still being deleted from the trash; freedBytes is filled in once they are. */
-  deleting?: boolean;
 }
 
 export interface CleanupDeps {
@@ -96,6 +74,11 @@ export class CleanupEngine {
 
   history(): CleanupRun[] {
     return [...this.runs];
+  }
+
+  /** Records a run made outside the engine (archiving finished Panes, stopping processes) in the same history. */
+  note(run: CleanupRun): CleanupRun {
+    return this.record(run);
   }
 
   /** Runs one request after any running one; requests never interleave. */

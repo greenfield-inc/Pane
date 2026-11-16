@@ -6336,7 +6336,7 @@ const PR_STATUS_TIMEOUT_MS = 20_000;
  * The Pane's PR state by its branch, after dropping cached PR results. A failed,
  * unavailable or slow lookup is `unknown`, which a `--merged` sweep skips.
  */
-async function findPrStatusForPane(services: AppServices, paneId: string): Promise<RunpanePaneArchivePrStatus> {
+export async function findPrStatusForPane(services: AppServices, paneId: string): Promise<RunpanePaneArchivePrStatus> {
   const gitStatus = services.gitStatusManager;
   try {
     const projectPath = services.sessionManager.getProjectForSession?.(paneId)?.path;
