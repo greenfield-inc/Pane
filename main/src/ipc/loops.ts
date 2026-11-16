@@ -202,7 +202,9 @@ async function readyLoopSession(commandRegistry: PaneCommandRegistry, loop: Stor
     session = await getLoopSession(commandRegistry, target);
   } catch (error) {
     if (!(error instanceof PaneError && error.code === 'ERR_SESSION_NOT_FOUND')) throw error;
-    const created = await createLoopSession(commandRegistry, loop.name, loop.agent ?? 'claude');
+    // Saving a Session loop requires its agent, so a stored one always has it.
+    if (!loop.agent) throw error;
+    const created = await createLoopSession(commandRegistry, loop.name, loop.agent);
     return { session: created, recovered: { kind: 'recreated', ...recoveredSession(created) } };
   }
   if (!session.archived) return { session };

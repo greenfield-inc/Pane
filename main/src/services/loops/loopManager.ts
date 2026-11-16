@@ -51,11 +51,11 @@ export interface LoopCard {
   session?: { id: string; name: string; paneId: string };
 }
 
-export const LOOP_CARD_KEEP = 'Keep it';
-export const LOOP_CARD_UNDO = 'Undo';
-export const LOOP_CARD_NEW_SESSION = 'Point it at a new Session';
-export const LOOP_CARD_RUN_AGAIN = 'Run again';
-export const LOOP_CARD_PAUSE = 'Pause the loop';
+const LOOP_CARD_KEEP = 'Keep it';
+const LOOP_CARD_UNDO = 'Undo';
+const LOOP_CARD_NEW_SESSION = 'Point it at a new Session';
+const LOOP_CARD_RUN_AGAIN = 'Run again';
+const LOOP_CARD_PAUSE = 'Pause the loop';
 
 export interface LoopManagerOptions {
   repo: LoopRepository;
