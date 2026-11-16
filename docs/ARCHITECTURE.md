@@ -207,6 +207,11 @@ settings cog holds promotion and deletion actions. Agent visibility is automatic
 within scope, with no sharing controls in the editor. Restoring an archived
 Pane refreshes its derived context from current project notes.
 
+Every marked section Pane keeps in an instruction file someone else can edit (the
+Notify block, notes' Pane memories, the repository `AGENTS.md` section and Session
+folder instructions) goes through `writeOwnedBlock` in `instructionsBlock.ts`: Pane
+adds, updates or removes only its own marked lines and keeps every other byte.
+
 `noteExports.ts` derives marked instruction sections and drawing assets from saved
 documents. Excalidraw scenes remain editable JSON, with PNG previews and readable
 labels in agent-facing Markdown. Global destinations are Claude's user

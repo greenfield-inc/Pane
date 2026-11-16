@@ -84,7 +84,7 @@ describe('Notes', () => {
     expect(fs.readFileSync(scenePath.replace('.excalidraw', '.png')).subarray(-12).toString('hex')).toBe('0000000049454e44ae426082');
     notes.remove(saved.id, saved.revision);
     exportNoteMemories(root, file, notes.list(saved.scope));
-    expect(fs.readFileSync(file, 'utf8')).toBe('---\nalwaysApply: true\n---\n\n\n');
+    expect(fs.readFileSync(file, 'utf8')).toBe('---\nalwaysApply: true\n---\n\n');
   });
 
   it('adds Cursor session context without replacing existing user hooks or duplicating its own hook', () => {
@@ -123,6 +123,24 @@ describe('Notes', () => {
     expect(fs.readFileSync(target, 'utf8')).toContain('My instructions\n');
     expect(fs.readFileSync(target, 'utf8')).toContain('### Symlink memory');
     if (process.platform !== 'win32') expect(fs.statSync(target).mode & 0o777).toBe(0o640);
+  });
+
+  it.each([
+    ['text with a final line break', '# Mine\n\nKeep this.\n'],
+    ['text without a final line break', '# Mine\n\nKeep this.'],
+    ['CRLF text', '# Mine\r\n\r\nKeep this.\r\n'],
+    ['a byte order mark', '\uFEFF# Mine\n'],
+  ])('gives back an instruction file with %s byte for byte after memories are added and removed', (_name, own) => {
+    const { root, notes } = notebook();
+    const file = path.join(root, 'CLAUDE.md');
+    fs.writeFileSync(file, own);
+    const note = notes.create({ kind: 'global', id: 'user' }, 'Checkout');
+
+    exportNoteMemories(root, file, [note]);
+    expect(fs.readFileSync(file, 'utf8').startsWith(own)).toBe(true);
+    expect(fs.readFileSync(file, 'utf8')).toContain('### Checkout');
+    exportNoteMemories(root, file, []);
+    expect(fs.readFileSync(file, 'utf8')).toBe(own);
   });
 
   it('delivers Unicode Cursor memory through legacy Windows code pages', () => {

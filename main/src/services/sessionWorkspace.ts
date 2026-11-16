@@ -8,6 +8,7 @@ import type { OrchestrationSessionRecord } from '../../../shared/types/orchestra
 import { keepSessionTidySection } from './sessionTidyRules';
 import { APPROVALS_RULES } from './approvalsRules';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
+import { LeftAlone, writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
 
 const START = '<!-- pane-session-context:start -->';
 const END = '<!-- pane-session-context:end -->';
@@ -43,22 +44,16 @@ function escapeMarkers(content: string): string {
   return content.split(START).join('<!-- pane-session-context start -->').split(END).join('<!-- pane-session-context end -->');
 }
 
+const MARKERS: BlockMarkers = { begin: START, end: END, repair: 'try again' };
+
 /** Only the marked generated section is replaced; user instructions survive. */
 function writeManagedInstructions(filePath: string, content: string): void {
-  if (fs.existsSync(filePath) && fs.lstatSync(filePath).isSymbolicLink()) {
-    throw new Error(`Session instruction file must not be a symbolic link: ${filePath}`);
+  try {
+    writeOwnedBlock(filePath, MARKERS, [START, ...escapeMarkers(content).split('\n'), END]);
+  } catch (error) {
+    if (error instanceof LeftAlone) throw new Error(`Session instruction file ${filePath}: ${error.message}`);
+    throw error;
   }
-  const previous = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
-  const start = previous.indexOf(START);
-  const end = previous.indexOf(END);
-  if ((start === -1) !== (end === -1) || (start !== -1 && end < start)) {
-    throw new Error(`Session instruction markers are incomplete: ${filePath}`);
-  }
-  const block = `${START}\n${escapeMarkers(content)}\n${END}`;
-  const next = start === -1
-    ? `${previous}${previous ? '\n\n' : ''}${block}\n`
-    : `${previous.slice(0, start)}${block}${previous.slice(end + END.length)}`;
-  if (next !== previous) fs.writeFileSync(filePath, next, { mode: 0o600 });
 }
 
 export function prepareSessionWorkspace(

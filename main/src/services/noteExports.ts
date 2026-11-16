@@ -4,21 +4,12 @@ import { pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 import type { Note } from '../../../shared/types/notes';
 import { writeNoteFile } from './noteFiles';
+import { writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
 
 const START = '<!-- pane-memories:start -->';
 const END = '<!-- pane-memories:end -->';
 
-/** Fail closed on ambiguous markers; preserve every byte outside a valid pair. */
-function replaceMemory(existing: string, body: string): string {
-  const starts = existing.split(START).length - 1;
-  const ends = existing.split(END).length - 1;
-  if (starts !== ends || starts > 1 || (starts === 1 && existing.indexOf(END) < existing.indexOf(START))) {
-    throw new Error('Malformed Pane memory markers. Repair the markers and retry; this file was not changed.');
-  }
-  const block = body ? `${START}\n## Pane memories\n\n${body}\n${END}` : '';
-  if (starts) return existing.slice(0, existing.indexOf(START)) + block + existing.slice(existing.indexOf(END) + END.length);
-  return block ? existing + (existing ? '\n\n' : '') + block + '\n' : existing;
-}
+const MARKERS: BlockMarkers = { begin: START, end: END, repair: 'save the note again' };
 
 function reference(from: string, to: string): string {
   // Across Windows drive letters a relative path is impossible; file URLs remain
@@ -30,11 +21,11 @@ function reference(from: string, to: string): string {
 
 export function exportNoteMemories(root: string, file: string, notes: Note[], preamble = ''): void {
   const entry = fs.lstatSync(file, { throwIfNoEntry: false });
-  const status = entry ? fs.statSync(file) : undefined;
+  // A symlinked instruction file (dotfiles) is edited at its target, and the link stays.
+  const target = entry?.isSymbolicLink() ? fs.realpathSync(file) : file;
+  const status = entry ? fs.statSync(target) : undefined;
   if (status && !status.isFile()) throw new Error('Instruction destination is not a regular file.');
-  const existing = status ? fs.readFileSync(file, 'utf8') : '';
-  // Validate markers before generating assets or touching instructions.
-  replaceMemory(existing, '');
+  const existing = status ? fs.readFileSync(target, 'utf8') : '';
   const owner = createHash('sha256').update(path.resolve(root)).digest('hex');
   const existingOwner = existing.match(/<!-- pane-memories:store ([a-f0-9]+) -->/)?.[1];
   if (existingOwner && existingOwner !== owner) throw new Error('This instruction file contains notes from another Pane data directory. To switch stores, back up the file and remove only its pane-memories section, then retry. Nothing was changed.');
@@ -59,8 +50,10 @@ export function exportNoteMemories(root: string, file: string, notes: Note[], pr
   // Notes are literal user content: escaping marker strings prevents a note from
   // making the next managed update ambiguous.
   const body = lines.join('\n').replaceAll(START, '&lt;!-- pane-memories:start --&gt;').replaceAll(END, '&lt;!-- pane-memories:end --&gt;');
-  const prefix = !status && body && path.extname(file) === '.mdc' ? '---\nalwaysApply: true\n---\n\n' : '';
-  const next = prefix + replaceMemory(existing, body ? `<!-- pane-memories:store ${owner} -->\n${body}` : '');
-  if (existing === next) return;
-  writeNoteFile(file, next);
+  if (body) fs.mkdirSync(path.dirname(target), { recursive: true });
+  // This front matter makes Cursor apply the rules file Pane creates in every chat.
+  if (!status && body && path.extname(file) === '.mdc') writeNoteFile(file, '---\nalwaysApply: true\n---\n\n');
+  writeOwnedBlock(target, MARKERS, body
+    ? [START, '## Pane memories', '', `<!-- pane-memories:store ${owner} -->`, ...body.split('\n'), END]
+    : undefined);
 }

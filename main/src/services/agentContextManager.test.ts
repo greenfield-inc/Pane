@@ -87,6 +87,42 @@ describe('agentContextManager', () => {
     expect(kept).not.toContain(PANE_AGENT_CONTEXT_START);
   });
 
+  const toggle = (config: ReturnType<typeof enabledConfig>, projectPath: string) =>
+    applyManagedAgentsMdSetting(config, { all: () => [{ path: projectPath }], active: () => ({ path: projectPath }) });
+
+  it.each([
+    ['text with a final line break', '# Repo Rules\n\nKeep this line.\n'],
+    ['text without a final line break', '# Repo Rules\n\nKeep this line.'],
+    ['CRLF text', '# Repo Rules\r\n\r\nKeep this line.\r\n'],
+    ['a byte order mark', '﻿# Repo Rules\n'],
+    ['blank lines only', '\n\n'],
+  ])('gives back %s byte for byte after publishing turns on, on again and off', async (_name, own) => {
+    const projectPath = await createTempProject();
+    const agentsPath = path.join(projectPath, 'AGENTS.md');
+    await fs.writeFile(agentsPath, own, 'utf8');
+
+    expect(await toggle(enabledConfig(), projectPath)).toBe(true);
+    const on = await fs.readFile(agentsPath, 'utf8');
+    expect(on.startsWith(own)).toBe(true);
+    expect(on).toContain(PANE_AGENT_CONTEXT_END);
+    expect(await toggle(enabledConfig(), projectPath)).toBe(true);
+    await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(on);
+
+    expect(await toggle(disabledConfig(), projectPath)).toBe(true);
+    await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(own);
+  });
+
+  it('leaves AGENTS.md alone when a Pane section in it has no end marker', async () => {
+    const projectPath = await createTempProject();
+    const agentsPath = path.join(projectPath, 'AGENTS.md');
+    const own = `# Repo Rules\n${PANE_AGENT_CONTEXT_START}\nhalf a section\n\n# My own section\nKeep this line.\n`;
+    await fs.writeFile(agentsPath, own, 'utf8');
+
+    expect(await toggle(enabledConfig(), projectPath)).toBe(false);
+    expect(await toggle(disabledConfig(), projectPath)).toBe(false);
+    await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(own);
+  });
+
   it('retries removal when a saved project becomes available again', async () => {
     const projectPath = await createTempProject();
     const offlinePath = `${projectPath}-offline`;

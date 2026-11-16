@@ -113,7 +113,7 @@ describe('Session workspace instructions', () => {
     const agentsPath = path.join(cwd, 'AGENTS.md');
     const broken = 'User content.\n<!-- pane-session-context:start -->\nIncomplete';
     await fs.writeFile(agentsPath, broken);
-    expect(() => prepareSessionWorkspace('session-a')).toThrow('markers are incomplete');
+    expect(() => prepareSessionWorkspace('session-a')).toThrow("markers in it don't pair up");
     await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(broken);
   });
   it('tells the agent to write plans as HTML, link them from the status document, and open them only when needed', async () => {

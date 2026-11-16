@@ -1,4 +1,3 @@
-import { constants } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import type { Project } from '../database/models';
@@ -7,9 +6,16 @@ import { PathResolver } from '../utils/pathResolver';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
+import { writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
 
 export const PANE_AGENT_CONTEXT_START = '<!-- pane-agent-context:start -->';
 export const PANE_AGENT_CONTEXT_END = '<!-- pane-agent-context:end -->';
+
+const MARKERS: BlockMarkers = {
+  begin: PANE_AGENT_CONTEXT_START,
+  end: PANE_AGENT_CONTEXT_END,
+  repair: 'turn Settings → AI & Agents → Publish Pane instructions to AGENTS.md off and on',
+};
 
 const AGENTS_FILENAMES = ['AGENTS.md', 'agents.md'] as const;
 let settingQueue: Promise<void> = Promise.resolve();
@@ -17,7 +23,7 @@ let settingQueue: Promise<void> = Promise.resolve();
 export interface AgentContextWriteResult {
   changed: boolean;
   filePath?: string;
-  skipped?: 'disabled' | 'missing' | 'unsafe-file';
+  skipped?: 'disabled' | 'unsafe-file';
   removed?: boolean;
 }
 
@@ -34,16 +40,7 @@ export async function ensureProjectAgentContext(
   if (!filePath) {
     return { changed: false, skipped: 'unsafe-file' };
   }
-  const existing = await readFileIfExists(filePath);
-  const block = renderManagedAgentContextBlock();
-  const next = upsertManagedBlock(existing ?? '', block);
-
-  if (existing === next) {
-    return { changed: false, filePath };
-  }
-
-  await writeFileNoFollow(filePath, next);
-  return { changed: true, filePath };
+  return { changed: writeOwnedBlock(filePath, MARKERS, renderManagedAgentContextBlock()), filePath };
 }
 
 /**
@@ -82,44 +79,13 @@ async function applyManagedAgentsMdSettingNow<P extends Pick<Project, 'path' | '
   return succeeded;
 }
 
-function renderManagedAgentContextBlock(): string {
+function renderManagedAgentContextBlock(): string[] {
   return [
     PANE_AGENT_CONTEXT_START,
     // The Pane and Tab rules come from workspaceRules, the one place the contract states them.
     ...RUNPANE_CONTRACT.agentContext.managedBlock.map(line => line.replace('{{paneAndTabRules}}', paneAndTabRules())),
     PANE_AGENT_CONTEXT_END,
-    ''
-  ].join('\n');
-}
-
-function upsertManagedBlock(existing: string, block: string = renderManagedAgentContextBlock()): string {
-  const startIndex = existing.indexOf(PANE_AGENT_CONTEXT_START);
-  const endIndex = existing.indexOf(PANE_AGENT_CONTEXT_END);
-
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const afterEndIndex = consumeTrailingNewline(existing, endIndex + PANE_AGENT_CONTEXT_END.length);
-    return `${existing.slice(0, startIndex)}${block}${existing.slice(afterEndIndex)}`;
-  }
-
-  if (existing.trim().length === 0) {
-    return block;
-  }
-
-  const separator = existing.endsWith('\n') ? '\n' : '\n\n';
-  return `${existing}${separator}${block}`;
-}
-
-function removeManagedBlock(existing: string): string {
-  const startIndex = existing.indexOf(PANE_AGENT_CONTEXT_START);
-  const endIndex = existing.indexOf(PANE_AGENT_CONTEXT_END);
-
-  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
-    return existing;
-  }
-
-  const afterEndIndex = consumeTrailingNewline(existing, endIndex + PANE_AGENT_CONTEXT_END.length);
-  const next = `${existing.slice(0, startIndex)}${existing.slice(afterEndIndex)}`;
-  return next.trim().length === 0 ? '' : next;
+  ].join('\n').split('\n');
 }
 
 async function removeProjectAgentContext(root: string): Promise<AgentContextWriteResult> {
@@ -131,17 +97,9 @@ async function removeProjectAgentContext(root: string): Promise<AgentContextWrit
     return { changed: false, skipped: 'disabled' };
   }
 
-  const existing = await readFileIfExists(filePath);
-  if (existing === undefined) {
-    return { changed: false, skipped: 'missing' };
-  }
-
-  const next = removeManagedBlock(existing);
-  if (next === existing) {
+  if (!writeOwnedBlock(filePath, MARKERS, undefined)) {
     return { changed: false, filePath, skipped: 'disabled' };
   }
-
-  await writeFileNoFollow(filePath, next);
   return { changed: true, filePath, removed: true };
 }
 
@@ -195,28 +153,6 @@ async function findExistingAgentsFile(root: string): Promise<{ filePath?: string
   return { hasUnsafeCandidate };
 }
 
-async function readFileIfExists(filePath: string): Promise<string | undefined> {
-  try {
-    const handle = await fs.open(filePath, constants.O_RDONLY | noFollowFlag());
-    try {
-      return await handle.readFile('utf8');
-    } finally {
-      await handle.close();
-    }
-  } catch (error) {
-    let code: string | undefined;
-    try {
-      code = decodeBoundary(error, boundary.object({ code: boundary.optional(boundary.string) })).code;
-    } catch {
-      code = undefined;
-    }
-    if (code === 'ENOENT') {
-      return undefined;
-    }
-    throw error;
-  }
-}
-
 async function inspectAgentsFile(filePath: string): Promise<'file' | 'missing' | 'unsafe'> {
   try {
     const stat = await fs.lstat(filePath);
@@ -235,36 +171,6 @@ async function inspectAgentsFile(filePath: string): Promise<'file' | 'missing' |
   }
 }
 
-async function writeFileNoFollow(filePath: string, content: string): Promise<void> {
-  const handle = await fs.open(
-    filePath,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | noFollowFlag(),
-    0o666,
-  );
-  try {
-    await handle.writeFile(content, 'utf8');
-  } finally {
-    await handle.close();
-  }
-}
-
 function resolveProjectRoot(project: Pick<Project, 'path' | 'wsl_enabled' | 'wsl_distribution'>): string {
   return new PathResolver(project).toFileSystem(project.path);
-}
-
-function noFollowFlag(): number {
-  if (process.platform === 'win32') {
-    return 0;
-  }
-  return constants.O_NOFOLLOW ?? 0;
-}
-
-function consumeTrailingNewline(value: string, index: number): number {
-  if (value[index] === '\r' && value[index + 1] === '\n') {
-    return index + 2;
-  }
-  if (value[index] === '\n') {
-    return index + 1;
-  }
-  return index;
 }
