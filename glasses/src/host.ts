@@ -149,7 +149,7 @@ function isEvenAppOrigin(origin: string): boolean {
 export function noAnswerMessage(computerName: string, origin: string): string {
   return isEvenAppOrigin(origin)
     ? `${computerName} didn't answer. Check that Pane is open and up to date on it, and that it is online.`
-    : `${computerName} didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Glasses › Allow (origin ${origin}).`;
+    : `${computerName} didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Phones and glasses › Allow (origin ${origin}).`;
 }
 
 /** Decodes the pasted code and trades each computer's single-use secret for its device token, once. */
@@ -468,8 +468,8 @@ export class HostConnection {
       code: 'ERR_GLASSES_ORIGIN_REFUSED',
       message: `${this.paired.name} doesn't allow this app (origin ${this.deps.origin}).`,
       next: isEvenAppOrigin(this.deps.origin)
-        ? 'Update Pane on that computer, or allow it there: Settings › Remote Access › Glasses › Allow.'
-        : 'Allow it in Pane on that computer: Settings › Remote Access › Glasses › Allow.',
+        ? 'Update Pane on that computer.'
+        : 'Allow it in Pane on that computer: Settings › Remote Access › Phones and glasses › Allow.',
     };
   }
 

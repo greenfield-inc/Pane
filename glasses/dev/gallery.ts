@@ -17,7 +17,7 @@ const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { ho
 const originRefusal = {
   code: ORIGIN_REFUSED,
   message: 'This computer accepts glasses tokens only from the Even app; this request came from https://evenhub.example.',
-  next: "Allow it in Pane on that computer: Settings › Remote Access › Glasses.",
+  next: "Allow it in Pane on that computer: Settings › Remote Access › Phones and glasses.",
 };
 const paneChat = { kind: 'session' as const, id: 's', name: 'Pane Chat', agent: 'Claude', status: 'working' as const, panelId: 'p' };
 /** Four computers, one of each mark, the travel laptop away since 9:12 and old-box on a Pane that reports no OS. */
@@ -90,7 +90,7 @@ const pages: Array<[string, Page]> = [
   ['error-origin-removed', refusedPage('studio-mac', {
     code: ORIGIN_REFUSED,
     message: `studio-mac doesn't allow this app (origin ${location.origin}).`,
-    next: 'Allow it in Pane on that computer: Settings › Remote Access › Glasses › Allow.',
+    next: 'Allow it in Pane on that computer: Settings › Remote Access › Phones and glasses › Allow.',
   })],
   ['error-locked-out', refusedPage('devbox', {
     code: LOCKED_OUT,

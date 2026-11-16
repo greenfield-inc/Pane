@@ -47,7 +47,7 @@ async function main(): Promise<void> {
     mirror: element('mirror', HTMLPreElement),
     ambient: element('ambient', HTMLButtonElement),
   };
-  // The Origin the Even app's WebView sends; each computer must allow it (Settings › Remote Access › Glasses).
+  // The Origin the Even app's WebView sends; each computer must allow it (Settings › Remote Access › Phones and glasses).
   console.info(`[Pane glasses] location.origin ${location.origin}`);
   ui.origin.textContent = `This app's origin: ${location.origin}`;
 
