@@ -9,19 +9,21 @@ name: Try the demo
 - assertNotVisible: "Allow.*Notifications.*"
 
 # A waiting question: pick a choice on its approval screen; once the agent has it, the screen
-# steps to the next one and the question leaves home's Approvals.
+# steps to the next one and the question leaves home's Needs you.
 - tapOn: "add-dark-mode.*Which colors.*"
 - extendedWaitUntil:
     visible:
       id: approval-card
     timeout: 10000
-- assertVisible: "2 of 2"
+# Its place in the queue; the demo's count changes as sample data grows.
+- assertVisible: "\\d+ of \\d+"
 - tapOn:
     id: notify-choice-0
 - assertVisible:
     id: notify-sent
 - extendedWaitUntil:
-    visible: "1 of 1"
+    notVisible:
+      id: notify-sent
     timeout: 15000
 - tapOn:
     id: approval-back
