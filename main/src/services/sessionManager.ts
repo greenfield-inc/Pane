@@ -33,8 +33,15 @@ interface ProjectContext {
   commandRunner: CommandRunner;
 }
 
-/** How much a Build or Archive script may print before Pane stops it and says why. */
-const SCRIPT_OUTPUT_LIMIT = 256 * 1024 * 1024;
+/** A script's last lines go to the session log (which keeps 1,000 entries); its result keeps all of it. */
+const SCRIPT_LOG_LINES = 500;
+
+function logTail(sessionId: string, level: 'info' | 'warn', output: string, label: string): void {
+  const lines = output.split('\n').filter(line => line.trim());
+  const shown = lines.slice(-SCRIPT_LOG_LINES);
+  if (lines.length > shown.length) addSessionLog(sessionId, level, `[${(lines.length - shown.length).toLocaleString('en-US')} earlier lines not shown]`, label);
+  for (const line of shown) addSessionLog(sessionId, level, line, label);
+}
 
 interface CommandExecutionError {
   stderr?: string;
@@ -142,6 +149,7 @@ type DbSessionOutputType = import('../database/models').SessionOutput['type'];
 import { addSessionLog, cleanupSessionLogs, startSessionLogs } from './session-logs';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner, type CommandRunOptions } from '../utils/commandRunner';
+import { COMMAND_OUTPUT_LIMIT } from '../utils/commandExecutor';
 import { withLock } from '../utils/mutex';
 import { detectGitBase } from './worktreeManager';
 import { panelManager } from './panelManager';
@@ -1370,8 +1378,7 @@ export class SessionManager extends EventEmitter {
 
     const projectEnv = await this.resolveProjectEnv(sessionId, teammatePaneCaller());
     for (const warning of projectEnv.warnings) addSessionLog(sessionId, 'warn', warning, label);
-    // Room for a verbose build; past it, the failure says why.
-    const options: CommandRunOptions = { maxBuffer: SCRIPT_OUTPUT_LIMIT };
+    const options: CommandRunOptions = {};
     if (label === 'Build') options.timeout = 0;
     if (Object.keys(projectEnv.env).length > 0) options.env = projectEnv.env;
 
@@ -1385,15 +1392,11 @@ export class SessionManager extends EventEmitter {
 
           if (stdout) {
             allOutput += stdout;
-            stdout.split('\n').filter(line => line.trim()).forEach(line => {
-              addSessionLog(sessionId, 'info', line, label);
-            });
+            logTail(sessionId, 'info', stdout, label);
           }
           if (stderr) {
             allOutput += stderr;
-            stderr.split('\n').filter(line => line.trim()).forEach(line => {
-              addSessionLog(sessionId, 'warn', line, label);
-            });
+            logTail(sessionId, 'warn', stderr, label);
           }
         } catch (cmdError) {
           console.error(`[SessionManager] ${label} command failed: ${command}`, cmdError);
@@ -1406,7 +1409,7 @@ export class SessionManager extends EventEmitter {
             }));
           } catch { /* String(cmdError) remains the fallback. */ }
           const errorMessage = cmdError instanceof Error && 'code' in cmdError && cmdError.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
-            ? `Pane stopped it after it printed more than ${SCRIPT_OUTPUT_LIMIT / 1024 / 1024} MB of output. Make it quieter (or send its output to a file) and run it again.`
+            ? `Pane stopped it after it printed more than ${COMMAND_OUTPUT_LIMIT / 1024 / 1024} MB of output. Make it quieter (or send its output to a file) and run it again.`
             : error.stderr || error.stdout || error.message || String(cmdError);
           allOutput += errorMessage;
 

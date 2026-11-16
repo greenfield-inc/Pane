@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { DatabaseService } from '../database/database';
 import { CommandRunner } from '../utils/commandRunner';
 import { SessionManager } from './sessionManager';
+import { getSessionLogs, startSessionLogs } from './session-logs';
 
 class ProjectCommandRunner extends CommandRunner {
   override execAsync(command: string, cwd: string, options?: Parameters<CommandRunner['execAsync']>[2]) {
@@ -70,4 +71,17 @@ it('finishes a build script that prints more than 10 MB', async () => {
   ], directory, runner);
   expect(result.success).toBe(true);
   expect(result.output.length).toBe(12 * 1024 * 1024);
+});
+
+it('logs the last lines of a long build and says how many it left out, keeping all of them in the result', async () => {
+  startSessionLogs('long-build');
+  const result = await manager.runBuildScript('long-build', [
+    'node -e "for (let i = 1; i <= 2000; i++) console.log(\'step \' + i)"',
+  ], directory, runner);
+  const messages = getSessionLogs('long-build').map(entry => entry.message);
+  expect(messages).toContain('[1,500 earlier lines not shown]');
+  expect(messages).not.toContain('step 1500');
+  expect(messages).toContain('step 1501');
+  expect(messages).toContain('step 2000');
+  expect(result.output.split('\n').filter(Boolean)).toHaveLength(2000);
 });
