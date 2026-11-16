@@ -144,7 +144,7 @@ import { agentConfig, agentLabel } from '../../../shared/agents';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import { withClaudePromptHooks } from './claudePrompts';
 import { forgetTab } from './tabListener';
-import { grantPaneMcp, paneMcpTabSettings, terminalUsesPaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
+import { grantPaneMcp, paneMcpConfigEnv, paneMcpTabSettings, terminalUsesPaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
 import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
 import {
   bracketedPaste,
@@ -2090,7 +2090,7 @@ export class TerminalPanelManager extends EventEmitter {
     const usesPaneMcp = terminalUsesPaneMcp(mcpAgent) && !isWSL && !panelCustomState.sshHost
       && panelCustomState.launchMode !== 'wrapped' && !panelCustomState.preserveLaunchCommand;
     const paneMcp = usesPaneMcp && mcpAgent ? grantPaneMcp({ panelId: panel.id, env: { ...spawnEnv }, cwd, agentLabel: agentLabel(mcpAgent) }) : undefined;
-    if (paneMcp) Object.assign(spawnEnv, paneMcp);
+    if (paneMcp) Object.assign(spawnEnv, paneMcp, paneMcpConfigEnv(mcpAgent, { ...spawnEnv, ...paneMcp }));
     existingState = terminalCustomState(panel.state);
 
     // Read the setting once per spawn so we don't scatter config reads.

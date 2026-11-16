@@ -671,6 +671,11 @@
               "description": "Pane's SessionStart hook reports the terminal's live conversation, so Switch to chat can be sure which one it is on.",
               "type": "boolean"
             },
+            "paneMcpConfigEnv": {
+              "description": "The environment variable that adds config for one launch, whose `pane` MCP server reads the tab's own Pane endpoint from {env:PANE_MCP_URL} and {env:PANE_MCP_TOKEN}. Terminal tabs Pane starts then reach Pane's tools over its loopback HTTP endpoint.",
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
             "paneMcpConfigFlag": {
               "description": "The flag that takes an MCP config file for one launch (written as <flag>=<file>), whose `pane` server replaces the user-level one. Terminal tabs Pane starts then reach Pane's tools over its loopback HTTP endpoint.",
               "type": "string",

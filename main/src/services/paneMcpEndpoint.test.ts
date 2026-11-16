@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { tokenizeShellCommand } from './agents/agentIdentity';
 import { withClaudePromptHooks } from './claudePrompts';
-import { PaneMcpEndpoint, paneMcpTabSettings, setPaneMcpEndpoint, withPaneMcpConfig, type PaneMcpTab } from './paneMcpEndpoint';
+import { PaneMcpEndpoint, paneMcpTabSettings, setPaneMcpEndpoint, withPaneMcpConfig, type PaneMcpTab, paneMcpConfigEnv } from './paneMcpEndpoint';
 import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
 import { TabListener } from './tabListener';
 import { syncNotifyInstructions } from './notify/notifyInstructions';
@@ -303,3 +303,21 @@ describe('withPaneMcpConfig', () => {
 });
 
 process.on('exit', () => rmSync(appDir, { recursive: true, force: true }));
+
+describe('OpenCode terminals', () => {
+  const granted = { PANE_MCP_URL: 'http://127.0.0.1:4000/mcp', PANE_MCP_TOKEN: 'secret-token' };
+
+  it('get a pane server that reads the tab\'s endpoint and token from the environment', () => {
+    const env = paneMcpConfigEnv('opencode', granted);
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT)).toEqual({
+      mcp: { pane: { type: 'remote', url: '{env:PANE_MCP_URL}', headers: { Authorization: 'Bearer {env:PANE_MCP_TOKEN}' } } },
+    });
+    expect(env.OPENCODE_CONFIG_CONTENT).not.toContain('secret-token');
+  });
+
+  it('leave a config the person set alone, and stay on stdio without a grant', () => {
+    expect(paneMcpConfigEnv('opencode', { ...granted, OPENCODE_CONFIG_CONTENT: '{"theme":"x"}' })).toEqual({});
+    expect(paneMcpConfigEnv('opencode', {})).toEqual({});
+    expect(paneMcpConfigEnv('claude', granted)).toEqual({});
+  });
+});
