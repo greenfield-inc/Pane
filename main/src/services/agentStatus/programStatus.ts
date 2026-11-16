@@ -56,8 +56,9 @@ const VALUE = /^[A-Za-z0-9_.,+/=-]*$/;
 const APP = /^[A-Za-z0-9_.+-]{1,32}$/;
 const ID_SEGMENT = /^[A-Za-z0-9_.+-]{1,32}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
-// Direction overrides and invisible formatting are removed before showing text.
-const INVISIBLE_FORMATTING = /[​-‏‪-‮⁠-⁩﻿]/gu;
+// Format characters (direction overrides, zero-width and tag characters) and
+// line or paragraph separators are removed before showing text.
+const INVISIBLE_FORMATTING = /[\p{Cf}\u2028\u2029]/gu;
 
 // Limits. A whole sequence is at most 4096 bytes: `ESC ] 7501 ;` and `ESC \` take 9.
 const MAX_BODY = 4096 - 9;
@@ -121,7 +122,7 @@ export class ProgramStatusRecords {
    * over-limit reports change nothing. Returns whether any record changed.
    */
   report(body: string): boolean {
-    if (body.length > MAX_BODY) return false;
+    if (Buffer.byteLength(body) > MAX_BODY) return false;
     const pairs = new Map<string, string>();
     for (const pair of body.split(':')) {
       const equals = pair.indexOf('=');
@@ -138,9 +139,8 @@ export class ProgramStatusRecords {
     const id = pairs.get('id') ?? '';
     if (pairs.has('id') && !validId(id)) return false;
 
-    if (state === 'clear') return this.clear(pairs.has('id') ? id : undefined);
-
-    const record: StoredRecord = { state };
+    // Every pair is checked before any record changes, `clear` included.
+    const record: StoredRecord = { state: state === 'clear' ? 'idle' : state };
     const kind = KINDS.get(pairs.get('kind') ?? '');
     if (state === 'blocked' && kind) record.kind = kind;
     const app = pairs.get('app');
@@ -154,6 +154,7 @@ export class ProgramStatusRecords {
       if (text === undefined) return false;
       record[key] = text;
     }
+    if (state === 'clear') return this.clear(pairs.has('id') ? id : undefined);
 
     this.records.delete(id);
     this.records.set(id, record);

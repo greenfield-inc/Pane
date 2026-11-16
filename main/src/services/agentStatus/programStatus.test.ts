@@ -80,6 +80,19 @@ describe('ProgramStatusRecords', () => {
     expect(records.current()).toMatchObject({ state: 'working', app: 'brew' });
   });
 
+  it('discards a clear whose other pairs fail, like any other report', () => {
+    const records = recordsAfter(BREW_WORKING);
+    records.report('state=clear:msg=QUJDR'); // base64 that does not decode
+    expect(records.current()).toMatchObject({ state: 'working', app: 'brew' });
+  });
+
+  it('counts the size limit in bytes', () => {
+    const records = recordsAfter(BREW_WORKING);
+    // 2100 two-byte characters: under 4087 UTF-16 units, over 4087 bytes.
+    records.report(`state=done:x=${'é'.repeat(2100)}`);
+    expect(records.current()).toMatchObject({ state: 'working', app: 'brew' });
+  });
+
   it('discards a report that breaks a limit', () => {
     const records = recordsAfter(BREW_WORKING);
     records.report(`state=blocked:msg=${'QUFB'.repeat(700)}`); // 2800 encoded bytes > 2732
@@ -106,5 +119,8 @@ describe('ProgramStatusRecords', () => {
   it('removes direction overrides and invisible formatting from shown text', () => {
     // "safe‮txt.exe​" base64-encoded.
     expect(recordsAfter('state=done:msg=c2FmZeKArnR4dC5leGXigIs=').current()).toEqual({ state: 'done', msg: 'safetxt.exe' });
+    // "Ok" with a soft hyphen, an Arabic letter mark, a line separator and a tag character between.
+    const hidden = Buffer.from('O\u00ad\u061c\u2028\u{E0041}k').toString('base64');
+    expect(recordsAfter(`state=done:msg=${hidden}`).current()).toEqual({ state: 'done', msg: 'Ok' });
   });
 });
