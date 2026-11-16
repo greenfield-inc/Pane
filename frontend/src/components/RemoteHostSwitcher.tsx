@@ -127,18 +127,19 @@ export function RemoteHostSwitcher({
   const [open, setOpen] = useState(false);
   // One measurement per connected machine each time the menu opens, kept until it closes; nothing runs while it is closed.
   const [latencies, setLatencies] = useState<Latencies>({});
-  const machinesRef = useRef(machines);
-  machinesRef.current = machines;
-  useEffect(() => {
-    if (!open) return undefined;
-    let current = true;
-    const record = (id: string, latency: number | null) => { if (current) setLatencies((before) => ({ ...before, [id]: latency })); };
-    for (const machine of machinesRef.current) {
+  const openCount = useRef(0);
+  const measureOnOpen = (next: boolean) => {
+    openCount.current += 1;
+    setLatencies({});
+    if (!next) return;
+    const opening = openCount.current;
+    for (const machine of machines) {
       if (!routeInUse(machine)) continue;
-      window.electronAPI.machines.latency(machine.id).then((latency) => record(machine.id, latency), () => record(machine.id, null));
+      // An answer that lands after the menu closed belongs to an earlier opening and is dropped.
+      const record = (latency: number | null) => { if (openCount.current === opening) setLatencies((before) => ({ ...before, [machine.id]: latency })); };
+      window.electronAPI.machines.latency(machine.id).then(record, () => record(null));
     }
-    return () => { current = false; setLatencies({}); };
-  }, [open]);
+  };
 
   const items: DropdownItem[] = machines.map((machine) => ({
     id: machine.id,
@@ -198,7 +199,7 @@ export function RemoteHostSwitcher({
       width="auto"
       menuClassName="w-[400px] max-w-[calc(100vw-2rem)]"
       menuLabel="Agents run on"
-      onOpenChange={(next) => { setOpen(next); onOpenChange?.(next); }}
+      onOpenChange={(next) => { setOpen(next); measureOnOpen(next); onOpenChange?.(next); }}
       itemClassName="py-1.5"
       footer={({ close }) => (
         <>

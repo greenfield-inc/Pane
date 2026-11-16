@@ -694,7 +694,8 @@ export class RemotePaneClient {
         });
         const deadline = setTimeout(() => request.destroy(new Error('no answer')), timeoutMs);
         request.on('error', () => resolve(false));
-        request.on('close', () => clearTimeout(deadline));
+        // A connection dropped mid-answer closes without an error or an end; the first outcome wins.
+        request.on('close', () => { clearTimeout(deadline); resolve(false); });
         request.end();
       });
       if (!answered) return null;

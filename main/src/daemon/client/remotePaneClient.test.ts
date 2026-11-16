@@ -1565,4 +1565,21 @@ describe('RemotePaneClient latency', () => {
     }
     expect(await new RemotePaneClient({ ...profile, baseUrl: `http://127.0.0.1:${address.port}` }).measureLatency(1_000)).toBeNull();
   });
+
+  it('answers null when the host drops the connection partway through its answer', async () => {
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, { 'Content-Length': '100' });
+      response.write('partial');
+      setTimeout(() => response.socket?.destroy(), 20);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    // SAFETY: a server listening on a host and port reports an AddressInfo.
+    const address = server.address() as import('net').AddressInfo;
+    try {
+      const client = new RemotePaneClient({ id: 'box', label: 'Box', token: 't', transport: 'http+sse', baseUrl: `http://127.0.0.1:${address.port}` });
+      expect(await client.measureLatency(5_000)).toBeNull();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
