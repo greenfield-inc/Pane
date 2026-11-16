@@ -48,16 +48,34 @@ export function readJson(file: string): JsonValue | undefined {
   }
 }
 
-/** Complete lines in the first `maxBytes` of a file, so metadata reads stay bounded. */
+/** Past this, a single line is skipped rather than held in memory whole. */
+const MAX_LINE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Complete lines from the start of a file up to `maxBytes`, plus the whole line that crosses it,
+ * so a long first message (a paste, an image) still yields its fields. Metadata reads stay bounded.
+ */
 export function readHeadLines(file: string, maxBytes = 64 * 1024): string[] {
   const handle = fs.openSync(file, 'r');
   try {
-    const buffer = Buffer.alloc(maxBytes);
-    const read = fs.readSync(handle, buffer, 0, maxBytes, 0);
-    const text = buffer.subarray(0, read).toString('utf8');
-    const lines = text.split('\n');
-    if (read === maxBytes) lines.pop();
-    return lines.filter(line => line.trim() !== '');
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let chunk = Buffer.alloc(maxBytes);
+    let read = fs.readSync(handle, chunk, 0, maxBytes, 0);
+    chunks.push(chunk.subarray(0, read));
+    total += read;
+    // The window ended mid-line: read on to that line's end.
+    while (read === chunk.length && chunk[read - 1] !== 0x0a && total < maxBytes + MAX_LINE_BYTES) {
+      chunk = Buffer.alloc(1024 * 1024);
+      read = fs.readSync(handle, chunk, 0, chunk.length, total);
+      chunks.push(chunk.subarray(0, read));
+      total += read;
+      if (chunk.subarray(0, read).includes(0x0a)) break;
+    }
+    const buffer = Buffer.concat(chunks);
+    const atEnd = read < chunk.length;
+    const text = buffer.subarray(0, atEnd ? buffer.length : buffer.lastIndexOf(0x0a) + 1).toString('utf8');
+    return text.split('\n').filter(line => line.trim() !== '');
   } finally {
     fs.closeSync(handle);
   }
