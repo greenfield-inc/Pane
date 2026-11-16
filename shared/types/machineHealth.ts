@@ -93,6 +93,9 @@ export interface MachineHealthSettings {
   autoClearAgentTemp?: boolean;
   autoClearPausedScratch?: boolean;
   autoClearArchivedFolders?: boolean;
+  autoArchiveFinished?: boolean;
+  /** A Pane counts as finished after this many idle days (default 14). */
+  finishedIdleDays?: number;
 }
 
 /** The value of every machine health setting nobody has overridden. */
@@ -172,6 +175,32 @@ export interface DiskBuckets {
   paneData: number;
 }
 
+/** Where a cleanup came from: a person in Resources or a card, the schedule, or an agent through runpane. */
+export type CleanupSource = 'ui' | 'card' | 'schedule' | 'cli';
+
+/** What a cleanup acted on: a storage item, or a finished Pane it archived, a process it stopped, a Pane it paused. */
+export type CleanupKind = ReclaimKind | 'finished-pane' | 'leftover-process' | 'idle-pane';
+
+export interface CleanupEntry {
+  id: string;
+  kind: CleanupKind;
+  /** A folder or file, or a Pane or process name. */
+  path: string;
+  sizeBytes: number;
+  reason?: string;
+}
+
+export interface CleanupRun {
+  at: number;
+  source: CleanupSource;
+  removed: CleanupEntry[];
+  skipped: CleanupEntry[];
+  /** Measured from free space on the affected volumes, before and after; never below 0. */
+  freedBytes: number;
+  /** True while removed items are still being deleted from the trash; freedBytes is filled in once they are. */
+  deleting?: boolean;
+}
+
 export interface StorageInventory {
   scannedAt: number;
   durationMs: number;
@@ -184,5 +213,10 @@ export const MACHINE_HEALTH_INVENTORY_CHANNEL = 'resource-monitor:machine-invent
 export const MACHINE_HEALTH_INVENTORY_CHANGED_EVENT = 'resource-monitor:machine-inventory-changed';
 /** Runs a cleanup through the one engine: `{ ids?, kinds?, source }`; tier 3 is refused. */
 export const MACHINE_HEALTH_CLEANUP_CHANNEL = 'resource-monitor:machine-cleanup';
+/** Finished Panes (PR merged or closed, folder missing, idle): `{ refresh? }`. */
+export const MACHINE_HEALTH_FINISHED_CHANNEL = 'resource-monitor:machine-finished-panes';
+export const MACHINE_HEALTH_FINISHED_CHANGED_EVENT = 'resource-monitor:machine-finished-changed';
+/** Archives the named finished Panes through the normal archive path: `{ ids, source }`. */
+export const MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL = 'resource-monitor:machine-archive-finished';
 /** Recent cleanup runs on this machine, newest first; held in memory since the last start. */
 export const MACHINE_HEALTH_HISTORY_CHANNEL = 'resource-monitor:machine-cleanup-history';

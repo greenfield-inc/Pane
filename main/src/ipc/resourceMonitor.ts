@@ -2,10 +2,14 @@ import type { IpcMain } from 'electron';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import { resourceMonitorService } from '../services/resourceMonitorService';
-import { RECLAIM_KINDS, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_HISTORY_CHANNEL, MACHINE_HEALTH_INVENTORY_CHANNEL, MACHINE_HEALTH_SNAPSHOT_CHANNEL } from '../../../shared/types/machineHealth';
+import { RECLAIM_KINDS, MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_HISTORY_CHANNEL, MACHINE_HEALTH_INVENTORY_CHANNEL, MACHINE_HEALTH_SNAPSHOT_CHANNEL } from '../../../shared/types/machineHealth';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const inventoryRequestSchema = boundary.object({ refresh: boundary.optional(boundary.boolean) });
+const archiveFinishedSchema = boundary.object({
+  ids: boundary.array(boundary.string),
+  source: boundary.enumeration('ui', 'card', 'cli'),
+});
 const cleanupRequestSchema = boundary.object({
   ids: boundary.optional(boundary.array(boundary.string)),
   kinds: boundary.optional(boundary.array(boundary.enumeration(...RECLAIM_KINDS))),
@@ -19,6 +23,8 @@ const DAEMON_RESOURCE_MONITOR_CHANNELS = [
   MACHINE_HEALTH_INVENTORY_CHANNEL,
   MACHINE_HEALTH_CLEANUP_CHANNEL,
   MACHINE_HEALTH_HISTORY_CHANNEL,
+  MACHINE_HEALTH_FINISHED_CHANNEL,
+  MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL,
 ] as const;
 
 export function registerResourceMonitorHandlers(
@@ -60,6 +66,18 @@ export function registerResourceMonitorHandlers(
     return run;
   });
   commandRegistry.register(MACHINE_HEALTH_HISTORY_CHANNEL, async () => cleanup().history());
+  const finished = () => {
+    if (!services.finishedPanes) {
+      throw new PaneError('ERR_MACHINE_HEALTH_UNAVAILABLE', 'Finished-Pane checks do not run in this Pane process.', 'Restart Pane, then try again.');
+    }
+    return services.finishedPanes;
+  };
+  commandRegistry.register(MACHINE_HEALTH_FINISHED_CHANNEL, async (value: PaneCommandValue) =>
+    finished().list(decodeBoundary(value ?? {}, inventoryRequestSchema).refresh === true));
+  commandRegistry.register(MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, async (value: PaneCommandValue) => {
+    const request = decodeBoundary(value, archiveFinishedSchema);
+    return finished().archive(request.ids, request.source);
+  });
 
   commandRegistry.bindChannels(ipcMain, DAEMON_RESOURCE_MONITOR_CHANNELS);
 }

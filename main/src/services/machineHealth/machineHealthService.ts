@@ -127,6 +127,11 @@ export class MachineHealthService extends EventEmitter {
     this.scheduledCleanup = run;
   }
 
+  /** The last inventory, or null before the first scan. */
+  cachedInventory(): StorageInventory | null {
+    return this.inventory;
+  }
+
   /**
    * The cached inventory, or null before the first scan finishes. Never waits for a walk. With none, a read
    * starts one scan (shared with any in flight) and nothing else; `refresh` (Measure now, Run now) scans and
