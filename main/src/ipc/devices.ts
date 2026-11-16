@@ -238,6 +238,10 @@ async function ensureDeviceTab(caller: DeviceCaller, platform: DevicePlatform, i
 
 /** iOS for a computer without Xcode: the device opens on a linked Mac Pane picks (or the pinned one). */
 async function openOnMac(services: AppServices, caller: DeviceCaller, device: string | undefined) {
+  // Only the desktop app keeps connections to saved computers; headless Pane has none to reach a Mac through.
+  if (!machines) {
+    throw new PaneError('ERR_DEVICE_NEEDS_DESKTOP', 'This computer has no Xcode, and iOS on a linked Mac needs Pane\'s desktop app here; headless Pane does not connect to saved computers. Nothing was opened.', 'Open the Pane desktop app on this computer, or run the agent on the Mac. Android works here now.');
+  }
   const panel = await ensureDeviceTab(caller, 'ios', { phase: 'booting' });
   try {
     const { lease, device: summary } = await remoteDevices(services).open(caller.paneId, caller.paneName, 'ios', device);

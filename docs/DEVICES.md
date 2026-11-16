@@ -90,6 +90,7 @@ its jobs on the Mac and removes its checkout there.
 | `ERR_DEVICE_NO_MAC` | No Mac is linked. Link one, as above. Android works on this computer meanwhile |
 | `ERR_DEVICE_MAC_OFFLINE` | The Mac is asleep or Pane isn't running there. Wake it, or pick another Mac in Settings |
 | `ERR_DEVICE_MAC_OUTDATED` | The Mac's Pane predates devices. Update it |
+| `ERR_DEVICE_NEEDS_DESKTOP` | This computer runs headless Pane, which has no connections to saved computers. Use the desktop app here |
 | `ERR_DEVICE_MAC_NO_XCODE` | The Mac answers but has no Xcode with an iOS runtime. Install it there, or pick another Mac |
 | `ERR_DEVICE_MAC_TIMEOUT` | The Mac was still working when the call's time ran out (10 minutes for an open). Pass `--background` for long builds |
 
