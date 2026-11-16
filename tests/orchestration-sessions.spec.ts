@@ -3464,7 +3464,7 @@ test('Move to machine… lists only machines that can take the Session and asks 
 test('Move to machine… viewing a Tailscale host offers this computer and leaves out the host', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     initialConfig: { remoteDaemon: { host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
-      client: { mode: 'remote', activeProfileId: 'mini', profiles: [{ id: 'mini', label: 'tylers-mac-mini', baseUrl: 'https://tylers-mac-mini.tail1234.ts.net:8443', token: '', transport: 'http+sse', tailnetMachine: 'tylers-mac-mini', tailnetDomain: 'tail1234.ts.net' }] } } },
+      client: { mode: 'remote', activeProfileId: 'mini', profiles: [], computers: [{ id: 'mini', label: 'tylers-mac-mini', routes: [{ id: 'tailscale:https://tylers-mac-mini.tail1234.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://tylers-mac-mini.tail1234.ts.net:8443', token: '', tailnetMachine: 'tylers-mac-mini', tailnetDomain: 'tail1234.ts.net' }] }] } } },
     tailnetMachines: { ok: true, tailnet: 'example.github', domain: 'tail1234.ts.net', machines: [tailnetMachine('tylers-mac-mini')] },
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -3492,17 +3492,17 @@ test('Move to machine… with nothing reachable says why, names the fix, and sen
   expect(await submissions()).toEqual([]);
 });
 
-test('Move to machine… is unavailable, with the reason, on a host paired with a code', async ({ page }) => {
+test('Move to machine… is unavailable, with the reason, on a host with no Tailscale route', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     initialConfig: { remoteDaemon: { host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
-      client: { mode: 'remote', activeProfileId: 'studio', profiles: [{ id: 'studio', label: 'Studio', baseUrl: 'https://studio.example:8443', token: 'paired', transport: 'http+sse' }] } } },
+      client: { mode: 'remote', activeProfileId: 'studio', profiles: [], computers: [{ id: 'studio', label: 'Studio', routes: [{ id: 'public:https://studio.example:8443', kind: 'public', source: 'manual', baseUrl: 'https://studio.example:8443', token: 'paired' }] }] } } },
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
   const item = page.getByRole('menuitem', { name: 'Move to machine…' });
   await expect(item).toHaveAttribute('aria-disabled', 'true');
-  await expect(item).toHaveAttribute('title', /pairing code, not over Tailscale/);
+  await expect(item).toHaveAttribute('title', /Studio has no Tailscale route, so Pane can't tell which machine it is/);
   await item.click({ force: true });
   await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toHaveCount(0);
 });
