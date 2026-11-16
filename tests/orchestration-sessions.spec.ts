@@ -3746,7 +3746,7 @@ test('Switch to chat is always in the Session menu: checking, then why nothing s
     const items = [
       { panelId: 'orch', paneName: 'Session', title: 'Claude', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
       { panelId: 'a', paneName: 'auth-fix', title: 'Claude', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
-      { panelId: 'b', paneName: 'docs', title: 'Codex', skip: { kind: 'plain-codex', reason: 'Pane isn\'t sure which conversation this tab is on.' } },
+      { panelId: 'b', paneName: 'docs', title: 'Codex', skip: { kind: 'no-conversation', reason: 'Pane isn\'t sure which conversation this tab is on.' } },
       { panelId: 'c', paneName: 'docs', title: 'Terminal', skip: { kind: 'not-agent', reason: 'Not an agent.' } },
     ];
     let release: (() => void) | null = null;
@@ -3780,7 +3780,7 @@ test('Switch to chat is always in the Session menu: checking, then why nothing s
 
   // SAFETY: the init script above defines it.
   await page.evaluate(() => (window as typeof window & { __releasePreview: () => void }).__releasePreview());
-  await expect(item).toHaveText('Switch to chat…Nothing to switch: 2 busy, 1 plain Codex');
+  await expect(item).toHaveText('Switch to chat…Nothing to switch: 2 busy, 1 no saved conversation');
   await expect(item).toHaveAttribute('aria-disabled', 'true');
   await page.screenshot({ path: testInfo.outputPath('switch-menu-nothing.png') });
   // Playwright waits for an aria-disabled item to enable; the click must still do nothing.
