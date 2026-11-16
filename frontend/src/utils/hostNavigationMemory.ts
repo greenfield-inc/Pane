@@ -217,7 +217,7 @@ export async function restoreLaunchChat(): Promise<void> {
     dropLaunchOutline();
     return;
   }
-  focusChatSoon(chat.panelId, { untilInput: true });
+  focusChatSoon(chat.panelId, { untilInput: true, paneId: chat.paneId });
   await now.setActiveSession(chat.paneId);
   // Anything that opens another Pane or view before the chat takes over (a key, a pane:// link) drops the outline.
   const leftLaunchPane = () => useSessionStore.getState().activeSessionId !== chat.paneId || useNavigationStore.getState().activeView !== 'sessions';

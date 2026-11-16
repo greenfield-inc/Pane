@@ -143,6 +143,43 @@ describe('session selection ordering', () => {
     expect(markViewed).toHaveBeenCalledExactlyOnceWith('missing');
   });
 
+  it('leaves the open Pane as it is when it is selected again', async () => {
+    await useSessionStore.getState().setActiveSession('a');
+    const revision = useSessionStore.getState().selectionRevision;
+    invoke.mockClear();
+    await useSessionStore.getState().setActiveSession('a');
+    // A new revision would reload the Pane's panels and remount its chat (#1384).
+    expect(useSessionStore.getState().selectionRevision).toBe(revision);
+    expect(invoke).not.toHaveBeenCalled();
+    expect(getSession).not.toHaveBeenCalled();
+  });
+
+  it('leaves an open main-repo Pane as it is when it is selected again', async () => {
+    const main = session({ id: 'main', isMainRepo: true });
+    useSessionStore.setState({ sessions: [main], activeSessionId: null, activeMainRepoSession: null });
+    await useSessionStore.getState().setActiveSession('main');
+    const { selectionRevision, activeMainRepoSession } = useSessionStore.getState();
+    await useSessionStore.getState().setActiveSession('main');
+    expect(useSessionStore.getState().selectionRevision).toBe(selectionRevision);
+    expect(useSessionStore.getState().activeMainRepoSession).toBe(activeMainRepoSession);
+  });
+
+  it('retries the open Pane when it is selected again after its fetch failed', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      getSession.mockResolvedValueOnce({ success: false })
+        .mockResolvedValueOnce({ success: true, data: session({ id: 'missing', name: 'Back' }) });
+      await useSessionStore.getState().setActiveSession('missing');
+      const revision = useSessionStore.getState().selectionRevision;
+      await useSessionStore.getState().setActiveSession('missing');
+      expect(useSessionStore.getState().selectionRevision).toBeGreaterThan(revision);
+      expect(useSessionStore.getState().selectionError).toBeNull();
+      expect(useSessionStore.getState().getActiveSession()?.name).toBe('Back');
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it.each(['not-found', 'disconnected'])('keeps an uncached selection and error when its current fetch fails: %s', async (failure) => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {

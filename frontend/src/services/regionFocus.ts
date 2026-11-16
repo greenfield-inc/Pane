@@ -583,9 +583,14 @@ let cancelChatWait: (() => void) | null = null;
  * a click, a key, or focus moving to a control, terminal or the sidebar. At
  * launch (`untilInput`) nobody has acted yet, so only a click, a key or a
  * dialog ends it: focus the opening Pane moves itself (its changes list) is
- * taken back.
+ * taken back. Given the opening Pane's id, a click on that Pane's own sidebar
+ * row does not end it either: it asks for the Pane already being opened
+ * (#1384).
  */
-export function focusChatSoon(panelId?: string, { untilInput = false }: { untilInput?: boolean } = {}): void {
+export function focusChatSoon(
+  panelId?: string,
+  { untilInput = false, paneId }: { untilInput?: boolean; paneId?: string } = {},
+): void {
   cancelChatWait?.();
   const landed = document.activeElement;
   // Focus on no control (the page, a region, a scroll surface) is still free to move.
@@ -612,16 +617,21 @@ export function focusChatSoon(panelId?: string, { untilInput = false }: { untilI
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
     window.removeEventListener('focusin', soon, true);
-    window.removeEventListener('mousedown', cancel, true);
+    window.removeEventListener('mousedown', onMouseDown, true);
     window.removeEventListener('keydown', cancel, true);
     clearTimeout(timer);
     if (cancelChatWait === cancel) cancelChatWait = null;
+  };
+  const ownRow = paneId ? `[data-sidebar-key="pane-${CSS.escape(paneId)}"]` : null;
+  const onMouseDown = (event: MouseEvent) => {
+    if (ownRow && event.target instanceof Element && event.target.closest(ownRow)) return;
+    cancel();
   };
   const timer = setTimeout(cancel, CHAT_WAIT_MS);
   // The body, not the main area: the Pane being opened may not have mounted its main area yet.
   observer.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('focusin', soon, true);
-  window.addEventListener('mousedown', cancel, true);
+  window.addEventListener('mousedown', onMouseDown, true);
   window.addEventListener('keydown', cancel, true);
   cancelChatWait = cancel;
   attempt();
