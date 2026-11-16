@@ -30,6 +30,7 @@ import { paneHasWaitingQuestion, useNotifyStore } from '../stores/notifyStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { AutopilotNavRow } from './autopilot/AutopilotNavRow';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
+import { confirmPaneArchive } from './PaneArchiveConfirmDialog';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
@@ -261,17 +262,6 @@ export function ProjectSessionList({
     window.dispatchEvent(new Event('project-changed'));
   };
 
-  // Session operations
-  const handleArchiveSession = useCallback(async (sessionId: string) => {
-    try {
-      const response = await API.sessions.delete(sessionId);
-      if (!response.success) showActionError('Could not archive the Pane', response.error);
-    } catch (e) {
-      console.error('Failed to archive session:', e);
-      showActionError('Could not archive the Pane', e);
-    }
-  }, []);
-
   const handleTogglePinnedSession = useCallback(async (sessionId: string) => {
     try {
       const response = await API.sessions.toggleFavorite(sessionId);
@@ -406,13 +396,13 @@ export function ProjectSessionList({
         isActive={activeView === 'sessions' && sidebarNavigationScope === 'orchestration' && parentSessionId === selectedOrchestrationSessionId && pane.id === activeSessionId}
         globalIndex={globalSessionIndex.get(pane.id) ?? -1}
         onClick={() => void handleManagedPaneClick(pane.id, parentSessionId)}
-        onArchive={() => void handleArchiveSession(pane.id)}
+        onArchive={() => confirmPaneArchive(pane)}
         onTogglePinned={() => void handleTogglePinnedSession(pane.id)}
         onDismiss={inboxActive ? () => dismissInboxPane(pane.id) : undefined}
         rowLayout={sidebarPaneRowLayout}
       />
     );
-  }, [activeView, sidebarNavigationScope, selectedOrchestrationSessionId, activeSessionId, globalSessionIndex, handleArchiveSession, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout, inboxActive, inboxMembers, dismissInboxPane]);
+  }, [activeView, sidebarNavigationScope, selectedOrchestrationSessionId, activeSessionId, globalSessionIndex, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout, inboxActive, inboxMembers, dismissInboxPane]);
 
   const pinnedPaneRows = pinnedSessions.length > 0 ? (
     <div>
@@ -425,7 +415,7 @@ export function ProjectSessionList({
           displayName={label}
           repositoryName={repositoryName}
           onClick={() => handleSessionClick(session.id, 'pinned')}
-          onArchive={() => handleArchiveSession(session.id)}
+          onArchive={() => confirmPaneArchive(session)}
           onTogglePinned={() => handleTogglePinnedSession(session.id)}
           rowLayout={sidebarPaneRowLayout}
         />
@@ -568,7 +558,7 @@ export function ProjectSessionList({
                 isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
                 globalIndex={globalSessionIndex.get(session.id) ?? -1}
                 onClick={() => handleSessionClick(session.id, 'repositories')}
-                onArchive={() => handleArchiveSession(session.id)}
+                onArchive={() => confirmPaneArchive(session)}
                 onTogglePinned={() => handleTogglePinnedSession(session.id)}
                 onDismiss={() => dismissInboxPane(session.id)}
                 rowLayout={sidebarPaneRowLayout}
@@ -695,7 +685,7 @@ export function ProjectSessionList({
                       isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
                       globalIndex={globalSessionIndex.get(session.id) ?? -1}
                       onClick={() => handleSessionClick(session.id, 'repositories')}
-                      onArchive={() => handleArchiveSession(session.id)}
+                      onArchive={() => confirmPaneArchive(session)}
                       onTogglePinned={() => handleTogglePinnedSession(session.id)}
                       rowLayout={sidebarPaneRowLayout}
                       nested
