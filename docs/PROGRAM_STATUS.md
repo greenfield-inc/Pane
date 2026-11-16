@@ -1,14 +1,16 @@
 # Program status (OSC 7501)
 
 Any program running in a Pane terminal tab can tell Pane what it is doing by
-printing one escape sequence. Pane shows that state as the tab's status cue,
-the same cue it reads from an agent's screen. A build, a deploy script or an
+printing one escape sequence. Pane shows that state as the tab's status cue
+(the dot on the tab and in the sidebar), the same cue it reads from an agent's
+screen. A build, a deploy script or an
 agent that prints the sequence shows working, blocked or done in Pane with no
 Pane-specific rules.
 
 The sequence is the Program Status Protocol, revision 0.4, published by
-Superlogical for its Rex terminal:
-<https://www.superlogical.com/rex/docs/build/program-status>.
+Superlogical, which makes the Rex terminal:
+<https://www.superlogical.com/rex/docs/build/program-status>. The example below
+is the spec's own and needs bash or zsh (`\e` is not POSIX `printf`).
 
 ```sh
 status() {
@@ -23,8 +25,8 @@ rsync -a ~/Photos backup:/photos && status done "Photos synced" || status error 
 | `state` | Tab status cue |
 | --- | --- |
 | `working` | Working. |
-| `blocked` | Blocked: a red dot, a desktop alert and a phone alert; in an agent tab, also `agent.blocked` in the Session journal. `msg` is the prompt line; `kind` (`permission`, `question`, `auth`) is in the status reason. |
-| `done`, `error` | Finished. The cue reads done until you look at the tab. |
+| `blocked` | Blocked: a red dot, plus a desktop alert and a phone alert when the tab becomes blocked. In an agent tab, also `agent.blocked` in the Session journal. `msg` is the prompt line; `kind` (`permission`, `question`, `auth`) is in the status reason. |
+| `done`, `error` | Finished. The tab shows the done cue until you open it. The record itself ends when you type in the tab. |
 | `idle` | Idle. |
 | `clear` | Removes the record, and the tab goes back to reading its screen. |
 
@@ -60,7 +62,7 @@ record lasts. When no record is left, the tab reads its screen again.
 - Pane removes direction overrides and invisible formatting from `msg` and
   `title` before showing them.
 - Pane answers the feature-detection query `ESC ] 7501 ; ? ESC \` with
-  `ESC ] 7501 ; ? ESC \`.
+  `ESC ] 7501 ; ? ESC \`. The reply repeats the query, as the spec defines.
 - `progress` is accepted and not shown.
 
 The parser is `main/src/services/agentStatus/programStatus.ts`.
