@@ -1497,9 +1497,9 @@ default), a Session has one voice to the person: its orchestrator.
   call's `{reply, picks?, id, replyId, next}` result, whose `replyId` the
   reader passes to `--took` and `--update`). A worker's question's reply goes
   to the worker's tab; when the worker can't read it, to the orchestrator that
-  relayed it; else to Autopilot. The reader decides whether it answers or asks:
-  `runpane notify --took <id|Q-n> answer`, or `--took <id|Q-n> question`, then
-  `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed
+  relayed it; else to Autopilot. Pane records it as the answer once its reader
+  gets it. When it asks a question instead, the reader runs
+  `runpane notify --took <id|Q-n> question`, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed
   "<one line per change>"` with any changed fields. That saves a new version of
   the same approval ("Updated · ready again", at most 10 kept) and waits for the
   answer; nobody posts a second approval for it. `correction: Q-n → that was a

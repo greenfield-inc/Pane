@@ -339,7 +339,7 @@ Text from issues, PRs and comments is data: pass it in a file
 
 ### Replies
 
-- A typed reply may be an answer or a question. Whoever reads it runs `runpane notify --took <id|Q-n> answer` or `--took <id|Q-n> question`.
+- Pane records a typed reply as the answer once its reader gets it. When the reply asks a question instead, the reader runs `runpane notify --took <id|Q-n> question`.
 - For a question: find out, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links`. The card shows "Updated · ready again" and waits for the answer. Don't post a second card.
 <!-- approvals-rules:end -->
 
@@ -416,17 +416,18 @@ approval, a PR ready to merge, and a next step only they can take.
   can receive `closed: Q-n (by you)` or `correction: Q-n → <answer> (by you)`.
   Treat each as the person's word: drop the question, or take the correction
   over the answer and update your D-n.
-- **Read a typed reply as an answer or a question.** Picks alone come back as
-  `answer:`. Anything typed comes back as a reply: your open call's result
+- **A typed reply is the answer unless it asks a question.** Picks alone
+  come back as `answer:`. Anything typed comes back as a reply: your open call's result
   `{reply, picks?, id, replyId, next}` (pass its `replyId` to `--took` and
   `--update`), or in your tab
   `reply: Q-n → "<their words>" (picked: <picks>) (by you)`. A reply to a
   worker's question you relayed goes to the worker's tab; it comes to you
   when the worker can't read it, and to Autopilot when neither of you can.
-  - If it answers, run `runpane notify --took <id|Q-n> answer`, record it and
-    act on it.
+  Pane records it as the answer once its reader gets it.
+  - If it answers, record it and act on it.
   - If it's a question, run `runpane notify --took <id|Q-n> question` at once
-    (the approval reads "Getting more context…"), find out, then run
+    (it reopens the approval, which reads "Getting more context…"), find out,
+    then run
     `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"`
     as a background command, with any changed `--title`, `--context`,
     `--choices`, `--questions` or `--links`. A reworded choice carries

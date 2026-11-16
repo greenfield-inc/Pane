@@ -77,11 +77,6 @@ function forSecret(result: NotifyResult): NotifyResult {
 const ASKER_STOPPED = 'the asker stopped waiting';
 /** Why an item's asker is gone when only its tab closed: a relaying orchestrator or Autopilot can still read for it. */
 export const ASKING_TAB_CLOSED = 'the asking tab was closed';
-/** A reply its reader hasn't taken (with --took) this long passes to Autopilot, when Autopilot is on. */
-function readFallbackMs(): number {
-  const configured = Number(process.env.PANE_APPROVALS_READ_FALLBACK_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 10 * 60_000;
-}
 /** What a reader that took a reply as a question is doing, until it says otherwise. */
 const ASKING_STATUS = 'Getting more context…';
 
@@ -634,14 +629,16 @@ export class NotifyQueue extends EventEmitter {
         continue;
       }
       const reply = item.reply;
-      if (reply?.state === 'reading' && reply.deliveredAt !== undefined && reply.reader?.kind !== 'autopilot' && now - reply.deliveredAt >= readFallbackMs()) {
-        // Its reader hasn't said how it took the reply: Autopilot reads it, when it's on.
-        const autopilot = this.env.autopilotReader?.();
-        if (autopilot) {
-          this.deliverReply(entry, { kind: 'autopilot', panelId: autopilot.panelId, name: 'Autopilot' });
-          dirty = true;
+      if (reply?.state === 'reading' && reply.deliveredAt !== undefined) {
+        // Delivered before replies were taken as answers: it is the answer, and it is never typed again.
+        try {
+          this.takeAsAnswer(entry, 'answer');
+        } catch (error) {
+          console.warn(`[Notify] ${item.id} was already ended elsewhere:`, error);
         }
-      } else if (reply && (reply.state === 'unread' || (reply.state === 'reading' && reply.deliveredAt === undefined)) && !this.tabMessages.some(message => message.reply === reply.id)) {
+        continue;
+      }
+      if (reply && (reply.state === 'unread' || reply.state === 'reading') && !this.tabMessages.some(message => message.reply === reply.id)) {
         // Nobody could read it earlier: try every reader again, now that one may be back.
         entry.replyTried = new Set();
         this.routeReply(entry);
@@ -844,11 +841,10 @@ export class NotifyQueue extends EventEmitter {
   private replyTo(entry: Entry, text: string, picks: string[], device?: string): void {
     const { item } = entry;
     const earlier = item.reply;
-    // One reply at a time with its reader: --took names the approval, so it must mean the reply the reader has.
-    // A line still being typed may already be in the tab, so it counts as read until the tab says otherwise.
-    if (earlier?.state === 'reading' && (earlier.deliveredAt !== undefined || this.repliesTyping.has(earlier.id))) {
+    // A line still being typed may already be in the tab, and it becomes the answer once it lands.
+    if (earlier?.state === 'reading' && this.repliesTyping.has(earlier.id)) {
       const reader = earlier.reader?.name ?? 'its reader';
-      throw new PaneError('ERR_NOTIFY_REPLY_BEING_READ', `${reader.charAt(0).toUpperCase()}${reader.slice(1)} is still reading your last reply, so this one wasn't sent. Your words are still in the box.`, 'Send it once the approval says how your last reply was taken, or pick an option to answer now.');
+      throw new PaneError('ERR_NOTIFY_REPLY_BEING_READ', `${reader.charAt(0).toUpperCase()}${reader.slice(1)} is getting your last reply right now, so this one wasn't sent. Your words are still in the box.`, 'Send it again in a moment, or pick an option to answer now.');
     }
     if (picks.some(Boolean)) this.checkPicks(item, picks, true);
     // A reply nobody has read yet is replaced, and its line, if still waiting for a busy tab, never goes.
@@ -918,7 +914,7 @@ export class NotifyQueue extends EventEmitter {
       if (reply.picks?.length) Object.assign(result, { picks: reply.picks });
       if (entry.waiter) entry.waiter.resolve(result);
       else entry.pending = result;
-      this.save(entry);
+      this.takeAsAnswer(entry, 'answer');
       return;
     }
     this.save(entry);
@@ -930,9 +926,9 @@ export class NotifyQueue extends EventEmitter {
     const reply = entry.item.reply;
     if (!reply || reply.id !== message.reply || reply.state !== 'reading') return;
     if (outcome === 'delivered') {
+      // Delivered is answered, like a pick: its reader runs --took question to reopen it.
       entry.item.reply = { ...reply, deliveredAt: Date.now() };
-      this.save(entry);
-      this.changed();
+      this.takeAsAnswer(entry, 'answer');
       return;
     }
     (entry.replyTried ?? (entry.replyTried = new Set())).add(message.panelId);
@@ -942,18 +938,20 @@ export class NotifyQueue extends EventEmitter {
 
   /**
    * `runpane notify --took <id|Q-n> answer|question`: the reader says how it took the reply.
-   * An answer is recorded with the typed text; a question shows what the reader is doing.
+   * A delivered reply is already the answer, so `answer` confirms it; `question` reopens the
+   * approval and shows what the reader is doing.
    */
   took(caller: NotifyReaderCaller, ref: string, as: 'answer' | 'question', status?: string): NotifyResult {
     const entry = this.forReader(caller, ref, 'took');
     const reply = entry.item.reply;
-    if (!reply || (reply.state !== 'reading' && reply.state !== 'question' && reply.state !== 'unread')) {
+    if (!reply || reply.state === 'sent') {
       throw new PaneError('ERR_NOTIFY_NO_REPLY', `${refOf(entry.item)} has no reply waiting to be read. Nothing was changed.`, 'Run --took only after a reply: line (or a {reply} result) for it.');
     }
     if (as === 'answer') {
-      this.takeAsAnswer(entry, 'answer');
+      if (entry.item.state === 'waiting') this.takeAsAnswer(entry, 'answer');
       return { took: 'answer', id: entry.item.id };
     }
+    if (entry.item.state !== 'waiting') this.reopenTakenReply(entry);
     entry.item.reply = { ...reply, state: 'question', status: status?.trim() || ASKING_STATUS };
     this.save(entry);
     this.changed();
@@ -998,6 +996,8 @@ export class NotifyQueue extends EventEmitter {
    */
   update(caller: NotifyReaderCaller, ref: string, update: NotifyUpdate, returnAfterMs?: number, signal?: AbortSignal): Promise<NotifyResult> {
     const entry = this.forReader(caller, ref, 'update');
+    // A reply taken as the answer was a question after all: the new version waits on the person again.
+    if (entry.item.state !== 'waiting') this.reopenTakenReply(entry);
     const { item } = entry;
     const now = Date.now();
     const earlier: NotifyVersion = { version: item.version ?? 1, title: item.title, at: item.revision?.at ?? item.createdAt };
@@ -1057,14 +1057,9 @@ export class NotifyQueue extends EventEmitter {
     const target = reply.reader?.panelId ?? item.source.panelId;
     if (as === 'question') {
       if (item.state !== 'answered' || reply.state !== 'answer') throw new PaneError('ERR_NOTIFY_NOT_ANSWERED', 'That reply was not taken as your answer, so there is nothing to fix. Nothing was sent.', 'Wait for it to be read.');
-      item.state = 'waiting';
-      item.resolvedAt = undefined;
-      item.answerSummary = undefined;
-      item.answeredBy = undefined;
-      item.delivered = undefined;
+      this.reopenTakenReply(entry);
       item.answeredOn = device;
       item.reply = { ...reply, state: 'question', status: ASKING_STATUS, fixed: 'question' };
-      this.queue = [id, ...this.queue.filter(other => other !== id)];
       this.save(entry);
       if (target) this.enqueueTabMessage(item, `correction: ${askerRef(item)} → that was a question: "${reply.text}"${idTag(item)} (by you)`, false, { panelId: target });
       this.changed();
@@ -1077,6 +1072,17 @@ export class NotifyQueue extends EventEmitter {
     if (target) this.enqueueTabMessage(item, `correction: ${askerRef(item)} → that was your answer: "${reply.text}"${idTag(item)} (by you)`, false, { panelId: target });
   }
 
+  /** A reply taken as the answer goes back to waiting: its reader is asking about it. */
+  private reopenTakenReply(entry: Entry): void {
+    const { item } = entry;
+    item.state = 'waiting';
+    item.resolvedAt = undefined;
+    item.answerSummary = undefined;
+    item.answeredBy = undefined;
+    item.delivered = undefined;
+    this.queue = [item.id, ...this.queue.filter(other => other !== item.id)];
+  }
+
   /**
    * The item `ref` (an id or Q-n) names, for a reader's `--took` or `--update`. Only its reader may:
    * the asker, the orchestrator that relayed it, or Autopilot (D-258).
@@ -1084,7 +1090,8 @@ export class NotifyQueue extends EventEmitter {
   private forReader(caller: NotifyReaderCaller, ref: string, what: 'took' | 'update'): Entry {
     const wanted = ref.trim();
     // An open call's continuation id names its approval too: it is how a reader with no Pane tab continues (D-294).
-    const candidates = [...this.entries.values()].filter(entry => entry.item.state === 'waiting' && (entry.item.id === wanted || (entry.continuation !== undefined && entry.continuation === wanted) || leadingQn(entry.item.title) === wanted));
+    // A reply taken as the answer still belongs to its reader, who may say it was a question.
+    const candidates = [...this.entries.values()].filter(entry => (entry.item.state === 'waiting' || (entry.item.state === 'answered' && entry.item.reply?.state === 'answer')) && (entry.item.id === wanted || (entry.continuation !== undefined && entry.continuation === wanted) || leadingQn(entry.item.title) === wanted));
     if (candidates.length === 0) {
       throw new PaneError('ERR_NOTIFY_GONE', `There's no waiting approval ${wanted} on ${this.machine()}: it was answered or closed. Nothing was changed.`, 'Check the id or Q-n in the reply: line, or read the answer you already have.');
     }
@@ -1093,7 +1100,9 @@ export class NotifyQueue extends EventEmitter {
       const reader = candidates[0].item.reply?.reader?.name ?? candidates[0].item.source.name;
       throw new PaneError('ERR_NOTIFY_NOT_READER', `Only the agent reading ${wanted}'s reply (${reader}) can run --${what} on it, and this tab isn't it. Nothing was changed.`, 'Leave it to its reader. To ask the person something else, call notify as usual.');
     }
-    return mine.find(entry => entry.item.reply) ?? mine[0];
+    const waiting = mine.filter(entry => entry.item.state === 'waiting');
+    const pool = waiting.length ? waiting : mine;
+    return pool.find(entry => entry.item.reply) ?? pool[0];
   }
 
   private mayRead(entry: Entry, caller: NotifyReaderCaller, ref: string): boolean {
@@ -2143,9 +2152,9 @@ function picksText(picks: readonly string[]): string {
   return picks.map(pick => pick || '—').join(' · ');
 }
 
-/** What a reader with an open call does with a reply: it names the reply's id, which only this call was given. */
+/** What a reader with an open call does if the reply was a question: it names the reply's id, which only this call was given. */
 function tookNext(item: NotifyItem, replyId: string): string {
-  return `The person replied. If it answers ${refOf(item)}, run \`runpane notify --took ${replyId} answer\`. If it asks about it, run \`runpane notify --took ${replyId} question\`, find out, then \`runpane notify --update ${replyId} --asked "<their question>" --what-changed "<one line per change>"\`. Use this reply id, not the Q-n: it is what lets this call continue.`;
+  return `The person replied, and Pane recorded the reply as the answer to ${refOf(item)}. If it asks about it instead, run \`runpane notify --took ${replyId} question\`, find out, then \`runpane notify --update ${replyId} --asked "<their question>" --what-changed "<one line per change>"\`. Use this reply id, not the Q-n: it is what lets this call continue.`;
 }
 
 /** A reply is with its reader, or its reader took it as a question: the pager and strip move past it. */

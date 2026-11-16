@@ -86,7 +86,7 @@ rather than asking in the terminal.
 
 ### Replies
 
-- A typed reply may be an answer or a question. Whoever reads it runs `runpane notify --took <id|Q-n> answer` or `--took <id|Q-n> question`.
+- Pane records a typed reply as the answer once its reader gets it. When the reply asks a question instead, the reader runs `runpane notify --took <id|Q-n> question`.
 - For a question: find out, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links`. The card shows "Updated · ready again" and waits for the answer. Don't post a second card.
 
 ### Posting an approval card
@@ -110,14 +110,13 @@ reply: the open call's result `{reply, picks?, id, replyId, next}` (pass its
 from outside a Pane tab too), or this line in your tab:
 `reply: Q-n → "<their words>" (picked: <picks>) (by you)` (`(picked: …)`
 only when they picked something; without a Q-n it names the title and ends
-`[id <item id>]`). A reply is an answer or a question about the approval,
-and you decide which:
+`[id <item id>]`). Pane records the reply as the answer once it reaches you, and the approval
+closes with it, like a pick. Read it:
 
-- **An answer:** run `runpane notify --took <id|Q-n> answer --json`, then act
-  on it.
+- **An answer:** act on it.
 - **A question:** run `runpane notify --took <id|Q-n> question --json` at
-  once (the approval reads "Getting more context…"; `--status "<text>"` says
-  what you're doing instead). Find out, then run
+  once. That reopens the approval, which reads "Getting more context…"
+  (`--status "<text>"` says what you're doing instead). Find out, then run
   `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>" --json`
   with any changed `--title`, `--context`, `--choices`, `--questions` or
   `--links`. A reworded choice carries `"was":"<old label>"`. That saves a
