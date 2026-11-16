@@ -277,7 +277,7 @@ export function UsageSnapshotCard({ report, status = null, failed = false, host 
           Open Usage &amp; Limits →
         </button>
       </div>
-      <div className={cn('grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]', state.kind === 'loading' && 'animate-pulse')}>
+      <div className={cn('grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]', state.kind === 'loading' && 'animate-skeleton')}>
         {state.kind === 'empty' && <EmptyTiles title={`No Claude Code or Codex history ${where} yet`} detail="Start an agent and each day's tokens chart here." />}
         {state.kind === 'unavailable' && <EmptyTiles title="Pane couldn't read your agent history" detail="Open Usage & Limits to read it again." />}
         {(state.kind === 'loading' || state.kind === 'ready') && (
