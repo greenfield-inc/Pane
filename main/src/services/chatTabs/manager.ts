@@ -486,7 +486,8 @@ export class ChatTabManager {
   /** Delivers the first queued message into the running turn; when the turn already ended, drain sends it. */
   private async steerFirst(panelId: string, tab: Tab, runtime: ChatTabRuntime): Promise<void> {
     const next = this.required(panelId).queue?.[0];
-    if (!next || tab.steering === next.operationId) return;
+    // One steer at a time: a second message sent now waits in the queue, so no message is delivered twice.
+    if (!next || tab.steering) return;
     const body = next.stored ? this.bodies.read(panelId, next.operationId) : { text: next.text, images: next.images };
     // drain reports a missing copy when the turn ends.
     if (!body) return;
@@ -510,8 +511,8 @@ export class ChatTabManager {
       }));
       this.bodies.remove(panelId, next.operationId);
       this.publish(panelId);
-      return;
     }
+    // The turn may have ended while the steer was in flight; drain waits for a turn that still runs.
     if (state) this.drain(panelId);
   }
 

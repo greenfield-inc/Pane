@@ -186,8 +186,8 @@ function UserImage({ content }: { content: JsonValue }) {
 
 function UserParts({ message }: { message: AgentChatMessage }) {
   return <>{message.parts.map((part, index) => part.type === 'text'
-    ? <span key={index} className="whitespace-pre-wrap">{part.text}</span>
-    : part.type === 'content' ? <UserImage key={index} content={part.content} /> : null)}</>;
+    ? <span key={`${message.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
+    : part.type === 'content' ? <UserImage key={`${message.id}:${index}`} content={part.content} /> : null)}</>;
 }
 
 function UserMessage({ turn }: { turn: ChatTurn }) {
