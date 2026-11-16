@@ -46,6 +46,7 @@ jobs:
             - 'scripts/test-runpane-handoff.js'
             - 'scripts/test-runpane-ask.js'
             - 'scripts/test-runpane-managed-cli.js'
+            - 'scripts/test-runpane-release-cache.js'
             - 'scripts/fixtures/**'
             - '.github/workflows/quality.yml'
           relay:
@@ -376,6 +377,9 @@ jobs:
 
     - name: Run wrapper telemetry tests
       run: node --test scripts/test-runpane-telemetry.js
+
+    - name: Run doctor release lookup tests
+      run: node --test scripts/test-runpane-release-cache.js
 
     - name: Finish wrapper contract tests
       if: ${{ !cancelled() }}
