@@ -75,6 +75,10 @@ const config = {
         },
         // Design token colors
         // Background colors
+        'device': {
+          'bezel': 'var(--color-device-bezel)',
+          'screen': 'var(--color-device-screen)',
+        },
         'bg': {
           'primary': 'var(--color-bg-primary)',
           'secondary': 'var(--color-bg-secondary)',

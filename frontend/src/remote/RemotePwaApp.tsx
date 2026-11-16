@@ -1290,6 +1290,7 @@ const PANEL_TYPE_LABELS = {
   browser: 'Browser',
   notes: 'Notes',
   chat: 'Chat',
+  device: 'Device',
 } satisfies Record<ToolPanelType, string>;
 
 /** The open Session's recorded blockers, from the latest Session list. */

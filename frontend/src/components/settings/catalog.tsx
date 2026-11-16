@@ -10,6 +10,7 @@ import {
   GitBranch,
   Keyboard,
   KeyRound,
+  Smartphone,
   Link,
   Link2,
   Monitor,
@@ -128,6 +129,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     icon: Link2,
     settingIds: ['remote-machines', 'remote-visibility', 'remote-address', 'remote-password', 'remote-pair-phone', 'remote-glasses', 'remote-linked-computers', 'remote-relay-address', 'remote-pane', 'remote-host-setup', 'remote-advanced-host'],
     aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'machines', 'switch machine', 'workspaces', 'glasses', 'even g2', 'phone', 'mobile', 'devices', 'connection code', 'qr', 'qr code', 'scan', 'pair', 'pair a phone', 'relay', 'relay address', 'self-host', 'linked computers', 'your computers', 'unlink'],
+  },
+  {
+    id: 'devices',
+    label: 'Devices',
+    description: 'Phone simulators and emulators that agents open in a device tab.',
+    icon: Smartphone,
+    settingIds: ['devices-enabled', 'devices-max-booted', 'devices-ios-machine'],
+    aliases: ['simulator', 'simulators', 'emulator', 'emulators', 'ios', 'iphone', 'android', 'xcode', 'device tools', 'device_open', 'simslim', 'mac'],
   },
   {
     id: 'integrations',
