@@ -24,7 +24,7 @@ function syncRef(key: string): string {
  * ignored files left out), bundled with only what `base` lacks. A temporary index keeps the
  * person's index, branch and stash untouched; the commit lives under refs/pane/device-sync.
  */
-export async function snapshotBundle(worktree: string, key: string, base: string | undefined, bundlePath: string): Promise<{ commit: string; path: string }> {
+export async function snapshotBundle(worktree: string, key: string, base: string | undefined, bundlePath: string): Promise<{ commit: string; path: string; unchanged: boolean }> {
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'pane-device-index-'));
   try {
     const index = { GIT_INDEX_FILE: path.join(scratch, 'index') };
@@ -32,12 +32,16 @@ export async function snapshotBundle(worktree: string, key: string, base: string
     if (hasHead) await git(worktree, ['read-tree', 'HEAD'], index);
     await git(worktree, ['add', '-A', '--', '.'], index);
     const tree = await git(worktree, ['write-tree'], index);
+    // Nothing changed since the snapshot the checkout has: no bundle to send.
+    if (base && await git(worktree, ['rev-parse', '--verify', '--quiet', `${base}^{tree}`]).catch(() => '') === tree) {
+      return { commit: base, path: bundlePath, unchanged: true };
+    }
     const commit = await git(worktree, ['commit-tree', tree, '-m', 'Pane device sync']);
     const ref = syncRef(key);
     await git(worktree, ['update-ref', ref, commit]);
     rmSync(bundlePath, { force: true });
     await git(worktree, ['bundle', 'create', bundlePath, ref, ...(base ? [`^${base}`] : [])]);
-    return { commit, path: bundlePath };
+    return { commit, path: bundlePath, unchanged: false };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -58,4 +62,15 @@ export async function applySnapshot(checkout: string, bundlePath: string, commit
   if (!existsSync(path.join(checkout, '.git'))) await git(checkout, ['init', '-q']);
   await git(checkout, ['fetch', '--quiet', bundlePath, `+refs/pane/device-sync/*:refs/pane/device-sync/*`]);
   await git(checkout, ['checkout', '--quiet', '--force', '--detach', commit]);
+}
+
+/** The repository's shared git folder: it outlives the worktree, so the snapshot ref can be deleted after archive. */
+export function gitCommonDir(worktree: string): Promise<string> {
+  return git(worktree, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+}
+
+/** Deletes `key`'s snapshot ref from the repository at `cwd`, so its untracked files can be collected. */
+export async function dropSnapshotRef(cwd: string, key: string): Promise<void> {
+  if (!existsSync(cwd)) return;
+  await git(cwd, ['update-ref', '-d', syncRef(key)]).catch(() => undefined);
 }

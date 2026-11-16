@@ -26,8 +26,8 @@ function setup() {
   git(worktree, 'commit', '-qm', 'init');
   const sync = async (base?: string) => {
     const bundle = await snapshotBundle(worktree, 'pane-a', base, path.join(root, 'bundle'));
-    await applySnapshot(checkout, bundle.path, bundle.commit);
-    return bundle.commit;
+    if (!bundle.unchanged) await applySnapshot(checkout, bundle.path, bundle.commit);
+    return bundle;
   };
   return { worktree, checkout, sync };
 }
@@ -47,7 +47,7 @@ describe('device checkout sync', () => {
 
   it('applies a later edit and a deletion as a delta, and keeps the checkout\'s ignored build products', async () => {
     const { worktree, checkout, sync } = setup();
-    const first = await sync();
+    const { commit: first } = await sync();
     mkdirSync(path.join(checkout, 'node_modules'));
     writeFileSync(path.join(checkout, 'node_modules', 'installed.js'), 'built on the Mac');
     writeFileSync(path.join(worktree, 'App.tsx'), 'three');
@@ -57,6 +57,13 @@ describe('device checkout sync', () => {
     expect(readFileSync(path.join(checkout, 'App.tsx'), 'utf8')).toBe('three');
     expect(existsSync(path.join(checkout, 'old.txt'))).toBe(false);
     expect(readFileSync(path.join(checkout, 'node_modules', 'installed.js'), 'utf8')).toBe('built on the Mac');
+  });
+
+  it('sends nothing when the worktree has not changed since the last sync', async () => {
+    const { sync } = setup();
+    const first = await sync();
+    const again = await sync(first.commit);
+    expect(again).toMatchObject({ unchanged: true, commit: first.commit });
   });
 
   it('leaves the person\'s index, branch and stash as they were', async () => {

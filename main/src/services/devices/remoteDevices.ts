@@ -1,14 +1,14 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { WebSocket } from 'ws';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { DeviceMac, DevicePlatform, DeviceStreamInfo, DeviceSummary } from '../../../../shared/types/devices';
-import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { createPortTunnel, type PortTunnel } from '../../daemon/client/portTunnel';
 import type { DeviceJobResult } from './deviceJobs';
 import type { DeviceScreenshot } from './deviceService';
-import { snapshotBundle } from './deviceSync';
+import { dropSnapshotRef, gitCommonDir, snapshotBundle } from './deviceSync';
 
 /** The channel a linked computer calls on a Mac for its devices; `runpane:machine:` admits only the owner's own computers. */
 export const MAC_DEVICES_CHANNEL = 'runpane:machine:devices';
@@ -18,7 +18,7 @@ const CHUNK_BYTES = 4 * 1024 * 1024;
 
 /** What a linked computer sends the Mac on MAC_DEVICES_CHANNEL; the Mac decodes it with `macDeviceRequestSchema`. */
 export const macDeviceRequestSchema = boundary.object({
-  op: boundary.enumeration('probe', 'list', 'open', 'screenshot', 'act', 'stream', 'frame', 'visible', 'sync-begin', 'sync-chunk', 'sync-end', 'run', 'close', 'archived'),
+  op: boundary.enumeration('probe', 'list', 'open', 'screenshot', 'act', 'stream', 'frame', 'visible', 'sync-begin', 'sync-chunk', 'sync-end', 'run', 'close', 'archived', 'await'),
   from: boundary.object({ id: boundary.string, name: boundary.string }),
   paneId: boundary.string,
   paneName: boundary.optional(boundary.string),
@@ -34,10 +34,11 @@ export const macDeviceRequestSchema = boundary.object({
   background: boundary.optional(boundary.boolean),
   waitMs: boundary.optional(boundary.number),
   visible: boundary.optional(boundary.boolean),
+  task: boundary.optional(boundary.string),
 });
 
 export interface MacDeviceRequest {
-  op: 'probe' | 'list' | 'open' | 'screenshot' | 'act' | 'stream' | 'frame' | 'visible' | 'sync-begin' | 'sync-chunk' | 'sync-end' | 'run' | 'close' | 'archived';
+  op: 'probe' | 'list' | 'open' | 'screenshot' | 'act' | 'stream' | 'frame' | 'visible' | 'sync-begin' | 'sync-chunk' | 'sync-end' | 'run' | 'close' | 'archived' | 'await';
   from: { id: string; name: string };
   paneId: string;
   paneName?: string;
@@ -53,6 +54,8 @@ export interface MacDeviceRequest {
   background?: boolean;
   waitMs?: number;
   visible?: boolean;
+  /** `await`: the task a slow call answered with. */
+  task?: string;
 }
 
 /** A request's fields besides its op, caller and Pane. */
@@ -77,6 +80,34 @@ export interface RemoteLease {
   reason: 'automatic' | 'pinned';
   /** The last snapshot the Mac's checkout has, so the next sync is a delta. */
   synced?: string;
+  /** The repository the snapshots came from, whose snapshot ref goes when the Pane is archived. */
+  repo?: string;
+}
+
+const leaseSchema = boundary.object({
+  macId: boundary.string,
+  macName: boundary.string,
+  deviceId: boundary.string,
+  platform: boundary.enumeration('ios', 'android'),
+  reason: boundary.enumeration('automatic', 'pinned'),
+  synced: boundary.optional(boundary.string),
+  repo: boundary.optional(boundary.string),
+});
+
+/** A Mac answers within this long; a call still running answers `{ pending: <task> }` and this computer asks again. */
+const pendingSchema = boundary.object({ pending: boundary.string });
+
+/** How long each call may run on the Mac in all: first use installs the tools and boots a device; a build runs as long as it was given. */
+function callBudgetMs(op: MacDeviceRequest['op'], fields: MacDeviceFields): number {
+  switch (op) {
+    case 'open': return 10 * 60_000;
+    case 'act':
+    case 'sync-end': return 5 * 60_000;
+    case 'run': return (fields.waitMs ?? 120_000) + 60_000;
+    case 'frame':
+    case 'visible': return 60_000;
+    default: return 3 * 60_000;
+  }
 }
 
 const summarySchema = boundary.object({
@@ -119,7 +150,13 @@ export class RemoteDevices {
   /** Macs that answered the devices channel this session, so the pick asks each once. */
   private readonly ready = new Map<string, boolean>();
 
-  constructor(private readonly routes: MacRoutes, private readonly root: string) {}
+  /** Leases are saved, so archiving a Pane after a restart still cleans its checkout and jobs on the Mac. */
+  constructor(private readonly routes: MacRoutes, private readonly root: string) {
+    try {
+      const saved = decodeBoundary(JSON.parse(readFileSync(this.leasesFile(), 'utf8')), boundary.record(leaseSchema));
+      for (const [paneId, lease] of Object.entries(saved)) this.leases.set(paneId, { ...lease });
+    } catch { /* none saved yet */ }
+  }
 
   leaseOf(paneId: string): RemoteLease | undefined {
     return this.leases.get(paneId);
@@ -146,7 +183,8 @@ export class RemoteDevices {
     const previous = this.leases.get(paneId);
     const lease: RemoteLease = { macId: mac.id, macName: mac.name, deviceId: opened.device.id, platform, reason };
     if (previous?.macId === mac.id && previous.synced) lease.synced = previous.synced;
-    this.leases.set(paneId, lease);
+    if (previous?.repo) lease.repo = previous.repo;
+    this.setLease(paneId, lease);
     return { lease, device: { ...opened.device, machine: mac.name } };
   }
 
@@ -182,16 +220,17 @@ export class RemoteDevices {
     const lease = this.leases.get(paneId);
     if (!lease) return { closed: [], jobsStopped: 0 };
     const result = decodeOrThrow(await this.call(this.mac(lease), 'close', paneId, {}), closeSchema, lease.macName);
-    this.leases.delete(paneId);
+    this.setLease(paneId, undefined);
     return result;
   }
 
   /** A Pane was archived here: its jobs stop on the Mac and its checkout there is removed. */
   async archived(paneId: string): Promise<void> {
     const lease = this.leases.get(paneId);
-    this.leases.delete(paneId);
     if (!lease) return;
+    if (lease.repo) await dropSnapshotRef(lease.repo, paneId);
     await this.call(this.mac(lease), 'archived', paneId, {});
+    this.setLease(paneId, undefined);
   }
 
   /** Where main reads the Mac's screen: the hub's port, tunnelled to this computer's loopback. */
@@ -236,17 +275,17 @@ export class RemoteDevices {
         'On the Mac, open Pane > Add a device > Computer and choose Copy link. On this PC, open Add a device > Computer and paste it under Or finish here, or run runpane link \'<link>\'. Android works on this PC now.',
       );
     }
-    let outdated: DeviceMac | undefined;
+    // The first reason a reachable Mac cannot run iOS (no Xcode, an older Pane) says more than "offline".
+    let reason: PaneError | undefined;
     for (const mac of macs.filter(candidate => candidate.online)) {
       try {
         await this.requireDevices(mac);
         return { mac, reason: 'automatic' };
       } catch (cause) {
-        if (cause instanceof PaneError && cause.code === 'ERR_DEVICE_MAC_OUTDATED') outdated ??= mac;
+        if (cause instanceof PaneError && cause.code !== 'ERR_DEVICE_MAC_OFFLINE') reason ??= cause;
       }
     }
-    if (outdated) throw outdatedMac(outdated.name);
-    throw offline(macs[0].name);
+    throw reason ?? offline(macs[0].name);
   }
 
   /** The Mac runs a Pane with device support and has Xcode. */
@@ -264,12 +303,16 @@ export class RemoteDevices {
       const begin = decodeOrThrow(await this.call(mac, 'sync-begin', paneId, { base: lease.synced ?? '' }), syncBeginSchema, lease.macName);
       const base = begin.has ? lease.synced : undefined;
       const bundle = await snapshotBundle(worktree, paneId, base, path.join(scratch, 'sync.bundle'));
+      lease.repo ??= await gitCommonDir(worktree);
+      this.setLease(paneId, lease);
+      if (bundle.unchanged) return;
       const bytes = readFileSync(bundle.path);
       for (let offset = 0; offset < bytes.length; offset += CHUNK_BYTES) {
         await this.call(mac, 'sync-chunk', paneId, { offset, data: bytes.subarray(offset, offset + CHUNK_BYTES).toString('base64') });
       }
       await this.call(mac, 'sync-end', paneId, { commit: bundle.commit, bytes: bytes.length });
       lease.synced = bundle.commit;
+      this.setLease(paneId, lease);
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
@@ -302,11 +345,47 @@ export class RemoteDevices {
     return mac;
   }
 
+  private leasesFile(): string {
+    return path.join(this.root, 'remote-leases.json');
+  }
+
+  private setLease(paneId: string, lease: RemoteLease | undefined): void {
+    if (lease) this.leases.set(paneId, lease);
+    else this.leases.delete(paneId);
+    mkdirSync(this.root, { recursive: true });
+    const file = this.leasesFile();
+    if (this.leases.size === 0) {
+      if (existsSync(file)) rmSync(file, { force: true });
+      return;
+    }
+    writeFileSync(`${file}.tmp`, JSON.stringify(Object.fromEntries(this.leases)));
+    renameSync(`${file}.tmp`, file);
+  }
+
+  /**
+   * One call to the Mac. A call the Mac cannot finish within its answer window (a first-use
+   * install, a cold boot, a build) comes back as a task, which this computer waits on in short
+   * rounds, so no single request outlasts the connection's idle limit.
+   */
   private async call(mac: DeviceMac, op: MacDeviceRequest['op'], paneId: string, fields: MacDeviceFields): Promise<JsonValue> {
+    const deadline = Date.now() + callBudgetMs(op, fields);
+    let answer = await this.callOnce(mac, op, paneId, fields);
+    for (;;) {
+      const pending = decodeOptionalBoundary(answer, pendingSchema);
+      if (!pending) return answer;
+      if (Date.now() > deadline) {
+        throw new PaneError('ERR_DEVICE_MAC_TIMEOUT', `${mac.name} is still working on ${op} after ${Math.round(callBudgetMs(op, fields) / 60_000)} minutes.`, op === 'run' ? 'Pass --background for long builds and Metro, then follow the job with device_run.' : 'Try again; it keeps going on the Mac.');
+      }
+      answer = await this.callOnce(mac, 'await', paneId, { task: pending.pending });
+    }
+  }
+
+  private async callOnce(mac: DeviceMac, op: MacDeviceRequest['op'], paneId: string, fields: MacDeviceFields): Promise<JsonValue> {
     if (!mac.online && op !== 'archived') throw offline(mac.name);
     try {
       return await this.routes.invoke(mac.id, MAC_DEVICES_CHANNEL, [{ ...fields, op, from: this.routes.self(), paneId }]);
     } catch (cause) {
+      if (cause instanceof PaneError && (cause.code === 'ERR_HOST_OUTDATED' || cause.code === 'ERR_UNKNOWN_CHANNEL')) throw outdatedMac(mac.name);
       if (cause instanceof PaneError && cause.code.startsWith('ERR_DEVICE')) throw cause;
       const reason = reasonOf(cause);
       if (/no handler|not registered|unknown (command|channel)/i.test(reason)) throw outdatedMac(mac.name);

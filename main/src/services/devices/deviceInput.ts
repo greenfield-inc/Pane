@@ -8,7 +8,8 @@ const BUTTON = 4;
 const COMMIT = 17;
 const IDLE_CLOSE_MS = 60_000;
 
-interface InputSocket { socket: WebSocket; admitted: boolean; queue: Buffer[]; timer?: NodeJS.Timeout }
+/** `socket` is unset while Pane is still asking where the device's input goes. */
+interface InputSocket { socket?: WebSocket; admitted: boolean; queue: Buffer[]; timer?: NodeJS.Timeout }
 
 /** The JSON the hub reads after a touch or button byte. */
 type InputBody = { type: 'begin' | 'move' | 'end'; x: number; y: number } | { button: 'home' | 'back' } | { type: 'home' | 'back' };
@@ -38,11 +39,16 @@ function clamp(value: number): number {
 export class DeviceInputSockets {
   private readonly sockets = new Map<string, InputSocket>();
 
-  send(deviceId: string, stream: DeviceStreamInfo, messages: Buffer[]): void {
+  /**
+   * Sends `messages` to the device in order. The socket opens once per device, asking `stream`
+   * where its input goes only then; messages wait in order until it is admitted.
+   */
+  send(deviceId: string, messages: Buffer[], stream: () => Promise<DeviceStreamInfo>): void {
     let entry = this.sockets.get(deviceId);
-    if (!entry || entry.socket.readyState === WebSocket.CLOSED || entry.socket.readyState === WebSocket.CLOSING) entry = this.open(deviceId, stream);
+    const closed = entry?.socket && (entry.socket.readyState === WebSocket.CLOSED || entry.socket.readyState === WebSocket.CLOSING);
+    if (!entry || closed) entry = this.open(deviceId, stream);
     for (const message of messages) {
-      if (entry.admitted && entry.socket.readyState === WebSocket.OPEN) entry.socket.send(message);
+      if (entry.admitted && entry.socket?.readyState === WebSocket.OPEN) entry.socket.send(message);
       else entry.queue.push(message);
     }
     if (entry.timer) clearTimeout(entry.timer);
@@ -55,24 +61,28 @@ export class DeviceInputSockets {
     if (!entry) return;
     this.sockets.delete(deviceId);
     if (entry.timer) clearTimeout(entry.timer);
-    entry.socket.close();
+    entry.socket?.close();
   }
 
   closeAll(): void {
     for (const id of [...this.sockets.keys()]) this.close(id);
   }
 
-  private open(deviceId: string, stream: DeviceStreamInfo): InputSocket {
-    const socket = new WebSocket(stream.inputUrl, { headers: { Authorization: `Bearer ${stream.token}` } });
-    const entry: InputSocket = { socket, admitted: false, queue: [] };
-    socket.on('message', (data: Buffer) => {
-      if (entry.admitted || data.length !== 1 || data[0] !== ADMITTED) return;
-      entry.admitted = true;
-      for (const message of entry.queue.splice(0)) socket.send(message);
-    });
-    socket.on('error', () => this.close(deviceId));
-    socket.on('close', () => { if (this.sockets.get(deviceId) === entry) this.sockets.delete(deviceId); });
+  private open(deviceId: string, stream: () => Promise<DeviceStreamInfo>): InputSocket {
+    const entry: InputSocket = { admitted: false, queue: [] };
     this.sockets.set(deviceId, entry);
+    stream().then((info) => {
+      if (this.sockets.get(deviceId) !== entry) return;
+      const socket = new WebSocket(info.inputUrl, { headers: { Authorization: `Bearer ${info.token}` } });
+      entry.socket = socket;
+      socket.on('message', (data: Buffer) => {
+        if (entry.admitted || data.length !== 1 || data[0] !== ADMITTED) return;
+        entry.admitted = true;
+        for (const message of entry.queue.splice(0)) socket.send(message);
+      });
+      socket.on('error', () => this.close(deviceId));
+      socket.on('close', () => { if (this.sockets.get(deviceId) === entry) this.sockets.delete(deviceId); });
+    }, () => this.close(deviceId));
     return entry;
   }
 }
