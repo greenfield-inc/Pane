@@ -6,7 +6,7 @@ import type { EditorPanelState, ToolPanel, ToolPanelType } from '@shared/types/p
 import type { RemotePwaCustomCommand } from '@shared/types/remoteDaemon';
 
 /** How the phone draws a tab. A placeholder names the computer, where the tab opens. */
-export type TabView = 'terminal' | 'chat' | 'browser' | 'explorer' | 'diff' | 'editor' | 'file-diff' | 'logs' | 'placeholder';
+export type TabView = 'terminal' | 'chat' | 'browser' | 'explorer' | 'diff' | 'editor' | 'file-diff' | 'logs' | 'device' | 'placeholder';
 
 export function tabView(panel: ToolPanel): TabView {
   switch (panel.type) {
@@ -16,6 +16,7 @@ export function tabView(panel: ToolPanel): TabView {
     case 'explorer':
     case 'diff':
     case 'logs':
+    case 'device':
       return panel.type;
     case 'editor':
       return (panel.state.customState as EditorPanelState | undefined)?.diff ? 'file-diff' : 'editor';
@@ -36,6 +37,7 @@ const STRIP_GROUP: Record<ToolPanelType, number> = {
   notes: 4,
   dashboard: 4,
   'setup-tasks': 4,
+  device: 1,
 };
 
 /** Every tab of a pane, in strip order; each group keeps the pane's tab order. */

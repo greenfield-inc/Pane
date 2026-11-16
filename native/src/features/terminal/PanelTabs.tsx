@@ -23,6 +23,7 @@ export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidS
   notes: { ios: 'note.text', android: 'sticky_note_2', label: 'notes' },
   dashboard: { ios: 'square.grid.2x2', android: 'dashboard', label: 'dashboard' },
   'setup-tasks': { ios: 'checklist', android: 'checklist', label: 'setup tasks' },
+  device: { ios: 'iphone', android: 'smartphone', label: 'device' },
 };
 const CHAT = { ios: 'bubble.left', android: 'chat_bubble', label: 'chat' } as const;
 

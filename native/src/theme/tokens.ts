@@ -33,6 +33,9 @@ const dark = {
   cardBorder: 'transparent',
   // Autopilot's violet (--color-autopilot on the desktop): its row, its own items, the walk's current Session.
   autopilot: '#a78bfa',
+  // A phone's bezel and dark screen in a device tab: black hardware in both themes (--color-device-*).
+  deviceBezel: '#0c0c0d',
+  deviceScreen: '#000000',
   autopilotText: '#c4b5fd',
 };
 
@@ -63,6 +66,8 @@ const light: ColorTokens = {
   card: '#ffffff',
   cardBorder: 'rgba(31, 35, 40, 0.12)',
   autopilot: '#7c3aed',
+  deviceBezel: '#0c0c0d',
+  deviceScreen: '#000000',
   autopilotText: '#6d28d9',
 };
 

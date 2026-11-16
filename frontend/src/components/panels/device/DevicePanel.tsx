@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Camera, Check, Home, Info, Laptop, Loader2, Lock, MoreHorizontal, Power, RotateCcw, WifiOff, X } from 'lucide-react';
 import type { DevicePanelState } from '../../../../../shared/types/devices';
 import type { ToolPanel } from '../../../../../shared/types/panels';
@@ -9,10 +9,10 @@ import { requestOpenSettings } from '../../../utils/openSettings';
 import { useAddDeviceStore } from '../../addDevice/addDeviceStore';
 import { useConfigStore } from '../../../stores/configStore';
 import { FRAME_POLL_MS, jpegToPng, useDeviceFrames } from './deviceFrames';
+import { DeviceClientContext, desktopDeviceClient, type DeviceTabClient } from './deviceClient';
 
 /** The tab's screen size when the device has not sent a frame yet (iPhone 17 Pro points). */
 const DEFAULT_ASPECT = { ios: 402 / 874, android: 412 / 915 } satisfies Record<DevicePanelState['platform'], number>;
-const CLIENT_ID = 'desktop';
 
 export interface DevicePanelProps {
   panel: ToolPanel;
@@ -34,11 +34,13 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
   const live = state.phase === 'live';
   // A desktop switched to another computer reads frames from it; this one's own devices stream.
   const remote = useConfigStore(store => store.config?.remoteDaemon?.client.mode === 'remote');
-  const lastFrame = useLastFrame(panel.id, state.deviceId, !live && state.phase !== 'booting' && state.phase !== 'installing');
+  const provided = useContext(DeviceClientContext);
+  const client = useMemo(() => provided ?? desktopDeviceClient(remote), [provided, remote]);
+  const lastFrame = useLastFrame(client, panel.id, state.deviceId, !live && state.phase !== 'booting' && state.phase !== 'installing');
 
   useEffect(() => {
     if (!state.deviceId) return;
-    const report = (visible: boolean) => { void window.electronAPI.devices.visible(panel.id, CLIENT_ID, visible); };
+    const report = (visible: boolean) => { void client.visible(panel.id, visible).catch(() => undefined); };
     const onVisibility = () => report(isActive && document.visibilityState === 'visible');
     onVisibility();
     document.addEventListener('visibilitychange', onVisibility);
@@ -46,40 +48,36 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
       document.removeEventListener('visibilitychange', onVisibility);
       report(false);
     };
-  }, [panel.id, state.deviceId, isActive]);
+  }, [client, panel.id, state.deviceId, isActive]);
 
-  const run = useCallback(async (label: string, work: () => Promise<{ success: boolean; error?: string }>) => {
+  const run = useCallback(async (label: string, work: () => Promise<void>) => {
     setBusy(label);
     setError(undefined);
     try {
-      const response = await work();
-      if (!response.success) setError(response.error ?? 'That did not work.');
+      await work();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'That did not work.');
     } finally {
       setBusy(undefined);
     }
   }, []);
 
-  const copyScreen = useCallback(async () => {
-    const response = await window.electronAPI.devices.frame(panel.id);
-    if (!response.success || !response.data) {
-      setError(response.error ?? 'Pane could not copy the screen.');
-      return;
-    }
+  const copyScreen = useCallback(() => run('copy', async () => {
     // Clipboard images must be PNG; the frame is a JPEG data URL.
-    const png = await jpegToPng(response.data);
+    const png = await jpegToPng(await client.frame(panel.id));
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
-  }, [panel.id]);
+  }), [client, panel.id, run]);
 
   if (state.phase === 'no-mac' || state.phase === 'mac-offline') {
-    return <NoMacView state={state} panelId={panel.id} />;
+    return <NoMacView state={state} panelId={panel.id} client={client} />;
   }
 
   const showBanner = !bannerHidden && state.machineReason && state.machineReason.kind !== 'local';
   const moreItems: DropdownItem[] = [
-    { id: 'restart', label: 'Restart', icon: RotateCcw, onClick: () => { void run('restart', () => window.electronAPI.devices.power(panel.id, 'restart')); }, disabled: !live },
-    { id: 'shutdown', label: 'Shut down', icon: Power, onClick: () => { void run('shutdown', () => window.electronAPI.devices.power(panel.id, 'shutdown')); }, disabled: !live },
+    { id: 'restart', label: 'Restart', icon: RotateCcw, onClick: () => { void run('restart', () => client.power(panel.id, 'restart')); }, disabled: !live },
+    { id: 'shutdown', label: 'Shut down', icon: Power, onClick: () => { void run('shutdown', () => client.power(panel.id, 'shutdown')); }, disabled: !live },
   ];
 
   return (
@@ -95,17 +93,17 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
       <div className="flex min-h-0 flex-1 items-center justify-center gap-3 p-4">
         <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-center">
           <PhoneFrame platform={state.platform} footer={<DeviceCaption state={state} />}>
-            {live && isActive ? <LiveScreen panelId={panel.id} platform={state.platform} remote={remote} /> : (
+            {live && isActive ? <LiveScreen client={client} panelId={panel.id} platform={state.platform} /> : (
               <div className="absolute inset-0 bg-device-screen">
                 {lastFrame && <img src={lastFrame} alt="" className="h-full w-full object-cover opacity-60" />}
               </div>
             )}
-            <PhaseOverlay state={state} busy={busy} onBoot={() => run('boot', () => window.electronAPI.devices.power(panel.id, 'boot'))} onTakeOver={() => run('take-over', () => window.electronAPI.devices.takeOver(panel.id))} />
+            <PhaseOverlay state={state} busy={busy} onBoot={() => run('boot', () => client.power(panel.id, 'boot'))} onTakeOver={() => run('take-over', () => client.takeOver(panel.id))} />
           </PhoneFrame>
           {error && <p className="mt-1 max-w-sm text-center text-xs text-status-error" role="alert">{error}</p>}
         </div>
         <div className="flex flex-shrink-0 flex-col items-center gap-1 self-center rounded-full border border-border-primary bg-surface-primary p-1 shadow-sm" data-testid="device-rail">
-          <RailButton label="Home" disabled={!live} onClick={() => { void window.electronAPI.devices.input(panel.id, { kind: 'button', button: 'home' }); }}><Home className="h-4 w-4" /></RailButton>
+          <RailButton label="Home" disabled={!live} onClick={() => { void client.input(panel.id, { kind: 'button', button: 'home' }).catch(() => undefined); }}><Home className="h-4 w-4" /></RailButton>
           <RailButton label={copied ? 'Copied' : 'Copy screenshot'} disabled={!live} onClick={() => { void copyScreen(); }}>{copied ? <Check className="h-4 w-4 text-status-success" /> : <Camera className="h-4 w-4" />}</RailButton>
           <div className="my-0.5 h-px w-5 bg-border-primary" />
           <Dropdown trigger={<RailButton label="More" disabled={false}><MoreHorizontal className="h-4 w-4" /></RailButton>} items={moreItems} position="bottom-right" width="sm" />
@@ -140,7 +138,7 @@ function DeviceCaption({ state }: { state: DevicePanelState }) {
 }
 
 /** The last frame of a device that is not live, faded behind its state's message. */
-function useLastFrame(panelId: string, deviceId: string | undefined, wanted: boolean): string | undefined {
+function useLastFrame(client: DeviceTabClient, panelId: string, deviceId: string | undefined, wanted: boolean): string | undefined {
   const [frame, setFrame] = useState<string>();
   useEffect(() => {
     if (!wanted || !deviceId) {
@@ -148,11 +146,9 @@ function useLastFrame(panelId: string, deviceId: string | undefined, wanted: boo
       return;
     }
     let cancelled = false;
-    void window.electronAPI.devices.frame(panelId).then((response) => {
-      if (!cancelled && response.success) setFrame(response.data);
-    });
+    void client.frame(panelId).then((next) => { if (!cancelled) setFrame(next); }, () => undefined);
     return () => { cancelled = true; };
-  }, [panelId, deviceId, wanted]);
+  }, [client, panelId, deviceId, wanted]);
   return frame;
 }
 
@@ -203,13 +199,14 @@ function PhoneFrame({ platform, children, dashed = false, footer }: { platform: 
  * it is frames read over the connection, about twice a second. Pointer events become normalized
  * touches; moves are sent once a frame.
  */
-function LiveScreen({ panelId, platform, remote }: { panelId: string; platform: DevicePanelState['platform']; remote: boolean }) {
-  const polled = useDeviceFrames(panelId, remote ? FRAME_POLL_MS : undefined);
-  const src = remote ? polled : `pane-media://device/${panelId}`;
-  return src ? <TouchScreen panelId={panelId} platform={platform} src={src} /> : <div className="absolute inset-0 bg-device-screen" />;
+function LiveScreen({ client, panelId, platform }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform'] }) {
+  const stream = client.streamUrl(panelId);
+  const polled = useDeviceFrames(client, panelId, stream ? undefined : FRAME_POLL_MS);
+  const src = stream ?? polled;
+  return src ? <TouchScreen client={client} panelId={panelId} platform={platform} src={src} /> : <div className="absolute inset-0 bg-device-screen" />;
 }
 
-export function TouchScreen({ panelId, platform, src }: { panelId: string; platform: DevicePanelState['platform']; src: string }) {
+function TouchScreen({ client, panelId, platform, src }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; src: string }) {
   const down = useRef(false);
   const pendingMove = useRef<{ x: number; y: number }>(undefined);
   const point = (event: ReactPointerEvent<HTMLImageElement>) => {
@@ -217,7 +214,7 @@ export function TouchScreen({ panelId, platform, src }: { panelId: string; platf
     return { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height };
   };
   const send = (phase: 'begin' | 'move' | 'end', at: { x: number; y: number }) => {
-    void window.electronAPI.devices.input(panelId, { kind: 'touch', phase, x: Math.min(1, Math.max(0, at.x)), y: Math.min(1, Math.max(0, at.y)) });
+    void client.input(panelId, { kind: 'touch', phase, x: Math.min(1, Math.max(0, at.x)), y: Math.min(1, Math.max(0, at.y)) }).catch(() => undefined);
   };
   const end = (event: ReactPointerEvent<HTMLImageElement>) => {
     if (!down.current) return;
@@ -274,7 +271,7 @@ function PhaseOverlay({ state, busy, onBoot, onTakeOver }: { state: DevicePanelS
 }
 
 /** iOS on a PC with no Mac, or with its Mac offline: a message inside a dashed phone outline. */
-function NoMacView({ state, panelId }: { state: DevicePanelState; panelId: string }) {
+function NoMacView({ state, panelId, client }: { state: DevicePanelState; panelId: string; client: DeviceTabClient }) {
   const openAddDevice = () => useAddDeviceStore.getState().open('computer');
   const offline = state.phase === 'mac-offline';
   return (
@@ -286,7 +283,7 @@ function NoMacView({ state, panelId }: { state: DevicePanelState; panelId: strin
             <>
               <p className="text-sm font-medium text-text-primary">{state.macName ?? 'Your Mac'} is offline</p>
               <p className="text-xs text-text-secondary">This PC has no Xcode, so iOS runs on that Mac. Open Pane on it, then try again.</p>
-              <button type="button" onClick={() => { void window.electronAPI.devices.power(panelId, 'boot'); }} className="mt-1 rounded bg-interactive px-3 py-1 text-xs font-medium text-text-on-interactive hover:bg-interactive-hover">Try again</button>
+              <button type="button" onClick={() => { void client.power(panelId, 'boot').catch(() => undefined); }} className="mt-1 rounded bg-interactive px-3 py-1 text-xs font-medium text-text-on-interactive hover:bg-interactive-hover">Try again</button>
               <button type="button" onClick={openAddDevice} className="text-xs text-interactive hover:text-interactive-hover">Link another Mac</button>
             </>
           ) : (
