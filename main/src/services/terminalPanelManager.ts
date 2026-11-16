@@ -2543,7 +2543,11 @@ export class TerminalPanelManager extends EventEmitter {
     }
     // Typing in the tab means its OSC 7501 done or error result has been seen.
     const reportedState = terminal.screenEmulator?.state.programStatus?.state;
-    if (reportedState === 'done' || reportedState === 'error') terminal.screenEmulator?.dropProgramStatus('finished');
+    if (reportedState === 'done' || reportedState === 'error') {
+      terminal.screenEmulator?.dropProgramStatus('finished');
+      // A rerun that reports the same result is a new finish.
+      terminal.announcedFinish = undefined;
+    }
     terminal.lastActivity = new Date();
   }
   

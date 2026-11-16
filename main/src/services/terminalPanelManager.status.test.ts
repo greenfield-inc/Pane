@@ -801,6 +801,13 @@ describe('program status reports (OSC 7501)', () => {
     fixture.data('\x1b]7501;state=error:app=brew\x1b\\');
     await pollAgentStatus();
     expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:error', workedVisibly: true });
+
+    // The person reruns the command and it reports the same result before the next poll.
+    const before = statuses().length;
+    manager.writeToTerminal('p', '\r');
+    fixture.data('\x1b]7501;state=error:app=brew\x1b\\');
+    await pollAgentStatus();
+    expect(statuses().slice(before)).toContainEqual(expect.objectContaining({ state: 'idle', reason: 'program_status:error' }));
   });
 
   it('answers the feature-detection query with the bare reply', async () => {
