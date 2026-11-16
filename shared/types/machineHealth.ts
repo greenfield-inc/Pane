@@ -96,6 +96,9 @@ export interface MachineHealthSettings {
   autoArchiveFinished?: boolean;
   /** A Pane counts as finished after this many idle days (default 14). */
   finishedIdleDays?: number;
+  /** Under memory pressure, pause Panes idle this many hours (default 2). */
+  pauseIdleHours?: number;
+  autoPauseUnderPressure?: boolean;
 }
 
 /** The value of every machine health setting nobody has overridden. */
@@ -218,5 +221,15 @@ export const MACHINE_HEALTH_FINISHED_CHANNEL = 'resource-monitor:machine-finishe
 export const MACHINE_HEALTH_FINISHED_CHANGED_EVENT = 'resource-monitor:machine-finished-changed';
 /** Archives the named finished Panes through the normal archive path: `{ ids, source }`. */
 export const MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL = 'resource-monitor:machine-archive-finished';
+/** What memory relief would do now: `{ idle: { paneIds, memoryMB }, leftBehind: HealthProcess[] }`. */
+export const MACHINE_HEALTH_RELIEF_CHANNEL = 'resource-monitor:machine-relief';
+/** Pauses Panes idle past `pauseIdleHours` now: `{ source }`. */
+export const MACHINE_HEALTH_PAUSE_IDLE_CHANNEL = 'resource-monitor:machine-pause-idle';
+/** Stops processes the latest sample attributes to a Pane, by pid and start time: `{ processes: [{ pid, started }], source }`. */
+export const MACHINE_HEALTH_STOP_PROCESSES_CHANNEL = 'resource-monitor:machine-stop-processes';
+/** Restarts the run script a leaking process belongs to: `{ pid, started }`. */
+export const MACHINE_HEALTH_RESTART_PROCESS_CHANNEL = 'resource-monitor:machine-restart-process';
+/** No leak warning for this process until it exits: `{ pid, started }`. */
+export const MACHINE_HEALTH_IGNORE_LEAK_CHANNEL = 'resource-monitor:machine-ignore-leak';
 /** Recent cleanup runs on this machine, newest first; held in memory since the last start. */
 export const MACHINE_HEALTH_HISTORY_CHANNEL = 'resource-monitor:machine-cleanup-history';

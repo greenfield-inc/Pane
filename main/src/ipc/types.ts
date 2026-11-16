@@ -17,6 +17,7 @@ import type { NotifyService } from '../services/notify/notifyService';
 import type { MachineHealthService } from '../services/machineHealth/machineHealthService';
 import type { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import type { FinishedPaneMonitor } from '../services/machineHealth/finishedPanes';
+import type { MemoryRelief } from '../services/machineHealth/memoryRelief';
 import type { ApprovalStore } from '../services/approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 
@@ -47,6 +48,8 @@ export interface DaemonHostServices extends CoreServices {
   machineCleanup?: CleanupEngine;
   /** Finished Panes, checked every 6 hours. */
   finishedPanes?: FinishedPaneMonitor;
+  /** Early pause under memory pressure and leftover processes. */
+  memoryRelief?: MemoryRelief;
 }
 
 export interface AppServices extends DaemonHostServices {

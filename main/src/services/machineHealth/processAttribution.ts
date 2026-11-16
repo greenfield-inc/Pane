@@ -55,7 +55,8 @@ export function parsePosixProcessTable(stdout: string): ProcessRow[] {
   for (const line of stdout.split('\n')) {
     const match = POSIX_ROW.exec(line);
     if (!match) continue;
-    const started = match[5].replace(/\s+/gu, ' ');
+    // Kept exactly as printed ("Nov  1" has two spaces): archiveProcessTracker compares this text to stop a process safely.
+    const started = match[5];
     rows.push({
       pid: Number(match[1]),
       ppid: Number(match[2]),

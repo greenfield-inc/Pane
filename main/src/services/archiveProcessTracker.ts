@@ -18,7 +18,8 @@ export interface ArchiveProcessObservation extends ArchiveProcessIdentity {
 
 /** A failed snapshot must never be interpreted as an empty process table. */
 export async function readArchiveProcesses(): Promise<ArchiveProcessObservation[]> {
-  const options = { encoding: 'utf8' as const, timeout: 5000, maxBuffer: 8 * 1024 * 1024 };
+  // LC_ALL=C: lstart is compared as text with machine health's process table, and other locales reorder it.
+  const options = { encoding: 'utf8' as const, timeout: 5000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } };
   const { stdout } = process.platform === 'win32'
     ? await execFileAsync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
       '$ErrorActionPreference = "Stop"; Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { [long]$ticks = $_.CreationDate.ToUniversalTime().Ticks; $birth = ($ticks - ($ticks % [long]10)).ToString(); "$($_.ProcessId) $($_.ParentProcessId) $birth" } }'], options)
@@ -65,6 +66,36 @@ async function terminateArchiveProcesses(identities: readonly ArchiveProcessIden
     if (!current || current.exited || current.started !== identity.started) continue;
     try { process.kill(identity.pid, 'SIGKILL'); } catch { /* verification retains survivors */ }
   }
+}
+
+export interface StopProcessDeps {
+  read?: () => Promise<ArchiveProcessObservation[]>;
+  signal?: (pid: number) => void;
+  terminate?: (identities: readonly ArchiveProcessIdentity[]) => Promise<void>;
+  graceMs?: number;
+}
+
+/**
+ * Stops processes the person chose: asks each to quit (SIGTERM) where the OS has that,
+ * waits, then force-stops what is left. Every signal goes only to a pid whose start
+ * time still matches, so a reused pid is never hit. Resolves with those still running.
+ */
+export async function stopProcessIdentities(identities: readonly { pid: number; started: string }[], deps: StopProcessDeps = {}): Promise<{ pid: number; started: string }[]> {
+  const read = deps.read ?? readArchiveProcesses;
+  const matching = async () => {
+    const table = await read();
+    return identities.filter(identity => table.some(row => row.pid === identity.pid && row.started === identity.started && !row.exited));
+  };
+  if (process.platform !== 'win32') {
+    const signal = deps.signal ?? ((pid: number) => process.kill(pid, 'SIGTERM'));
+    for (const identity of await matching()) {
+      try { signal(identity.pid); } catch { /* already gone */ }
+    }
+    await new Promise(resolve => setTimeout(resolve, deps.graceMs ?? 3000));
+  }
+  const left = await matching();
+  if (left.length > 0) await (deps.terminate ?? terminateArchiveProcesses)(left.map(identity => ({ ...identity, parent: 0 })));
+  return matching();
 }
 
 /** Persist before retiring manager maps. Retained identities survive restart;

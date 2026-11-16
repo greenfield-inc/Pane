@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { once } from 'events';
-import { expect, it, vi } from 'vitest';
-import { ArchiveProcessTracker, readArchiveProcesses, type ArchiveProcessIdentity } from './archiveProcessTracker';
+import { describe, expect, it, vi } from 'vitest';
+import { ArchiveProcessTracker, readArchiveProcesses, stopProcessIdentities, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
 import { isProcessAlive } from '../utils/processTree';
 import { spawnDetachedWorkerPty } from '../test/detachedWorkerPty';
 
@@ -121,4 +121,37 @@ it.skipIf(process.platform === 'win32')('matches by terminal only at capture, on
   terminals.set(1000005, 'ttys009');
   await tracker.terminateSurvivors();
   expect(terminate.mock.calls[0][0].map(item => item.pid)).toEqual([1000006, 1000002, 1000001]);
+});
+
+describe('stopProcessIdentities', () => {
+  const row = (pid: number, started: string): ArchiveProcessObservation => ({ pid, parent: 1, started, exited: false });
+
+  it('signals a pid only while its start time still matches, so a reused pid is never hit', async () => {
+    const signalled: number[] = [];
+    const forced: number[] = [];
+    let table = [row(10, 'Mon Nov 16 09:00:00 2026'), row(11, 'Mon Nov 16 10:30:00 2026')];
+    const left = await stopProcessIdentities(
+      [{ pid: 10, started: 'Mon Nov 16 09:00:00 2026' }, { pid: 11, started: 'Mon Nov 16 08:00:00 2026' }],
+      {
+        read: async () => table,
+        signal: pid => { signalled.push(pid); table = table.filter(item => item.pid !== pid); },
+        terminate: async identities => { forced.push(...identities.map(identity => identity.pid)); },
+        graceMs: 0,
+      },
+    );
+    // pid 11 now belongs to another program started at 10:30: never signalled, never forced.
+    expect(signalled).toEqual(process.platform === 'win32' ? [] : [10]);
+    expect(forced).toEqual(process.platform === 'win32' ? [10] : []);
+    expect(left).toEqual(process.platform === 'win32' ? [{ pid: 10, started: 'Mon Nov 16 09:00:00 2026' }] : []);
+  });
+
+  it('force-stops what ignores the request to quit, and reports what still runs', async () => {
+    const table = [row(20, 'Mon Nov 16 09:00:00 2026')];
+    const forced: number[] = [];
+    const left = await stopProcessIdentities([{ pid: 20, started: 'Mon Nov 16 09:00:00 2026' }], {
+      read: async () => table, signal: () => {}, terminate: async identities => { forced.push(...identities.map(identity => identity.pid)); }, graceMs: 0,
+    });
+    expect(forced).toEqual([20]);
+    expect(left).toEqual([{ pid: 20, started: 'Mon Nov 16 09:00:00 2026' }]);
+  });
 });

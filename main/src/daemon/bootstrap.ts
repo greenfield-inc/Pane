@@ -66,6 +66,8 @@ import { agentTempRoots, ignoredDirs, installPathOf, otherToolPaths, processCwds
 import { DB_CLEAN_OPEN_PREFERENCE } from '../services/machineHealth/reclaimRules';
 import { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import { FinishedPaneMonitor, findFinishedPanes } from '../services/machineHealth/finishedPanes';
+import { MemoryRelief } from '../services/machineHealth/memoryRelief';
+import { stopProcessIdentities } from '../services/archiveProcessTracker';
 import type { LevelChange } from '../services/machineHealth/machineHealthService';
 import { paneInactiveSince } from '../services/paneInactivity';
 import { findPrStatusForPane } from '../ipc/runpane';
@@ -813,6 +815,23 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     machineHealth.on('level-changed', (change: LevelChange) => {
       if (change.kind === 'disk' && change.level !== 'ok') void finishedPanes.check().catch(() => undefined);
     });
+  }
+  const latestPaneMemoryMB = (paneId: string) => machineHealth.latestSnapshot()?.panes.find(pane => pane.sessionId === paneId)?.rssMB ?? 0;
+  const memoryRelief = new MemoryRelief({
+    now: () => Date.now(),
+    paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
+    stop: identities => stopProcessIdentities(identities),
+    idlePanes: hours => autoPauser.idlePanes(hours),
+    pauseIdle: (hours, paneIds) => autoPauser.pauseIdleNow(hours, paneIds),
+    pinned: paneId => !!databaseService.getSession(paneId)?.is_favorite,
+    paneMemoryMB: latestPaneMemoryMB,
+    settings: () => configManager.getConfig().machineHealth,
+    record: run => machineCleanup.note(run),
+  });
+  services.memoryRelief = memoryRelief;
+  if (duties.housekeeping) {
+    machineHealth.on('snapshot', snapshot => { void memoryRelief.onSnapshot(snapshot).catch(error => logger.warn('[MachineHealth] memory relief failed', error)); });
+    taskQueue.setInstallsOneAtATime(() => machineHealth.latestSnapshot()?.memory.level !== undefined && machineHealth.latestSnapshot()?.memory.level !== 'ok');
   }
   finishedPanes.on('finished', list => getPaneEventSink().send(MACHINE_HEALTH_FINISHED_CHANGED_EVENT, list));
   machineHealth.start();
