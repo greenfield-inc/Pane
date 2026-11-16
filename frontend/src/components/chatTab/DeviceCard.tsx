@@ -18,7 +18,8 @@ export interface ChatDeviceActions {
 /**
  * The card at a chat's device_open step (option 2 of the D-71 mockups): a phone-shaped thumbnail
  * like an image the agent sent, with a Live badge while the device runs and Closed after. It
- * refreshes about once a second while on screen, and clicking it focuses the device tab.
+ * refreshes about once a second while on screen and the window is visible, and clicking it
+ * focuses the device tab.
  */
 export function DeviceCard({ marker, device }: { marker: DeviceOpenMarker; device: ChatDeviceActions }) {
   const live = device.phase(marker.panelId) === 'live';
@@ -38,16 +39,20 @@ export function DeviceCard({ marker, device }: { marker: DeviceOpenMarker; devic
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    const load = async () => {
-      const next = await read(marker.panelId).catch(() => undefined);
-      if (!cancelled && next) setFrame(next);
+    let timer: number | undefined;
+    // The next read waits for the last one, and none run while the window is hidden.
+    const tick = async (first: boolean) => {
+      if (first || document.visibilityState === 'visible') {
+        const next = await read(marker.panelId).catch(() => undefined);
+        if (cancelled) return;
+        if (next) setFrame(next);
+      }
+      if (live) timer = window.setTimeout(() => { void tick(false); }, FRAME_MS);
     };
-    void load();
-    if (!live) return () => { cancelled = true; };
-    const timer = window.setInterval(() => { void load(); }, FRAME_MS);
+    void tick(true);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, [marker.panelId, visible, live, read]);
 

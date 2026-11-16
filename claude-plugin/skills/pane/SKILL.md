@@ -171,7 +171,7 @@ Xcode, iOS runs on a linked Mac. Then `device_run` builds and runs the app
 there (`--background` for Metro), `device_act` drives it with agent-device
 commands (`open <app id>`, `snapshot -i`, `press @eN --settle`), and
 `device_screenshot` shows you the screen. Call `device_close` when done, so
-another Pane can use it. `runpane docs read --doc DEVICES.md` has the rest.
+another Pane can use it. `runpane docs read --doc docs/DEVICES.md` has the rest.
 
 ## Restyle Pane
 

@@ -48,7 +48,7 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
       document.removeEventListener('visibilitychange', onVisibility);
       report(false);
     };
-  }, [client, panel.id, state.deviceId, isActive]);
+  }, [client, panel.id, state.deviceId, isActive, state.phase]);
 
   const run = useCallback(async (label: string, work: () => Promise<void>) => {
     setBusy(label);
@@ -235,8 +235,21 @@ function LiveScreen({ client, panelId, platform }: { client: DeviceTabClient; pa
   // Simulators stream MJPEG; an emulator's screen comes as frames.
   const stream = platform === 'ios' ? client.streamUrl(panelId) : undefined;
   const polled = useDeviceFrames(client, panelId, stream ? undefined : FRAME_POLL_MS);
-  const src = stream ?? polled;
+  // A hidden window drops the stream, which closes its connection; the last polled frame stays.
+  const pageVisible = usePageVisible();
+  const src = stream ? (pageVisible ? stream : undefined) : polled;
   return src ? <TouchScreen client={client} panelId={panelId} platform={platform} src={src} /> : <div className="absolute inset-0 bg-device-screen" />;
+}
+
+/** Whether the window is visible (not minimized or behind another app's full screen). */
+function usePageVisible(): boolean {
+  const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+  return visible;
 }
 
 function TouchScreen({ client, panelId, platform, src }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; src: string }) {

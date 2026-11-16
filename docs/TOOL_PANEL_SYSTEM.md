@@ -59,7 +59,7 @@ The tool panel system consists of several key components:
 
 ## Implemented Panel Types
 
-The tool panel system supports 10 panel types (`ToolPanelType` in `shared/types/panels.ts`):
+The tool panel system supports 11 panel types (`ToolPanelType` in `shared/types/panels.ts`):
 
 1. **Terminal** (`terminal`): PTY shells, several per pane. Agent CLIs such as
    Claude Code, Codex and Cursor Agent run in terminal panels
@@ -79,6 +79,8 @@ The tool panel system supports 10 panel types (`ToolPanelType` in `shared/types/
 8. **Browser** (`browser`): embedded browser. Worktrees only.
 9. **Notes** (`notes`): the Pane's notes. Singleton. Experimental: hidden
    until Settings → Advanced → Notes is on.
+10. **Device** (`device`): an iOS simulator or Android emulator's live screen,
+   opened by `device_open`, not the + menu. See [DEVICES.md](DEVICES.md).
 
 ## Panel Capabilities
 

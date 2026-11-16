@@ -7,7 +7,7 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { settingDomId } from '../catalog';
 import { cn } from '../../../utils/cn';
 
-const DOCS_URL = 'https://runpane.com/docs/devices';
+const DOCS_URL = 'https://github.com/greenfield-inc/Pane/blob/main/docs/DEVICES.md';
 
 /**
  * Settings > Devices: the agent device tools switch, which Mac runs iOS on a machine without
