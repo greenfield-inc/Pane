@@ -1,3 +1,5 @@
+import { RUNPANE_CONTRACT } from './generatedRunpaneContract';
+
 /** Machine health: free disk, memory pressure, and what each Pane's processes cost. */
 
 export type HealthLevel = 'ok' | 'warning' | 'critical';
@@ -125,16 +127,8 @@ export const MACHINE_HEALTH_SNAPSHOT_CHANNEL = 'resource-monitor:machine-health'
  */
 export type ReclaimTier = 1 | 2 | 3;
 
-export const RECLAIM_KINDS = [
-  'update-snapshot',
-  'migration-backup',
-  'archived-pane-folder',
-  'agent-temp',
-  'paused-scratch',
-  'foreign-worktree',
-  'foreign-pane-data',
-  'other-tool-data',
-] as const;
+/** The kinds of reclaimable item; the runpane contract holds the list so the CLIs and the app agree. */
+export const RECLAIM_KINDS = RUNPANE_CONTRACT.enums.reclaimKinds;
 export type ReclaimKind = typeof RECLAIM_KINDS[number];
 
 export interface ReclaimItem {

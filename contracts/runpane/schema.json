@@ -403,6 +403,11 @@
           "description": "Flags the CLI accepts that the command's MCP tool leaves out, such as a mode that changes state on a command otherwise read-only.",
           "$ref": "#/$defs/stringList"
         },
+        "confirmDescription": {
+          "description": "The MCP tool's description of its confirm input, for a command whose --yes does more than confirm (machine cleanup: without it, a dry run).",
+          "type": "string",
+          "minLength": 1
+        },
         "mcpName": {
           "description": "The MCP tool's name, when it differs from the command name with spaces as underscores.",
           "type": "string",

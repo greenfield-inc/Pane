@@ -2492,6 +2492,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "machine cleanup",
+      "confirmDescription": "Delete the listed items (the CLI's --yes). Without it the call is a dry run that lists them and deletes nothing.",
       "summary": "Free disk space that Pane made: list one kind of tier 1 or 2 item with its size (a dry run), or delete them with --yes.",
       "usage": [
         "runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]"
