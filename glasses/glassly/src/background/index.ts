@@ -137,6 +137,8 @@ registerMiniapp(async (session) => {
           if (result.dropped?.length) console.warn(`[Pane glasses] Glassly dropped ${result.dropped.join(', ')}`);
         } catch (error) {
           console.error('[Pane glasses] render failed', error);
+          // The next draw sends it again, even unchanged.
+          lastFrame = '';
         }
       }
       rendering = false;
