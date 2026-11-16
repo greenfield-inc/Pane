@@ -657,6 +657,14 @@ describe('AutopilotManager: the person\'s own instructions (D-196)', () => {
     expect(manager.instructions().text).toBe(long);
   });
 
+  it('refuses an instructions file too large to read, rather than cutting it', async () => {
+    const f = fake();
+    const manager = new AutopilotManager(f.ports);
+    await manager.setEnabled(true);
+    fs.writeFileSync(file(), 'Check every Session. '.repeat(60_000));
+    expect(() => manager.instructions()).toThrow(expect.objectContaining({ code: 'AUTOPILOT_INSTRUCTIONS_FILE_TOO_LARGE' }));
+  });
+
   it('Start puts them in its brief after Pane\'s rules, labelled as the person\'s, and in AGENTS.md after Never', async () => {
     const f = fake();
     const manager = new AutopilotManager(f.ports);
