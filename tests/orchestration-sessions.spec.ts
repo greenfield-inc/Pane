@@ -537,7 +537,8 @@ for (const theme of ['light', 'night-owl']) {
       });
       await page.goto('/');
       await dismissStartupDialogs(page);
-      await expect(page.getByTestId('sessions-section-header')).toBeVisible();
+      // The first page of a run waits on a cold Vite transform, as every first-load check here allows for.
+      await expect(page.getByTestId('sessions-section-header')).toBeVisible({ timeout: 10_000 });
       if (compact) await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
       const sidebar = page.getByTestId('sidebar');
       const creation = compact
