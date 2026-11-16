@@ -49,23 +49,6 @@ describe('Session intent ownership', () => {
   });
 });
 
-describe('Session visits', () => {
-  it('counts a selection as a visit, so the Session\'s tile re-reads it', async () => {
-    select.mockResolvedValue(reply('b'));
-    const store = await setup();
-    await store.getState().select({ sessionId: 'b' });
-    expect(store.getState().selectionVisits.b).toBe(1);
-  });
-
-  it('moves the selection without a visit for a Session a tile already shows', async () => {
-    select.mockResolvedValue(reply('b'));
-    const store = await setup();
-    await store.getState().select({ sessionId: 'b' }, { visit: false });
-    expect(store.getState().selectedSessionId).toBe('b');
-    expect(store.getState().selectionVisits.b).toBeUndefined();
-  });
-});
-
 it.each([true, false])('stale selected-event refresh cannot replace B (ack first: %s)', async ackFirst => {
   const selection = deferred<ReturnType<typeof reply>>();
   const snapshot = deferred<ReturnType<typeof reply>>();

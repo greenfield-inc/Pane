@@ -257,17 +257,11 @@ function SessionWorkspace() {
     if (next !== layout) applyLayout(next);
   }, [applyLayout, layout, selectedSessionId]);
 
-  /**
-   * Apply a gesture's layout and let the Session selection follow its focus.
-   * The focused Session is already on screen, so this is not a visit: counting
-   * one would reload that tile mid-gesture (see `select`).
-   */
+  /** Apply a gesture's layout and let the Session selection follow its focus. */
   const commitLayout = useCallback((next: SessionWorkspaceLayout) => {
     applyLayout(next);
-    const sessionId = focusedSessionId(next);
-    if (sessionId === useOrchestrationSessionStore.getState().selectedSessionId) return;
-    void select({ sessionId }, { visit: false }).catch(() => undefined);
-  }, [applyLayout, select]);
+    selectSession(focusedSessionId(next));
+  }, [applyLayout, selectSession]);
 
   const focusTile = useCallback((tileId: string) => {
     const current = currentLayout();
@@ -531,7 +525,13 @@ function SessionTile({
 
   const handleDropZoneChange = useCallback((zone: DropZone | null) => setDropZone(zone), []);
 
-  const focusThisTile = useCallback(() => onFocus(tile.id), [onFocus, tile.id]);
+  // Focusing a tile selects its Session, which starts a fresh visit and reloads the tile. Its
+  // close button must not focus it first: the reload swaps the header out between mousedown
+  // and mouseup, so the click never lands and closing an unfocused tile took two clicks.
+  const focusThisTile = useCallback((event: React.SyntheticEvent) => {
+    if (event.target instanceof Element && event.target.closest('[data-tile-close]')) return;
+    onFocus(tile.id);
+  }, [onFocus, tile.id]);
 
   const chrome: SessionTileChrome = useMemo(() => ({
     tiled,
@@ -684,6 +684,7 @@ function SessionTileHeader({ name, chrome, error, actions }: {
             <button
               type="button"
               aria-label={`Stop tiling ${name}`}
+              data-tile-close
               onClick={chrome.onClose}
               className="inline-flex h-7 w-7 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"
             >
