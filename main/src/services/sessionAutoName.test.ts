@@ -20,6 +20,10 @@ describe('sessionNameFromMessage', () => {
     expect(sessionNameFromMessage('a'.repeat(50))).toBe('a'.repeat(40));
   });
 
+  it('counts an emoji as one character and never cuts it in half', () => {
+    expect(sessionNameFromMessage(`${'a'.repeat(39)}😀${'b'.repeat(10)}`)).toBe(`${'a'.repeat(39)}😀`);
+  });
+
   it('gives no name for slash commands, menu choices and symbols', () => {
     expect(sessionNameFromMessage('/model opus')).toBeUndefined();
     expect(sessionNameFromMessage('1')).toBeUndefined();

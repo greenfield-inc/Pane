@@ -3894,7 +3894,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --repo <selector>              active, id, exact path, or saved repository name",
         "  --name <name>                  Pane/session name",
-        "  --worktree-name <name>         Worktree directory name; defaults to --name",
+        "  --worktree-name <name>         Worktree directory name, cut to 100 characters at a word; defaults to --name",
         "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
         "  --base-branch <ref>            Ref to branch from; --base is an alias",
         "  --agent <codex|claude|cursor|opencode|pi>  Built-in terminal template; with --tool-command, the agent it runs",
@@ -5938,7 +5938,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --repo <selector>              active, id, exact path, or saved repository name",
         "  --name <name>                  Pane/session name",
-        "  --worktree-name <name>         Worktree directory name; defaults to --name",
+        "  --worktree-name <name>         Worktree directory name, cut to 100 characters at a word; defaults to --name",
         "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
         "  --base-branch <ref>            Ref to branch from; --base is an alias",
         "  --agent <codex|claude|cursor|opencode|pi>  Built-in terminal template; with --tool-command, the agent it runs",
@@ -19872,7 +19872,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--worktree-name",
             "value": "<name>",
             "required": false,
-            "description": "Worktree directory name; defaults to --name."
+            "description": "Worktree directory name, cut to 100 characters at a word; defaults to --name."
           },
           {
             "name": "--prompt",
