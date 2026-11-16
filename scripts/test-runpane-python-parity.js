@@ -273,7 +273,7 @@ print(json.dumps(next(versions, 'all versions read')))
   assert.equal(JSON.parse(stdout.split('\n').slice(-1)[0]), 'all versions read');
 });
 
-test('Python update without the engine reports a Pane older than runpane update like the npm CLI', () => {
+test('Python update without the engine reports a Pane older than runpane update like the npm CLI', async () => {
   const output = JSON.parse(runPython(`
 import json, sys, tempfile
 from runpane import update
@@ -294,8 +294,12 @@ for channels in json.load(sys.stdin):
         results.append({'code': error.code, 'message': str(error), 'next': error.next, 'calls': calls})
 print(json.dumps(results))
 `, [[], ['runpane:update:host']]));
-  const { updateHostUnsupported } = require(path.join(root, 'packages/runpane/dist/updatePreflight'));
-  const expected = updateHostUnsupported();
+  // The npm CLI's own answer, from the daemon's unknown-channel error.
+  const daemonClient = require(path.join(root, 'packages/runpane/dist/daemonClient'));
+  const { readUpdateHost } = require(path.join(root, 'packages/runpane/dist/updatePreflight'));
+  const invokeDaemon = daemonClient.invokeDaemon;
+  daemonClient.invokeDaemon = async channel => { throw new daemonClient.PaneDaemonClientError(`No Pane daemon command registered for channel "${channel}".`, 'ERR_UNKNOWN_CHANNEL'); };
+  const expected = await readUpdateHost(root, 1000).then(() => assert.fail('readUpdateHost resolved'), error => error).finally(() => { daemonClient.invokeDaemon = invokeDaemon; });
   assert.deepEqual(output[0], { code: expected.code, message: expected.message, next: expected.next, calls: ['runpane:update:in-app', 'runpane:update:host'] });
   assert.doesNotMatch(output[0].next, /Update Pane with `runpane update`/);
   // A Pane with the host but not the handoff keeps its Settings advice.
