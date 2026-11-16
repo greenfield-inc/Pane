@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
+  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore, type Attachment as ComposerAttachment,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
@@ -173,6 +173,12 @@ export interface ChatTabPanelProps {
   working?: readonly WorkingAgent[];
 }
 
+/**
+ * The attachments of each chat's unsent draft, kept with its viewer as the draft text is: the
+ * composer is rebuilt when the tab or its Pane is shown again, and they go back into it then.
+ */
+const draftAttachments = new WeakMap<ChatTabViewer, readonly ComposerAttachment[]>();
+
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
 const PASTE_LIMIT = 1024 * 1024;
 
@@ -318,7 +324,48 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       }));
     },
   });
-  useEffect(() => { runtime.thread.composer.setText(viewer.snapshot().draft); }, [runtime, viewer]);
+  /**
+   * The draft's attachments going back into this runtime's composer: once, though development
+   * mode runs the effect twice. `mounted` counts the effect runs still in place.
+   */
+  const restore = useRef<{ runtime: typeof runtime; done: boolean; mounted: number } | undefined>(undefined);
+  // A layout effect: its cleanup runs as the panel leaves, before assistant-ui disposes the
+  // composer (a microtask queued on unmount) and cancels the adds still waiting.
+  useLayoutEffect(() => {
+    const composer = runtime.thread.composer;
+    const save = () => draftAttachments.set(viewer, composer.getState().attachments);
+    if (restore.current?.runtime !== runtime) {
+      const restoring: NonNullable<typeof restore.current> = { runtime, done: false, mounted: 0 };
+      restore.current = restoring;
+      composer.setText(viewer.snapshot().draft);
+      const saved = draftAttachments.get(viewer) ?? [];
+      // In their order: a file already copied to the chat's machine comes back with its path; an
+      // image (or a file still copying) is added again from the file itself. One the chat now
+      // refuses says why through attachmentAddError, below.
+      void (async () => {
+        for (const { id, type, name, contentType, content, file } of saved) {
+          const restored = content ? { id, type, name, contentType, content } : file;
+          if (!restored) continue;
+          // On to the next once this one shows, without waiting for a file to copy again.
+          const count = composer.getState().attachments.length;
+          let stopWatching = () => {};
+          const shown = new Promise<void>(resolve => {
+            stopWatching = composer.subscribe(() => { if (composer.getState().attachments.length > count) resolve(); });
+          });
+          await Promise.race([composer.addAttachment(restored).catch(() => undefined), shown]);
+          stopWatching();
+        }
+        restoring.done = true;
+        // Left before every attachment was back: the saved list stays whole for next time.
+        if (restoring.mounted > 0) save();
+      })();
+    }
+    const run = restore.current;
+    run.mounted += 1;
+    // Sending empties the composer's attachments, and with them the saved ones.
+    const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
+    return () => { run.mounted -= 1; unsubscribe(); };
+  }, [runtime, viewer]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {
