@@ -217,7 +217,8 @@ export class DeviceService {
     const pooled = Object.values(this.readState().made).filter(made => made.platform === platform).length;
     const name = pooled === 0 ? PANE_DEVICE_NAMES[platform] : `${PANE_DEVICE_NAMES[platform]}${platform === 'ios' ? ' ' : '_'}${pooled + 1}`;
     const created = decodeBoundary(await (await hub.request('/api/devices/create', { platform, name, runtime: runtime.value, deviceType: model.value })).json(), boundary.object({ ok: boundary.boolean, id: boundary.optional(boundary.string), error: boundary.optional(boundary.string) }));
-    const id = created.id ?? (platform === 'android' ? name : undefined);
+    // The hub answers an emulator's serial once it boots; Pane keys emulators by AVD name.
+    const id = !created.ok ? undefined : platform === 'android' ? name : created.id;
     if (!id) throw new PaneError('ERR_DEVICE_CREATE_FAILED', `Pane could not make ${name}: ${created.error ?? 'the hub gave no reason'}. Nothing was opened.`, 'Try again; if it repeats, check that Xcode or Android Studio can create a device.');
     const state = this.readState();
     state.made[id] = { platform, name, model: model.label, createdAt: this.now(), lastUsedAt: this.now(), users: [], slimmed: false };

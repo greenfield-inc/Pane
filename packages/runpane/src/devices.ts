@@ -80,13 +80,21 @@ export async function runDevicesList(parsed: ParsedArgs): Promise<number> {
     : devices.map(device => `${device.platform}\t${device.name}\t${device.os}\t${device.machine}\t${device.state}${device.heldBy ? `\theld by ${device.heldBy.paneName}` : ''}`).join('\n'));
 }
 
+/** First use installs the helpers, may create a device, and cold-boots it (over 2 minutes on Windows). */
+const OPEN_TIMEOUT_MS = 10 * 60_000;
+/** agent-device installs apps and waits on screens. */
+const ACT_TIMEOUT_MS = 5 * 60_000;
+/** Pane waits this long for a run's command by default, and syncing to a linked Mac comes on top. */
+const RUN_WAIT_MS = 120_000;
+const SYNC_ALLOWANCE_MS = 5 * 60_000;
+
 export async function runDevicesOpen(parsed: ParsedArgs): Promise<number> {
   const platform = parsed.devicePlatform;
   if (platform !== 'ios' && platform !== 'android') {
     throw new RunpaneError('ERR_DEVICE_INVALID_REQUEST', 'runpane devices open needs --platform ios or --platform android. Nothing was opened.', 'Run `runpane devices open --platform ios`.');
   }
   const request = parsed.deviceName ? { platform, device: parsed.deviceName } : { platform };
-  const result = await invokeDaemon('runpane:devices:open', [request], boundary.json, { paneDir: parsed.paneDir });
+  const result = await invokeDaemon('runpane:devices:open', [request], boundary.json, { paneDir: parsed.paneDir, timeoutMs: OPEN_TIMEOUT_MS });
   const { device } = decodeBoundary(result, openSchema);
   return print(parsed, result, `Opened ${device.name} · ${device.os} on ${device.machine}.`);
 }
@@ -101,7 +109,7 @@ export async function runDevicesAct(parsed: ParsedArgs): Promise<number> {
   if (args.length === 0) {
     throw new RunpaneError('ERR_DEVICE_ACT_EMPTY', 'runpane devices act needs an agent-device command after --. Nothing ran.', 'Run `runpane devices act -- snapshot -i`.');
   }
-  const result = await invokeDaemon('runpane:devices:act', [{ args }], boundary.json, { paneDir: parsed.paneDir });
+  const result = await invokeDaemon('runpane:devices:act', [{ args }], boundary.json, { paneDir: parsed.paneDir, timeoutMs: ACT_TIMEOUT_MS });
   const { exitCode, output } = decodeBoundary(result, actSchema);
   print(parsed, result, output);
   return parsed.json ? 0 : exitCode;
@@ -114,7 +122,7 @@ export async function runDevicesRun(parsed: ParsedArgs): Promise<number> {
   if (command.trim()) request.command = command;
   if (parsed.deviceBackground) request.background = true;
   if (parsed.deviceWaitMs !== undefined) request.waitMs = parsed.deviceWaitMs;
-  const result = await invokeDaemon('runpane:devices:run', [request], boundary.json, { paneDir: parsed.paneDir });
+  const result = await invokeDaemon('runpane:devices:run', [request], boundary.json, { paneDir: parsed.paneDir, timeoutMs: (request.waitMs ?? RUN_WAIT_MS) + SYNC_ALLOWANCE_MS });
   const run = decodeBoundary(result, runSchema);
   const still = run.state === 'running' ? `\nStill running as job ${run.jobId ?? ''}.` : '';
   print(parsed, result, `${run.logTail ?? ''}${still}`);
