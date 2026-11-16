@@ -4,7 +4,7 @@ import { onOpenNewDialogRequest } from '../utils/openNewDialog';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
-import { confirmPaneArchive } from './PaneArchiveConfirmDialog';
+import { confirmPaneArchive } from './paneArchiveConfirm';
 import { ArchiveProgress } from './ArchiveProgress';
 import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Inbox, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';

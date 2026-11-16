@@ -1,24 +1,8 @@
-import { create as createStore } from 'zustand';
 import { Archive } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 import { API } from '../utils/api';
 import { showActionError } from '../stores/errorStore';
-import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
-import type { Session } from '../types/session';
-
-type PaneToArchive = Pick<Session, 'id' | 'name' | 'isMainRepo' | 'worktreeOwnership'>;
-
-const usePaneArchiveConfirmStore = createStore<{ pane: PaneToArchive | null }>(() => ({ pane: null }));
-
-// A dialog opened for one host must never archive on another: a host change cancels it.
-useOrchestrationSessionStore.subscribe((state, previous) => {
-  if (state.hostRevision !== previous.hostRevision) usePaneArchiveConfirmStore.setState({ pane: null });
-});
-
-/** Asks before a sidebar archive of a Pane; the Pane is archived only when the person confirms. */
-export function confirmPaneArchive(pane: PaneToArchive): void {
-  usePaneArchiveConfirmStore.setState({ pane });
-}
+import { usePaneArchiveConfirmStore, type PaneToArchive } from './paneArchiveConfirm';
 
 function worktreeLine(pane: PaneToArchive): string {
   if (pane.isMainRepo) return 'Its agents stop. The repository folder stays as it is.';

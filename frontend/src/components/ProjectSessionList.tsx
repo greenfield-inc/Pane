@@ -30,7 +30,7 @@ import { paneHasWaitingQuestion, useNotifyStore } from '../stores/notifyStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { AutopilotNavRow } from './autopilot/AutopilotNavRow';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
-import { confirmPaneArchive } from './PaneArchiveConfirmDialog';
+import { confirmPaneArchive } from './paneArchiveConfirm';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
