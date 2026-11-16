@@ -1550,7 +1550,12 @@ default), a Session has one voice to the person: its orchestrator.
 - **Closing with the Session.** Closing or archiving a Session closes the
   waiting items connected to it, workers' and orchestrators' alike, within 5 s
   ("closed: Session closed", "closed: Session archived"). A worker's newer report
-  closes its older question ("closed: the worker moved on").
+  that asks the same question (the same Q-n, or the same words) keeps its card,
+  with the orchestrator's relaying call and the answer route; `--relays` and
+  `inbox ack` take either report's id. A newer report that asks nothing closes
+  the older question ("closed: the worker moved on"), and one that asks a
+  different question closes it ("closed: the worker asked a new question") and
+  gets its own card, which the relaying call is told to relay.
 
 See [PANE_NOTIFY.md](PANE_NOTIFY.md) for the Approvals screen itself.
 

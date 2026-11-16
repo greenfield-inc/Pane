@@ -180,7 +180,7 @@ export interface NotifyQueueEnvironment {
   /** The project a Pane belongs to, filed on each new item. */
   projectOf?: (paneId: string) => string | undefined;
   /** This machine's table. Without one the queue only remembers while it runs. */
-  store?: Pick<ApprovalStore, 'saveItem' | 'claim' | 'readItem' | 'openItems' | 'recentItems' | 'prune'>;
+  store?: Pick<ApprovalStore, 'saveItem' | 'claim' | 'readItem' | 'openItems' | 'recentItems' | 'prune'> & Partial<Pick<ApprovalStore, 'holdsReport'>>;
   /** Why this item's asker is gone (the owning machine decides, D-145), or undefined while someone can take the answer. */
   askerGone?: (item: NotifyItem) => string | undefined;
   /** The person used this computer in the last 2 minutes, with its screen unlocked (D-144). Absent: yes. */
@@ -520,7 +520,8 @@ export class NotifyQueue extends EventEmitter {
    */
   /** Whether a worker's question is carded already: this start, or days ago with the card since answered and off the list. */
   holdsWorkerQuestion(id: string): boolean {
-    return this.entries.has(id) || this.isRewrittenFrom(id) || Boolean(this.env.store?.readItem(id));
+    return this.entries.has(id) || this.isRewrittenFrom(id) || [...this.entries.values()].some(entry => entry.item.reportId === id)
+      || Boolean(this.env.store?.readItem(id)) || Boolean(this.env.store?.holdsReport?.(id));
   }
 
   addWorkerQuestion(question: WorkerQuestion): void {
@@ -552,16 +553,33 @@ export class NotifyQueue extends EventEmitter {
     this.changed();
   }
 
-  /** The inbox let go of a worker's question: the worker moved on, or its orchestrator dealt with it. */
-  endWorkerQuestion(id: string, reason: string): void {
+  /**
+   * The inbox let go of a worker's question: the worker moved on, or its orchestrator dealt with it.
+   * `next` replaces the closed result's next step, for a relaying call that has something to do now.
+   */
+  endWorkerQuestion(id: string, reason: string, next?: string): void {
+    const result: NotifyResult = next ? { unavailable: `Closed: ${reason}.`, next } : closedResult(`Closed: ${reason}.`);
     for (const entry of [...this.entries.values()]) {
-      if (isOpen(entry.item) && (entry.item.id === id || entry.item.rewrittenFrom?.id === id)) this.closeOpen(entry, { by: 'pane', reason }, closedResult(`Closed: ${reason}.`));
+      if (isOpen(entry.item) && answersReport(entry.item, id)) this.closeOpen(entry, { by: 'pane', reason }, result);
     }
+  }
+
+  /**
+   * The worker re-asked its open question in a newer report (#1353): the card, its relaying call and
+   * its answer route stay, and it now answers the newer inbox item. False when no open card has it.
+   */
+  carryWorkerQuestion(from: string, to: string): boolean {
+    const entry = [...this.entries.values()].find(candidate => isOpen(candidate.item) && candidate.item.originKind === 'worker' && answersReport(candidate.item, from));
+    if (!entry) return false;
+    entry.item.reportId = to === entry.item.id ? undefined : to;
+    this.save(entry);
+    this.changed();
+    return true;
   }
 
   /** The orchestrator recorded this answer as a D-n (J8). */
   recordDecision(id: string, decision: string): boolean {
-    const entry = this.entries.get(id);
+    const entry = this.entries.get(id) ?? [...this.entries.values()].find(candidate => candidate.item.reportId === id);
     if (!entry) return false;
     entry.item.decision = decision;
     this.save(entry);
@@ -720,7 +738,7 @@ export class NotifyQueue extends EventEmitter {
 
   /** `runpane notify --relays <item>`: the orchestrator improves the worker's card and waits on it as on any notify (J8). */
   private relay(id: string, question: NotifyQuestion, returnAfterMs: number | undefined, signal?: AbortSignal, by?: NotifySource): Promise<NotifyResult> {
-    const entry = this.entries.get(id) ?? [...this.entries.values()].find(candidate => candidate.item.rewrittenFrom?.id === id && isOpen(candidate.item));
+    const entry = this.entries.get(id) ?? [...this.entries.values()].find(candidate => answersReport(candidate.item, id) && isOpen(candidate.item));
     if (!entry || entry.item.originKind !== 'worker' || entry.item.state !== 'waiting') {
       return Promise.resolve({ unavailable: `There's no waiting worker question ${id}: it was answered or closed, or its worker moved on. Nothing was shown.`, next: 'Check runpane inbox for the answer.' });
     }
@@ -814,6 +832,7 @@ export class NotifyQueue extends EventEmitter {
         rewrittenFrom: { id: old.id, title: old.title },
       },
     };
+    if (old.reportId) fresh.item.reportId = old.reportId;
     const qn = leadingQn(old.title);
     if (qn && fresh.item.rewrittenFrom) fresh.item.rewrittenFrom.qn = qn;
     // Its call now waits on the rewrite, so the answer still reaches it.
@@ -1141,7 +1160,7 @@ export class NotifyQueue extends EventEmitter {
   private closeOpen(entry: Entry, closed: { by: NotifyActor; reason: string; at?: number }, result: NotifyResult): void {
     this.close(entry.item.id, { state: 'expired', closed: { by: closed.by, reason: closed.reason, at: closed.at ?? Date.now() } }, result, false);
     // Its asker is gone, so its orchestrator has nothing left to act on either.
-    if (closed.by === 'pane' && entry.item.originKind === 'worker') this.env.workerQuestionGone?.(entry.item.rewrittenFrom?.id ?? entry.item.id);
+    if (closed.by === 'pane' && entry.item.originKind === 'worker') this.env.workerQuestionGone?.(entry.item.reportId ?? entry.item.rewrittenFrom?.id ?? entry.item.id);
   }
 
   /** Reopen: it waits again, for a tab that can still take the answer. */
@@ -2071,6 +2090,11 @@ function withDeviceLabels(item: NotifyItem, label: (device: string | undefined) 
 /** A machine's items under its current name, after a rename. */
 function withMachine(items: Map<string, NotifyItem>, machine: string): Map<string, NotifyItem> {
   return new Map([...items].map(([key, item]) => [key, item.machine === machine ? item : { ...item, machine }]));
+}
+
+/** Whether this card answers that inbox item: the one it was made from, the one it carried over to, or its rewrite's. */
+function answersReport(item: NotifyItem, id: string): boolean {
+  return item.id === id || item.reportId === id || item.rewrittenFrom?.id === id;
 }
 
 function isOpen(item: NotifyItem): boolean {

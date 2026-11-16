@@ -38,6 +38,7 @@ import type { ApprovalStore } from '../approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../../database/jsonStoreImport';
 import type { SessionInboxEnded } from '../sessionInbox';
 import { workerCard } from './workerContext';
+import { leadingQn } from '../../../../shared/autopilotDecision';
 import { agentConfig } from '../../../../shared/agents';
 
 const agentName = (agentType: string | undefined): string => (agentType ? agentConfig(agentType)?.label : undefined) ?? 'Agent';
@@ -284,9 +285,21 @@ export class NotifyService {
     }
   }
 
-  private workerQuestionEnded({ id, how, decision }: SessionInboxEnded): void {
+  private workerQuestionEnded({ id, how, decision, question, next }: SessionInboxEnded): void {
     if (decision) this.queue.recordDecision(id, decision);
-    this.queue.endWorkerQuestion(id, how === 'moved-on' ? 'the worker moved on' : 'its orchestrator dealt with it');
+    if (how === 'acked') {
+      this.queue.endWorkerQuestion(id, 'its orchestrator dealt with it');
+      return;
+    }
+    const nextQuestion = next?.kind === 'report' && next.report?.state === 'blocked' ? next.report.question?.trim() : undefined;
+    // The same question again (#1353): its card, and the call relaying it, carry over to the newer report.
+    if (next && question && nextQuestion && sameWorkerQuestion(question, nextQuestion) && this.queue.carryWorkerQuestion(id, next.id)) return;
+    if (next && nextQuestion) {
+      // A different question gets its own card, which the relaying call can take up.
+      this.queue.endWorkerQuestion(id, 'the worker asked a new question', `Relay its new question with \`runpane notify --relays ${next.id}\`.`);
+      return;
+    }
+    this.queue.endWorkerQuestion(id, 'the worker moved on');
   }
 
   /** The liveness rule (D-147): connected Session first, then the Pane and the tab that asked. */
@@ -847,4 +860,12 @@ function besideStatusFile(statusFile: string, page: string): string {
   const folderName = path.basename(path.dirname(statusFile));
   const first = page.split(/[\\/]/u)[0];
   return path.resolve(first === folderName ? path.dirname(path.dirname(statusFile)) : path.dirname(statusFile), page);
+}
+
+/** A worker re-asking its question: the same Q-n, or the same words. */
+export function sameWorkerQuestion(before: string, after: string): boolean {
+  const qn = leadingQn(before);
+  if (qn) return leadingQn(after) === qn;
+  const words = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase();
+  return words(before) === words(after);
 }

@@ -244,6 +244,7 @@ const notifyItemSchema = boundary.object({
   closed: boundary.optional(boundary.object({ by: actorSchema, reason: boundary.string, at: boundary.number })),
   staleSince: boundary.optional(boundary.number),
   quiet: boundary.optional(boundary.boolean),
+  reportId: boundary.optional(boundary.string),
   rewrittenFrom: boundary.optional(boundary.object({ id: boundary.string, title: boundary.string, qn: boundary.optional(boundary.string) })),
   rewrittenAs: boundary.optional(boundary.object({ id: boundary.string, title: boundary.string })),
   delivered: boundary.optional(boundary.object({ via: boundary.enumeration('call', 'tab'), at: boundary.number })),

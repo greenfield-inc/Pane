@@ -93,6 +93,11 @@ export class ApprovalStore {
     return row?.item_json ? parseItem(row.item_json)[0] : undefined;
   }
 
+  /** Whether a card carried over to this worker report (its `reportId`), so the report needs no card of its own. */
+  holdsReport(id: string): boolean {
+    return this.db.prepare(`SELECT 1 FROM approvals WHERE item_json IS NOT NULL AND json_extract(item_json, '$.reportId') = ? LIMIT 1`).get(id) !== undefined;
+  }
+
   /** Waiting and held cards, oldest first. */
   openItems(): NotifyItem[] {
     return this.items(`state IN ('waiting', 'sent') AND item_json IS NOT NULL`, []);

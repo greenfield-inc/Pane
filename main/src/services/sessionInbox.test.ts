@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ApprovalStore } from './approvals/approvalStore';
-import { SessionInbox, type SessionInboxStore } from './sessionInbox';
+import { SessionInbox, type SessionInboxEnded, type SessionInboxStore } from './sessionInbox';
 import { WorkspaceJournal } from './workspaceJournal';
 import type { RunpaneWorkspaceEntry } from '../../../shared/types/runpaneOrchestration';
 
@@ -105,6 +105,23 @@ describe('SessionInbox', () => {
     const [second] = inbox.list('session-a');
     inbox.ack([second.id], 'session-a', 'D-9');
     expect(ended[1]).toEqual([second.id, 'acked', 'D-9']);
+    inbox.dispose();
+  });
+
+  it('names the question that left and the worker report that replaced it, for its card to carry over', () => {
+    const inbox = open();
+    const ended: SessionInboxEnded[] = [];
+    inbox.subscribeEnded(item => ended.push(item));
+    journal.append(entry('agent.report', 'pane-2', { report: { state: 'blocked', question: 'Q-1: a?', reportedAt: '2026-10-15T10:00:00.000Z' } }));
+    const before = inbox.all();
+    journal.append(entry('agent.report', 'pane-2', { report: { state: 'blocked', question: 'Q-1: a, still?', reportedAt: '2026-10-15T10:01:00.000Z' } }));
+    const after = inbox.all();
+    // One per Session the worker is in, each naming its own Session's newer item.
+    expect(ended.map(item => [item.id, item.how, item.question, item.next?.id, item.next?.sessionId])).toEqual(
+      before.map((item, index) => [item.id, 'moved-on', 'Q-1: a?', after[index].id, item.sessionId]),
+    );
+    journal.append(entry('agent.report', 'pane-2', { report: { state: 'done', reportedAt: '2026-10-15T10:02:00.000Z' } }));
+    expect(ended.slice(2).map(item => [item.question, item.next?.report?.state])).toEqual([['Q-1: a, still?', 'done'], ['Q-1: a, still?', 'done']]);
     inbox.dispose();
   });
 
