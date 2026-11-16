@@ -7,14 +7,15 @@ export type BoardTile = 'needs' | 'working' | 'ready' | 'all';
 export type PaneRecentRow = Extract<RecentRow, { type: 'pane' }>;
 
 /**
- * The tiles' counts. Needs you counts what waits on you (not answers held for Undo, replies the
- * agent is reading, stale items or machines that are offline). Working and Ready count Panes whose
- * agent works or finished unseen, leaving paused ones out. All panes counts every open Pane.
+ * The tiles' counts. Needs you counts what waits on you: approvals (not answers held for Undo,
+ * replies the agent is reading, stale items or machines that are offline) and Panes blocked at a
+ * terminal prompt (D-81). Working and Ready count Panes whose agent works or finished unseen,
+ * leaving paused ones out. All panes counts every open Pane.
  */
 export function boardCounts(list: Pick<AllMachinesList, 'waiting' | 'recent'>): Record<BoardTile, number> {
   const panes = paneRows(list.recent);
   return {
-    needs: waitingCounts(list.waiting).total,
+    needs: waitingCounts(list.waiting).total + terminalWaiting(list).length,
     working: tilePanes(panes, 'working').length,
     ready: tilePanes(panes, 'ready').length,
     all: panes.length,
@@ -25,6 +26,19 @@ export function boardCounts(list: Pick<AllMachinesList, 'waiting' | 'recent'>): 
 export function tilePanes(recent: readonly RecentRow[], tile: 'working' | 'ready'): PaneRecentRow[] {
   const status = tile === 'working' ? 'working' : 'done';
   return paneRows(recent).filter(row => row.pane.status === status && !row.pane.paused);
+}
+
+/**
+ * Panes whose agent waits at a prompt in its terminal with no approval behind it (Codex asking
+ * "Allow this command?", for one): Needs you lists them after the approvals. A Pane with an
+ * approval counts through that approval; paused Panes and machines that went offline stay out.
+ */
+export function terminalWaiting(list: Pick<AllMachinesList, 'waiting' | 'recent'>): PaneRecentRow[] {
+  const asked = new Set(list.waiting.flatMap(row => {
+    const paneId = row.type === 'question' ? row.item.source.paneId : row.request.sessionId;
+    return paneId ? [`${row.machineKey}:${paneId}`] : [];
+  }));
+  return paneRows(list.recent).filter(row => row.pane.status === 'blocked' && !row.pane.paused && !row.stale && !asked.has(`${row.machineKey}:${row.pane.id}`));
 }
 
 function paneRows(recent: readonly RecentRow[]): PaneRecentRow[] {

@@ -4,7 +4,7 @@ import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 
 import { buildAllMachinesList, type MachineFeed } from '@/features/allMachines/allMachinesList';
 
-import { boardCounts, tilePanes, todayBuckets } from './statusBoard';
+import { boardCounts, terminalWaiting, tilePanes, todayBuckets } from './statusBoard';
 
 const notify = (items: Array<Partial<NotifyItem> & Pick<NotifyItem, 'id' | 'createdAt'>>): NotifySharedState => ({
   machine: 'host', epoch: 'e1', revision: 1, enabled: true, queue: [], hidden: [],
@@ -49,6 +49,41 @@ describe('boardCounts', () => {
   it('sums every machine on All', () => {
     const box: MachineFeed = { key: 'box', name: 'build-box', snapshot: { projects: [{ id: 1, name: 'infra', sessions: [{ id: 'x', name: 'x' }] }], notify: notify([{ id: 'q-box', createdAt: 5 }]) } };
     expect(boardCounts(buildAllMachinesList([mac, box], ''))).toEqual({ needs: 3, working: 2, ready: 1, all: 6 });
+  });
+});
+
+describe('terminalWaiting', () => {
+  // Codex stopped at "Allow this command?" in its terminal: blocked, with no approval behind it.
+  const box: MachineFeed = {
+    key: 'box',
+    name: 'build-box',
+    snapshot: {
+      projects: [{ id: 1, name: 'infra', sessions: [
+        { id: 'prompt', name: 'prompt', lastActivity: '2026-11-15T09:00:00Z' },
+        { id: 'asked', name: 'asked' },
+        { id: 'held', name: 'held', paused: { at: '2026-11-15T07:00:00Z' } as never },
+      ] }],
+      statuses: {
+        agentStatus: { p1: 'blocked', p2: 'blocked', p3: 'blocked' },
+        agentStatusSession: { p1: 'prompt', p2: 'asked', p3: 'held' },
+        agentType: { prompt: 'codex' },
+        unseen: {},
+      },
+      // "asked" waits through a permission request, so it counts there only.
+      permissions: [{ id: 'perm', sessionId: 'asked', toolName: 'Bash', input: {}, timestamp: 4 }],
+    },
+  };
+
+  it('lists Panes blocked in the terminal without an approval, and Needs you counts them once', () => {
+    const list = buildAllMachinesList([box], '');
+    expect(terminalWaiting(list).map(row => row.pane.name)).toEqual(['prompt']);
+    expect(boardCounts(list).needs).toBe(2);
+  });
+
+  it('leaves out a machine that went offline, like its approvals', () => {
+    const list = buildAllMachinesList([{ ...box, offlineSince: 1 }], '');
+    expect(terminalWaiting(list)).toEqual([]);
+    expect(boardCounts(list).needs).toBe(0);
   });
 });
 

@@ -94,8 +94,10 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
 }
 
 /** A Working or Ready Pane: its name over agent, time and repository, with a chevron. */
-export function ActivityRow({ row, machine, divided, onPress, swipe }: {
+export function ActivityRow({ row, machine, divided, onPress, swipe, background }: {
   row: PaneRecentRow;
+  /** The card's colour, over the page's own so its swipe actions stay hidden behind a tint. */
+  background?: string;
   machine?: MarkedMachine;
   divided: boolean;
   onPress: () => void;
@@ -114,7 +116,7 @@ export function ActivityRow({ row, machine, divided, onPress, swipe }: {
       accessibilityHint={row.stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
       {...(actions ? swipeRowAccessibility(actions) : {})}
       onPress={onPress}
-      style={({ pressed }) => [styles.activity, { opacity: row.stale ? STALE_OPACITY : 1, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised }]}
+      style={({ pressed }) => [styles.activity, { opacity: row.stale ? STALE_OPACITY : 1, backgroundColor: pressed ? theme.colors.surfacePressed : background ?? theme.colors.surfaceRaised }]}
     >
       {divided ? <RowDivider /> : null}
       <View style={styles.approvalDot}>{pane.paused ? <PausedBadge /> : <StatusBadge status={pane.status} />}</View>
@@ -129,7 +131,11 @@ export function ActivityRow({ row, machine, divided, onPress, swipe }: {
     </Pressable>
   );
   if (!actions) return content;
-  return <SwipeRow testIDPrefix="pane" id={pane.id} {...actions}>{content}</SwipeRow>;
+  return (
+    <SwipeRow testIDPrefix="pane" id={pane.id} {...actions}>
+      <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
+    </SwipeRow>
+  );
 }
 
 /** A card row that opens a list or a group: icon, title, count and a chevron (down while open). */
