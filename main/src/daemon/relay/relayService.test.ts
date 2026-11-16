@@ -3,7 +3,7 @@ import { mkdtempSync } from 'fs';
 import net from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { RelayService } from './relayService';
+import { RelayService, privateAddresses } from './relayService';
 
 afterEach(() => { vi.useRealTimers(); });
 
@@ -97,5 +97,19 @@ describe('relay service', () => {
     expect(probe.mock.calls.length).toBe(probesAtStart);
     await service.stop();
     probe.mockRestore();
+  });
+
+  it('reports only the addresses another computer on the network can reach', () => {
+    const v4 = (address: string) => [{ address, netmask: '255.255.240.0', family: 'IPv4' as const, mac: '00:00:00:00:00:00', internal: false, cidr: null }];
+    // A Windows computer with WSL and Hyper-V, as `Get-NetIPAddress` lists it.
+    expect(privateAddresses({
+      'vEthernet (WSL (Hyper-V firewall))': v4('172.19.0.1'),
+      'vEthernet (Default Switch)': v4('172.21.144.1'),
+      'Wi-Fi 4': v4('169.254.101.22'),
+      'Wi-Fi': v4('192.168.1.192'),
+      Tailscale: v4('100.65.125.102'),
+      docker0: v4('172.17.0.1'),
+      'vEthernet (External)': v4('10.0.0.5'),
+    })).toEqual(['192.168.1.192', '10.0.0.5']);
   });
 });

@@ -1,4 +1,4 @@
-# Answer a Notify question from home's Approvals, on its approval screen. Before running, ask one
+# Answer a Notify question from home's Needs you, on its approval screen. Before running, ask one
 # on the dev host and leave it waiting: `PANE_SESSION_ID=<pane-id> node
 # packages/runpane/dist/cli.js notify --pane-dir <pane-dir> --ui approve
 # --title "Run the migration?"` (see native/README.md).
@@ -24,7 +24,7 @@ name: Answer a Notify question
     id: notify-approve
 - assertVisible:
     id: notify-sent
-# Once the agent has it, the screen goes back home (nothing else waits) and Approvals clears.
+# Once the agent has it, the screen goes back home (nothing else waits) and Needs you clears.
 - extendedWaitUntil:
     notVisible:
       id: approvals-section

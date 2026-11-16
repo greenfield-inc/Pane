@@ -24,6 +24,8 @@ export interface McpToolContract {
     name: string;
     /** The tool's name when it isn't the command name with underscores. */
     mcpName?: string;
+    /** What the confirm input means, when it does more than confirm. */
+    confirmDescription?: string;
     summary: string;
     usage: readonly string[];
     mutates?: boolean;
@@ -181,7 +183,7 @@ function buildTool(
     const placeholder = contextArg?.value ?? globalFlag?.value ?? usagePlaceholder(usage, flag);
     const isConfirm = flag === CONFIRM_FLAG;
     const baseDescription = isConfirm
-      ? CONFIRM_DESCRIPTION
+      ? command.confirmDescription ?? CONFIRM_DESCRIPTION
       : contextArg?.description ?? globalFlag?.description ?? '';
     const schema = contextArg?.schema === undefined
       ? undefined

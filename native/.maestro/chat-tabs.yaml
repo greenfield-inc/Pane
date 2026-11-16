@@ -7,6 +7,10 @@ appId: com.dcouple.pane.mobile
 name: Chat tabs
 ---
 - runFlow: subflows/signed-in.yaml
+- runFlow:
+    file: subflows/home-open.yaml
+    env:
+      SECTION: repositories
 - tapOn:
     id: "pane-row-${PANE_ID}"
     index: 0

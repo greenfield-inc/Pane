@@ -90,6 +90,8 @@ export interface ParsedArgs {
   themeId?: string;
   themeColors?: string;
   themeCss?: string;
+  /** `runpane machine cleanup --kind`: checked against the contract's reclaim kinds when it runs. */
+  kind?: string;
   timeoutMs?: number;
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -269,7 +271,7 @@ const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactForm
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops', 'secrets', 'autopilot', 'devices']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'secrets', 'autopilot', 'devices']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -303,6 +305,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--theme', ['theme set']],
   ['--colors', ['theme set']],
   ['--css', ['theme set']],
+  ['--kind', ['machine cleanup']],
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
 ]);
@@ -1215,6 +1218,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--css') {
     parsed.themeCss = value;
+    return;
+  }
+  if (flag === '--kind') {
+    parsed.kind = value;
     return;
   }
   if (flag === '--timeout-ms') {

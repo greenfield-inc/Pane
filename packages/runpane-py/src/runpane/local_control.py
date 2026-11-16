@@ -1442,7 +1442,13 @@ def run_panels_output(parsed: Any) -> int:
     sys.stdout.write(text)
     if text and not text.endswith("\n"):
         sys.stdout.write("\n")
+    if result.get("hasMore"):
+        print(older_output_note(result.get("limit")), file=sys.stderr)
     return 0
+
+
+def older_output_note(limit: Any) -> str:
+    return f"(older output not shown; raise --limit above {limit} to see more)"
 
 
 def run_panels_input(parsed: Any) -> int:
@@ -1477,6 +1483,8 @@ def run_panels_screen(parsed: Any) -> int:
     sys.stdout.write(text)
     if text and not text.endswith("\n"):
         sys.stdout.write("\n")
+    if result.get("hasMore"):
+        print(older_output_note(result.get("limit")), file=sys.stderr)
     return 0
 
 

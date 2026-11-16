@@ -9,6 +9,7 @@ import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, Fol
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
+import { ResourcesButton } from './machineHealth/ResourcesButton';
 import { Kbd } from './ui/Kbd';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { useHotkeyStore } from '../stores/hotkeyStore';
@@ -575,7 +576,8 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   // in the rail so reopening the sidebar is reachable where the sidebar lives.
   // The host pill keeps to the sidebar's width: the room right of the toggle,
   // capped at 180px, and only its icon once a name no longer fits.
-  const hostPillRoom = width - (titleBarControlsSlot?.offsetLeft ?? 0) - 44;
+  // Room for the collapse button and the Resources icon beside the pill.
+  const hostPillRoom = width - (titleBarControlsSlot?.offsetLeft ?? 0) - 76;
   const hostPillMaxWidth = Math.min(180, hostPillRoom);
   const showHostPillLabel = hostPillRoom >= 96;
   const headerControls = (
@@ -617,6 +619,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
         </button>,
         'bottom-left',
       )}
+      {!collapsed && <ResourcesButton className="ml-auto mr-1" />}
     </>
   );
 
@@ -915,6 +918,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
             <Tooltip content={remoteFooterTooltip} side="right" interactive delay={250}>
               {switcherVisible ? renderRemoteHostSwitcher(railRemoteButton, 'top-right') : railRemoteButton}
             </Tooltip>
+            <ResourcesButton rail className={COMPACT_RAIL_BUTTON} />
             <Tooltip content={hotkeyDisplay('open-settings') ? <Kbd>{hotkeyDisplay('open-settings')}</Kbd> : undefined} side="right">
               <button
                 type="button"

@@ -30,6 +30,13 @@ describe.skipIf(process.platform === 'win32')('DeviceJobs', () => {
     expect(result.logTail).toContain('warning');
   });
 
+  it('marks a log tail whose earlier output was cut', async () => {
+    const result = await jobs.start('pane-a', 'echo first line; i=0; while [ $i -lt 2000 ]; do echo "compiling module $i of the app"; i=$((i+1)); done; echo last line', dir, 10_000);
+    expect(result.logTail.startsWith('[earlier output cut]\n')).toBe(true);
+    expect(result.logTail).not.toContain('first line');
+    expect(result.logTail.endsWith('last line\n')).toBe(true);
+  });
+
   it('leaves a long command running, and stopAll ends it', async () => {
     const pidFile = path.join(dir, 'pid');
     const started = await jobs.start('pane-a', `echo $$ > "${pidFile}"; echo metro up; sleep 30`, dir, 500);

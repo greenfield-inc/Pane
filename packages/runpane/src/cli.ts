@@ -17,6 +17,7 @@ import { runLink } from './pairingLink';
 import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
 import { runDevicesAct, runDevicesClose, runDevicesFree, runDevicesList, runDevicesOpen, runDevicesRun, runDevicesScreenshot, runDevicesUsage } from './devices';
 import { runThemeRead, runThemeReset, runThemeSet } from './theme';
+import { runMachineCleanup, runMachineHealth } from './machine';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo } from './daemonClient';
@@ -324,6 +325,8 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'lock list': async (parsed, telemetryContext) => {
     return runLockList(parsed);
   },
+  'machine health': async (parsed) => runMachineHealth(parsed),
+  'machine cleanup': async (parsed) => runMachineCleanup(parsed),
   'loops list': async (parsed) => runLoopsList(parsed),
   'loops create': async (parsed) => runLoopsSave(parsed),
   'loops update': async (parsed) => runLoopsSave(parsed),

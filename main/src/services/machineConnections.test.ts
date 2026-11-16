@@ -47,6 +47,8 @@ function setup(ids: string[]) {
         retryNow: vi.fn(async () => undefined),
         suspend: vi.fn(),
         resume: vi.fn(),
+        openPortStream: vi.fn(),
+        measureLatency: vi.fn(async () => 4),
       };
       clients.set(saved.id, client);
       return client;
@@ -133,6 +135,20 @@ describe('MachineConnections', () => {
       .rejects.toThrow(/Pane can't send "submit-to-agent" to another machine/);
   });
 
+  it('runs a machine health cleanup on the named machine through that machine\'s own engine', async () => {
+    const { machines, client, connect } = setup(['studio-mac', 'build-box']);
+    connect('build-box');
+
+    await machines.run('build-box', { type: 'machine-health', action: 'cleanup', request: { kinds: ['agent-temp'], source: 'ui' } });
+    await machines.run('build-box', { type: 'machine-health', action: 'pause-idle', request: { source: 'card' } });
+
+    expect(client('build-box').invoke.mock.calls).toEqual([
+      ['resource-monitor:machine-cleanup', [{ kinds: ['agent-temp'], source: 'ui' }]],
+      ['resource-monitor:machine-pause-idle', [{ source: 'card' }]],
+    ]);
+    expect(client('studio-mac').invoke).not.toHaveBeenCalled();
+  });
+
   it('sets a Pane\'s pin to the requested state in one host call', async () => {
     const { machines, client, connect } = setup(['build-box']);
     connect('build-box');
@@ -210,6 +226,17 @@ describe('MachineConnections', () => {
     expect([client('build-box').suspend, client('mini').suspend].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
     machines.resume();
     expect([client('build-box').resume, client('mini').resume].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
+  });
+
+  it('measures a machine only once it is online, names the route it measured, and shares a measurement already running', async () => {
+    const { machines, client } = setup(['build-box']);
+    expect(await machines.measureLatency('build-box')).toEqual({ ms: null, routeId: null });
+    expect(client('build-box').measureLatency).not.toHaveBeenCalled();
+    client('build-box').options.onConnectionStateChange?.('connected', undefined, { routeId: 'relay:https://bb.runpane.net' });
+    const [first, second] = await Promise.all([machines.measureLatency('build-box'), machines.measureLatency('build-box')]);
+    expect(first).toEqual({ ms: 4, routeId: 'relay:https://bb.runpane.net' });
+    expect(second).toEqual(first);
+    expect(client('build-box').measureLatency).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a write to an offline machine before sending it', async () => {

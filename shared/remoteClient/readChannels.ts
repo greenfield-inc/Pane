@@ -17,6 +17,12 @@ export const REMOTE_READ_CHANNELS = new Set([
   // An approval's Summary page, read or written from its card; nothing on the host changes.
   'notify:summary-page',
   'runpane:update:progress',
+  // Machine health (Resources) on a linked machine; nothing on the host changes.
+  'resource-monitor:machine-health',
+  'resource-monitor:machine-inventory',
+  'resource-monitor:machine-finished-panes',
+  'resource-monitor:machine-relief',
+  'resource-monitor:machine-cleanup-history',
   'config:get',
   'config:get-session-preferences',
   'ui-state:get-expanded',

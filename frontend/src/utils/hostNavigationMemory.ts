@@ -322,6 +322,13 @@ export async function restoreHostNavigation(
     return;
   }
 
+  if (memory.view === 'resources') {
+    await setActiveSession(null);
+    if (!ownsRuntime()) return;
+    navigation.navigateToResources();
+    return;
+  }
+
   navigation.navigateToSessions();
   const remembered = memory.paneId !== null
     && useSessionStore.getState().sessions.some(session => session.id === memory.paneId);

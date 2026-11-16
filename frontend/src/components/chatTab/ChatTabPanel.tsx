@@ -455,6 +455,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     setBusy(true);
     try { await operation(); viewer.setError(undefined); } catch (error) { viewer.setError(ipcErrorMessage(error, 'Pane did not say why.')); } finally { setBusy(false); }
   };
+  /** The whole conversation, not only the window on screen. */
+  const copyConversation = async () => {
+    try {
+      return conversationMarkdown(chatTurns(await viewer.allMessages(), { running: working }), agentName);
+    } catch (error) {
+      viewer.setError(`Could not copy the conversation: ${ipcErrorMessage(error, 'Pane did not say why.')}`);
+      throw error;
+    }
+  };
   const configure = (id: string, value: string) => void act(() => client.configure(panelId, id, value));
   const answerPermission = (permission: AgentChatPermission, optionId: string) => void act(() => client.permission(panelId, permission.id, optionId));
   const clearConversation = () => {
@@ -516,7 +525,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         {clearable && <button type="button" className="chat-copy chat-copy-all" disabled={disabled} title="Start a fresh conversation in this tab (/clear)" onClick={requestClear}>
           <Eraser className="h-3.5 w-3.5" aria-hidden /><span>Clear</span>
         </button>}
-        <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={() => conversationMarkdown(turns, agentName)} />
+        <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={copyConversation} />
       </div>}
       <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer && !paged}>
         <div className="chat-column">

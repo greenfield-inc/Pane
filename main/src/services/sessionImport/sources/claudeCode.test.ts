@@ -102,6 +102,24 @@ describe('readClaudeCode', () => {
     expect(result.storePaths).toEqual([path.join(config, 'projects'), path.join(config, 'sessions')]);
   });
 
+  it('reads the folder and entrypoint of a session whose first message is very long', async () => {
+    const config = path.join(root, 'home', '.claude');
+    const pasted = 'x'.repeat(300 * 1024);
+    writeTranscript(config, '-work-app', ID_A, [
+      { type: 'file-history-snapshot', kind: 'snapshot' },
+      message(ID_A, { cwd: '/work/pasted', text: pasted }),
+      { type: 'custom-title', customTitle: 'Long paste', sessionId: ID_A },
+    ], NOW - DAY);
+    writeTranscript(config, '-work-api', ID_B, [
+      { type: 'file-history-snapshot', kind: 'snapshot' },
+      message(ID_B, { cwd: '/work/api', entrypoint: 'sdk-cli', text: pasted }),
+    ], NOW - DAY);
+
+    const result = await readClaudeCode(context());
+
+    expect(result.sessions.map(session => [session.sessionId, session.folder, session.title])).toEqual([[ID_A, '/work/pasted', 'Long paste']]);
+  });
+
   it('says running is unknown when there is no live-session registry', async () => {
     const config = path.join(root, 'home', '.claude');
     writeTranscript(config, '-work-app', ID_A, [message(ID_A, {})], NOW - DAY);

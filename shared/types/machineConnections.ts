@@ -30,6 +30,12 @@ export interface MachineState {
   workspaceEntries?: boolean;
 }
 
+/** A saved machine's round trip: `ms` null when it did not answer; `routeId` the route it was measured over (`ComputerRoute.id`). */
+export interface MachineLatency {
+  ms: number | null;
+  routeId: string | null;
+}
+
 /** The reads `machines:read` serves; each takes the arguments the same channel takes today. */
 export const MACHINE_READ_CHANNELS = [
   'sessions:get-all-with-projects',
@@ -45,6 +51,12 @@ export const MACHINE_READ_CHANNELS = [
   'projects:list-branches',
   'projects:detect-branch',
   'remote:pwa-affordances',
+  // Machine health (Resources): the snapshot, inventory, finished Panes, relief offer and cleanup history.
+  'resource-monitor:machine-health',
+  'resource-monitor:machine-inventory',
+  'resource-monitor:machine-finished-panes',
+  'resource-monitor:machine-relief',
+  'resource-monitor:machine-cleanup-history',
 ] as const;
 export type MachineReadChannel = typeof MACHINE_READ_CHANNELS[number];
 
@@ -68,6 +80,8 @@ export const MACHINE_EVENT_CHANNELS = [
   'notify:shared-changed',
   'remote:settings-changed',
   'workspace:entry',
+  'resource-monitor:machine-health-changed',
+  'resource-monitor:machine-inventory-changed',
 ] as const;
 export type MachineEventChannel = typeof MACHINE_EVENT_CHANNELS[number];
 
@@ -93,7 +107,13 @@ export type MachineCommand =
   | { type: 'preview-switch-to-chat'; sessionId: string }
   | { type: 'switch-to-chat'; sessionId: string; panelIds: string[] }
   /** Sends `input` to an agent tab as the person's message (`runpane panels submit`); Move to machine… uses it. */
-  | { type: 'submit-to-agent'; panelId: string; input: string };
+  | { type: 'submit-to-agent'; panelId: string; input: string }
+  /** Machine health on that machine, through its own engine and protections. */
+  | { type: 'machine-health'; action: MachineHealthAction; request: object };
+
+/** What Resources and its cards can ask another machine to do, each through that machine's own checks. */
+export const MACHINE_HEALTH_ACTIONS = ['cleanup', 'pause-idle', 'archive-finished', 'stop-processes', 'restart-process', 'ignore-leak'] as const;
+export type MachineHealthAction = typeof MACHINE_HEALTH_ACTIONS[number];
 
 /** A read's or command's answer, exactly as the machine gave it, tagged with that machine. */
 export interface MachineResult {

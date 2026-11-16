@@ -4,6 +4,7 @@ import { getRunpaneShimState, installRunpaneShimBestEffort } from '../services/r
 import { BUNDLED_MCP_HTTP_MODULE, PaneMcpEndpoint, setPaneMcpEndpoint, type PaneMcpHttpModule } from '../services/paneMcpEndpoint';
 import { tabListener } from '../services/tabListener';
 import os from 'os';
+import fs from 'fs';
 import path from 'path';
 import { powerMonitor, type App, type BrowserWindow } from 'electron';
 import { runStartupRetentionSweep, startupPanelBufferMigration } from '../services/database';
@@ -57,6 +58,29 @@ import type { AppServices, DaemonHostServices } from '../ipc/types';
 import { setupEventListeners } from '../events';
 import { getAppDirectory } from '../utils/appDirectory';
 import { resourceMonitorService } from '../services/resourceMonitorService';
+import { MachineHealthService } from '../services/machineHealth/machineHealthService';
+import { recheckItem, scanStorage } from '../services/machineHealth/storageInventory';
+import { readFootprints } from '../services/machineHealth/footprint';
+import { parseSessionTimestampMs } from '../services/paneInactivity';
+import { agentTempRoots, ignoredDirs, installPathOf, otherToolPaths, processCwds, readUpdateRecords, wslDiskImages } from '../services/machineHealth/inventorySources';
+import { DB_CLEAN_OPEN_PREFERENCE } from '../services/machineHealth/reclaimRules';
+import { CleanupEngine } from '../services/machineHealth/cleanupEngine';
+import { FinishedPaneMonitor, findFinishedPanes } from '../services/machineHealth/finishedPanes';
+import { MemoryRelief, canRestartProcess } from '../services/machineHealth/memoryRelief';
+import { HealthCardController } from '../services/machineHealth/healthCardController';
+import { showDesktopAlert } from '../ipc/desktopAlerts';
+import type { FinishedPane } from '../services/machineHealth/finishedPanes';
+import { stopProcessIdentities } from '../services/archiveProcessTracker';
+import type { LevelChange } from '../services/machineHealth/machineHealthService';
+import { paneInactiveSince } from '../services/paneInactivity';
+import { findPrStatusForPane } from '../ipc/runpane';
+import { protectionOf } from '../services/machineHealth/paneProtections';
+import { fastCheckWorkingDirectory, hasUntrackedWork } from '../services/gitPlumbingCommands';
+import { withArchiveRepositoryLock } from '../services/archiveRepositoryLock';
+import { PaneError } from '../../../shared/paneError';
+import { appScratchDirectory, appScratchRoot } from '../services/archiveRetention';
+import { panePausedMark } from '../../../shared/types/panels';
+import { MACHINE_HEALTH_CHANGED_EVENT, MACHINE_HEALTH_FINISHED_CHANGED_EVENT, MACHINE_HEALTH_INVENTORY_CHANGED_EVENT, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, type LeakWarning } from '../../../shared/types/machineHealth';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
@@ -80,7 +104,7 @@ import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { startArchiveExpiry } from '../services/archiveExpiry';
 import { ARCHIVE_EXPIRY_START_DELAY_MS } from '../../../shared/constants/archiveRetention';
 
@@ -139,6 +163,9 @@ function registerPowerMonitorDiagnostics(logger: Logger): void {
 function megabytes(bytes: number | null): string {
   return bytes === null ? 'unknown' : `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
+
+/** Leftover processes the person chose to keep (pid:start), so a restart does not ask about them again. */
+const KEPT_PROCESSES_PREFERENCE = 'machine_health_kept_processes';
 
 export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Promise<PaneDaemonHost> {
   const mode = options.mode ?? 'desktop';
@@ -408,7 +435,75 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   const archiveCleanupManager = new ArchiveCleanupManager(databaseService, sessionManager, archiveProgressManager);
   worktreeManager.setArchivePathGuard(target => archiveCleanupManager.assertPathAvailable(target));
+  // A WSL project stores Linux paths; Node's fs reads them through the project's path resolver.
+  const contextOf = (session: { project_id?: number | null }) => (session.project_id ? sessionManager.getProjectContextByProjectId(session.project_id) : null);
+  const fileSystemPath = (session: { project_id?: number | null }, stored: string) => contextOf(session)?.pathResolver.toFileSystem(stored) ?? stored;
+  // Git runs through the project's command runner at the stored (Linux, for WSL) path.
+  const storedWorktrees = new Map<string, string>();
+  const inventoryPanes = () => databaseService.getAllSessionsIncludingArchived({ includeHidden: true }).flatMap(session => {
+    const context = contextOf(session);
+    if (!context) return [];
+    if (session.worktree_path) storedWorktrees.set(session.id, session.worktree_path);
+    return [{
+      id: session.id, name: session.name, worktreePath: session.worktree_path ? context.pathResolver.toFileSystem(session.worktree_path) : null,
+      projectPath: context.pathResolver.toFileSystem(context.project.path),
+      branch: session.worktree_name, archived: !!session.archived, updatedAt: parseSessionTimestampMs(session.updated_at), isMainRepo: !!session.is_main_repo,
+      ownedByPane: session.worktree_ownership !== 'external',
+      paused: !session.archived && !!panePausedMark(panelManager.getPanelsForSession(session.id)),
+    }];
+  });
+  // Only folders Pane made worktrees in: an adopted worktree's or a projectless session's parent is the person's own folder.
+  const worktreeRoots = () => [...new Set(databaseService.getAllSessionsIncludingArchived({ includeHidden: true })
+    .flatMap(session => (session.worktree_path && session.project_id && !session.is_main_repo && session.worktree_ownership !== 'external'
+      ? [path.dirname(fileSystemPath(session, session.worktree_path))] : [])))];
+  const installPath = () => installPathOf(process.execPath, !!options.app?.isPackaged);
+  const listGitWorktrees = async (pane: { id: string }) => {
+    const context = sessionManager.getProjectContext(pane.id);
+    if (!context) return [];
+    const { project, commandRunner, pathResolver } = context;
+    return (await worktreeManager.listWorktrees(project.path, commandRunner)).map(worktree => ({ ...worktree, path: pathResolver.toFileSystem(worktree.path) }));
+  };
+  const inventoryIgnoredDirs = async (pane: { id: string }) => {
+    const context = sessionManager.getProjectContext(pane.id);
+    const stored = storedWorktrees.get(pane.id);
+    return context && stored ? ignoredDirs(stored, context.commandRunner) : [];
+  };
+  const machineHealth = new MachineHealthService({
+    now: () => Date.now(),
+    settings: () => configManager.getConfig().machineHealth,
+    volumePaths: () => [
+      { path: getAppDirectory(), role: 'pane-data' as const },
+      { path: os.tmpdir(), role: 'temp' as const },
+      ...[...new Set(databaseService.getAllSessions(undefined, { includeHidden: true })
+        .flatMap(session => (session.worktree_path ? [path.dirname(fileSystemPath(session, session.worktree_path))] : [])))]
+        .map(folder => ({ path: folder, role: 'worktrees' as const })),
+    ],
+    processes: () => resourceMonitorService.getSnapshot(),
+    readFootprints: process.platform === 'darwin' ? readFootprints : undefined,
+    scanInventory: () => scanStorage({
+      now: () => Date.now(),
+      paneDir: getAppDirectory(),
+      panes: inventoryPanes,
+      worktreeRoots,
+      agentTempRoots: () => agentTempRoots(),
+      installPath,
+      cleanOpenAt: () => Number(databaseService.getUserPreference(DB_CLEAN_OPEN_PREFERENCE)) || null,
+      archiveJobsInFlight: () => new Set(archiveCleanupManager.getTasks().filter(task => task.status !== 'completed').map(task => task.sessionId)),
+      readUpdates: () => readUpdateRecords(getAppDirectory()),
+      listGitWorktrees,
+      ignoredDirs: inventoryIgnoredDirs,
+      processCwds,
+      otherTools: async () => [...otherToolPaths(), ...await wslDiskImages()],
+      appScratchDir: appScratchDirectory,
+    }),
+  });
+  // Payload-free: readers re-read. The per-minute sample stays off the daemon stream.
+  machineHealth.on('level-changed', () => getPaneEventSink().send(MACHINE_HEALTH_CHANGED_EVENT));
+  machineHealth.on('inventory', () => getPaneEventSink().send(MACHINE_HEALTH_INVENTORY_CHANGED_EVENT));
+  // Migration backups become removable once a later start opened the database cleanly.
+  if (duties.housekeeping && !startupPanelBufferMigration.error) databaseService.setUserPreference(DB_CLEAN_OPEN_PREFERENCE, String(Date.now()));
   const daemonServices: DaemonHostServices = {
+    machineHealth,
     configManager,
     databaseService,
     sessionManager,
@@ -621,6 +716,187 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   sessionPrMonitor.start();
   loopManager.start();
   autoPauser.sync();
+  /** True only when the OS confirms the folder is not there; any other failure cannot tell. */
+  const folderGone = (folder: string) => fs.promises.access(folder).then(
+    () => false,
+    error => error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR'),
+  );
+  const paneProtection = (paneId: string) => protectionOf(paneId, {
+    pinned: id => !!databaseService.getSession(id)?.is_favorite,
+    focusedPaneId: () => (options.getMainWindow()?.isFocused() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined),
+    panelIds: id => panelManager.getPanelsForSession(id).map(panel => panel.id),
+    agentState: panelId => (panelManager.getPanel(panelId)?.type === 'chat' ? getChatTabManager().agentState(panelId) : terminalPanelManager.getAgentStatus(panelId)),
+    hasOpenNotify: panelIds => services.notifyService?.queue.hasOpenFor(panelIds) ?? false,
+    hasUncommittedChanges: async id => {
+      const session = databaseService.getSession(id);
+      const ctx = sessionManager.getProjectContext(id);
+      if (!session?.worktree_path || !ctx) throw new Error('No worktree');
+      // A folder the OS confirms is gone has nothing left to lose; WSL paths resolve through the project.
+      if (await folderGone(ctx.pathResolver.toFileSystem(session.worktree_path))) return false;
+      // WSL-aware; a folder it cannot read counts as changed, so "cannot tell" protects the Pane.
+      const status = await fastCheckWorkingDirectory(session.worktree_path, ctx.commandRunner.wslContext);
+      if (status.hasModified || status.hasStaged || status.hasConflicts) return true;
+      return status.hasUntracked && await hasUntrackedWork(session.worktree_path, ctx.commandRunner);
+    },
+  });
+  const machineCleanup = new CleanupEngine({
+    now: () => Date.now(),
+    inventory: async () => machineHealth.getInventory() ?? machineHealth.scanInventory(),
+    recheck: item => recheckItem(item, { now: () => Date.now(), panes: inventoryPanes, listGitWorktrees }),
+    protectionOf: paneProtection,
+    processCwds,
+    freeBytes: async folder => {
+      const fsStats = await fs.promises.statfs(folder);
+      return Number(fsStats.bavail) * Number(fsStats.bsize);
+    },
+    settings: () => configManager.getConfig().machineHealth,
+    // The folders every reclaimable kind sits in (see scanStorage), plus each open Pane's `.pane` for its scratch.
+    trashParents: () => {
+      const install = installPath();
+      return [
+        getAppDirectory(), path.join(getAppDirectory(), 'updates'), appScratchRoot(), ...(install ? [path.dirname(install)] : []),
+        ...agentTempRoots(), ...worktreeRoots(),
+        ...inventoryPanes().flatMap(pane => (!pane.archived && pane.worktreePath ? [path.join(pane.worktreePath, '.pane')] : [])),
+      ];
+    },
+    moveWorktree: async (item, move) => {
+      const ctx = item.sessionId ? sessionManager.getProjectContext(item.sessionId) : null;
+      if (!ctx) throw new PaneError('ERR_MACHINE_CLEANUP_NO_PROJECT', 'Pane no longer has this Pane\'s project, so it cannot update git\'s worktree records. Nothing was moved.', 'Remove the folder with git worktree remove from its repository.');
+      await withArchiveRepositoryLock(ctx.project.path, ctx.commandRunner, async () => {
+        await move();
+        await ctx.commandRunner.execFile('git', ['worktree', 'prune'], ctx.project.path, { silent: true, timeout: 30_000 })
+          .catch(error => logger.warn(`[MachineHealth] git worktree prune failed in ${ctx.project.path}; git drops the record on its next gc.`, error instanceof Error ? error : undefined));
+      });
+    },
+    log: message => logger.info(message),
+  });
+  if (duties.housekeeping) {
+    // Only the Pane that owns this data folder deletes anything; another one answers cleanup requests with ERR_MACHINE_HEALTH_UNAVAILABLE.
+    services.machineCleanup = machineCleanup;
+    void machineCleanup.finishPendingDeletes();
+    machineHealth.setScheduledCleanup(async () => {
+      await machineCleanup.run({ source: 'schedule', tiers: [1, 2] });
+      // Tier 1: archive cleanup jobs that failed get one more try a day.
+      for (const task of archiveCleanupManager.getTasks()) {
+        if (task.status === 'failed' && !task.interruptedScript) {
+          try { archiveCleanupManager.retry(task.sessionId, false); } catch { /* not ready; next pass */ }
+        }
+      }
+    });
+  }
+  const finishedPanes = new FinishedPaneMonitor({
+    now: () => Date.now(),
+    find: scope => findFinishedPanes({
+      now: () => Date.now(),
+      // At least 1: 0 would mark every open Pane finished.
+      idleDays: Math.max(1, configManager.getConfig().machineHealth?.finishedIdleDays ?? 14),
+      panes: () => databaseService.getAllSessions(undefined, { includeHidden: true }).flatMap(session => {
+        if (session.archived || session.is_main_repo || !session.worktree_path || !session.project_id) return [];
+        if (scope.ids && !scope.ids.includes(session.id)) return [];
+        // Stored paths are Linux paths for WSL; without its project Pane cannot resolve one, so it lists nothing.
+        const ctx = sessionManager.getProjectContext(session.id);
+        if (!ctx) return [];
+        const pane = sessionManager.getSession(session.id);
+        const inactiveSince = paneInactiveSince(
+          { createdAt: pane?.createdAt ?? new Date(session.created_at), lastViewedAt: pane?.lastViewedAt, panels: panelManager.getPanelsForSession(session.id) },
+          panelId => terminalPanelManager.getLastActivity(panelId) ?? getChatTabManager().lastActivity(panelId),
+        ).getTime();
+        const projectName = databaseService.getProject(session.project_id)?.name ?? '';
+        return [{ id: session.id, name: session.name, projectName, worktreePath: ctx.pathResolver.toFileSystem(session.worktree_path), inactiveSince }];
+      }),
+      prStatus: paneId => (scope.offline ? Promise.resolve({ state: 'unknown' as const }) : findPrStatusForPane(services, paneId)),
+      folderExists: async folder => !(await folderGone(folder)),
+      protectionOf: paneProtection,
+      sizeOf: paneId => machineHealth.cachedInventory()?.panes.find(pane => pane.sessionId === paneId)?.worktreeBytes ?? null,
+    }),
+    archive: async paneId => {
+      const result = decodeBoundary(await commandRegistry.invoke('sessions:delete', [paneId]), boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) }));
+      if (!result.success) throw new Error(result.error ?? 'Archive failed');
+    },
+    automatic: () => configManager.getConfig().machineHealth?.autoArchiveFinished === true,
+    record: run => machineCleanup.note(run),
+  });
+  services.finishedPanes = finishedPanes;
+  if (duties.housekeeping) {
+    finishedPanes.start();
+    machineHealth.on('level-changed', (change: LevelChange) => {
+      if (change.kind === 'disk' && change.level !== 'ok') void finishedPanes.check().catch(() => undefined);
+    });
+  }
+  const latestPaneMemoryMB = (paneId: string) => machineHealth.latestSnapshot()?.panes.find(pane => pane.sessionId === paneId)?.rssMB ?? 0;
+  const paneState = (paneId: string): 'archived' | 'paused' | 'open' => {
+    const session = databaseService.getSession(paneId);
+    if (!session || session.archived) return 'archived';
+    return panePausedMark(panelManager.getPanelsForSession(paneId)) ? 'paused' : 'open';
+  };
+  const memoryRelief = new MemoryRelief({
+    now: () => Date.now(),
+    paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
+    stop: identities => stopProcessIdentities(identities),
+    idlePanes: hours => autoPauser.idlePanes(hours),
+    pauseIdle: (hours, paneIds) => autoPauser.pauseIdleNow(hours, paneIds),
+    pinned: paneId => !!databaseService.getSession(paneId)?.is_favorite,
+    paneMemoryMB: latestPaneMemoryMB,
+    settings: () => configManager.getConfig().machineHealth,
+    record: run => machineCleanup.note(run),
+  });
+  services.memoryRelief = memoryRelief;
+  if (duties.housekeeping) {
+    machineHealth.on('snapshot', snapshot => { void memoryRelief.onSnapshot(snapshot).catch(error => logger.warn('[MachineHealth] memory relief failed', error)); });
+    taskQueue.setInstallsOneAtATime(() => machineHealth.latestSnapshot()?.memory.level !== undefined && machineHealth.latestSnapshot()?.memory.level !== 'ok');
+  }
+  const healthCards = new HealthCardController({
+    now: () => Date.now(),
+    ask: question => {
+      const queue = services.notifyService?.queue;
+      if (!queue) return Promise.resolve({ unavailable: 'Approvals are not running.', next: 'Turn on Approvals in Settings.' });
+      return queue.ask({
+        question: { ui: 'options', title: question.title, context: question.context, choices: question.choices.map((label, index) => ({ label, recommended: index === 0 })), machineHealth: question.card },
+        source: { name: 'Pane', agent: 'Pane' },
+      });
+    },
+    inventory: () => machineHealth.cachedInventory(),
+    idleOffer: () => memoryRelief.idleOffer(),
+    pauseIdleHours: () => configManager.getConfig().machineHealth?.pauseIdleHours ?? 2,
+    paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
+    paneState,
+    tabName: panelId => panelManager.getPanel(panelId)?.title ?? null,
+    canRestart: leak => canRestartProcess(machineHealth.latestSnapshot(), leak, paneId => logsManager.isRunning(paneId)),
+    cleanUp: async itemIds => {
+      await machineCleanup.run({ source: 'card', tiers: [1, 2], ids: itemIds });
+      // Rescan so Resources and the CLI stop listing what the card removed.
+      void machineHealth.scanInventory().catch(() => undefined);
+    },
+    readKept: () => {
+      try {
+        return decodeOptionalBoundary(JSON.parse(databaseService.getUserPreference(KEPT_PROCESSES_PREFERENCE) ?? '[]'), boundary.array(boundary.string)) ?? [];
+      } catch {
+        return [];
+      }
+    },
+    writeKept: identities => databaseService.setUserPreference(KEPT_PROCESSES_PREFERENCE, JSON.stringify(identities)),
+    pauseIdle: async () => { await memoryRelief.pauseIdle('card'); },
+    stopProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, [{ source: 'card', processes: [{ pid: leak.pid, started: leak.started }] }]); },
+    stopProcesses: processes => memoryRelief.stopProcesses(processes, 'card'),
+    restartProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, [{ pid: leak.pid, started: leak.started }]); },
+    ignoreLeak: leak => machineHealth.ignoreLeak(leak.pid, leak.started),
+    archive: async paneIds => { await finishedPanes.archive(paneIds, 'card'); },
+    alert: (title, body) => showDesktopAlert(services, services.notifyService?.queue.alertsHere() ?? true, title, body),
+    log: message => logger.warn(message),
+  });
+  if (duties.housekeeping) {
+    machineHealth.on('snapshot', snapshot => healthCards.onSnapshot(snapshot));
+    machineHealth.on('leak', (leak: LeakWarning) => {
+      const snapshot = machineHealth.latestSnapshot();
+      if (snapshot) void healthCards.onLeak(leak, snapshot);
+    });
+    finishedPanes.on('finished', (list: FinishedPane[]) => {
+      const snapshot = machineHealth.latestSnapshot();
+      if (snapshot) healthCards.onFinished(list, snapshot);
+    });
+  }
+  finishedPanes.on('finished', list => getPaneEventSink().send(MACHINE_HEALTH_FINISHED_CHANGED_EVENT, list));
+  machineHealth.start();
   // Delete archived folders past their retention, keeping their agent logs; deferred so startup stays fast.
   let stopArchiveExpiry: (() => void) | undefined;
   const archiveExpiryTimer = setTimeout(() => { stopArchiveExpiry = startArchiveExpiry(); }, ARCHIVE_EXPIRY_START_DELAY_MS);
@@ -631,6 +907,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   }
   resourceMonitorService.initialize({
     app: options.app,
+    processRoots: () => [
+      ...paneProcessManagers().flatMap(manager => manager.getPanelPids()),
+      ...databaseService.getAllSessions(undefined, { includeHidden: true }).flatMap(session =>
+        runCommandManager.getArchiveProcessPids(session.id).map(pid => ({ pid, sessionId: session.id, panelId: null }))),
+    ],
+    knownSessionIds: () => new Set(databaseService.getAllSessionsIncludingArchived({ includeHidden: true }).map(session => session.id)),
     getSessionById: (sessionId) => sessionManager.getSession(sessionId),
     getSessionWslDistro: (sessionId) => {
       const projectId = sessionManager.getSession(sessionId)?.projectId;
@@ -662,6 +944,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       prepareNotifyForQuit();
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
+      machineHealth.stop();
+      finishedPanes.stop();
       autoPauser.stop();
       clearTimeout(archiveExpiryTimer);
       stopArchiveExpiry?.();

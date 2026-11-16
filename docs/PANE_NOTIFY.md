@@ -27,7 +27,8 @@ its question and `why`, adds its `files` as links, and turns an `ask` with no
 other JSON shows one `summary`, `step` or `title` line, or none. On `--update`
 the new context is read the same way, but the card keeps its `ui`, and its
 choices and links unless the update passes them. Prose stays as written, even
-when it starts with `[` or `{`. Any card also
+when it starts with `[` or `{`. A card shows up to 6 links; when a status file's `files` add more, the context's
+last line names the rest (`More links: …`). Any card also
 takes up to 6 `links` (`--links`), related files and pages shown as chips:
 `{label, path}` for a file on the asking machine (relative to its working
 directory), `{label, url}` for an http or https page, or `{label, approval}`
@@ -127,7 +128,7 @@ the first answer from the terminal, Approvals, the strip or the phone wins.
   waits, as No does in the terminal. A plan shows its text with "Yes, and
   auto-accept edits", "Yes, and manually approve edits" and "No, keep
   planning".
-- **The phone** lists the prompt in Approvals with **Yes** and
+- **The phone** lists the prompt under home's **Needs you** with **Yes** and
   **No**, and its alert carries the same two buttons. The question's sheet has
   every choice.
 - **Answered in the terminal**: Pane closes the question and lists it in
@@ -525,8 +526,9 @@ the agent:
   "Mac mini offline · 4 waiting · they come back when the Mac mini is online",
   since its cards can't be answered; the agents keep waiting. After reconnecting
   the screen shows what is waiting there now. Autopilot says "<machine> offline".
-- **Your phone**: the Pane app lists Approvals with the same sort menu, and an
-  item opens above its Session's tabs and chat. A question still waiting after
+- **Your phone**: the Pane app lists approvals on home's **Needs you** tile, in
+  the same three sorts (chosen on its sort sheet), and an item opens above its
+  Session's tabs and chat. A question still waiting after
   about 90 seconds sends one alert to every phone signed
   in to the host in the Pane app with notifications allowed and **Needs
   Input** on. The alert is titled with the Pane's name and says only "<Pane>

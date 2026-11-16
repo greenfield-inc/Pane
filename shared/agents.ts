@@ -58,6 +58,8 @@ interface AgentConfigBase {
   install: { url: string; command: string };
   /** Transcript folders, relative to the home the CLI runs with. */
   transcriptDirs?: readonly string[];
+  /** Per-session temp folders: `{tmp}` is /tmp on macOS and Linux, the OS temp folder on Windows; `{uid}` the user id. */
+  tempDirs?: readonly string[];
   onboarding?: boolean;
   onboardingPanelId?: string;
 }

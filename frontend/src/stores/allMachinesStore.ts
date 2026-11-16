@@ -68,6 +68,9 @@ const READS_FOR_EVENT = {
   'remote:settings-changed': [],
   // A Session member's report, for the main process's Session journal; nothing to refresh here.
   'workspace:entry': [],
+  // Machine health is read by the Resources page itself; the sidebar lists need nothing.
+  'resource-monitor:machine-health-changed': [],
+  'resource-monitor:machine-inventory-changed': [],
 } satisfies Record<MachineEventChannel, ReadKey[]>;
 
 /** A machine as the pill menu knows it, plus whether the app is on it. */

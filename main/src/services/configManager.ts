@@ -660,12 +660,15 @@ export class ConfigManager extends EventEmitter {
       : current.agentContext;
     // Notify settings arrive one field at a time from Settings and the tray menu.
     const notify = updates.notify !== undefined ? { ...current.notify, ...updates.notify } : current.notify;
+    // So do machine health settings, from Settings and the Resources page.
+    const machineHealth = updates.machineHealth !== undefined ? { ...current.machineHealth, ...updates.machineHealth } : current.machineHealth;
     const next: AppConfig = {
       ...current,
       ...updates,
       analytics,
       agentContext,
       notify,
+      machineHealth,
       defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
         ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
         : current.defaultOrchestratorAgent,

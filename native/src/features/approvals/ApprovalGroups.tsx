@@ -1,27 +1,24 @@
-import { useState, type ReactNode } from 'react';
-import { ActionSheetIOS, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
-import { SectionHeader } from '@/features/panes/PaneKit';
 import { useTheme, withAlpha } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Text } from '@/ui';
 
 import { useApprovalSort } from './approvalSortPreference';
-import { APPROVAL_SORTS, groupApprovals, machineOfflineLine, waitingCounts, type ApprovalEntry, type ApprovalGroup, type ApprovalList, type ApprovalSort, type OfflineMachine } from './approvals';
+import { groupApprovals, machineOfflineLine, type ApprovalEntry, type ApprovalGroup, type ApprovalList, type OfflineMachine } from './approvals';
 
-type MachineOf = (key: string) => Pick<Machine, 'os' | 'slot' | 'state' | 'name'> | undefined;
+export type MachineOf = (key: string) => Pick<Machine, 'os' | 'slot' | 'state' | 'name'> | undefined;
 
 /**
- * Home's Approvals: the sort menu, then what waits on you newest first, flat or in one card per
- * Session or project (its name and its machine's mark above it). Then With the agent (approvals whose
- * reply an agent is reading, P7), one row per machine that isn't online, and the collapsed Stale and
- * Done today groups, none of which count. Each home draws its own rows.
+ * Home's Needs you list: what waits on you newest first, flat or in one card per Session or project
+ * (its name and its machine's mark above it), in the sort chosen on its sheet. Then With the agent
+ * (approvals whose reply an agent is reading, P7) and one row per machine that isn't online, neither
+ * of which counts. The caller draws each row (`renderEntry`).
  */
-export function ApprovalGroups<T extends ApprovalEntry>({ entries, stale = [], answered = [], offline = [], machineOf, renderEntry }: {
+export function ApprovalGroups<T extends ApprovalEntry>({ entries, offline = [], machineOf, renderEntry }: {
   entries: readonly T[];
-  stale?: readonly T[];
-  answered?: readonly T[];
   offline?: readonly OfflineMachine[];
   machineOf: MachineOf;
   /** `divided`: a hairline above every row but a card's first. `list`: the list it is opened from. */
@@ -31,12 +28,9 @@ export function ApprovalGroups<T extends ApprovalEntry>({ entries, stale = [], a
   const sort = useApprovalSort(state => state.sort);
   const onYou = entries.filter(entry => !entry.withAgent);
   const withAgent = entries.filter(entry => entry.withAgent);
-  if (entries.length === 0 && stale.length === 0 && answered.length === 0 && offline.length === 0) return null;
+  if (entries.length === 0 && offline.length === 0) return null;
   return (
     <View testID="approvals-section" style={styles.section}>
-      {/* What waits from every Session plus what waits outside one; answers held for Undo don't count. */}
-      <SectionHeader title="Approvals" count={waitingCounts(entries).total} first />
-      <SortMenu sort={sort} />
       {withAgent.length > 0 && onYou.length > 0 ? <ListLabel testID="approvals-waiting-label" title={`Waiting on you · ${onYou.length}`} /> : null}
       {groupApprovals(onYou, sort).map(group => (
         <GroupCard key={group.key} group={group} machineOf={machineOf} tint={withAlpha(theme.colors.warning, 0.09)} render={(entry, divided) => renderEntry(entry, divided, 'waiting')} />
@@ -58,36 +52,7 @@ export function ApprovalGroups<T extends ApprovalEntry>({ entries, stale = [], a
           </View>
         );
       })}
-      <CollapsedGroup testID="approvals-stale" title="Stale" entries={stale} groups={[{ key: 'stale', label: '', entries: [...stale] }]} machineOf={machineOf} render={(entry, divided) => renderEntry(entry, divided, 'stale')} />
-      <CollapsedGroup testID="approvals-answered" title="Done today" entries={answered} groups={groupApprovals(answered, sort)} machineOf={machineOf} render={(entry, divided) => renderEntry(entry, divided, 'answered')} />
     </View>
-  );
-}
-
-/** The sort's name, opening the phone's own list of the three. */
-function SortMenu({ sort }: { sort: ApprovalSort }) {
-  const theme = useTheme();
-  const setSort = useApprovalSort(state => state.setSort);
-  const label = APPROVAL_SORTS.find(option => option.id === sort)?.label ?? '';
-  const open = () => {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { title: 'Sort approvals', options: [...APPROVAL_SORTS.map(option => option.label), 'Cancel'], cancelButtonIndex: APPROVAL_SORTS.length },
-        index => {
-          const choice = APPROVAL_SORTS[index];
-          if (choice) setSort(choice.id);
-        },
-      );
-    } else {
-      // Android's alert holds three buttons: tapping outside it cancels.
-      Alert.alert('Sort approvals', undefined, APPROVAL_SORTS.map(option => ({ text: option.label, onPress: () => setSort(option.id) })), { cancelable: true });
-    }
-  };
-  return (
-    <Pressable testID="approvals-sort" accessibilityRole="button" accessibilityLabel={`Sort approvals: ${label}`} hitSlop={8} onPress={open} style={styles.sort}>
-      <Text variant="footnote" tone="secondary" numberOfLines={1}>{label}</Text>
-      <Icon ios="chevron.down" android="expand_more" size={12} color={theme.colors.textMuted} />
-    </Pressable>
   );
 }
 
@@ -120,28 +85,11 @@ function GroupCard<T extends ApprovalEntry>({ group, machineOf, tint, render }: 
   );
 }
 
-/** "Stale · 3": closed until tapped. Nothing when it's empty. */
-function CollapsedGroup<T extends ApprovalEntry>({ title, entries, groups, machineOf, render, testID }: { title: string; entries: readonly T[]; groups: ApprovalGroup<T>[]; machineOf: MachineOf; render: (entry: T, divided: boolean) => ReactNode; testID: string }) {
-  const theme = useTheme();
-  const [open, setOpen] = useState(false);
-  if (entries.length === 0) return null;
-  return (
-    <View testID={testID} style={styles.group}>
-      <Pressable testID={`${testID}-toggle`} accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${title}, ${entries.length}`} onPress={() => setOpen(!open)} style={styles.groupHeader}>
-        <Icon ios={open ? 'chevron.down' : 'chevron.right'} android={open ? 'expand_more' : 'chevron_right'} size={12} color={theme.colors.textMuted} />
-        <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.groupLabel}>{`${title} · ${entries.length}`}</Text>
-      </Pressable>
-      {open ? groups.map(group => <GroupCard key={group.key} group={group} machineOf={machineOf} tint={theme.colors.surfaceRaised} render={render} />) : null}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  section: { marginBottom: 12 },
+  section: { gap: 4 },
   group: { gap: 4, marginTop: 4 },
   groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 4, minHeight: 22 },
   groupLabel: { flexShrink: 1, fontWeight: '600' },
-  sort: { flexDirection: 'row', alignSelf: 'flex-start', alignItems: 'center', gap: 4, paddingHorizontal: 4, minHeight: 22 },
   card: { overflow: 'hidden' },
   offline: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, paddingHorizontal: 12, paddingVertical: 10 },
   offlineText: { flex: 1, minWidth: 0 },

@@ -3,6 +3,9 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
+/** Environment for `ps`: the C locale keeps dates and names in one parseable form, and the start text stops compare stable. */
+export const cLocaleEnv = (): NodeJS.ProcessEnv => ({ ...process.env, LC_ALL: 'C' });
+
 /** Reading the whole process table is one call; give it room without hanging teardown. */
 const SNAPSHOT_TIMEOUT_MS = 5_000;
 /** A killed process leaves the table within a few milliseconds, so poll finely. */

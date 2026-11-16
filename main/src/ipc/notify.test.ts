@@ -589,6 +589,39 @@ describe('Approvals items, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it('builds a card from a status file context longer than a card context may be', async () => {
+    const pane = await startWithSessions();
+    const status = {
+      state: 'blocked',
+      step: 'Invoice PDFs',
+      log: Array.from({ length: 60 }, (_, index) => `Step ${index + 1}: rendered the invoice batch and checked every total against the ledger export`),
+      needs_you: { questions: [{ q: 'Use the invoice id or number?', why: 'Ids are stable.', options: ['Invoice id (recommended)', 'Invoice number'] }] },
+    };
+    const context = JSON.stringify(status, null, 2);
+    expect(context.length).toBeGreaterThan(4_000);
+
+    void pane.registry.invoke('runpane:notify', [{ ui: 'ask', title: 'Q-4: Invoice filename', context, caller: { paneId: 'session-pane', panelId: 'orchestrator-panel' } }]);
+    await flush();
+
+    expect(pane.notify.snapshot().items).toMatchObject([
+      { ui: 'options', context: 'Use the invoice id or number?\n\nIds are stable.', choices: [{ label: 'Invoice id', recommended: true }, { label: 'Invoice number' }] },
+    ]);
+    pane.notify.dispose();
+  });
+
+  it('names the status file links a card has no room for', async () => {
+    const pane = await startWithSessions();
+    const needsYou = { questions: [{ q: 'Use the invoice id or number?', why: 'Ids are stable.', options: ['Invoice id (recommended)', 'Invoice number'] }], files: ['/work/a.html', '/work/b.html', '/work/c.html'] };
+    const links = ['one', 'two', 'three', 'four'].map(name => ({ label: name, url: `https://example.com/${name}` }));
+    void pane.registry.invoke('runpane:notify', [{ ui: 'ask', title: 'Q-4: Invoice filename', context: JSON.stringify(needsYou), links, caller: { paneId: 'session-pane', panelId: 'orchestrator-panel' } }]);
+    await flush();
+
+    const [card] = pane.notify.snapshot().items;
+    expect(card.links?.map(link => link.label)).toEqual(['one', 'two', 'three', 'four', 'a.html', 'b.html']);
+    expect(card.context).toBe('Use the invoice id or number?\n\nIds are stable.\n\nMore links: c.html');
+    pane.notify.dispose();
+  });
+
   it('gives each question of a two-question needs_you context its own buttons, and lists them when the card cannot take buttons', async () => {
     const pane = await startWithSessions();
     const caller = { paneId: 'loose', panelId: 'loose-panel' };

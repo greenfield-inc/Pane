@@ -942,12 +942,20 @@ test('docs search finds docs, help, and installed skills; docs read and resource
   const skillDir = path.join(paneDir, 'skills', 'pane-chat', 'skills', 'zebra-release');
   fs.mkdirSync(skillDir, { recursive: true });
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: zebra-release\ndescription: "Ship a zebra release"\n---\n\nRun the zebrafication checklist before tagging.\n');
+  for (let index = 0; index < 25; index++) {
+    const dir = path.join(paneDir, 'skills', 'pane-chat', 'skills', `quokka-${index}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nname: quokka\n---\n\nQuokkafication steps.\n');
+  }
   try {
     await withMcpClient(async (client) => {
       const skill = (await client.callTool({ name: 'docs_search', arguments: { query: 'zebrafication checklist' } })).structuredContent;
       assert.equal(skill.results[0].path, 'skills/zebra-release/SKILL.md');
       assert.equal(skill.results[0].kind, 'skill');
       assert.match(skill.results[0].excerpt, /zebrafication checklist/);
+
+      const many = (await client.callTool({ name: 'docs_search', arguments: { query: 'quokkafication', limit: 25 } })).structuredContent;
+      assert.equal(many.results.length, 25, 'a --limit above 20 returns every match it asks for');
 
       const doc = (await client.callTool({ name: 'docs_search', arguments: { query: 'pane mcp toolsets', limit: 3 } })).structuredContent;
       assert.ok(doc.results.some((result) => result.path === 'docs/PANE_MCP.md'), JSON.stringify(doc.results));

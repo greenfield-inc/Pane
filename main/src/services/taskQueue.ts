@@ -23,6 +23,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { withLock } from '../utils/mutex';
 import { PaneError } from '../../../shared/paneError';
 import type { RunpanePaneBase } from '../../../shared/types/runpaneOrchestration';
+import { COMMAND_OUTPUT_LIMIT } from '../utils/commandExecutor';
 
 const loadQueueDependency = createRequire(__filename);
 
@@ -160,6 +161,9 @@ export class TaskQueue {
   private readonly setupWaiters: Array<{ sessionId: string; start: () => void }> = [];
   private readonly setupRuns = new Map<string, Promise<void>>();
   private readonly setupLineWrites = new Map<string, Promise<void>>();
+
+  private installsOneAtATime: () => boolean = () => false;
+  private installChain: Promise<void> = Promise.resolve();
 
   constructor(private options: TaskQueueOptions) {
     console.log('[TaskQueue] Initializing task queue...');
@@ -655,8 +659,30 @@ export class TaskQueue {
     }
   }
 
+  /** Machine health: while memory is tight, dependency installs run one at a time. */
+  setInstallsOneAtATime(whenTrue: () => boolean): void {
+    this.installsOneAtATime = whenTrue;
+  }
+
   /** Awaited so the install holds its setup slot; the terminal shows how it went. */
   private async installDependencies(sessionId: string, installCommand: string, worktreePath: string, ctx: ProjectContext): Promise<void> {
+    const previous = this.installChain;
+    let release = () => {};
+    const mine = new Promise<void>(resolve => { release = resolve; });
+    // Every install joins the chain, so one that started before memory got tight still holds back the next.
+    this.installChain = Promise.all([previous, mine]).then(() => undefined);
+    try {
+      if (this.installsOneAtATime()) {
+        await this.writeSetupLines(sessionId, worktreePath, ctx, ['Memory is tight, so dependency installs run one at a time.']);
+        await previous;
+      }
+      await this.runInstall(sessionId, installCommand, worktreePath, ctx);
+    } finally {
+      release();
+    }
+  }
+
+  private async runInstall(sessionId: string, installCommand: string, worktreePath: string, ctx: ProjectContext): Promise<void> {
     this.options.sessionManager.updateSessionStatus(sessionId, 'initializing', `Installing dependencies: ${installCommand}`);
     await this.writeSetupLines(sessionId, worktreePath, ctx, [`Installing dependencies: ${installCommand}`]);
     const startedAt = Date.now();
@@ -674,7 +700,9 @@ export class TaskQueue {
           stdout: boundary.optional(boundary.string),
           message: boundary.optional(boundary.string),
         }));
-        reason = installFailureLine(`${failure.stderr ?? ''}\n${failure.stdout ?? ''}`) ?? firstLine(failure.message ?? reason);
+        reason = installError instanceof Error && 'code' in installError && installError.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+          ? `it printed more than ${COMMAND_OUTPUT_LIMIT / 1024 / 1024} MB of output`
+          : installFailureLine(`${failure.stderr ?? ''}\n${failure.stdout ?? ''}`) ?? firstLine(failure.message ?? reason);
       } catch { /* "unknown error" still reports the failure. */ }
       await this.writeSetupLines(sessionId, worktreePath, ctx, [`Dependency install failed: ${reason.slice(0, 200)}. Run ${installCommand} to retry.`]);
     }
