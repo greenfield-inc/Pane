@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { ArtifactFormat } from './commands';
-import type { BoundarySchema } from './boundaryDecoder';
+import type { BoundarySchema, JsonObject } from './boundaryDecoder';
 import { archAliases, defaultFormat, platformParam, type PanePlatform } from './platform';
 
 const GITHUB_API_BASE = 'https://api.github.com/repos/greenfield-inc/Pane/releases';
@@ -76,15 +76,16 @@ export async function resolveRelease(options: ResolveReleaseOptions): Promise<Re
   const artifact = findArtifact(release, options.platform, format);
   const preferredDownloadUrl = buildPreferredDownloadUrl(options, format, release);
 
-  return {
+  const resolved: ResolvedRelease = {
     release,
-    ...(lookup ? { lookup } : {}),
     artifact,
     format,
     preferredDownloadUrl,
     fallbackDownloadUrl: artifact.browser_download_url,
     checksumUrl: `https://github.com/greenfield-inc/Pane/releases/download/${release.tag_name}/SHA256SUMS.txt`
   };
+  if (lookup) resolved.lookup = lookup;
+  return resolved;
 }
 
 export async function fetchRelease(version: string, timeoutMs?: number): Promise<GitHubRelease> {
@@ -210,7 +211,7 @@ export async function fetchReleaseCached(version: string, options: CachedRelease
 }
 
 function readReleaseCacheFile(cacheFile: string): ReleaseCacheFile | undefined {
-  let parsed: { version: number; entries: Record<string, unknown> };
+  let parsed: { version: number; entries: JsonObject };
   try {
     parsed = decodeBoundary(JSON.parse(fs.readFileSync(cacheFile, 'utf8')), releaseCacheFileSchema);
   } catch {
