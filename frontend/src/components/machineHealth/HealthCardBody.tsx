@@ -12,7 +12,7 @@ export interface HealthCardBodyProps {
   item: NotifyItem & { machineHealth: MachineHealthCard };
   /** Answers the card with one of its choices; it runs on the machine that raised it. */
   onAnswer: (choice: string) => void;
-  /** Opens Pane Chat on this screen's machine with the card's list. */
+  /** Hands the card's list to an agent in a Clean up Session and shows it. */
   onAskAgent: () => void;
   /** Opens Resources with the card's machine selected; absent until the page exists here. */
   onReview?: () => void;
@@ -109,7 +109,7 @@ export function HealthCardBody({ item, onAnswer, onAskAgent, onReview, machineNa
         <button type="button" onClick={onAskAgent}
           className="flex flex-col items-start gap-1 rounded-lg border border-border-primary px-4 py-3 text-left hover:bg-surface-hover">
           <span className="flex items-center gap-2 font-medium text-text-primary"><Sparkles className="h-4 w-4" aria-hidden="true" />Ask an agent</span>
-          <span className="text-sm text-text-secondary">{machineName ? `Opens Pane Chat with this list; the agent works on ${machineName}.` : 'Opens Pane Chat with this list; the agent asks you before it changes anything.'}</span>
+          <span className="text-sm text-text-secondary">{machineName ? `Opens a Session with this list; the agent works on ${machineName}.` : 'Opens a Session with this list; the agent asks you before it changes anything.'}</span>
         </button>
       </div>
 

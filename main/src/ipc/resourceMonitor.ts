@@ -3,7 +3,10 @@ import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandReg
 import type { AppServices } from './types';
 import { resourceMonitorService } from '../services/resourceMonitorService';
 import { RECLAIM_KINDS, MACHINE_HEALTH_ASK_AGENT_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RELIEF_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_HISTORY_CHANNEL, MACHINE_HEALTH_INVENTORY_CHANNEL, MACHINE_HEALTH_SNAPSHOT_CHANNEL } from '../../../shared/types/machineHealth';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
+import { terminalPanelManager } from '../services/terminalPanelManager';
+import { bracketedPaste, normalizePromptNewlines, stripTrailingNewlines } from '../services/agents/promptDelivery';
 import { PaneError } from '../../../shared/paneError';
 import { logsManager } from '../services/panels/logPanel/logsManager';
 import { canRestartProcess } from '../services/machineHealth/memoryRelief';
@@ -37,6 +40,11 @@ const DAEMON_RESOURCE_MONITOR_CHANNELS = [
   MACHINE_HEALTH_IGNORE_LEAK_CHANNEL,
   MACHINE_HEALTH_ASK_AGENT_CHANNEL,
 ] as const;
+
+/** How long an agent that missed the first 30 s may take to start before its request is dropped. */
+const LATE_AGENT_WAIT_MS = 10 * 60_000;
+/** Requests waiting for an agent that missed the first 30 s, by panel. */
+const lateRequests = new Map<string, string>();
 
 export function registerResourceMonitorHandlers(
   ipcMain: IpcMain,
@@ -140,14 +148,84 @@ export function registerResourceMonitorHandlers(
     return { ignored: identity.pid };
   });
 
+  // The request goes to a Session named for the machine, started and shown, so it never depends
+  // on a tab the window has not opened yet. A second request reuses that Session while it is open.
   commandRegistry.register(MACHINE_HEALTH_ASK_AGENT_CHANNEL, async (value: PaneCommandValue) => {
-    const { prompt } = decodeBoundary(value, boundary.object({ prompt: boundary.nonEmptyString }));
-    if (!services.paneChatManager) {
-      throw new PaneError('ERR_MACHINE_HEALTH_UNAVAILABLE', 'Pane Chat is not running in this Pane process, so nothing was sent.', 'Open Pane Chat, then try Ask an agent again.');
+    const { name, prompt } = decodeBoundary(value, boundary.object({ name: boundary.nonEmptyString, prompt: boundary.nonEmptyString }));
+    const sessions = services.orchestrationSessionManager;
+    if (!sessions) {
+      throw new PaneError('ERR_MACHINE_HEALTH_UNAVAILABLE', 'Sessions are not running in this Pane process, so no agent was asked.', 'Restart Pane, then try Ask an agent again.');
     }
-    const chat = await services.paneChatManager.getOrCreate();
-    await commandRegistry.invoke('runpane:panels:submit', [{ panelId: chat.panel.id, input: prompt }]);
-    return { panelId: chat.panel.id };
+    const submit = (panelId: string) => {
+      // A request sent now replaces one still waiting for this agent to start.
+      lateRequests.delete(panelId);
+      return commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: prompt, source: 'user', expectReport: false }]);
+    };
+    const ready = async (panelId: string, timeoutMs?: number) =>
+      decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:wait', [{ panelId, condition: 'ready', timeoutMs }]), boundary.object({ ok: boundary.boolean }))?.ok === true;
+    /**
+     * Types the request once the agent is ready (30 s). An agent still starting gets it later: a
+     * terminal agent in its input box, for the person to send; a chat tab as a queued message.
+     */
+    const typeWhenReady = async (panelId: string, panelType: string): Promise<boolean> => {
+      if (await ready(panelId)) {
+        await submit(panelId);
+        return true;
+      }
+      void services.notifyService?.queue.ask({
+        question: { ui: 'info', title: 'The agent is still starting', context: 'Your cleanup request will appear in its input box when it is ready. Press Enter there to send it.' },
+        source: { name: 'Pane', agent: 'Pane' },
+      });
+      // One late delivery per agent: a later click while it waits only updates the request.
+      const waiting = lateRequests.has(panelId);
+      lateRequests.set(panelId, prompt);
+      if (waiting) return false;
+      void (async () => {
+        if (!(await ready(panelId, LATE_AGENT_WAIT_MS))) return;
+        const request = lateRequests.get(panelId);
+        lateRequests.delete(panelId);
+        if (request === undefined) return;
+        if (panelType === 'chat') {
+          await commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: request, source: 'user', expectReport: false }]);
+          return;
+        }
+        // Never into a draft the person is typing.
+        const screen = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:screen', [{ panelId }]), boundary.object({ composer: boundary.object({ hasUndeliveredText: boundary.boolean }) }));
+        if (screen?.composer.hasUndeliveredText !== false) return;
+        // As runpane stages composer text: newlines stay text inside one bracketed paste, never Enter.
+        const text = stripTrailingNewlines(normalizePromptNewlines(request));
+        terminalPanelManager.writeToTerminal(panelId, terminalPanelManager.isBracketedPasteEnabled(panelId) ? bracketedPaste(text) : text.replace(/\n+/gu, ' '));
+      })().catch(error => console.warn('[MachineHealth] Ask an agent: the late agent did not get the request:', error));
+      return false;
+    };
+    const key = (sessionName: string) => sessionName.trim().toLocaleLowerCase();
+    // The machine's Session, or the numbered one that replaced it after it was archived.
+    const ours = (sessionName: string) => key(sessionName) === key(name) || (key(sessionName).startsWith(`${key(name)} `) && /^\d+$/.test(key(sessionName).slice(key(name).length + 1)));
+    const { sessions: all } = await sessions.list();
+    const open = all.find(session => ours(session.name) && session.archived !== true);
+    if (open) {
+      const view = await sessions.getView({ sessionId: open.id });
+      const resumed = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId: view.panel.id }]), boundary.object({ action: boundary.string }));
+      // A running agent queues the request behind its turn; one just started gets it once it is ready.
+      if (resumed?.action === 'already-running') {
+        await submit(view.panel.id);
+        return { sessionId: view.session.id, panelId: view.panel.id, typed: true };
+      }
+      return { sessionId: view.session.id, panelId: view.panel.id, typed: await typeWhenReady(view.panel.id, view.panel.type) };
+    }
+    // An archived Session keeps its name, so the new one takes the next free number.
+    let fresh = name;
+    for (let n = 2; all.some(session => key(session.name) === key(fresh)); n += 1) fresh = `${name} ${n}`;
+    // As the Pane Chat offer does: the request rides on the agent's launch line when the shell allows it.
+    const atLaunch = terminalPanelManager.launchShellIsPosix();
+    const view = await sessions.create({
+      name: fresh, launchCommand: '', customResume: null,
+      openingPrompt: atLaunch ? `${PANE_ONE_TIME_PROMPT_OPENING}, when you clicked Ask an agent in Resources: ${prompt}` : undefined,
+    });
+    if (view.panel.type === 'terminal') await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
+    // PowerShell and cmd cannot carry it on the launch line: type it once the agent is ready.
+    const typed = atLaunch || await typeWhenReady(view.panel.id, view.panel.type);
+    return { sessionId: view.session.id, panelId: view.panel.id, typed };
   });
 
   commandRegistry.bindChannels(ipcMain, DAEMON_RESOURCE_MONITOR_CHANNELS);

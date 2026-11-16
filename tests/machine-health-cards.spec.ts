@@ -26,7 +26,7 @@ test.describe('Machine health cards', () => {
     await open(page, 'kind=memory&remote=1');
     await expect(page.getByRole('heading', { name: 'build-box: memory is tight' })).toBeVisible();
     await expect(page.getByText('Using the most memory on build-box')).toBeVisible();
-    await expect(page.getByText('Opens Pane Chat with this list; the agent works on build-box.')).toBeVisible();
+    await expect(page.getByText('Opens a Session with this list; the agent works on build-box.')).toBeVisible();
   });
 
   test('disk: every item Clean up deletes is listed, with what it frees', async ({ page }) => {

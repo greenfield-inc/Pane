@@ -3,6 +3,9 @@ import { ResourcesView } from '../../frontend/src/components/machineHealth/Resou
 import { useNavigationStore } from '../../frontend/src/stores/navigationStore';
 import { usePanelStore } from '../../frontend/src/stores/panelStore';
 import { useConfigStore } from '../../frontend/src/stores/configStore';
+import { useActiveMachineStore } from '../../frontend/src/stores/activeMachineStore';
+import { useAllMachinesStore } from '../../frontend/src/stores/allMachinesStore';
+import { useOrchestrationSessionStore } from '../../frontend/src/stores/orchestrationSessionStore';
 import { MachineHealthSettings } from '../../frontend/src/components/settings/categories/MachineHealthSettings';
 import { useSettingsPersistence } from '../../frontend/src/components/settings/useSettingsPersistence';
 import type { AppConfig, UpdateConfigRequest } from '../../frontend/src/types/config';
@@ -12,7 +15,9 @@ import type { CleanupRun, MachineHealthSnapshot, StorageInventory } from '../../
 import '../../frontend/src/index.css';
 
 // The Resources page on canned machines: ?machine=local|devbox, ?theme=dark, ?leak=1 (a leaking dev server),
-// ?housekeeping=off (another Pane owns the data folder, so this one runs no cleanup), ?view=settings (Settings › Machine health).
+// ?housekeeping=off (another Pane owns the data folder, so this one runs no cleanup), ?view=settings (Settings › Machine health),
+// ?window=devbox (the window is switched to the devbox). Ask an agent answers with Session qa-session; the Session
+// selected lands in window.qaSelected and each machine switch in window.qaSwitches.
 // The build-box runs an older Pane (no machine health channels) and travel-laptop is offline.
 // Every machine health command lands in window.qaRuns; window.qaSetStatus(id, status) changes a machine's status.
 declare global {
@@ -21,6 +26,8 @@ declare global {
     qaInvokes: Array<{ channel: string; args: unknown[] }>;
     qaSetStatus: (machineId: string, status: MachineState['status']) => void;
     qaConfigUpdates: UpdateConfigRequest[];
+    qaSelected: string[];
+    qaSwitches: string[];
   }
 }
 window.qaRuns = [];
@@ -113,7 +120,10 @@ const api = {
     },
     run: async (machineId: string, command: MachineCommand) => { window.qaRuns.push({ machineId, command }); return { machineId, data: null }; },
   },
-  invoke: async (channel: string, ...args: unknown[]) => { window.qaInvokes.push({ channel, args }); return null; },
+  invoke: async (channel: string, ...args: unknown[]) => {
+    window.qaInvokes.push({ channel, args });
+    return channel === 'resource-monitor:machine-ask-agent' ? { sessionId: 'qa-session', panelId: 'qa-panel' } : null;
+  },
 };
 Object.assign(window, { electronAPI: api });
 const tab = (id: string, sessionId: string, title: string): ToolPanel => ({
@@ -121,6 +131,17 @@ const tab = (id: string, sessionId: string, title: string): ToolPanel => ({
 });
 usePanelStore.setState({ panels: { s1: [tab('p1', 's1', 'Claude'), tab('p2', 's1', 'Terminal 1')], s3: [tab('p3', 's3', 'Codex')] } });
 useNavigationStore.setState({ activeView: 'resources', resourcesMachineId: params.get('machine') ?? 'local' });
+window.qaSelected = [];
+window.qaSwitches = [];
+useOrchestrationSessionStore.setState({ select: async ({ sessionId }) => { if (sessionId) window.qaSelected.push(sessionId); } });
+if (params.get('window') === 'devbox') useActiveMachineStore.setState({ machine: { id: 'devbox', name: 'devbox', os: 'windows', slot: 1, letters: 'D', local: false } });
+useAllMachinesStore.setState({
+  switchMachine: async machineId => {
+    window.qaSwitches.push(machineId);
+    useActiveMachineStore.setState({ machine: null });
+    return { ok: true };
+  },
+});
 
 // SAFETY: these screens read only machineHealth from the config.
 useConfigStore.setState({ config: { machineHealth: { autoClearAgentTemp: true, finishedIdleDays: 14 } } as AppConfig });

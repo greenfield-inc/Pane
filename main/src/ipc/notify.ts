@@ -113,6 +113,7 @@ const notifyCommandSchema = boundary.union(
   idCommand('dismiss'),
   idCommand('skip'),
   idCommand('open-in-pane'),
+  idCommand('ask-agent'),
   boundary.object({ type: boundary.literal('open-link'), id: boundary.nonEmptyString, index: boundary.number, paneId: boundary.optional(boundary.nonEmptyString) }),
   boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h', 'pane') }),
   boundary.object({ type: boundary.literal('hover-info'), id: boundary.nonEmptyString, hovering: boundary.boolean }),

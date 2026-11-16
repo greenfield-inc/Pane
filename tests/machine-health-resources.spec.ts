@@ -64,6 +64,43 @@ test.describe('Resources page', () => {
     await expect(page.getByRole('status')).toHaveText('Update Pane on this machine to see its health.');
   });
 
+  test('switching machine replaces every section with the new machine\'s', async ({ page }) => {
+    await open(page, 'machine=devbox');
+    await expect(page.getByText('Runs on devbox').first()).toBeVisible();
+    await page.getByRole('button', { name: /devbox/ }).first().click();
+    await page.getByRole('listbox', { name: 'Machine' }).getByText('Studio-Mac').click();
+    await expect(page.getByText('Pressure high')).toBeVisible();
+    await expect(page.getByRole('heading', { name: /^Recommendations/ })).toHaveCount(1);
+    await expect(page.getByRole('region', { name: 'Per Pane' })).toHaveCount(1);
+    await expect(page.getByText('Runs on devbox')).toHaveCount(0);
+  });
+
+  test('Ask an agent hands the request to a Clean up Session and shows it; a linked machine is reached by its saved id', async ({ page }) => {
+    await open(page, 'machine=devbox');
+    await page.getByRole('button', { name: 'Ask an agent to clean up' }).click();
+    await expect.poll(() => page.evaluate(() => window.qaSelected)).toEqual(['qa-session']);
+    const [ask] = await page.evaluate(() => window.qaInvokes.filter(call => call.channel === 'resource-monitor:machine-ask-agent'));
+    expect(ask.args).toEqual([{ name: 'Clean up devbox', prompt: expect.stringMatching(/^This is about the linked machine devbox\. Run each runpane command there as `runpane workspace devbox <command>`\. Help me free disk and memory on devbox\./) }]);
+    expect(await page.evaluate(() => window.qaSwitches)).toEqual([]);
+  });
+
+  test('with the window on the devbox, its own request runs there and a request about this computer switches back first', async ({ page }) => {
+    await open(page, 'machine=devbox&window=devbox');
+    await page.getByRole('button', { name: 'Ask an agent to clean up' }).click();
+    await expect.poll(() => page.evaluate(() => window.qaSelected.length)).toBe(1);
+    await page.getByRole('button', { name: /devbox/ }).first().click();
+    await page.getByRole('listbox', { name: 'Machine' }).getByText('Studio-Mac').click();
+    await expect(page.getByText('Pressure high')).toBeVisible();
+    await page.getByRole('button', { name: 'Ask an agent to clean up' }).click();
+    await expect.poll(() => page.evaluate(() => window.qaSelected.length)).toBe(2);
+    const asks = await page.evaluate(() => window.qaInvokes.filter(call => call.channel === 'resource-monitor:machine-ask-agent').map(call => call.args[0]));
+    expect(asks).toEqual([
+      { name: 'Clean up devbox', prompt: expect.stringMatching(/^Help me free disk and memory on devbox\./) },
+      { name: 'Clean up Studio-Mac', prompt: expect.stringMatching(/^Help me free disk and memory on Studio-Mac\./) },
+    ]);
+    expect(await page.evaluate(() => window.qaSwitches)).toEqual(['local']);
+  });
+
   test('a machine that goes offline keeps its last reading, greyed, with every action off', async ({ page }) => {
     await open(page, 'machine=devbox');
     await expect(page.getByText('Pressure normal')).toBeVisible();
