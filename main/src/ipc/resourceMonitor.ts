@@ -33,7 +33,7 @@ export function registerResourceMonitorHandlers(
     return services.machineHealth;
   };
   commandRegistry.register(MACHINE_HEALTH_SNAPSHOT_CHANNEL, async () => machineHealth().getSnapshot());
-  /** The storage inventory; `{ refresh: true }` walks the disk again (seconds to minutes) instead of returning the cached one. */
+  /** The last storage inventory, or null before the first scan; `{ refresh: true }` also starts a new scan in the background. */
   commandRegistry.register(MACHINE_HEALTH_INVENTORY_CHANNEL, async (options?: { refresh?: boolean }) =>
     machineHealth().getInventory(options?.refresh === true));
 

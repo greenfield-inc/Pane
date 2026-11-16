@@ -10,6 +10,8 @@ const SAMPLE_INTERVAL_MS = 60_000;
 const FIRST_SAMPLE_DELAY_MS = 20_000;
 const INVENTORY_INTERVAL_MS = 24 * 60 * 60_000;
 const FIRST_INVENTORY_DELAY_MS = 10 * 60_000;
+/** A disk warning rescans only when the last scan is older than this, so a level flapping at a threshold costs one walk an hour. */
+const INVENTORY_FRESH_MS = 60 * 60_000;
 const GB = 1024 ** 3;
 const MINUTE = 60_000;
 const FOOTPRINT_SLACK_MS = 5_000;
@@ -106,7 +108,9 @@ export class MachineHealthService extends EventEmitter {
     firstScan.unref?.();
     this.inventoryTimer = firstScan;
     this.on('level-changed', (change: LevelChange) => {
-      if (change.kind === 'disk' && change.level !== 'ok') void this.scanSafely();
+      if (change.kind !== 'disk' || change.level === 'ok') return;
+      if (this.inventory && this.deps.now() - this.inventory.scannedAt < INVENTORY_FRESH_MS) return;
+      void this.scanSafely();
     });
   }
 
@@ -117,10 +121,15 @@ export class MachineHealthService extends EventEmitter {
     this.inventoryTimer = null;
   }
 
-  /** The cached inventory, scanning first when there is none or `refresh` asks for a new one. */
-  async getInventory(refresh = false): Promise<StorageInventory> {
-    if (this.inventory && !refresh) return this.inventory;
-    return this.scanInventory();
+  /**
+   * The cached inventory, or null before the first scan finishes. Never waits for a walk. With none, a read
+   * starts one scan (shared with any in flight) and nothing else; `refresh` (Measure now, Run now) scans and
+   * then runs the scheduled pass. `inventory` fires when a scan ends.
+   */
+  getInventory(refresh = false): StorageInventory | null {
+    if (refresh) void this.scanSafely();
+    else if (!this.inventory && !this.inventoryInFlight) void this.scanInventory().catch(() => undefined);
+    return this.inventory;
   }
 
   /** One scan; concurrent callers share it. */
