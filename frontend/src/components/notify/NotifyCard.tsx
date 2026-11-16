@@ -11,7 +11,7 @@ import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
 import { ClampedText } from './ClampedText';
 import { HealthCardBody } from '../machineHealth/HealthCardBody';
-import { askAgentAbout, isHealthCard, remoteMachineName, type HealthNotifyItem } from '../machineHealth/healthCardActions';
+import { askAgentAbout, isHealthCard, remoteMachineName, reviewHealthCard, type HealthNotifyItem } from '../machineHealth/healthCardActions';
 
 /** The compact strip shows this many choices, then More. */
 const COMPACT_CHOICE_LIMIT = 4;
@@ -1165,6 +1165,7 @@ function HealthNotifyCard({ item, form, onCommand, className }: NotifyCardProps 
         machineName={remoteMachineName(item)}
         onAnswer={choice => onCommand({ type: 'answer', id: item.id, answer: { choice } })}
         onAskAgent={() => { void askAgentAbout(item); }}
+        onReview={form === 'strip' ? undefined : () => { void reviewHealthCard(item); }}
       />
     </div>
   );

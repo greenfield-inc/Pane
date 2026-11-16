@@ -115,6 +115,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     aliases: ['git', 'worktree', 'commit', 'pull request', 'pr', 'attribution', 'committer', 'author', 'ide', 'editor', 'open in ide', 'archive', 'retention', 'delete', 'cleanup', 'scratch', 'disk space'],
   },
   {
+    id: 'machine-health',
+    label: 'Machine health',
+    description: 'Disk and memory warnings, finished Panes, leaks, and what Pane may clean up by itself.',
+    icon: Gauge,
+    settingIds: ['machine-health-disk', 'machine-health-memory', 'machine-health-finished', 'machine-health-leak', 'machine-health-automatic', 'machine-health-run-now'],
+    aliases: ['storage', 'disk', 'disk space', 'free space', 'memory', 'ram', 'pressure', 'swap', 'leak', 'leaking', 'cleanup', 'clean up', 'resources', 'temp', 'tmp', 'snapshot', 'backup', 'finished', 'archive', 'processes'],
+  },
+  {
     id: 'notifications',
     label: 'Notifications',
     description: 'Desktop alerts, permissions, and sound.',

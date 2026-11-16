@@ -7,6 +7,7 @@ export type SettingsCategoryId =
   | 'agents'
   | 'usage'
   | 'worktrees-git'
+  | 'machine-health'
   | 'notify'
   | 'autopilot'
   | 'notifications'
@@ -22,6 +23,12 @@ export type SettingsCategoryId =
 export type RemoteAccessSubviewId = 'host-setup' | 'advanced-host';
 
 export type SettingsSettingId =
+  | 'machine-health-disk'
+  | 'machine-health-memory'
+  | 'machine-health-finished'
+  | 'machine-health-leak'
+  | 'machine-health-automatic'
+  | 'machine-health-run-now'
   | 'automatic-updates'
   | 'check-updates-now'
   | 'send-feedback'

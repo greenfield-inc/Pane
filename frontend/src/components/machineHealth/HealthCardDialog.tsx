@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Modal } from '../ui/Modal';
 import { selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { HealthCardBody } from './HealthCardBody';
-import { answerHealthCard, askAgentAbout, cardTitle, isHealthCard, remoteMachineName } from './healthCardActions';
+import { answerHealthCard, askAgentAbout, cardTitle, isHealthCard, remoteMachineName, reviewHealthCard } from './healthCardActions';
 
 /**
  * Inside the Pane window, a waiting machine health card opens as a dialog, this
@@ -29,6 +29,7 @@ export function HealthCardDialog({ suppressed }: { suppressed: boolean }) {
           machineName={remoteMachineName(card)}
           onAnswer={answer}
           onAskAgent={() => { void askAgentAbout(card); close(); }}
+          onReview={() => { void reviewHealthCard(card); close(); }}
         />
       </div>
     </Modal>

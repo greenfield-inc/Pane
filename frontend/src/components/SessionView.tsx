@@ -1,3 +1,4 @@
+import { ResourcesView } from './machineHealth/ResourcesView';
 import { AutopilotView } from './autopilot/AutopilotView';
 import { useRef, useEffect, useState, memo, useMemo, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -1950,6 +1951,10 @@ export const SessionView = memo(() => {
 
   if (activeView === 'autopilot') {
     return <AutopilotView />;
+  }
+
+  if (activeView === 'resources') {
+    return <ResourcesView />;
   }
 
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);
