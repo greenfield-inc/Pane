@@ -1123,7 +1123,7 @@ function promptSize(body: Pick<ChatTabSend, 'text' | 'images'>): number {
   return body.text.length + (body.images ?? []).reduce((sum, image) => sum + image.data.length, 0);
 }
 
-/** Context usage, background tasks and the last /clear, each only when there is one. */
+/** A queued message as ACP prompt content. */
 function promptContent(body: { text?: string; images?: Array<{ mimeType: string; data: string }> }): ContentBlock[] {
   return [
     ...(body.text ? [{ type: 'text' as const, text: body.text }] : []),
@@ -1131,6 +1131,7 @@ function promptContent(body: { text?: string; images?: Array<{ mimeType: string;
   ];
 }
 
+/** Context usage, background tasks, the last /clear and whether Send now steers, each only when there is one. */
 function extras(state: ChatPanelState, runtime: ChatTabRuntime | undefined): Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt' | 'sendNowSteers'> {
   const result: Pick<ChatTabView, 'context' | 'tasks' | 'clearedAt' | 'sendNowSteers'> = {};
   if (runtime?.canSteer() && !runtime.isWorkingAlone()) result.sendNowSteers = true;
