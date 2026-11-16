@@ -6,7 +6,7 @@ import { tabListener } from '../services/tabListener';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
-import { Notification, powerMonitor, type App, type BrowserWindow } from 'electron';
+import { powerMonitor, type App, type BrowserWindow } from 'electron';
 import { runStartupRetentionSweep, startupPanelBufferMigration } from '../services/database';
 import { ConfigManager } from '../services/configManager';
 import { Logger } from '../utils/logger';
@@ -68,6 +68,7 @@ import { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import { FinishedPaneMonitor, findFinishedPanes } from '../services/machineHealth/finishedPanes';
 import { MemoryRelief } from '../services/machineHealth/memoryRelief';
 import { HealthCardController } from '../services/machineHealth/healthCardController';
+import { showDesktopAlert } from '../ipc/desktopAlerts';
 import type { FinishedPane } from '../services/machineHealth/finishedPanes';
 import { stopProcessIdentities } from '../services/archiveProcessTracker';
 import type { LevelChange } from '../services/machineHealth/machineHealthService';
@@ -103,7 +104,7 @@ import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
 import { WorkspaceCursorStore } from '../services/workspaceCursorStore';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { startArchiveExpiry } from '../services/archiveExpiry';
 import { ARCHIVE_EXPIRY_START_DELAY_MS } from '../../../shared/constants/archiveRetention';
 
@@ -162,6 +163,9 @@ function registerPowerMonitorDiagnostics(logger: Logger): void {
 function megabytes(bytes: number | null): string {
   return bytes === null ? 'unknown' : `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
+
+/** Leftover processes the person chose to keep (pid:start), so a restart does not ask about them again. */
+const KEPT_PROCESSES_PREFERENCE = 'machine_health_kept_processes';
 
 export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Promise<PaneDaemonHost> {
   const mode = options.mode ?? 'desktop';
@@ -819,6 +823,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     });
   }
   const latestPaneMemoryMB = (paneId: string) => machineHealth.latestSnapshot()?.panes.find(pane => pane.sessionId === paneId)?.rssMB ?? 0;
+  const paneState = (paneId: string): 'archived' | 'paused' | 'open' => {
+    const session = databaseService.getSession(paneId);
+    if (!session || session.archived) return 'archived';
+    return panePausedMark(panelManager.getPanelsForSession(paneId)) ? 'paused' : 'open';
+  };
   const memoryRelief = new MemoryRelief({
     now: () => Date.now(),
     paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
@@ -849,17 +858,32 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     idleOffer: () => memoryRelief.idleOffer(),
     pauseIdleHours: () => configManager.getConfig().machineHealth?.pauseIdleHours ?? 2,
     paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
-    canRestart: async leak => leak.panelId === null && await logsManager.isRunning(leak.sessionId),
-    cleanUp: async itemIds => { await machineCleanup.run({ source: 'card', tiers: [1, 2], ids: itemIds }); },
+    paneState,
+    tabName: panelId => panelManager.getPanel(panelId)?.title ?? null,
+    // Only a process inside the run script's own tree: an escaped one or a WSL one is not the script's.
+    canRestart: async leak => leak.panelId === null
+      && machineHealth.latestSnapshot()?.panes.some(pane => pane.processes.some(proc => proc.pid === leak.pid && proc.started === leak.started && !proc.escaped)) === true
+      && await logsManager.isRunning(leak.sessionId),
+    cleanUp: async itemIds => {
+      await machineCleanup.run({ source: 'card', tiers: [1, 2], ids: itemIds });
+      // Rescan so Resources and the CLI stop listing what the card removed.
+      void machineHealth.scanInventory().catch(() => undefined);
+    },
+    readKept: () => {
+      try {
+        return decodeOptionalBoundary(JSON.parse(databaseService.getUserPreference(KEPT_PROCESSES_PREFERENCE) ?? '[]'), boundary.array(boundary.string)) ?? [];
+      } catch {
+        return [];
+      }
+    },
+    writeKept: identities => databaseService.setUserPreference(KEPT_PROCESSES_PREFERENCE, JSON.stringify(identities)),
     pauseIdle: async () => { await memoryRelief.pauseIdle('card'); },
     stopProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, [{ source: 'card', processes: [{ pid: leak.pid, started: leak.started }] }]); },
+    stopProcesses: processes => memoryRelief.stopProcesses(processes, 'card'),
     restartProcess: async leak => { await commandRegistry.invoke(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, [{ pid: leak.pid, started: leak.started }]); },
     ignoreLeak: leak => machineHealth.ignoreLeak(leak.pid, leak.started),
     archive: async paneIds => { await finishedPanes.archive(paneIds, 'card'); },
-    alert: (title, body) => {
-      if (!options.app || options.getMainWindow()?.isFocused() || !Notification.isSupported()) return;
-      new Notification({ title, body }).show();
-    },
+    alert: (title, body) => showDesktopAlert(services, services.notifyService?.queue.alertsHere() ?? true, title, body),
     log: message => logger.warn(message),
   });
   if (duties.housekeeping) {

@@ -30,6 +30,24 @@ export function isDesktopAlertHandedOff(leases: WorkspaceWatchLeases | undefined
 
 // Held until the OS answers; an unreferenced Electron Notification can be collected before `show`/`failed`.
 let pendingTest: Notification | null = null;
+const pendingAlerts = new Set<Notification>();
+
+/**
+ * A desktop alert raised by main, under the same rules as the renderer's: only with
+ * notifications on, while Pane is not focused, and not while Dictate shows them.
+ * `alertsHere` is Notify's "Show cards on" routing.
+ */
+export function showDesktopAlert(services: Pick<AppServices, 'configManager' | 'getMainWindow' | 'workspaceWatchLeases'>, alertsHere: boolean, title: string, body: string): void {
+  if (services.configManager.getConfig().notifications?.enabled === false || !alertsHere) return;
+  if (services.getMainWindow()?.isFocused() || isDesktopAlertHandedOff(services.workspaceWatchLeases) || !Notification.isSupported()) return;
+  const notification = new Notification({ title, body });
+  pendingAlerts.add(notification);
+  const release = () => pendingAlerts.delete(notification);
+  notification.once('close', release);
+  notification.once('failed', release);
+  notification.once('click', release);
+  notification.show();
+}
 
 /** Shows a native notification and reports what the OS did with it. */
 function sendTestNotification(): Promise<TestNotificationResult> {

@@ -1,8 +1,9 @@
-import { Archive, HardDrive, MemoryStick, Moon, Sparkles, TrendingUp } from 'lucide-react';
+import { Archive, Ghost, HardDrive, MemoryStick, Moon, Sparkles, TrendingUp } from 'lucide-react';
 import type { MachineHealthCard } from '../../../../shared/types/machineHealth';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
-import { formatBytes, formatMB } from './format';
+import { formatBytes, formatMB } from '../../../../shared/utils/formatBytes';
+import { cardTitle } from './healthCardActions';
 
 const NOT_NOW = 'Not now';
 const PAUSE_IDLE = 'Pause idle Panes';
@@ -20,7 +21,7 @@ export interface HealthCardBodyProps {
   compact?: boolean;
 }
 
-const KIND_ICON = { disk: HardDrive, memory: MemoryStick, leak: TrendingUp, finished: Archive } as const;
+const KIND_ICON = { disk: HardDrive, memory: MemoryStick, leak: TrendingUp, finished: Archive, leftovers: Ghost } as const;
 
 /** A small rising line of the process's memory across the window. */
 function Sparkline({ series }: { series: number[] }) {
@@ -45,7 +46,7 @@ export function HealthCardBody({ item, onAnswer, onAskAgent, onReview, machineNa
   const Icon = KIND_ICON[card.kind];
   const largest = Math.max(1, ...card.rows.map(row => row.bytes));
   const rowsTitle = card.kind === 'memory' ? `Using the most memory${machineName ? ` on ${machineName}` : ''}`
-    : card.kind === 'disk' ? 'Pane can free' : card.kind === 'finished' ? 'Finished Panes' : null;
+    : card.kind === 'disk' ? 'Pane can free' : card.kind === 'finished' ? 'Finished Panes' : card.kind === 'leftovers' ? 'Still running' : null;
 
   return (
     <div className="flex flex-col gap-4" data-testid={`health-card-${card.kind}`}>
@@ -59,7 +60,7 @@ export function HealthCardBody({ item, onAnswer, onAskAgent, onReview, machineNa
         )}
       </div>
       <div>
-        <h2 className="text-lg font-semibold text-text-primary">{item.title}</h2>
+        <h2 className="text-lg font-semibold text-text-primary">{cardTitle(item)}</h2>
         {item.context && <p className="mt-1 text-sm text-text-secondary">{item.context}</p>}
       </div>
 
@@ -73,12 +74,16 @@ export function HealthCardBody({ item, onAnswer, onAskAgent, onReview, machineNa
       {rowsTitle && card.rows.length > 0 && (
         <div>
           <div className="mb-1.5 text-sm text-text-primary">{rowsTitle}</div>
-          <ul className="divide-y divide-border-primary overflow-hidden rounded-lg border border-border-primary">
-            {card.rows.slice(0, compact ? 3 : 6).map(row => (
-              <li key={`${row.label}-${row.detail}`} className={cn('flex items-center gap-3 px-3 py-2 text-sm', row.skipped && 'text-text-tertiary')}>
-                <span className="min-w-0 flex-1 truncate">
-                  <span className={row.skipped ? 'text-text-tertiary' : 'text-text-primary'}>{row.label}</span>
-                  <span className="ml-1.5 text-text-tertiary">{row.detail}</span>
+          {/* Every row the card's action covers is listed; the list scrolls instead of hiding rows. */}
+          <ul className={cn('divide-y divide-border-primary overflow-y-auto rounded-lg border border-border-primary', compact ? 'max-h-40' : 'max-h-72')}>
+            {card.rows.map(row => (
+              <li key={`${row.label}-${row.detail}-${row.note ?? ''}`} className={cn('flex items-center gap-3 px-3 py-2 text-sm', row.skipped && 'text-text-tertiary')}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">
+                    <span className={row.skipped ? 'text-text-tertiary' : 'text-text-primary'}>{row.label}</span>
+                    <span className="ml-1.5 text-text-tertiary">{row.detail}</span>
+                  </span>
+                  {row.command && <span className="line-clamp-2 break-all font-mono text-xs text-text-tertiary" title={row.command}>{row.command}</span>}
                 </span>
                 {row.note && <span className="shrink-0 rounded px-1.5 py-0.5 text-xs text-text-secondary bg-surface-secondary">{row.note}</span>}
                 {card.kind === 'memory' && (
@@ -104,7 +109,7 @@ export function HealthCardBody({ item, onAnswer, onAskAgent, onReview, machineNa
         <button type="button" onClick={onAskAgent}
           className="flex flex-col items-start gap-1 rounded-lg border border-border-primary px-4 py-3 text-left hover:bg-surface-hover">
           <span className="flex items-center gap-2 font-medium text-text-primary"><Sparkles className="h-4 w-4" aria-hidden="true" />Ask an agent</span>
-          <span className="text-sm text-text-secondary">{machineName ? `Opens Pane Chat with this list; the agent works on ${machineName}.` : 'Opens Pane Chat with this list and asks before it stops anything.'}</span>
+          <span className="text-sm text-text-secondary">{machineName ? `Opens Pane Chat with this list; the agent works on ${machineName}.` : 'Opens Pane Chat with this list; the agent asks you before it changes anything.'}</span>
         </button>
       </div>
 

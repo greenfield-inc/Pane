@@ -1284,7 +1284,7 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** Cards pop up and chime here while it's in use, unless "Show cards on" picked a machine that reads this one (D-6, D-7). */
-  private alertsHere(): boolean {
+  alertsHere(): boolean {
     return this.inUse() && this.cardsOn().kind !== 'elsewhere';
   }
 

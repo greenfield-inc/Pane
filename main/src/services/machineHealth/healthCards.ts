@@ -1,4 +1,5 @@
-import type { HealthCardRow, HealthLevel, LeakWarning, MachineHealthCard, MachineHealthSnapshot, StorageInventory } from '../../../../shared/types/machineHealth';
+import type { HealthCardRow, HealthLevel, HealthProcess, LeakWarning, MachineHealthCard, MachineHealthSnapshot, ReclaimItem } from '../../../../shared/types/machineHealth';
+import { formatBytes, formatMB } from '../../../../shared/utils/formatBytes';
 import type { FinishedPane } from './finishedPanes';
 import type { IdleOffer } from './memoryRelief';
 
@@ -32,6 +33,10 @@ export class CardGate {
     this.last.set(key, { at: this.now(), level, snoozedUntil: this.now() + SNOOZE_MS });
   }
 
+  isOpen(key: string): boolean {
+    return this.openKeys.has(key);
+  }
+
   open(key: string): void {
     this.openKeys.add(key);
   }
@@ -41,11 +46,7 @@ export class CardGate {
   }
 }
 
-const GB = 1024 ** 3;
 const MB = 1024 * 1024;
-const mbText = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
-/** "13 GB", "2.4 GB", "40 MB": the same wording as the Resources page. */
-const formatGB = (bytes: number) => (bytes >= 10 * GB ? `${Math.round(bytes / GB)} GB` : bytes >= GB ? `${(bytes / GB).toFixed(1)} GB` : `${Math.round(bytes / (1024 * 1024))} MB`);
 
 export const NOT_NOW = 'Not now';
 export const CLEAN_UP = 'Clean up';
@@ -53,6 +54,9 @@ export const PAUSE_IDLE = 'Pause idle Panes';
 export const STOP_IT = 'Stop it';
 export const RESTART_IT = 'Restart it';
 export const IGNORE_PROCESS = 'Ignore for this process';
+export const STOP_THEM = 'Stop them';
+export const KEEP_THEM = 'Keep them';
+export const KEEP_IT = 'Keep it';
 
 export interface CardQuestion {
   title: string;
@@ -61,7 +65,20 @@ export interface CardQuestion {
   card: MachineHealthCard;
 }
 
-const agentRule = 'Clean up only through `runpane machine cleanup --kind <kind>`: run it without --yes first to see the list, then with --yes. Never delete files with rm, and ask me before you stop a process or archive a Pane.';
+/** A process that left its tab and still runs after its Pane was archived or paused. */
+export interface Leftover {
+  proc: HealthProcess;
+  paneName: string;
+  paneState: 'archived' | 'paused';
+}
+
+const agentRule = 'Clean up only through `runpane machine cleanup --kind <kind>`. Run it without --yes first to see the list and total. Add --yes yourself only for a tier 1 kind; for a tier 2 kind, show me that list and total and wait for my OK. Never delete files with rm, and ask me before you stop a process or archive a Pane.';
+
+/** The rows the person saw, for the agent prompt. */
+function listed(rows: HealthCardRow[]): string {
+  const lines = rows.map(row => `- ${row.label} (${row.detail})${row.bytes > 0 ? `: ${formatBytes(row.bytes)}` : ''}${row.note ? `, ${row.note}` : ''}${row.command ? `, \`${row.command}\`` : ''}`);
+  return lines.length > 0 ? `\n\nThe card listed:\n${lines.join('\n')}` : '';
+}
 
 function topConsumers(snapshot: MachineHealthSnapshot): HealthCardRow[] {
   const rows: HealthCardRow[] = snapshot.panes.flatMap(pane => pane.processes.map(proc => ({
@@ -71,77 +88,93 @@ function topConsumers(snapshot: MachineHealthSnapshot): HealthCardRow[] {
   return rows.sort((a, b) => b.bytes - a.bytes).slice(0, 5);
 }
 
-/** The card for a disk below the warning level: free space, what Pane can free, and the cleanup. */
-export function diskCard(snapshot: MachineHealthSnapshot, inventory: StorageInventory | null, machine: string): CardQuestion {
+/** The card for a disk below the warning level: free space, and the items Clean up deletes, every one listed. */
+export function diskCard(snapshot: MachineHealthSnapshot, items: readonly ReclaimItem[]): CardQuestion {
   const volume = [...snapshot.disk.volumes].sort((a, b) => a.freeBytes - b.freeBytes)[0];
   const free = volume?.freeBytes ?? 0;
-  const items = (inventory?.items ?? []).filter(item => item.tier !== 3).slice(0, 5);
   const frees = items.reduce((sum, item) => sum + item.sizeBytes, 0);
   const rows = items.map(item => ({ label: item.path.split(/[\\/]/u).pop() ?? item.path, detail: item.reason, bytes: item.sizeBytes, note: `Tier ${item.tier}` }));
-  const where = machine === 'local' ? 'This machine' : snapshot.hostname;
   return {
     title: snapshot.disk.level === 'critical' ? 'Disk is almost full' : 'Disk almost full',
-    context: `${where} has ${formatGB(free)} free. Pane can free about ${formatGB(frees)} of its own leftovers and finished work.`,
+    context: frees > 0 ? `${formatBytes(free)} free. Pane can free about ${formatBytes(frees)} of its own leftovers and finished work.` : `${formatBytes(free)} free.`,
     choices: frees > 0 ? [CLEAN_UP, NOT_NOW] : [NOT_NOW],
     card: {
-      kind: 'disk', level: snapshot.disk.level, machine, hostname: snapshot.hostname,
+      kind: 'disk', level: snapshot.disk.level, hostname: snapshot.hostname,
       freeBytes: free, totalBytes: volume?.totalBytes, rows, freesBytes: frees,
-      agentPrompt: `${snapshot.hostname} has ${formatGB(free)} of disk free. Run \`runpane machine health --json\` to see what Pane can free, by tier. ${agentRule}`,
+      agentPrompt: `${snapshot.hostname} has ${formatBytes(free)} of disk free. Run \`runpane machine health --json\` to see what Pane can free, by tier. ${agentRule}${listed(rows)}`,
     },
   };
 }
 
 /** The card for memory pressure: top consumers and an early pause of idle Panes. */
-export function memoryCard(snapshot: MachineHealthSnapshot, offer: IdleOffer, hours: number, machine: string): CardQuestion {
+export function memoryCard(snapshot: MachineHealthSnapshot, offer: IdleOffer, hours: number): CardQuestion {
   const used = snapshot.memory.totalBytes - snapshot.memory.freeBytes;
-  const swap = snapshot.memory.swapUsedBytes ? `, plus ${formatGB(snapshot.memory.swapUsedBytes)} of swap` : '';
-  const where = machine === 'local' ? 'This machine' : snapshot.hostname;
+  const swap = snapshot.memory.swapUsedBytes ? `, plus ${formatBytes(snapshot.memory.swapUsedBytes)} of swap` : '';
+  const rows = topConsumers(snapshot);
   return {
-    title: machine === 'local' ? 'Memory is tight' : `${snapshot.hostname}: memory is tight`,
-    context: `${where} is using ${formatGB(used)} of ${formatGB(snapshot.memory.totalBytes)}${swap}. Agents and dev servers may slow down.`,
+    title: 'Memory is tight',
+    context: `Using ${formatBytes(used)} of ${formatBytes(snapshot.memory.totalBytes)}${swap}. Agents and dev servers may slow down.`,
     choices: offer.paneIds.length > 0 ? [PAUSE_IDLE, NOT_NOW] : [NOT_NOW],
     card: {
-      kind: 'memory', level: snapshot.memory.level, machine, hostname: snapshot.hostname,
+      kind: 'memory', level: snapshot.memory.level, hostname: snapshot.hostname,
       usedBytes: used, totalBytes: snapshot.memory.totalBytes, swapUsedBytes: snapshot.memory.swapUsedBytes,
-      rows: topConsumers(snapshot),
+      rows,
       pauseOffer: { paneCount: offer.paneIds.length, memoryMB: Math.round(offer.memoryMB), hours },
-      agentPrompt: `${snapshot.hostname} is short of memory. Run \`runpane machine health --json\` to see which Panes and processes use the most. ${agentRule}`,
+      agentPrompt: `${snapshot.hostname} is short of memory. Run \`runpane machine health --json\` to see which Panes and processes use the most. ${agentRule}${listed(rows)}`,
     },
   };
 }
 
-/** The card for a process that keeps climbing. */
-export function leakCard(leak: LeakWarning, paneName: string, canRestart: boolean, snapshot: MachineHealthSnapshot, machine: string): CardQuestion {
+/** The card for a process that keeps climbing, named with its Pane and tab. */
+export function leakCard(leak: LeakWarning, paneName: string, tabName: string | null, canRestart: boolean, snapshot: MachineHealthSnapshot): CardQuestion {
   const name = leak.name.split('/').pop() ?? leak.name;
   const minutes = Math.round(leak.windowMs / 60_000);
+  const where = tabName ? `${paneName} · ${tabName}` : paneName;
   return {
     title: `${name} in ${paneName} keeps using more memory`,
-    context: `It grew ${mbText(leak.growthMB)} in ${minutes} min and kept climbing. It now uses ${mbText(leak.memoryMB)}.`,
+    context: `${tabName ? `It runs in the tab ${tabName}. ` : ''}It grew ${formatMB(leak.growthMB)} in ${minutes} min and kept climbing. It now uses ${formatMB(leak.memoryMB)}.`,
     choices: canRestart ? [RESTART_IT, STOP_IT, IGNORE_PROCESS] : [STOP_IT, IGNORE_PROCESS],
     card: {
-      kind: 'leak', level: 'warning', machine, hostname: snapshot.hostname,
-      rows: [{ label: name, detail: paneName, bytes: Math.round(leak.memoryMB * MB) }],
+      kind: 'leak', level: 'warning', hostname: snapshot.hostname,
+      rows: [{ label: name, detail: where, bytes: Math.round(leak.memoryMB * MB) }],
       leak: { pid: leak.pid, started: leak.started, growthMB: leak.growthMB, windowMs: leak.windowMs, series: leak.series, canRestart },
-      agentPrompt: `${name} (pid ${leak.pid}) in the Pane ${paneName} on ${snapshot.hostname} grew ${leak.growthMB} MB in ${minutes} minutes. Find out why before restarting it, and ask me before you stop it.`,
+      agentPrompt: `${name} (pid ${leak.pid}) in the Pane ${paneName}${tabName ? `, tab ${tabName},` : ''} on ${snapshot.hostname} grew ${leak.growthMB} MB in ${minutes} minutes. Find out why before restarting it, and ask me before you stop it.`,
     },
   };
 }
 
 /** The card for finished Panes: each with its reason and size; protected ones listed as skipped. */
-export function finishedCard(finished: FinishedPane[], snapshot: MachineHealthSnapshot, machine: string): CardQuestion {
+export function finishedCard(finished: FinishedPane[], snapshot: MachineHealthSnapshot): CardQuestion {
   const ready = finished.filter(pane => !pane.protection);
   const frees = ready.reduce((sum, pane) => sum + (pane.sizeBytes ?? 0), 0);
   const reasonText = (pane: FinishedPane) => pane.reason === 'pr-merged' ? `PR #${pane.prNumber} merged`
     : pane.reason === 'pr-closed' ? `PR #${pane.prNumber} closed` : pane.reason === 'folder-missing' ? 'Folder missing' : `Idle ${pane.idleDays} days`;
+  const rows = finished.map(pane => ({ label: pane.name, detail: pane.projectName, bytes: pane.sizeBytes ?? 0, note: pane.protection ?? reasonText(pane), skipped: !!pane.protection }));
   return {
     title: `Archive ${ready.length} finished Pane${ready.length === 1 ? '' : 's'}`,
     context: 'Their work is done. Archiving keeps each branch, and you can restore them.',
     choices: [`Archive ${ready.length} Pane${ready.length === 1 ? '' : 's'}`, NOT_NOW],
     card: {
-      kind: 'finished', level: 'warning', machine, hostname: snapshot.hostname, freesBytes: frees,
-      rows: finished.map(pane => ({ label: pane.name, detail: pane.projectName, bytes: pane.sizeBytes ?? 0, note: pane.protection ?? reasonText(pane), skipped: !!pane.protection })),
-      agentPrompt: `Pane found finished Panes on ${snapshot.hostname}. Review them with \`runpane panes list\` and archive merged ones with \`runpane panes archive --merged\`. Ask me before archiving anything else.`,
+      kind: 'finished', level: 'warning', hostname: snapshot.hostname, freesBytes: frees, rows,
+      agentPrompt: `Pane found finished Panes on ${snapshot.hostname}. Review them with \`runpane panes list\` and archive merged ones with \`runpane panes archive --merged\`. Ask me before archiving anything else.${listed(rows)}`,
     },
   };
 }
 
+/** The card for processes left behind by archived or paused Panes: what each one is, and stop or keep. */
+export function leftoversCard(leftovers: readonly Leftover[], snapshot: MachineHealthSnapshot): CardQuestion {
+  const count = leftovers.length;
+  const rows = leftovers.map(({ proc, paneName, paneState }) => ({
+    label: proc.name.split('/').pop() ?? proc.name, detail: `${paneName}, ${paneState}`, bytes: Math.round(proc.rssMB * MB),
+    note: `pid ${proc.pid}`, command: proc.command,
+  }));
+  return {
+    title: count === 1 ? 'A process was left behind' : `${count} processes were left behind`,
+    context: `${count === 1 ? 'It was' : 'They were'} started in a Pane terminal and still ${count === 1 ? 'runs' : 'run'} after ${count === 1 ? 'its' : 'their'} Pane was archived or paused. Stop ${count === 1 ? 'it' : 'them'}, or keep ${count === 1 ? 'it' : 'them'} and Pane won't ask about ${count === 1 ? 'it' : 'them'} again.`,
+    choices: count === 1 ? [STOP_IT, KEEP_IT] : [STOP_THEM, KEEP_THEM],
+    card: {
+      kind: 'leftovers', level: 'warning', hostname: snapshot.hostname, rows,
+      agentPrompt: `Processes started in Pane terminals on ${snapshot.hostname} still run after their Pane was archived or paused. Find out what each one is doing, and ask me before you stop any.${listed(rows)}`,
+    },
+  };
+}

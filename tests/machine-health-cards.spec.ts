@@ -29,9 +29,10 @@ test.describe('Machine health cards', () => {
     await expect(page.getByText('Opens Pane Chat with this list; the agent works on build-box.')).toBeVisible();
   });
 
-  test('disk: Clean up shows what it frees', async ({ page }) => {
+  test('disk: every item Clean up deletes is listed, with what it frees', async ({ page }) => {
     await open(page, 'kind=disk');
-    await page.getByRole('button', { name: 'Clean up · 23 GB' }).click();
+    for (const label of ['u-2.4.212', 'sessions.db.pre-panel-buffers.bak', 'qa1344.noindex', 'qa1351.noindex', 'u-2.4.208']) await expect(page.getByText(label, { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Clean up · 25 GB' }).click();
     expect(await page.evaluate(() => window.qaAnswers)).toEqual(['Clean up']);
   });
 
@@ -41,11 +42,21 @@ test.describe('Machine health cards', () => {
     expect(await page.evaluate(() => window.qaAnswers)).toEqual(['Stop it', 'Ignore for this process', 'Restart it']);
   });
 
-  test('finished: protected Panes are listed with the reason they are skipped', async ({ page }) => {
+  test('finished: every Pane is listed, protected ones with the reason they are skipped', async ({ page }) => {
     await open(page, 'kind=finished');
     await expect(page.getByText('It is pinned.')).toBeVisible();
-    await page.getByRole('button', { name: 'Archive 5 Panes · 17 GB' }).click();
-    expect(await page.evaluate(() => window.qaAnswers)).toEqual(['Archive 5 Panes']);
+    await expect(page.getByText('glassly-port', { exact: true })).toBeAttached();
+    await page.getByRole('button', { name: 'Archive 6 Panes · 17 GB' }).click();
+    expect(await page.evaluate(() => window.qaAnswers)).toEqual(['Archive 6 Panes']);
+  });
+
+  test('leftovers: each process shows what it is, and Stop them or Keep them answers the card', async ({ page }) => {
+    await open(page, 'kind=leftovers');
+    await expect(page.getByText('postgres -D /Users/me/pg/data -p 5433')).toBeVisible();
+    await expect(page.getByText('pid 6031')).toBeVisible();
+    await page.getByRole('button', { name: 'Keep them' }).click();
+    await page.getByRole('button', { name: 'Stop them' }).click();
+    expect(await page.evaluate(() => window.qaAnswers)).toEqual(['Keep them', 'Stop them']);
   });
 
   test('inside the window, Escape leaves a card waiting and the next card opens', async ({ page }) => {
@@ -61,7 +72,7 @@ test.describe('Machine health cards', () => {
 
   test('screenshots of every card, light and dark', async ({ page }) => {
     test.skip(!shots, 'Set MACHINE_HEALTH_SHOTS to a folder to capture screenshots.');
-    for (const kind of ['memory', 'disk', 'leak', 'finished', 'memory&remote=1']) {
+    for (const kind of ['memory', 'disk', 'leak', 'finished', 'leftovers', 'memory&remote=1']) {
       for (const theme of ['light', 'dark']) {
         await open(page, `kind=${kind}&theme=${theme}`);
         await page.locator('#root > div > div').screenshot({ path: `${shots}/card-${kind.replace('&remote=1', '-remote')}-${theme}.png` });

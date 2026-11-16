@@ -1,8 +1,12 @@
 import type { NotifyResult } from '../../../../shared/types/notify';
-import type { LeakWarning, MachineHealthSnapshot, StorageInventory } from '../../../../shared/types/machineHealth';
+import type { CleanupRun, HealthLevel, HealthProcess, LeakWarning, MachineHealthSnapshot, StorageInventory } from '../../../../shared/types/machineHealth';
 import type { FinishedPane } from './finishedPanes';
 import type { IdleOffer } from './memoryRelief';
-import { CardGate, CLEAN_UP, diskCard, finishedCard, IGNORE_PROCESS, leakCard, memoryCard, NOT_NOW, PAUSE_IDLE, RESTART_IT, STOP_IT, type CardQuestion } from './healthCards';
+import { CardGate, CLEAN_UP, diskCard, finishedCard, IGNORE_PROCESS, KEEP_IT, KEEP_THEM, leakCard, leftoversCard, memoryCard, NOT_NOW, PAUSE_IDLE, RESTART_IT, STOP_IT, STOP_THEM, type CardQuestion, type Leftover } from './healthCards';
+
+/** Clean up on the disk card covers at most this many tier 1 and 2 items, largest first, each listed on the card. */
+const DISK_CARD_ITEMS = 5;
+const LEFTOVERS_OPEN = 'leftovers';
 
 export interface HealthCardDeps {
   now: () => number;
@@ -12,53 +16,72 @@ export interface HealthCardDeps {
   idleOffer: () => IdleOffer;
   pauseIdleHours: () => number;
   paneName: (paneId: string) => string;
+  paneState: (paneId: string) => 'archived' | 'paused' | 'open';
+  /** The tab's title, or null when Pane does not know the tab. */
+  tabName: (panelId: string) => string | null;
   /** Whether the leaking process belongs to its Pane's running run script. */
   canRestart: (leak: LeakWarning) => Promise<boolean>;
   cleanUp: (itemIds: string[]) => Promise<void>;
   pauseIdle: () => Promise<void>;
   stopProcess: (leak: LeakWarning) => Promise<void>;
+  /** Identity-checked stop: a process whose start time changed is never signalled. */
+  stopProcesses: (processes: HealthProcess[]) => Promise<CleanupRun>;
   restartProcess: (leak: LeakWarning) => Promise<void>;
   ignoreLeak: (leak: LeakWarning) => void;
   archive: (paneIds: string[]) => Promise<void>;
-  /** A desktop notification when Pane is not focused; used at the critical level. */
+  /** A desktop notification through Pane's desktop-alert path; used once when disk or memory turns critical. */
   alert: (title: string, body: string) => void;
   log: (message: string) => void;
+  /** Leftover processes the person kept, as pid:start, saved so a restart does not ask again. */
+  readKept: () => string[];
+  writeKept: (identities: string[]) => void;
 }
 
+const identity = (proc: HealthProcess) => `${proc.pid}:${proc.started}`;
+
 /**
- * Raises the four machine health cards from samples and checks, each through
- * CardGate, and runs the answer on this machine. Review in Resources and Ask an
- * agent are buttons on the card's own body, so they act on whichever machine shows it.
+ * Raises the machine health cards from samples and checks, each through
+ * CardGate, and runs the answer on this machine. Every action covers exactly the
+ * rows its card lists. Review in Resources and Ask an agent are buttons on the
+ * card's own body, so they act on whichever machine shows it.
  */
 export class HealthCardController {
   private readonly gate: CardGate;
+  private readonly critical = new Set<'disk' | 'memory'>();
+  /** Leftover processes the person chose to keep, by pid and start time. */
+  private readonly kept: Set<string>;
 
   constructor(private readonly deps: HealthCardDeps) {
     this.gate = new CardGate(deps.now);
+    this.kept = new Set(deps.readKept());
   }
 
   onSnapshot(snapshot: MachineHealthSnapshot): void {
-    if (snapshot.disk.level !== 'ok' && this.gate.shouldShow('disk', snapshot.disk.level)) {
-      const question = diskCard(snapshot, this.deps.inventory(), 'local');
-      const itemIds = (this.deps.inventory()?.items ?? []).filter(item => item.tier !== 3).slice(0, 5).map(item => item.id);
-      this.raise('disk', snapshot.disk.level, question, async answer => {
-        if (answer === CLEAN_UP) await this.deps.cleanUp(itemIds);
+    const inventory = this.deps.inventory();
+    const items = (inventory?.items ?? []).filter(item => item.tier !== 3).sort((a, b) => b.sizeBytes - a.sizeBytes).slice(0, DISK_CARD_ITEMS);
+    this.alertOnCritical('disk', snapshot.disk.level, () => diskCard(snapshot, items));
+    this.alertOnCritical('memory', snapshot.memory.level, () => memoryCard(snapshot, this.deps.idleOffer(), this.deps.pauseIdleHours()));
+    // Without a scan the card could offer only Not now; the warning level starts one, and the next sample raises the card.
+    if (snapshot.disk.level !== 'ok' && inventory && this.gate.shouldShow('disk', snapshot.disk.level)) {
+      this.raise('disk', snapshot.disk.level, diskCard(snapshot, items), async answer => {
+        if (answer === CLEAN_UP) await this.deps.cleanUp(items.map(item => item.id));
       });
-      if (snapshot.disk.level === 'critical') this.deps.alert(question.title, question.context);
     }
     if (snapshot.memory.level !== 'ok' && this.gate.shouldShow('memory', snapshot.memory.level)) {
-      const question = memoryCard(snapshot, this.deps.idleOffer(), this.deps.pauseIdleHours(), 'local');
-      this.raise('memory', snapshot.memory.level, question, async answer => {
+      this.raise('memory', snapshot.memory.level, memoryCard(snapshot, this.deps.idleOffer(), this.deps.pauseIdleHours()), async answer => {
         if (answer === PAUSE_IDLE) await this.deps.pauseIdle();
       });
-      if (snapshot.memory.level === 'critical') this.deps.alert(question.title, question.context);
     }
+    this.askAboutLeftovers(snapshot);
   }
 
   async onLeak(leak: LeakWarning, snapshot: MachineHealthSnapshot): Promise<void> {
+    // A WSL process has no identity Pane can stop or restart by.
+    if (leak.started.startsWith('wsl:')) return;
     const key = `leak:${leak.pid}:${leak.started}`;
     if (!this.gate.shouldShow(key, 'warning')) return;
-    const question = leakCard(leak, this.deps.paneName(leak.sessionId), await this.deps.canRestart(leak), snapshot, 'local');
+    const tabName = leak.panelId ? this.deps.tabName(leak.panelId) : null;
+    const question = leakCard(leak, this.deps.paneName(leak.sessionId), tabName, await this.deps.canRestart(leak), snapshot);
     this.raise(key, 'warning', question, async answer => {
       if (answer === STOP_IT) await this.deps.stopProcess(leak);
       if (answer === RESTART_IT) await this.deps.restartProcess(leak);
@@ -69,15 +92,52 @@ export class HealthCardController {
   onFinished(finished: FinishedPane[], snapshot: MachineHealthSnapshot): void {
     const ready = finished.filter(pane => !pane.protection);
     if (ready.length === 0 || !this.gate.shouldShow('finished', 'warning')) return;
-    const question = finishedCard(finished, snapshot, 'local');
-    this.raise('finished', 'warning', question, async answer => {
+    this.raise('finished', 'warning', finishedCard(finished, snapshot), async answer => {
       if (answer !== NOT_NOW) await this.deps.archive(ready.map(pane => pane.sessionId));
     });
   }
 
-  private raise(key: string, level: MachineHealthSnapshot['disk']['level'], question: CardQuestion, act: (answer: string) => Promise<void>): void {
+  /** Asks once about processes that left a tab and outlived their Pane; a new set of processes asks again. */
+  private askAboutLeftovers(snapshot: MachineHealthSnapshot): void {
+    const leftovers: Leftover[] = snapshot.panes.flatMap(pane => {
+      const paneState = this.deps.paneState(pane.sessionId);
+      if (paneState === 'open') return [];
+      return pane.processes.filter(proc => proc.escaped && !this.kept.has(identity(proc))).map(proc => ({ proc, paneName: pane.name, paneState }));
+    });
+    if (leftovers.length === 0 || this.gate.isOpen(LEFTOVERS_OPEN)) return;
+    const key = `leftovers:${leftovers.map(({ proc }) => identity(proc)).sort().join(',')}`;
+    if (!this.gate.shouldShow(key, 'warning')) return;
+    const processes = leftovers.map(({ proc }) => proc);
+    this.raise(key, 'warning', leftoversCard(leftovers, snapshot), async answer => {
+      if (answer === KEEP_THEM || answer === KEEP_IT) {
+        // Only identities still running are worth remembering; a pid with a new start time is a new process.
+        const running = new Set(snapshot.panes.flatMap(pane => pane.processes.map(identity)));
+        for (const id of [...this.kept]) if (!running.has(id)) this.kept.delete(id);
+        for (const proc of processes) this.kept.add(identity(proc));
+        this.deps.writeKept([...this.kept]);
+      }
+      if (answer === STOP_THEM || answer === STOP_IT) {
+        const run = await this.deps.stopProcesses(processes);
+        if (run.skipped.length > 0) this.deps.log(`[MachineHealth] ${run.skipped.length} left-behind process(es) did not stop`);
+      }
+    }, LEFTOVERS_OPEN);
+  }
+
+  /** One desktop alert when a level turns critical, whatever card is already waiting. */
+  private alertOnCritical(kind: 'disk' | 'memory', level: HealthLevel, question: () => CardQuestion): void {
+    if (level !== 'critical') {
+      this.critical.delete(kind);
+      return;
+    }
+    if (this.critical.has(kind)) return;
+    this.critical.add(kind);
+    const { title, context } = question();
+    this.deps.alert(title, context);
+  }
+
+  private raise(key: string, level: HealthLevel, question: CardQuestion, act: (answer: string) => Promise<void>, openKey = key): void {
     this.gate.shown(key, level);
-    this.gate.open(key);
+    this.gate.open(openKey);
     void this.deps.ask(question).then(async result => {
       if (!('answer' in result)) return;
       if (result.answer === NOT_NOW) {
@@ -87,6 +147,6 @@ export class HealthCardController {
       await act(result.answer);
     }).catch(error => {
       this.deps.log(`[MachineHealth] card "${question.title}" failed: ${error instanceof Error ? error.message : String(error)}`);
-    }).finally(() => this.gate.closed(key));
+    }).finally(() => this.gate.closed(openKey));
   }
 }

@@ -236,9 +236,11 @@ export interface HealthCardRow {
   detail: string;
   /** Memory (memory and leak cards) or disk bytes (disk and finished cards). */
   bytes: number;
-  /** finished cards: why the Pane is finished, or why it is skipped. */
+  /** finished cards: why the Pane is finished, or why it is skipped; leftovers cards: the pid. */
   note?: string;
   skipped?: boolean;
+  /** leftovers cards: the process's command line. */
+  command?: string;
 }
 
 /**
@@ -247,10 +249,9 @@ export interface HealthCardRow {
  * still answer it.
  */
 export interface MachineHealthCard {
-  kind: 'disk' | 'memory' | 'leak' | 'finished';
+  kind: 'disk' | 'memory' | 'leak' | 'finished' | 'leftovers';
   level: HealthLevel;
-  /** The machine that raised it, and its id in the machine list ('local' on itself). */
-  machine: string;
+  /** The raising machine's OS hostname. */
   hostname: string;
   freeBytes?: number;
   totalBytes?: number;
@@ -261,7 +262,7 @@ export interface MachineHealthCard {
   pauseOffer?: { paneCount: number; memoryMB: number; hours: number };
   /** leak cards: the process and its memory across the window. */
   leak?: { pid: number; started: string; growthMB: number; windowMs: number; series: number[]; canRestart: boolean };
-  /** Total bytes the primary action frees. */
+  /** Total bytes the primary action frees. Every row the action covers is in `rows`. */
   freesBytes?: number;
   /** The prompt "Ask an agent" sends to Pane Chat. */
   agentPrompt: string;

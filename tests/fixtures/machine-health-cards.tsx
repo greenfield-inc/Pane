@@ -7,7 +7,7 @@ import type { HealthNotifyItem } from '../../frontend/src/components/machineHeal
 import type { MachineHealthCard } from '../../shared/types/machineHealth';
 import '../../frontend/src/index.css';
 
-// One machine health card body: ?kind=memory|disk|leak|finished, ?theme=dark, ?remote=1 (raised by a
+// One machine health card body: ?kind=memory|disk|leak|finished|leftovers, ?theme=dark, ?remote=1 (raised by a
 // linked machine). Answers land in window.qaAnswers and Ask an agent in window.qaAsked.
 declare global { interface Window { qaAnswers: string[]; qaAsked: number } }
 window.qaAnswers = [];
@@ -26,11 +26,11 @@ const kind = params.get('kind') ?? 'memory';
 interface FixtureCard { title: string; context: string; choices: string[]; card: MachineHealthCard }
 const cards = {
   memory: {
-    title: remote ? 'build-box: memory is tight' : 'Memory is tight',
-    context: `${host} is using 30.9 GB of 32 GB, plus 3.0 GB of swap. Agents and dev servers may slow down.`,
+    title: 'Memory is tight',
+    context: 'Using 30.9 GB of 32 GB, plus 3.0 GB of swap. Agents and dev servers may slow down.',
     choices: ['Pause idle Panes', 'Not now'],
     card: {
-      kind: 'memory', level: 'warning', machine: remote ? 'm-build' : 'local', hostname: host, usedBytes: 30.9 * GB, totalBytes: 32 * GB, swapUsedBytes: 3 * GB,
+      kind: 'memory', level: 'warning', hostname: host, usedBytes: 30.9 * GB, totalBytes: 32 * GB, swapUsedBytes: 3 * GB,
       rows: [
         { label: 'claude', detail: 'glassly-port', bytes: 3.7 * GB },
         { label: 'Pane', detail: 'the app', bytes: 2.6 * GB },
@@ -44,48 +44,65 @@ const cards = {
   },
   disk: {
     title: 'Disk almost full',
-    context: 'This Mac has 13 GB free. Pane can free about 23 GB of its own leftovers and finished work.',
+    context: '13 GB free. Pane can free about 25 GB of its own leftovers and finished work.',
     choices: ['Clean up', 'Not now'],
     card: {
-      kind: 'disk', level: 'warning', machine: 'local', hostname: host, freeBytes: 13 * GB, totalBytes: 926 * GB, freesBytes: 23 * GB,
+      kind: 'disk', level: 'warning', hostname: host, freeBytes: 13 * GB, totalBytes: 926 * GB, freesBytes: 25 * GB,
       rows: [
         { label: 'u-2.4.212', detail: 'The rollback copy of an update a newer update replaced.', bytes: 9.3 * GB, note: 'Tier 1' },
         { label: 'sessions.db.pre-panel-buffers.bak', detail: 'A database backup from a migration more than 30 days ago.', bytes: 1.8 * GB, note: 'Tier 1' },
         { label: 'qa1344.noindex', detail: 'Agent temp files nobody touched for 2 days.', bytes: 11.8 * GB, note: 'Tier 2' },
+        { label: 'qa1351.noindex', detail: 'Agent temp files nobody touched for 2 days.', bytes: 1.4 * GB, note: 'Tier 2' },
+        { label: 'u-2.4.208', detail: 'The rollback copy of an update a newer update replaced.', bytes: 900 * MB, note: 'Tier 1' },
       ],
       agentPrompt: 'This Mac has 13 GB of disk free.',
     },
   },
   leak: {
     title: 'vite in homepage-alpine keeps using more memory',
-    context: 'It grew 1.2 GB in 30 min and kept climbing. It now uses 2.3 GB.',
+    context: 'It runs in the tab dev server. It grew 1.2 GB in 30 min and kept climbing. It now uses 2.3 GB.',
     choices: ['Restart it', 'Stop it', 'Ignore for this process'],
     card: {
-      kind: 'leak', level: 'warning', machine: 'local', hostname: host,
-      rows: [{ label: 'vite', detail: 'homepage-alpine', bytes: 2.4 * GB }],
+      kind: 'leak', level: 'warning', hostname: host,
+      rows: [{ label: 'vite', detail: 'homepage-alpine · dev server', bytes: 2.4 * GB }],
       leak: { pid: 4242, started: 'Sun Nov 15 12:00:00 2026', growthMB: 1229, windowMs: 1_800_000, series: [1180, 1390, 1600, 1810, 2050, 2240, 2400], canRestart: true },
       agentPrompt: 'vite grew 1.2 GB.',
     },
   },
   finished: {
-    title: 'Archive 5 finished Panes',
+    title: 'Archive 6 finished Panes',
     context: 'Their work is done. Archiving keeps each branch, and you can restore them.',
-    choices: ['Archive 5 Panes', 'Not now'],
+    choices: ['Archive 6 Panes', 'Not now'],
     card: {
-      kind: 'finished', level: 'warning', machine: 'local', hostname: host, freesBytes: 17.3 * GB,
+      kind: 'finished', level: 'warning', hostname: host, freesBytes: 17.3 * GB,
       rows: [
         { label: 'Spanner schema diff fix', detail: 'bloom-mono', bytes: 6.2 * GB, note: 'PR #808 merged' },
         { label: 'STOP line option', detail: 'bloom-mono', bytes: 5.1 * GB, note: 'PR #1335 merged' },
         { label: 'Cloud: service and fleet API contracts', detail: 'Pane', bytes: 3.1 * GB, note: 'PR #1256 merged' },
         { label: 'release-2.4.223', detail: 'Pane', bytes: 2.9 * GB, note: 'It is pinned.', skipped: true },
         { label: 'ademark-hillclimb', detail: 'Pane', bytes: 1.1 * GB, note: 'Folder missing' },
+        { label: 'onboarding-copy', detail: 'Pane', bytes: 0, note: 'Idle 21 days' },
+        { label: 'glassly-port', detail: 'glassly', bytes: 0, note: 'PR #41 closed' },
       ],
       agentPrompt: 'Pane found finished Panes.',
     },
   },
+  leftovers: {
+    title: '2 processes were left behind',
+    context: "They were started in a Pane terminal and still run after their Pane was archived or paused. Stop them, or keep them and Pane won't ask about them again.",
+    choices: ['Stop them', 'Keep them'],
+    card: {
+      kind: 'leftovers', level: 'warning', hostname: host,
+      rows: [
+        { label: 'postgres', detail: 'billing-migration, archived', bytes: 210 * MB, note: 'pid 5120', command: 'postgres -D /Users/me/pg/data -p 5433' },
+        { label: 'tmux', detail: 'release-2.4.223, paused', bytes: 6 * MB, note: 'pid 6031', command: 'tmux new -s qa' },
+      ],
+      agentPrompt: 'Processes started in Pane terminals still run.',
+    },
+  },
 } satisfies Record<string, FixtureCard>;
 
-const chosen: FixtureCard = kind === 'disk' ? cards.disk : kind === 'leak' ? cards.leak : kind === 'finished' ? cards.finished : cards.memory;
+const chosen: FixtureCard = kind === 'disk' ? cards.disk : kind === 'leak' ? cards.leak : kind === 'finished' ? cards.finished : kind === 'leftovers' ? cards.leftovers : cards.memory;
 const item: HealthNotifyItem = {
   id: 'h1', ui: 'options', title: chosen.title, context: chosen.context,
   choices: chosen.choices.map((label, index) => ({ label, recommended: index === 0 })),

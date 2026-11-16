@@ -27,7 +27,8 @@ import { statusCard } from '../services/notify/workerContext';
 import { admitCard } from '../services/notify/cardAdmit';
 import { checkCard, fitLinks } from '../services/notify/cardCheck';
 import { summaryPage } from '../services/notify/summaryPage';
-import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import type { MachineHealthCard } from '../../../shared/types/machineHealth';
 import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
@@ -170,13 +171,11 @@ const replySchema = boundary.object({
 const revisionSchema = boundary.object({ asked: boundary.string, whatChanged: boundary.array(boundary.string), by: boundary.string, at: boundary.number });
 const healthCardRowSchema = boundary.object({
   label: boundary.string, detail: boundary.string, bytes: boundary.number,
-  note: boundary.optional(boundary.string), skipped: boundary.optional(boundary.boolean),
+  note: boundary.optional(boundary.string), skipped: boundary.optional(boundary.boolean), command: boundary.optional(boundary.string),
 });
-/** A machine health card's dialog data; an older Pane leaves it out of its schema and shows the plain card. */
 const machineHealthCardSchema = boundary.object({
-  kind: boundary.enumeration('disk', 'memory', 'leak', 'finished'),
+  kind: boundary.enumeration('disk', 'memory', 'leak', 'finished', 'leftovers'),
   level: boundary.enumeration('ok', 'warning', 'critical'),
-  machine: boundary.string,
   hostname: boundary.string,
   freeBytes: boundary.optional(boundary.number),
   totalBytes: boundary.optional(boundary.number),
@@ -191,6 +190,11 @@ const machineHealthCardSchema = boundary.object({
   freesBytes: boundary.optional(boundary.number),
   agentPrompt: boundary.string,
 });
+/**
+ * A machine health card's dialog data, decoded on its own: one this Pane cannot read (a newer
+ * kind, a changed field) is dropped, and the item shows as a plain card whose choices still answer it.
+ */
+const machineHealthField: BoundarySchema<MachineHealthCard | undefined> = { decode: current => decodeOptionalBoundary(current.value, machineHealthCardSchema) };
 const notifyItemSchema = boundary.object({
   id: boundary.nonEmptyString,
   ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
@@ -201,7 +205,7 @@ const notifyItemSchema = boundary.object({
   replyIsAnswer: boundary.optional(boundary.boolean),
   asSent: boundary.optional(boundary.object({ title: boundary.string, context: boundary.optional(boundary.string) })),
   summaryPage: boundary.optional(boundary.string),
-  machineHealth: boundary.optional(machineHealthCardSchema),
+  machineHealth: machineHealthField,
   statusFile: boundary.optional(boundary.string),
   optionsOnly: boundary.optional(boundary.boolean),
   detail: boundary.optional(boundary.string),

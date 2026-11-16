@@ -114,7 +114,7 @@ export function registerResourceMonitorHandlers(
   });
   commandRegistry.register(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, async (value: PaneCommandValue) => {
     const proc = await attributed(decodeBoundary(value, identitySchema));
-    if (proc.panelId !== null || !(await logsManager.isRunning(proc.sessionId))) {
+    if (proc.panelId !== null || proc.escaped || !(await logsManager.isRunning(proc.sessionId))) {
       throw new PaneError('ERR_MACHINE_RESTART_UNSUPPORTED', `${proc.name} does not belong to this Pane's run script, so Pane cannot start it again. Nothing was changed.`, 'Stop it instead, then start it again in its tab.');
     }
     await commandRegistry.invoke('sessions:stop-script', [proc.sessionId]);

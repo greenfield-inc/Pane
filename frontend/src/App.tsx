@@ -1048,7 +1048,7 @@ function App() {
               ? <MachineOfflineView onMachineDetails={() => openSettings({ category: 'remote-access', setting: 'remote-machines' })} />
               : <SessionView />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
-          {!isSettingsOpen && !isOnboardingOpen && !isWelcomeOpen && <HealthCardDialog />}
+          <HealthCardDialog suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </RemoteWorkspace>
         </div>
         <OnboardingDialog

@@ -14,6 +14,18 @@ export function remoteMachineName(item: NotifyItem): string | undefined {
   return item.machineId && item.machineId !== 'local' ? item.machine ?? item.machineHealth?.hostname : undefined;
 }
 
+/**
+ * The card's title as this screen shows it: a linked machine's card starts with that machine's
+ * name, since the raising machine writes its titles about itself.
+ */
+export function cardTitle(item: HealthNotifyItem): string {
+  const remote = remoteMachineName(item);
+  if (!remote) return item.title;
+  // A leak card starts with a process name, kept as written; the others start with a plain word.
+  const title = item.machineHealth.kind === 'leak' ? item.title : `${item.title.charAt(0).toLowerCase()}${item.title.slice(1)}`;
+  return `${remote}: ${title}`;
+}
+
 export function answerHealthCard(item: NotifyItem, choice: string): void {
   runNotify({ type: 'answer', id: item.id, answer: { choice } });
 }
