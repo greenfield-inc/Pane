@@ -57,7 +57,7 @@ describe('stopping or restarting a process from outside', () => {
 });
 
 describe('Ask an agent', () => {
-  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>, agent: { resume?: string; ready?: boolean[]; panelType?: string; draft?: boolean; prompt?: string } = {}) {
+  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>, agent: { resume?: string; ready?: Array<boolean | Error>; panelType?: string; draft?: boolean; prompt?: string } = {}) {
     const typed: Array<{ panelId: string; input: string }> = [];
     const readiness = [...(agent.ready ?? [])];
     const created: Array<{ name: string }> = [];
@@ -69,7 +69,11 @@ describe('Ask an agent', () => {
     });
     const registry = new PaneCommandRegistry();
     registry.register('runpane:panels:resume', async () => ({ action: agent.resume ?? 'already-running' }));
-    registry.register('runpane:panels:wait', async () => ({ ok: readiness.shift() ?? true }));
+    registry.register('runpane:panels:wait', async () => {
+      const next = readiness.shift() ?? true;
+      if (next instanceof Error) throw next;
+      return { ok: next };
+    });
     registry.register('runpane:panels:screen', async () => ({ composer: { hasUndeliveredText: agent.draft ?? false } }));
     registry.register('runpane:panels:submit', async request => { typed.push(partial(request)); return { ok: true }; });
     registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions }), registry);
@@ -110,5 +114,27 @@ describe('Ask an agent', () => {
     await expect(ask()).resolves.toMatchObject({ typed: false });
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(writes).not.toHaveBeenCalled();
+  });
+
+  it('forgets a late request when the 10-minute wait gives up, so the next slow start gets its own (F-7)', async () => {
+    const writes = vi.spyOn(terminalPanelManager, 'writeToTerminal').mockImplementation(() => undefined);
+    vi.spyOn(terminalPanelManager, 'isBracketedPasteEnabled').mockReturnValue(true);
+    // First click: 30 s miss, then the late wait gives up. Second click: 30 s miss, then ready.
+    const { ask } = asker([{ id: 'gave-up', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, false, false, true], panelType: 'terminal' });
+    await expect(ask()).resolves.toMatchObject({ typed: false });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await expect(ask()).resolves.toMatchObject({ typed: false });
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledWith('panel-gave-up', '\x1b[200~Free memory.\x1b[201~'));
+  });
+
+  it('forgets a late request when the late wait throws, so the next slow start gets its own (F-7)', async () => {
+    const writes = vi.spyOn(terminalPanelManager, 'writeToTerminal').mockImplementation(() => undefined);
+    vi.spyOn(terminalPanelManager, 'isBracketedPasteEnabled').mockReturnValue(true);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { ask } = asker([{ id: 'threw', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, new Error('panel closed'), false, true], panelType: 'terminal' });
+    await expect(ask()).resolves.toMatchObject({ typed: false });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await expect(ask()).resolves.toMatchObject({ typed: false });
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledWith('panel-threw', '\x1b[200~Free memory.\x1b[201~'));
   });
 });

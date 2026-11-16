@@ -181,7 +181,11 @@ export function registerResourceMonitorHandlers(
       lateRequests.set(panelId, prompt);
       if (waiting) return false;
       void (async () => {
-        if (!(await ready(panelId, LATE_AGENT_WAIT_MS))) return;
+        if (!(await ready(panelId, LATE_AGENT_WAIT_MS))) {
+          // Given up: forget the request so the next slow start waits for its own.
+          lateRequests.delete(panelId);
+          return;
+        }
         const request = lateRequests.get(panelId);
         lateRequests.delete(panelId);
         if (request === undefined) return;
@@ -195,7 +199,10 @@ export function registerResourceMonitorHandlers(
         // As runpane stages composer text: newlines stay text inside one bracketed paste, never Enter.
         const text = stripTrailingNewlines(normalizePromptNewlines(request));
         terminalPanelManager.writeToTerminal(panelId, terminalPanelManager.isBracketedPasteEnabled(panelId) ? bracketedPaste(text) : text.replace(/\n+/gu, ' '));
-      })().catch(error => console.warn('[MachineHealth] Ask an agent: the late agent did not get the request:', error));
+      })().catch(error => {
+        lateRequests.delete(panelId);
+        console.warn('[MachineHealth] Ask an agent: the late agent did not get the request:', error);
+      });
       return false;
     };
     const key = (sessionName: string) => sessionName.trim().toLocaleLowerCase();
