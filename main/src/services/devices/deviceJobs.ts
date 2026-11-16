@@ -7,17 +7,19 @@ export interface DeviceJobResult {
   owner: string;
   state: 'running' | 'exited';
   exitCode?: number;
-  /** The last lines of combined output. */
+  /** The last lines of combined output, starting with TAIL_CUT when earlier output was left out. */
   logTail: string;
 }
 
 const TAIL_BYTES = 16 * 1024;
+const TAIL_CUT = '[earlier output cut]\n';
 
 interface Job {
   id: string;
   owner: string;
   child: ChildProcess;
   tail: string;
+  cut: boolean;
   exitCode?: number;
   exited: Promise<void>;
 }
@@ -43,9 +45,11 @@ export class DeviceJobs {
       windowsHide: true,
       windowsVerbatimArguments: shell.verbatim === true,
     });
-    const job: Job = { id: randomUUID(), owner, child, tail: '', exited: Promise.resolve() };
+    const job: Job = { id: randomUUID(), owner, child, tail: '', cut: false, exited: Promise.resolve() };
     const append = (chunk: Buffer) => {
-      job.tail = (job.tail + chunk.toString('utf8')).slice(-TAIL_BYTES);
+      const tail = job.tail + chunk.toString('utf8');
+      if (tail.length > TAIL_BYTES) job.cut = true;
+      job.tail = tail.slice(-TAIL_BYTES);
     };
     child.stdout?.on('data', append);
     child.stderr?.on('data', append);
@@ -77,7 +81,7 @@ export class DeviceJobs {
   }
 
   private describe(job: Job): DeviceJobResult {
-    const result: DeviceJobResult = { jobId: job.id, owner: job.owner, state: job.exitCode === undefined ? 'running' : 'exited', logTail: job.tail };
+    const result: DeviceJobResult = { jobId: job.id, owner: job.owner, state: job.exitCode === undefined ? 'running' : 'exited', logTail: job.cut ? TAIL_CUT + job.tail.slice(job.tail.indexOf('\n') + 1) : job.tail };
     if (job.exitCode !== undefined) result.exitCode = job.exitCode;
     return result;
   }
