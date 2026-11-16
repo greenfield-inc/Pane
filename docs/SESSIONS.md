@@ -1470,11 +1470,13 @@ default), a Session has one voice to the person: its orchestrator.
   worker's `notify` call isn't shown to the person; it returns `unavailable`
   with a `next` that says to report blocked.
 - **A worker's question is a card at once.** Its blocked report shows in
-  Approvals straight away. From a JSON status file (even one the journal cut
-  short) or a bare `needs_you` block, the card takes its question and `why` as
+  Approvals straight away. From a JSON status file or a bare `needs_you`
+  block, the card takes its question and `why` as
   context, its question's `options` as answer buttons (a `(recommended)`
   suffix marks the recommended one; several questions get an answer box), and
-  its `files` as links. Other JSON shows one line (`summary`, `step` or
+  its `files` as links. When the journal cut the summary short, Pane reads
+  the first 256 KB of the status file itself, so a long `needs_you` keeps its
+  buttons and links. Other JSON shows one line (`summary`, `step` or
   `title`) or none, never the raw text; the file itself opens as the worker's
   status link. It rings once the orchestrator
   relays it or after 10 minutes, so the orchestrator first settles what the plan

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
@@ -9,6 +10,8 @@ const MAX_CONTEXT = 2_000;
 const MAX_CHOICES = 9;
 /** How Pane's journal marks a summary it cut short. */
 const TRUNCATION_MARKER = '[summary truncated]';
+/** How much of a worker's status file a card reads when its report summary was cut short. */
+const MAX_STATUS_FILE = 256 * 1024;
 const RECOMMENDED = /\s*\((recommended)\)\s*$/iu;
 
 const questionSchema = boundary.object({
@@ -77,8 +80,8 @@ function objectAt(text: string, start: number): JsonValue | undefined {
 }
 
 /**
- * The named field's value from JSON that may be cut short (a journal keeps 2,000 characters of a
- * report): an object read to its closing brace, or a string. Undefined when it isn't there whole.
+ * The named field's value from JSON that may be cut short: an object read to its closing brace, or
+ * a string. Undefined when it isn't there whole.
  */
 function fieldOf(text: string, key: string): JsonValue | undefined {
   const match = new RegExp(`"${key}"\\s*:\\s*(\\{|"(?:[^"\\\\]|\\\\.)*")`, 'u').exec(text);
@@ -216,13 +219,33 @@ export function workerReportCard(summary: string | undefined, question: string):
 }
 
 /**
+ * The report's summary, or the status file it came from when the summary was cut short (the
+ * journal keeps 2,000 characters of a report, and a long needs_you runs past that).
+ */
+function wholeSummary(summary: string | undefined, summaryPath: string | undefined): string | undefined {
+  if (!summaryPath || !summary?.trimEnd().endsWith(TRUNCATION_MARKER)) return summary;
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(summaryPath, 'r');
+    const buffer = Buffer.alloc(Math.min(fs.fstatSync(fd).size, MAX_STATUS_FILE));
+    const text = buffer.toString('utf8', 0, fs.readSync(fd, buffer, 0, buffer.length, 0)).replace(/^\uFEFF/u, '');
+    return text.trim() ? text : summary;
+  } catch {
+    // Moved or deleted since the report: the summary is what is left.
+    return summary;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/**
  * A worker's question card as Pane posts it: built from its report, tidied when the question is an
  * old paragraph, and checked. Throws the check's refusal (a PaneError); `quietly` keeps a card that
  * fails as it was sent instead, for reports recorded before the check existed.
  */
 export function workerCard(summary: string | undefined, question: string, options: { quietly?: boolean; summaryPath?: string } = {}): StatusCard & { title: string; asSent?: AdmittedCard['asSent']; warnings: string[] } {
   // An .html passed as --summary-file is the card's Summary page, never its subtitle.
-  const card = options.summaryPath && /\.html?$/iu.test(options.summaryPath) ? {} : workerReportCard(summary, question);
+  const card = options.summaryPath && /\.html?$/iu.test(options.summaryPath) ? {} : workerReportCard(wholeSummary(summary, options.summaryPath), question);
   const fields = { title: question, context: card.context, choices: card.choices, questions: card.questions, links: card.links };
   let admitted: AdmittedCard;
   try {
