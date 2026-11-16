@@ -1,0 +1,9 @@
+# Searches home for ${QUERY}. Home lists Panes and Sessions under All panes, its Sessions and
+# Repositories screens, or a search.
+appId: com.dcouple.pane.mobile
+---
+- tapOn:
+    id: panes-search
+- eraseText: 60
+- inputText: ${QUERY}
+- hideKeyboard

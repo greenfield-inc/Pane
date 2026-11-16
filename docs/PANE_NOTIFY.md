@@ -127,7 +127,7 @@ the first answer from the terminal, Approvals, the strip or the phone wins.
   waits, as No does in the terminal. A plan shows its text with "Yes, and
   auto-accept edits", "Yes, and manually approve edits" and "No, keep
   planning".
-- **The phone** lists the prompt in Approvals with **Yes** and
+- **The phone** lists the prompt under home's **Needs you** with **Yes** and
   **No**, and its alert carries the same two buttons. The question's sheet has
   every choice.
 - **Answered in the terminal**: Pane closes the question and lists it in
@@ -525,8 +525,9 @@ the agent:
   "Mac mini offline · 4 waiting · they come back when the Mac mini is online",
   since its cards can't be answered; the agents keep waiting. After reconnecting
   the screen shows what is waiting there now. Autopilot says "<machine> offline".
-- **Your phone**: the Pane app lists Approvals with the same sort menu, and an
-  item opens above its Session's tabs and chat. A question still waiting after
+- **Your phone**: the Pane app lists approvals on home's **Needs you** tile, in
+  the same three sorts (chosen on its sort sheet), and an item opens above its
+  Session's tabs and chat. A question still waiting after
   about 90 seconds sends one alert to every phone signed
   in to the host in the Pane app with notifications allowed and **Needs
   Input** on. The alert is titled with the Pane's name and says only "<Pane>

@@ -48,7 +48,12 @@ env:
     visible:
       id: panes-list
     timeout: 15000
-- assertVisible: "${PANE_NAME}.*"
+# Home lists Pane rows under a search.
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: ${PANE_NAME}
+- assertVisible: "${PANE_NAME},.*"
 - openLink: pane://pane/some-pane?host=https%3A%2F%2Funknown.example
 # iOS asks before opening a link in the app.
 - extendedWaitUntil:
