@@ -16,7 +16,7 @@ import {
 } from '../../../shared/types/remoteDaemon';
 import type { ApnsCredentialConfig } from '../../../shared/types/sharedCredentials';
 import type { NotifyItem } from '../../../shared/types/notify';
-import { isProgramStatusReason } from '../services/agentStatus/programStatus';
+import { isProgramStatusReason } from '../../../shared/utils/agentStatus';
 
 interface MobilePushConfigManager {
   getConfig(): { remoteDaemon?: RemoteDaemonConfig; apns?: ApnsCredentialConfig };

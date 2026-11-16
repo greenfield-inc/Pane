@@ -9,6 +9,7 @@
  */
 
 import type { AgentDetectionResult } from '../../../../shared/types/agentStatus';
+import { PROGRAM_STATUS_REASON } from '../../../../shared/utils/agentStatus';
 
 type ProgramState = 'idle' | 'working' | 'done' | 'blocked' | 'error';
 type ProgramBlockedKind = 'permission' | 'question' | 'auth';
@@ -20,13 +21,6 @@ export interface ProgramStatus {
   app?: string;
   title?: string;
   msg?: string;
-}
-
-const PROGRAM_STATUS_REASON = 'program_status';
-
-/** The status event's reason says a program reported this state itself. */
-export function isProgramStatusReason(reason: string | null | undefined): boolean {
-  return reason?.startsWith(`${PROGRAM_STATUS_REASON}:`) ?? false;
 }
 
 /**

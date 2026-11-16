@@ -780,6 +780,29 @@ describe('program status reports (OSC 7501)', () => {
     expect(statuses().at(-1)).not.toMatchObject({ reason: 'program_status:working' });
   });
 
+  it('announces each new done or error report, even when the tab already reads idle', async () => {
+    const fixture = attach();
+    fixture.terminal.agentType = undefined;
+    fixture.data('$ ');
+    vi.setSystemTime(40_000); // the shell prompt settled idle long ago
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle' });
+
+    fixture.data(BREW_DONE);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:done', workedVisibly: true });
+
+    // Output under the same record is not a second finish.
+    const count = statuses().length;
+    fixture.data('tick\r\n');
+    await pollAgentStatus();
+    expect(statuses()).toHaveLength(count);
+
+    fixture.data('\x1b]7501;state=error:app=brew\x1b\\');
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:error', workedVisibly: true });
+  });
+
   it('answers the feature-detection query with the bare reply', async () => {
     const fixture = attach();
     fixture.data('\x1b]7501;?\x1b\\');

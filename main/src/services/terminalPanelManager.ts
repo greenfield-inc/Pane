@@ -352,6 +352,8 @@ interface TerminalProcess {
   lastStatusPromptKey?: string;
   /** A foreground read is checking whether the program behind an OSC 7501 record exited. */
   programExitCheck?: boolean;
+  /** The OSC 7501 done or error record last announced, so each finish is announced once. */
+  announcedFinish?: string;
   /** Pane answered Claude's bypass-permissions warning in this terminal. */
   bypassWarningAnswered?: boolean;
   /** Last status scan, reused while the emulator pushes no new screen. */
@@ -2972,7 +2974,14 @@ export class TerminalPanelManager extends EventEmitter {
           oscTitle: screen.oscTitle,
           oscProgress: screen.oscProgress,
         });
+        // A done or error report is a finish even when the tab already read idle.
+        const finish = reported?.state === 'done' || reported?.state === 'error'
+          ? [reported.state, reported.app, reported.title, reported.msg].join('\n')
+          : undefined;
+        const newFinish = finish !== undefined && finish !== terminal.announcedFinish;
+        terminal.announcedFinish = finish;
         if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId, next === 'blocked' ? promptLines() : undefined);
+        else if (newFinish && this.agentStatusMonitor.getState(terminal.panelId) === 'idle') this.emitAgentStatus(terminal, 'idle', detection.matchedRuleId);
         // A new blocking screen (folder trust giving way to another prompt) keeps
         // the state but carries a new reason, which the Session view reads.
         else if (
