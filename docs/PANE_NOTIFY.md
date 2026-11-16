@@ -208,9 +208,9 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   Session, across saved machines; in the one-machine sidebar its tooltip says
   how many of them wait on other machines. Beside
   it, the queue has **Waiting** and **Done today** tabs and a **Group by** menu,
-  remembered per device: **Most recent** (the default) lists items flat, newest
-  first, each row naming its Session and machine; **By Session** and **By
-  project** group them, each group placed by its newest item; **Sidebar order**
+  remembered per device: **By Session** (the default) and **By project** group
+  items, each group placed by its newest item; **Most recent** lists them flat,
+  newest first, each row naming its Session and machine; **Sidebar order**
   groups by Session in the order the sidebar shows them (the All machines
   arrangement when that's on), following a drag there, with Sessions the
   sidebar doesn't show last, newest first. Each group is boxed under a header
