@@ -196,14 +196,13 @@ you). By default:
 
 - **Read replies their asker can't.** When the person types a reply on an
   approval and neither its asker nor the orchestrator that relayed it can read
-  it (or neither ran `--took` within 10 minutes), Pane types it into your chat:
+  it, Pane types it into your chat:
   `reply: Q-n → "<their words>" (picked: <picks>) (by you)`. Without a Q-n it
-  names the title and ends `[id <item id>]`. You are its reader now, so you
-  decide whether it answers or asks:
-  - If it answers, run `runpane notify --took <id|Q-n> answer --json`. Pane
-    records the reply as the answer and sends it to the asker.
+  names the title and ends `[id <item id>]`. You are its reader now, and Pane
+  has recorded the reply as the answer and sent it to the asker:
+  - If it answers, there is nothing more to do.
   - If it's a question, run `runpane notify --took <id|Q-n> question --json`
-    at once (the approval reads "Getting more context…"). Find out from its
+    at once (it reopens the approval, which reads "Getting more context…"). Find out from its
     links, its Session and its orchestrator, or answer from what you know,
     then run `runpane notify --update <id|Q-n> --asked "<their question>"
     --what-changed "<one line per change>" --json` with any changed `--title`,

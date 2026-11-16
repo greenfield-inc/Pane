@@ -190,7 +190,7 @@ export const SCENARIOS = [
     prompt: () => 'Delete the `legacy` branch on origin once I approve it: it holds the 1.x release history. Get my approval first, I am away from this chat.',
     script: () => ({
       notify: [
-        { reply: 'Can we get it back later if we need it?', picks: [], id: 'n-1', replyId: 'r-1', next: 'The person typed a reply. If it answers, run runpane notify --took r-1 answer; if it asks, run runpane notify --took r-1 question, find out, then runpane notify --update r-1 --asked "<their question>" --what-changed "<one line per change>".' },
+        { reply: 'Can we get it back later if we need it?', picks: [], id: 'n-1', replyId: 'r-1', next: 'The person replied, and Pane recorded the reply as the answer to your approval. If it asks about it instead, run `runpane notify --took r-1 question`, find out, then `runpane notify --update r-1 --asked "<their question>" --what-changed "<one line per change>"`. Use this reply id, not the Q-n: it is what lets this call continue.' },
         { approved: true },
         { approved: true },
       ],

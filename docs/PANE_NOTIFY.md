@@ -333,8 +333,9 @@ retries on the next start.
 
 An approval has one reply box. Picks alone are an answer, as before: the call
 returns `{answer}`, or Pane types `answer: Q-20 → Yes, turn it on · One train
-(by you)`. Anything typed is a **reply**, which may be an answer or a question
-about the approval. Pane doesn't decide which; the agent that reads it does
+(by you)`. Anything typed is a **reply**. Pane records it as the answer once
+its reader gets it, and the approval closes with the typed text, like a pick.
+When the reply asks a question instead, the reader reopens the approval
 (D-245, D-258).
 
 **The lines.** The reader's open call returns `{reply, picks?, id, replyId,
@@ -356,9 +357,9 @@ the result's `picks` holds `''` there. Without a Q-n the line names the title
 in quotes, and adds `[id <item id>]` before `(by you)`. Each reply has an id
 and is delivered once.
 
-One reply at a time: while its reader is reading a reply (it has the line but
-hasn't run `--took`), a second typed reply is refused, with your words left in
-the box; picks still answer. A reply still waiting for a busy tab is replaced
+One reply at a time: while a reply is being typed into its reader's tab, a
+second typed reply is refused, with your words left in the box; picks still
+answer. A reply still waiting for a busy tab is replaced
 by a newer one, and only the newer line is typed. The same rule holds on every
 surface: the floating strip and the round send anything typed as a reply too,
 except on a permission prompt, whose note stays a note.
@@ -372,9 +373,15 @@ except on a permission prompt, whose note stays a note.
 4. None: the approval reads "No agent can read replies right now. You can
    still pick an option." The reply stays unread, and picks still answer.
 
-A reader that turns out gone passes the reply to the next one. A reply the
-asker or orchestrator hasn't taken after 10 minutes goes to Autopilot when
-Autopilot is on.
+A reader that turns out gone passes the reply to the next one. When Autopilot
+reads a reply, it is recorded as the answer the same way, and Autopilot acts
+only when it was a question.
+
+For a relayed worker question that the worker reads, the orchestrator's relay
+call gets the reply as its answer. When the worker takes it as a question, Pane
+types `reopened: Q-n → … (by <worker>)` into the orchestrator's tab, the
+orchestrator's `inbox ack` leaves the card open, and the answer to the new
+version reaches the orchestrator as `correction: Q-n → <answer> (by you)`.
 
 **What the reader runs.** Only the reader may; anyone else gets
 `ERR_NOTIFY_NOT_READER` with a `next`. While a card waits, a later run of the
@@ -383,18 +390,19 @@ Pane. A worker in a Session may run both:
 they aren't new asks.
 
 ```sh
-runpane notify --took Q-20 answer      # records the reply (picks and text) as the answer
-runpane notify --took Q-20 question    # "Getting more context…" (--status "<text>" to say otherwise)
+runpane notify --took Q-20 question    # reopens it: "Getting more context…" (--status "<text>" to say otherwise)
 runpane notify --update Q-20 --asked "Can it be undone?" \
   --what-changed "Added the undo path to the context" \
   --context "<new context>" --choices '[{"label":"Yes, with undo","was":"Yes, turn it on","recommended":true},{"label":"Not yet"}]'
 ```
 
-`--took` and `--update` take an item id or Q-n and no `--ui`. `--update` needs
-`--what-changed` (one line per change), and `--asked` (the person's question)
-when it answers a question they typed; an update of your own, such as a
-loop's next run refreshing its card, leaves `--asked` out and shows no "You
-asked". It replaces whichever of `--title`, `--context`, `--choices`, `--questions`
+`--took` and `--update` take an item id or Q-n and no `--ui`. `--took Q-20
+answer` changes nothing: the reply is already the answer. `--update` reopens an
+answered approval as its new version. It needs `--what-changed` (one line per
+change), and `--asked` (the person's question) when it answers a question they
+typed; an update of your own, such as a loop's next run refreshing its card,
+leaves `--asked` out and shows no "You asked". It replaces whichever of
+`--title`, `--context`, `--choices`, `--questions`
 and `--links` it passes. A reworded choice carries `"was"`, its old label.
 `--update` then waits for the answer like any notify call (`waiting`,
 `unavailable` and `--return-after` work the same). It never adds a second
@@ -410,8 +418,8 @@ so older items simply have none.
 | State | Shows |
 | --- | --- |
 | Waiting, no reply | Waiting |
-| Reply delivered, not yet taken | "<reader> is reading your reply…", naming the reader for every kind ("okta-sso-account", "The Doozy orchestrator", "Autopilot") |
-| Taken as an answer | "Taken as your answer", with **It was a question** |
+| Reply waiting for a busy reader | "<reader> is reading your reply…", naming the reader for every kind ("okta-sso-account", "The Doozy orchestrator", "Autopilot") |
+| Reply delivered | "Taken as your answer", with **It was a question** |
 | Taken as a question | "Taken as a question: <reader> is getting more context", with its status when the reader gave one, and **It was my answer** |
 | Updated | "Updated · ready again": your question quoted ("You asked", when the update answers one), What changed and by whom, choices marked NEW, REWORDED (the old label struck) or REMOVED, and a collapsed **Earlier version** |
 | No reader | "No agent can read replies right now. You can still pick an option." |
@@ -420,7 +428,7 @@ so older items simply have none.
 | Answered | Answered |
 
 The fix is one click. **It was a question** sends the reader `correction: Q-n →
-that was a question: "…"`, and the reader updates the approval. **It was my answer**
+that was a question: "…"`, reopens the approval, and the reader updates it. **It was my answer**
 records the reply as the answer and sends `correction: Q-n → that was your
 answer: "…"`, and the reader acts on it. The pager skips items whose reply is
 being read or asked about. Permission prompts stay options only, with no reply

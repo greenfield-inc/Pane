@@ -91,7 +91,6 @@ describe('Pane Chat skill bundle', () => {
     expect(guide).toContain('`runpane inbox ack <item> --decision <D-n>`');
     expect(guide).toContain('`correction: Q-n → <answer> (by you)`');
     expect(guide).toContain('`reply: Q-n → "<their words>" (picked: <picks>) (by you)`');
-    expect(guide).toContain('`runpane notify --took <id|Q-n> answer`');
     expect(guide).toContain('`runpane notify --took <id|Q-n> question`');
     expect(guide).toContain('`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"`');
     expect(guide).toContain('Never post a second approval for it.');
@@ -180,7 +179,6 @@ describe('Pane Chat skill bundle', () => {
     expect(guide).not.toContain('D-66');
     // Autopilot reads the replies their asker can't, and updates instead of re-asking.
     expect(guide).toContain('**Read replies their asker can\'t.**');
-    expect(guide).toContain('`runpane notify --took <id|Q-n> answer --json`');
     expect(guide).toContain('`runpane notify --took <id|Q-n> question --json`');
     expect(guide).toContain('Never post a second approval for it.');
     expect(guide).not.toMatch(/never answers? an approval/i);

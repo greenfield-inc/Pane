@@ -231,8 +231,8 @@ function givenFields(fields: NotifyQuestionFlags & NotifyOtherFlags, keep: (fiel
 /** `--took <id|Q-n> answer|question`: how the reader took the person's reply. It asks nothing new. */
 function buildTookRequest(given: NotifyQuestionFlags, others: NotifyOtherFlags, caller: NotifyCaller): NotifyRequest {
   if (others.took === undefined) throw invalid('tookAs', 'tookAs goes with took: --took <id|Q-n> answer|question.');
-  if (!others.took.trim()) throw invalid('took', "took must be the approval's id or Q-n, such as --took Q-20 answer.");
-  if (others.tookAs === undefined) throw invalid('took', 'took needs answer or question after the id: answer if the reply answers the question, question if it asks one.');
+  if (!others.took.trim()) throw invalid('took', "took must be the approval's id or Q-n, such as --took Q-20 question.");
+  if (others.tookAs === undefined) throw invalid('took', 'took needs answer or question after the id: question if the reply asks something (it reopens the approval), answer to confirm the recorded answer.');
   const tookAs = TOOK_AS.find((candidate) => candidate === others.tookAs);
   if (!tookAs) throw invalid('took', `took takes answer or question after the id; got "${others.tookAs}".`);
   const extra = givenFields({ ...given, ...others }, (field) => field === 'took' || field === 'tookAs' || field === 'status');

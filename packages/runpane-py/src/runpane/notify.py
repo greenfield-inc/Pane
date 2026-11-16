@@ -112,9 +112,9 @@ def build_took_request(given: Mapping[str, Optional[str]], others: Mapping[str, 
     if took is None:
         raise invalid("tookAs", "tookAs goes with took: --took <id|Q-n> answer|question.")
     if not took.strip():
-        raise invalid("took", "took must be the approval's id or Q-n, such as --took Q-20 answer.")
+        raise invalid("took", "took must be the approval's id or Q-n, such as --took Q-20 question.")
     if took_as is None:
-        raise invalid("took", "took needs answer or question after the id: answer if the reply answers the question, question if it asks one.")
+        raise invalid("took", "took needs answer or question after the id: question if the reply asks something (it reopens the approval), answer to confirm the recorded answer.")
     if took_as not in TOOK_AS:
         raise invalid("took", f'took takes answer or question after the id; got "{took_as}".')
     extra = given_fields({**given, **others}, ("took", "tookAs", "status"))

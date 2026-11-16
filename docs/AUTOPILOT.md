@@ -114,7 +114,7 @@ default, Autopilot:
 | closes the ones that don't matter or that it judges stale; you can reopen them | "Closed by Autopilot: <reason>" |
 | may close an unclear one and re-ask it rewritten; the answer goes to the original asker | "Closed by Autopilot: rewritten as …" on the old one, "Rewritten by Autopilot from Q-n" on the new one |
 | answers only when the way forward is clear and the item relates to what it's working on with you, or when you tell it to handle approvals | "Answered by Autopilot · because <D-n, document or your words>", with **Override** |
-| reads a typed reply its asker can't (D-258): takes it as an answer with `runpane notify --took`, or as a question, then finds out and sends a new version with `runpane notify --update` ([Replies](PANE_NOTIFY.md#replies-and-new-versions)) | "Autopilot is reading your reply…", then "Taken as your answer" or "Updated · ready again" |
+| reads a typed reply its asker can't (D-258): Pane records it as the answer on delivery; when it was a question, Autopilot reopens it with `runpane notify --took`, finds out and sends a new version with `runpane notify --update` ([Replies](PANE_NOTIFY.md#replies-and-new-versions)) | "Taken as your answer", or "Updated · ready again" after a question |
 | never answers a permission prompt, or types raw keys into another tab | refused in code ([The guard](#the-guard-d-149)) |
 
 An answer is delivered at once, with no hold. Override sends your answer to the
