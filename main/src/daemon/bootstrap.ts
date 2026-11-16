@@ -732,8 +732,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     pruneWorktrees: async projectPath => { await execFileAsync('git', ['worktree', 'prune'], { cwd: projectPath, timeout: 30_000 }); },
     log: message => logger.info(message),
   });
-  services.machineCleanup = machineCleanup;
   if (duties.housekeeping) {
+    // Only the Pane that owns this data folder deletes anything; another one answers cleanup requests with ERR_MACHINE_HEALTH_UNAVAILABLE.
+    services.machineCleanup = machineCleanup;
     void machineCleanup.finishPendingDeletes();
     machineHealth.setScheduledCleanup(async () => {
       await machineCleanup.run({ source: 'schedule', tiers: [1, 2] });
