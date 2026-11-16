@@ -30,6 +30,72 @@ An agent that needs to wait a few minutes, for CI or a review, sleeps and
 wakes with its own tools (such as a sleep command or its harness's wake-up
 timer).
 
+## Writing a good loop
+
+A loop runs while the person is away, again and again. A good loop's prompt
+follows these rules:
+
+1. **Talk through cards and artifacts only.** The person never opens a loop's
+   Pane, Session or terminal. Everything they need arrives as a `runpane
+   notify` card that stands on its own, with every artifact in `--links`.
+   Questions, blockers and errors (a source unreachable, a sign-in expired)
+   are cards too, with what was tried and the one thing the person can do. The
+   loop acts on their answers on the card.
+2. **Remember across runs.** Keep a small ledger file: the items found, what
+   each run covered, and what was already surfaced. Start every run by reading
+   it, the last one or two outputs, and the person's card answers since the
+   last run. Scan only what is new, and re-check open items.
+3. **Never repeat.** Surface an item only when it is new, newly urgent or
+   overdue, and record when it was last surfaced. Match items by meaning, not
+   wording. While a card is unanswered, update it (`runpane notify --update`)
+   instead of posting another.
+4. **One card per run, or none.** Batch the findings into one card. When
+   nothing qualifies, stay quiet.
+5. **Publish outputs to one place.** Each run's output goes to the person's
+   document destination, one folder per loop, named by date and slot, and
+   links the previous output. Keep a local copy beside the ledger.
+6. **Ask before acting outward.** Anything that sends a message or changes
+   something for someone else is proposed on an approve card and done only
+   once approved. Limit how often the same reminder is proposed.
+7. **Start with a small window.** Set the default look-ahead or look-back,
+   widen it when the evidence calls for it, and record the window used.
+8. **Keep the prompt in a file.** After each edit, run `runpane loops update
+   --loop <id> --prompt-file <path> --yes`, then read the saved loop back with
+   `runpane loops list`.
+9. **Use cards that wait.** Post findings on an `options` or `approve` card,
+   such as "Got it" / "Not interested". A `--ui info` card disappears, so the
+   person rarely sees one from a loop; `runpane notify --ui info` from a loop
+   run prints a warning saying so.
+
+A worked prompt for a twice-daily Session loop, kept in
+`~/loops/commitments-watch/prompt.md`:
+
+```markdown
+You are the commitments-watch loop. You run at 7:30 and 16:30 while I am away.
+
+1. Read ~/loops/commitments-watch/ledger.json, the last two outputs in
+   ~/loops/commitments-watch/out/, and my answers on your cards since the last
+   run (`runpane inbox --json`).
+2. Look for commitments due in the next 3 days in my calendar, email and
+   GitHub, only in what changed since the ledger's last run. Widen to 7 days
+   if something due later needs work now. Re-check every open item.
+3. Keep an item only if it is new, newly urgent or overdue. Compare by
+   meaning: a restated item is not new.
+4. Write today's output as out/<date>-<am|pm>.md, linking the previous one,
+   and publish it to the "commitments-watch" folder of my documents.
+5. If anything qualifies, post one card that waits: `runpane notify --ui
+   options --title "<n> commitments due soon" --choices '[{"label":"Got
+   it"},{"label":"Not interested"}]' --links '[{"label":"Today","url":"<the
+   output>"}]'`. If my last card is unanswered, update it instead
+   (`runpane notify --update <id> --asked <what> --what-changed <what>`). If
+   nothing qualifies, post nothing.
+6. Never send a message for me. Propose it on an approve card, at most once
+   a day per item.
+7. If a source fails (signed out, unreachable), say so on the same card with
+   what you tried and the one thing I can do.
+8. Update the ledger: items, the window you used, what you surfaced and when.
+```
+
 ## In the app
 
 Open **Loops** in the sidebar, under Home and Pane Chat. The Loops page lists

@@ -16,6 +16,9 @@ import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
+import { LoopManager } from '../services/loops/loopManager';
+import { LoopRepository } from '../services/loops/loopRepository';
+import { createLoopTestDb } from '../services/loops/loopTestDb';
 
 /** A Pane's Notify handlers, registered the way the app registers them; no window or phone. */
 async function startPane() {
@@ -424,7 +427,7 @@ describe('Approvals items, through the registered handlers', () => {
   afterEach(() => { openSessions = [launch, later]; });
 
   /** A Pane with Sessions and, optionally, a Session inbox. */
-  async function startWithSessions(inbox?: ReturnType<typeof inboxOf>) {
+  async function startWithSessions(inbox?: ReturnType<typeof inboxOf>, loopManager?: LoopManager) {
     const registry = new PaneCommandRegistry();
     const configManager = new ConfigManager();
     await configManager.initialize();
@@ -435,9 +438,38 @@ describe('Approvals items, through the registered handlers', () => {
       getMainWindow: () => null,
       orchestrationSessionManager: sessions,
       sessionInbox: inbox,
+      loopManager,
     };
     return { configManager, registry, notify: registerNotifyHandlers(ipcMain, services, registry) };
   }
+
+  it("warns a loop off info cards, which disappear before the person is back (#1446)", async () => {
+    const db = createLoopTestDb();
+    const loops = new LoopManager({
+      repo: new LoopRepository(() => db),
+      startRun: async loop => ({ sessionId: loop.projectId ? 'loose' : null }),
+      archiveRun: async () => true,
+      projectExists: () => true,
+      prepareSession: async target => target,
+    });
+    const projectLoop = await loops.save({ name: 'deal-watch', projectId: 1, cron: '0 9 * * *', agent: 'claude', enabled: false });
+    await loops.runNow(projectLoop.id);
+    await loops.save({ name: 'standup', orchestrationSessionId: launch.id, cron: '0 8 * * *', agent: 'claude', initialInput: 'Summarize.', enabled: false });
+    const pane = await startWithSessions(undefined, loops);
+    const ask = (ui: string, paneId: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      ui, caller: { paneId, panelId: `${paneId}-tab` }, title: '3 new deals', context: 'Two under $40.', returnAfterMs: 1,
+      ...(ui === 'options' && { choices: [{ label: 'Got it' }, { label: 'Not interested' }] }),
+    }]);
+
+    // A project loop's run Pane, and a Session loop's own Session.
+    expect((await ask('info', 'loose')).warnings).toEqual([expect.stringMatching(/^The loop "deal-watch" runs while the person is away.*--ui options/u)]);
+    expect((await ask('info', 'session-pane')).warnings).toEqual([expect.stringMatching(/^The loop "standup"/u)]);
+    // A card that waits is what a loop should post; a Pane no loop runs in is not a loop.
+    expect((await ask('options', 'loose')).warnings ?? []).not.toContainEqual(expect.stringMatching(/^The loop/u));
+    loops.delete(projectLoop.id);
+    expect((await ask('info', 'loose')).warnings).toBeUndefined();
+    pane.notify.dispose();
+  });
 
   /** A Session inbox stand-in: its items, and a way to change them as an ack or a new report would. */
   function inboxOf(items: RunpaneInboxItem[]) {

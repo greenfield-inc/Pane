@@ -76,6 +76,13 @@ export class LoopManager {
     return this.options.repo.list().map(loop => this.present(loop));
   }
 
+  /** The loop a caller works for: a project loop's run Pane, or a Session loop's Session. */
+  loopFor(caller: { paneId: string; sessionId?: string }): StoredLoop | null {
+    const { repo } = this.options;
+    return repo.list().find(loop => (caller.sessionId !== undefined && loop.orchestrationSessionId === caller.sessionId)
+      || repo.runs(loop.id).some(run => run.sessionId === caller.paneId)) ?? null;
+  }
+
   async save(input: LoopInput): Promise<Loop> {
     const { repo } = this.options;
     const name = input.name.trim();
