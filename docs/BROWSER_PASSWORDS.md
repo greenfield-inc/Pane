@@ -13,6 +13,9 @@ don't run in them. To sign in to a page beside your agent:
 
 ## Desktop apps and Pane tabs
 
+What each app offers, from its own documentation. None of these has been
+tested with Pane yet.
+
 | Password manager | macOS | Windows | Linux |
 |---|---|---|---|
 | 1Password 8 | Universal Autofill: click the field, press `⌘\` | Auto-Type: click the username field, press `Ctrl+Shift+Space`, pick the login | Copy and paste from Quick Access |
@@ -20,8 +23,8 @@ don't run in them. To sign in to a page beside your agent:
 | KeePassXC | Global Auto-Type | Global Auto-Type | Global Auto-Type (X11; Wayland asks you to pick the entry) |
 | NordPass | Copy and paste | Copy and paste | Copy and paste |
 
-- **1Password on macOS** needs the Accessibility permission (System Settings ›
-  Privacy & Security › Accessibility). 1Password treats Pane as an app, not a
+- **1Password on macOS** (untested with Pane) needs the Accessibility
+  permission (System Settings › Privacy & Security › Accessibility). 1Password treats Pane as an app, not a
   browser, so it doesn't see which site the tab shows. The first time, it asks
   whether the login may fill in Pane: choose **Always Allow** to link that
   login to Pane, or **Allow Once**. See 1Password's
