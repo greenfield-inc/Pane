@@ -738,7 +738,7 @@ describe('runpane IPC handlers', () => {
       const worktreePath = path.join(path.dirname(repoPath), 'create-adopt-worktree');
       execFileSync('git', ['worktree', 'add', '-b', 'create-adopt', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const services = adoptionServices(repoPath, worktreePath);
-      const adoptedPanel = { ...terminalPanel, state: { ...terminalPanel.state, customState: { agentType: 'codex' as const, agentSessionId: 'thread-1' } } };
+      const adoptedPanel = { ...terminalPanel, state: { ...terminalPanel.state, customState: { agentType: 'codex' as const, agentSessionId: '019a0000-0000-7000-8000-000000000001' } } };
       vi.mocked(panelManager.createPanel).mockResolvedValue(adoptedPanel);
       vi.mocked(panelManager.getPanel).mockReturnValue(adoptedPanel);
       terminalPanelStore.getPanel.mockReturnValue(adoptedPanel);
@@ -746,16 +746,16 @@ describe('runpane IPC handlers', () => {
 
       const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
         repo: { id: project.id },
-        panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex' }, resume: 'thread-1', launch }],
+        panes: [{ path: worktreePath, name: 'Adopted', tool: { agent: 'codex' }, resume: '019a0000-0000-7000-8000-000000000001', launch }],
       }]);
 
       expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [{ ok: true, sessionId: session.id }] });
       expect(panelManager.createPanel).toHaveBeenCalledTimes(1);
       expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
-        initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-1', initialCommand: launch ? 'codex --yolo' : undefined, resumeDirectory: worktreePath }),
+        initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: '019a0000-0000-7000-8000-000000000001', initialCommand: launch ? 'codex --yolo' : undefined, resumeDirectory: worktreePath }),
       }));
       if (!launch) {
-        expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'codex --yolo resume "thread-1"');
+        expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, "codex --yolo resume '019a0000-0000-7000-8000-000000000001'");
       }
       expect(services.sessionManager.emitSessionCreated).toHaveBeenCalledWith(
         expect.objectContaining({ status: 'stopped' }),
@@ -878,6 +878,31 @@ describe('runpane IPC handlers', () => {
         expect(terminalPanelManager.initializeTerminal).not.toHaveBeenCalled();
       },
     );
+
+    // The id goes onto the agent's launch line, so anything outside its UUID shape is refused (#1124).
+    it.each([
+      ['claude', 'x$(Remove-Item -Recurse ~)'],
+      ['claude', '0b6f2a8e-3d6c-4f0a-9a43-6c2a3f0e9d11"; calc; "'],
+      ['codex', 'thread-1'],
+      ['codex', '`whoami`'],
+      ['codex', "it's"],
+    ] as const)('rejects a %s resume %j outside its id shape before dry-run output or mutation', async (agent, resume) => {
+      const { repoPath, worktreePath } = createAdoptWorktree(`invalid-${agent}-${resume.length}`);
+      const services = adoptionServices(repoPath, worktreePath);
+
+      const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
+        repo: { id: project.id },
+        dryRun: true,
+        panes: [{ path: worktreePath, name: 'Invalid', tool: { agent }, resume }],
+      }]);
+
+      expect(result).toMatchObject({
+        ok: false,
+        items: [{ ok: false, error: { message: expect.stringMatching(/(Claude|Codex) --resume must be a session id matching \^\[0-9A-Fa-f\]\{8\}-/) } }],
+      });
+      expect(services.sessionManager.createSession).not.toHaveBeenCalled();
+      expect(panelManager.createPanel).not.toHaveBeenCalled();
+    });
 
     it.each([
       ['dry-run', true, 123],
@@ -1140,7 +1165,7 @@ describe('runpane IPC handlers', () => {
           path: worktreePath,
           name: 'Adopted',
           tool: { agent: 'codex', initialInput: 'Continue with step 2' },
-          resume: 'thread-1',
+          resume: '019a0000-0000-7000-8000-000000000001',
           launch: true,
         }],
       }]);
@@ -1152,7 +1177,7 @@ describe('runpane IPC handlers', () => {
         resumeDirectory: expect.any(String),
         initialInput: 'Continue with step 2',
         initialInputSubmitStrategy: 'codex-ctrl-enter',
-        agentSessionId: 'thread-1',
+        agentSessionId: '019a0000-0000-7000-8000-000000000001',
         hasClaudeSessionId: false,
       });
       expect(initialState).not.toHaveProperty('initialInputMode');
@@ -3011,16 +3036,39 @@ describe('runpane IPC handlers', () => {
     }));
   });
 
+  it.each([
+    ['claude', 'x$(Write-Output pwned)'],
+    ['codex', 'thread-1'],
+  ] as const)('refuses to open a %s tab resuming %j, which is not in its id shape', async (agent, resume) => {
+    await expect(createRegistry(createServices()).invoke('runpane:panels:create', [{
+      paneId: session.id, tool: { agent }, resume, noFocus: true,
+    }])).rejects.toMatchObject({ code: 'ERR_RESUME_ID', next: expect.stringContaining('leave out --resume') });
+    expect(panelManager.createPanel).not.toHaveBeenCalled();
+  });
+
+  it('refuses an empty resume id with a next step', async () => {
+    await expect(createRegistry(createServices()).invoke('runpane:panels:create', [{
+      paneId: session.id, tool: { agent: 'claude' }, resume: '  ', noFocus: true,
+    }])).rejects.toMatchObject({ code: 'ERR_RESUME_ID', next: expect.stringContaining('leave out --resume') });
+  });
+
+  it('refuses a Pane whose Codex resume id is not in its id shape', async () => {
+    await expect(createRegistry(createServices()).invoke('runpane:panes:create', [{
+      repo: { id: project.id }, panes: [{ name: 'handoff-feature', tool: { agent: 'codex' }, resume: '$(id)' }],
+    }])).rejects.toMatchObject({ code: 'ERR_RESUME_ID', message: expect.stringMatching(/Codex --resume must be a session id matching/) });
+    expect(panelManager.createPanel).not.toHaveBeenCalled();
+  });
+
   it('creates a Pane whose agent resumes a native session id', async () => {
-    const panel = { ...terminalPanel, state: { ...terminalPanel.state, customState: { agentType: 'codex' as const, agentSessionId: 'thread-7' } } };
+    const panel = { ...terminalPanel, state: { ...terminalPanel.state, customState: { agentType: 'codex' as const, agentSessionId: '019a0000-0000-7000-8000-000000000007' } } };
     vi.mocked(panelManager.createPanel).mockResolvedValue(panel);
     vi.mocked(panelManager.getPanel).mockReturnValue(panel);
     await createRegistry(createServices()).invoke('runpane:panes:create', [{
-      repo: { id: project.id }, panes: [{ name: 'handoff-feature', tool: { agent: 'codex' }, resume: 'thread-7' }],
+      repo: { id: project.id }, panes: [{ name: 'handoff-feature', tool: { agent: 'codex' }, resume: '019a0000-0000-7000-8000-000000000007' }],
     }]);
     expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
       // The resumed conversation recorded another folder; the terminal pins it with --cd so Codex does not ask which to use.
-      initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-7', initialCommand: 'codex --yolo', resumeDirectory: expect.any(String) }),
+      initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: '019a0000-0000-7000-8000-000000000007', initialCommand: 'codex --yolo', resumeDirectory: expect.any(String) }),
     }));
   });
 
