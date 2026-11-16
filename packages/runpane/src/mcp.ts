@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { setFlagsFromString } from 'node:v8';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
 import { loadDocs } from './docs';
@@ -11,7 +12,7 @@ import { agentsIntroForInstructions, claudeMdHasPaneGuidance, scratchRule } from
 
 // A type alias, unlike an interface, is assignable to the SDK's open result type.
 type ToolResult = {
-  content: { type: 'text'; text: string }[];
+  content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[];
   structuredContent?: JsonObject;
   isError?: boolean;
 };
@@ -295,7 +296,8 @@ async function callTool(
   }
   const structuredContent = parseJsonObject(text);
   if (!structuredContent) return errorResult(`runpane ${tool.command} did not print JSON:\n${text}`);
-  return { content: [{ type: 'text', text }], structuredContent };
+  const image = imageContent(structuredContent);
+  return { content: image ? [{ type: 'text', text }, image] : [{ type: 'text', text }], structuredContent };
 }
 
 /**
@@ -375,6 +377,18 @@ export function runCliProcess(
     child.on('error', (error) => resolve({ code: 1, stdout, stderr: `${stderr}${error.message}` }));
     child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
   });
+}
+
+const imageResultSchema = boundary.object({ mimeType: boundary.literal('image/png'), path: boundary.string });
+
+/** A result that names a PNG on this machine (device_screenshot) also carries the image, so the model sees it. */
+function imageContent(result: JsonObject): { type: 'image'; data: string; mimeType: string } | undefined {
+  try {
+    const image = decodeBoundary(result, imageResultSchema);
+    return { type: 'image', data: readFileSync(image.path).toString('base64'), mimeType: image.mimeType };
+  } catch {
+    return undefined;
+  }
 }
 
 function errorResult(text: string): ToolResult {

@@ -795,6 +795,164 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "devices list",
+      "mcpName": "device_list",
+      "summary": "List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.",
+      "usage": [
+        "runpane devices list [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesListResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices open",
+      "mcpName": "device_open",
+      "summary": "Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.",
+      "usage": [
+        "runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesOpenResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices screenshot",
+      "mcpName": "device_screenshot",
+      "summary": "Capture the screen of this Pane's open device as an image.",
+      "usage": [
+        "runpane devices screenshot [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesScreenshotResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices act",
+      "mcpName": "device_act",
+      "summary": "Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.",
+      "usage": [
+        "runpane devices act [--json] [--pane-dir <path>] -- <command>"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesActResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices run",
+      "mcpName": "device_run",
+      "summary": "Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.",
+      "usage": [
+        "runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>"
+      ],
+      "mutates": true,
+      "openWorld": true,
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesRunResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices close",
+      "mcpName": "device_close",
+      "summary": "Release this Pane's device and stop the commands device_run started. The device stays warm for 10 minutes.",
+      "usage": [
+        "runpane devices close [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesCloseResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices usage",
+      "mcpName": "device_usage",
+      "summary": "Report the memory and disk Pane's simulators, device tools and build checkouts use on this machine.",
+      "usage": [
+        "runpane devices usage [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesUsageResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices free",
+      "mcpName": "device_free",
+      "summary": "Shut down unused devices (--idle), or also delete every unused device Pane made (--all).",
+      "usage": [
+        "runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesFreeResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "theme read",
       "summary": "Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.",
       "usage": [
@@ -3183,6 +3341,21 @@ export const RUNPANE_CONTRACT = {
         "name": "--search",
         "value": "<text>",
         "description": "models only: keep models whose name contains this text."
+      },
+      {
+        "name": "--platform",
+        "value": "<ios|android>",
+        "description": "devices open: ios or android."
+      },
+      {
+        "name": "--device",
+        "value": "<name-or-id>",
+        "description": "devices open: one of the person's own devices by name or id."
+      },
+      {
+        "name": "--wait-ms",
+        "value": "<milliseconds>",
+        "description": "devices run: how long to wait for the command to exit."
       }
     ],
     "localBoolean": [
@@ -3341,6 +3514,14 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--hook",
         "description": "runpane panels conversation: read a Claude Code SessionStart hook's JSON from stdin and report it for PANE_PANEL_ID. Prints nothing and always exits 0."
+      },
+      {
+        "name": "--background",
+        "description": "devices run: keep the command running after the call returns; it stops at devices close."
+      },
+      {
+        "name": "--idle",
+        "description": "devices free: shut down Pane's devices no Pane holds."
       }
     ]
   },
@@ -3371,6 +3552,14 @@ export const RUNPANE_CONTRACT = {
         "  runpane secrets delete --project <project> --name <name> --yes",
         "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "  runpane devices list [--json] [--pane-dir <path>]",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "  runpane devices screenshot [--json] [--pane-dir <path>]",
+        "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
+        "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
+        "  runpane devices close [--json] [--pane-dir <path>]",
+        "  runpane devices usage [--json] [--pane-dir <path>]",
+        "  runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]",
         "  runpane theme read [--json]",
         "  runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
         "  runpane theme set --theme <id> [--json]",
@@ -5413,6 +5602,110 @@ export const RUNPANE_CONTRACT = {
         "  --session <id|name>            Named Session id or exact name",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
+      ],
+      "devices list": [
+        "Usage:",
+        "  runpane devices list [--json] [--pane-dir <path>]",
+        "",
+        "Lists this machine's iOS simulators and Android emulators, plus the iOS machine Pane uses when this one has no Xcode. paneMade marks the devices Pane created; device_open uses those unless you name another.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices open": [
+        "Usage:",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "",
+        "Leases a device to the calling tab's Pane and boots it. Without --device, Pane uses its own device (Pane iPhone or Pane_Android) and makes one from the newest installed runtime when needed. The first call on a machine installs Pane's device tools (agent-device and Expo's device hub), which takes a minute. When every device Pane may boot is held by another Pane, it waits up to 60 seconds, then fails with ERR_DEVICE_BUSY naming the holder. On a machine without Xcode, iOS opens on a linked Mac. Later device calls act on this device; you never pass it again.",
+        "",
+        "Options:",
+        "  --platform <ios|android>       ios for an iOS simulator, android for an Android emulator",
+        "  --device <name-or-id>          One of the person's own devices by name or id, from device_list. Leave it out to use Pane's own device",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices screenshot": [
+        "Usage:",
+        "  runpane devices screenshot [--json] [--pane-dir <path>]",
+        "",
+        "Returns the PNG's path; MCP clients also get the image itself.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices act": [
+        "Usage:",
+        "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
+        "",
+        "Passes the command to agent-device, pinned to the device this Pane holds. Start with `open <app id>`, then `snapshot -i` for @refs, then `press @eN --settle`. agent-device's own help: `help workflow`. Flags that pick another device, session or daemon (--session, --device, --udid, --serial, --platform) are refused.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices run": [
+        "Usage:",
+        "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
+        "",
+        "On this machine it runs in the Pane's worktree. When the device runs on a linked Mac, Pane first syncs the worktree there (uncommitted changes included) and runs in Pane's checkout on the Mac. It waits up to --wait-ms (default 120000) and returns the exit code and log tail, or a jobId while it still runs. --background keeps a server such as Metro running until device_close. Pass an empty command to sync only.",
+        "",
+        "Options:",
+        "  --background                   Keep the command running after the call returns (Metro); it stops at device_close",
+        "  --wait-ms <milliseconds>       How long to wait for the command to exit (default 120000)",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices close": [
+        "Usage:",
+        "  runpane devices close [--json] [--pane-dir <path>]",
+        "",
+        "Ends the lease so another Pane can use the device. It shuts down 10 minutes later unless a Pane opens it again.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices usage": [
+        "Usage:",
+        "  runpane devices usage [--json] [--pane-dir <path>]",
+        "",
+        "For machine health. Memory comes from simslim measure when it is installed, otherwise the simulator's processes.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices free": [
+        "Usage:",
+        "  runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]",
+        "",
+        "Never touches the person's own devices or runtimes, or a device a Pane holds.",
+        "",
+        "Options:",
+        "  --idle                         Shut down Pane's devices no Pane holds",
+        "  --all                          Also erase and delete them",
+        "  --yes                          Confirm the change",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices": [
+        "Usage:",
+        "  runpane devices <list|open|screenshot|act|run|close|usage|free> [options]",
+        "",
+        "Phone simulators and emulators for agents. device_open boots a device for the calling tab's Pane and shows its live screen in a device tab beside the agent; the other commands act only on that Pane's device.",
+        "On a machine without Xcode, iOS runs on a linked Mac. See docs/DEVICES.md.",
+        "",
+        "Commands:",
+        "  runpane devices list [--json] [--pane-dir <path>]",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "  runpane devices screenshot [--json] [--pane-dir <path>]",
+        "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
+        "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
+        "  runpane devices close [--json] [--pane-dir <path>]",
+        "  runpane devices usage [--json] [--pane-dir <path>]",
+        "  runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]"
       ]
     },
     "pip": {
@@ -7345,6 +7638,69 @@ export const RUNPANE_CONTRACT = {
         "  --session <id|name>            Named Session id or exact name",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
+      ],
+      "devices list": [
+        "Usage:",
+        "  runpane devices list [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices list` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices list"
+      ],
+      "devices open": [
+        "Usage:",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices open` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices open"
+      ],
+      "devices screenshot": [
+        "Usage:",
+        "  runpane devices screenshot [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices screenshot` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices screenshot"
+      ],
+      "devices act": [
+        "Usage:",
+        "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
+        "",
+        "`runpane devices act` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices act"
+      ],
+      "devices run": [
+        "Usage:",
+        "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
+        "",
+        "`runpane devices run` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices run"
+      ],
+      "devices close": [
+        "Usage:",
+        "  runpane devices close [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices close` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices close"
+      ],
+      "devices usage": [
+        "Usage:",
+        "  runpane devices usage [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices usage` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices usage"
+      ],
+      "devices free": [
+        "Usage:",
+        "  runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices free` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices free"
+      ],
+      "devices": [
+        "Usage:",
+        "  runpane devices <list|open|screenshot|act|run|close|usage|free> [options]",
+        "",
+        "`runpane devices` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices"
       ]
     }
   },
@@ -18357,6 +18713,419 @@ export const RUNPANE_CONTRACT = {
         }
       },
       "additionalProperties": false
+    },
+    "deviceSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "platform",
+        "name",
+        "os",
+        "machine",
+        "state",
+        "paneMade"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "platform": {
+          "enum": [
+            "ios",
+            "android"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string",
+          "description": "The machine the device runs on."
+        },
+        "state": {
+          "enum": [
+            "booted",
+            "shutdown"
+          ]
+        },
+        "paneMade": {
+          "type": "boolean",
+          "description": "Pane created this device; it erases and deletes only these."
+        },
+        "heldBy": {
+          "type": "object",
+          "required": [
+            "paneId",
+            "paneName"
+          ],
+          "properties": {
+            "paneId": {
+              "type": "string"
+            },
+            "paneName": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "devices"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/deviceSummary"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesOpenResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "device",
+        "machine",
+        "panelId",
+        "paneDevice",
+        "next"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "device": {
+          "$ref": "#/jsonSchemas/deviceSummary"
+        },
+        "machine": {
+          "type": "object",
+          "required": [
+            "name",
+            "reason"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why this machine runs the device."
+            }
+          },
+          "additionalProperties": false
+        },
+        "panelId": {
+          "type": "string",
+          "description": "The device tab beside the agent."
+        },
+        "paneDevice": {
+          "type": "object",
+          "description": "Marker a chat tab uses to show the device card.",
+          "required": [
+            "kind",
+            "panelId",
+            "name",
+            "machine"
+          ],
+          "properties": {
+            "kind": {
+              "const": "pane-device"
+            },
+            "panelId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "os": {
+              "type": "string"
+            },
+            "machine": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesScreenshotResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "path",
+        "mimeType"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "path": {
+          "type": "string",
+          "description": "PNG on the caller's machine."
+        },
+        "mimeType": {
+          "const": "image/png"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesActResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "exitCode",
+        "output"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "exitCode": {
+          "type": "number",
+          "description": "agent-device's exit code."
+        },
+        "output": {
+          "type": "string",
+          "description": "agent-device's output."
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesRunResult": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "synced": {
+          "type": "boolean"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Where the command ran: the worktree, or Pane's synced checkout on a linked Mac."
+        },
+        "machine": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "exited"
+          ]
+        },
+        "exitCode": {
+          "type": "number"
+        },
+        "logTail": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesCloseResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "closed",
+        "jobsStopped"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "closed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "jobsStopped": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesUsageResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "machines"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "machines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "machine",
+              "devices",
+              "helpers",
+              "checkouts",
+              "slimSim"
+            ],
+            "properties": {
+              "machine": {
+                "type": "string"
+              },
+              "devices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "platform",
+                    "name",
+                    "paneMade",
+                    "booted"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "platform": {
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "paneMade": {
+                      "type": "boolean"
+                    },
+                    "booted": {
+                      "type": "boolean"
+                    },
+                    "heldBy": {
+                      "type": "string"
+                    },
+                    "lastUsedAt": {
+                      "type": "string"
+                    },
+                    "memoryBytes": {
+                      "type": "number"
+                    },
+                    "diskBytes": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "helpers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "pid",
+                    "memoryBytes"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "pid": {
+                      "type": "number"
+                    },
+                    "memoryBytes": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "checkouts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "path",
+                    "bytes"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "slimSim": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesFreeResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "machine",
+        "shutdown",
+        "deleted"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "machine": {
+          "type": "string"
+        },
+        "shutdown": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deleted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "agentContext": {
@@ -25056,6 +25825,288 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "The person's way back from any Custom theme; an agent switches away with `runpane theme set --theme <id>` instead."
+        ]
+      },
+      "devices list": {
+        "name": "devices list",
+        "summary": "List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.",
+        "details": "Lists this machine's iOS simulators and Android emulators, plus the iOS machine Pane uses when this one has no Xcode. paneMade marks the devices Pane created; device_open uses those unless you name another.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices list --json"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesListResult"
+        ]
+      },
+      "devices open": {
+        "name": "devices open",
+        "summary": "Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.",
+        "details": "Leases a device to the calling tab's Pane and boots it. Without --device, Pane uses its own device (Pane iPhone or Pane_Android) and makes one from the newest installed runtime when needed. The first call on a machine installs Pane's device tools (agent-device and Expo's device hub), which takes a minute. When every device Pane may boot is held by another Pane, it waits up to 60 seconds, then fails with ERR_DEVICE_BUSY naming the holder. On a machine without Xcode, iOS opens on a linked Mac. Later device calls act on this device; you never pass it again.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--platform",
+            "value": "<ios|android>",
+            "required": true,
+            "description": "ios for an iOS simulator, android for an Android emulator."
+          },
+          {
+            "name": "--device",
+            "value": "<name-or-id>",
+            "required": false,
+            "description": "One of the person's own devices by name or id, from device_list. Leave it out to use Pane's own device."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices open --platform ios --json"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesOpenResult"
+        ]
+      },
+      "devices screenshot": {
+        "name": "devices screenshot",
+        "summary": "Capture the screen of this Pane's open device as an image.",
+        "details": "Returns the PNG's path; MCP clients also get the image itself.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices screenshot --json"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesScreenshotResult"
+        ]
+      },
+      "devices act": {
+        "name": "devices act",
+        "summary": "Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.",
+        "details": "Passes the command to agent-device, pinned to the device this Pane holds. Start with `open <app id>`, then `snapshot -i` for @refs, then `press @eN --settle`. agent-device's own help: `help workflow`. Flags that pick another device, session or daemon (--session, --device, --udid, --serial, --platform) are refused.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "-- <command>",
+            "required": true,
+            "description": "The agent-device command and its arguments, such as `snapshot -i` or `press @e3 --settle`."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices act --json -- open com.apple.Preferences",
+          "runpane devices act --json -- snapshot -i"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesActResult"
+        ]
+      },
+      "devices run": {
+        "name": "devices run",
+        "summary": "Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.",
+        "details": "On this machine it runs in the Pane's worktree. When the device runs on a linked Mac, Pane first syncs the worktree there (uncommitted changes included) and runs in Pane's checkout on the Mac. It waits up to --wait-ms (default 120000) and returns the exit code and log tail, or a jobId while it still runs. --background keeps a server such as Metro running until device_close. Pass an empty command to sync only.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--background",
+            "required": false,
+            "description": "Keep the command running after the call returns (Metro); it stops at device_close."
+          },
+          {
+            "name": "--wait-ms",
+            "value": "<milliseconds>",
+            "required": false,
+            "description": "How long to wait for the command to exit (default 120000)."
+          },
+          {
+            "name": "-- <command>",
+            "required": true,
+            "description": "The command line to run, or empty to sync only."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices run --json -- npx expo run:ios",
+          "runpane devices run --background --json -- npx expo start"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesRunResult"
+        ]
+      },
+      "devices close": {
+        "name": "devices close",
+        "summary": "Release this Pane's device and stop the commands device_run started. The device stays warm for 10 minutes.",
+        "details": "Ends the lease so another Pane can use the device. It shuts down 10 minutes later unless a Pane opens it again.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices close --json"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesCloseResult"
+        ]
+      },
+      "devices usage": {
+        "name": "devices usage",
+        "summary": "Report the memory and disk Pane's simulators, device tools and build checkouts use on this machine.",
+        "details": "For machine health. Memory comes from simslim measure when it is installed, otherwise the simulator's processes.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices usage --json"
+        ],
+        "notes": [
+          "For machine health: answers only callers on this machine, and never touches the person's own devices or runtimes."
+        ],
+        "jsonSchemas": [
+          "devicesUsageResult"
+        ]
+      },
+      "devices free": {
+        "name": "devices free",
+        "summary": "Shut down unused devices (--idle), or also delete every unused device Pane made (--all).",
+        "details": "Never touches the person's own devices or runtimes, or a device a Pane holds.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--idle",
+            "required": false,
+            "description": "Shut down Pane's devices no Pane holds."
+          },
+          {
+            "name": "--all",
+            "required": false,
+            "description": "Also erase and delete them."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm the change."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices free --idle --yes --json"
+        ],
+        "notes": [
+          "For machine health: answers only callers on this machine, and never touches the person's own devices or runtimes."
+        ],
+        "jsonSchemas": [
+          "devicesFreeResult"
         ]
       }
     },

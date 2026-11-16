@@ -332,6 +332,14 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `secrets delete`: Delete a Pane secret from this machine and, through sync, from your other machines.
 - `secrets exec`: Run a command with Pane secrets in its environment. Nothing prints a value.
 - `secrets request`: Ask the person for a secret on a masked card. Pane saves what they type as a Pane secret and never returns it.
+- `devices list`: List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.
+- `devices open`: Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.
+- `devices screenshot`: Capture the screen of this Pane's open device as an image.
+- `devices act`: Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.
+- `devices run`: Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.
+- `devices close`: Release this Pane's device and stop the commands device_run started. The device stays warm for 10 minutes.
+- `devices usage`: Report the memory and disk Pane's simulators, device tools and build checkouts use on this machine.
+- `devices free`: Shut down unused devices (--idle), or also delete every unused device Pane made (--all).
 - `theme read`: Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.
 - `theme set`: Restyle Pane itself, only when the person asks to change Pane's look: write the Custom theme (a base theme, colour tokens and CSS) and select it, or switch to another theme. Pane restyles within a second.
 - `theme reset`: Delete the Custom theme and go back to the theme it was built on.
@@ -460,6 +468,14 @@ runpane secrets set --project <project> --name <name> --yes [--json] [--pane-dir
 runpane secrets delete --project <project> --name <name> --yes [--json] [--pane-dir <path>]
 runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... [--pane-dir <path>] -- <command>...
 runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json] [--pane-dir <path>]
+runpane devices list [--json] [--pane-dir <path>]
+runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]
+runpane devices screenshot [--json] [--pane-dir <path>]
+runpane devices act [--json] [--pane-dir <path>] -- <command>
+runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>
+runpane devices close [--json] [--pane-dir <path>]
+runpane devices usage [--json] [--pane-dir <path>]
+runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]
 runpane theme read [--json] [--pane-dir <path>]
 runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json] [--pane-dir <path>]
 runpane theme set --theme <id> [--json] [--pane-dir <path>]
@@ -779,6 +795,9 @@ These flags are consumed by local daemon-control commands:
 --css <text>
 --theme <id>
 --search <text>
+--platform <ios|android>
+--device <name-or-id>
+--wait-ms <milliseconds>
 --json
 --wait-ready
 --no-focus
@@ -818,6 +837,8 @@ These flags are consumed by local daemon-control commands:
 --approve
 --deny
 --hook
+--background
+--idle
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, use Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane`), which reaches the Windows named-pipe daemon through WSL interop; older Pane builds need `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'`.

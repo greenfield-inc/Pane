@@ -1,3 +1,4 @@
+import type { DeviceSettings } from '../../../shared/types/devices';
 import type { PaneSecretMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
@@ -59,6 +60,8 @@ type HtmlFileOpenMode = 'preview' | 'source';
 export interface AppConfig {
   // Chat tabs (Claude and Codex over ACP, no terminal). On for a fresh install; see ConfigManager.
   chatTabsEnabled?: boolean;
+  /** Settings > Devices (docs/DEVICES.md). */
+  devices?: Partial<DeviceSettings>;
   /** Experimental: Autopilot, one always-running agent above every Session (needs chat tabs). */
   autopilotEnabled?: boolean;
   verbose?: boolean;
