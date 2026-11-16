@@ -48,7 +48,7 @@ export function readJson(file: string): JsonValue | undefined {
   }
 }
 
-/** Past this, a single line is skipped rather than held in memory whole. */
+/** Past this, a single line is skipped rather than held in memory whole; most lines end within a step or two. */
 const MAX_LINE_BYTES = 64 * 1024 * 1024;
 
 /**
@@ -66,7 +66,7 @@ export function readHeadLines(file: string, maxBytes = 64 * 1024): string[] {
     total += read;
     // The window ended mid-line: read on to that line's end.
     while (read === chunk.length && chunk[read - 1] !== 0x0a && total < maxBytes + MAX_LINE_BYTES) {
-      chunk = Buffer.alloc(1024 * 1024);
+      chunk = Buffer.alloc(maxBytes);
       read = fs.readSync(handle, chunk, 0, chunk.length, total);
       chunks.push(chunk.subarray(0, read));
       total += read;
