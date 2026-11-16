@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FinishedPaneMonitor, findFinishedPanes, type FinishedPane, type FinishedPaneDeps } from './finishedPanes';
+import { FinishedPaneMonitor, findFinishedPanes, type FinishedPane, type FinishedPaneDeps, type FinishedScope } from './finishedPanes';
 
 const DAY = 86_400_000;
 const NOW = Date.parse('2026-11-15T12:00:00Z');
@@ -89,5 +89,35 @@ describe('FinishedPaneMonitor', () => {
     const run = await m.archive(['a', 'b'], 'card');
     expect(archived).toEqual([]);
     expect(run.skipped.map(entry => [entry.id, entry.reason])).toEqual([['a', 'An agent is working in it.'], ['b', 'It is no longer finished.']]);
+  });
+
+  it('answers the first read without GitHub, and reads that come during a check share it', async () => {
+    const scopes: FinishedScope[] = [];
+    let finishSweep = () => {};
+    const m = new FinishedPaneMonitor({
+      now: () => NOW,
+      find: scope => {
+        scopes.push(scope);
+        if (scope.offline) return Promise.resolve([finished('idle-one')]);
+        return new Promise(resolve => { finishSweep = () => resolve([finished('idle-one'), finished('merged-one')]); });
+      },
+      archive: async () => undefined, automatic: () => false, record: () => undefined,
+    });
+    expect((await m.list()).map(pane => pane.sessionId)).toEqual(['idle-one']);
+    const refreshed = Promise.all([m.list(true), m.list(true)]);
+    finishSweep();
+    expect((await refreshed).map(list => list.length)).toEqual([2, 2]);
+    expect(scopes).toEqual([{}, { offline: true }]);
+    expect((await m.list()).map(pane => pane.sessionId)).toEqual(['idle-one', 'merged-one']);
+  });
+
+  it('checks again only the Panes it was asked to archive', async () => {
+    const scopes: FinishedScope[] = [];
+    const m = new FinishedPaneMonitor({
+      now: () => NOW, find: async scope => { scopes.push(scope); return [finished('a'), finished('b')]; },
+      archive: async () => undefined, automatic: () => false, record: () => undefined,
+    });
+    await m.archive(['a'], 'ui');
+    expect(scopes[0]).toEqual({ ids: ['a'] });
   });
 });

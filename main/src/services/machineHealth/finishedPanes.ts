@@ -69,9 +69,15 @@ export async function findFinishedPanes(deps: FinishedPaneDeps): Promise<Finishe
   return finished;
 }
 
+/** Which open Panes a check covers (`ids`, else all), and whether it skips the GitHub lookup (`offline`). */
+export interface FinishedScope {
+  ids?: readonly string[];
+  offline?: boolean;
+}
+
 export interface FinishedMonitorDeps {
   now: () => number;
-  find: () => Promise<FinishedPane[]>;
+  find: (scope: FinishedScope) => Promise<FinishedPane[]>;
   /** Archives through the normal archive path, so the branch stays and Restore works. */
   archive: (paneId: string) => Promise<void>;
   automatic: () => boolean;
@@ -85,6 +91,7 @@ const FIRST_CHECK_DELAY_MS = 15 * 60_000;
 export class FinishedPaneMonitor extends EventEmitter {
   private latest: FinishedPane[] | null = null;
   private timer: NodeJS.Timeout | null = null;
+  private sweeping: Promise<FinishedPane[]> | null = null;
 
   constructor(private readonly deps: FinishedMonitorDeps) {
     super();
@@ -106,11 +113,25 @@ export class FinishedPaneMonitor extends EventEmitter {
     this.timer = null;
   }
 
+  /**
+   * The last full check. Before the first one, it starts one in the background and answers
+   * with what Pane can tell without GitHub. `refresh` waits for a fresh check.
+   */
   async list(refresh = false): Promise<FinishedPane[]> {
-    if (this.latest && !refresh) return this.latest;
-    this.latest = await this.deps.find();
-    this.emit('finished', this.latest);
-    return this.latest;
+    if (refresh) return this.sweep();
+    if (this.latest) return this.latest;
+    void this.sweep().catch(error => console.warn('[MachineHealth] finished-Pane check failed:', error instanceof Error ? error.message : error));
+    return this.deps.find({ offline: true });
+  }
+
+  /** One check over every open Pane; callers that come while it runs share it. */
+  private sweep(): Promise<FinishedPane[]> {
+    this.sweeping ??= this.deps.find({}).then(list => {
+      this.latest = list;
+      this.emit('finished', list);
+      return list;
+    }).finally(() => { this.sweeping = null; });
+    return this.sweeping;
   }
 
   /** One scheduled check (also run when disk reaches the warning level). */
@@ -121,9 +142,9 @@ export class FinishedPaneMonitor extends EventEmitter {
     if (ready.length > 0) await this.archive(ready, 'schedule');
   }
 
-  /** Archives the named Panes that are still finished and unprotected right now. */
+  /** Archives the named Panes that are still finished and unprotected right now; only those are checked again. */
   async archive(paneIds: readonly string[], source: CleanupSource): Promise<CleanupRun> {
-    const current = new Map((await this.list(true)).map(pane => [pane.sessionId, pane]));
+    const current = new Map((await this.deps.find({ ids: paneIds })).map(pane => [pane.sessionId, pane]));
     const run: CleanupRun = { at: this.deps.now(), source, removed: [], skipped: [], freedBytes: 0 };
     for (const id of paneIds) {
       const pane = current.get(id);
@@ -144,7 +165,7 @@ export class FinishedPaneMonitor extends EventEmitter {
       }
     }
     this.deps.record(run);
-    await this.list(true).catch(() => undefined);
+    if (run.removed.length > 0) void this.sweep().catch(() => undefined);
     return run;
   }
 

@@ -708,6 +708,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   sessionPrMonitor.start();
   loopManager.start();
   autoPauser.sync();
+  /** True only when the OS confirms the folder is not there; any other failure cannot tell. */
+  const folderGone = (folder: string) => fs.promises.access(folder).then(
+    () => false,
+    error => error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR'),
+  );
   const paneProtection = (paneId: string) => protectionOf(paneId, {
     pinned: id => !!databaseService.getSession(id)?.is_favorite,
     focusedPaneId: () => (options.getMainWindow()?.isFocused() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined),
@@ -718,8 +723,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       const session = databaseService.getSession(id);
       const ctx = sessionManager.getProjectContext(id);
       if (!session?.worktree_path || !ctx) throw new Error('No worktree');
-      // A Pane whose folder is gone has nothing left to lose.
-      if (!fs.existsSync(session.worktree_path)) return false;
+      // A folder the OS confirms is gone has nothing left to lose; WSL paths resolve through the project.
+      if (await folderGone(ctx.pathResolver.toFileSystem(session.worktree_path))) return false;
+      // WSL-aware; a folder it cannot read counts as changed, so "cannot tell" protects the Pane.
       const status = await fastCheckWorkingDirectory(session.worktree_path, ctx.commandRunner.wslContext);
       if (status.hasModified || status.hasStaged || status.hasConflicts) return true;
       return status.hasUntracked && await hasUntrackedWork(session.worktree_path, ctx.commandRunner);
@@ -772,21 +778,25 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   }
   const finishedPanes = new FinishedPaneMonitor({
     now: () => Date.now(),
-    find: () => findFinishedPanes({
+    find: scope => findFinishedPanes({
       now: () => Date.now(),
       idleDays: configManager.getConfig().machineHealth?.finishedIdleDays ?? 14,
       panes: () => databaseService.getAllSessions(undefined, { includeHidden: true }).flatMap(session => {
         if (session.archived || session.is_main_repo || !session.worktree_path || !session.project_id) return [];
+        if (scope.ids && !scope.ids.includes(session.id)) return [];
+        // Stored paths are Linux paths for WSL; without its project Pane cannot resolve one, so it lists nothing.
+        const ctx = sessionManager.getProjectContext(session.id);
+        if (!ctx) return [];
         const pane = sessionManager.getSession(session.id);
         const inactiveSince = paneInactiveSince(
           { createdAt: pane?.createdAt ?? new Date(session.created_at), lastViewedAt: pane?.lastViewedAt, panels: panelManager.getPanelsForSession(session.id) },
           panelId => terminalPanelManager.getLastActivity(panelId) ?? getChatTabManager().lastActivity(panelId),
         ).getTime();
         const projectName = databaseService.getProject(session.project_id)?.name ?? '';
-        return [{ id: session.id, name: session.name, projectName, worktreePath: session.worktree_path, inactiveSince }];
+        return [{ id: session.id, name: session.name, projectName, worktreePath: ctx.pathResolver.toFileSystem(session.worktree_path), inactiveSince }];
       }),
-      prStatus: paneId => findPrStatusForPane(services, paneId),
-      folderExists: async folder => fs.promises.access(folder).then(() => true, () => false),
+      prStatus: paneId => (scope.offline ? Promise.resolve({ state: 'unknown' as const }) : findPrStatusForPane(services, paneId)),
+      folderExists: async folder => !(await folderGone(folder)),
       protectionOf: paneProtection,
       sizeOf: paneId => machineHealth.cachedInventory()?.panes.find(pane => pane.sessionId === paneId)?.worktreeBytes ?? null,
     }),
