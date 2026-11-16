@@ -1812,6 +1812,94 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
   });
 
+  describe('quotes saved resume ids for the terminal\'s own shell (#1124)', () => {
+    // No agent's id shape allows these, but a saved id is read back from disk: each part is syntax
+    // some shell expands or splits on, and the PowerShell part ran before ids were quoted for it.
+    const hostile = 'id $(Write-Output PANE_SECURITY_SENTINEL) `echo tick` \'sq\' ’tq’ $HOME;x';
+    const withDoubleQuote = 'id "dq" x';
+    // ASCII output, so no console code page can change what the test reads back.
+    const nodeArgv = 'console.log(JSON.stringify(process.argv.slice(1).map(encodeURIComponent)))';
+    const prefixes = { claude: 'claude --resume ', codex: 'codex resume ', template: 'wrapper --resume ' } as const;
+    const launch = (agent: keyof typeof prefixes, id: string, shellType: string | undefined): string => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      const state: TerminalPanelState = agent === 'claude'
+        ? { agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true }
+        : agent === 'codex'
+          ? { agentType: 'codex', agentSessionId: id }
+          : { initialCommand: 'wrapper', agentSessionId: id, customResumeStarted: true, customResume: { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } };
+      return manager.resolveCliLaunchCommand('panel', agent === 'template' ? 'wrapper' : agent, state, shellType).commandToRun;
+    };
+    const resumeWord = (agent: keyof typeof prefixes, id: string, shellType: string | undefined): string => {
+      const command = launch(agent, id, shellType);
+      expect(command.startsWith(prefixes[agent])).toBe(true);
+      return command.slice(prefixes[agent].length);
+    };
+    const agents: Array<keyof typeof prefixes> = ['claude', 'codex', 'template'];
+
+    it.each(agents)('single-quotes a %s id for PowerShell, doubling its single quotes', agent => {
+      for (const shell of ['powershell', 'pwsh.exe']) {
+        expect(resumeWord(agent, hostile, shell)).toBe('\'id $(Write-Output PANE_SECURITY_SENTINEL) `echo tick` \'\'sq\'\' ’’tq’’ $HOME;x\'');
+      }
+    });
+
+    it.each(agents)('single-quotes a %s id for POSIX shells and fish', agent => {
+      for (const shell of ['bash', 'zsh', '/bin/zsh', undefined]) {
+        expect(resumeWord(agent, hostile, shell)).toBe('\'id $(Write-Output PANE_SECURITY_SENTINEL) `echo tick` \'\\\'\'sq\'\\\'\' ’tq’ $HOME;x\'');
+      }
+      expect(resumeWord(agent, hostile, 'fish')).toBe('\'id $(Write-Output PANE_SECURITY_SENTINEL) `echo tick` \\\'sq\\\' ’tq’ $HOME;x\'');
+    });
+
+    it.each(agents)('double-quotes a %s id for cmd only when cmd keeps it literal', agent => {
+      expect(resumeWord(agent, hostile, 'cmd.exe')).toBe(`"${hostile}"`);
+      for (const id of ['id %PATH%', 'id !x!', withDoubleQuote]) {
+        expect(() => launch(agent, id, 'cmd')).toThrow(expect.objectContaining({ code: 'ERR_RESUME_ID_UNQUOTABLE', next: expect.stringContaining('Default shell') }));
+      }
+    });
+
+    it.each(agents)('refuses a %s id holding a double quote on PowerShell, which drops it on the way to the agent', agent => {
+      for (const shell of ['powershell', 'pwsh']) {
+        expect(() => launch(agent, withDoubleQuote, shell)).toThrow(expect.objectContaining({ code: 'ERR_RESUME_ID_UNQUOTABLE' }));
+      }
+      expect(resumeWord(agent, withDoubleQuote, 'bash')).toBe('\'id "dq" x\'');
+    });
+
+    it('quotes the id a custom resume is checked against the same way it launches', () => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      const id = 'id $(x)';
+      const customResume = { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } as const;
+      const result = manager.resolveCliLaunchCommand('panel', 'wrapper', {
+        initialCommand: 'wrapper', agentSessionId: id, customResumeStarted: true, customResume, updateResumeId: id,
+      }, 'powershell');
+      expect(result.commandToRun).toBe('wrapper --resume \'id $(x)\'');
+    });
+
+    // The shells this machine has: each runs the agent's id word as Node's argument and reports its argv.
+    const shells: Array<[string, (word: string) => ReturnType<typeof spawnSync>]> = [
+      ['bash', word => spawnSync('bash', ['--noprofile', '--norc', '-c', `'${process.execPath}' -e '${nodeArgv}' ${word}`], { encoding: 'utf8' })],
+      ['zsh', word => spawnSync('zsh', ['-f', '-c', `'${process.execPath}' -e '${nodeArgv}' ${word}`], { encoding: 'utf8' })],
+      ['fish', word => spawnSync('fish', ['--no-config', '-c', `'${process.execPath}' -e '${nodeArgv}' ${word}`], { encoding: 'utf8' })],
+      ['powershell', word => spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `& '${process.execPath}' -e '${nodeArgv}' ${word}`], { encoding: 'utf8' })],
+      ['pwsh', word => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `& '${process.execPath}' -e '${nodeArgv}' ${word}`], { encoding: 'utf8' })],
+      ['cmd', word => spawnSync('cmd.exe', ['/d', '/s', '/c', `""${process.execPath}" -e ${nodeArgv} ${word}"`], { encoding: 'utf8', windowsVerbatimArguments: true })],
+    ];
+    const available = (shell: string): boolean => {
+      if (shell === 'cmd' || shell === 'powershell') return process.platform === 'win32';
+      // A Windows `bash` may be the WSL launcher, which doesn't run this Node.
+      if (shell !== 'pwsh' && process.platform === 'win32') return false;
+      return spawnSync(shell, ['-c', 'exit 0']).status === 0;
+    };
+
+    for (const [shell, run] of shells) {
+      it.skipIf(!available(shell))(`hands the id to the agent as one literal argument in ${shell}`, () => {
+        for (const agent of agents) {
+          const result = run(resumeWord(agent, hostile, shell));
+          expect(result.status, String(result.stderr)).toBe(0);
+          expect(JSON.parse(String(result.stdout).trim())).toEqual([encodeURIComponent(hostile)]);
+        }
+      });
+    }
+  });
+
   it('uses generic templates to allocate and resume a wrapper conversation without changing its saved command', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const command = 'my-launcher profile --label "review work"';
