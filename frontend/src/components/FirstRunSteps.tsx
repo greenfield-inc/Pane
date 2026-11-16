@@ -41,7 +41,7 @@ export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
           if (agents === null) {
             return (
               <div key={agent.id} className="flex h-10 items-center rounded-lg border border-border-secondary bg-surface-secondary px-3">
-                <span className="h-2.5 w-[40%] animate-pulse rounded bg-surface-tertiary" />
+                <span className="h-2.5 w-[40%] animate-skeleton rounded bg-surface-tertiary" />
               </div>
             );
           }

@@ -81,11 +81,11 @@ const TERMINAL_TOOLBAR_CHIP = 'rounded bg-surface-secondary/60 p-0.5 group-hover
 const SKELETON_TRANSCRIPT_WIDTHS = ['w-2/3', 'w-1/2', 'w-5/6', 'w-1/3', 'w-3/4', 'w-2/5'];
 
 // Opaque stand-in shaped like a CLI agent session: greeting banner, transcript
-// lines, and a prompt box, swept by a single shimmer so it reads as one
-// cohesive loading surface. Shown while initializing, refreshing, and CLI startup.
+// lines, and a prompt box, breathing as one surface. Shown until the terminal
+// is first revealed; later masks cover a loaded terminal with a plain surface.
 const TerminalLoadingSkeleton: React.FC = () => (
-  <div className="relative w-full h-full overflow-hidden px-4 py-4 font-mono select-none" role="status" aria-label="Loading terminal">
-    <div className="flex h-full flex-col gap-4">
+  <div className="relative w-full h-full overflow-hidden px-4 py-4 font-mono select-none" aria-hidden="true">
+    <div className="flex h-full flex-col gap-4 animate-skeleton">
       <div className="rounded-md border border-border-primary p-3 space-y-2 max-w-md">
         <div className="h-3.5 w-40 rounded bg-surface-tertiary" />
         <div className="h-3 w-56 rounded bg-surface-tertiary" />
@@ -107,7 +107,6 @@ const TerminalLoadingSkeleton: React.FC = () => (
         </div>
       </div>
     </div>
-    <div className="pointer-events-none absolute inset-0 animate-shimmer bg-gradient-to-r from-transparent via-[color-mix(in_srgb,var(--color-text-primary)_4%,transparent)] to-transparent" />
   </div>
 );
 
@@ -414,7 +413,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     }
   }, [terminalState?.isCliReady, isCliReady]);
 
-  // Loading-skeleton visibility: show immediately when any loading state is
+  // Loading-mask visibility: show immediately when any loading state is
   // active, hide only after a short linger so the terminal underneath has
   // finished painting before the mask lifts.
   const overlayActive = !isInitialized || isRefreshing || (isCliPanel && !isCliReady);
@@ -430,6 +429,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     return () => clearTimeout(timeout);
   }, [overlayActive, initAttempt]);
   const [overlayVisible, setOverlayVisible] = useState(true);
+  // A terminal already shown once is loaded: its refit masks stay plain.
+  const [terminalShown, setTerminalShown] = useState(false);
   useEffect(() => {
     if (overlayActive) {
       setOverlayVisible(true);
@@ -437,6 +438,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     }
     const lingerTimer = setTimeout(() => {
       setOverlayVisible(false);
+      setTerminalShown(true);
       markPaneTerminalShown(panel.sessionId);
     }, TERMINAL_OVERLAY_LINGER_MS);
     return () => clearTimeout(lingerTimer);
@@ -2286,11 +2288,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       )}
 
       {(overlayVisible || initError) && (
-        <div className="absolute inset-0 bg-surface-primary z-10" data-testid="terminal-activation-mask">
+        <div className="absolute inset-0 bg-surface-primary z-10" data-testid="terminal-activation-mask" role={initError ? undefined : 'status'} aria-label={initError ? undefined : 'Loading terminal'}>
           {initError ? <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-text-secondary">
             <p role="alert">Terminal could not load: {initError}</p>
             <button type="button" className="rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => setInitAttempt(attempt => attempt + 1)}>Retry</button>
-          </div> : <TerminalLoadingSkeleton />}
+          </div> : !terminalShown && <TerminalLoadingSkeleton />}
         </div>
       )}
 

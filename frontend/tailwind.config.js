@@ -15,6 +15,14 @@ const ATTENTION_PULSES = 3;
  */
 const WORKING_TURNS = 6;
 
+/**
+ * Loading skeletons breathe in opacity steps: 5 values each way over Tailwind's
+ * 2 s pulse period, so the compositor paints about 5 frames a second instead of
+ * one per display refresh (120-144 a second). The bars are dim, so each step
+ * changes a pixel by a level or two and the breath still reads as smooth.
+ */
+const SKELETON_STEPS = 5;
+
 /** @type {import('tailwindcss').Config} */
 const config = {
   darkMode: 'class',
@@ -293,7 +301,7 @@ const config = {
         },
       },
       animation: {
-        shimmer: 'shimmer 2s linear infinite',
+        skeleton: `skeleton-breathe 2s steps(${SKELETON_STEPS}, jump-none) infinite`,
         // Tailwind's `animate-pulse`, run a set number of times instead of forever.
         'attention-pulse': defaultTheme.animation.pulse.replace('infinite', String(ATTENTION_PULSES)),
         // Tailwind's `animate-spin`, run a set number of turns instead of forever.
@@ -309,9 +317,9 @@ const config = {
         'modal-overlay-enter': 'fade-in var(--duration-modal) var(--ease-out-strong)',
       },
       keyframes: {
-        shimmer: {
-          '0%': { transform: 'translateX(-100%)' },
-          '100%': { transform: 'translateX(100%)' },
+        'skeleton-breathe': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.5' },
         },
         // Vertical "loading" light that sweeps up and down the working status bar.
         'status-working-sweep': {

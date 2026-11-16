@@ -1441,7 +1441,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
       {showArchived && (
         <div id={archivedContentId} className="pb-2 max-h-[40vh] overflow-y-auto">
           {isLoadingArchived ? (
-            <div className="px-4 py-2 space-y-2 animate-pulse">
+            <div className="px-4 py-2 space-y-2 animate-skeleton">
               {[1, 2, 3].map(i => (
                 <div key={i} className="h-7 bg-surface-tertiary rounded" />
               ))}
