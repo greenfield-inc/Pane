@@ -10,6 +10,7 @@ import { DeviceHelpers, paneNode, refuseRetarget, runAgentDevice, startHub, type
 import { DeviceJobs, type DeviceJobResult } from './deviceJobs';
 import { DeviceLifecycle, type DeviceRecord } from './deviceLifecycle';
 import { probeDevices, type DeviceCapabilities, type ProbeEnvironment } from './deviceProbe';
+import { getShellPath } from '../../utils/shellPath';
 
 const execFileAsync = promisify(execFile);
 
@@ -328,7 +329,8 @@ export class DeviceService {
   run(owner: string, command: string, cwd: string, options: { background: boolean; waitMs: number }): Promise<DeviceJobResult> {
     // A build is use of the device; the sweep also counts a running job as use.
     this.lifecycle.touch(owner);
-    return this.jobs.start(owner, command, cwd, options.background ? Math.min(options.waitMs, 5_000) : options.waitMs);
+    // The PATH an agent tab gets: a login shell alone misses Node set up in .zshrc (nvm) when Pane starts from Finder.
+    return this.jobs.start(owner, command, cwd, options.background ? Math.min(options.waitMs, 5_000) : options.waitMs, { PATH: process.platform === 'linux' ? (process.env.PATH ?? '') : getShellPath() });
   }
 
   /** Ends the Pane's lease on `platform`'s device, or on all of them; its jobs stop with its last lease. */

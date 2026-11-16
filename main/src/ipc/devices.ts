@@ -215,7 +215,10 @@ async function followDeviceChange(change: DeviceChange): Promise<void> {
   }
 }
 
-/** The Pane's device tab for `platform`, created in a split beside the caller without focus. */
+/**
+ * The Pane's device tab for `platform`, created in a split beside the caller and selected, as
+ * `runpane panels open` does. It brings the tab forward on clients showing this Pane; it never raises the window.
+ */
 async function ensureDeviceTab(caller: DeviceCaller, platform: DevicePlatform, initial: Partial<DevicePanelState>): Promise<ToolPanel> {
   const existing = devicePanels(caller.paneId).find(panel => panelState(panel)?.platform === platform);
   const name = platform === 'ios' ? 'iPhone' : 'Android';
@@ -223,6 +226,7 @@ async function ensureDeviceTab(caller: DeviceCaller, platform: DevicePlatform, i
   if (caller.panelId) state.openedBy = caller.panelId;
   if (existing) {
     await setPanelState(existing, state);
+    await panelManager.setActivePanel(caller.paneId, existing.id, 'split');
     return panelManager.getPanel(existing.id) ?? existing;
   }
   return panelManager.createPanel({
@@ -231,8 +235,8 @@ async function ensureDeviceTab(caller: DeviceCaller, platform: DevicePlatform, i
     title: state.name,
     initialState: { customState: state },
     metadata: caller.panelId ? { openPlacement: 'split', openedBy: { source: 'agent', panelId: caller.panelId } } : { openPlacement: 'split' },
-    activate: false,
-    announceActivation: false,
+    activate: true,
+    announceActivation: true,
   });
 }
 
