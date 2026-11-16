@@ -516,12 +516,28 @@ export class TaskQueue {
     return index === -1 ? undefined : index + 1;
   }
 
-  /** Settles when the Pane's setup finishes, and rejects with its error if setup failed or timed out. */
-  waitForSetup(sessionId: string, timeoutMs?: number): Promise<void> {
+  /** Settles when the Pane's setup finishes, and rejects with its error if setup failed. */
+  waitForSetup(sessionId: string): Promise<void> {
+    return this.setupRuns.get(sessionId) ?? Promise.resolve();
+  }
+
+  /**
+   * Waits at most `timeoutMs` for the Pane's setup: `finished` once it is done, `running` when it
+   * is still going at the deadline (setup keeps running; only this wait ends). Rejects if setup failed.
+   */
+  async waitForSetupWithin(sessionId: string, timeoutMs: number): Promise<'finished' | 'running'> {
     const setup = this.setupRuns.get(sessionId);
-    if (!setup) return Promise.resolve();
-    if (timeoutMs === undefined) return setup;
-    return this.withTimeout(setup, timeoutMs, `Timed out waiting for Pane ${sessionId} setup`);
+    if (!setup) return 'finished';
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<'running'>(resolve => { timer = setTimeout(() => resolve('running'), timeoutMs); });
+    const finished = setup.then(() => 'finished' as const);
+    // A failure after the deadline is not this wait's to report: settleSetup records it on the Pane.
+    finished.catch(() => undefined);
+    try {
+      return await Promise.race([finished, deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private announceQueuedSetup(sessionId: string, worktreePath: string, ctx: ProjectContext, position: number): void {

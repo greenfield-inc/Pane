@@ -238,6 +238,32 @@ describe('pane creation name reuse', () => {
     expect(send).not.toHaveBeenCalledWith('session:creation-failed', expect.anything());
   });
 
+  it('waits a bounded time for setup without failing it, and reports a later failure only to waitForSetup', async () => {
+    const setups = testAccess<{ setupRuns: Map<string, Promise<void>> }>(queue).setupRuns;
+    let finishSlow: () => void = () => {};
+    setups.set('slow', new Promise<void>(resolve => { finishSlow = resolve; }));
+    let failLate: (error: Error) => void = () => {};
+    const late = new Promise<void>((_resolve, reject) => { failLate = reject; });
+    setups.set('late-failure', late);
+    const failed = Promise.reject(new Error('Install exploded'));
+    setups.set('failed', failed);
+    // settleSetup observes every stored setup in the app; these do the same here.
+    late.catch(() => undefined);
+    failed.catch(() => undefined);
+
+    expect(await queue.waitForSetupWithin('no-setup', 10)).toBe('finished');
+    expect(await queue.waitForSetupWithin('slow', 10)).toBe('running');
+    await expect(queue.waitForSetupWithin('failed', 10)).rejects.toThrow('Install exploded');
+    expect(await queue.waitForSetupWithin('late-failure', 10)).toBe('running');
+
+    // The deadline ended only the wait: the setup still settles, and its outcome reaches waitForSetup.
+    finishSlow();
+    await expect(queue.waitForSetup('slow')).resolves.toBeUndefined();
+    failLate(new Error('Build failed'));
+    await expect(queue.waitForSetup('late-failure')).rejects.toThrow('Build failed');
+    setups.clear();
+  });
+
   it('runs two setups at once and starts a queued one when a slot frees, even after a failure', async () => {
     vi.spyOn(queueOptions.worktreeManager, 'resolveWorkingDirectory').mockImplementation(async (_projectPath, worktreeName) => {
       const worktreePath = path.join(tempDir, worktreeName);
