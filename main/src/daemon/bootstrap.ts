@@ -70,7 +70,7 @@ import type { LevelChange } from '../services/machineHealth/machineHealthService
 import { paneInactiveSince } from '../services/paneInactivity';
 import { findPrStatusForPane } from '../ipc/runpane';
 import { protectionOf } from '../services/machineHealth/paneProtections';
-import { fastCheckWorkingDirectory } from '../services/gitPlumbingCommands';
+import { fastCheckWorkingDirectory, hasUntrackedWork } from '../services/gitPlumbingCommands';
 import { withArchiveRepositoryLock } from '../services/archiveRepositoryLock';
 import { PaneError } from '../../../shared/paneError';
 import { appScratchDirectory, appScratchRoot } from '../services/archiveRetention';
@@ -718,8 +718,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       const session = databaseService.getSession(id);
       const ctx = sessionManager.getProjectContext(id);
       if (!session?.worktree_path || !ctx) throw new Error('No worktree');
+      // A Pane whose folder is gone has nothing left to lose.
+      if (!fs.existsSync(session.worktree_path)) return false;
       const status = await fastCheckWorkingDirectory(session.worktree_path, ctx.commandRunner.wslContext);
-      return status.hasModified || status.hasStaged || status.hasConflicts || status.hasUntracked;
+      if (status.hasModified || status.hasStaged || status.hasConflicts) return true;
+      return status.hasUntracked && await hasUntrackedWork(session.worktree_path, ctx.commandRunner);
     },
   });
   const machineCleanup = new CleanupEngine({

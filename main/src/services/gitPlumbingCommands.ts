@@ -1,4 +1,5 @@
 import { commandExecutor } from '../utils/commandExecutor';
+import type { CommandRunner } from '../utils/commandRunner';
 import * as fs from 'fs';
 import { WSLContext, linuxToUNCPath } from '../utils/wslUtils';
 
@@ -206,4 +207,16 @@ export async function fastGetDiffStats(cwd: string, wslContext?: WSLContext | nu
   } catch {
     return { additions: 0, deletions: 0, filesChanged: 0 };
   }
+}
+
+/**
+ * Untracked files other than agent setup (.codex/, .claude/, .agent-farm/), which agents
+ * recreate and which never count as the person's work.
+ */
+export async function hasUntrackedWork(cwd: string, runner: Pick<CommandRunner, 'execFile'>): Promise<boolean> {
+  const { stdout } = await runner.execFile('git', [
+    'ls-files', '--others', '--exclude-standard', '-z',
+    '--exclude=/.codex/', '--exclude=/.claude/', '--exclude=/.agent-farm/',
+  ], cwd, { silent: true, timeout: 10_000 });
+  return stdout.length > 0;
 }

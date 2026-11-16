@@ -38,7 +38,7 @@ import type { ProjectEnvVar } from '../../../shared/types/projectEnvVars';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
-import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
+import { fastCheckWorkingDirectory, hasUntrackedWork, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
 import { queuedSetupMessage } from '../services/taskQueue';
 import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
@@ -6025,15 +6025,8 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
     const commits = await computeUnpublishedCommits(services, pane, ctx);
     const workingDirectory = await fastCheckWorkingDirectory(pane.worktreePath, ctx.commandRunner.wslContext);
     const hasUncommittedChanges = workingDirectory.hasModified || workingDirectory.hasStaged || workingDirectory.hasConflicts;
-    let hasUntrackedFiles = workingDirectory.hasUntracked;
-    if (hasUntrackedFiles) {
-      // Agent setup is disposable; ordinary untracked work must still block archive.
-      const { stdout } = await ctx.commandRunner.execFile('git', [
-        'ls-files', '--others', '--exclude-standard', '-z',
-        '--exclude=/.codex/', '--exclude=/.claude/', '--exclude=/.agent-farm/',
-      ], pane.worktreePath, { silent: true, timeout: 10_000 });
-      hasUntrackedFiles = stdout.length > 0;
-    }
+    // Agent setup is disposable; ordinary untracked work must still block archive.
+    const hasUntrackedFiles = workingDirectory.hasUntracked && await hasUntrackedWork(pane.worktreePath, ctx.commandRunner);
     return { performed: true, hasUncommittedChanges, hasUntrackedFiles, ...commits };
   } catch {
     return { performed: false, reason: 'git-error' };
