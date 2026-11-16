@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { buildAllMachinesList, sinceLabel } from '@/features/allMachines/allMachinesList';
 import { openWaitingRow, waitingRowText } from '@/features/allMachines/AllMachinesRows';
+import { ConnectionBar } from '@/features/hosts/ConnectionStatus';
 import { MachineMark } from '@/features/machines/MachineMark';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
@@ -24,7 +25,7 @@ export function HistoryScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
-  const { feeds, all, chipMachines, here } = useHomeFeeds({ active: focused });
+  const { feeds, all, chipMachines, here, notice, retry } = useHomeFeeds({ active: focused });
   const { answered, staleQuestions } = buildAllMachinesList(feeds, '');
   const [picked, setPicked] = useState<HistoryTab | undefined>(undefined);
   const tab: HistoryTab = picked ?? (answered.length === 0 && staleQuestions.length > 0 ? 'stale' : 'done');
@@ -44,22 +45,26 @@ export function HistoryScreen() {
       style={{ backgroundColor: theme.colors.background }}
       contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
       ListHeaderComponent={(
-        <View style={[styles.segments, { backgroundColor: theme.colors.surfaceRaised }]} accessibilityRole="tablist">
-          {([['done', `Done today · ${answered.length}`], ['stale', `Stale · ${staleQuestions.length}`]] as const).map(([id, label]) => {
-            const on = id === tab;
-            return (
-              <Pressable
-                key={id}
-                testID={`history-tab-${id}`}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: on }}
-                onPress={() => setPicked(id)}
-                style={[styles.segment, on && { backgroundColor: theme.colors.surfacePressed }]}
-              >
-                <Text variant="rowDetail" style={[styles.bold, { color: on ? theme.colors.text : theme.colors.textMuted }]}>{label}</Text>
-              </Pressable>
-            );
-          })}
+        <View>
+          {/* A machine that isn't connected leaves both lists: say why. */}
+          <ConnectionBar notice={notice} onRetry={retry} />
+          <View style={[styles.segments, { backgroundColor: theme.colors.surfaceRaised }]} accessibilityRole="tablist">
+            {([['done', `Done today · ${answered.length}`], ['stale', `Stale · ${staleQuestions.length}`]] as const).map(([id, label]) => {
+              const on = id === tab;
+              return (
+                <Pressable
+                  key={id}
+                  testID={`history-tab-${id}`}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: on }}
+                  onPress={() => setPicked(id)}
+                  style={[styles.segment, on && { backgroundColor: theme.colors.surfacePressed }]}
+                >
+                  <Text variant="rowDetail" style={[styles.bold, { color: on ? theme.colors.text : theme.colors.textMuted }]}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
       )}
       ListEmptyComponent={(

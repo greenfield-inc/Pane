@@ -13,7 +13,6 @@ import { AutopilotRow } from '@/features/autopilot/AutopilotRow';
 import { useAutopilot } from '@/features/autopilot/hooks';
 import { DemoBadge } from '@/features/demo/DemoBadge';
 import { ConnectionBar, Dimmed } from '@/features/hosts/ConnectionStatus';
-import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { MachineChips } from '@/features/machines/MachineChips';
 import { PaneLogo } from '@/features/machines/PaneLogo';
 import { AgentPromptActions } from '@/features/notify/AgentPromptActions';
@@ -24,14 +23,14 @@ import { PaneRow } from '@/features/panes/PaneRow';
 import { SidebarItemView, toggleMember, type SidebarItemContext } from '@/features/panes/SidebarItemView';
 import { useSidebarSections } from '@/features/panes/sidebarSections';
 import { usePaneActions } from '@/features/panes/usePaneActions';
-import { useTheme } from '@/theme';
+import { useTheme, withAlpha } from '@/theme';
 import { Icon, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
 
 import { ActivityRow, ApprovalRow, BoardHeader, Card, EmptyCard, GroupRow, HistoryLine, RowDivider } from './BoardRows';
 import { useBoardTile } from './boardTile';
 import { bottomBarHeight, HomeBottomBar } from './HomeBottomBar';
-import { boardCounts, PINNED_PREVIEW, tilePanes, type PaneRecentRow } from './statusBoard';
+import { boardCounts, PINNED_PREVIEW, terminalWaiting, tilePanes, type PaneRecentRow } from './statusBoard';
 import { StatusTiles } from './StatusTiles';
 import { useHomeFeeds } from './useHomeData';
 
@@ -58,9 +57,8 @@ export function HomeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
-  const { presence, notice, retry } = useConnectionPresence();
-  const home = useHomeFeeds({ active: focused, unreachable: presence === 'unreachable', retry });
-  const { here, all, feeds, chipMachines, current } = home;
+  const home = useHomeFeeds({ active: focused });
+  const { here, all, feeds, chipMachines, current, presence, notice, retry } = home;
   const profile = here.profile;
   const autopilot = useAutopilot();
   const actions = usePaneActions();
@@ -73,8 +71,8 @@ export function HomeScreen() {
   const expanded = useSidebarSections(state => state.expanded);
   const toggleSection = useSidebarSections(state => state.toggle);
   const searching = query.trim().length > 0;
-  // Archived's count shows on the All panes tile; search covers it while its section is open.
-  const archived = useArchivedProjects(!all && ((tile === 'all' && !searching) || (searching && expanded.archived)));
+  // The archive is read for a search, or by its own screen; the All panes tile counts it only once cached.
+  const archived = useArchivedProjects(!all && searching);
 
   const board = buildAllMachinesList(feeds, '');
   const loading = all ? feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined && feed.error === undefined) : here.loading;
@@ -120,7 +118,8 @@ export function HomeScreen() {
     if (loading) return [];
     if (searching) {
       if (all) return buildAllMachinesList(feeds, query).recent.map(row => ({ kind: 'recent', key: row.key, row }));
-      const items = sidebar(query, expanded);
+      // Every section, whatever the person last folded, so a match never hides under a header.
+      const items = sidebar(query, { pinned: true, sessions: true, repositories: true, archived: true });
       return items.map((item, index) => ({ kind: 'sidebar', key: item.key, item, previous: items[index - 1], first: index === 0 }));
     }
     if (tile === 'working' || tile === 'ready') {
@@ -131,32 +130,40 @@ export function HomeScreen() {
     return [];
   })();
 
+  // A Pane in a card: Working, Ready, or waiting in its terminal.
+  const activityRow = (row: PaneRecentRow, first: boolean, last: boolean, tint = theme.colors.surfaceRaised) => {
+    const swipes = row.machineKey === profile.id && !row.stale;
+    const radius = theme.radius.card;
+    return (
+      <View
+        key={row.key}
+        style={[
+          styles.cardRow,
+          { backgroundColor: tint },
+          first && { borderTopLeftRadius: radius, borderTopRightRadius: radius },
+          last && { borderBottomLeftRadius: radius, borderBottomRightRadius: radius },
+        ]}
+      >
+        <ActivityRow
+          row={row}
+          machine={markOf(row.machineKey)}
+          divided={!first}
+          background={tint}
+          onPress={() => openRecentRow(row, profile.id, actions, sayOffline)}
+          swipe={swipes ? {
+            onTogglePinned: () => actions.togglePanePinned(row.pane.id),
+            onArchive: () => actions.archivePane(row.pane),
+            onTogglePaused: () => actions.setPanePaused(row.pane.id, !row.pane.paused),
+          } : undefined}
+        />
+      </View>
+    );
+  };
+
   const renderRow = ({ item }: { item: HomeRow }) => {
     switch (item.kind) {
-      case 'activity': {
-        const swipes = item.row.machineKey === profile.id && !item.row.stale;
-        const radius = theme.radius.card;
-        return (
-          <View style={[
-            styles.cardRow,
-            { backgroundColor: theme.colors.surfaceRaised },
-            item.first && { borderTopLeftRadius: radius, borderTopRightRadius: radius },
-            item.last && { borderBottomLeftRadius: radius, borderBottomRightRadius: radius },
-          ]}>
-            <ActivityRow
-              row={item.row}
-              machine={markOf(item.row.machineKey)}
-              divided={!item.first}
-              onPress={() => openRecentRow(item.row, profile.id, actions, sayOffline)}
-              swipe={swipes ? {
-                onTogglePinned: () => actions.togglePanePinned(item.row.pane.id),
-                onArchive: () => actions.archivePane(item.row.pane),
-                onTogglePaused: () => actions.setPanePaused(item.row.pane.id, !item.row.pane.paused),
-              } : undefined}
-            />
-          </View>
-        );
-      }
+      case 'activity':
+        return activityRow(item.row, item.first, item.last);
       case 'recent':
         return (
           <View style={styles.below}>
@@ -172,7 +179,11 @@ export function HomeScreen() {
     }
   };
 
-  // Needs you: Autopilot, the approvals in the chosen sort, then the line that opens History.
+  // Needs you: Autopilot, the approvals in the chosen sort, Panes waiting in their terminal (D-81),
+  // then the line that opens History.
+  const inTerminal = terminalWaiting(board);
+  // The approvals card's amber: both lists wait on you.
+  const needsTint = withAlpha(theme.colors.warning, 0.09);
   const autopilotSnapshot = autopilot.data?.enabled ? autopilot.data : undefined;
   const needsYou = (
     <>
@@ -225,9 +236,17 @@ export function HomeScreen() {
             );
           }}
         />
-      ) : (
-        <EmptyCard testID="approvals-empty" title="Nothing needs you" detail="Questions and permission requests from your agents land here." />
-      )}
+      ) : null}
+      {inTerminal.length > 0 ? (
+        <View testID="needs-terminal" style={styles.terminalGroup}>
+          <Text variant="footnote" tone="secondary" style={styles.groupLabel} accessibilityRole="header">{`Waiting in the terminal · ${inTerminal.length}`}</Text>
+          {/* The board's own padding already insets the column; the rows bring the card. */}
+          <View style={styles.flush}>{inTerminal.map((row, index) => activityRow(row, index === 0, index === inTerminal.length - 1, needsTint))}</View>
+        </View>
+      ) : null}
+      {board.waiting.length + board.offline.length + inTerminal.length === 0 ? (
+        <EmptyCard testID="approvals-empty" title="Nothing needs you" detail="Questions, permission requests and agents waiting in their terminal land here." />
+      ) : null}
       <HistoryLine stale={board.staleQuestions.length} done={board.answered.length} onPress={() => router.push('/history')} />
     </>
   );
@@ -249,7 +268,6 @@ export function HomeScreen() {
     : undefined;
   const allPanes = (
     <>
-      {here.projects.isError ? <Notice danger message={here.projects.error.message} action={{ title: 'Try again', onPress: () => void here.projects.refetch() }} /> : null}
       {(here.projects.data ?? []).length === 0 && !here.projects.isError ? <Notice testID="panes-empty" message="No remote panes found on this host." /> : null}
       {pinnedItems.length > 0 ? (
         <Card testID="home-pinned" style={styles.cardGap}>
@@ -365,11 +383,20 @@ export function HomeScreen() {
           {list}
         </>
       ) : (
-        // The last screen stays, dimmed and untouchable, while the machine isn't connected. The pills
-        // above stay live, so you can switch away from a machine that is down.
-        <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>{list}</Dimmed>
+        // The last screen stays, dimmed and untouchable, while the machine isn't connected, search and
+        // + included. The pills above stay live, so you can switch away from a machine that is down.
+        <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
+          {/* The Panes read failed: say why above the tiles, which still count what the other reads found. */}
+          {here.projects.isError ? (
+            <View style={styles.note}>
+              <Notice testID="home-read-error" danger message={here.projects.error.message} action={{ title: 'Try again', onPress: () => void here.projects.refetch() }} />
+            </View>
+          ) : null}
+          {list}
+          <HomeBottomBar query={query} onQuery={setQuery} />
+        </Dimmed>
       )}
-      <HomeBottomBar query={query} onQuery={setQuery} />
+      {all ? <HomeBottomBar query={query} onQuery={setQuery} /> : null}
     </View>
   );
 }
@@ -386,6 +413,10 @@ const styles = StyleSheet.create({
   sortButton: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   cardGap: { marginTop: 12 },
   cardRow: { marginHorizontal: 12, overflow: 'hidden' },
+  terminalGroup: { gap: 4, marginTop: 8 },
+  groupLabel: { fontWeight: '600', paddingHorizontal: 4, minHeight: 22, textAlignVertical: 'center' },
+  flush: { marginHorizontal: -12 },
+  note: { marginHorizontal: 16, marginBottom: 8 },
   hairline: { height: StyleSheet.hairlineWidth },
   more: { minHeight: 40, justifyContent: 'center', paddingLeft: 36 },
 });

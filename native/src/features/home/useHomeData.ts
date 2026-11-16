@@ -1,6 +1,7 @@
 import { useDaemon } from '@/daemon';
 import type { AllMachinesFeed } from '@/features/allMachines/AllMachinesRows';
 import { useOtherMachines } from '@/features/allMachines/useOtherMachines';
+import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { useMachinePrefs } from '@/features/machines/machinePrefs';
 import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
@@ -22,8 +23,9 @@ export function useCurrentMachine({ name, unreachable = false, retry }: { name?:
   const feed: AllMachinesFeed = {
     key: profile.id,
     name: name ?? profile.label,
-    snapshot: projects.data
-      ? { projects: projects.data, statuses: statuses.data, permissions: permissions.data, notify: notify.data, sessions: sessions.data?.sessions }
+    // Approvals still list when only the Panes read failed.
+    snapshot: projects.data || permissions.data || notify.data
+      ? { projects: projects.data ?? [], statuses: statuses.data, permissions: permissions.data, notify: notify.data, sessions: sessions.data?.sessions }
       : undefined,
     offlineSince: unreachable ? projects.dataUpdatedAt : undefined,
     // Connected, but the first read failed: say why, with Try again.
@@ -45,13 +47,15 @@ export function useCurrentMachine({ name, unreachable = false, retry }: { name?:
 }
 
 /**
- * Home's machines: every chip, whether All is selected, and the feeds home lists: the machine
- * the phone is on, plus every other saved machine while All is on screen (`active`).
+ * Home's machines: every chip, whether All is selected, the connection to the machine the phone is
+ * on, and the feeds home lists: that machine, plus every other saved machine while All is on screen
+ * (`active`).
  */
-export function useHomeFeeds({ active, unreachable, retry }: { active: boolean; unreachable?: boolean; retry?: () => void }) {
+export function useHomeFeeds({ active }: { active: boolean }) {
   const machines = useMachines();
   const current = machines.find(machine => machine.current);
-  const here = useCurrentMachine({ name: current?.name, unreachable, retry });
+  const connection = useConnectionPresence();
+  const here = useCurrentMachine({ name: current?.name, unreachable: connection.presence === 'unreachable', retry: connection.retry });
   const saved = machines.filter(machine => machine.profile);
   const showAll = saved.length >= 2;
   const all = useMachinePrefs(state => state.all) && showAll;
@@ -77,6 +81,7 @@ export function useHomeFeeds({ active, unreachable, retry }: { active: boolean; 
       : machine))
     : machines;
   return {
+    ...connection,
     machines,
     chipMachines,
     current,

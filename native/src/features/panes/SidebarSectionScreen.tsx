@@ -1,12 +1,14 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { buildAllMachinesList } from '@/features/allMachines/allMachinesList';
 import { sessionKey, waitingCounts } from '@/features/approvals/approvals';
 import { useCurrentMachine } from '@/features/home/useHomeData';
+import { ConnectionBar, Dimmed } from '@/features/hosts/ConnectionStatus';
+import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { useTheme } from '@/theme';
 
 import { useArchivedProjects } from './hooks';
@@ -24,13 +26,15 @@ function parseSection(value: string | undefined): Exclude<SidebarSection, 'pinne
 /**
  * Sessions, Repositories or Archived from home's All panes tile, on the machine the phone is on:
  * the same rows as before, swipes included, with a + on each repository and Restore and Delete on
- * archived ones.
+ * archived ones. While the machine isn't connected, the rows stay dimmed and untouchable under the
+ * connection bar, as on home.
  */
 export function SidebarSectionScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const section = parseSection(useLocalSearchParams<{ section?: string }>().section);
-  const here = useCurrentMachine();
+  const { presence, notice, retry } = useConnectionPresence();
+  const here = useCurrentMachine({ unreachable: presence === 'unreachable', retry });
   const actions = usePaneActions();
   const archived = useArchivedProjects(section === 'archived');
   const [collapsedSessions, setCollapsedSessions] = useState<ReadonlySet<string>>(new Set());
@@ -60,41 +64,45 @@ export function SidebarSectionScreen() {
   };
 
   return (
-    <>
+    <View style={[styles.fill, { backgroundColor: theme.colors.background }]}>
       <Stack.Screen options={{ title: TITLES[section] }} />
-      <LegendList
-        testID={`section-list-${section}`}
-        data={here.loading ? [] : items}
-        keyExtractor={item => item.key}
-        getItemType={item => item.type}
-        estimatedItemSize={44}
-        refreshing={refreshing}
-        onRefresh={() => void refresh()}
-        contentInsetAdjustmentBehavior="automatic"
-        style={{ backgroundColor: theme.colors.background }}
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
-        ListEmptyComponent={here.loading ? <LoadingRows />
-          : here.projects.isError ? <Notice danger message={here.projects.error.message} action={{ title: 'Try again', onPress: () => void here.projects.refetch() }} />
-          : <Notice testID="section-empty" message={section === 'repositories' ? 'No repositories on this host yet.' : 'Nothing here yet.'} />}
-        renderItem={({ item, index }) => (
-          <SidebarItemView
-            item={item}
-            previous={items[index - 1]}
-            first={index === 0}
-            context={{
-              actions,
-              waitingFor: sessionId => waitingBySession.get(sessionKey(here.profile.id, sessionId)) ?? 0,
-              onToggleSection: () => undefined,
-              onToggleNested: nestedKey => setCollapsedSessions(current => toggleMember(current, nestedKey)),
-              retry: what => void (what === 'archived' ? archived.refetch() : here.sessions.refetch()),
-            }}
-          />
-        )}
-      />
-    </>
+      <ConnectionBar notice={notice} onRetry={retry} />
+      <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
+        <LegendList
+          testID={`section-list-${section}`}
+          data={here.loading ? [] : items}
+          keyExtractor={item => item.key}
+          getItemType={item => item.type}
+          estimatedItemSize={44}
+          refreshing={refreshing}
+          onRefresh={() => void refresh()}
+          contentInsetAdjustmentBehavior="automatic"
+          style={{ backgroundColor: theme.colors.background }}
+          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+          ListEmptyComponent={here.loading ? <LoadingRows />
+            : here.projects.isError ? <Notice danger message={here.projects.error.message} action={{ title: 'Try again', onPress: () => void here.projects.refetch() }} />
+            : <Notice testID="section-empty" message={section === 'repositories' ? 'No repositories on this host yet.' : 'Nothing here yet.'} />}
+          renderItem={({ item, index }) => (
+            <SidebarItemView
+              item={item}
+              previous={items[index - 1]}
+              first={index === 0}
+              context={{
+                actions,
+                waitingFor: sessionId => waitingBySession.get(sessionKey(here.profile.id, sessionId)) ?? 0,
+                onToggleSection: () => undefined,
+                onToggleNested: nestedKey => setCollapsedSessions(current => toggleMember(current, nestedKey)),
+                retry: what => void (what === 'archived' ? archived.refetch() : here.sessions.refetch()),
+              }}
+            />
+          )}
+        />
+      </Dimmed>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  fill: { flex: 1 },
   content: { padding: 12 },
 });
