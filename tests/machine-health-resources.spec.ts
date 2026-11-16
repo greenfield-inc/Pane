@@ -52,6 +52,52 @@ test.describe('Resources page', () => {
     ]);
   });
 
+  test('Other apps opens into each app, biggest first; stop asks once by name and runs on that machine; protected apps say why', async ({ page }) => {
+    await open(page, 'machine=local');
+    const memory = page.getByRole('region', { name: 'Memory' });
+    await memory.getByRole('button', { name: 'Other apps' }).click();
+    const apps = memory.getByLabel('Other apps', { exact: true }).getByRole('listitem');
+    await expect(apps.first()).toContainText('Google Chrome23 processes4.2 GB12%');
+    await expect(apps).toHaveCount(12);
+    await expect(memory.getByRole('img', { name: 'Finder cannot be stopped: Part of macOS. Pane never stops system processes.' })).toBeVisible();
+    await expect(memory.getByRole('img', { name: /^Terminal cannot be stopped: Pane runs inside it/ })).toBeVisible();
+    await expect(memory.getByRole('button', { name: 'Stop Finder' })).toHaveCount(0);
+    await memory.getByRole('button', { name: 'Show all 14 apps' }).click();
+    await expect(apps).toHaveCount(14);
+
+    await memory.getByRole('button', { name: 'Stop Slack' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Stop Slack?' });
+    await expect(dialog).toContainText('Pane ends Slack now (6 processes). Unsaved work in it may be lost.');
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    expect(await page.evaluate(() => window.qaRuns)).toEqual([]);
+
+    await memory.getByRole('button', { name: 'Stop Google Chrome' }).click();
+    await page.getByRole('dialog', { name: 'Stop Google Chrome?' }).getByRole('button', { name: 'Stop Google Chrome' }).click();
+    await expect(memory.getByText('Google Chrome')).toHaveCount(0);
+    expect(await page.evaluate(() => window.qaRuns)).toEqual([
+      { machineId: 'local', command: { type: 'machine-health', action: 'stop-app', request: { key: '/Applications/Google Chrome.app', source: 'ui' } } },
+    ]);
+
+    await memory.getByRole('button', { name: 'Other apps' }).click();
+    await expect(memory.getByLabel('Other apps', { exact: true })).toHaveCount(0);
+  });
+
+  test('Other apps on a linked machine stops there; a Pane too old for the list says to update it', async ({ page }) => {
+    await open(page, 'machine=devbox');
+    const memory = page.getByRole('region', { name: 'Memory' });
+    await memory.getByRole('button', { name: 'Other apps' }).click();
+    await expect(memory.getByRole('img', { name: /^explorer cannot be stopped: Part of Windows/ })).toBeVisible();
+    await memory.getByRole('button', { name: 'Stop chrome' }).click();
+    await page.getByRole('dialog', { name: 'Stop chrome?' }).getByRole('button', { name: 'Stop chrome' }).click();
+    await expect.poll(() => page.evaluate(() => window.qaRuns)).toEqual([
+      { machineId: 'devbox', command: { type: 'machine-health', action: 'stop-app', request: { key: 'chrome', source: 'ui' } } },
+    ]);
+
+    await open(page, 'machine=local&apps=outdated');
+    await page.getByRole('region', { name: 'Memory' }).getByRole('button', { name: 'Other apps' }).click();
+    await expect(page.getByText('Update Pane on this machine to list its apps.')).toBeVisible();
+  });
+
   test('the switcher lists every machine: an older Pane asks for an update, an offline one says so', async ({ page }) => {
     await open(page, 'machine=local');
     await page.getByRole('button', { name: /Studio-Mac/ }).click();
@@ -153,6 +199,11 @@ test.describe('Resources page', () => {
       await page.getByRole('region', { name: 'Per Pane' }).getByRole('button', { name: 'glassly-port' }).click();
       await page.getByRole('region', { name: 'Per Pane' }).scrollIntoViewIfNeeded();
       await page.getByRole('region', { name: 'Per Pane' }).screenshot({ path: `${shots}/resources-per-pane-processes-${theme}.png` });
+      await open(page, `machine=local&theme=${theme}`);
+      await page.getByRole('region', { name: 'Memory' }).getByRole('button', { name: 'Other apps' }).click();
+      await page.getByRole('region', { name: 'Memory' }).screenshot({ path: `${shots}/resources-other-apps-${theme}.png` });
+      await page.getByRole('button', { name: 'Stop Google Chrome' }).click();
+      await page.screenshot({ path: `${shots}/resources-other-apps-confirm-${theme}.png` });
       await open(page, `machine=devbox&theme=${theme}`);
       await page.getByRole('button', { name: /Review/ }).click();
       await page.screenshot({ path: `${shots}/resources-devbox-review-${theme}.png`, fullPage: true });

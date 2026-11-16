@@ -175,8 +175,8 @@ export interface DiskBuckets {
 /** Where a cleanup came from: a person in Resources or a card, the schedule, or an agent through runpane. */
 export type CleanupSource = 'ui' | 'card' | 'schedule' | 'cli';
 
-/** What a cleanup acted on: a storage item, or a finished Pane it archived, a process it stopped, a Pane it paused. */
-export type CleanupKind = ReclaimKind | 'finished-pane' | 'leftover-process' | 'idle-pane';
+/** What a cleanup acted on: a storage item, or a finished Pane it archived, a process it stopped, a Pane it paused, an app the person stopped. */
+export type CleanupKind = ReclaimKind | 'finished-pane' | 'leftover-process' | 'idle-pane' | 'app';
 
 export interface CleanupEntry {
   id: string;
@@ -221,6 +221,27 @@ export const MACHINE_HEALTH_RELIEF_CHANNEL = 'resource-monitor:machine-relief';
 export const MACHINE_HEALTH_PAUSE_IDLE_CHANNEL = 'resource-monitor:machine-pause-idle';
 /** Stops processes the latest sample attributes to a Pane, by pid and start time: `{ processes: [{ pid, started }], source }`. */
 export const MACHINE_HEALTH_STOP_PROCESSES_CHANNEL = 'resource-monitor:machine-stop-processes';
+/** The apps running outside Pane on this machine, biggest memory first: `OtherApp[]`. Read when Resources expands "Other apps". */
+export const MACHINE_HEALTH_APPS_CHANNEL = 'resource-monitor:machine-apps';
+/** Stops every process of one app from that list, when the person asks: `{ key, source }`; protected apps are refused. */
+export const MACHINE_HEALTH_STOP_APP_CHANNEL = 'resource-monitor:machine-stop-app';
+
+/** One app outside Pane: a macOS app bundle with its helpers, or every process of one executable elsewhere. */
+export interface OtherApp {
+  /** What stop names it by: the bundle path on macOS, the executable name elsewhere. */
+  key: string;
+  name: string;
+  /** Summed resident memory of its processes; shared pages count once per process. */
+  rssMB: number;
+  /** Summed CPU of its processes, in percent of one core. */
+  cpuPercent: number;
+  processCount: number;
+  /** A PNG data URL of the app's icon, when the OS gives one. */
+  icon?: string;
+  /** Why Pane will not stop it (system, Pane itself, or an app Pane runs inside); null when it can. */
+  protectedReason: string | null;
+}
+
 /** Restarts the run script a leaking process belongs to: `{ pid, started }`. */
 export const MACHINE_HEALTH_RESTART_PROCESS_CHANNEL = 'resource-monitor:machine-restart-process';
 /** No leak warning for this process until it exits: `{ pid, started }`. */

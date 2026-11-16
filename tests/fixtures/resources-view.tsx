@@ -11,11 +11,12 @@ import { useSettingsPersistence } from '../../frontend/src/components/settings/u
 import type { AppConfig, UpdateConfigRequest } from '../../frontend/src/types/config';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../../shared/types/machineConnections';
 import type { ToolPanel } from '../../shared/types/panels';
-import type { CleanupRun, MachineHealthSnapshot, StorageInventory } from '../../shared/types/machineHealth';
+import type { CleanupRun, MachineHealthSnapshot, OtherApp, StorageInventory } from '../../shared/types/machineHealth';
 import '../../frontend/src/index.css';
 
 // The Resources page on canned machines: ?machine=local|devbox, ?theme=dark, ?leak=1 (a leaking dev server),
 // ?housekeeping=off (another Pane owns the data folder, so this one runs no cleanup), ?view=settings (Settings › Machine health),
+// ?apps=outdated (the machine's Pane predates the app list),
 // ?window=devbox (the window is switched to the devbox). Ask an agent answers with Session qa-session; the Session
 // selected lands in window.qaSelected and each machine switch in window.qaSwitches.
 // The build-box runs an older Pane (no machine health channels) and travel-laptop is offline.
@@ -87,6 +88,34 @@ const finished = [
 ];
 const history: CleanupRun[] = [{ at: now - 3_600_000, source: 'schedule', removed: [{ id: 'x', kind: 'update-snapshot', path: '/u', sizeBytes: 0.7 * GB }], skipped: [], freedBytes: 0.7 * GB }];
 
+const MACOS = 'Part of macOS. Pane never stops system processes.';
+const app = (key: string, name: string, rssMB: number, cpuPercent: number, processCount: number, protectedReason: string | null = null): OtherApp =>
+  ({ key, name, rssMB, cpuPercent, processCount, protectedReason });
+const otherApps: Record<'local' | 'devbox', OtherApp[]> = {
+  local: [
+    app('/Applications/Google Chrome.app', 'Google Chrome', 4300, 12.4, 23),
+    app('/Applications/Slack.app', 'Slack', 1250, 1.2, 6),
+    app('/Applications/Docker.app', 'Docker', 1100, 3.1, 9),
+    app('/System/Library/CoreServices/WindowServer', 'WindowServer', 820, 9.5, 1, MACOS),
+    app('/Applications/Visual Studio Code.app', 'Visual Studio Code', 760, 0.6, 11),
+    app('/Applications/Spotify.app', 'Spotify', 410, 2.2, 5),
+    app('/System/Applications/Utilities/Terminal.app', 'Terminal', 260, 0.3, 1, 'Pane runs inside it, so stopping it would stop Pane.'),
+    app('/System/Library/CoreServices/Finder.app', 'Finder', 240, 0.1, 1, MACOS),
+    app('/Applications/Figma.app', 'Figma', 230, 0, 4),
+    app('/Applications/Notion.app', 'Notion', 210, 0, 4),
+    app('postgres', 'postgres', 120, 0.2, 7),
+    app('/Applications/1Password.app', '1Password', 110, 0, 3),
+    app('node', 'node', 90, 0, 2),
+    app('/System/Applications/Notes.app', 'Notes', 60, 0, 1),
+  ],
+  devbox: [
+    app('chrome', 'chrome', 2100, 4, 18),
+    app('explorer', 'explorer', 180, 0.4, 1, 'Part of Windows. Pane never stops system processes.'),
+    app('code', 'Code', 640, 1, 9),
+  ],
+};
+const stoppedApps = new Set<string>();
+
 function outdated(): never {
   throw new Error('Error invoking remote method \'machines:read\': Error [ERR_UNKNOWN_CHANNEL]: No Pane daemon command registered for channel "resource-monitor:machine-health".');
 }
@@ -106,6 +135,10 @@ const api = {
       if (machineId === 'build-box') outdated();
       if (machineId === 'travel-laptop') throw new Error('Error invoking remote method \'machines:read\': Error [ERR_MACHINE_OFFLINE]: travel-laptop is offline.');
       const machine = machineId === 'devbox' ? 'devbox' : 'local';
+      if (channel === 'resource-monitor:machine-apps') {
+        if (params.get('apps') === 'outdated') throw new Error('Error invoking remote method \'machines:read\': Error [ERR_UNKNOWN_CHANNEL]: No Pane daemon command registered for channel "resource-monitor:machine-apps".');
+        return { machineId, data: otherApps[machine].filter(item => !stoppedApps.has(item.key)).sort((a, b) => b.rssMB - a.rssMB) };
+      }
       const data = channel === 'resource-monitor:machine-health' ? snapshot(machine)
         : channel === 'resource-monitor:machine-inventory' ? inventory
           : channel === 'resource-monitor:machine-finished-panes' ? finished
@@ -118,7 +151,11 @@ const api = {
               : history;
       return { machineId, data };
     },
-    run: async (machineId: string, command: MachineCommand) => { window.qaRuns.push({ machineId, command }); return { machineId, data: null }; },
+    run: async (machineId: string, command: MachineCommand) => {
+      window.qaRuns.push({ machineId, command });
+      if (command.type === 'machine-health' && command.action === 'stop-app' && 'key' in command.request && typeof command.request.key === 'string') stoppedApps.add(command.request.key);
+      return { machineId, data: null };
+    },
   },
   invoke: async (channel: string, ...args: unknown[]) => {
     window.qaInvokes.push({ channel, args });

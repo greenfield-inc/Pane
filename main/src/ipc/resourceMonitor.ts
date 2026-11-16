@@ -2,7 +2,7 @@ import type { IpcMain } from 'electron';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import { resourceMonitorService } from '../services/resourceMonitorService';
-import { RECLAIM_KINDS, MACHINE_HEALTH_ASK_AGENT_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RELIEF_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_HISTORY_CHANNEL, MACHINE_HEALTH_INVENTORY_CHANNEL, MACHINE_HEALTH_SNAPSHOT_CHANNEL } from '../../../shared/types/machineHealth';
+import { RECLAIM_KINDS, MACHINE_HEALTH_APPS_CHANNEL, MACHINE_HEALTH_STOP_APP_CHANNEL, MACHINE_HEALTH_ASK_AGENT_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RELIEF_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_HISTORY_CHANNEL, MACHINE_HEALTH_INVENTORY_CHANNEL, MACHINE_HEALTH_SNAPSHOT_CHANNEL } from '../../../shared/types/machineHealth';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
 import { terminalPanelManager } from '../services/terminalPanelManager';
@@ -19,6 +19,7 @@ const archiveFinishedSchema = boundary.object({
 const sourceSchema = boundary.object({ source: boundary.enumeration('ui', 'card', 'cli') });
 const identitySchema = boundary.object({ pid: boundary.number, started: boundary.string });
 const stopProcessesSchema = boundary.object({ processes: boundary.array(identitySchema), source: boundary.enumeration('ui', 'card', 'cli') });
+const stopAppSchema = boundary.object({ key: boundary.nonEmptyString, source: boundary.enumeration('ui', 'card', 'cli') });
 const cleanupRequestSchema = boundary.object({
   ids: boundary.optional(boundary.array(boundary.string)),
   kinds: boundary.optional(boundary.array(boundary.enumeration(...RECLAIM_KINDS))),
@@ -39,6 +40,8 @@ const DAEMON_RESOURCE_MONITOR_CHANNELS = [
   MACHINE_HEALTH_RESTART_PROCESS_CHANNEL,
   MACHINE_HEALTH_IGNORE_LEAK_CHANNEL,
   MACHINE_HEALTH_ASK_AGENT_CHANNEL,
+  MACHINE_HEALTH_APPS_CHANNEL,
+  MACHINE_HEALTH_STOP_APP_CHANNEL,
 ] as const;
 
 /** How long an agent that missed the first 30 s may take to start before its request is dropped. */
@@ -141,6 +144,18 @@ export function registerResourceMonitorHandlers(
     await commandRegistry.invoke('sessions:stop-script', [proc.sessionId]);
     await commandRegistry.invoke('sessions:run-script', [proc.sessionId]);
     return { restarted: proc.sessionId };
+  });
+  const otherApps = () => {
+    if (!services.otherApps) {
+      throw new PaneError('ERR_MACHINE_HEALTH_UNAVAILABLE', 'The app list does not run in this Pane process.', 'Restart Pane, then try again.');
+    }
+    return services.otherApps;
+  };
+  commandRegistry.register(MACHINE_HEALTH_APPS_CHANNEL, async () => otherApps().list());
+  /** Stops one app outside Pane when the person asks; the service refuses system apps, Pane itself and Pane's parents. */
+  commandRegistry.register(MACHINE_HEALTH_STOP_APP_CHANNEL, async (value: PaneCommandValue) => {
+    const request = decodeBoundary(value, stopAppSchema);
+    return otherApps().stop(request.key, request.source);
   });
   commandRegistry.register(MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, async (value: PaneCommandValue) => {
     const identity = decodeBoundary(value, identitySchema);

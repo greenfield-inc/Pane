@@ -105,13 +105,37 @@ on a card or on Resources, hands the items to the agent of a Session named
 The agent runs on the machine the window is on when the items are about that
 machine, and on this computer otherwise (the window switches back to it).
 
+## Other apps
+
+On Resources, the chevron beside **Other apps** under Memory opens the apps
+running outside Pane, biggest memory first, each with its memory and CPU. On
+macOS an app is its `.app` bundle with all its helpers, and each iOS simulator
+runtime counts as one app. On Windows and Linux an app is every process of one
+executable. Pane reads this list when you open it and with each refresh after
+that; it is not part of the per-minute sample.
+
+The stop button beside an app ends all of its processes after you confirm
+once: Pane asks each to quit, then forces whatever still runs after 3 seconds
+(Windows ends them at once). Unsaved work in that app may be lost. A lock
+replaces the button, with the reason, for:
+
+- system processes: another user's or the system's, macOS's own (under
+  `/System/Library`, `/usr` and similar), Windows' own (under `C:\Windows`,
+  or another session's), and the Linux desktop session;
+- Pane itself, including another Pane instance;
+- any app Pane runs inside, such as the terminal that started it.
+
+The machine checks these again when the stop arrives, so a linked machine
+refuses them too. Pane never stops an app by itself.
+
 ## Other machines
 
 The Resources header switches between this computer and every machine you
 linked. Each machine samples itself; Resources reads it over the link, and a
 cleanup you start runs on that machine, through its own checks, and its
 buttons say "Runs on" that machine. A machine on an older Pane shows "Update
-Pane on this machine to see its health", and an offline machine keeps its last
+Pane on this machine to see its health" (or, for a Pane from before the app
+list, "Update Pane on this machine to list its apps"), and an offline machine keeps its last
 numbers with their age, with its buttons off. Each machine's cards also show
 on every linked machine, titled with their machine's name.
 
