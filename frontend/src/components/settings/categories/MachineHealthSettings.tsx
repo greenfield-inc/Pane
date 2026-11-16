@@ -37,7 +37,7 @@ function NumberField({ label, unit, saved, min, max, onSave }: NumberFieldProps)
 }
 
 const AUTOMATIC: Array<{ key: keyof HealthSettings; label: string; description: string }> = [
-  { key: 'autoArchiveFinished', label: 'Archive finished Panes automatically', description: 'Panes whose PR merged or closed, whose folder is missing, or that sat idle for the days below. Branches stay and Restore works.' },
+  { key: 'autoArchiveFinished', label: 'Archive finished Panes automatically', description: 'Panes whose PR merged or closed, whose folder is missing, or that sat idle for the days set above. Branches stay and Restore works.' },
   { key: 'autoClearAgentTemp', label: 'Clear agent temp files automatically', description: 'Temp folders of Panes that are gone, and items nobody touched for 2 days with no process working in them.' },
   { key: 'autoClearPausedScratch', label: 'Clear scratch of paused Panes automatically', description: 'QA and scratch folders of Panes whose tabs are all paused.' },
   { key: 'autoClearArchivedFolders', label: 'Remove folders left by archived Panes automatically', description: 'Only folders git confirms were that Pane\'s worktree.' },

@@ -138,7 +138,7 @@ interface Recommendation {
   title: string;
   detail: string;
   bytes: number;
-  unit: 'frees' | 'memory' | 'frees tonight';
+  unit: 'frees' | 'memory' | 'frees automatically';
   action?: { label: string; run: () => Promise<void> };
   automatic?: boolean;
 }
@@ -248,7 +248,7 @@ function Recommendations({ data, machineId, reload, readOnlyReason }: { data: Ma
     const tierOne = kindItems.every(item => item.tier === 1);
     rows.push({
       key: kind, icon: text.icon, title: text.title(kindItems.length), detail: text.detail,
-      bytes: kindItems.reduce((sum, item) => sum + item.sizeBytes, 0), unit: tierOne ? 'frees tonight' : 'frees', automatic: tierOne,
+      bytes: kindItems.reduce((sum, item) => sum + item.sizeBytes, 0), unit: tierOne ? 'frees automatically' : 'frees', automatic: tierOne,
       action: tierOne ? undefined : { label: 'Clear', run: () => act(kind, () => runHealthAction(machineId, 'cleanup', { kinds: [kind], source: 'ui' }), `Could not clear ${text.title(kindItems.length).toLowerCase()}`)() },
     });
   }
@@ -375,7 +375,7 @@ function PerPane({ data }: { data: MachineHealthData }) {
             return (
               <tr key={row.sessionId}>
                 <td className="max-w-[260px] truncate px-4 py-2 text-text-primary">{row.name}</td>
-                <td className="px-4 py-2"><div style={{ width: `${Math.max(2, (total / largest) * 100)}%` }}><StackedBar parts={parts} total={Math.max(1, total)} /></div></td>
+                <td className="px-4 py-2">{total > 0 && <div style={{ width: `${Math.max(2, (total / largest) * 100)}%` }}><StackedBar parts={parts} total={total} /></div>}</td>
                 <td className="px-4 py-2 text-right tabular-nums text-text-primary">{total ? formatBytes(total) : '–'}</td>
                 <td className="px-4 py-2 text-right tabular-nums text-text-primary">{row.rssMB ? formatMB(row.rssMB) : '–'}</td>
               </tr>
@@ -400,7 +400,9 @@ function NotManaged({ data }: { data: MachineHealthData }) {
             <div className="min-w-0 flex-1">
               <div className="truncate text-text-primary" title={item.path}>{item.path}</div>
               <div className="text-text-secondary">{item.reason}</div>
-              {item.howToFree && <code className="mt-0.5 block truncate text-xs text-text-tertiary">{item.howToFree}</code>}
+              {item.howToFree && (/[.!]$/u.test(item.howToFree)
+                ? <div className="mt-0.5 text-xs text-text-tertiary">{item.howToFree}</div>
+                : <code className="mt-0.5 block truncate text-xs text-text-tertiary">{item.howToFree}</code>)}
             </div>
             <span className="tabular-nums text-text-primary">{formatBytes(item.sizeBytes)}</span>
           </li>
@@ -410,6 +412,8 @@ function NotManaged({ data }: { data: MachineHealthData }) {
   );
 }
 
+const SOURCE_TEXT = { schedule: 'by itself', ui: 'from Resources', card: 'from a card', cli: 'by an agent' } as const;
+
 function History({ data }: { data: MachineHealthData }) {
   if (data.history.length === 0) return null;
   return (
@@ -418,7 +422,7 @@ function History({ data }: { data: MachineHealthData }) {
       <ul className="space-y-1 text-sm text-text-secondary">
         {data.history.slice(0, 10).map(run => (
           <li key={`${run.at}-${run.source}`}>
-            {`${new Date(run.at).toLocaleString()}: ${run.removed.length} done${run.skipped.length ? `, ${run.skipped.length} skipped` : ''}${run.freedBytes ? `, freed ${formatBytes(run.freedBytes)}` : ''} (${run.source === 'schedule' ? 'automatic' : run.source})`}
+            {`${new Date(run.at).toLocaleString()}: ${run.removed.length} done${run.skipped.length ? `, ${run.skipped.length} skipped` : ''}${run.freedBytes ? `, freed ${formatBytes(run.freedBytes)}` : ''}, ${SOURCE_TEXT[run.source]}`}
           </li>
         ))}
       </ul>
@@ -433,6 +437,7 @@ export function ResourcesView() {
   const { state, reload } = useMachineHealth(machineId);
   const [now, setNow] = useState(() => Date.now());
   const [pausing, setPausing] = useState(false);
+  const [measuring, setMeasuring] = useState(false);
   const pauseHours = useConfigStore(store => store.config?.machineHealth?.pauseIdleHours ?? 2);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
@@ -460,6 +465,11 @@ export function ResourcesView() {
           <h1 className="text-xl font-semibold text-text-primary">Resources</h1>
           <MachineSwitcher machineId={machineId} onSelect={setMachine} />
           <span className="text-sm text-text-secondary">{data ? `Updated ${relativeTime(data.readAt, now)}` : ''}</span>
+          <button type="button" disabled={measuring} onClick={async () => { setMeasuring(true); try { await reload(true); } finally { setMeasuring(false); } }}
+            aria-label="Measure storage again" title="Measure storage again"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover disabled:opacity-50">
+            <RefreshCw className={cn('h-4 w-4', measuring && 'animate-spin')} aria-hidden="true" />
+          </button>
           <button type="button" disabled={!data} onClick={() => { void askAgent(); }}
             className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-surface-secondary px-3 py-1.5 text-sm font-medium text-text-primary hover:bg-surface-hover disabled:opacity-50">
             <Sparkles className="h-4 w-4" aria-hidden="true" />Ask an agent to clean up

@@ -19,6 +19,7 @@ import {
   Shield,
   SlidersHorizontal,
   Terminal,
+  HardDrive,
 } from 'lucide-react';
 import type { SettingsCategoryId, SettingsSettingId } from '../../types/settings';
 import { CONFIGURED_AGENT_IDS, agentLabel } from '../../../../shared/agents';
@@ -118,7 +119,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     id: 'machine-health',
     label: 'Machine health',
     description: 'Disk and memory warnings, finished Panes, leaks, and what Pane may clean up by itself.',
-    icon: Gauge,
+    icon: HardDrive,
     settingIds: ['machine-health-disk', 'machine-health-memory', 'machine-health-finished', 'machine-health-leak', 'machine-health-automatic', 'machine-health-run-now'],
     aliases: ['storage', 'disk', 'disk space', 'free space', 'memory', 'ram', 'pressure', 'swap', 'leak', 'leaking', 'cleanup', 'clean up', 'resources', 'temp', 'tmp', 'snapshot', 'backup', 'finished', 'archive', 'processes'],
   },
@@ -198,4 +199,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
 
 export function settingDomId(settingId: SettingsSettingId): string {
   return `settings-${settingId}`;
+}
+
+/** Categories whose name, description or search words contain every word typed. */
+export function matchSettingsCategories(categories: readonly SettingsCategoryDefinition[], query: string): readonly SettingsCategoryDefinition[] {
+  const words = query.toLowerCase().split(/\s+/u).filter(Boolean);
+  if (words.length === 0) return categories;
+  return categories.filter(category => {
+    const text = [category.label, category.description, ...category.aliases].join(' ').toLowerCase();
+    return words.every(word => text.includes(word));
+  });
 }
