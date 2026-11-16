@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Camera, Check, Home, Info, Laptop, Loader2, Lock, MoreHorizontal, Power, RotateCcw, WifiOff, X } from 'lucide-react';
-import type { DevicePanelState } from '../../../../../shared/types/devices';
+import type { DevicePanelState, DeviceSettingsView } from '../../../../../shared/types/devices';
 import type { ToolPanel } from '../../../../../shared/types/panels';
 import { Dropdown, type DropdownItem } from '../../ui/Dropdown';
 import { cn } from '../../../utils/cn';
@@ -86,7 +86,7 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
         <div className="flex flex-shrink-0 items-center gap-2 border-b border-border-primary bg-bg-chrome px-3 py-1.5 text-xs text-text-secondary">
           <Info className="h-3.5 w-3.5 flex-shrink-0" />
           <span className="min-w-0 flex-1 truncate">{state.machineReason.text}</span>
-          <button type="button" className="text-interactive hover:text-interactive-hover" onClick={() => requestOpenSettings({ category: 'devices' })}>Change</button>
+          {!provided && <MacMenu />}
           <button type="button" aria-label="Hide" className="text-text-tertiary hover:text-text-primary" onClick={() => setBannerHidden(true)}><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
@@ -110,6 +110,38 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Change, on the banner of a device that runs on a linked Mac: Automatic and each saved Mac with
+ * whether it is online, then Devices settings. The choice applies to the next device_open.
+ */
+function MacMenu() {
+  const [view, setView] = useState<DeviceSettingsView>();
+  const load = (open: boolean) => {
+    if (!open) return;
+    void window.electronAPI.devices.settings().then((response) => { if (response.success) setView(response.data); });
+  };
+  const pick = (iosMachineId: string | null) => { void window.electronAPI.devices.updateSettings({ iosMachineId }).then(() => load(true)); };
+  const pinned = view?.settings.iosMachineId;
+  const automatic = view?.macs.find(mac => mac.online);
+  const items: DropdownItem[] = [
+    { id: 'automatic', label: 'Automatic', description: automatic?.name, onClick: () => pick(null) },
+    ...(view?.macs ?? []).map((mac): DropdownItem => ({ id: mac.id, label: mac.name, description: mac.online ? 'Online' : 'Offline', showDot: true, dotColor: mac.online ? 'bg-status-success' : 'bg-status-neutral', onClick: () => pick(mac.id) })),
+    { id: 'settings', label: 'Devices settings', separatorBefore: true, onClick: () => requestOpenSettings({ category: 'devices' }) },
+  ];
+  return (
+    <Dropdown
+      trigger={<button type="button" className="text-interactive hover:text-interactive-hover">Change</button>}
+      items={items}
+      selectedId={pinned ?? 'automatic'}
+      selectedMark="check"
+      header="iOS devices run on a linked Mac. This computer has no Xcode."
+      position="bottom-right"
+      width="md"
+      onOpenChange={load}
+    />
   );
 }
 
