@@ -48,6 +48,12 @@ test('the collapsed rail shows the active machine and opens the same menu', asyn
   await expect(dialog.getByRole('tab', { name: 'Computer' })).toHaveAttribute('aria-selected', 'true');
 });
 
+/** Every machine latency the menu asked main for, in order. */
+function latencyCalls(page: Page): Promise<string[]> {
+  // SAFETY: installElectronApiMock defines this control before the app loads.
+  return page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getMachineLatencyCalls(): string[] } }).__paneTestElectronMock.getMachineLatencyCalls());
+}
+
 const buildBox: RemoteComputer = {
   id: 'build-box', label: 'Build Box', os: 'Windows',
   routes: [
@@ -57,23 +63,69 @@ const buildBox: RemoteComputer = {
   ],
 };
 
-test('the menu shows a computer once with every route as a pill and a dot on the one in use', async ({ page }) => {
+test('the menu shows a computer once, with only the route it is on and its latency, measured each time the menu opens', async ({ page }) => {
   await installElectronApiMock(page, {
     computers: [buildBox],
     tailnetMachines: { ok: true, tailnet: 'demo.github', domain: 'tail1234.ts.net', machines: [
       { name: 'build-box', dnsName: 'build-box.tail1234.ts.net', url: 'https://build-box.tail1234.ts.net:8443', os: 'Windows', ownerLogin: 'demo@github', mine: true, state: 'available' },
     ] },
+    machineConnections: {
+      machines: [
+        { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+        { id: 'build-box', label: 'Build Box', kind: 'remote', status: 'online', offlineSince: null, routeId: 'lan:https://192.168.1.20:8443' },
+      ],
+      reads: {},
+    },
+    machineLatency: { 'build-box': 4 },
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
+  const switcher = page.getByRole('button', { name: 'Agents run on devbox. Switch machine' });
+  await expect(switcher).toBeVisible();
+  expect(await latencyCalls(page)).toEqual([]);
+
+  await switcher.click();
   const row = page.getByRole('menuitemradio', { name: /Build Box/ });
   await expect(row).toHaveCount(1);
   await expect(page.getByRole('menuitemradio', { name: /build-box/ })).toHaveCount(0);
-  await expect(row.getByRole('list', { name: 'Routes' }).getByRole('listitem')).toHaveText(['Same network', 'Tailscale', 'Pane relay']);
+  await expect(row.getByLabel('Same network, in use')).toBeVisible();
+  await expect(row).toContainText('4 ms');
+  await expect(row).toContainText('Windows');
+  await expect(row).not.toContainText('Tailscale');
+  await expect(row).not.toContainText('Pane relay');
+  expect(await latencyCalls(page)).toEqual(['build-box']);
 
-  await row.click();
-  await page.getByRole('button', { name: 'Agents run on Build Box. Switch machine' }).click();
-  await expect(page.getByRole('menuitemradio', { name: /Build Box/ }).getByLabel('Same network, in use')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(row).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(await latencyCalls(page)).toEqual(['build-box']);
+  await switcher.click();
+  await expect(page.getByRole('menuitemradio', { name: /Build Box/ })).toContainText('4 ms');
+  expect(await latencyCalls(page)).toEqual(['build-box', 'build-box']);
+});
+
+test('a machine shows "…" until its latency answers, and an offline machine is not measured', async ({ page }) => {
+  await installElectronApiMock(page, {
+    computers: [buildBox, { ...buildBox, id: 'studio', label: 'Studio Mac', os: 'macOS' }],
+    tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Sign in to Tailscale.' },
+    machineConnections: {
+      machines: [
+        { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+        { id: 'build-box', label: 'Build Box', kind: 'remote', status: 'online', offlineSince: null, routeId: 'relay:https://bb.runpane.net' },
+        { id: 'studio', label: 'Studio Mac', kind: 'remote', status: 'offline', offlineSince: '2026-11-15T09:00:00.000Z' },
+      ],
+      reads: {},
+    },
+    machineLatency: { 'build-box': 'pending' },
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Switch machine$/ }).click();
+  const row = page.getByRole('menuitemradio', { name: /Build Box/ });
+  await expect(row.getByLabel('Pane relay, in use')).toBeVisible();
+  await expect(row.getByLabel('Measuring latency')).toHaveText('…');
+  const studio = page.getByRole('menuitemradio', { name: /Studio Mac/ });
+  await expect(studio).toContainText('macOS · Last seen');
+  await expect(studio.getByLabel(/in use$/)).toHaveCount(0);
+  expect(await latencyCalls(page)).toEqual(['build-box']);
 });
 
 test('a saved computer agents do not run on shows its live state and the route it is on, with All machines off', async ({ page }) => {
@@ -91,8 +143,8 @@ test('a saved computer agents do not run on shows its live state and the route i
   await page.goto('/');
   await page.getByRole('button', { name: /Switch machine$/ }).click();
   const row = page.getByRole('menuitemradio', { name: /Build Box/ });
-  await expect(row).toContainText('Windows · Online');
   await expect(row.getByLabel('Pane relay, in use')).toBeVisible();
+  await expect(row).toContainText('Windows');
 });
 
 const tailnetMachines: TailnetMachineList = {
@@ -116,7 +168,10 @@ test('the menu lists Tailscale machines never connected and connects one in one 
   await page.getByRole('menuitemradio', { name: /office-pc/ }).click();
   await expect(page.getByRole('button', { name: 'Agents run on office-pc. Switch machine' })).toBeVisible();
   await page.getByRole('button', { name: 'Agents run on office-pc. Switch machine' }).click();
-  await expect(page.getByRole('menuitemradio', { name: /office-pc/ })).toContainText('Windows · Agents run here');
+  const connected = page.getByRole('menuitemradio', { name: /office-pc/ });
+  await expect(connected).toHaveAttribute('aria-checked', 'true');
+  await expect(connected.getByLabel('Tailscale, in use')).toBeVisible();
+  await expect(connected).toContainText('Windows');
 });
 
 test('a machine that needs a password opens its password field in Remote Access', async ({ page }) => {

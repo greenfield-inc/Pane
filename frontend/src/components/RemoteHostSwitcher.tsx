@@ -32,9 +32,9 @@ function unpickable(machine: MachineEntry): boolean {
   return machine.action === 'none' && !machine.active;
 }
 
-/** The route a machine is connected on now, when it is online: the one pill its row shows. */
+/** The route a saved machine is connected on now: the one pill its row shows. Reconnecting or offline, it has none. */
 function routeInUse(machine: MachineEntry): RoutePill | undefined {
-  if (machine.kind !== 'computer' || machine.presence === 'dimmed') return undefined;
+  if (machine.kind !== 'computer' || machine.presence !== 'solid') return undefined;
   return machine.routes?.find((route) => route.inUse && !route.down);
 }
 
@@ -196,7 +196,7 @@ export function RemoteHostSwitcher({
       header="Agents run on"
       position={position}
       width="auto"
-      menuClassName="w-[520px] max-w-[calc(100vw-2rem)]"
+      menuClassName="w-[400px] max-w-[calc(100vw-2rem)]"
       menuLabel="Agents run on"
       onOpenChange={(next) => { setOpen(next); onOpenChange?.(next); }}
       itemClassName="py-1.5"

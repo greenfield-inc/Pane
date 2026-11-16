@@ -137,6 +137,8 @@ export type ElectronApiMockOptions = {
   paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage };
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
+  /** machines:latency answers by machine, in ms; `pending` never answers. Absent: null (no answer). */
+  machineLatency?: Record<string, number | null | 'pending'>;
   /** machines:run answers by machine, then command type. Absent: `{ success: true }`. */
   machineRunAnswers?: Record<string, Record<string, JsonValue>>;
   /** Phone access (QR pairing). Absent: off; turning it on reaches `ready` at once with 10-minute codes. */
@@ -916,6 +918,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       reads: {},
     };
     const machineRuns: Array<{ machineId: string; command: MachineCommand }> = [];
+    const machineLatencyCalls: string[] = [];
     const machineReads: Array<{ machineId: string; channel: string }> = [];
     const machineListeners = new Set<(event: MachineConnectionsEvent) => void>();
     const machinesApi = {
@@ -931,6 +934,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return Promise.resolve({ machineId, data: clone(answer ?? { success: true }) });
       },
       retry: () => Promise.resolve(),
+      latency: (machineId: string) => {
+        machineLatencyCalls.push(machineId);
+        const answer = mockOptions.machineLatency?.[machineId] ?? null;
+        return answer === 'pending' ? new Promise<number | null>(() => undefined) : Promise.resolve(answer);
+      },
       onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
         machineListeners.add(callback);
         return () => { machineListeners.delete(callback); };
@@ -2210,6 +2218,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getMachineRuns() {
           return clone(machineRuns);
+        },
+        getMachineLatencyCalls() {
+          return [...machineLatencyCalls];
         },
         getMachineReads() {
           return clone(machineReads);
