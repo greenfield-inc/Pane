@@ -58,7 +58,7 @@ describe('stopping or restarting a process from outside', () => {
 });
 
 describe('Ask an agent', () => {
-  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>, agent: { resume?: string; ready?: Array<boolean | Error>; panelType?: string; draft?: boolean; prompt?: string } = {}) {
+  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>, agent: { resume?: string; ready?: Array<boolean | Error>; panelType?: string; draft?: boolean; prompt?: string; hostname?: string } = {}) {
     const typed: Array<{ panelId: string; input: string }> = [];
     const readiness = [...(agent.ready ?? [])];
     const created: Array<{ name: string }> = [];
@@ -79,8 +79,14 @@ describe('Ask an agent', () => {
     registry.register('runpane:panels:screen', async () => ({ composer: { hasUndeliveredText: agent.draft ?? false } }));
     registry.register('runpane:panels:submit', async request => { typed.push(partial(request)); return { ok: true }; });
     const notifyService = partial<NotifyService>({ queue: partial<NotifyService['queue']>({ ask: async (input: { question: { context?: string } }) => { cards.push({ context: input.question.context }); return partial({}); } }) });
-    registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions, notifyService }), registry);
-    return { ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: agent.prompt ?? 'Free memory.' }]), typed, created, cards };
+    const machineHealth = partial<MachineHealthService>({ latestSnapshot: () => partial<MachineHealthSnapshot>({ hostname: agent.hostname ?? 'devbox' }) });
+    registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions, notifyService, machineHealth }), registry);
+    return {
+      ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: agent.prompt ?? 'Free memory.' }]),
+      /** As a desktop from before Sessions sends it: the prompt alone. */
+      askUnnamed: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ prompt: agent.prompt ?? 'Free memory.' }]),
+      typed, created, cards,
+    };
   }
 
   it('hands the request to the numbered Session that replaced an archived one, and starts no other', async () => {
@@ -117,6 +123,13 @@ describe('Ask an agent', () => {
     await expect(ask()).resolves.toMatchObject({ typed: false });
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(writes).not.toHaveBeenCalled();
+  });
+
+  it('names the Session for this machine when an older desktop sends no name (F-2)', async () => {
+    setPaneRuntime(partial<PaneRuntime>({ getConfigManager: () => partial<ConfigManager>({ getPreferredShell: () => 'auto' }) }));
+    const { askUnnamed, created } = asker([], { hostname: 'buildbox' });
+    await expect(askUnnamed()).resolves.toMatchObject({ sessionId: 'new', panelId: 'panel-new' });
+    expect(created).toEqual([{ name: 'Clean up buildbox' }]);
   });
 
   it('forgets a late request when the 10-minute wait gives up, so the next slow start gets its own (F-7)', async () => {

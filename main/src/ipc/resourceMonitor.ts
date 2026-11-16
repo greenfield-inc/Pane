@@ -1,3 +1,4 @@
+import os from 'node:os';
 import type { IpcMain } from 'electron';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
@@ -151,7 +152,10 @@ export function registerResourceMonitorHandlers(
   // The request goes to a Session named for the machine, started and shown, so it never depends
   // on a tab the window has not opened yet. A second request reuses that Session while it is open.
   commandRegistry.register(MACHINE_HEALTH_ASK_AGENT_CHANNEL, async (value: PaneCommandValue) => {
-    const { name, prompt } = decodeBoundary(value, boundary.object({ name: boundary.nonEmptyString, prompt: boundary.nonEmptyString }));
+    const request = decodeBoundary(value, boundary.object({ name: boundary.optional(boundary.nonEmptyString), prompt: boundary.nonEmptyString }));
+    const { prompt } = request;
+    // A desktop older than this host sends no name: the Session is named for this machine.
+    const name = request.name ?? `Clean up ${services.machineHealth?.latestSnapshot()?.hostname ?? os.hostname()}`;
     const sessions = services.orchestrationSessionManager;
     if (!sessions) {
       throw new PaneError('ERR_MACHINE_HEALTH_UNAVAILABLE', 'Sessions are not running in this Pane process, so no agent was asked.', 'Restart Pane, then try Ask an agent again.');
@@ -193,18 +197,18 @@ export function registerResourceMonitorHandlers(
           lateRequests.delete(panelId);
           return;
         }
-        const request = lateRequests.get(panelId);
+        const late = lateRequests.get(panelId);
         lateRequests.delete(panelId);
-        if (request === undefined) return;
+        if (late === undefined) return;
         if (panelType === 'chat') {
-          await commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: request, source: 'user', expectReport: false }]);
+          await commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: late, source: 'user', expectReport: false }]);
           return;
         }
         // Never into a draft the person is typing.
         const screen = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:screen', [{ panelId }]), boundary.object({ composer: boundary.object({ hasUndeliveredText: boundary.boolean }) }));
         if (screen?.composer.hasUndeliveredText !== false) return;
         // As runpane stages composer text: newlines stay text inside one bracketed paste, never Enter.
-        const text = stripTrailingNewlines(normalizePromptNewlines(request));
+        const text = stripTrailingNewlines(normalizePromptNewlines(late));
         terminalPanelManager.writeToTerminal(panelId, terminalPanelManager.isBracketedPasteEnabled(panelId) ? bracketedPaste(text) : text.replace(/\n+/gu, ' '));
       })().catch(error => {
         lateRequests.delete(panelId);
