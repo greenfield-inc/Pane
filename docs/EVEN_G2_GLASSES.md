@@ -17,14 +17,14 @@ It talks straight to each of your computers over Tailscale, or through each comp
     Pane's **Settings › Remote Access › Tailscale › Who can connect** set to **Only me** or **Everyone on
     tailnet** (on by default for the Pane that owns `~/.pane`).
 - Pane open on each computer.
+- For dictation and voice answers, a Deepgram key (live) or a fal key (recorded) on the computer
+  you talk to: **Settings › Integrations › Voice transcription** on the computer, or **Settings › Voice** in the
+  Pane phone app.
 
 The Even app lets the glasses reach only the addresses in their network permission: Tailscale
 (`https://*.ts.net:8443`) and Pane's relay (`https://*.runpane.net`), each with its `wss://` twin for
 voice. A computer paired through [your own relay](QR_PAIRING.md#use-your-own-relay) is on another
 domain, so pair the glasses with it over Tailscale.
-- For dictation and voice answers, a Deepgram key (live) or a fal key (recorded) on the computer
-  you talk to: **Settings › Integrations › Voice transcription** on the computer, or **Settings › Voice** in the
-  Pane phone app.
 
 ## Install and pair
 
