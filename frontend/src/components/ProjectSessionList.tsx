@@ -30,7 +30,7 @@ import { paneHasWaitingQuestion, useNotifyStore } from '../stores/notifyStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { AutopilotNavRow } from './autopilot/AutopilotNavRow';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
-import { confirmPaneArchive } from './paneArchiveConfirm';
+import { confirmPaneArchive } from './archiveConfirm';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
@@ -396,7 +396,6 @@ export function ProjectSessionList({
         isActive={activeView === 'sessions' && sidebarNavigationScope === 'orchestration' && parentSessionId === selectedOrchestrationSessionId && pane.id === activeSessionId}
         globalIndex={globalSessionIndex.get(pane.id) ?? -1}
         onClick={() => void handleManagedPaneClick(pane.id, parentSessionId)}
-        onArchive={() => confirmPaneArchive(pane)}
         onTogglePinned={() => void handleTogglePinnedSession(pane.id)}
         onDismiss={inboxActive ? () => dismissInboxPane(pane.id) : undefined}
         rowLayout={sidebarPaneRowLayout}
@@ -415,7 +414,6 @@ export function ProjectSessionList({
           displayName={label}
           repositoryName={repositoryName}
           onClick={() => handleSessionClick(session.id, 'pinned')}
-          onArchive={() => confirmPaneArchive(session)}
           onTogglePinned={() => handleTogglePinnedSession(session.id)}
           rowLayout={sidebarPaneRowLayout}
         />
@@ -558,7 +556,6 @@ export function ProjectSessionList({
                 isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
                 globalIndex={globalSessionIndex.get(session.id) ?? -1}
                 onClick={() => handleSessionClick(session.id, 'repositories')}
-                onArchive={() => confirmPaneArchive(session)}
                 onTogglePinned={() => handleTogglePinnedSession(session.id)}
                 onDismiss={() => dismissInboxPane(session.id)}
                 rowLayout={sidebarPaneRowLayout}
@@ -685,7 +682,6 @@ export function ProjectSessionList({
                       isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
                       globalIndex={globalSessionIndex.get(session.id) ?? -1}
                       onClick={() => handleSessionClick(session.id, 'repositories')}
-                      onArchive={() => confirmPaneArchive(session)}
                       onTogglePinned={() => handleTogglePinnedSession(session.id)}
                       rowLayout={sidebarPaneRowLayout}
                       nested
@@ -1064,7 +1060,6 @@ interface SessionRowProps {
   isActive: boolean;
   globalIndex: number;
   onClick: () => void;
-  onArchive: () => void;
   onTogglePinned: () => void;
   /** Attention inbox only: hide the row until the agent works again. */
   onDismiss?: () => void;
@@ -1083,7 +1078,7 @@ interface GitStatusIPCResponse {
 
 function SessionRow({
   session, isActive, globalIndex, onClick,
-  onArchive, onTogglePinned, onDismiss, displayName, repositoryName, rowLayout, nested = false, reorder,
+  onTogglePinned, onDismiss, displayName, repositoryName, rowLayout, nested = false, reorder,
 }: SessionRowProps) {
   const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
   const initialGitStatusRequestRef = useRef<string | null>(null);
@@ -1127,6 +1122,9 @@ function SessionRow({
   const hasDiff = adds > 0 || dels > 0;
   const showActivity = agentDisplayStatus === 'working';
   const accessibleName = displayName || gs?.prTitle || session.name || 'Untitled';
+  const openButtonRef = useRef<HTMLButtonElement>(null);
+  // The dialog names the Pane as this row does, and focus comes back to the row when it closes.
+  const archive = () => confirmPaneArchive(session, { label: accessibleName, returnFocus: openButtonRef.current });
   // Composite translucent row tokens over an opaque base to mask the title.
   const actionSurfaceClassName = cn(
     'flex h-full items-center bg-surface-secondary transition-opacity group-hover/session:opacity-100 group-focus-within/session:opacity-100',
@@ -1160,6 +1158,7 @@ function SessionRow({
       >
         <button
           type="button"
+          ref={openButtonRef}
           data-row-open
           data-sidebar-item
           data-sidebar-key={`pane-${session.id}`}
@@ -1208,7 +1207,7 @@ function SessionRow({
         <div className={cn(actionSurfaceClassName, 'pr-0.5 opacity-0')}>
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onArchive(); }}
+            onClick={(e) => { e.stopPropagation(); archive(); }}
             className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-status-error"
             title="Archive"
             aria-label={`Archive ${accessibleName}`}
@@ -1230,7 +1229,7 @@ function SessionRow({
       </div>
     </div>
     <CompactSessionMenu menu={contextMenu} onClose={() => setContextMenu(null)}
-      onArchive={() => { setContextMenu(null); onArchive(); }}
+      onArchive={() => { setContextMenu(null); archive(); }}
       onTogglePinned={() => { setContextMenu(null); onTogglePinned(); }} />
   </>);
 }

@@ -63,7 +63,7 @@ import { ContextMenuProvider } from './contexts/ContextMenuContext';
 
 import { CommandPalette } from './components/CommandPalette';
 import { SessionArchiveConfirmDialog } from './components/SessionArchiveConfirmDialog';
-import { PaneArchiveConfirmDialog } from './components/PaneArchiveConfirmDialog';
+import { ArchiveConfirmDialog } from './components/ArchiveConfirmDialog';
 import { Settings } from './components/Settings';
 import { CreateSessionDialog } from './components/CreateSessionDialog';
 import { AddProjectDialog } from './components/AddProjectDialog';
@@ -1117,7 +1117,7 @@ function App() {
           onNewPane={handleNewPaneInProject}
         />
         <SessionArchiveConfirmDialog />
-        <PaneArchiveConfirmDialog />
+        <ArchiveConfirmDialog />
         {showCreateSessionDialog && activeProject && (
           <CreateSessionDialog
             isOpen={showCreateSessionDialog}

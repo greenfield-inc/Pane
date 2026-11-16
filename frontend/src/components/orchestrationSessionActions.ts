@@ -19,14 +19,18 @@ interface ArchivedSessionToast {
   panes: OrchestrationSessionArchivedPanes;
 }
 
-type UnsafePanesChoice = 'keep' | 'archive';
+/**
+ * What to archive. `keep` archives the Session and its Panes without work in progress, keeping any
+ * that have some (the plain confirm, with none, sends `keep`); `archive` takes those Panes too.
+ */
+type ArchiveChoice = 'keep' | 'archive';
 
 /** Archiving a Session waits on the person's choice here. */
 export interface SessionArchiveConfirm {
   sessionName: string;
   /** Every Pane the archive would take along; `blocked` marks the ones with work in progress. */
   panes: OrchestrationSessionArchivePane[];
-  choose: (choice: UnsafePanesChoice | null) => void;
+  choose: (choice: ArchiveChoice | null) => void;
 }
 
 export const useSessionArchiveConfirmStore = createStore<{ confirm: SessionArchiveConfirm | null }>(() => ({ confirm: null }));
@@ -36,7 +40,7 @@ useOrchestrationSessionStore.subscribe((state, previous) => {
   if (state.hostRevision !== previous.hostRevision) useSessionArchiveConfirmStore.getState().confirm?.choose(null);
 });
 
-function askArchive(sessionName: string, panes: OrchestrationSessionArchivePane[]): Promise<UnsafePanesChoice | null> {
+function askArchive(sessionName: string, panes: OrchestrationSessionArchivePane[]): Promise<ArchiveChoice | null> {
   // A second archive replaces a dialog still open, which then counts as cancelled.
   useSessionArchiveConfirmStore.getState().confirm?.choose(null);
   return new Promise(resolve => {

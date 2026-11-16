@@ -30,6 +30,7 @@ export function SessionArchiveConfirmDialog() {
       <ConfirmDialog
         isOpen
         onClose={() => confirm.choose(null)}
+        // No Pane has work in progress, so `keep` archives the Session with all its Panes.
         onConfirm={() => confirm.choose('keep')}
         title={title}
         message={`${total === 0 ? 'It has no Panes.' : `Archiving this Session also archives its ${total === 1 ? 'Pane' : `${total} Panes`}.`} You can undo right after.`}
