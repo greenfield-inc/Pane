@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LoopManager, type LoopRunStarter } from './loopManager';
+import { LoopManager, type LoopCard, type LoopManagerOptions, type LoopRunStarter } from './loopManager';
 import { LoopRepository } from './loopRepository';
 import { createLoopTestDb } from './loopTestDb';
 import type { LoopInput } from '../../../../shared/types/loop';
@@ -24,6 +24,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 function setup(
   startRun: LoopRunStarter = async () => ({ sessionId: `pane-${Math.random()}` }),
   refusesArchive: (sessionId: string) => boolean = () => false,
+  more: Partial<LoopManagerOptions> = {},
 ) {
   let nowMs = utc('2026-10-23T12:00:00Z');
   const archived: string[] = [];
@@ -46,6 +47,7 @@ function setup(
       return target === 'new' ? 'session-new' : target;
     },
     now: () => nowMs,
+    ...more,
   });
   return {
     manager,
@@ -122,6 +124,168 @@ describe('LoopManager Session loops', () => {
     expect(manager.list()[0].runs).toHaveLength(10);
     expect(manager.list()[0].runs.every(run => run.status === 'started' && run.sessionId === null)).toBe(true);
     expect(archived).toEqual([]);
+  });
+});
+
+/** The person at Approvals: every card the loops post, answered one at a time, oldest first. */
+function approvals() {
+  const cards: LoopCard[] = [];
+  const waiting: Array<(answer: string | null) => void> = [];
+  const archivedSessions: string[] = [];
+  const taken: string[] = [];
+  return {
+    cards,
+    taken,
+    archivedSessions,
+    options: {
+      ask: (card: LoopCard, signal: AbortSignal) => {
+        cards.push(card);
+        return new Promise<string | null>(resolve => {
+          waiting.push(resolve);
+          // Like Approvals: an aborted card comes down, unanswered.
+          signal.addEventListener('abort', () => { taken.push(card.title); resolve(null); });
+        });
+      },
+      archiveSession: async (sessionId: string) => { archivedSessions.push(sessionId); },
+    },
+    answer: async (label: string) => {
+      waiting.shift()?.(label);
+      for (let index = 0; index < 5; index += 1) await settle();
+    },
+  };
+}
+
+describe('LoopManager cards', () => {
+  const standup: LoopInput = {
+    name: 'promises-watch',
+    orchestrationSessionId: 'session-1',
+    cron: '30 7 * * *',
+    agent: 'claude',
+    initialInput: 'Remind me of what is due.',
+    enabled: true,
+  };
+  const restored = { kind: 'restored' as const, sessionId: 'session-1', sessionName: 'promises-watch' };
+
+  it('says when a run restored its archived Session, and Undo archives it again and pauses the loop', async () => {
+    const desk = approvals();
+    const { manager } = setup(async () => ({ sessionId: null, recovered: restored }), undefined, desk.options);
+    const { id } = await manager.save(standup);
+    await manager.runNow(id);
+
+    expect(desk.cards).toEqual([{
+      title: 'promises-watch: Session restored',
+      context: 'Its Session promises-watch was archived, so Pane restored it and sent this run there. Undo archives it and pauses the loop.',
+      choices: ['Keep it', 'Undo'],
+      sessionId: 'session-1',
+    }]);
+    expect(manager.list()[0].runs[0]).toMatchObject({ status: 'started', error: null });
+    await desk.answer('Undo');
+    expect(desk.archivedSessions).toEqual(['session-1']);
+    expect(manager.list()[0].enabled).toBe(false);
+  });
+
+  it('points the loop at a Session a run made again, and Keep it changes nothing', async () => {
+    const desk = approvals();
+    const recreated = { kind: 'recreated' as const, sessionId: 'session-2', sessionName: 'promises-watch 2' };
+    const { manager } = setup(async () => ({ sessionId: null, recovered: recreated }), undefined, desk.options);
+    const { id } = await manager.save(standup);
+    await manager.runNow(id);
+
+    expect(manager.list()[0].orchestrationSessionId).toBe('session-2');
+    expect(desk.cards[0].context).toBe('Its Session was gone, so Pane made promises-watch 2 in its place and sent this run there. Undo archives it and pauses the loop.');
+    await desk.answer('Keep it');
+    expect(desk.archivedSessions).toEqual([]);
+    expect(manager.list()[0].enabled).toBe(true);
+  });
+
+  it('raises a failed run as a card that waits, one at a time, and fixes it in one click', async () => {
+    const desk = approvals();
+    let fails = true;
+    const { manager, preparedSessions, started } = setup(async () => {
+      if (fails) throw new Error('Session promises-watch runs Pi, which loops cannot run yet, so the prompt was not sent.');
+      return { sessionId: null };
+    }, undefined, desk.options);
+    const { id } = await manager.save(standup);
+    await manager.runNow(id);
+    await manager.runNow(id);
+
+    // The second failure waits behind the first card instead of posting another.
+    expect(desk.cards).toEqual([{
+      title: 'promises-watch did not run',
+      context: 'Session promises-watch runs Pi, which loops cannot run yet, so the prompt was not sent. The loop tries again at its next scheduled run.',
+      choices: ['Point it at a new Session', 'Run again', 'Pause the loop'],
+      sessionId: 'session-1',
+    }]);
+    fails = false;
+    await desk.answer('Point it at a new Session');
+    expect(preparedSessions.at(-1)).toEqual({ target: 'new', name: 'promises-watch', agent: 'claude' });
+    expect(manager.list()[0].orchestrationSessionId).toBe('session-new');
+    expect(started).toHaveLength(3);
+    expect(manager.list()[0].runs[0].status).toBe('started');
+    // The run that worked made the failure held back behind the card stale, so no second card.
+    expect(desk.cards).toHaveLength(1);
+  });
+
+  it('posts a failure that came while a card was being answered once that card is done', async () => {
+    const desk = approvals();
+    const { manager } = setup(async () => { throw new Error('Session promises-watch is unreachable.'); }, undefined, desk.options);
+    const { id } = await manager.save(standup);
+    await manager.runNow(id);
+    // Run now fails again before the person answers the first card.
+    await manager.runNow(id);
+    await desk.answer('Pause the loop');
+    expect(manager.list()[0].enabled).toBe(false);
+    expect(desk.cards.map(card => card.title)).toEqual(['promises-watch did not run', 'promises-watch did not run']);
+  });
+
+  it('says the prompt was held when a run restored its Session but could not send', async () => {
+    const desk = approvals();
+    const warning = 'When this run started, the Session\'s agent was stopped at a prompt. The loop\'s prompt was not sent. Open the Session and answer it.';
+    const { manager } = setup(async () => ({ sessionId: null, warning, recovered: restored }), undefined, desk.options);
+    const { id } = await manager.save(standup);
+    await manager.runNow(id);
+    expect(desk.cards[0].context).toBe(`Its Session promises-watch was archived, so Pane restored it. ${warning} Undo archives it and pauses the loop.`);
+  });
+
+  it('takes a failure card down once a run starts, and every card of a deleted loop', async () => {
+    const desk = approvals();
+    let fails = true;
+    const { manager } = setup(async () => {
+      if (fails) throw new Error('Session promises-watch is unreachable.');
+      return { sessionId: null };
+    }, undefined, desk.options);
+    const { id } = await manager.save(standup);
+    await manager.runNow(id);
+    fails = false;
+    // The scheduled run works: the card's Run again would start an extra run.
+    await manager.runNow(id);
+    await settle();
+    expect(desk.taken).toEqual(['promises-watch did not run']);
+
+    fails = true;
+    await manager.runNow(id);
+    manager.delete(id);
+    await settle();
+    expect(desk.taken).toEqual(['promises-watch did not run', 'promises-watch did not run']);
+  });
+
+  it('pauses the loops that send to a Session archived anywhere', async () => {
+    const { manager } = setup();
+    const { id } = await manager.save(standup);
+    const other = await manager.save({ ...nightly, name: 'Elsewhere' });
+    expect(manager.pauseForArchivedSession('session-1')).toEqual(['promises-watch']);
+    expect(manager.list().find(loop => loop.id === id)?.enabled).toBe(false);
+    expect(manager.list().find(loop => loop.id === other.id)?.enabled).toBe(true);
+  });
+
+  it('offers a project loop that failed to run again or pause', async () => {
+    const desk = approvals();
+    const { manager } = setup(async () => { throw new Error('Project worktree could not be created.'); }, undefined, desk.options);
+    const { id } = await manager.save(nightly);
+    await manager.runNow(id);
+    expect(desk.cards[0].choices).toEqual(['Run again', 'Pause the loop']);
+    await desk.answer('Pause the loop');
+    expect(manager.list()[0].enabled).toBe(false);
   });
 });
 

@@ -33,6 +33,8 @@ import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { confirmPaneArchive } from './archiveConfirm';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
+import { LoopLabel, LoopMark } from './loops/LoopMark';
+import { useIsLoopRun, useListedPanes } from '../hooks/useListedPanes';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
@@ -106,7 +108,9 @@ export function ProjectSessionList({
   const [dragProjectId, setDragProjectId] = useState<number | null>(null);
   const [dragOverProjectId, setDragOverProjectId] = useState<number | null>(null);
 
-  const sessions = useSessionStore(s => s.sessions);
+  const allPanes = useSessionStore(s => s.sessions);
+  const sessions = useListedPanes();
+  const isLoopRun = useIsLoopRun();
   const sessionsLoaded = useSessionStore(s => s.isLoaded);
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const setActiveSession = useSessionStore(s => s.setActiveSession);
@@ -192,8 +196,9 @@ export function ProjectSessionList({
   const blockedAgentCount = useBlockedAgentCount();
 
   const pinnedSessions = useMemo(() => {
-    return getPinnedSessions(sessions, projectById);
-  }, [sessions, projectById]);
+    // A loop's run Pane is never pinned in the sidebar.
+    return getPinnedSessions(sessions.filter(pane => !isLoopRun(pane.id)), projectById);
+  }, [sessions, isLoopRun, projectById]);
 
   // mod+1-9 session switch hotkeys are registered in useSessionNavigationHotkeys
   // (always mounted in Sidebar), and new-project auto-expansion lives there too.
@@ -364,8 +369,8 @@ export function ProjectSessionList({
   }, [projects, expandedProjects, sessionsByProject, inboxActive, inboxSessions]);
 
   const paneById = useMemo(
-    () => new Map(sessions.map(session => [session.id, session])),
-    [sessions],
+    () => new Map(allPanes.map(session => [session.id, session])),
+    [allPanes],
   );
 
   const availablePaneIds = useMemo(
@@ -946,7 +951,7 @@ export function SessionRowContent({
   showUnviewedCompleted,
   agentDisplayStatus,
   rowLayout,
-  isLoopRun,
+  loopName,
   notifyWaiting,
 }: {
   session: Session;
@@ -961,7 +966,8 @@ export function SessionRowContent({
   showUnviewedCompleted: boolean;
   agentDisplayStatus: AgentDisplayStatus;
   rowLayout: SidebarPaneRowLayout;
-  isLoopRun: boolean;
+  /** The loop this Pane is a run of: the loop icon replaces the status dot, labelled "Loop: <name>". */
+  loopName?: string;
   /** A Notify question from this Pane is waiting: an amber dot and "Waiting". */
   notifyWaiting: boolean;
 }) {
@@ -971,15 +977,16 @@ export function SessionRowContent({
   const waiting = notifyWaiting && !paused;
   const statusIndicator = (className?: string) => paused
     ? <PausedGlyph size="sm" className={cn('flex-shrink-0', className)} />
-    : waiting
+    : loopName !== undefined
+      ? <LoopMark loopName={loopName} className={className} />
+      : waiting
       ? <NotifyWaitingDot className={className} />
       : <AgentStatusDot status={agentDisplayStatus} size="sm" className={cn('flex-shrink-0', className)} />;
   const titleTone = paused ? 'font-normal text-text-muted' : 'font-medium text-text-primary';
   const branchIconColor = paused ? 'text-text-disabled' : iconColor;
   const prNumber = gs?.prNumber;
   const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
-  // A loop's run Pane wears the loop icon until it has a PR.
-  const BranchIcon = isLoopRun ? Repeat : GitBranch;
+  const trailingLabel = loopName !== undefined ? <LoopLabel loopName={loopName} /> : waiting && <NotifyWaitingLabel />;
   const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
   // The repository yields all its space before the Pane name gives up any.
   const repositoryLabel = repositoryName ? (
@@ -992,7 +999,7 @@ export function SessionRowContent({
         {prNumber ? (
           <PullRequestIcon className={`w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
         ) : (
-          <BranchIcon className={`w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
+          <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
         )}
         {statusIndicator()}
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
@@ -1006,7 +1013,7 @@ export function SessionRowContent({
           </span>
           {repositoryLabel}
         </span>
-        {waiting && <NotifyWaitingLabel />}
+        {trailingLabel}
       </div>
     );
   }
@@ -1016,7 +1023,7 @@ export function SessionRowContent({
       {prNumber ? (
         <PullRequestIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
       ) : (
-        <BranchIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
+        <GitBranch className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
       )}
       {statusIndicator('mt-0.5')}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -1030,7 +1037,7 @@ export function SessionRowContent({
             {title}
           </span>
           {repositoryLabel}
-          {waiting && <NotifyWaitingLabel />}
+          {trailingLabel}
         </span>
         {showMetadata && (
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[10px] font-semibold leading-3">
@@ -1085,7 +1092,7 @@ function SessionRow({
 
   const hasUnviewedCompletedActivity = usePanelStore(s => Boolean(s.unviewedCompletedActivity[session.id]));
   const agentDisplayStatus = useSessionAgentDisplayStatus(session.id);
-  const isLoopRun = useLoopsStore(s => s.runsBySessionId.has(session.id));
+  const loopName = useLoopsStore(s => s.runsBySessionId.get(session.id)?.loop.name);
   const notifyWaiting = useNotifyStore(s => paneHasWaitingQuestion(s.snapshot, session.id));
 
   // Queue the initial refresh even when cached status is available, so cached
@@ -1182,7 +1189,7 @@ function SessionRow({
           showUnviewedCompleted={hasUnviewedCompletedActivity && !isActive && !showActivity}
           agentDisplayStatus={agentDisplayStatus}
           rowLayout={rowLayout}
-          isLoopRun={isLoopRun}
+          loopName={loopName}
           notifyWaiting={notifyWaiting}
         />
       </div>
@@ -1215,7 +1222,7 @@ function SessionRow({
             <Archive className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className={cn(actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
+        {loopName === undefined && <div className={cn(actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
@@ -1225,12 +1232,13 @@ function SessionRow({
           >
             <Pin className="h-3.5 w-3.5 rotate-45" />
           </button>
-        </div>
+        </div>}
       </div>
     </div>
     <CompactSessionMenu menu={contextMenu} onClose={() => setContextMenu(null)}
       onArchive={() => { setContextMenu(null); archive(); }}
-      onTogglePinned={() => { setContextMenu(null); onTogglePinned(); }} />
+      // A loop's run Pane is never pinned.
+      onTogglePinned={loopName === undefined ? () => { setContextMenu(null); onTogglePinned(); } : undefined} />
   </>);
 }
 

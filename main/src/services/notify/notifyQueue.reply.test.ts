@@ -177,6 +177,19 @@ describe('NotifyQueue replies (the reply contract)', () => {
     expect(queue.took({}, result.replyId, 'answer')).toMatchObject({ took: 'answer', id: 'q50' });
   });
 
+  it('an update answering a typed question must quote it; the asker\'s own update quotes nothing', async () => {
+    const queue = restoredQ20();
+    // The asker refreshes its own card (a loop's next run, say): no question of the person's to quote.
+    queue.update({ panelId: 'orch' }, 'Q-20', { asked: '', whatChanged: 'Two more items' });
+    expect(item(queue, 'q20')).toMatchObject({ version: 2, revision: { asked: '', whatChanged: ['Two more items'] } });
+
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Which two?' } });
+    await vi.advanceTimersByTimeAsync(1);
+    queue.took({ panelId: 'orch' }, 'Q-20', 'question');
+    expect(() => queue.update({ panelId: 'orch' }, 'Q-20', { asked: ' ', whatChanged: 'Named them' })).toThrow(/didn't say what it was/);
+    expect(item(queue, 'q20')).toMatchObject({ version: 2 });
+  });
+
   it('J7: --took question, then --update makes v2 with the question, what changed and v1 kept', async () => {
     const queue = restoredQ20();
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Can the switch be turned off again if the test goes badly?' } });

@@ -251,11 +251,12 @@ function buildUpdateRequest(update: string, given: NotifyQuestionFlags, others: 
   if (!update.trim()) throw invalid('update', "update must be the approval's id or Q-n, such as --update Q-20.");
   const extra = givenFields({ ...given, ...others }, (field) => UPDATE_FIELDS.has(field) || field === 'update' || field === 'asked' || field === 'whatChanged');
   if (extra.length > 0) throw invalid('update', `update changes only title, context, choices, questions and links, and keeps the approval's ui; remove ${extra.join(', ')}.`);
-  if (!others.asked?.trim()) throw invalid('asked', "asked is required with update: the person's question, as they typed it.");
   if (!others.whatChanged?.trim()) throw invalid('whatChanged', 'whatChanged is required with update: one line per change, such as "Added: it can be undone from Settings".');
   if (given.title !== undefined && !given.title.trim()) throw invalid('title', 'title must be non-empty text; leave it out to keep the current one.');
   if (given.choices !== undefined && given.questions !== undefined) throw invalid('questions', 'questions asks several questions in place of choices; give choices or questions, not both.');
-  const request: Omit<NotifyRequest, 'caller'> = { update, asked: others.asked, whatChanged: others.whatChanged };
+  // asked is the person's typed question; an update of the asker's own (a loop's next run, say) has none.
+  const request: Omit<NotifyRequest, 'caller'> = { update, whatChanged: others.whatChanged };
+  if (others.asked?.trim()) request.asked = others.asked;
   if (given.title !== undefined) request.title = given.title;
   if (given.context !== undefined) request.context = given.context;
   if (given.choices !== undefined) request.choices = parseChoices(parseJson(given.choices), 'choices', 'choices', true);

@@ -15,6 +15,7 @@ import {
 } from '../utils/sessionOrdering';
 import type { SwitchSessionId } from '../../../shared/constants/keyboardShortcuts';
 import type { Project } from '../types/project';
+import { useIsLoopRun, useListedPanes } from './useListedPanes';
 
 interface UseSessionNavigationHotkeysOptions {
   projects: Project[];
@@ -23,7 +24,9 @@ interface UseSessionNavigationHotkeysOptions {
 export function useSessionNavigationHotkeys({
   projects,
 }: UseSessionNavigationHotkeysOptions): void {
-  const sessions = useSessionStore(s => s.sessions);
+  // The Panes the sidebar lists, so numbering and cycling skip loop runs it hides.
+  const sessions = useListedPanes();
+  const isLoopRun = useIsLoopRun();
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const setActiveSession = useSessionStore(s => s.setActiveSession);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
@@ -70,8 +73,8 @@ export function useSessionNavigationHotkeys({
   }, [allActiveSessions, expandedProjects, inboxActive, inboxMembers, projects, sessionsByProject]);
 
   const pinnedSessions = useMemo(() => {
-    return getPinnedSessions(sessions, projectById).map(item => item.session);
-  }, [sessions, projectById]);
+    return getPinnedSessions(sessions.filter(pane => !isLoopRun(pane.id)), projectById).map(item => item.session);
+  }, [sessions, isLoopRun, projectById]);
 
   const allActiveSessionsRef = useCommittedRef(allActiveSessions);
   const visibleSessionsRef = useCommittedRef(visibleSessions);
