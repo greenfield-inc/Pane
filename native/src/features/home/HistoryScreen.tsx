@@ -4,8 +4,6 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { receiptLine } from '@shared/approvalReceipts';
-
 import { buildAllMachinesList, sinceLabel } from '@/features/allMachines/allMachinesList';
 import { openWaitingRow, waitingRowText } from '@/features/allMachines/AllMachinesRows';
 import { MachineMark } from '@/features/machines/MachineMark';
@@ -76,16 +74,15 @@ export function HistoryScreen() {
           {group.label ? <Text variant="footnote" tone="muted" style={styles.groupLabel} accessibilityRole="header">{group.label.toUpperCase()}</Text> : <View style={styles.groupGap} />}
           <Card>
             {group.rows.map((row, index) => {
-              const { title, detail } = waitingRowText(row, all ? '' : here.profile.label);
+              const { title, detail } = waitingRowText(row);
               const machine = machineOf(row.machineKey);
-              const receipt = tab === 'done' ? receiptLine(row.item) : undefined;
               const time = sinceLabel(tab === 'done' ? row.item.resolvedAt ?? row.item.createdAt : row.item.createdAt, now);
               return (
                 <Pressable
                   key={row.key}
                   testID={`history-row-${row.item.id}`}
                   accessibilityRole="button"
-                  accessibilityLabel={[title, detail, receipt, time, machine?.name].filter(Boolean).join(', ')}
+                  accessibilityLabel={[title, detail, time, machine?.name].filter(Boolean).join(', ')}
                   onPress={() => openWaitingRow(row, tab === 'done' ? 'answered' : 'stale', here.profile.id)}
                   style={({ pressed }) => [styles.row, { opacity: row.stale ? STALE_OPACITY : 1 }, pressed && { backgroundColor: theme.colors.surfacePressed }]}
                 >
@@ -102,7 +99,6 @@ export function HistoryScreen() {
                       <Text variant="footnote" tone="muted">{time}</Text>
                     </View>
                     <Text variant="rowDetail" tone="muted" numberOfLines={2}>{detail}</Text>
-                    {receipt ? <Text variant="footnote" tone="muted" numberOfLines={1}>{receipt}</Text> : null}
                   </View>
                 </Pressable>
               );

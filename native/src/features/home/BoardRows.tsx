@@ -191,8 +191,8 @@ export function HistoryLine({ stale, done, onPress }: { stale: number; done: num
 export function EmptyCard({ title, detail, testID }: { title: string; detail?: string; testID: string }) {
   return (
     <Card testID={testID} style={styles.empty}>
-      <Text variant="rowValue" tone="secondary" style={styles.bold}>{title}</Text>
-      {detail ? <Text variant="rowDetail" tone="muted">{detail}</Text> : null}
+      <Text variant="rowValue" tone="secondary" style={[styles.bold, styles.center]}>{title}</Text>
+      {detail ? <Text variant="rowDetail" tone="muted" style={styles.center}>{detail}</Text> : null}
     </Card>
   );
 }
@@ -201,6 +201,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1, minWidth: 0 },
   bold: { fontWeight: '600' },
   tabular: { fontVariant: ['tabular-nums'] },
+  center: { textAlign: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32, paddingHorizontal: 8, marginTop: 18, marginBottom: 6 },
   headerTitle: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   card: { overflow: 'hidden' },

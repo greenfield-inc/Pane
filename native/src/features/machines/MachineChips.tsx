@@ -48,6 +48,8 @@ export function MachineChips({ machines, showAll }: { machines: Machine[]; showA
       data={chips}
       keyExtractor={chip => (chip.kind === 'machine' ? chip.machine.key : chip.kind)}
       estimatedItemSize={120}
+      // Which pill is selected lives outside `data`.
+      extraData={all}
       initialScrollOffset={scrollOffset}
       onScroll={event => { scrollOffset = event.nativeEvent.contentOffset.x; }}
       showsHorizontalScrollIndicator={false}

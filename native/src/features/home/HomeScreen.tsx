@@ -200,7 +200,7 @@ export function HomeScreen() {
           offline={board.offline}
           machineOf={machineOf}
           renderEntry={(row, divided, list) => {
-            const { title, detail } = waitingRowText(row, all ? '' : profile.label);
+            const { title, detail } = waitingRowText(row);
             const id = row.type === 'question' ? `notify-row-${row.item.id}` : `permission-row-${row.request.sessionId}`;
             const machine = machineOf(row.machineKey);
             return (
@@ -238,8 +238,11 @@ export function HomeScreen() {
     const end = items.findIndex((item, index) => index > 0 && item.type === 'section');
     return items[0]?.type === 'section' && items[0].section === 'pinned' ? items.slice(1, end === -1 ? undefined : end) : [];
   })();
-  const pinnedCount = pinnedItems.filter(item => !(item.type === 'pane' && item.nested)).length;
-  const shownPinned = pinnedExpanded ? pinnedItems : pinnedItems.slice(0, PINNED_PREVIEW);
+  // Count and preview what is pinned: a pinned Session brings its nested Panes along.
+  const isPinnedItem = (item: SidebarItem) => !(item.type === 'pane' && item.nested);
+  const pinnedCount = pinnedItems.filter(isPinnedItem).length;
+  const previewEnd = pinnedItems.findIndex((item, index) => isPinnedItem(item) && pinnedItems.slice(0, index).filter(isPinnedItem).length === PINNED_PREVIEW);
+  const shownPinned = pinnedExpanded || previewEnd === -1 ? pinnedItems : pinnedItems.slice(0, previewEnd);
   const sessionCount = here.sessions.data?.sessions.filter(session => !session.archived).length;
   const archivedCount = archived.data
     ? archived.data.reduce((sum, project) => sum + (project.sessions ?? []).length, 0) + (here.sessions.data?.sessions.filter(session => session.archived).length ?? 0)
@@ -268,9 +271,9 @@ export function HomeScreen() {
               ) : <SidebarItemView item={item} previous={undefined} first={false} context={sidebarContext(theme.colors.surfaceRaised)} />}
             </View>
           )) : null}
-          {expanded.pinned && pinnedItems.length > PINNED_PREVIEW ? (
+          {expanded.pinned && pinnedCount > PINNED_PREVIEW ? (
             <Pressable testID="home-pinned-more" accessibilityRole="button" hitSlop={4} onPress={() => setPinnedExpanded(!pinnedExpanded)} style={styles.more}>
-              <Text variant="subhead" tone="accent">{pinnedExpanded ? 'Show less' : `Show ${pinnedItems.length - PINNED_PREVIEW} more`}</Text>
+              <Text variant="subhead" tone="accent">{pinnedExpanded ? 'Show less' : `Show ${pinnedCount - PINNED_PREVIEW} more`}</Text>
             </Pressable>
           ) : null}
         </Card>
@@ -316,6 +319,8 @@ export function HomeScreen() {
       estimatedItemSize={52}
       keyboardDismissMode="on-drag"
       keyboardShouldPersistTaps="handled"
+      // Search results scroll clear of the keyboard.
+      automaticallyAdjustKeyboardInsets
       refreshing={refreshing}
       onRefresh={() => void refresh()}
       style={styles.fill}

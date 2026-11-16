@@ -81,9 +81,9 @@ export function offlineAlert(feeds: readonly AllMachinesFeed[], machines: readon
   };
 }
 
-/** A question's or permission request's title and detail, as every list words them. */
-export function waitingRowText(row: WaitingRow, machineLabel: string): { title: string; detail: string } {
-  if (row.type === 'question') return { title: originLine(row.item, machineLabel), detail: questionDetail(row.item) };
+/** A question's or permission request's title and detail, as every list words them. The pill or mark names its machine. */
+export function waitingRowText(row: WaitingRow): { title: string; detail: string } {
+  if (row.type === 'question') return { title: originLine(row.item, ''), detail: questionDetail(row.item) };
   const permission = describePermission(row.request);
   return { title: askerLine(row.paneName, row.session), detail: permission.target ? `${permission.title}: ${permission.target}` : permission.title };
 }

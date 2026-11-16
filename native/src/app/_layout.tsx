@@ -124,11 +124,11 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         />
         <Stack.Screen
           name="sort-approvals"
-          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.42], sheetGrabberVisible: true, headerShown: false }}
+          options={{ presentation: 'formSheet', sheetAllowedDetents: 'fitToContents', sheetGrabberVisible: true, headerShown: false }}
         />
         {/* Home's Stale and Done today. */}
         <Stack.Screen name="history" options={{ title: 'History', headerLargeTitle: true, headerBackTitle: 'Home', headerBackButtonDisplayMode: 'default' }} />
-        {/* Home's Sessions, Repositories and Archived, from the All panes tile. */}
+        {/* Home's Sessions, Repositories and Archived, from the All panes tile. Rows leave the left edge to swipe-back. */}
         <Stack.Screen name="panes/[section]" options={{ title: '' }} />
         <Stack.Screen name="hosts/new" options={{ title: 'Add a computer', ...grouped }} />
         <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add with a code' }} />
