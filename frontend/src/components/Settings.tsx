@@ -10,6 +10,7 @@ import { LinksSettings } from './settings/categories/LinksSettings';
 import { AIAgentsSettings } from './settings/categories/AIAgentsSettings';
 import { AgentsSettings } from './settings/categories/AgentsSettings';
 import { WorktreesGitSettings } from './settings/categories/WorktreesGitSettings';
+import { MachineHealthSettings } from './settings/categories/MachineHealthSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { NotifySettings } from './settings/categories/NotifySettings';
 import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings';
@@ -207,6 +208,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <UsageView key={usageTab} initialTab={usageTab} />;
       case 'worktrees-git':
         return <WorktreesGitSettings persistence={persistence} {...sharedDirtyProps} />;
+      case 'machine-health':
+        return <MachineHealthSettings persistence={persistence} />;
       case 'notify':
         return <NotifySettings persistence={persistence} />;
       case 'autopilot':

@@ -26,6 +26,13 @@ export function cardTitle(item: HealthNotifyItem): string {
   return `${remote}: ${title}`;
 }
 
+/** Opens Resources on this screen with the card's machine selected. */
+export async function reviewHealthCard(item: NotifyItem): Promise<void> {
+  // Loaded on use: Notify surfaces render in windows and tests that have no navigation store.
+  const { useNavigationStore } = await import('../../stores/navigationStore');
+  useNavigationStore.getState().navigateToResources(item.machineId ?? 'local');
+}
+
 export function answerHealthCard(item: NotifyItem, choice: string): void {
   runNotify({ type: 'answer', id: item.id, answer: { choice } });
 }

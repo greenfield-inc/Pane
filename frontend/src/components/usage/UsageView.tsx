@@ -1,3 +1,4 @@
+import { CATEGORY_COLORS } from '../ui/charts/palette';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, CalendarDays, Check, Download, Loader2, RefreshCw, Share2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
@@ -51,7 +52,7 @@ const SERIES_COLORS = {
   cacheWrite: '#e0913a',
 } as const;
 
-const MODEL_COLORS = ['#4f8ef7', '#37b877', '#e0913a', '#c765d6', '#e05a6b', '#3fb8c4', '#8f8ff0', '#c2a63a'];
+const MODEL_COLORS = CATEGORY_COLORS;
 
 type PaneSortKey =
   | 'paneName'

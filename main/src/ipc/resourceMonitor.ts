@@ -105,7 +105,19 @@ export function registerResourceMonitorHandlers(
     }
     return proc;
   };
-  commandRegistry.register(MACHINE_HEALTH_RELIEF_CHANNEL, async () => ({ idle: relief().idleOffer(), leftBehind: relief().leftBehind() }));
+  /** The Pause offer, leftovers, the leaks Restart can serve (run-script processes whose script is running), and whether this Pane cleans up at all. */
+  commandRegistry.register(MACHINE_HEALTH_RELIEF_CHANNEL, async () => {
+    const snapshot = machineHealth().latestSnapshot();
+    const isRunning = (paneId: string) => logsManager.isRunning(paneId);
+    const restartable = await Promise.all((snapshot?.leaks ?? []).map(async leak => (await canRestartProcess(snapshot, leak, isRunning) ? [leak.pid] : [])));
+    return {
+      idle: { ...relief().idleOffer(), hours: services.configManager.getConfig().machineHealth?.pauseIdleHours ?? 2 },
+      leftBehind: relief().leftBehind(),
+      restartable: restartable.flat(),
+      // Only the Pane that owns its data folder cleans up; another one on that folder refuses every action.
+      housekeeping: services.machineCleanup !== undefined,
+    };
+  });
   commandRegistry.register(MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, async (value: PaneCommandValue) =>
     relief().pauseIdle(decodeBoundary(value, sourceSchema).source));
   commandRegistry.register(MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, async (value: PaneCommandValue) => {

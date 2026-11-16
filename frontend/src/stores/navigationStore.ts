@@ -14,8 +14,9 @@ const toProjectIdArray = (projectIds: Set<number>): number[] =>
 /**
  * Pane has no router — this enum is the whole navigation model. It lives in
  * `shared` because per-host navigation memory crosses the IPC boundary; adding a
- * value there also requires a branch in `SessionView` and an entry in *both*
- * sidebar components (`Sidebar` compact rail and `ProjectSessionList` tree).
+ * value there also requires a branch in `SessionView` and a way in from the
+ * sidebar: an entry in both sidebar components (`Sidebar` compact rail and
+ * `ProjectSessionList` tree), or for Resources, its icon in the sidebar's top bar.
  */
 export type ActiveView = PaneNavigationView;
 
@@ -72,6 +73,9 @@ interface NavigationState {
   navigateToProject: (projectId: number) => void;
   navigateToSessions: () => void;
   navigateToPaneChat: () => void;
+  /** Resources for a machine (`local` or a linked machine's id); the header switcher changes it. */
+  navigateToResources: (machineId?: string) => void;
+  resourcesMachineId: string | null;
   navigateToMissionControl: () => void;
   navigateToSsh: () => void;
   navigateToLoops: () => void;
@@ -205,6 +209,14 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     activeView: 'pane-chat',
     activeProjectId: null
   }),
+
+  // Resources spans every project and can show another machine, so it clears the project scope.
+  resourcesMachineId: null,
+  navigateToResources: (machineId?: string) => set(state => ({
+    activeView: 'resources',
+    activeProjectId: null,
+    resourcesMachineId: machineId ?? state.resourcesMachineId ?? 'local',
+  })),
 
   // Mission Control spans every project, so it clears the project scope.
   navigateToMissionControl: () => set({

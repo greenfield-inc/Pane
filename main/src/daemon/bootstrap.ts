@@ -788,7 +788,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     now: () => Date.now(),
     find: scope => findFinishedPanes({
       now: () => Date.now(),
-      idleDays: configManager.getConfig().machineHealth?.finishedIdleDays ?? 14,
+      // At least 1: 0 would mark every open Pane finished.
+      idleDays: Math.max(1, configManager.getConfig().machineHealth?.finishedIdleDays ?? 14),
       panes: () => databaseService.getAllSessions(undefined, { includeHidden: true }).flatMap(session => {
         if (session.archived || session.is_main_repo || !session.worktree_path || !session.project_id) return [];
         if (scope.ids && !scope.ids.includes(session.id)) return [];
