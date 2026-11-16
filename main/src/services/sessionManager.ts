@@ -1367,7 +1367,8 @@ export class SessionManager extends EventEmitter {
 
     const projectEnv = await this.resolveProjectEnv(sessionId, teammatePaneCaller());
     for (const warning of projectEnv.warnings) addSessionLog(sessionId, 'warn', warning, label);
-    const options: CommandRunOptions = {};
+    // A script's output is its own business: a verbose build must not fail for printing a lot.
+    const options: CommandRunOptions = { maxBuffer: Infinity };
     if (label === 'Build') options.timeout = 0;
     if (Object.keys(projectEnv.env).length > 0) options.env = projectEnv.env;
 

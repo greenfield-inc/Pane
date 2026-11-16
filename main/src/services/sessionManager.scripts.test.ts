@@ -63,3 +63,11 @@ it('gives setup and archive commands their project\'s variables and no other pro
   await expect(manager.runArchiveScript('cura-pane', print, directory, runner)).resolves.toEqual({ success: true, output: 'from-project\n' });
   await expect(manager.runBuildScript('other-pane', print, directory, runner)).resolves.toEqual({ success: true, output: 'undefined\n' });
 });
+
+it('finishes a build script that prints more than 10 MB', async () => {
+  const result = await manager.runBuildScript('session', [
+    'node -e "process.stdout.write(\'x\'.repeat(12 * 1024 * 1024))"',
+  ], directory, runner);
+  expect(result.success).toBe(true);
+  expect(result.output.length).toBe(12 * 1024 * 1024);
+});
