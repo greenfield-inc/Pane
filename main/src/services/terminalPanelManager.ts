@@ -141,7 +141,7 @@ import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatI
 import { assertDirectOpenCodeLaunchCommand, extractOpenCodeSessionId, resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
 import { resolveChosenSessionLaunch } from './agents/chosenSessionLaunch';
 import { agentConfig, agentLabel } from '../../../shared/agents';
-import { isPosixShell, quoteShellWord } from './agents/shellWord';
+import { isPosixShell, quoteNativeArgument, quoteShellWord } from './agents/shellWord';
 import { withClaudePromptHooks } from './claudePrompts';
 import { forgetTab } from './tabListener';
 import { grantPaneMcp, paneMcpConfigEnv, paneMcpTabSettings, terminalUsesPaneMcp, withPaneMcpConfig } from './paneMcpEndpoint';
@@ -489,6 +489,23 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   /**
+   * A saved conversation id (or Claude transcript path) as one literal word for the shell that
+   * reads the launch command: PowerShell expands `$(...)` inside double quotes, so POSIX quoting
+   * is not enough. cmd has no quoting that keeps `%`, `!` or `"` literal, and PowerShell drops `"`
+   * on its way to the agent. An id the shell would rewrite could reopen a different conversation
+   * or run code, so the launch is refused instead.
+   */
+  private resumeIdWord(panelId: string, value: string, shellType: string | undefined): string {
+    const word = quoteNativeArgument(value, shellType);
+    if (word !== undefined) return word;
+    throw new PaneError(
+      'ERR_RESUME_ID_UNQUOTABLE',
+      `Panel ${panelId} could not reopen its conversation: ${shellType ?? 'this shell'} can't pass the saved id ${JSON.stringify(value)} to the agent as one literal argument. No command was sent.`,
+      'Pick a POSIX shell such as Git Bash under Settings > Terminal > Default shell and reopen the tab, or start a new conversation in it.',
+    );
+  }
+
+  /**
    * An argument-mode prompt as one literal shell word: its prompt file read by the shell, or the
    * quoted text. Only POSIX shells pass a quoted word to the agent unchanged: Windows PowerShell
    * drops embedded `"` when it hands an argument to a native program, and cmd expands `%` and `!`.
@@ -545,7 +562,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (customState.updateResumeId) {
       const id = customState.updateResumeId;
       const custom = effectiveCustomResume(customState);
-      const expectedCustom = custom?.config.resumeTemplate.replace(/\{command\}|\{sessionId\}/g, token => token === '{command}' ? initialCommand : this.quoteCommandArgument(id));
+      const expectedCustom = custom?.config.resumeTemplate.replace(/\{command\}|\{sessionId\}/g, token => token === '{command}' ? initialCommand : this.resumeIdWord(panelId, id, isWSL ? 'bash' : shellType));
       const exact = expectedCustom
         ? resolution.commandToRun === expectedCustom
         : resolution.commandToRun.includes(id) && reopensConversation(resolution.commandToRun, resolution.customState.agentType);
@@ -603,7 +620,7 @@ export class TerminalPanelManager extends EventEmitter {
       const template = shouldResume ? config.resumeTemplate : config.initialTemplate || '{command}';
       if (template.includes('{sessionId}') && !sessionId) throw new Error('No session ID is available for this launch template');
       const commandToRun = template.replace(/\{command\}|\{sessionId\}/g, token =>
-        token === '{command}' ? initialCommand : this.quoteCommandArgument(sessionId!));
+        token === '{command}' ? initialCommand : this.resumeIdWord(panelId, sessionId!, isWSL ? 'bash' : shellType));
       const agentType = customResumeAgentType(config) ?? customState.agentType;
       const launchState: TerminalPanelState = {
         ...customState, agentType, customResumeStarted: true,
@@ -766,8 +783,8 @@ export class TerminalPanelManager extends EventEmitter {
 
       return {
         commandToRun: canResumeClaudeSession
-          ? `${claudeResumeBase(initialCommand)} --resume ${this.quoteCommandArgument(transcript ?? claudeSessionId)}`
-          : `${initialCommand} --session-id ${claudeSessionId}${initialPromptArg}`,
+          ? `${claudeResumeBase(initialCommand)} --resume ${this.resumeIdWord(panelId, transcript ?? claudeSessionId, shellType)}`
+          : `${initialCommand} --session-id ${this.resumeIdWord(panelId, claudeSessionId, shellType)}${initialPromptArg}`,
         customState: nextState,
         isCliCommand: true,
       };
@@ -799,7 +816,7 @@ export class TerminalPanelManager extends EventEmitter {
         : undefined;
       const directoryArg = directoryWord ? ` --cd ${directoryWord}` : '';
       const commandToRun = customState.agentSessionId
-        ? `${resumeBase} resume ${this.quoteCommandArgument(customState.agentSessionId)}${directoryArg}`
+        ? `${resumeBase} resume ${this.resumeIdWord(panelId, customState.agentSessionId, shellType)}${directoryArg}`
         : `${resumeBase} resume${directoryArg}`;
 
       if (customState.agentSessionId) {

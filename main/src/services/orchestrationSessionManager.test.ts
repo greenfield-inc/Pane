@@ -1197,7 +1197,7 @@ describe('OrchestrationSessionManager', () => {
       };
       const terminal = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
       const resumed = terminal.resolveCliLaunchCommand(reopened.panel.id, command, reopened.panel.state.customState ?? {});
-      expect(resumed.commandToRun).toContain(' resume "saved-codex-thread"');
+      expect(resumed.commandToRun).toContain(" resume 'saved-codex-thread'");
       expect(resumed.commandToRun).toContain(`agents.explorer.config_file=${JSON.stringify(path.join(skills.codexProjectAgentsRoot, 'explorer.toml'))}`);
       expect(resumed.customState.agentSessionId).toBe('saved-codex-thread');
     } finally {

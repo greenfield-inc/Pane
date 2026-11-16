@@ -1610,7 +1610,8 @@ describe('TerminalPanelManager hidden output delivery', () => {
       const claude = manager.resolveCliLaunchCommand('11111111-1111-4111-8111-111111111111', 'claude', { agentType: 'claude', ...prompt }, shellType);
 
       expect(codex.commandToRun).toBe('codex --yolo');
-      expect(claude.commandToRun).toBe('claude --session-id 11111111-1111-4111-8111-111111111111');
+      const idWord = shellType === 'cmd' ? '"11111111-1111-4111-8111-111111111111"' : '\'11111111-1111-4111-8111-111111111111\'';
+      expect(claude.commandToRun).toBe(`claude --session-id ${idWord}`);
       for (const { customState } of [codex, claude]) {
         expect(customState.initialInput).toBeUndefined();
         expect(customState.initialInputSentAt).toBeUndefined();
@@ -1633,7 +1634,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     );
 
     expect(result).toMatchObject({
-      commandToRun: 'claude --dangerously-skip-permissions --session-id 11111111-1111-4111-8111-111111111111 "/do TM-x"',
+      commandToRun: 'claude --dangerously-skip-permissions --session-id \'11111111-1111-4111-8111-111111111111\' "/do TM-x"',
       isCliCommand: true,
       customState: {
         initialInputSentAt: expect.any(String),
@@ -1657,7 +1658,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     );
 
     expect(result.commandToRun).toBe(
-      'claude --dangerously-skip-permissions --session-id 11111111-1111-4111-8111-111111111111 "First line\nSecond line with \\$value"',
+      'claude --dangerously-skip-permissions --session-id \'11111111-1111-4111-8111-111111111111\' "First line\nSecond line with \\$value"',
     );
     expect(result.customState.initialInputSentAt).toEqual(expect.any(String));
   });
@@ -1668,12 +1669,12 @@ describe('TerminalPanelManager hidden output delivery', () => {
     const claude = manager.resolveCliLaunchCommand('panel', 'claude --model "my model" --permission-mode plan "implement the task"', {
       agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
     });
-    expect(claude.commandToRun).toBe(`claude --model "my model" --permission-mode plan --resume "${id}"`);
+    expect(claude.commandToRun).toBe(`claude --model "my model" --permission-mode plan --resume '${id}'`);
     expect(claude.customState.initialInputSentAt).toBeUndefined();
     const codex = manager.resolveCliLaunchCommand('panel', 'codex --model test --sandbox read-only', {
       agentType: 'codex', agentSessionId: id, wasInterrupted: true,
     });
-    expect(codex.commandToRun).toBe(`codex --model test --sandbox read-only resume "${id}"`);
+    expect(codex.commandToRun).toBe(`codex --model test --sandbox read-only resume '${id}'`);
     expect(codex.customState.initialInputSentAt).toBeUndefined();
   });
 
@@ -1686,7 +1687,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       const result = manager.resolveCliLaunchCommand('panel', 'claude --model test', {
         agentType: 'claude', orchestrationSessionId: 'untouched', agentSessionId: id, hasClaudeSessionId: true,
       });
-      expect(result.commandToRun).toBe(`claude --model test --session-id ${id}`);
+      expect(result.commandToRun).toBe(`claude --model test --session-id '${id}'`);
       expect(result.customState.initialInputSentAt).toBeUndefined();
     } finally { readable.mockRestore(); lookup.mockRestore(); }
   });
@@ -1701,7 +1702,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
         agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
       });
       expect(lookup).toHaveBeenCalledWith(id);
-      expect(result.commandToRun).toBe(`claude --session-id ${id}`);
+      expect(result.commandToRun).toBe(`claude --session-id '${id}'`);
       expect(result.customState.agentSessionId).toBe(id);
     } finally { readable.mockRestore(); lookup.mockRestore(); }
   });
@@ -1715,7 +1716,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       const result = manager.resolveCliLaunchCommand(id, 'claude --model test', {
         agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
       });
-      expect(result.commandToRun).toBe('claude --model test --resume "/claude/projects/old/transcript.jsonl"');
+      expect(result.commandToRun).toBe('claude --model test --resume \'/claude/projects/old/transcript.jsonl\'');
     } finally { readable.mockRestore(); lookup.mockRestore(); }
   });
 
@@ -1734,7 +1735,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
         agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
       }, undefined, isWSL);
       expect(lookup).not.toHaveBeenCalled();
-      expect(result.commandToRun).toBe(`${command} --resume "${id}"`);
+      expect(result.commandToRun).toBe(`${command} --resume '${id}'`);
     } finally { readable.mockRestore(); lookup.mockRestore(); }
   });
 
@@ -1742,16 +1743,16 @@ describe('TerminalPanelManager hidden output delivery', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const command = 'codex -c model_instructions_file="/tmp/review.md"';
     const result = manager.resolveCliLaunchCommand('panel', command, { agentType: 'codex', agentSessionId: 'saved-thread', wasInterrupted: true });
-    expect(result.commandToRun).toBe(`${command} resume "saved-thread"`);
+    expect(result.commandToRun).toBe(`${command} resume 'saved-thread'`);
   });
 
   it('pins resumed Codex Sessions to their managed directory without overriding user cwd arguments', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const state: TerminalPanelState = { agentType: 'codex', orchestrationSessionId: 'session', orchestrationWorkspace: '/tmp/new session', agentSessionId: 'saved-thread' };
     expect(manager.resolveCliLaunchCommand('panel', 'codex --yolo', state).commandToRun)
-      .toBe(`codex --yolo resume "saved-thread" --cd '/tmp/new session'`);
+      .toBe(`codex --yolo resume 'saved-thread' --cd '/tmp/new session'`);
     expect(manager.resolveCliLaunchCommand('panel', 'codex --cd /custom', state).commandToRun)
-      .toBe('codex --cd /custom resume "saved-thread"');
+      .toBe('codex --cd /custom resume \'saved-thread\'');
   });
 
   describe('quotes the resumed Codex folder for the terminal\'s own shell', () => {
@@ -1761,7 +1762,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
       const state: TerminalPanelState = { agentType: 'codex', agentSessionId: 'saved-thread', [field]: directory };
       const { commandToRun } = manager.resolveCliLaunchCommand('panel', 'codex --yolo', state, shellType);
-      const prefix = 'codex --yolo resume "saved-thread"';
+      const prefix = `codex --yolo resume ${/^cmd(?:\.exe)?$/.test(shellType ?? '') ? '"saved-thread"' : '\'saved-thread\''}`;
       expect(commandToRun.startsWith(prefix)).toBe(true);
       const rest = commandToRun.slice(prefix.length);
       if (!rest) return undefined;
@@ -1817,10 +1818,10 @@ describe('TerminalPanelManager hidden output delivery', () => {
     const customResume = { mode: 'generated', initialTemplate: '{command} -- --session-id {sessionId}', resumeTemplate: '{command} -- --resume {sessionId}' } satisfies NonNullable<TerminalPanelState['customResume']>;
     const first = manager.resolveCliLaunchCommand('panel', command, { initialCommand: command, customResume });
     expect(first.customState.agentSessionId).toMatch(/^[a-f0-9-]{36}$/);
-    expect(first.commandToRun).toBe(`${command} -- --session-id "${first.customState.agentSessionId}"`);
+    expect(first.commandToRun).toBe(`${command} -- --session-id '${first.customState.agentSessionId}'`);
     expect(first.customState.initialCommand).toBe(command);
     const restarted = testAccess<LaunchCommandAccess>(new TerminalPanelManager()).resolveCliLaunchCommand('panel', command, first.customState);
-    expect(restarted.commandToRun).toBe(`${command} -- --resume "${first.customState.agentSessionId}"`);
+    expect(restarted.commandToRun).toBe(`${command} -- --resume '${first.customState.agentSessionId}'`);
     expect(restarted.customState.initialInputSentAt).toBeUndefined();
   });
 
@@ -1836,7 +1837,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       expect(manager.resolveCliLaunchCommand('panel', command, first.customState).commandToRun).toBe(first.commandToRun);
       lookup.mockReturnValue('/private/transcript.jsonl');
       expect(manager.resolveCliLaunchCommand('panel', command, first.customState).commandToRun)
-        .toBe(`${command} -- --resume "${first.customState.agentSessionId}"`);
+        .toBe(`${command} -- --resume '${first.customState.agentSessionId}'`);
     } finally { lookup.mockRestore(); readable.mockRestore(); }
   });
 
@@ -1849,7 +1850,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
         mode: 'claude', initialTemplate: '{command} -- --session-id {sessionId}', resumeTemplate: '{command} -- --resume {sessionId}',
       } });
       expect(manager.resolveCliLaunchCommand('panel', command, first.customState).commandToRun)
-        .toBe(`${command} -- --resume "${first.customState.agentSessionId}"`);
+        .toBe(`${command} -- --resume '${first.customState.agentSessionId}'`);
     } finally { readable.mockRestore(); }
   });
 
@@ -1858,16 +1859,16 @@ describe('TerminalPanelManager hidden output delivery', () => {
     const result = manager.resolveCliLaunchCommand('panel', 'CODEX_HOME=~/codex-work codex --yolo "fix the bug"', {
       agentType: 'codex', agentSessionId: 'thread-1', wasInterrupted: true,
     });
-    expect(result.commandToRun).toBe('CODEX_HOME=~/codex-work codex --yolo resume "thread-1"');
+    expect(result.commandToRun).toBe('CODEX_HOME=~/codex-work codex --yolo resume \'thread-1\'');
   });
 
   it.each([
-    ['CODEX_HOME="/tmp/my codex" codex "fix bug"', 'CODEX_HOME="/tmp/my codex" codex resume "thread-1"'],
-    ['codex --cd "$HOME/repo" "fix bug"', 'codex --cd "$HOME/repo" resume "thread-1"'],
-    ['codex -- "fix bug"', 'codex resume "thread-1"'],
-    ['codex -- "review"', 'codex resume "thread-1"'],
-    ['codex --cd "$HOME/repo" -- "--model is broken"', 'codex --cd "$HOME/repo" resume "thread-1"'],
-    ['codex --', 'codex resume "thread-1"'],
+    ['CODEX_HOME="/tmp/my codex" codex "fix bug"', 'CODEX_HOME="/tmp/my codex" codex resume \'thread-1\''],
+    ['codex --cd "$HOME/repo" "fix bug"', 'codex --cd "$HOME/repo" resume \'thread-1\''],
+    ['codex -- "fix bug"', 'codex resume \'thread-1\''],
+    ['codex -- "review"', 'codex resume \'thread-1\''],
+    ['codex --cd "$HOME/repo" -- "--model is broken"', 'codex --cd "$HOME/repo" resume \'thread-1\''],
+    ['codex --', 'codex resume \'thread-1\''],
   ])('preserves shell argument spelling on resume: %s', (command, expected) => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     expect(manager.resolveCliLaunchCommand('panel', command, {
@@ -1883,14 +1884,14 @@ describe('TerminalPanelManager hidden output delivery', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     expect(manager.resolveCliLaunchCommand('panel', command, {
       agentType: 'claude', agentSessionId: '22222222-2222-4222-8222-222222222222', hasClaudeSessionId: true,
-    }).commandToRun).toBe(`${command} --resume "22222222-2222-4222-8222-222222222222"`);
+    }).commandToRun).toBe(`${command} --resume '22222222-2222-4222-8222-222222222222'`);
   });
 
   it('allocates a Claude session when resume flags appear only inside an option value', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const command = 'claude --append-system-prompt "use -c for config"';
     const result = manager.resolveCliLaunchCommand('panel', command, { agentType: 'claude' });
-    expect(result.commandToRun).toBe(`${command} --session-id ${result.customState.agentSessionId}`);
+    expect(result.commandToRun).toBe(`${command} --session-id '${result.customState.agentSessionId}'`);
   });
 
   it('resumes wrapped Codex by captured ID and never guesses the latest conversation', () => {
@@ -1901,7 +1902,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     }, wasInterrupted: true };
     expect(manager.resolveCliLaunchCommand('panel', command, state).commandToRun).toBe(command);
     expect(manager.resolveCliLaunchCommand('panel', command, { ...state, agentSessionId: 'saved-thread' }).commandToRun)
-      .toBe(`${command} -- resume "saved-thread"`);
+      .toBe(`${command} -- resume 'saved-thread'`);
   });
 
   it('rejects resume templates that cannot identify the saved conversation', () => {
@@ -1938,7 +1939,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     );
 
     expect(result.commandToRun).toBe(
-      'claude --dangerously-skip-permissions --resume "22222222-2222-4222-8222-222222222222"',
+      'claude --dangerously-skip-permissions --resume \'22222222-2222-4222-8222-222222222222\'',
     );
     expect(result.customState).not.toHaveProperty('initialInputSentAt');
   });
@@ -2046,7 +2047,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
 
     expect(result).toMatchObject({
-      commandToRun: `codex --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"' resume "thread-1"`,
+      commandToRun: `codex --yolo -c 'agents.explorer.config_file="/data/.codex/agents/explorer.toml"' resume 'thread-1'`,
       isCliCommand: true,
     });
   });
@@ -2060,7 +2061,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
       agentSessionId: 'thread-1',
     });
 
-    expect(result).toMatchObject({ commandToRun: 'codex --yolo resume "thread-1"' });
+    expect(result).toMatchObject({ commandToRun: 'codex --yolo resume \'thread-1\'' });
   });
 
   it('keeps Enter as the default initial input submit strategy', async () => {
@@ -2173,7 +2174,7 @@ describe('TerminalPanelManager agent session capture', () => {
     manager.captureAgentSessionId(terminal, `To continue, run codex resume ${CURSOR_CHAT_ID}\r\n`);
     expect(panelManager.updatePanel).not.toHaveBeenCalled();
     const launch = manager.resolveCliLaunchCommand('panel-1', 'wrapper', customState);
-    expect(launch.commandToRun).toBe('wrapper --continue "allocated-thread"');
+    expect(launch.commandToRun).toBe('wrapper --continue \'allocated-thread\'');
     expect(launch.customState.agentType).toBe('codex');
     disposeFlowControlRecord(terminal.flowControl);
   });
@@ -2440,7 +2441,7 @@ describe('TerminalPanelManager wrapper launches', () => {
       wasInterrupted: true,
     });
 
-    expect(result.commandToRun).toBe('agent-farm run free-range --resume "019a0000-0000-7000-8000-000000000000"');
+    expect(result.commandToRun).toBe('agent-farm run free-range --resume \'019a0000-0000-7000-8000-000000000000\'');
     expect(result.customState.wasInterrupted).toBeUndefined();
   });
 
@@ -2662,7 +2663,7 @@ describe('TerminalPanelManager long prompt delivery', () => {
   });
 
   it.each([
-    ['claude', 'claude --dangerously-skip-permissions', `claude --dangerously-skip-permissions --session-id 11111111-1111-4111-8111-111111111111 ${promptWord}`],
+    ['claude', 'claude --dangerously-skip-permissions', `claude --dangerously-skip-permissions --session-id '11111111-1111-4111-8111-111111111111' ${promptWord}`],
     ['codex', 'codex --yolo', `codex --yolo ${promptWord}`],
   ] as const)('launches %s with the prompt read from its file, never typed into the shell', (agentType, command, expected) => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
@@ -2909,7 +2910,7 @@ describe('TerminalPanelManager Agent Farm resume', () => {
       initialCommand: FARM, agentType: 'claude', agentSessionId: LAUNCH_ID, customResumeStarted: true, wasInterrupted: true,
     };
     const result = manager.resolveCliLaunchCommand('panel-1', FARM, state);
-    expect(result.commandToRun).toBe(`${FARM} --resume "${LAUNCH_ID}"`);
+    expect(result.commandToRun).toBe(`${FARM} --resume '${LAUNCH_ID}'`);
     expect(result.customState).toMatchObject({ agentType: 'claude', agentSessionId: LAUNCH_ID });
     expect(result.customState).not.toHaveProperty('customResume');
   });
@@ -2920,7 +2921,7 @@ describe('TerminalPanelManager Agent Farm resume', () => {
       initialCommand: FARM, agentType: 'claude', agentDetection: 'declared', launchMode: 'wrapped',
       agentSessionId: LAUNCH_ID, customResumeStarted: true,
     });
-    expect(result.commandToRun).toBe(`${FARM} --resume "${LAUNCH_ID}"`);
+    expect(result.commandToRun).toBe(`${FARM} --resume '${LAUNCH_ID}'`);
     expect(result.customState).toMatchObject({
       agentType: 'claude', agentDetection: 'declared', launchMode: 'wrapped', launchCommand: FARM,
     });
@@ -2932,7 +2933,7 @@ describe('TerminalPanelManager Agent Farm resume', () => {
       mode: 'generated', initialTemplate: '{command} --id {sessionId}', resumeTemplate: '{command} --continue {sessionId}',
     } as const;
     const state: TerminalPanelState = { initialCommand: FARM, customResume, agentSessionId: 'mine', customResumeStarted: true };
-    expect(manager.resolveCliLaunchCommand('panel-1', FARM, state).commandToRun).toBe(`${FARM} --continue "mine"`);
+    expect(manager.resolveCliLaunchCommand('panel-1', FARM, state).commandToRun).toBe(`${FARM} --continue 'mine'`);
   });
 
   it.each([
@@ -2957,7 +2958,7 @@ describe('TerminalPanelManager Agent Farm resume', () => {
     });
     const result = manager.resolveCliLaunchCommand('panel-1', FARM, { initialCommand: FARM, agentType: 'claude' });
     expect(buffers).toHaveBeenCalledWith('panel-1');
-    expect(result.commandToRun).toBe(`${FARM} --resume "${LAUNCH_ID}"`);
+    expect(result.commandToRun).toBe(`${FARM} --resume '${LAUNCH_ID}'`);
     expect(result.customState).toMatchObject({ agentSessionId: LAUNCH_ID, customResumeStarted: true });
 
     // A launch under the rule marks the panel, so it is never scanned again.
