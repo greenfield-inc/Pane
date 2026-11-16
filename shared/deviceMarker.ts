@@ -1,4 +1,5 @@
-import type { DeviceOpenMarker } from './types/devices';
+import type { DeviceOpenMarker, DevicePanelPhase } from './types/devices';
+import type { ToolPanel } from './types/panels';
 import { boundary, decodeOptionalBoundary } from './validation/boundaryDecoder';
 
 const resultSchema = boundary.object({
@@ -10,6 +11,8 @@ const resultSchema = boundary.object({
     machine: boundary.string,
   }),
 });
+
+const phaseSchema = boundary.object({ phase: boundary.enumeration('installing', 'booting', 'live', 'off', 'in-use', 'closed', 'no-mac', 'mac-offline', 'error') });
 
 function markerIn(text: string): DeviceOpenMarker | undefined {
   let result;
@@ -38,4 +41,10 @@ export function deviceMarkerOf(output: string | undefined): DeviceOpenMarker | u
     if (marker) return marker;
   }
   return undefined;
+}
+
+/** The phase of the device tab `panelId` among a Pane's tabs, or undefined when it is not there. */
+export function devicePhaseOf(panels: readonly ToolPanel[], panelId: string): DevicePanelPhase | undefined {
+  const panel = panels.find(candidate => candidate.id === panelId && candidate.type === 'device');
+  return decodeOptionalBoundary(panel?.state.customState, phaseSchema)?.phase;
 }

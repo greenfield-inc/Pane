@@ -7,6 +7,8 @@ import { cn } from '../../../utils/cn';
 import { deviceCaption, devicePhaseCopy } from './deviceCopy';
 import { requestOpenSettings } from '../../../utils/openSettings';
 import { useAddDeviceStore } from '../../addDevice/addDeviceStore';
+import { useConfigStore } from '../../../stores/configStore';
+import { FRAME_POLL_MS, jpegToPng, useDeviceFrames } from './deviceFrames';
 
 /** The tab's screen size when the device has not sent a frame yet (iPhone 17 Pro points). */
 const DEFAULT_ASPECT = { ios: 402 / 874, android: 412 / 915 } satisfies Record<DevicePanelState['platform'], number>;
@@ -30,6 +32,8 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
   const [copied, setCopied] = useState(false);
   const [bannerHidden, setBannerHidden] = useState(false);
   const live = state.phase === 'live';
+  // A desktop switched to another computer reads frames from it; this one's own devices stream.
+  const remote = useConfigStore(store => store.config?.remoteDaemon?.client.mode === 'remote');
   const lastFrame = useLastFrame(panel.id, state.deviceId, !live && state.phase !== 'booting' && state.phase !== 'installing');
 
   useEffect(() => {
@@ -56,11 +60,14 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
   }, []);
 
   const copyScreen = useCallback(async () => {
-    const response = await window.electronAPI.devices.copyFrame(panel.id);
-    if (!response.success) {
+    const response = await window.electronAPI.devices.frame(panel.id);
+    if (!response.success || !response.data) {
       setError(response.error ?? 'Pane could not copy the screen.');
       return;
     }
+    // Clipboard images must be PNG; the frame is a JPEG data URL.
+    const png = await jpegToPng(response.data);
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }, [panel.id]);
@@ -88,7 +95,7 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
       <div className="flex min-h-0 flex-1 items-center justify-center gap-3 p-4">
         <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-center">
           <PhoneFrame platform={state.platform} footer={<DeviceCaption state={state} />}>
-            {live && isActive ? <LiveScreen panelId={panel.id} platform={state.platform} /> : (
+            {live && isActive ? <LiveScreen panelId={panel.id} platform={state.platform} remote={remote} /> : (
               <div className="absolute inset-0 bg-device-screen">
                 {lastFrame && <img src={lastFrame} alt="" className="h-full w-full object-cover opacity-60" />}
               </div>
@@ -191,10 +198,18 @@ function PhoneFrame({ platform, children, dashed = false, footer }: { platform: 
 }
 
 /**
- * The device's MJPEG stream, served by main at pane-media://device/<panelId> so the hub token
- * never reaches the renderer. Pointer events become normalized touches; moves are sent once a frame.
+ * The device's screen with touch. Locally it is the MJPEG stream main serves at
+ * pane-media://device/<panelId>, so the hub token never reaches the renderer; on another computer
+ * it is frames read over the connection, about twice a second. Pointer events become normalized
+ * touches; moves are sent once a frame.
  */
-function LiveScreen({ panelId, platform }: { panelId: string; platform: DevicePanelState['platform'] }) {
+function LiveScreen({ panelId, platform, remote }: { panelId: string; platform: DevicePanelState['platform']; remote: boolean }) {
+  const polled = useDeviceFrames(panelId, remote ? FRAME_POLL_MS : undefined);
+  const src = remote ? polled : `pane-media://device/${panelId}`;
+  return src ? <TouchScreen panelId={panelId} platform={platform} src={src} /> : <div className="absolute inset-0 bg-device-screen" />;
+}
+
+export function TouchScreen({ panelId, platform, src }: { panelId: string; platform: DevicePanelState['platform']; src: string }) {
   const down = useRef(false);
   const pendingMove = useRef<{ x: number; y: number }>(undefined);
   const point = (event: ReactPointerEvent<HTMLImageElement>) => {
@@ -212,7 +227,7 @@ function LiveScreen({ panelId, platform }: { panelId: string; platform: DevicePa
   };
   return (
     <img
-      src={`pane-media://device/${panelId}`}
+      src={src}
       alt={`${platform === 'ios' ? 'iOS' : 'Android'} screen`}
       draggable={false}
       data-testid="device-screen"

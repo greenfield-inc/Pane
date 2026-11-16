@@ -1,4 +1,4 @@
-import { clipboard, nativeImage, type IpcMain } from 'electron';
+import type { IpcMain } from 'electron';
 import os from 'os';
 import path from 'path';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
@@ -276,7 +276,7 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
     return { ok: true, machine: localMachineName(), ...(await devices().free(mode)) };
   });
 
-  registerDeviceTabChannels(ipcMain, services);
+  registerDeviceTabChannels(ipcMain, services, commandRegistry);
 
   services.sessionManager.on('session-deleted', ({ id }: { id: string }) => {
     if (!service) return;
@@ -295,10 +295,12 @@ async function respond<Data>(work: () => Promise<Data> | Data): Promise<IpcRespo
 }
 
 /**
- * The person's device tab. These channels are the UI's own (agents reach only runpane
- * commands), so the person can drive any device their tab shows.
+ * The person's device tab. `devices:*` are host channels, so a desktop switched to another
+ * computer, the browser app and phones reach the device on the Pane they show. They are the UI's
+ * own (agents reach runpane commands), so the person can drive any device their tab shows.
+ * Settings > Devices is about this computer, so its channels stay local.
  */
-function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices): void {
+function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   const devices = () => deviceService(services);
   const panelOf = (panelId: PaneCommandValue) => {
     const id = decodeOptionalBoundary(panelId, boundary.string);
@@ -309,7 +311,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
   };
 
   /** The person's touches and buttons, sent from main so the hub token never reaches the renderer. */
-  ipcMain.handle('devices:input', (_event, panelId: PaneCommandValue, input: PaneCommandValue) => respond(async () => {
+  commandRegistry.register('devices:input', (panelId: PaneCommandValue, input: PaneCommandValue) => respond(async () => {
     const { state } = panelOf(panelId);
     if (!state.deviceId || state.phase !== 'live') return false;
     const decoded = decodeBoundary(input, inputSchema);
@@ -327,27 +329,19 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
   });
 
   /** One frame as a data URL: the chat card's thumbnail, and the frame view on phones and in the browser app. */
-  ipcMain.handle('devices:frame', (_event, panelId: PaneCommandValue) => respond(async () => {
+  commandRegistry.register('devices:frame', (panelId: PaneCommandValue) => respond(async () => {
     const { state } = panelOf(panelId);
     if (!state.deviceId) throw new PaneError('ERR_DEVICE_NOT_OPEN', 'This tab has no device yet.', 'Wait for it to boot.');
     return `data:image/jpeg;base64,${(await devices().latestFrame(state.deviceId)).toString('base64')}`;
   }));
 
-  /** The rail's Screenshot: the current screen, copied to the clipboard. */
-  ipcMain.handle('devices:copy-frame', (_event, panelId: PaneCommandValue) => respond(async () => {
-    const { state } = panelOf(panelId);
-    if (!state.deviceId) throw new PaneError('ERR_DEVICE_NOT_OPEN', 'This tab has no device yet.', 'Wait for it to boot.');
-    clipboard.writeImage(nativeImage.createFromBuffer(await devices().latestFrame(state.deviceId)));
-    return true;
-  }));
-
-  ipcMain.handle('devices:visible', (_event, panelId: PaneCommandValue, clientId: PaneCommandValue, visible: PaneCommandValue) => respond(() => {
+  commandRegistry.register('devices:visible', (panelId: PaneCommandValue, clientId: PaneCommandValue, visible: PaneCommandValue) => respond(() => {
     const { panel, state } = panelOf(panelId);
     if (state.deviceId && service) service.lifecycle.setVisible(panel.sessionId, state.deviceId, String(clientId), visible === true);
     return true;
   }));
 
-  ipcMain.handle('devices:take-over', (_event, panelId: PaneCommandValue) => respond(async () => {
+  commandRegistry.register('devices:take-over', (panelId: PaneCommandValue) => respond(async () => {
     const { panel, state } = panelOf(panelId);
     if (!state.deviceId) return false;
     const session = services.sessionManager.getSession(panel.sessionId);
@@ -356,7 +350,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
   }));
 
   /** Boot (off after idle), Restart and Shut down from the device tab. */
-  ipcMain.handle('devices:power', (_event, panelId: PaneCommandValue, action: PaneCommandValue) => respond(async () => {
+  commandRegistry.register('devices:power', (panelId: PaneCommandValue, action: PaneCommandValue) => respond(async () => {
     const { panel, state } = panelOf(panelId);
     const session = services.sessionManager.getSession(panel.sessionId);
     const caller = { paneId: panel.sessionId, paneName: session?.name ?? panel.sessionId };
@@ -376,7 +370,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     return true;
   }));
 
-  ipcMain.handle('devices:settings', () => respond(async () => {
+  ipcMain.handle('device-settings:get', () => respond(async () => {
     const capabilities = await devices().probe(true);
     const view: DeviceSettingsView = {
       settings: deviceSettings(services),
@@ -387,7 +381,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     return view;
   }));
 
-  ipcMain.handle('devices:settings:update', (_event, patch: PaneCommandValue) => respond(async () => {
+  ipcMain.handle('device-settings:update', (_event, patch: PaneCommandValue) => respond(async () => {
     const update = decodeBoundary(patch ?? {}, boundary.object({ enabled: boundary.optional(boundary.boolean), iosMachineId: boundary.optional(boundary.nullable(boundary.string)), maxBooted: boundary.optional(boundary.number) }));
     const next: DeviceSettings = { ...deviceSettings(services) };
     if (update.enabled !== undefined) next.enabled = update.enabled;

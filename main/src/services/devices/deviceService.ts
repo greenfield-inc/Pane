@@ -19,7 +19,7 @@ const JPEG_END = Buffer.from([0xff, 0xd9]);
 const PANE_DEVICE_NAMES = { ios: 'Pane iPhone', android: 'Pane_Android' } satisfies Record<DevicePlatform, string>;
 
 /** A Pane-made device, as the state file keeps it. */
-interface MadeDevice { platform: DevicePlatform; name: string; model?: string; createdAt: number; lastUsedAt: number; users: string[]; slimmed?: boolean }
+interface MadeDevice { platform: DevicePlatform; name: string; model?: string; createdAt: number; lastUsedAt: number; users: string[]; slimmed?: boolean; lastPane?: string }
 const stateSchema = boundary.object({
   made: boundary.record(boundary.object({
     platform: boundary.enumeration('ios', 'android'),
@@ -29,6 +29,7 @@ const stateSchema = boundary.object({
     lastUsedAt: boundary.number,
     users: boundary.array(boundary.string),
     slimmed: boundary.optional(boundary.boolean),
+    lastPane: boundary.optional(boundary.string),
   })),
 });
 
@@ -140,10 +141,14 @@ export class DeviceService {
         this.lifecycle.lease(caller.paneId, chosen.id, chosen.platform, { bootedByPane: !chosen.booted && !chosen.paneMade });
         this.options.onChange?.({ kind: 'held', id: chosen.id, paneId: caller.paneId });
       }
-      this.markUsed(chosen.id, caller.paneId);
+      const previousPane = this.markUsed(chosen.id, caller.paneId);
       if (!chosen.booted || this.needsSlim(chosen, capabilities)) {
         onPhase?.('booting');
         await this.boot(chosen, capabilities);
+      }
+      // A pooled device moves between Panes: the next Pane gets it without the last one's apps (D-84).
+      if (previousPane && previousPane !== caller.paneId) {
+        await this.wipeApps(chosen, capabilities).catch((cause) => this.options.log?.(`[devices] clearing apps on ${chosen.id} failed: ${reasonOf(cause)}`));
       }
       await this.agentDevice(caller.paneId, chosen, ['open']);
       this.scheduleSweep();
@@ -204,7 +209,9 @@ export class DeviceService {
           : 'In Android Studio, open SDK Manager and install a system image and "Android SDK Command-line Tools (latest)". Or name one of your own emulators with device.',
       );
     }
-    const name = PANE_DEVICE_NAMES[platform];
+    // The pool's devices: "Pane iPhone", then "Pane iPhone 2" when the cap allows more at once.
+    const pooled = Object.values(this.readState().made).filter(made => made.platform === platform).length;
+    const name = pooled === 0 ? PANE_DEVICE_NAMES[platform] : `${PANE_DEVICE_NAMES[platform]}${platform === 'ios' ? ' ' : '_'}${pooled + 1}`;
     const created = decodeBoundary(await (await hub.request('/api/devices/create', { platform, name, runtime: runtime.value, deviceType: model.value })).json(), boundary.object({ ok: boundary.boolean, id: boundary.optional(boundary.string), error: boundary.optional(boundary.string) }));
     const id = created.id ?? (platform === 'android' ? name : undefined);
     if (!id) throw new PaneError('ERR_DEVICE_CREATE_FAILED', `Pane could not make ${name}: ${created.error ?? 'the hub gave no reason'}. Nothing was opened.`, 'Try again; if it repeats, check that Xcode or Android Studio can create a device.');
@@ -398,7 +405,8 @@ export class DeviceService {
     const hub = running ? await this.hub : undefined;
     const report: DeviceUsage = {
       machine: this.options.machineName(),
-      devices: await Promise.all(devices.filter(device => device.paneMade || device.booted).map(device => this.deviceUsage(device, capabilities))),
+      // Every simulator and emulator here, Pane's and the person's, so machine health sees them all (D-84).
+      devices: await Promise.all(devices.map(device => this.deviceUsage(device, capabilities))),
       helpers: hub?.pid ? [{ name: 'expo-device-hub', pid: hub.pid, memoryBytes: await processMemory(hub.pid) }] : [],
       checkouts: checkouts(),
       slimSim: capabilities.simslim !== undefined,
@@ -407,7 +415,7 @@ export class DeviceService {
   }
 
   private async deviceUsage(device: HubDevice, capabilities: DeviceCapabilities): Promise<DeviceUsage['devices'][number]> {
-    const usage: DeviceUsage['devices'][number] = { id: device.id, platform: device.platform, name: device.name, paneMade: device.paneMade, booted: device.booted };
+    const usage: DeviceUsage['devices'][number] = { id: device.id, platform: device.platform, name: device.name, os: device.os, paneMade: device.paneMade, booted: device.booted };
     const holder = this.lifecycle.holderOf(device.id);
     if (holder) usage.heldBy = holder;
     if (device.lastUsedAt) usage.lastUsedAt = new Date(device.lastUsedAt).toISOString();
@@ -617,13 +625,38 @@ export class DeviceService {
     }
   }
 
-  private markUsed(id: string, paneId: string): void {
+  /** Records that `paneId` uses a Pane-made device; returns the Pane that used it last. */
+  private markUsed(id: string, paneId: string): string | undefined {
     const state = this.readState();
     const made = state.made[id];
-    if (!made) return;
+    if (!made) return undefined;
+    const previous = made.lastPane;
     made.lastUsedAt = this.now();
+    made.lastPane = paneId;
     if (!made.users.includes(paneId)) made.users.push(paneId);
     this.writeState(state);
+    return previous;
+  }
+
+  /** Uninstalls the apps someone installed on a Pane-made device, keeping the system's; no reboot. */
+  private async wipeApps(device: HubDevice, capabilities: DeviceCapabilities): Promise<void> {
+    if (device.platform === 'ios') {
+      if (!capabilities.ios.ready) return;
+      const xcrun = capabilities.ios.xcrun;
+      const { stdout: listing } = await execFileAsync(xcrun, ['simctl', 'listapps', device.id], { maxBuffer: 16 * 1024 * 1024 });
+      const apps = decodeBoundary(JSON.parse(await plistToJson(listing)), boundary.record(boundary.object({ ApplicationType: boundary.optional(boundary.string) })));
+      for (const [bundleId, app] of Object.entries(apps)) {
+        if (app.ApplicationType === 'User') await execFileAsync(xcrun, ['simctl', 'uninstall', device.id, bundleId], { timeout: 60_000 });
+      }
+      return;
+    }
+    if (!capabilities.android.ready) return;
+    const serial = device.serial ?? device.id;
+    const { stdout } = await execFileAsync(capabilities.android.adb, ['-s', serial, 'shell', 'pm', 'list', 'packages', '-3'], { timeout: 60_000 });
+    for (const line of stdout.split('\n')) {
+      const pkg = line.trim().replace(/^package:/, '');
+      if (pkg) await execFileAsync(capabilities.android.adb, ['-s', serial, 'uninstall', pkg], { timeout: 60_000 });
+    }
   }
 
   private hasMadeDevices(): boolean {
@@ -659,7 +692,7 @@ export interface DeviceScreenshot { path: string; width?: number; height?: numbe
 
 export interface DeviceUsage {
   machine: string;
-  devices: { id: string; platform: DevicePlatform; name: string; paneMade: boolean; booted: boolean; heldBy?: string; lastUsedAt?: string; memoryBytes?: number; diskBytes?: number }[];
+  devices: { id: string; platform: DevicePlatform; name: string; os: string; paneMade: boolean; booted: boolean; heldBy?: string; lastUsedAt?: string; memoryBytes?: number; diskBytes?: number }[];
   helpers: { name: string; pid: number; memoryBytes: number }[];
   checkouts: { path: string; bytes: number }[];
   slimSim: boolean;
@@ -690,6 +723,14 @@ function parseAgentDeviceError(stdout: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** simctl prints an old-style plist; plutil reads it from stdin and writes JSON. */
+function plistToJson(plist: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile('plutil', ['-convert', 'json', '-o', '-', '-'], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout) => (error ? reject(error) : resolve(stdout)));
+    child.stdin?.end(plist);
+  });
 }
 
 function sleep(ms: number): Promise<void> {

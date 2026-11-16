@@ -6,6 +6,7 @@ import type { ChatTurnActions } from '../../components/chatTab/ChatTurns';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import type { ChatStatusPullRequest } from '../../components/chatTab/ChatStatusBar';
 import { watchPanePullRequest } from './panePullRequest';
+import { devicePhaseOf } from '../../../../shared/deviceMarker';
 
 const ChatTabPanel = lazy(() => import('../../components/chatTab/ChatTabPanel'));
 
@@ -36,7 +37,12 @@ export function RemoteChatTab({ adapter, panel, panels, connected, onOpenWorker,
   const actions = useMemo<ChatTurnActions>(() => ({
     onOpenWorker: sessionId ? paneId => onOpenWorker(paneId, sessionId) : undefined,
     onViewDiff: diffPanelId ? () => onSelectPanel(diffPanelId) : undefined,
-  }), [diffPanelId, onOpenWorker, onSelectPanel, sessionId]);
+    device: {
+      phase: panelId => devicePhaseOf(panels, panelId),
+      frame: panelId => adapter.invoke<string>('devices:frame', [panelId]),
+      open: onSelectPanel,
+    },
+  }), [adapter, diffPanelId, onOpenWorker, onSelectPanel, panels, sessionId]);
   // Dropped and pasted files land in the Pane's folder on the host, as the terminal's do.
   const saveFile = useMemo(() => (file: { name: string; dataUrl: string }) => adapter.saveFile(panel.sessionId, file), [adapter, panel.sessionId]);
   return <ChatTabPanel key={panel.id} panelId={panel.id} client={adapter.chatTab} connected={connected}

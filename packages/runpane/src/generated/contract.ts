@@ -918,7 +918,7 @@ export const RUNPANE_CONTRACT = {
     {
       "name": "devices usage",
       "mcpName": "device_usage",
-      "summary": "Report the memory and disk Pane's simulators, device tools and build checkouts use on this machine.",
+      "summary": "Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.",
       "usage": [
         "runpane devices usage [--json] [--pane-dir <path>]"
       ],
@@ -5671,7 +5671,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane devices usage [--json] [--pane-dir <path>]",
         "",
-        "For machine health. Memory comes from simslim measure when it is installed, otherwise the simulator's processes.",
+        "For machine health. Lists every simulator and emulator on this machine, including ones made outside Pane (paneMade false), with OS, disk and, when booted, memory (simslim measure when installed, otherwise the simulator's processes).",
         "",
         "Options:",
         "  --json                         Print machine-readable output",
@@ -19007,6 +19007,7 @@ export const RUNPANE_CONTRACT = {
                     "id",
                     "platform",
                     "name",
+                    "os",
                     "paneMade",
                     "booted"
                   ],
@@ -19023,8 +19024,13 @@ export const RUNPANE_CONTRACT = {
                     "name": {
                       "type": "string"
                     },
+                    "os": {
+                      "type": "string",
+                      "description": "The device's OS runtime, such as iOS 27.0."
+                    },
                     "paneMade": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Pane made it; false for simulators made outside Pane."
                     },
                     "booted": {
                       "type": "boolean"
@@ -26038,8 +26044,8 @@ export const RUNPANE_CONTRACT = {
       },
       "devices usage": {
         "name": "devices usage",
-        "summary": "Report the memory and disk Pane's simulators, device tools and build checkouts use on this machine.",
-        "details": "For machine health. Memory comes from simslim measure when it is installed, otherwise the simulator's processes.",
+        "summary": "Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.",
+        "details": "For machine health. Lists every simulator and emulator on this machine, including ones made outside Pane (paneMade false), with OS, disk and, when booted, memory (simslim measure when installed, otherwise the simulator's processes).",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [

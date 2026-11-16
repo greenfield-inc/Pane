@@ -1,3 +1,6 @@
+import { usePanelStore } from '../../stores/panelStore';
+import { openPaneTarget } from '../terminal/openPaneLink';
+import { devicePhaseOf } from '../../../../shared/deviceMarker';
 import { useMemo } from 'react';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
@@ -36,11 +39,21 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     savedFilePath(await window.electronAPI.invoke('terminal:paste-file', panel.sessionId, file.dataUrl, file.name, { keepName: true })), [panel.sessionId]);
   // Stable, so a re-render here does not re-render every turn of the chat.
   const cwd = state?.cwd;
+  // The Pane's device tabs, so device cards follow their device's state.
+  const paneTabs = usePanelStore(store => store.panels[panel.sessionId]);
   const actions = useMemo<ChatTurnActions>(() => ({
     onOpenWorker: (paneId: string, panelId?: string) => { void openWorkerTab(paneId, panelId); },
     onViewDiff: file => void openFileInEditor({ sessionId: panel.sessionId, filePath: worktreeRelative(file, cwd), pin: true, diff: { kind: 'scope', scope: { kind: 'session' } } })
       .catch(error => showActionError('Could not open the diff', error)),
-  }), [cwd, panel.sessionId]);
+    device: {
+      phase: panelId => devicePhaseOf(paneTabs ?? [], panelId),
+      frame: async panelId => {
+        const response = await window.electronAPI.devices.frame(panelId);
+        return response.success ? response.data : undefined;
+      },
+      open: panelId => { void openPaneTarget({ paneId: panel.sessionId, panelId }); },
+    },
+  }), [cwd, panel.sessionId, paneTabs]);
   return <ChatTabPanel
     saveFile={saveFile}
     workers={workers}

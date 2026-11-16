@@ -9,8 +9,7 @@ import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { imageOf, messageTime, planEntryKeys, stoppedText, turnDisplay, type WorkerNote, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 import { responseText, userMarkdown } from '../../../../shared/chatTabMarkdown';
 import { ChatCopyButton } from './ChatCopyButton';
-import { DeviceCard } from './DeviceCard';
-import { useDeviceTab } from './useDeviceTab';
+import { DeviceCard, type ChatDeviceActions } from './DeviceCard';
 import { deviceMarkerOf } from '../../../../shared/deviceMarker';
 
 export interface ChatTurnActions {
@@ -18,6 +17,8 @@ export interface ChatTurnActions {
   onViewDiff?: (path: string) => void;
   /** Opens a Session worker's Pane, at the given tab when one is named. */
   onOpenWorker?: (paneId: string, panelId?: string) => void;
+  /** Device cards at device_open steps; without it, the step is a plain row. */
+  device?: ChatDeviceActions;
 }
 
 /** A code block keeps its own copy button, for the code alone. */
@@ -89,14 +90,14 @@ function Output({ text, live }: { text: string; live: boolean }) {
 }
 
 /** device_open's step: "Opened iPhone 17 Pro · iOS 27 · This Mac" and the device's live card. */
-function DeviceStepRow({ anchorId, marker }: { anchorId: string; marker: NonNullable<ReturnType<typeof deviceMarkerOf>> }) {
+function DeviceStepRow({ anchorId, marker, device }: { anchorId: string; marker: NonNullable<ReturnType<typeof deviceMarkerOf>>; device: ChatDeviceActions }) {
   return <div className="chat-step" data-anchor-id={anchorId} data-kind="device" data-state="done">
     <div className="chat-step-line">
       <span className="chat-step-icon" data-state="done"><Smartphone aria-hidden="true" /></span>
       <span className="chat-step-verb">Opened</span>
       <span className="chat-step-label">{[marker.name, marker.os, marker.machine].filter(Boolean).join(' · ')}</span>
     </div>
-    <DeviceCard marker={marker} />
+    <DeviceCard marker={marker} device={device} />
   </div>;
 }
 
@@ -106,8 +107,8 @@ function deviceMarkers(items: readonly TurnItem[]) {
 }
 
 function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
-  const marker = group.steps.length === 1 && group.steps[0].status === 'completed' ? deviceMarkerOf(group.steps[0].output) : undefined;
-  if (marker) return <DeviceStepRow anchorId={group.id} marker={marker} />;
+  const marker = actions.device && group.steps.length === 1 && group.steps[0].status === 'completed' ? deviceMarkerOf(group.steps[0].output) : undefined;
+  if (marker && actions.device) return <DeviceStepRow anchorId={group.id} marker={marker} device={actions.device} />;
   return <StepGroupLine group={group} waiting={waiting} actions={actions} />;
 }
 
@@ -189,9 +190,8 @@ function UserMessage({ turn }: { turn: ChatTurn }) {
 }
 
 /** A folded turn keeps its device's card in view while the device is live; a closed one folds away. */
-function PinnedDeviceCard({ marker }: { marker: NonNullable<ReturnType<typeof deviceMarkerOf>> }) {
-  const live = useDeviceTab(marker.panelId).state?.phase === 'live';
-  return live ? <div className="chat-steps"><DeviceStepRow anchorId={`device:${marker.panelId}`} marker={marker} /></div> : null;
+function PinnedDeviceCard({ marker, device }: { marker: NonNullable<ReturnType<typeof deviceMarkerOf>>; device: ChatDeviceActions }) {
+  return device.phase(marker.panelId) === 'live' ? <div className="chat-steps"><DeviceStepRow anchorId={`device:${marker.panelId}`} marker={marker} device={device} /></div> : null;
 }
 
 /** A worker the latest turn has news of, as one compact line with Open (D-201). */
@@ -228,7 +228,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
     <UserMessage turn={turn} />
     <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {fold}
-    {!open && deviceMarkers(activity).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} />)}
+    {!open && actions.device && deviceMarkers(activity).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} device={actions.device!} />)}
     <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}

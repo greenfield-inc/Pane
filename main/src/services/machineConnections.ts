@@ -396,7 +396,7 @@ const MEMBER_READ_TIMEOUT_MS = 4_000;
 const panelOverviewSchema: BoundarySchema<OrchestrationPanelOverview> = boundary.object({
   panelId: boundary.string,
   title: boundary.string,
-  type: boundary.optional(boundary.enumeration('terminal', 'chat', 'diff', 'explorer', 'editor', 'logs', 'dashboard', 'setup-tasks', 'browser', 'notes')),
+  type: boundary.optional(boundary.enumeration('terminal', 'chat', 'diff', 'explorer', 'editor', 'logs', 'dashboard', 'setup-tasks', 'browser', 'notes', 'device')),
   agentType: boundary.optional(configuredAgentSchema),
   state: boundary.enumeration('blocked', 'working', 'idle', 'unknown'),
   initialized: boundary.boolean,

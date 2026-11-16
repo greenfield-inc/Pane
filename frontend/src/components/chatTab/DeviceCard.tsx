@@ -1,24 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 import { ExternalLink } from 'lucide-react';
-import type { DeviceOpenMarker } from '../../../../shared/types/devices';
-import { useDeviceTab } from './useDeviceTab';
-import { openPaneTarget } from '../terminal/openPaneLink';
+import type { DeviceOpenMarker, DevicePanelPhase } from '../../../../shared/types/devices';
 import { cn } from '../../utils/cn';
 
 /** About one frame a second while the card is on screen (journey 3). */
 const FRAME_MS = 1_000;
+
+/** What a chat client gives its device cards: the device tab's phase, its frames, and how to open it. */
+export interface ChatDeviceActions {
+  phase(panelId: string): DevicePanelPhase | undefined;
+  frame(panelId: string): Promise<string | undefined>;
+  open(panelId: string): void;
+}
 
 /**
  * The card at a chat's device_open step (option 2 of the D-71 mockups): a phone-shaped thumbnail
  * like an image the agent sent, with a Live badge while the device runs and Closed after. It
  * refreshes about once a second while on screen, and clicking it focuses the device tab.
  */
-export function DeviceCard({ marker }: { marker: DeviceOpenMarker }) {
-  const { paneId, state } = useDeviceTab(marker.panelId);
-  const live = state?.phase === 'live';
+export function DeviceCard({ marker, device }: { marker: DeviceOpenMarker; device: ChatDeviceActions }) {
+  const live = device.phase(marker.panelId) === 'live';
   const [frame, setFrame] = useState<string>();
   const [visible, setVisible] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
+  const read = device.frame;
 
   useEffect(() => {
     const element = ref.current;
@@ -32,8 +37,8 @@ export function DeviceCard({ marker }: { marker: DeviceOpenMarker }) {
     if (!visible) return;
     let cancelled = false;
     const load = async () => {
-      const response = await window.electronAPI.devices.frame(marker.panelId).catch(() => undefined);
-      if (!cancelled && response?.success && response.data) setFrame(response.data);
+      const next = await read(marker.panelId).catch(() => undefined);
+      if (!cancelled && next) setFrame(next);
     };
     void load();
     if (!live) return () => { cancelled = true; };
@@ -42,15 +47,13 @@ export function DeviceCard({ marker }: { marker: DeviceOpenMarker }) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [marker.panelId, visible, live]);
-
-  const open = () => { if (paneId) void openPaneTarget({ paneId, panelId: marker.panelId }); };
+  }, [marker.panelId, visible, live, read]);
 
   return (
     <button
       ref={ref}
       type="button"
-      onClick={open}
+      onClick={() => device.open(marker.panelId)}
       className="chat-device-card relative mt-1 block overflow-hidden rounded-[22px] border-[5px] border-device-bezel bg-device-screen text-left"
       style={{ width: 132, aspectRatio: '402 / 874' }}
       aria-label={`Open ${marker.name}`}
