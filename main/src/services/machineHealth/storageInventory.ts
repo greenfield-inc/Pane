@@ -142,6 +142,7 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
   const agentTempTotal = { bytes: 0 };
   for (const root of deps.agentTempRoots()) {
     for (const name of await listDir(root)) {
+      if (name === '.pane-trash') continue;
       const full = path.join(root, name);
       const owner = byTempName.get(name);
       const ownerOpen = owner !== undefined && !owner.archived;
@@ -195,7 +196,7 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
         const listed = gitWorktrees.get(archived.projectPath)?.find(entry => path.resolve(entry.path) === full);
         const born = folder.birthtimeMs || folder.ctimeMs;
         if (listed?.branch === archived.branch && born <= archived.updatedAt) {
-          addItem({ kind: 'archived-pane-folder', tier: 2, path: full, sessionId: archived.id, reason: `Left at the path of ${archived.name}, which is archived. Its branch stays.` });
+          addItem({ kind: 'archived-pane-folder', tier: 2, path: full, sessionId: archived.id, projectPath: archived.projectPath, reason: `Left at the path of ${archived.name}, which is archived. Its branch stays.` });
           continue;
         }
       }
@@ -255,4 +256,26 @@ export async function scanStorage(deps: InventoryDeps): Promise<StorageInventory
   };
   items.sort((a, b) => a.tier - b.tier || b.sizeBytes - a.sizeBytes);
   return { scannedAt: now, durationMs: deps.now() - started, items, panes: paneUsage.sort((a, b) => b.worktreeBytes - a.worktreeBytes), buckets };
+}
+
+export interface RecheckDeps {
+  now: () => number;
+  isArchived: (paneId: string) => boolean;
+  isPaused: (paneId: string) => boolean;
+  measure?: (requests: readonly SizeRequest[]) => Promise<SizeResult[]>;
+}
+
+/**
+ * Re-checks one item just before cleanup acts on it, so a cached inventory is
+ * never trusted: the target still exists, its Pane is still archived when that
+ * was the reason, and loose agent temp is still untouched for 2 days.
+ */
+export async function recheckItem(item: ReclaimItem, deps: RecheckDeps): Promise<string | null> {
+  const [result] = await (deps.measure ?? measureSizes)([{ path: item.path }]);
+  if (!result?.exists) return 'It is already gone.';
+  const needsArchivedPane = item.kind === 'archived-pane-folder' || (item.kind === 'agent-temp' && item.sessionId);
+  if (needsArchivedPane && item.sessionId && !deps.isArchived(item.sessionId)) return 'Its Pane is no longer archived.';
+  if (item.kind === 'agent-temp' && !item.sessionId && deps.now() - result.newestMs < AGENT_TEMP_IDLE_MS) return 'Something in it changed in the last 2 days.';
+  if (item.kind === 'paused-scratch' && item.sessionId && !deps.isPaused(item.sessionId)) return 'Its Pane is no longer paused.';
+  return null;
 }

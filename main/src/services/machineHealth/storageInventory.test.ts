@@ -3,7 +3,7 @@ import { tmpdir } from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { measureSizesHere } from './sizeWalker';
-import { scanStorage, type InventoryDeps, type InventoryPane } from './storageInventory';
+import { recheckItem, scanStorage, type InventoryDeps, type InventoryPane } from './storageInventory';
 
 const DAY = 86_400_000;
 const NOW = Date.parse('2026-11-15T12:00:00Z');
@@ -166,6 +166,7 @@ describe('scanStorage', () => {
     ]);
   });
 
+
   it('never offers an adopted worktree kept at an archived Pane\'s path', async () => {
     const adopted = pane('p5', 'my-feature', { archived: true, updatedAt: NOW + DAY, ownedByPane: false });
     file('repo/worktrees/my-feature/work.txt', 600);
@@ -181,5 +182,17 @@ describe('scanStorage', () => {
     const inventory = await scanStorage(deps([old, current]));
     expect(inventory.items).toEqual([]);
     expect(inventory.panes[0]).toMatchObject({ sessionId: 'new', agentTempBytes: 300 });
+  });
+
+  it('rechecks an item before cleanup: gone, Pane restored, or touched recently', async () => {
+    const loose = file('claude-temp/loose/a.bin', 10, 3);
+    dirAge('claude-temp/loose', 3);
+    const looseItem = { id: 'x', kind: 'agent-temp' as const, tier: 2 as const, path: path.dirname(loose), sizeBytes: 10, modifiedAt: 0, sessionId: null, reason: '' };
+    const recheck = { now: () => NOW, isArchived: () => true, measure: async (requests: Parameters<typeof measureSizesHere>[0]) => measureSizesHere(requests) };
+    expect(await recheckItem(looseItem, recheck)).toBeNull();
+    file('claude-temp/loose/new.bin', 10, 0);
+    expect(await recheckItem(looseItem, recheck)).toBe('Something in it changed in the last 2 days.');
+    expect(await recheckItem({ ...looseItem, sessionId: 'p2' }, { ...recheck, isArchived: () => false })).toBe('Its Pane is no longer archived.');
+    expect(await recheckItem({ ...looseItem, path: path.join(root, 'nope') }, recheck)).toBe('It is already gone.');
   });
 });

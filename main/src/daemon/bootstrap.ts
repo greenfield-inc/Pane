@@ -4,6 +4,7 @@ import { getRunpaneShimState, installRunpaneShimBestEffort } from '../services/r
 import { BUNDLED_MCP_HTTP_MODULE, PaneMcpEndpoint, setPaneMcpEndpoint, type PaneMcpHttpModule } from '../services/paneMcpEndpoint';
 import { tabListener } from '../services/tabListener';
 import os from 'os';
+import fs from 'fs';
 import path from 'path';
 import { powerMonitor, type App, type BrowserWindow } from 'electron';
 import { runStartupRetentionSweep, startupPanelBufferMigration } from '../services/database';
@@ -58,11 +59,18 @@ import { setupEventListeners } from '../events';
 import { getAppDirectory } from '../utils/appDirectory';
 import { resourceMonitorService } from '../services/resourceMonitorService';
 import { MachineHealthService } from '../services/machineHealth/machineHealthService';
-import { scanStorage } from '../services/machineHealth/storageInventory';
+import { recheckItem, scanStorage } from '../services/machineHealth/storageInventory';
 import { readFootprints } from '../services/machineHealth/footprint';
 import { parseSessionTimestampMs } from '../services/paneInactivity';
 import { agentTempRoots, ignoredDirs, installPathOf, otherToolPaths, processCwds, readUpdateRecords, wslDiskImages } from '../services/machineHealth/inventorySources';
 import { DB_CLEAN_OPEN_PREFERENCE } from '../services/machineHealth/reclaimRules';
+import { CleanupEngine } from '../services/machineHealth/cleanupEngine';
+import { protectionOf } from '../services/machineHealth/paneProtections';
+import { fastCheckWorkingDirectory } from '../services/gitPlumbingCommands';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 import { appScratchDirectory } from '../services/archiveRetention';
 import { panePausedMark } from '../../../shared/types/panels';
 import { MACHINE_HEALTH_CHANGED_EVENT, MACHINE_HEALTH_INVENTORY_CHANGED_EVENT } from '../../../shared/types/machineHealth';
@@ -692,9 +700,51 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   sessionPrMonitor.start();
   loopManager.start();
   autoPauser.sync();
-  // Payload-free: readers re-read the snapshot. The per-minute sample stays off the daemon stream.
-  machineHealth.on('level-changed', () => getPaneEventSink().send(MACHINE_HEALTH_CHANGED_EVENT));
-  machineHealth.on('inventory', () => getPaneEventSink().send(MACHINE_HEALTH_INVENTORY_CHANGED_EVENT));
+  const machineCleanup = new CleanupEngine({
+    now: () => Date.now(),
+    paneDir: getAppDirectory(),
+    inventory: async () => machineHealth.getInventory() ?? machineHealth.scanInventory(),
+    recheck: item => recheckItem(item, {
+      now: () => Date.now(),
+      isArchived: id => !!databaseService.getSession(id)?.archived,
+      isPaused: id => !!panePausedMark(panelManager.getPanelsForSession(id)),
+    }),
+    protectionOf: paneId => protectionOf(paneId, {
+      pinned: id => !!databaseService.getSession(id)?.is_favorite,
+      focusedPaneId: () => (options.getMainWindow()?.isFocused() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined),
+      panelIds: id => panelManager.getPanelsForSession(id).map(panel => panel.id),
+      agentState: panelId => (panelManager.getPanel(panelId)?.type === 'chat' ? getChatTabManager().agentState(panelId) : terminalPanelManager.getAgentStatus(panelId)),
+      hasOpenNotify: panelIds => services.notifyService?.queue.hasOpenFor(panelIds) ?? false,
+      hasUncommittedChanges: async id => {
+        const session = databaseService.getSession(id);
+        const ctx = sessionManager.getProjectContext(id);
+        if (!session?.worktree_path || !ctx) throw new Error('No worktree');
+        const status = await fastCheckWorkingDirectory(session.worktree_path, ctx.commandRunner.wslContext);
+        return status.hasModified || status.hasStaged || status.hasConflicts || status.hasUntracked;
+      },
+    }),
+    processCwds,
+    freeBytes: async folder => {
+      const fsStats = await fs.promises.statfs(folder);
+      return Number(fsStats.bavail) * Number(fsStats.bsize);
+    },
+    settings: () => configManager.getConfig().machineHealth,
+    pruneWorktrees: async projectPath => { await execFileAsync('git', ['worktree', 'prune'], { cwd: projectPath, timeout: 30_000 }); },
+    log: message => logger.info(message),
+  });
+  services.machineCleanup = machineCleanup;
+  if (duties.housekeeping) {
+    void machineCleanup.finishPendingDeletes();
+    machineHealth.setScheduledCleanup(async () => {
+      await machineCleanup.run({ source: 'schedule', tiers: [1, 2] });
+      // Tier 1: archive cleanup jobs that failed get one more try a day.
+      for (const task of archiveCleanupManager.getTasks()) {
+        if (task.status === 'failed' && !task.interruptedScript) {
+          try { archiveCleanupManager.retry(task.sessionId, false); } catch { /* not ready; next pass */ }
+        }
+      }
+    });
+  }
   machineHealth.start();
   // Delete archived folders past their retention, keeping their agent logs; deferred so startup stays fast.
   let stopArchiveExpiry: (() => void) | undefined;
