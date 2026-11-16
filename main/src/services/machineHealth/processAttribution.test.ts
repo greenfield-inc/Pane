@@ -48,13 +48,13 @@ describe('parsePosixProcessTable', () => {
     const stdout = [
       '    1     0  21648  88:05.52 Wed Nov 11 08:36:48 2026     /sbin/launchd',
       '  144 57061  40224   0:00.34 Sun Nov 15 12:35:00 2026     /Applications/Grain.app/Contents/MacOS/Grain Helper (Renderer)',
-      '  777   144   2048 1-02:03:04 Sun Nov 15 12:36:00 2026 node',
+      '  777   144   2048 1-02:03:04 Sun Nov  1 12:36:00 2026 node',
     ].join('\n');
     const rows = parsePosixProcessTable(stdout);
     expect(rows.map(r => [r.pid, r.ppid, r.rssKB, r.cpuSeconds, r.started, r.name])).toEqual([
       [1, 0, 21648, 5285.52, 'Wed Nov 11 08:36:48 2026', '/sbin/launchd'],
       [144, 57061, 40224, 0.34, 'Sun Nov 15 12:35:00 2026', '/Applications/Grain.app/Contents/MacOS/Grain Helper (Renderer)'],
-      [777, 144, 2048, 93784, 'Sun Nov 15 12:36:00 2026', 'node'],
+      [777, 144, 2048, 93784, 'Sun Nov  1 12:36:00 2026', 'node'],
     ]);
   });
 });

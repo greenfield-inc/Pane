@@ -127,6 +127,11 @@ export class MachineHealthService extends EventEmitter {
     this.scheduledCleanup = run;
   }
 
+  /** The last sample, or null before the first one. */
+  latestSnapshot(): MachineHealthSnapshot | null {
+    return this.latest;
+  }
+
   /** The last inventory, or null before the first scan. */
   cachedInventory(): StorageInventory | null {
     return this.inventory;

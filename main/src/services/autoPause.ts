@@ -92,18 +92,34 @@ export class AutoPauser {
     return paused;
   }
 
+  /** Whether auto-pause may pause this Pane now: idle at least `thresholdMs`, with every skip above. */
+  private pausable(pane: AutoPausePane, thresholdMs: number, now: number): boolean {
+    if (pane.archived || pane.id === this.deps.focusedPaneId()) return false;
+    const terminals = this.deps.panels(pane.id).filter(panel => panel.type === 'terminal');
+    const running = terminals.filter(panel => !pausedMarkOf(panel));
+    if (running.length === 0) return false;
+    if (running.some(panel => this.deps.agentState(panel.id) === 'blocked' || this.deps.heldByUpdate(panel))) return false;
+    if (this.deps.hasOpenNotify(running.map(panel => panel.id))) return false;
+    const inactiveSince = paneInactiveSince({ ...pane, panels: this.deps.panels(pane.id) }, this.deps.liveActivity);
+    return now - inactiveSince.getTime() >= thresholdMs;
+  }
+
+  /** The Panes a pause after `hours` idle would pause now, with the same skips; used to offer an early pause under memory pressure. */
+  idlePanes(hours: number): string[] {
+    const now = this.deps.now();
+    return this.deps.panes().filter(pane => this.pausable(pane, this.deps.testThresholdMs ?? hours * HOUR_MS, now)).map(pane => pane.id);
+  }
+
+  /** Pauses Panes idle for `hours` now, whatever the setting says; for memory relief. */
+  pauseIdleNow(hours: number): Promise<string[]> {
+    return this.pauseIdlePanes(hours, this.deps.now());
+  }
+
   private async pauseIdlePanes(hours: number, now: number): Promise<string[]> {
     const paused: string[] = [];
     for (const pane of this.deps.panes()) {
       // Read per Pane: each pause takes seconds, and the person may focus a Pane meanwhile.
-      if (pane.archived || pane.id === this.deps.focusedPaneId()) continue;
-      const terminals = this.deps.panels(pane.id).filter(panel => panel.type === 'terminal');
-      const running = terminals.filter(panel => !pausedMarkOf(panel));
-      if (running.length === 0) continue;
-      if (running.some(panel => this.deps.agentState(panel.id) === 'blocked' || this.deps.heldByUpdate(panel))) continue;
-      if (this.deps.hasOpenNotify(running.map(panel => panel.id))) continue;
-      const inactiveSince = paneInactiveSince({ ...pane, panels: this.deps.panels(pane.id) }, this.deps.liveActivity);
-      if (now - inactiveSince.getTime() < (this.deps.testThresholdMs ?? hours * HOUR_MS)) continue;
+      if (!this.pausable(pane, this.deps.testThresholdMs ?? hours * HOUR_MS, now)) continue;
       // One Pane that cannot pause never stops the sweep for the Panes after it.
       try {
         const outcome = await this.deps.pause(pane.id, { at: new Date(now).toISOString(), by: 'auto', idleHours: hours });

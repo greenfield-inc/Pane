@@ -162,6 +162,9 @@ export class TaskQueue {
   private readonly setupRuns = new Map<string, Promise<void>>();
   private readonly setupLineWrites = new Map<string, Promise<void>>();
 
+  private installsOneAtATime: () => boolean = () => false;
+  private installChain: Promise<void> = Promise.resolve();
+
   constructor(private options: TaskQueueOptions) {
     console.log('[TaskQueue] Initializing task queue...');
     
@@ -657,7 +660,26 @@ export class TaskQueue {
   }
 
   /** Awaited so the install holds its setup slot; the terminal shows how it went. */
+  /** Machine health: while memory is tight, dependency installs run one at a time. */
+  setInstallsOneAtATime(whenTrue: () => boolean): void {
+    this.installsOneAtATime = whenTrue;
+  }
+
   private async installDependencies(sessionId: string, installCommand: string, worktreePath: string, ctx: ProjectContext): Promise<void> {
+    if (!this.installsOneAtATime()) return this.runInstall(sessionId, installCommand, worktreePath, ctx);
+    const previous = this.installChain;
+    let release = () => {};
+    this.installChain = new Promise<void>(resolve => { release = resolve; });
+    try {
+      await this.writeSetupLines(sessionId, worktreePath, ctx, ['Memory is tight, so dependency installs run one at a time.']);
+      await previous;
+      await this.runInstall(sessionId, installCommand, worktreePath, ctx);
+    } finally {
+      release();
+    }
+  }
+
+  private async runInstall(sessionId: string, installCommand: string, worktreePath: string, ctx: ProjectContext): Promise<void> {
     this.options.sessionManager.updateSessionStatus(sessionId, 'initializing', `Installing dependencies: ${installCommand}`);
     await this.writeSetupLines(sessionId, worktreePath, ctx, [`Installing dependencies: ${installCommand}`]);
     const startedAt = Date.now();
