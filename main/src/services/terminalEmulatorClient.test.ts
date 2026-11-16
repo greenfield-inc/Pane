@@ -20,6 +20,16 @@ describe('RemoteTerminalEmulator', () => {
     emulator.dispose();
   });
 
+  it('pushes a change to the program status alone, with the screen unchanged', async () => {
+    const emulator = inProcessEmulatorHost().createEmulator(20, 3);
+    emulator.write('same\x1b]7501;state=blocked\x1b\\');
+    await vi.waitFor(() => expect(emulator.state.programStatus).toEqual({ state: 'blocked' }));
+    emulator.write('\x1b]7501;state=working\x1b\\');
+    await vi.waitFor(() => expect(emulator.state.programStatus).toEqual({ state: 'working' }));
+    expect(emulator.state.screenText).toBe('same');
+    emulator.dispose();
+  });
+
   it('keeps the final capture, scrollback included, readable after dispose', async () => {
     const emulator = inProcessEmulatorHost().createEmulator(20, 3);
     emulator.write(Array.from({ length: 8 }, (_, index) => `line ${index}`).join('\r\n'));

@@ -728,32 +728,65 @@ describe('program status reports (OSC 7501)', () => {
     expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:done', workedVisibly: true });
   });
 
-  // Windows terminals cannot report their foreground, so a record there lasts until replaced or cleared.
-  it.skipIf(process.platform === 'win32')("outranks the agent's screen, and gives way to it once the program exits", async () => {
-    let foregroundGroup: number | undefined = 999;
-    manager = new TerminalPanelManager(undefined, undefined, async () => foregroundGroup);
-    // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
-    access = manager as StatusAccess;
+  it("never hides a prompt the agent's screen shows behind a report that isn't blocked", async () => {
     const fixture = attach('claude');
-    fixture.terminal.pty.process = 'claude';
     const rule = '─'.repeat(60);
     fixture.data(['', rule, ' Accessing workspace:', '', ' /tmp/session', '', ' ❯ No, exit', '   Yes, I trust this folder', '', ' Enter to confirm · Esc to cancel'].join('\r\n'));
     fixture.data('\x1b]7501;state=working:app=claude-code\x1b\\');
     await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'blocked', reason: 'workspace_trust_prompt' });
+  });
+
+  // Windows terminals cannot report their foreground, so a record there lasts until replaced or cleared.
+  it.skipIf(process.platform === 'win32')('ends a running record once the program exits, then reads the screen', async () => {
+    let foregroundGroup: number | undefined = 999;
+    manager = new TerminalPanelManager(undefined, undefined, async () => foregroundGroup);
+    // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
+    access = manager as StatusAccess;
+    const fixture = attach();
+    fixture.terminal.agentType = undefined;
+    fixture.terminal.pty.process = 'node';
+    fixture.data('\x1b]7501;state=working:app=deploy\x1b\\');
+    await pollAgentStatus();
     expect(statuses().at(-1)).toMatchObject({ state: 'working', reason: 'program_status:working' });
+
+    // Silent for longer than the output settle: the report still holds working.
+    vi.setSystemTime(40_000);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'working' });
 
     // Pane's shell is back in the foreground: the program exited, so its working record ends.
     fixture.terminal.pty.process = 'zsh';
     foregroundGroup = fixture.terminal.pty.pid;
-    await pollAgentStatus();
     await vi.waitFor(async () => {
       await pollAgentStatus();
-      expect(statuses().at(-1)).toMatchObject({ state: 'blocked', reason: 'workspace_trust_prompt' });
+      expect(statuses().at(-1)).toMatchObject({ state: 'idle' });
     });
   });
 
-  it('keeps a running record while another process group holds the foreground', async () => {
+  it.skipIf(process.platform === 'win32')('ends a running record when an agent takes the foreground after it', async () => {
+    const fixture = attach('claude');
+    fixture.terminal.pty.process = 'zsh';
     manager = new TerminalPanelManager(undefined, undefined, async () => 4242);
+    // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
+    access = manager as StatusAccess;
+    access.terminals.set('p', fixture.terminal);
+    access.agentStatusMonitor.register('p', 0);
+    await pollAgentStatus();
+
+    // A wrapper prints `working`, then starts Claude.
+    fixture.data('\x1b]7501;state=working:app=wrapper\x1b\\');
+    fixture.terminal.pty.process = 'claude';
+    vi.setSystemTime(40_000);
+    await pollAgentStatus();
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle' });
+    expect(statuses()).not.toContainEqual(expect.objectContaining({ reason: 'program_status:working' }));
+  });
+
+  it('keeps a running record while another process group holds the foreground, checking it seldom', async () => {
+    const readGroup = vi.fn(async () => 4242);
+    manager = new TerminalPanelManager(undefined, undefined, readGroup);
     // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
     access = manager as StatusAccess;
     const fixture = attach();
@@ -764,6 +797,31 @@ describe('program status reports (OSC 7501)', () => {
     await pollAgentStatus();
     await pollAgentStatus();
     expect(statuses().at(-1)).toMatchObject({ state: 'blocked' });
+    expect(readGroup).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(Date.now() + 6_000);
+    await pollAgentStatus();
+    expect(readGroup).toHaveBeenCalledTimes(2);
+  });
+
+  it("doesn't count the next ordinary command after a done report as another finish", async () => {
+    const fixture = attach();
+    fixture.terminal.agentType = undefined;
+    fixture.data(BREW_DONE);
+    await pollAgentStatus();
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:done', workedVisibly: true });
+
+    manager.writeToTerminal('p', 'ls\r');
+    // A poll before the worker confirms the drop must not announce the finish again.
+    access.pollAgentStatus();
+    expect(statuses().filter(status => JSON.stringify(status).includes('program_status:done'))).toHaveLength(1);
+    fixture.data('ls\r\n');
+    fixture.data('notes.txt\r\n$ ');
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'working' });
+    vi.setSystemTime(40_000);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', workedVisibly: false });
   });
 
   it('hands the tab back to its screen once the person types after done', async () => {

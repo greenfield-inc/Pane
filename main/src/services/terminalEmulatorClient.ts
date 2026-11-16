@@ -154,9 +154,16 @@ export class RemoteTerminalEmulator {
     if (!this.final) this.host.post({ op: 'clear', id: this.id });
   }
 
-  /** See TerminalStateEmulator.dropProgramStatus. */
+  /**
+   * See TerminalStateEmulator.dropProgramStatus. Until the host pushes the
+   * records left, reads show none rather than the one being dropped.
+   */
   dropProgramStatus(which: 'running' | 'finished'): void {
-    if (!this.final) this.host.post({ op: 'dropProgramStatus', id: this.id, which });
+    if (this.final) return;
+    this.host.post({ op: 'dropProgramStatus', id: this.id, which });
+    const state = this.cached.programStatus?.state;
+    const finished = state === 'done' || state === 'error';
+    if (state && finished === (which === 'finished')) this.cached = { ...this.cached, programStatus: null };
   }
 
   async refresh(): Promise<ScreenState> {
