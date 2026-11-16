@@ -181,14 +181,14 @@ function panelState(panel: ToolPanel): DevicePanelState | undefined {
   return state && { ...state };
 }
 
-/** Applies `patch` to a device tab's state; a `heldBy` of undefined clears the holder. */
+/** Applies `patch` to a device tab's state; a field set to undefined is cleared from the stored state. */
 async function setPanelState(panel: ToolPanel, patch: Partial<DevicePanelState>, title?: string): Promise<void> {
   const current = panelManager.getPanel(panel.id) ?? panel;
   const previous = panelState(current);
   if (!previous) return;
   const next: DevicePanelState = { ...previous, ...patch };
   if (next.deviceId) rememberTab(next.deviceId, panel.id);
-  if (patch.heldBy === undefined && 'heldBy' in patch) delete next.heldBy;
+  // A field set to undefined stays in the update as undefined: that is how the panel store removes it.
   const update: Partial<ToolPanel> = { state: { ...current.state, customState: next } };
   if (title) update.title = title;
   await panelManager.updatePanel(panel.id, update);
@@ -294,7 +294,8 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
     try {
       const opened = await devices().open(caller, device ? { platform, device } : { platform }, (phase) => { void setPanelState(panel, { phase }); });
       const summary = opened.device;
-      await setPanelState(panel, { deviceId: summary.id, name: summary.name, os: summary.os, machine: summary.machine, phase: 'live', heldBy: undefined, machineReason: { kind: 'local', text: `Runs on ${summary.machine}.` } }, summary.name);
+      // A tab that last showed a Mac's device now shows this machine's: the Mac fields go.
+      await setPanelState(panel, { deviceId: summary.id, name: summary.name, os: summary.os, machine: summary.machine, phase: 'live', heldBy: undefined, machineId: undefined, macName: undefined, machineReason: { kind: 'local', text: `Runs on ${summary.machine}.` } }, summary.name);
       const marker: DeviceOpenMarker = { kind: 'pane-device', panelId: panel.id, name: summary.name, machine: summary.machine };
       if (summary.os) marker.os = summary.os;
       return {
