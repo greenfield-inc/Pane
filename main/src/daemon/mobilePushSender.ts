@@ -74,6 +74,8 @@ const MAX_OWNER_REGISTRATIONS = 10;
  * turn was 3.5 s, on top of the monitor's 10 s settle.
  */
 export const STABLE_IDLE_MS = 10_000;
+/** A program reporting its own blocked state (OSC 7501) alerts a phone at most once per this long per tab. */
+export const PROGRAM_ALERT_COOLDOWN_MS = 60_000;
 const PROVIDER_TIMEOUT_MS = 15_000;
 const senderByConfigManager = new WeakMap<MobilePushConfigManager, MobilePushSender>();
 
@@ -111,6 +113,8 @@ export class MobilePushSender {
   /** Panels a person sent a prompt to whose turn has not been reported finished yet. */
   private readonly armed = new Set<string>();
   private readonly finishTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Tabs whose program alerted from its own report within the cooldown. */
+  private readonly programAlertCooldown = new Set<string>();
   /** Each Notify question's waits so far, and whether it waits now: Undo makes it wait, and alert, again. */
   private readonly questionRounds = new Map<string, { round: number; open: boolean }>();
   /** When each registration may next ask the relay for a grant, by `<registration id> <token>`. */
@@ -249,8 +253,13 @@ export class MobilePushSender {
 
   observeStatus(event: PanelAgentStatusEvent): Promise<void> {
     // Plain shells go quiet all the time; only agents, and programs that
-    // report their own status (OSC 7501), tell the phone anything.
-    if (!event.agentType && !isProgramStatusReason(event.reason)) return Promise.resolve();
+    // report their own status (OSC 7501), tell the phone anything. A shell
+    // whose program's blocked report ended unreported still records that the
+    // tab moved on, so its next blocked report alerts.
+    if (!event.agentType && !isProgramStatusReason(event.reason)) {
+      if (event.state === 'blocked' || this.config().host.mobilePush.panelStates[event.panelId] !== 'blocked') return Promise.resolve();
+      return this.mutate(() => this.processStatus(event));
+    }
     this.scheduleFinished(event);
     return this.mutate(() => this.processStatus(event));
   }
@@ -388,11 +397,20 @@ export class MobilePushSender {
     if (!hasLiveRegistration(config)) return;
     const previous = config.host.mobilePush.panelStates[event.panelId];
     const ended = event.reason === 'exit' || event.reason === 'destroyed';
-    if (!ended && event.state === 'blocked' && previous !== 'blocked') {
+    if (!ended && event.state === 'blocked' && previous !== 'blocked' && !this.inProgramAlertCooldown(event)) {
       await this.notify(event, 'needs-input');
       return;
     }
     if (previous !== event.state) await this.save(withPanelState(config, event));
+  }
+
+  /** True when a program's own blocked report should stay quiet; starts the cooldown otherwise. */
+  private inProgramAlertCooldown(event: PanelAgentStatusEvent): boolean {
+    if (!isProgramStatusReason(event.reason)) return false;
+    if (this.programAlertCooldown.has(event.panelId)) return true;
+    this.programAlertCooldown.add(event.panelId);
+    setTimeout(() => this.programAlertCooldown.delete(event.panelId), PROGRAM_ALERT_COOLDOWN_MS).unref?.();
+    return false;
   }
 
   private async notify(event: PanelAgentStatusEvent, kind: AttentionKind): Promise<void> {
