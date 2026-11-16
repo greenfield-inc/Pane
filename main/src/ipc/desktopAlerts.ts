@@ -37,9 +37,15 @@ const pendingAlerts = new Set<Notification>();
  * notifications on, while Pane is not focused, and not while Dictate shows them.
  * `alertsHere` is Notify's "Show cards on" routing.
  */
-export function showDesktopAlert(services: Pick<AppServices, 'configManager' | 'getMainWindow' | 'workspaceWatchLeases'>, alertsHere: boolean, title: string, body: string): void {
-  if (services.configManager.getConfig().notifications?.enabled === false || !alertsHere) return;
-  if (services.getMainWindow()?.isFocused() || isDesktopAlertHandedOff(services.workspaceWatchLeases) || !Notification.isSupported()) return;
+/**
+ * Shows a desktop alert under the person's notification rules. Returns false only when this machine is not
+ * where alerts go right now (the person is away from it), so the caller can try again later; true when the
+ * alert was shown or the rules say it should not be (notifications off, Pane in front, handed off).
+ */
+export function showDesktopAlert(services: Pick<AppServices, 'configManager' | 'getMainWindow' | 'workspaceWatchLeases'>, alertsHere: boolean, title: string, body: string): boolean {
+  if (services.configManager.getConfig().notifications?.enabled === false) return true;
+  if (!alertsHere) return false;
+  if (services.getMainWindow()?.isFocused() || isDesktopAlertHandedOff(services.workspaceWatchLeases) || !Notification.isSupported()) return true;
   const notification = new Notification({ title, body });
   pendingAlerts.add(notification);
   const release = () => pendingAlerts.delete(notification);
@@ -47,6 +53,7 @@ export function showDesktopAlert(services: Pick<AppServices, 'configManager' | '
   notification.once('failed', release);
   notification.once('click', release);
   notification.show();
+  return true;
 }
 
 /** Shows a native notification and reports what the OS did with it. */

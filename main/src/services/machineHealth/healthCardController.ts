@@ -29,8 +29,8 @@ export interface HealthCardDeps {
   restartProcess: (leak: LeakWarning) => Promise<void>;
   ignoreLeak: (leak: LeakWarning) => void;
   archive: (paneIds: string[]) => Promise<void>;
-  /** A desktop notification through Pane's desktop-alert path; used once when disk or memory turns critical. */
-  alert: (title: string, body: string) => void;
+  /** A desktop notification through Pane's desktop-alert path; false when it should be tried again later. */
+  alert: (title: string, body: string) => boolean;
   log: (message: string) => void;
   /** Leftover processes the person kept, as pid:start, saved so a restart does not ask again. */
   readKept: () => string[];
@@ -130,9 +130,9 @@ export class HealthCardController {
       return;
     }
     if (this.critical.has(kind)) return;
-    this.critical.add(kind);
     const { title, context } = question();
-    this.deps.alert(title, context);
+    // Counted only once it went out (or the rules say it should not); otherwise the next sample tries again.
+    if (this.deps.alert(title, context)) this.critical.add(kind);
   }
 
   private raise(key: string, level: HealthLevel, question: CardQuestion, act: (answer: string) => Promise<void>, openKey = key): void {

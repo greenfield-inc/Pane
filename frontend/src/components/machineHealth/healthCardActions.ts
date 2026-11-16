@@ -33,8 +33,9 @@ export function answerHealthCard(item: NotifyItem, choice: string): void {
 /** Opens Pane Chat on this machine with the card's list; for another machine's card, the agent is told to work there. */
 export async function askAgentAbout(item: HealthNotifyItem): Promise<void> {
   const remote = remoteMachineName(item);
-  const prompt = remote
-    ? `This is about the linked machine ${remote}. Run each runpane command there as \`runpane workspace ${remote} <command>\`. ${item.machineHealth.agentPrompt}`
+  // runpane workspace resolves the saved machine id; a label or OS hostname may not resolve.
+  const prompt = remote && item.machineId
+    ? `This is about the linked machine ${remote}. Run each runpane command there as \`runpane workspace ${item.machineId} <command>\`. ${item.machineHealth.agentPrompt}`
     : item.machineHealth.agentPrompt;
   try {
     await window.electronAPI.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, { prompt });

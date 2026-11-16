@@ -13,12 +13,14 @@ function partial<Contract>(value: Partial<Contract>): Contract {
 }
 
 const devServer: HealthProcess = { pid: 4242, started: 'Mon Nov 16 09:00:00 2026', name: 'node', sessionId: 'pane-1', panelId: null, rssMB: 300, cpuPercent: 0, escaped: true };
+/** Sampled inside a WSL distro: no tab, never escaped, but not the run script's process. */
+const wslNode: HealthProcess = { pid: 77, started: 'wsl:Ubuntu-24.04:77', name: 'node', sessionId: 'pane-1', panelId: null, rssMB: 900, cpuPercent: 0, escaped: false };
 
 function host() {
-  const snapshot = partial<MachineHealthSnapshot>({ panes: [{ sessionId: 'pane-1', name: 'Pane 1', rssMB: 300, cpuPercent: 0, processes: [devServer] }] });
+  const snapshot = partial<MachineHealthSnapshot>({ panes: [{ sessionId: 'pane-1', name: 'Pane 1', rssMB: 300, cpuPercent: 0, processes: [devServer, wslNode] }] });
   const stopProcesses = vi.fn(async () => ({ at: 0, source: 'cli' as const, removed: [], skipped: [], freedBytes: 0 }));
   const services = partial<AppServices>({
-    machineHealth: partial<MachineHealthService>({ getSnapshot: async () => snapshot }),
+    machineHealth: partial<MachineHealthService>({ getSnapshot: async () => snapshot, latestSnapshot: () => snapshot }),
     memoryRelief: partial<MemoryRelief>({ stopProcesses }),
   });
   const registry = new PaneCommandRegistry();
@@ -36,6 +38,11 @@ describe('stopping or restarting a process from outside', () => {
     await expect(registry.invoke(MACHINE_HEALTH_STOP_PROCESSES_CHANNEL, [{ processes: [{ pid: devServer.pid, started: devServer.started }, stranger], source: 'cli' }])).rejects.toMatchObject({ code: 'ERR_MACHINE_PROCESS_NOT_PANES' });
     await expect(registry.invoke(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, [stranger])).rejects.toMatchObject({ code: 'ERR_MACHINE_PROCESS_NOT_PANES' });
     expect(stopProcesses).not.toHaveBeenCalled();
+  });
+
+  it('refuses to restart a process sampled inside WSL, which is not the run script\'s', async () => {
+    const { registry } = host();
+    await expect(registry.invoke(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, [{ pid: wslNode.pid, started: wslNode.started }])).rejects.toMatchObject({ code: 'ERR_MACHINE_RESTART_UNSUPPORTED' });
   });
 
   it('stops a process the latest sample credits to a Pane', async () => {

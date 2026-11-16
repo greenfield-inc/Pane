@@ -94,17 +94,18 @@ const cleanupRunSchema = boundary.object({
   removed: boundary.array(cleanupEntrySchema),
   skipped: boundary.array(cleanupEntrySchema),
   freedBytes: boundary.number,
+  deleting: boundary.optional(boundary.boolean),
 });
 
 export async function runMachineHealth(parsed: ParsedArgs): Promise<number> {
   const options = { paneDir: parsed.paneDir };
   const snapshot = await invokeDaemon(SNAPSHOT_CHANNEL, [], boundary.jsonObject, options);
-  const inventory = await invokeDaemon(INVENTORY_CHANNEL, [{ refresh: false }], boundary.jsonObject, options);
+  const inventory = await invokeDaemon(INVENTORY_CHANNEL, [{ refresh: false }], boundary.nullable(boundary.jsonObject), options);
   if (parsed.json) {
     printJson({ ok: true, snapshot, inventory });
     return 0;
   }
-  for (const line of healthLines(decodeBoundary(snapshot, snapshotSchema), decodeBoundary(inventory, inventorySchema))) console.log(line);
+  for (const line of healthLines(decodeBoundary(snapshot, snapshotSchema), inventory && decodeBoundary(inventory, inventorySchema))) console.log(line);
   return 0;
 }
 
@@ -112,7 +113,15 @@ export async function runMachineCleanup(parsed: ParsedArgs): Promise<number> {
   const kind = requireKind(parsed.kind);
   const options = { paneDir: parsed.paneDir };
   if (FOREIGN_KINDS.has(kind) || !parsed.yes) {
-    const inventory = decodeBoundary(await invokeDaemon(INVENTORY_CHANNEL, [{ refresh: false }], boundary.jsonObject, options), inventorySchema);
+    const inventory = decodeBoundary(await invokeDaemon(INVENTORY_CHANNEL, [{ refresh: false }], boundary.nullable(boundary.jsonObject), options), boundary.nullable(inventorySchema));
+    if (!inventory) {
+      if (parsed.json) {
+        printJson({ ok: true, dryRun: true, kind, items: [], totalBytes: 0, scanning: true });
+        return 0;
+      }
+      console.log(SCANNING);
+      return 0;
+    }
     const ofKind = inventory.items.filter(item => item.kind === kind);
     if (FOREIGN_KINDS.has(kind)) throw notPanesError(kind, ofKind);
     const items = ofKind.filter(item => item.tier !== 3);
@@ -140,7 +149,9 @@ export async function runMachineCleanup(parsed: ParsedArgs): Promise<number> {
     console.log(`Removed nothing: no ${kind} items were left to delete.`);
     return 0;
   }
-  console.log(`Removed ${count(run.removed.length, `${kind} item`)}, freed ${formatBytes(run.freedBytes)}.`);
+  console.log(run.deleting
+    ? `Removed ${count(run.removed.length, `${kind} item`)}; Pane is still deleting them in the background, so the space freed is not known yet.`
+    : `Removed ${count(run.removed.length, `${kind} item`)}, freed ${formatBytes(run.freedBytes)}.`);
   for (const entry of run.removed) console.log(`  ${formatBytes(entry.sizeBytes)}  ${entry.path}`);
   if (run.skipped.length > 0) {
     console.log(`Skipped ${count(run.skipped.length, 'item')}:`);
@@ -168,7 +179,9 @@ function notPanesError(kind: string, items: ReclaimItem[]): RunpaneError {
   return new RunpaneError('ERR_MACHINE_CLEANUP_NOT_PANES', `${kind} is tier 3: not Pane's to delete.${reason} Nothing was deleted.`, next);
 }
 
-function healthLines(snapshot: Snapshot, inventory: Inventory): string[] {
+const SCANNING = 'Pane has not finished its first storage scan; one is running now. Run this again in a few minutes.';
+
+function healthLines(snapshot: Snapshot, inventory: Inventory | null): string[] {
   const lines = [`Machine health for ${snapshot.hostname}, sampled ${isoTime(snapshot.sampledAt)}`];
   lines.push(`Disk: ${snapshot.disk.level}`);
   for (const volume of snapshot.disk.volumes) {
@@ -187,6 +200,10 @@ function healthLines(snapshot: Snapshot, inventory: Inventory): string[] {
     lines.push(`  ${leak.name} (pid ${leak.pid}) in ${paneName}: ${formatBytes(leak.memoryMB * 1024 * 1024)}, grew ${formatBytes(leak.growthMB * 1024 * 1024)} in ${Math.round(leak.windowMs / 60_000)} min`);
   }
   if (snapshot.leaks.length === 0) lines.push('  None.');
+  if (!inventory) {
+    lines.push(`Storage: ${SCANNING}`);
+    return lines;
+  }
   lines.push(`Storage, scanned ${isoTime(inventory.scannedAt)}:`);
   for (const { tier, title } of TIERS) {
     const items = inventory.items.filter(item => item.tier === tier);

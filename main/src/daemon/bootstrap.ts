@@ -66,7 +66,7 @@ import { agentTempRoots, ignoredDirs, installPathOf, otherToolPaths, processCwds
 import { DB_CLEAN_OPEN_PREFERENCE } from '../services/machineHealth/reclaimRules';
 import { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import { FinishedPaneMonitor, findFinishedPanes } from '../services/machineHealth/finishedPanes';
-import { MemoryRelief } from '../services/machineHealth/memoryRelief';
+import { MemoryRelief, canRestartProcess } from '../services/machineHealth/memoryRelief';
 import { HealthCardController } from '../services/machineHealth/healthCardController';
 import { showDesktopAlert } from '../ipc/desktopAlerts';
 import type { FinishedPane } from '../services/machineHealth/finishedPanes';
@@ -860,10 +860,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     paneName: paneId => databaseService.getSession(paneId)?.name ?? paneId,
     paneState,
     tabName: panelId => panelManager.getPanel(panelId)?.title ?? null,
-    // Only a process inside the run script's own tree: an escaped one or a WSL one is not the script's.
-    canRestart: async leak => leak.panelId === null
-      && machineHealth.latestSnapshot()?.panes.some(pane => pane.processes.some(proc => proc.pid === leak.pid && proc.started === leak.started && !proc.escaped)) === true
-      && await logsManager.isRunning(leak.sessionId),
+    canRestart: leak => canRestartProcess(machineHealth.latestSnapshot(), leak, paneId => logsManager.isRunning(paneId)),
     cleanUp: async itemIds => {
       await machineCleanup.run({ source: 'card', tiers: [1, 2], ids: itemIds });
       // Rescan so Resources and the CLI stop listing what the card removed.

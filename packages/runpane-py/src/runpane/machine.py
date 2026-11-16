@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import math
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .daemon_client import invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
@@ -22,13 +22,16 @@ FOREIGN_KINDS = set(RUNPANE_CONTRACT["enums"]["foreignReclaimKinds"])
 TOP_PANES = 5
 # The fields the --json output carries, as the npm CLI decodes them, so both print the same JSON.
 ITEM_FIELDS = ("id", "kind", "tier", "path", "sizeBytes", "modifiedAt", "sessionId", "reason", "projectPath", "howToFree")
-RUN_FIELDS = ("at", "source", "removed", "skipped", "freedBytes")
+RUN_FIELDS = ("at", "source", "removed", "skipped", "freedBytes", "deleting")
 ENTRY_FIELDS = ("id", "kind", "path", "sizeBytes", "reason")
 TIER_TITLES = {
     1: "Tier 1, Pane removes these by itself",
     2: "Tier 2, Pane asks first",
     3: "Tier 3, not Pane's to delete",
 }
+
+
+SCANNING = "Pane has not finished its first storage scan; one is running now. Run this again in a few minutes."
 
 
 def run_machine_health(parsed: Any) -> int:
@@ -46,6 +49,12 @@ def run_machine_cleanup(parsed: Any) -> int:
     kind = require_kind(parsed.kind)
     if kind in FOREIGN_KINDS or not parsed.yes:
         inventory = invoke_daemon(INVENTORY_CHANNEL, [{"refresh": False}], pane_dir=parsed.pane_dir)
+        if inventory is None:
+            if parsed.json:
+                print_json({"ok": True, "dryRun": True, "kind": kind, "items": [], "totalBytes": 0, "scanning": True})
+            else:
+                print(SCANNING)
+            return 0
         of_kind = [item for item in inventory.get("items") or [] if item.get("kind") == kind]
         if kind in FOREIGN_KINDS:
             raise not_panes_error(kind, of_kind)
@@ -75,7 +84,10 @@ def run_machine_cleanup(parsed: Any) -> int:
     if not removed and not skipped:
         print(f"Removed nothing: no {kind} items were left to delete.")
         return 0
-    print(f"Removed {count(len(removed), f'{kind} item')}, freed {format_bytes(run['freedBytes'])}.")
+    if run.get("deleting"):
+        print(f"Removed {count(len(removed), f'{kind} item')}; Pane is still deleting them in the background, so the space freed is not known yet.")
+    else:
+        print(f"Removed {count(len(removed), f'{kind} item')}, freed {format_bytes(run['freedBytes'])}.")
     for entry in removed:
         print(f"  {format_bytes(entry['sizeBytes'])}  {entry['path']}")
     if skipped:
@@ -111,7 +123,7 @@ def not_panes_error(kind: str, items: List[Dict[str, Any]]) -> RunpaneError:
     return RunpaneError("ERR_MACHINE_CLEANUP_NOT_PANES", f"{kind} is tier 3: not Pane's to delete.{reason} Nothing was deleted.", next_step)
 
 
-def health_lines(snapshot: Dict[str, Any], inventory: Dict[str, Any]) -> List[str]:
+def health_lines(snapshot: Dict[str, Any], inventory: Optional[Dict[str, Any]]) -> List[str]:
     lines = [f"Machine health for {snapshot['hostname']}, sampled {iso_time(snapshot['sampledAt'])}"]
     disk = snapshot["disk"]
     lines.append(f"Disk: {disk['level']}")
@@ -139,6 +151,9 @@ def health_lines(snapshot: Dict[str, Any], inventory: Dict[str, Any]) -> List[st
         )
     if not snapshot["leaks"]:
         lines.append("  None.")
+    if inventory is None:
+        lines.append(f"Storage: {SCANNING}")
+        return lines
     lines.append(f"Storage, scanned {iso_time(inventory['scannedAt'])}:")
     for tier in (1, 2, 3):
         items = [item for item in inventory["items"] if item["tier"] == tier]

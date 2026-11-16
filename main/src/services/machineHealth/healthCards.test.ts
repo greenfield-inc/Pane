@@ -54,11 +54,18 @@ describe('HealthCardController', () => {
   // A one-process leftovers card offers 'Stop it' / 'Keep it'.
   const singular = (answer: string) => (answer === 'Stop them' ? 'Stop it' : answer === 'Keep them' ? 'Keep it' : answer);
 
-  function controller(answer: string | null, options: { inventory?: StorageInventory | null; paneState?: 'archived' | 'paused' | 'open'; kept?: string[] } = {}) {
+  function controller(answer: string | null, options: { inventory?: StorageInventory | null; paneState?: 'archived' | 'paused' | 'open'; kept?: string[]; awayFor?: number } = {}) {
     const asked: CardQuestion[] = [];
     const cleaned: string[][] = [];
     const stopped: number[][] = [];
     const alerts: string[] = [];
+    // The first `awayFor` alerts find the person away from this machine.
+    let away = options.awayFor ?? 0;
+    const delivered = () => {
+      if (away === 0) return true;
+      away -= 1;
+      return false;
+    };
     let now = 0;
     let inventory = options.inventory === undefined ? scanned : options.inventory;
     const c = new HealthCardController({
@@ -68,7 +75,7 @@ describe('HealthCardController', () => {
       paneState: () => options.paneState ?? 'archived', tabName: () => null,
       canRestart: async () => false, cleanUp: async ids => { cleaned.push(ids); }, pauseIdle: async () => {}, stopProcess: async () => {},
       stopProcesses: async processes => { stopped.push(processes.map(proc => proc.pid)); return { at: now, source: 'card', removed: [], skipped: [], freedBytes: 0 }; },
-      restartProcess: async () => {}, ignoreLeak: () => {}, archive: async () => {}, alert: title => alerts.push(title), log: () => {},
+      restartProcess: async () => {}, ignoreLeak: () => {}, archive: async () => {}, alert: title => { alerts.push(title); return delivered(); }, log: () => {},
       readKept: () => [...(options.kept ?? [])], writeKept: ids => { if (options.kept) options.kept.splice(0, options.kept.length, ...ids); },
     });
     return { c, asked, cleaned, stopped, alerts, setNow: (value: number) => { now = value; }, setInventory: (value: StorageInventory | null) => { inventory = value; } };
@@ -102,6 +109,14 @@ describe('HealthCardController', () => {
     c.onSnapshot(snapshot('warning'));
     c.onSnapshot(snapshot('critical'));
     expect(alerts).toHaveLength(2);
+  });
+
+  it('tries the critical alert again on the next sample when the person was away from this machine', async () => {
+    const { c, alerts } = controller(null, { awayFor: 1 });
+    c.onSnapshot(snapshot('critical'));
+    c.onSnapshot(snapshot('critical'));
+    c.onSnapshot(snapshot('critical'));
+    expect(alerts).toEqual(['Disk is almost full', 'Disk is almost full']);
   });
 
   it('waits for the storage scan before raising the disk card', async () => {

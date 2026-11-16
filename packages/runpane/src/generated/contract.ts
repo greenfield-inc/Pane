@@ -19628,37 +19628,45 @@ export const RUNPANE_CONTRACT = {
           }
         },
         "inventory": {
-          "type": "object",
-          "required": [
-            "scannedAt",
-            "durationMs",
-            "items",
-            "panes",
-            "buckets"
-          ],
-          "properties": {
-            "scannedAt": {
-              "type": "number"
-            },
-            "durationMs": {
-              "type": "number"
-            },
-            "items": {
-              "type": "array",
-              "items": {
-                "$ref": "#/jsonSchemas/reclaimItem"
+          "description": "Null until the first storage scan after Pane starts has finished.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "scannedAt",
+                "durationMs",
+                "items",
+                "panes",
+                "buckets"
+              ],
+              "properties": {
+                "scannedAt": {
+                  "type": "number"
+                },
+                "durationMs": {
+                  "type": "number"
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/jsonSchemas/reclaimItem"
+                  }
+                },
+                "panes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "buckets": {
+                  "type": "object"
+                }
               }
             },
-            "panes": {
-              "type": "array",
-              "items": {
-                "type": "object"
-              }
-            },
-            "buckets": {
-              "type": "object"
+            {
+              "type": "null"
             }
-          }
+          ]
         }
       },
       "additionalProperties": false
@@ -19701,6 +19709,10 @@ export const RUNPANE_CONTRACT = {
             },
             "totalBytes": {
               "type": "number"
+            },
+            "scanning": {
+              "type": "boolean",
+              "description": "True when Pane has not finished its first storage scan; items is empty. Run the dry run again in a few minutes."
             }
           },
           "additionalProperties": false
@@ -19826,6 +19838,10 @@ export const RUNPANE_CONTRACT = {
                 },
                 "freedBytes": {
                   "type": "number"
+                },
+                "deleting": {
+                  "type": "boolean",
+                  "description": "True while removed items are still being deleted in the background; freedBytes is 0 until they are."
                 }
               },
               "additionalProperties": false

@@ -6,6 +6,7 @@ import { RECLAIM_KINDS, MACHINE_HEALTH_ASK_AGENT_CHANNEL, MACHINE_HEALTH_IGNORE_
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import { logsManager } from '../services/panels/logPanel/logsManager';
+import { canRestartProcess } from '../services/machineHealth/memoryRelief';
 
 const inventoryRequestSchema = boundary.object({ refresh: boundary.optional(boundary.boolean) });
 const archiveFinishedSchema = boundary.object({
@@ -114,7 +115,7 @@ export function registerResourceMonitorHandlers(
   });
   commandRegistry.register(MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, async (value: PaneCommandValue) => {
     const proc = await attributed(decodeBoundary(value, identitySchema));
-    if (proc.panelId !== null || proc.escaped || !(await logsManager.isRunning(proc.sessionId))) {
+    if (!(await canRestartProcess(machineHealth().latestSnapshot(), proc, paneId => logsManager.isRunning(paneId)))) {
       throw new PaneError('ERR_MACHINE_RESTART_UNSUPPORTED', `${proc.name} does not belong to this Pane's run script, so Pane cannot start it again. Nothing was changed.`, 'Stop it instead, then start it again in its tab.');
     }
     await commandRegistry.invoke('sessions:stop-script', [proc.sessionId]);
