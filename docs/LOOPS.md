@@ -105,6 +105,19 @@ a side drawer where you pick the project, what runs (Claude, Codex, Cursor or a
 command), and the schedule. Each run's branch is named after the loop, as
 above.
 
+A loop's Session and its run Panes live on the Loops page (**Open Session**,
+and **Open** on each run), out of the Sessions and project lists, so a run a
+day never crowds the sidebar. One joins the sidebar list only while a card
+from it waits on you, marked with the loop icon in place of its status dot and
+"Loop: <name>". A loop's Session is never pinned: saving the loop unpins it,
+and its menu has no Pin.
+
+Archiving a Session a loop sends to asks first, such as "promises-watch runs
+here daily at 7:30 AM", and pauses the loop, so no run brings the Session
+back. Undo restores the Session and resumes the loop; so does resuming the
+loop later. Deleting a loop says what happens to its Session or run Panes: they
+stay, and move back to the sidebar lists.
+
 The schedule works like Google Calendar's Repeat field. Pick **Hourly**,
 **Daily**, **Every weekday (Monday to Friday)**, **Weekly** (choose the days),
 or **Monthly** (choose the day of the month), then the time. The drawer shows
@@ -201,6 +214,16 @@ runpane loops create --session new --name morning-standup --cron "0 9 * * 1-5" \
   the agent is stopped at a prompt of its own, or its launch exited back to
   the shell, the loop's prompt is not sent (Pane never types it into a shell)
   and the run shows as **needs attention**; open the Session and fix it.
+- **An archived or missing Session.** A run whose Session was archived (from
+  the CLI or another machine, say) restores it and sends there. A run whose
+  Session is gone makes a new Session named after the loop (`standup 2` when
+  an archived Session keeps the name), points the loop at it and sends there.
+  Either way you get a card that waits: **Keep it**, or **Undo**, which
+  archives the Session and pauses the loop.
+- **A failed run.** A run that did not start raises a card that waits, with
+  the fixes: **Point it at a new Session**, **Run again** or **Pause the
+  loop**. A project loop's card offers the last two. A loop posts no second
+  card while one waits.
 - **Kept runs.** The last 10 runs are listed. There is no run Pane to archive.
 
 ## Rules
@@ -223,7 +246,8 @@ runpane loops create --session new --name morning-standup --cron "0 9 * * 1-5" \
   list with the note "Kept because the run Pane has unfinished work", so a loop can show more than 10 runs. Archive the Pane yourself
   when you're done; Pane tries again after each new run.
 - **Delete.** Deleting a loop stops its schedule. Its run Panes stay, as
-  normal Panes.
+  normal Panes back in their project's list; a Session loop's Session stays,
+  back in the Sessions list.
 - **Pause.** A paused loop starts no scheduled runs. Resuming picks up at the
   next scheduled time.
 - **Permissions.** Runs are unattended, so Claude, Codex and Cursor runs skip
@@ -245,8 +269,9 @@ runpane loops create --session new --name morning-standup --cron "0 9 * * 1-5" \
 ## Runs
 
 Each project loop run is a new Pane in a fresh worktree branched from the
-repository's default base branch. It appears as a normal Pane under its
-project, and you review its work the way you review any Pane. A Session loop's
+repository's default base branch. It is listed on the Loops page rather than
+under its project (see [In the app](#in-the-app)), and you review its work the
+way you review any Pane. A Session loop's
 runs happen in its Session; their `sessionId` is null.
 
 `runpane loops list --json` lists each loop's runs, newest first. A run's

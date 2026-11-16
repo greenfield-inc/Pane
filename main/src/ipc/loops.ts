@@ -232,8 +232,13 @@ const PRINTED = /It printed: "(.+?)"\./;
  */
 async function sendSessionLoopRun(commandRegistry: PaneCommandRegistry, context: SessionRunContext, loop: StoredLoop): Promise<LoopRunStart> {
   const { session, recovered } = await readyLoopSession(commandRegistry, loop);
-  const sent = await sendToLoopSession(commandRegistry, context, session, loop.initialInput ?? '');
-  return recovered ? { ...sent, recovered } : sent;
+  if (!recovered) return sendToLoopSession(commandRegistry, context, session, loop.initialInput ?? '');
+  try {
+    return { ...await sendToLoopSession(commandRegistry, context, session, loop.initialInput ?? ''), recovered };
+  } catch (error) {
+    const done = recovered.kind === 'restored' ? `restored the archived Session ${session.name}` : `made a new Session, ${session.name}`;
+    throw new Error(`Pane ${done} for this run, but the prompt was not sent: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function sendToLoopSession(commandRegistry: PaneCommandRegistry, context: SessionRunContext, session: LoopSession, prompt: string): Promise<LoopRunStart> {

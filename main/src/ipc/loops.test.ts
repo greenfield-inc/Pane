@@ -167,6 +167,8 @@ function sessionRegistry(options: {
   missing?: boolean;
   /** Names `sessions create` refuses because a Session (an archived one, say) has them. */
   takenNames?: string[];
+  /** `panels resume` fails, as when Pane cannot run the agent at all. */
+  resumeError?: string;
 } = {}) {
   const calls: Array<{ channel: string; request: PaneCommandValue }> = [];
   const registry = new PaneCommandRegistry();
@@ -185,7 +187,10 @@ function sessionRegistry(options: {
     return { ok: true, session: { ...session, id: '__orchestration_session_2222__', name, internalSessionId: 'new-pane' } };
   });
   answer('runpane:sessions:update', () => ({ ok: true, session }));
-  answer('runpane:panels:resume', () => ({ ok: true, readiness: { ok: true, state: { running: true, agentType: session.agent } }, ...options.resume }));
+  answer('runpane:panels:resume', () => {
+    if (options.resumeError) throw new Error(options.resumeError);
+    return { ok: true, readiness: { ok: true, state: { running: true, agentType: session.agent } }, ...options.resume };
+  });
   answer('runpane:panels:submit', () => ({ ok: true, ...options.submit }));
   return { registry, calls };
 }
@@ -284,6 +289,13 @@ describe('startLoopRun for a Session loop', () => {
     });
     expect(calls.map(call => call.channel)).toEqual(['runpane:sessions:get', 'runpane:sessions:update', 'runpane:panels:resume', 'runpane:panels:submit']);
     expect(calls[1].request).toEqual({ selector: { sessionId: SESSION_ID }, input: { archived: false, isPinned: false, source: 'user' } });
+  });
+
+  it('says the Session was restored when the run then fails to reach its agent', async () => {
+    const { registry } = sessionRegistry({ session: { archived: true }, resumeError: 'Pane could not run Claude Code to read its version.' });
+    await expect(startLoopRun(registry, standup, slotAtMs, noLaunches)).rejects.toThrow(
+      'Pane restored the archived Session Standups for this run, but the prompt was not sent: Pane could not run Claude Code to read its version.',
+    );
   });
 
   it('recreates a missing Session from the loop\'s name and agent, numbered when an archived one keeps the name', async () => {

@@ -3,6 +3,8 @@ import { API } from '../utils/api';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { useLoopsStore } from '../stores/loopsStore';
+import type { Loop } from '../../../shared/types/loop';
 import type {
   OrchestrationSessionArchivedPanes,
   OrchestrationSessionArchivePane,
@@ -17,6 +19,8 @@ interface ArchivedSessionToast {
   hostRevision: number;
   /** What the host did with each Pane; Undo restores `archivedPaneIds`. */
   panes: OrchestrationSessionArchivedPanes;
+  /** The loops archiving paused because they send to this Session; Undo resumes them. */
+  pausedLoops: Array<{ id: string; name: string }>;
 }
 
 /**
@@ -28,6 +32,8 @@ type ArchiveChoice = 'keep' | 'archive';
 /** Archiving a Session waits on the person's choice here. */
 export interface SessionArchiveConfirm {
   sessionName: string;
+  /** "standup runs here daily at 7:30 AM. …": what archiving does to the loops that send here. */
+  loopNote?: string;
   /** Every Pane the archive would take along; `blocked` marks the ones with work in progress. */
   panes: OrchestrationSessionArchivePane[];
   choose: (choice: ArchiveChoice | null) => void;
@@ -40,13 +46,14 @@ useOrchestrationSessionStore.subscribe((state, previous) => {
   if (state.hostRevision !== previous.hostRevision) useSessionArchiveConfirmStore.getState().confirm?.choose(null);
 });
 
-function askArchive(sessionName: string, panes: OrchestrationSessionArchivePane[]): Promise<ArchiveChoice | null> {
+function askArchive(sessionName: string, panes: OrchestrationSessionArchivePane[], loopNote: string | undefined): Promise<ArchiveChoice | null> {
   // A second archive replaces a dialog still open, which then counts as cancelled.
   useSessionArchiveConfirmStore.getState().confirm?.choose(null);
   return new Promise(resolve => {
     useSessionArchiveConfirmStore.setState({
       confirm: {
         sessionName,
+        loopNote,
         panes,
         choose: choice => {
           useSessionArchiveConfirmStore.setState(state => state.confirm?.panes === panes ? { confirm: null } : state);
@@ -70,6 +77,14 @@ export const clearArchivedToast = () => setArchivedToast(null);
  * never on a Session the server or the auto-selection picks, so a person who opens something else
  * while the request is in flight keeps what they opened. Throws when the host refuses.
  */
+/** What archiving a Session does to the loops that send to it: each pauses, so no run restores it. */
+function loopArchiveNote(loops: readonly Loop[]): string | undefined {
+  if (loops.length === 0) return undefined;
+  const runs = loops.map(loop => `${loop.name} runs here ${loop.scheduleText.charAt(0).toLowerCase()}${loop.scheduleText.slice(1)}`).join('; ');
+  const one = loops.length === 1;
+  return `${runs}. Archiving the Session pauses ${one ? 'the loop' : 'those loops'}; resume ${one ? 'it' : 'them'} on the Loops page to bring the Session back.`;
+}
+
 export async function archiveOrchestrationSession(sessionId: string, sessionName: string): Promise<void> {
   const before = useOrchestrationSessionStore.getState();
   const hostChanged = () => useOrchestrationSessionStore.getState().hostRevision !== before.hostRevision;
@@ -77,7 +92,8 @@ export async function archiveOrchestrationSession(sessionId: string, sessionName
   if (!preview.success || !preview.data) throw new Error(preview.error ?? 'Could not check the Session\'s Panes');
   if (hostChanged()) return;
   const { panes } = preview.data;
-  const choice = await askArchive(sessionName, panes);
+  const loops = useLoopsStore.getState().loops.filter(loop => loop.enabled && loop.orchestrationSessionId === sessionId);
+  const choice = await askArchive(sessionName, panes, loopArchiveNote(loops));
   if (!choice || hostChanged()) return;
   const wasOpen = useNavigationStore.getState().activeView === 'pane-chat' && useOrchestrationSessionStore.getState().selectedSessionId === sessionId;
   if (wasOpen) {
@@ -92,7 +108,9 @@ export async function archiveOrchestrationSession(sessionId: string, sessionName
   // A host switch during the request leaves nothing on the new host to undo.
   if (hostChanged()) return;
   const { archivedPaneIds, keptPanes, failedPanes } = response.data;
-  setArchivedToast({ sessionId, sessionName, wasOpen, hostRevision: before.hostRevision, panes: { archivedPaneIds, keptPanes, failedPanes } });
+  for (const loop of loops) await useLoopsStore.getState().setEnabled(loop.id, false);
+  const pausedLoops = loops.map(loop => ({ id: loop.id, name: loop.name }));
+  setArchivedToast({ sessionId, sessionName, wasOpen, hostRevision: before.hostRevision, panes: { archivedPaneIds, keptPanes, failedPanes }, pausedLoops });
   await useOrchestrationSessionStore.getState().refresh();
 }
 
