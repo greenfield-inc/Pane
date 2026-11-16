@@ -793,7 +793,7 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.resume) return request;
   if (request.took !== undefined) {
     if (!request.took.trim()) throw invalid('took needs the approval\'s id or Q-n.');
-    if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> answer.');
+    if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> question.');
     if (request.ui !== undefined || request.update !== undefined) throw invalid('took goes on its own, without ui or update.');
     return request;
   }

@@ -1535,7 +1535,9 @@ default), a Session has one voice to the person: its orchestrator.
   to tell). It
   records the decision with
   `runpane inbox ack <item> --decision <D-n>`, and the card reads "Recorded as
-  D-n". The older way (post a second card, ack, forward the answer) keeps working
+  D-n". When the worker takes a typed reply as a question, the orchestrator
+  gets `reopened: Q-n → … (by <worker>)`, an ack leaves that card open, and the
+  answer to its new version comes as `correction: Q-n → <answer> (by you)`. The older way (post a second card, ack, forward the answer) keeps working
   for one release. The orchestrator stays free to talk about the item in its
   tab while the card waits. Stopping an item's background call drops its own
   stale item. On start, resume or wake it reconciles against the status files,

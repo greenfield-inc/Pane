@@ -25955,7 +25955,7 @@
             "name": "--took-as",
             "value": "<answer|question>",
             "required": false,
-            "description": "With took: answer or question. On the command line it can follow the id instead (`--took Q-20 answer`).",
+            "description": "With took: answer or question. On the command line it can follow the id instead (`--took Q-20 question`).",
             "schema": {
               "type": "string",
               "enum": [
@@ -26033,7 +26033,7 @@
           "A result of {unavailable, next} means nobody can answer through Pane right now (Pane is not running, Notify is off, or the wait ended): ask in the terminal instead. It is a result, not an error.",
           "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
           "An older Pane ignores links and shows the card without them.",
-          "With relays the call waits on the worker's card as on any notify, and the answer also goes straight to the worker's tab as `answer: Q-n → <answer> (by you)`. Then record it: `runpane inbox ack <item> --decision <D-n>`.",
+          "With relays the call waits on the worker's card as on any notify, and the answer also goes straight to the worker's tab as `answer: Q-n → <answer> (by you)`. Then record it: `runpane inbox ack <item> --decision <D-n>`. If the worker takes a typed reply as a question, you get `reopened: Q-n → … (by <worker>)` instead, and the answer to the new version comes as `correction: Q-n → <answer> (by you)`.",
           "Invalid input, such as choices with ui ask, 10 choices, or ui with took or update, fails with a message naming the field, and nothing is shown.",
           "Examples of a good title and context. Needs a decision (ui approve): \"Speed up slow search: run the database change?\" with \"Search takes 4 s and an index brings it under 100 ms. It changes the live database and can't easily be undone.\", not \"Approve the migration?\" Blocked (ui options): \"The 2.5 release is stuck on a GitHub hiccup\" with \"The fixes pass everywhere except one Mac build machine, which errored. That's GitHub's machine, not our code.\", not \"Blocked\". Just so you know (ui info): \"Questions from agents now wait until you answer\", not \"Done\"."
         ],

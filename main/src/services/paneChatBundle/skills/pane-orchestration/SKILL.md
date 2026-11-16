@@ -387,7 +387,10 @@ approval, a PR ready to merge, and a next step only they can take.
   inbox` lists that answer with `undelivered`, read why: if Pane can't see
   what runs in the tab, pass it on yourself with `runpane panels submit`; if
   its tab closed, there is no worker left to tell, so don't resubmit it.
-  Record the decision either way. A question you relayed stays open after its
+  Record the decision either way. If the worker takes a typed reply as a
+  question, you get `reopened: Q-n → … (by <worker>)`: the answer your relay
+  returned doesn't stand, and the answer to the new version comes as
+  `correction: Q-n → <answer> (by you)`; record that one. A question you relayed stays open after its
   worker's tab closes, because you can still read a reply to it: the reply
   comes to you.
 - **Post your own item when it appears**, titled with its Q-n, with the files

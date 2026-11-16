@@ -286,7 +286,9 @@ export class NotifyService {
 
   private workerQuestionEnded({ id, how, decision }: SessionInboxEnded): void {
     if (decision) this.queue.recordDecision(id, decision);
-    this.queue.endWorkerQuestion(id, how === 'moved-on' ? 'the worker moved on' : 'its orchestrator dealt with it');
+    if (how === 'moved-on') this.queue.endWorkerQuestion(id, 'the worker moved on');
+    // An ack records what the relay returned; a card the worker since reopened stays open.
+    else this.queue.endWorkerQuestion(id, 'its orchestrator dealt with it', true);
   }
 
   /** The liveness rule (D-147): connected Session first, then the Pane and the tab that asked. */

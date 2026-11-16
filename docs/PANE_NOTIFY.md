@@ -377,6 +377,12 @@ A reader that turns out gone passes the reply to the next one. When Autopilot
 reads a reply, it is recorded as the answer the same way, and Autopilot acts
 only when it was a question.
 
+For a relayed worker question that the worker reads, the orchestrator's relay
+call gets the reply as its answer. When the worker takes it as a question, Pane
+types `reopened: Q-n → … (by <worker>)` into the orchestrator's tab, the
+orchestrator's `inbox ack` leaves the card open, and the answer to the new
+version reaches the orchestrator as `correction: Q-n → <answer> (by you)`.
+
 **What the reader runs.** Only the reader may; anyone else gets
 `ERR_NOTIFY_NOT_READER` with a `next`. A worker in a Session may run both:
 they aren't new asks.

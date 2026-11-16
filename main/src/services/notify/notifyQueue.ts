@@ -345,6 +345,8 @@ export class NotifyQueue extends EventEmitter {
       if (item.state === 'answered' && !item.delivered && !item.undelivered && item.source.panelId && !item.agentPrompt) this.enqueueTabMessage(item, answerLine(item), true);
       // A reply that never reached its reader goes out once more; one already typed is never typed again.
       if (item.state === 'waiting' && item.reply?.state === 'reading' && item.reply.deliveredAt === undefined) this.routeReply(entry);
+      // Delivered by an older Pane, which waited for --took: it is the answer.
+      else if (item.state === 'waiting' && item.reply?.state === 'reading') this.takeAsAnswer(entry, 'answer');
     }
   }
 
@@ -548,9 +550,12 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** The inbox let go of a worker's question: the worker moved on, or its orchestrator dealt with it. */
-  endWorkerQuestion(id: string, reason: string): void {
+  endWorkerQuestion(id: string, reason: string, keepReopened = false): void {
     for (const entry of [...this.entries.values()]) {
-      if (isOpen(entry.item) && (entry.item.id === id || entry.item.rewrittenFrom?.id === id)) this.closeOpen(entry, { by: 'pane', reason }, closedResult(`Closed: ${reason}.`));
+      if (!isOpen(entry.item) || (entry.item.id !== id && entry.item.rewrittenFrom?.id !== id)) continue;
+      // The orchestrator acked the answer its relay got, but the worker took that reply as a question.
+      if (keepReopened && (entry.item.reply?.state === 'question' || entry.item.readyAgain !== undefined)) continue;
+      this.closeOpen(entry, { by: 'pane', reason }, closedResult(`Closed: ${reason}.`));
     }
   }
 
@@ -629,16 +634,7 @@ export class NotifyQueue extends EventEmitter {
         continue;
       }
       const reply = item.reply;
-      if (reply?.state === 'reading' && reply.deliveredAt !== undefined) {
-        // Delivered before replies were taken as answers: it is the answer, and it is never typed again.
-        try {
-          this.takeAsAnswer(entry, 'answer');
-        } catch (error) {
-          console.warn(`[Notify] ${item.id} was already ended elsewhere:`, error);
-        }
-        continue;
-      }
-      if (reply && (reply.state === 'unread' || reply.state === 'reading') && !this.tabMessages.some(message => message.reply === reply.id)) {
+      if (reply && (reply.state === 'unread' || (reply.state === 'reading' && reply.deliveredAt === undefined)) && !this.tabMessages.some(message => message.reply === reply.id)) {
         // Nobody could read it earlier: try every reader again, now that one may be back.
         entry.replyTried = new Set();
         this.routeReply(entry);
@@ -983,9 +979,11 @@ export class NotifyQueue extends EventEmitter {
     clearEntryTimers(entry);
     // The words are the answer, or a note on the picks: never both.
     const result: NotifyResult = reply.picks?.length ? { answer: picksText(reply.picks), answers: reply.picks, note: reply.text } : { answer: reply.text };
-    // A call between resume rounds gets it on its next --resume, unless that call already holds the reply itself.
+    // A call between resume rounds gets it on its next --resume, unless that call read the reply itself.
+    const callRead = reply.reader !== undefined && !reply.reader.panelId;
     if (entry.waiter) entry.waiter.resolve(result);
-    else if (entry.resumeLoop && !entry.pending) entry.pending = result;
+    else if (entry.resumeLoop && !callRead) entry.pending = result;
+    if (reply.reader?.kind !== 'orchestrator') this.correctRelay(item);
     if (reply.reader?.kind !== 'asker' && item.source.panelId && !this.env.askerGone?.(item)) this.enqueueTabMessage(item, answerLine(item), true);
     this.save(entry);
     this.trimHistory();
@@ -1082,7 +1080,14 @@ export class NotifyQueue extends EventEmitter {
     item.answerSummary = undefined;
     item.answeredBy = undefined;
     item.delivered = undefined;
+    // An answer still waiting for the next --resume is no longer the answer.
+    entry.pending = undefined;
     this.queue = [item.id, ...this.queue.filter(other => other !== item.id)];
+    // The relay that returned the reply as the answer hears it doesn't stand; the new answer follows as a correction.
+    const relay = item.relayedBy;
+    if (item.originKind === 'worker' && relay && item.reply && item.reply.reader?.kind !== 'orchestrator') {
+      this.enqueueTabMessage(item, `reopened: ${askerRef(item)} → ${askerName(item)} took "${item.reply.text}" as a question and is updating the card${idTag(item)} (by ${askerName(item)})`, false, { panelId: relay.panelId });
+    }
   }
 
   /**
@@ -1093,7 +1098,7 @@ export class NotifyQueue extends EventEmitter {
     const wanted = ref.trim();
     // An open call's continuation id names its approval too: it is how a reader with no Pane tab continues (D-294).
     // A reply taken as the answer still belongs to its reader, who may say it was a question.
-    const candidates = [...this.entries.values()].filter(entry => (entry.item.state === 'waiting' || (entry.item.state === 'answered' && entry.item.reply?.state === 'answer')) && (entry.item.id === wanted || (entry.continuation !== undefined && entry.continuation === wanted) || leadingQn(entry.item.title) === wanted));
+    const candidates = [...this.entries.values()].filter(entry => (entry.item.state === 'waiting' || (entry.item.state === 'answered' && entry.item.reply?.state === 'answer' && entry.item.reply.fixed !== 'answer')) && (entry.item.id === wanted || (entry.continuation !== undefined && entry.continuation === wanted) || leadingQn(entry.item.title) === wanted));
     if (candidates.length === 0) {
       throw new PaneError('ERR_NOTIFY_GONE', `There's no waiting approval ${wanted} on ${this.machine()}: it was answered or closed. Nothing was changed.`, 'Check the id or Q-n in the reply: line, or read the answer you already have.');
     }
@@ -1103,8 +1108,9 @@ export class NotifyQueue extends EventEmitter {
       throw new PaneError('ERR_NOTIFY_NOT_READER', `Only the agent reading ${wanted}'s reply (${reader}) can run --${what} on it, and this tab isn't it. Nothing was changed.`, 'Leave it to its reader. To ask the person something else, call notify as usual.');
     }
     const waiting = mine.filter(entry => entry.item.state === 'waiting');
-    const pool = waiting.length ? waiting : mine;
-    return pool.find(entry => entry.item.reply) ?? pool[0];
+    if (waiting.length) return waiting.find(entry => entry.item.reply) ?? waiting[0];
+    // Answered cards that share a Q-n (a loop asks Q-1 every run): the newest is the one just read.
+    return mine.reduce((newest, entry) => ((entry.item.resolvedAt ?? 0) > (newest.item.resolvedAt ?? 0) ? entry : newest));
   }
 
   private mayRead(entry: Entry, caller: NotifyReaderCaller, ref: string): boolean {
@@ -1209,7 +1215,17 @@ export class NotifyQueue extends EventEmitter {
     else entry.pending = result;
     if (item.source.panelId && !item.agentPrompt && (item.originKind === 'worker' || !overCall)) this.enqueueTabMessage(item, answerLine(item), true);
     else if (overCall) item.delivered = { via: 'call', at: Date.now() };
+    this.correctRelay(item);
     this.save(entry);
+  }
+
+  /**
+   * A relayed worker card answered after the worker updated it: the relay had ended (the worker's
+   * --update call took its place), so the orchestrator's recorded answer gets corrected.
+   */
+  private correctRelay(item: NotifyItem): void {
+    if (item.originKind !== 'worker' || !item.relayedBy || !item.revision) return;
+    this.enqueueTabMessage(item, answerLine(item).replace(/^answer:/u, 'correction:'), false, { panelId: item.relayedBy.panelId });
   }
 
   /** Close all on the upgrade's summary card. */

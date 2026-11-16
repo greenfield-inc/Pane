@@ -224,7 +224,7 @@ describe('Session workspace instructions', () => {
     expect(agents).toContain('runpane inbox ack <item> --decision <D-n>');
     expect(agents).toContain('correction: Q-n → <answer> (by you)');
     expect(agents).toContain('reply: Q-n → "<their words>" (picked: <picks>) (by you)');
-    expect(agents).toContain('run runpane notify --took <id|Q-n> answer and act on it');
+    expect(agents).toContain('Pane records it as the answer once its reader gets it. If it answers, act on it. If it\'s a question, run runpane notify --took <id|Q-n> question at once (it reopens the approval)');
     expect(agents).toContain('runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"');
     expect(agents).toContain('never post a second approval for it');
     expect(agents).toContain('## Asking the person in Pane');

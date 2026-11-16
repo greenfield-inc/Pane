@@ -178,7 +178,10 @@ runpane notify --ui options --title "Q-7: <the question>" --context "<what it is
   next}\`, or in your tab as
   \`reply: Q-n → "<their words>" (picked: <picks>) (by you)\`; picks alone
   stay \`answer:\`. A reply to a worker's question you relayed goes to the
-  worker's tab, and comes to you when the worker can't read it. Pane records
+  worker's tab, and comes to you when the worker can't read it. If the worker
+  takes it as a question, you get \`reopened: Q-n → … (by <worker>)\`: the
+  answer your relay returned doesn't stand, and the answer to the new version
+  comes as \`correction: Q-n → <answer> (by you)\`. Pane records
   it as the answer once its reader gets it. If it answers, act on it. If it's
   a question, run \`runpane notify --took <id|Q-n> question\` at once (it
   reopens the approval), find out, then run

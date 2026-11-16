@@ -320,6 +320,73 @@ describe('NotifyQueue replies (the reply contract)', () => {
     await expect(queue.ask({ resume: 'in-1', source: orchestrator })).resolves.toEqual({ answer: 'eu-west' });
   });
 
+  it('J10: a worker that takes a relayed reply as a question keeps its card open through the orchestrator\'s ack, and the orchestrator hears the real answer', async () => {
+    const queue = queueWith();
+    queue.addWorkerQuestion({ id: 'in-1', question: 'Q-21: which region?', source: worker, at: Date.now() });
+    const relay = queue.ask({ relays: 'in-1', question: { ui: 'ask', title: 'Q-21: which region?' }, source: orchestrator });
+    queue.run({ type: 'answer', id: 'in-1', answer: { picks: [], text: 'what is latency like in eu-west?' } });
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(relay).resolves.toEqual({ answer: 'what is latency like in eu-west?' });
+    expect(queue.took({ panelId: 'w1' }, 'Q-21', 'question')).toMatchObject({ took: 'question' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toContainEqual(['orch', 'reopened: Q-21 → doozy-overhaul took "what is latency like in eu-west?" as a question and is updating the card (by doozy-overhaul)']);
+    // The orchestrator acks the answer its relay returned: the reopened card stays.
+    queue.endWorkerQuestion('in-1', 'its orchestrator dealt with it', true);
+    expect(item(queue, 'in-1')?.state).toBe('waiting');
+    void queue.update({ panelId: 'w1' }, 'Q-21', { asked: 'what is latency like in eu-west?', whatChanged: 'Added latency per region', context: 'eu-west: 40 ms; us-east: 90 ms.' });
+    queue.run({ type: 'answer', id: 'in-1', answer: { picks: [], text: 'eu-west' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(item(queue, 'in-1')).toMatchObject({ state: 'answered', answerSummary: 'eu-west' });
+    expect(typed).toContainEqual(['orch', 'correction: Q-21 → eu-west (by you)']);
+  });
+
+  it('a call in resume rounds that read a reply never gets it back as the answer after it was reopened', async () => {
+    const queue = queueWith();
+    const first = queue.ask({ question: q20, source: orchestrator, id: 'q20', returnAfterMs: 50_000 });
+    await vi.advanceTimersByTimeAsync(50_000);
+    await expect(first).resolves.toMatchObject({ waiting: true });
+    const resumed = queue.ask({ resume: 'q20', source: orchestrator, returnAfterMs: 50_000 });
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Can it be undone?' } });
+    const result = await resumed;
+    if (!('replyId' in result)) throw new Error(`expected a reply result, got ${JSON.stringify(result)}`);
+    queue.took({}, result.replyId, 'question');
+    const updated = queue.update({}, result.replyId, { asked: 'Can it be undone?', whatChanged: 'Added the undo path' }, 50_000);
+    await vi.advanceTimersByTimeAsync(50_000);
+    await expect(updated).resolves.toMatchObject({ waiting: true });
+    let settled: NotifyResult | undefined;
+    const next = queue.ask({ resume: 'q20', source: orchestrator, returnAfterMs: 50_000 });
+    void next.then((value) => { settled = value; });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBeUndefined();
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: ['Yes, turn it on', 'One train'] } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect(next).resolves.toEqual({ answer: 'Yes, turn it on · One train', answers: ['Yes, turn it on', 'One train'] });
+  });
+
+  it('--took Q-n question reopens the newest answered card when a tab asked that Q-n twice', async () => {
+    const queue = queueWith();
+    const ask = (id: string, title: string) => queue.ask({ question: { ui: 'ask', title }, source: orchestrator, id });
+    const first = ask('run-1', 'Q-1: first run?');
+    queue.run({ type: 'answer', id: 'run-1', answer: { picks: [], text: 'yes' } });
+    await first;
+    await vi.advanceTimersByTimeAsync(60_000);
+    const second = ask('run-2', 'Q-1: second run?');
+    queue.run({ type: 'answer', id: 'run-2', answer: { picks: [], text: 'which one do you mean?' } });
+    await second;
+    expect(queue.took({ panelId: 'orch' }, 'Q-1', 'question')).toMatchObject({ took: 'question', id: 'run-2' });
+    expect(item(queue, 'run-1')?.state).toBe('answered');
+  });
+
+  it('an agent cannot reopen a reply the person marked as their answer', async () => {
+    const queue = restoredQ20();
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'One train' } });
+    await vi.advanceTimersByTimeAsync(1);
+    queue.took({ panelId: 'orch' }, 'Q-20', 'question');
+    queue.run({ type: 'fix-reply', id: 'q20', as: 'answer' });
+    expect(() => queue.took({ panelId: 'orch' }, 'Q-20', 'question')).toThrow(/no waiting approval/);
+    expect(item(queue, 'q20')).toMatchObject({ state: 'answered', reply: { fixed: 'answer' } });
+  });
+
   it('J10: with the asker gone, the reply goes to the relaying orchestrator; with that gone too, to Autopilot; else unread', async () => {
     const queue = queueWith();
     queue.addWorkerQuestion({ id: 'in-1', question: 'Q-21: which region?', source: worker, at: Date.now() });
