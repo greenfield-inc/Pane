@@ -5,8 +5,8 @@ import { MACHINE_HEALTH_CHANGED_EVENT } from '../../../../shared/types/machineHe
 import { useNavigationStore } from '../../stores/navigationStore';
 import { cn } from '../../utils/cn';
 import { Tooltip } from '../ui/Tooltip';
-import { formatBytes } from './format';
-import { readHealthSnapshot } from './useMachineHealth';
+import { formatBytes } from '../../../../shared/utils/formatBytes';
+import { HEALTH_POLL_MS, readHealthSnapshot } from './useMachineHealth';
 
 const RANK = { ok: 0, warning: 1, critical: 2 } as const satisfies Record<HealthLevel, number>;
 
@@ -34,10 +34,11 @@ export function ResourcesButton({ className, rail = false }: { className?: strin
     let live = true;
     const load = () => readHealthSnapshot('local').then(next => { if (live) setSnapshot(next); }).catch(() => undefined);
     void load();
+    const poll = setInterval(() => { void load(); }, HEALTH_POLL_MS);
     const off = window.electronAPI.machines.onEvent(event => {
       if (event.type === 'event' && event.machineId === 'local' && event.channel === MACHINE_HEALTH_CHANGED_EVENT) void load();
     });
-    return () => { live = false; off(); };
+    return () => { live = false; clearInterval(poll); off(); };
   }, []);
 
   const level = resourcesLevel(snapshot);

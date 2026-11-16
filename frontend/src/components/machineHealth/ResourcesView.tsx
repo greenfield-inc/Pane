@@ -1,21 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Archive, Box, ChevronDown, ChevronUp, Clock, FlaskConical, FolderX, HardDrive, MemoryStick, Moon, RefreshCw, Sparkles, Square, TrendingUp } from 'lucide-react';
-import type { MachineHealthSnapshot, ReclaimItem, ReclaimKind } from '../../../../shared/types/machineHealth';
+import type { HealthProcess, MachineHealthSnapshot, PaneUsage, ReclaimItem, ReclaimKind } from '../../../../shared/types/machineHealth';
 import { MACHINE_HEALTH_ASK_AGENT_CHANNEL } from '../../../../shared/types/machineHealth';
 import { configuredAgent, CONFIGURED_AGENT_IDS } from '../../../../shared/agents';
 import { cn } from '../../utils/cn';
 import { showActionError } from '../../stores/errorStore';
 import { useConfigStore } from '../../stores/configStore';
 import { useNavigationStore } from '../../stores/navigationStore';
-import { formatBytes, formatMB } from './format';
+import { usePanelStore } from '../../stores/panelStore';
+import { formatBytes, formatMB } from '../../../../shared/utils/formatBytes';
 import { CATEGORY_COLORS } from '../ui/charts/palette';
 import { MachineSwitcher } from './MachineSwitcher';
 import { runHealthAction, useMachineHealth, type FinishedPaneRow, type MachineHealthData } from './useMachineHealth';
 
 const MB = 1024 * 1024;
 
-/** Bar segments use theme tokens so every theme, light and dark, keeps its own palette. */
-const [BLUE, GREEN, ORANGE, PURPLE, , TEAL] = CATEGORY_COLORS;
+/**
+ * Bar segments take the categorical chart palette, hex by design: theme tokens
+ * give several categories the same colour in some themes (see palette.ts).
+ * Red is left out so no category reads as an error.
+ */
+const [BLUE, GREEN, ORANGE, PURPLE, , TEAL, , GOLD] = CATEGORY_COLORS;
 const DISK_SEGMENTS = [
   { key: 'paneWorktrees', label: 'Pane worktrees', color: BLUE },
   { key: 'dependencies', label: 'Dependencies', color: PURPLE },
@@ -97,7 +102,9 @@ function LevelBadge({ level, text }: { level: MachineHealthSnapshot['disk']['lev
   );
 }
 
-function MemorySection({ data, onPause, busy, hours }: { data: MachineHealthData; onPause: () => void; busy: boolean; hours: number }) {
+function MemorySection({ data, onPause, busy, hours, runsOn, readOnlyReason }: {
+  data: MachineHealthData; onPause: () => void; busy: boolean; hours: number | null; runsOn: string | null; readOnlyReason: string | null;
+}) {
   const { snapshot, relief } = data;
   const used = snapshot.memory.totalBytes - snapshot.memory.freeBytes;
   const processes = snapshot.panes.flatMap(pane => pane.processes);
@@ -121,9 +128,13 @@ function MemorySection({ data, onPause, busy, hours }: { data: MachineHealthData
         {snapshot.memory.swapUsedBytes ? <span className="rounded-md bg-surface-secondary px-2 py-0.5 text-sm text-text-secondary">{`Swap ${formatBytes(snapshot.memory.swapUsedBytes)}`}</span> : null}
         <span className="ml-auto text-sm text-text-secondary">{`CPU ${Math.round(snapshot.cpuPercent)}%`}</span>
         {relief.idle.paneIds.length > 0 && (
-          <button type="button" disabled={busy} onClick={onPause} className="inline-flex items-center gap-1.5 rounded-md border border-border-primary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover disabled:opacity-50">
-            <Moon className="h-4 w-4" aria-hidden="true" />{`Pause Panes idle ${hours}+ hours`}
-          </button>
+          <span className="flex flex-col items-end gap-0.5">
+            <button type="button" disabled={busy || readOnlyReason !== null} title={readOnlyReason ?? undefined} onClick={onPause}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border-primary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover disabled:opacity-50">
+              <Moon className="h-4 w-4" aria-hidden="true" />{hours === null ? 'Pause idle Panes' : `Pause Panes idle ${hours}+ hours`}
+            </button>
+            {runsOn && <span className="text-xs text-text-tertiary">{runsOn}</span>}
+          </span>
         )}
       </div>
       <div className="mt-3"><StackedBar parts={parts} total={snapshot.memory.totalBytes} /></div>
@@ -153,8 +164,8 @@ const KIND_TEXT = new Map<ReclaimKind, KindText>([
 ]);
 const kindText = (kind: ReclaimKind): KindText | undefined => KIND_TEXT.get(kind);
 
-function FinishedReview({ finished, machineId, onDone, automatic, onAutomatic }: {
-  finished: FinishedPaneRow[]; machineId: string; onDone: () => void; automatic: boolean | null; onAutomatic: (on: boolean) => void;
+function FinishedReview({ finished, machineId, onDone, automatic, onAutomatic, readOnlyReason }: {
+  finished: FinishedPaneRow[]; machineId: string; onDone: () => void; automatic: boolean | null; onAutomatic: (on: boolean) => void; readOnlyReason: string | null;
 }) {
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set(finished.filter(pane => !pane.protection).map(pane => pane.sessionId)));
   const [busy, setBusy] = useState(false);
@@ -185,7 +196,7 @@ function FinishedReview({ finished, machineId, onDone, automatic, onAutomatic }:
             <span><span className="block font-medium text-text-primary">Do this automatically</span><span className="text-text-secondary">Archive Panes whose PR merged, whose folder is missing, or that sat idle 14 days.</span></span>
           </label>
         )}
-        <button type="button" disabled={busy || chosen.length === 0}
+        <button type="button" disabled={busy || chosen.length === 0 || readOnlyReason !== null} title={readOnlyReason ?? undefined}
           onClick={async () => {
             setBusy(true);
             try {
@@ -218,7 +229,9 @@ function Sparkline({ series }: { series: number[] }) {
   );
 }
 
-function Recommendations({ data, machineId, reload, readOnlyReason }: { data: MachineHealthData; machineId: string; reload: () => Promise<void>; readOnlyReason: string | null }) {
+function Recommendations({ data, machineId, reload, readOnlyReason, runsOn }: {
+  data: MachineHealthData; machineId: string; reload: () => Promise<void>; readOnlyReason: string | null; runsOn: string | null;
+}) {
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const config = useConfigStore(state => state.config);
@@ -255,8 +268,8 @@ function Recommendations({ data, machineId, reload, readOnlyReason }: { data: Ma
   if (data.relief.leftBehind.length > 0) {
     const names = [...new Set(data.relief.leftBehind.map(proc => processBase(proc.name)))].join(', ');
     rows.push({
-      key: 'leftovers', icon: Square, title: `Stop ${data.relief.leftBehind.length} leftover process${data.relief.leftBehind.length === 1 ? '' : 'es'}`,
-      detail: `${names}, left behind by work that already finished.`, bytes: data.relief.leftBehind.reduce((sum, proc) => sum + proc.rssMB * MB, 0), unit: 'memory',
+      key: 'leftovers', icon: Square, title: `Stop ${data.relief.leftBehind.length} process${data.relief.leftBehind.length === 1 ? '' : 'es'} that left ${data.relief.leftBehind.length === 1 ? 'its' : 'their'} tab`,
+      detail: `${names}. Started in a Pane terminal and still running after ${data.relief.leftBehind.length === 1 ? 'its' : 'their'} tab closed.`, bytes: data.relief.leftBehind.reduce((sum, proc) => sum + proc.rssMB * MB, 0), unit: 'memory',
       action: { label: 'Stop', run: () => act('leftovers', () => runHealthAction(machineId, 'stop-processes', { source: 'ui', processes: data.relief.leftBehind.map(proc => ({ pid: proc.pid, started: proc.started })) }), 'Could not stop the leftover processes')() },
     });
   }
@@ -269,6 +282,7 @@ function Recommendations({ data, machineId, reload, readOnlyReason }: { data: Ma
   return (
     <section aria-label="Recommendations">
       <h2 className="mb-2 text-base font-semibold text-text-primary">Recommendations <span className="ml-2 text-sm font-normal text-text-secondary">{`Frees about ${formatBytes(total)}${leaks.length ? ` · ${leaks.length} need${leaks.length === 1 ? 's' : ''} a look` : ''}`}</span></h2>
+      {runsOn && <p className="mb-2 text-sm text-text-secondary">{runsOn}</p>}
       {readOnlyReason && <p className="mb-2 text-sm text-text-secondary">{readOnlyReason}</p>}
       <ul className="divide-y divide-border-primary overflow-hidden rounded-xl border border-border-primary">
         {leaks.map(leak => (
@@ -280,13 +294,13 @@ function Recommendations({ data, machineId, reload, readOnlyReason }: { data: Ma
             </div>
             <Sparkline series={leak.series} />
             <div className="flex items-center gap-1">
-              {leak.panelId === null && (
-                <button type="button" disabled={disabled || busy !== null} onClick={act(`restart:${leak.pid}`, () => runHealthAction(machineId, 'restart-process', { pid: leak.pid, started: leak.started }), 'Could not restart it')}
+              {(data.relief.restartable ? data.relief.restartable.includes(leak.pid) : leak.panelId === null) && (
+                <button type="button" disabled={disabled || busy !== null} title={readOnlyReason ?? undefined} onClick={act(`restart:${leak.pid}`, () => runHealthAction(machineId, 'restart-process', { pid: leak.pid, started: leak.started }), 'Could not restart it')}
                   className="inline-flex items-center gap-1.5 rounded-md bg-status-warning px-3 py-1.5 text-sm font-medium text-text-on-status-warning disabled:opacity-50"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Restart it</button>
               )}
-              <button type="button" disabled={disabled || busy !== null} onClick={act(`stop:${leak.pid}`, () => runHealthAction(machineId, 'stop-processes', { source: 'ui', processes: [{ pid: leak.pid, started: leak.started }] }), 'Could not stop it')}
+              <button type="button" disabled={disabled || busy !== null} title={readOnlyReason ?? undefined} onClick={act(`stop:${leak.pid}`, () => runHealthAction(machineId, 'stop-processes', { source: 'ui', processes: [{ pid: leak.pid, started: leak.started }] }), 'Could not stop it')}
                 className="rounded-md px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover disabled:opacity-50">Stop it</button>
-              <button type="button" disabled={disabled || busy !== null} onClick={act(`ignore:${leak.pid}`, () => runHealthAction(machineId, 'ignore-leak', { pid: leak.pid, started: leak.started }), 'Could not ignore it')}
+              <button type="button" disabled={disabled || busy !== null} title={readOnlyReason ?? undefined} onClick={act(`ignore:${leak.pid}`, () => runHealthAction(machineId, 'ignore-leak', { pid: leak.pid, started: leak.started }), 'Could not ignore it')}
                 className="rounded-md px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-hover disabled:opacity-50">Ignore for this process</button>
             </div>
           </li>
@@ -300,15 +314,15 @@ function Recommendations({ data, machineId, reload, readOnlyReason }: { data: Ma
                 <div className="text-sm text-text-secondary">Their work is done. Branches stay and you can restore them.</div>
               </div>
               <div className="w-28 text-right"><div className="font-semibold tabular-nums text-text-primary">{`up to ${formatBytes(finishedBytes)}`}</div><div className="text-sm text-text-secondary">frees</div></div>
-              <button type="button" disabled={disabled} onClick={() => setOpen(open === 'finished' ? null : 'finished')}
+              <button type="button" disabled={disabled} title={readOnlyReason ?? undefined} onClick={() => setOpen(open === 'finished' ? null : 'finished')}
                 className={cn('inline-flex w-24 items-center justify-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50', open === 'finished' ? 'text-text-primary hover:bg-surface-hover' : 'bg-interactive text-text-on-interactive hover:bg-interactive-hover')}>
                 {open === 'finished' ? <><ChevronUp className="h-4 w-4" aria-hidden="true" />Hide</> : <><ChevronDown className="h-4 w-4" aria-hidden="true" />Review</>}
               </button>
             </div>
             {open === 'finished' && (
-              <FinishedReview finished={data.finished} machineId={machineId} onDone={() => { setOpen(null); void reload(); }}
+              <FinishedReview finished={data.finished} machineId={machineId} readOnlyReason={readOnlyReason} onDone={() => { setOpen(null); void reload(); }}
                 automatic={machineId === 'local' ? config?.machineHealth?.autoArchiveFinished === true : null}
-                onAutomatic={on => { void updateConfig({ machineHealth: { ...config?.machineHealth, autoArchiveFinished: on } }).catch(error => showActionError('Could not save the setting', error)); }} />
+                onAutomatic={on => { void updateConfig({ machineHealth: { autoArchiveFinished: on } }).catch(error => showActionError('Could not save the setting', error)); }} />
             )}
           </li>
         )}
@@ -326,7 +340,7 @@ function Recommendations({ data, machineId, reload, readOnlyReason }: { data: Ma
                 {row.automatic ? (
                   <span className="rounded-md bg-interactive/10 px-2 py-0.5 text-sm text-interactive">Automatic</span>
                 ) : row.action && (
-                  <button type="button" disabled={disabled || busy !== null} onClick={() => { void row.action?.run(); }} className="rounded-md px-3 py-1.5 text-sm font-medium text-text-primary hover:bg-surface-hover disabled:opacity-50">{busy === row.key ? 'Working…' : row.action.label}</button>
+                  <button type="button" disabled={disabled || busy !== null} title={readOnlyReason ?? undefined} onClick={() => { void row.action?.run(); }} className="rounded-md px-3 py-1.5 text-sm font-medium text-text-primary hover:bg-surface-hover disabled:opacity-50">{busy === row.key ? 'Working…' : row.action.label}</button>
                 )}
               </div>
             </li>
@@ -337,49 +351,120 @@ function Recommendations({ data, machineId, reload, readOnlyReason }: { data: Ma
   );
 }
 
-function PerPane({ data }: { data: MachineHealthData }) {
-  const [sort, setSort] = useState<'disk' | 'memory'>('disk');
-  const memory = new Map(data.snapshot.panes.map(pane => [pane.sessionId, pane]));
-  const rows = (data.inventory?.panes ?? []).map(pane => ({ ...pane, rssMB: memory.get(pane.sessionId)?.rssMB ?? 0 }));
-  for (const pane of data.snapshot.panes) {
-    if (!rows.some(row => row.sessionId === pane.sessionId)) rows.push({ sessionId: pane.sessionId, name: pane.name, worktreePath: '', worktreeBytes: 0, dependencyBytes: 0, buildOutputBytes: 0, scratchBytes: 0, agentTempBytes: 0, rssMB: pane.rssMB });
+const PANE_SEGMENTS = [
+  { label: 'Worktree', color: BLUE },
+  { label: 'Dependencies', color: PURPLE },
+  { label: 'Build outputs', color: GOLD },
+  { label: 'Scratch', color: ORANGE },
+  { label: 'Agent temp', color: TEAL },
+] as const;
+
+/** One Pane's processes grouped by the tab that started them, biggest first. */
+function ProcessRows({ pane, tabTitle }: { pane: PaneUsage; tabTitle: (panelId: string) => string | undefined }) {
+  const tabs = new Map<string | null, HealthProcess[]>();
+  for (const proc of pane.processes) tabs.set(proc.panelId, [...(tabs.get(proc.panelId) ?? []), proc]);
+  const groups = [...tabs].map(([panelId, processes]) => ({
+    panelId, processes: [...processes].sort((a, b) => b.rssMB - a.rssMB),
+    rssMB: processes.reduce((sum, proc) => sum + proc.rssMB, 0), cpuPercent: processes.reduce((sum, proc) => sum + proc.cpuPercent, 0),
+  })).sort((a, b) => b.rssMB - a.rssMB);
+  if (groups.length === 0) {
+    return <tr className="bg-surface-secondary/50"><td colSpan={5} className="px-4 py-2 pl-10 text-text-secondary">No processes running.</td></tr>;
   }
-  rows.sort((a, b) => (sort === 'disk' ? b.worktreeBytes + b.agentTempBytes - (a.worktreeBytes + a.agentTempBytes) : b.rssMB - a.rssMB));
-  const largest = Math.max(1, ...rows.map(row => row.worktreeBytes + row.agentTempBytes));
+  return (
+    <>
+      {groups.flatMap(group => [
+        <tr key={group.panelId ?? 'none'} className="bg-surface-secondary/50">
+          <td colSpan={2} className="px-4 py-1.5 pl-10 text-text-secondary">{group.panelId === null ? 'Not in a tab' : tabTitle(group.panelId) ?? 'Tab'}</td>
+          <td />
+          <td className="px-4 py-1.5 text-right tabular-nums text-text-secondary">{formatMB(group.rssMB)}</td>
+          <td className="px-4 py-1.5 text-right tabular-nums text-text-secondary">{`${Math.round(group.cpuPercent)}%`}</td>
+        </tr>,
+        ...group.processes.map(proc => (
+          <tr key={`${proc.pid}:${proc.started}`} className="bg-surface-secondary/50">
+            <td colSpan={2} className="truncate px-4 py-1 pl-16 text-text-primary">{processBase(proc.name)}<span className="ml-2 text-text-tertiary">{`pid ${proc.pid}`}</span></td>
+            <td />
+            <td className="px-4 py-1 text-right tabular-nums text-text-primary">{formatMB(proc.rssMB)}</td>
+            <td className="px-4 py-1 text-right tabular-nums text-text-primary">{`${Math.round(proc.cpuPercent)}%`}</td>
+          </tr>
+        )),
+      ])}
+    </>
+  );
+}
+
+type PaneSort = 'disk' | 'memory' | 'cpu';
+const PANE_SORTS = new Set<string>(['disk', 'memory', 'cpu']);
+const isPaneSort = (value: string): value is PaneSort => PANE_SORTS.has(value);
+
+function PerPane({ data, machineId }: { data: MachineHealthData; machineId: string }) {
+  const [sort, setSort] = useState<PaneSort>('disk');
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+  const panels = usePanelStore(state => state.panels);
+  // Tab ids are this Pane's own; a linked machine's tabs are not in this window.
+  const tabTitle = (panelId: string) => (machineId === 'local' ? Object.values(panels).flat().find(panel => panel.id === panelId)?.title : undefined);
+  const usage = new Map(data.snapshot.panes.map(pane => [pane.sessionId, pane]));
+  const rows = (data.inventory?.panes ?? []).map(pane => ({ ...pane, usage: usage.get(pane.sessionId) }));
+  for (const pane of data.snapshot.panes) {
+    if (!rows.some(row => row.sessionId === pane.sessionId)) rows.push({ sessionId: pane.sessionId, name: pane.name, worktreePath: '', worktreeBytes: 0, dependencyBytes: 0, buildOutputBytes: 0, scratchBytes: 0, agentTempBytes: 0, usage: pane });
+  }
+  const diskOf = (row: typeof rows[number]) => row.worktreeBytes + row.agentTempBytes;
+  rows.sort((a, b) => (sort === 'disk' ? diskOf(b) - diskOf(a) : sort === 'memory' ? (b.usage?.rssMB ?? 0) - (a.usage?.rssMB ?? 0) : (b.usage?.cpuPercent ?? 0) - (a.usage?.cpuPercent ?? 0)));
+  const largest = Math.max(1, ...rows.map(diskOf));
   if (rows.length === 0) return null;
   return (
     <section aria-label="Per Pane">
-      <div className="mb-2 flex items-center">
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
         <h2 className="text-base font-semibold text-text-primary">Per Pane <span className="ml-2 text-sm font-normal text-text-secondary">{`${rows.length} open`}</span></h2>
-        <select aria-label="Sort Panes" value={sort} onChange={event => setSort(event.target.value === 'memory' ? 'memory' : 'disk')}
+        <ul className="flex flex-wrap gap-x-3 text-xs text-text-secondary" aria-label="Disk breakdown colours">
+          {PANE_SEGMENTS.map(segment => (
+            <li key={segment.label} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ backgroundColor: segment.color }} aria-hidden="true" />{segment.label}</li>
+          ))}
+        </ul>
+        <select aria-label="Sort Panes" value={sort} onChange={event => { if (isPaneSort(event.target.value)) setSort(event.target.value); }}
           className="ml-auto rounded-md border border-border-primary bg-surface-primary px-2 py-1 text-sm text-text-primary">
           <option value="disk">By disk</option>
           <option value="memory">By memory</option>
+          <option value="cpu">By CPU</option>
         </select>
       </div>
-      <table className="w-full overflow-hidden rounded-xl border border-border-primary text-sm">
+      <table className="w-full table-fixed overflow-hidden rounded-xl border border-border-primary text-sm">
+        <colgroup><col className="w-[34%]" /><col /><col className="w-24" /><col className="w-24" /><col className="w-20" /></colgroup>
         <thead className="text-left text-text-secondary">
-          <tr className="border-b border-border-primary"><th className="px-4 py-2 font-normal">Pane</th><th className="px-4 py-2 font-normal">Breakdown</th><th className="px-4 py-2 text-right font-normal">Disk</th><th className="px-4 py-2 text-right font-normal">Memory</th></tr>
+          <tr className="border-b border-border-primary">
+            <th className="px-4 py-2 font-normal">Pane</th><th className="px-4 py-2 font-normal">Breakdown</th>
+            <th className="px-4 py-2 text-right font-normal">Disk</th><th className="px-4 py-2 text-right font-normal">Memory</th><th className="px-4 py-2 text-right font-normal">CPU</th>
+          </tr>
         </thead>
         <tbody className="divide-y divide-border-primary">
-          {rows.slice(0, 50).map(row => {
-            const total = row.worktreeBytes + row.agentTempBytes;
+          {rows.slice(0, 50).flatMap(row => {
+            const total = diskOf(row);
             const code = Math.max(0, row.worktreeBytes - row.dependencyBytes - row.buildOutputBytes - row.scratchBytes);
-            const parts = [
-              { label: 'Worktree', bytes: code, color: BLUE },
-              { label: 'Dependencies', bytes: row.dependencyBytes, color: PURPLE },
-              { label: 'Build outputs', bytes: row.buildOutputBytes, color: GREEN },
-              { label: 'Scratch', bytes: row.scratchBytes, color: ORANGE },
-              { label: 'Agent temp', bytes: row.agentTempBytes, color: TEAL },
-            ];
-            return (
+            const sizes = [code, row.dependencyBytes, row.buildOutputBytes, row.scratchBytes, row.agentTempBytes];
+            const parts = PANE_SEGMENTS.map((segment, index) => ({ ...segment, bytes: sizes[index] ?? 0 }));
+            const breakdown = parts.filter(part => part.bytes > 0).map(part => `${part.label} ${formatBytes(part.bytes)}`).join(', ');
+            const open = expanded.has(row.sessionId);
+            return [
               <tr key={row.sessionId}>
-                <td className="max-w-[260px] truncate px-4 py-2 text-text-primary">{row.name}</td>
-                <td className="px-4 py-2">{total > 0 && <div style={{ width: `${Math.max(2, (total / largest) * 100)}%` }}><StackedBar parts={parts} total={total} /></div>}</td>
+                <td className="px-2 py-2">
+                  <button type="button" aria-expanded={open} disabled={!row.usage} onClick={() => setExpanded(previous => {
+                    const next = new Set(previous);
+                    if (open) next.delete(row.sessionId); else next.add(row.sessionId);
+                    return next;
+                  })} className="flex w-full min-w-0 items-center gap-1 rounded px-1 text-left text-text-primary hover:bg-surface-hover disabled:hover:bg-transparent">
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center text-text-tertiary">{row.usage && <ChevronDown className={cn('h-4 w-4 transition-transform', !open && '-rotate-90')} aria-hidden="true" />}</span>
+                    <span className="truncate">{row.name}</span>
+                  </button>
+                </td>
+                <td className="px-4 py-2" title={breakdown || undefined}>
+                  {total > 0 && <div style={{ width: `${Math.max(2, (total / largest) * 100)}%` }}><StackedBar parts={parts} total={total} /></div>}
+                  {breakdown && <span className="sr-only">{breakdown}</span>}
+                </td>
                 <td className="px-4 py-2 text-right tabular-nums text-text-primary">{total ? formatBytes(total) : '–'}</td>
-                <td className="px-4 py-2 text-right tabular-nums text-text-primary">{row.rssMB ? formatMB(row.rssMB) : '–'}</td>
-              </tr>
-            );
+                <td className="px-4 py-2 text-right tabular-nums text-text-primary">{row.usage?.rssMB ? formatMB(row.usage.rssMB) : '–'}</td>
+                <td className="px-4 py-2 text-right tabular-nums text-text-primary">{row.usage ? `${Math.round(row.usage.cpuPercent)}%` : '–'}</td>
+              </tr>,
+              ...(open && row.usage ? [<ProcessRows key={`${row.sessionId}:processes`} pane={row.usage} tabTitle={tabTitle} />] : []),
+            ];
           })}
         </tbody>
       </table>
@@ -434,7 +519,7 @@ function History({ data }: { data: MachineHealthData }) {
 export function ResourcesView() {
   const machineId = useNavigationStore(state => state.resourcesMachineId) ?? 'local';
   const setMachine = useNavigationStore(state => state.navigateToResources);
-  const { state, reload } = useMachineHealth(machineId);
+  const { state, machine, reload } = useMachineHealth(machineId);
   const [now, setNow] = useState(() => Date.now());
   const [pausing, setPausing] = useState(false);
   const [measuring, setMeasuring] = useState(false);
@@ -445,13 +530,26 @@ export function ResourcesView() {
   }, []);
   const data = state.status === 'ready' ? state.data : state.status === 'problem' ? state.last : null;
   const problem = state.status === 'problem' ? state.problem : null;
-  const readOnlyReason = useMemo(() => (problem?.kind === 'offline' ? 'This machine is offline, so nothing can run there now.' : null), [problem]);
+  const offline = problem?.kind === 'offline';
+  const remote = machineId !== 'local';
+  const label = machine?.label ?? machineId;
+  const runsOn = remote ? `Runs on ${label}` : null;
+  const readOnlyReason = useMemo(() => {
+    if (offline) return 'This machine is offline, so nothing can run there now.';
+    if (data?.relief.housekeeping === false) {
+      return remote
+        ? `Pane on ${label} does not clean up: another Pane there owns its data folder. Act from that Pane.`
+        : 'This Pane does not clean up: another Pane on this computer owns the same data folder. Act from that Pane.';
+    }
+    return null;
+  }, [offline, data?.relief.housekeeping, remote, label]);
 
   const askAgent = async () => {
     if (!data) return;
-    const where = machineId === 'local' ? '' : ` This is about the linked machine ${data.snapshot.hostname}; run each runpane command there as \`runpane workspace ${data.snapshot.hostname} <command>\`.`;
+    // The saved machine id is what `runpane workspace` resolves; the OS hostname may not be.
+    const where = remote ? ` This is about the linked machine ${label}; run each runpane command there as \`runpane workspace ${machineId} <command>\`.` : '';
     try {
-      await window.electronAPI.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, { prompt: `Help me free disk and memory on ${data.snapshot.hostname}.${where} Run \`runpane machine health --json\` to see what Pane can free, by tier. Clean up only through \`runpane machine cleanup --kind <kind>\`: run it without --yes first to see the list, then with --yes. Never delete files with rm, and ask me before you stop a process or archive a Pane.` });
+      await window.electronAPI.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, { prompt: `Help me free disk and memory on ${remote ? label : data.snapshot.hostname}.${where} Run \`runpane machine health --json\` to see what Pane can free, by tier. Clean up only through \`runpane machine cleanup --kind <kind>\`: run it without --yes first to see the list and total. For a tier 1 kind, then run it with --yes. For a tier 2 kind, show me that list and total and run --yes only after I agree. Never delete files with rm, and ask me before you stop a process or archive a Pane.` });
       useNavigationStore.getState().navigateToPaneChat();
     } catch (error) {
       showActionError('Could not ask an agent', error);
@@ -463,28 +561,28 @@ export function ResourcesView() {
       <div className="mx-auto flex w-full max-w-[1160px] flex-col gap-5 px-8 py-6">
         <header className="flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold text-text-primary">Resources</h1>
-          <MachineSwitcher machineId={machineId} onSelect={setMachine} />
-          <span className="text-sm text-text-secondary">{data ? `Updated ${relativeTime(data.readAt, now)}` : ''}</span>
-          <button type="button" disabled={measuring} onClick={async () => { setMeasuring(true); try { await reload(true); } finally { setMeasuring(false); } }}
-            aria-label="Measure storage again" title="Measure storage again"
+          <MachineSwitcher machineId={machineId} hostname={data?.snapshot.hostname} onSelect={setMachine} />
+          <span className="text-sm text-text-secondary">{data && !offline ? `Updated ${relativeTime(data.readAt, now)}` : ''}</span>
+          <button type="button" disabled={measuring || offline} onClick={async () => { setMeasuring(true); try { await reload(true); } finally { setMeasuring(false); } }}
+            aria-label="Measure storage again" title={offline ? readOnlyReason ?? undefined : 'Measure storage again'}
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover disabled:opacity-50">
             <RefreshCw className={cn('h-4 w-4', measuring && 'animate-spin')} aria-hidden="true" />
           </button>
-          <button type="button" disabled={!data} onClick={() => { void askAgent(); }}
+          <button type="button" disabled={!data || offline} title={offline ? readOnlyReason ?? undefined : undefined} onClick={() => { void askAgent(); }}
             className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-surface-secondary px-3 py-1.5 text-sm font-medium text-text-primary hover:bg-surface-hover disabled:opacity-50">
             <Sparkles className="h-4 w-4" aria-hidden="true" />Ask an agent to clean up
           </button>
         </header>
         {problem && (
           <div className={cn('rounded-lg px-4 py-3 text-sm', problem.kind === 'error' ? 'bg-status-error/10 text-status-error' : 'bg-surface-secondary text-text-secondary')} role="status">
-            {problem.kind === 'offline' && data ? `Offline. Showing what it reported ${relativeTime(data.readAt, now)}.` : problem.message}
+            {offline ? (data ? `Offline. Showing what it reported ${relativeTime(data.readAt, now)}.` : 'Offline. Pane has not read this machine\'s health yet.') : problem.message}
           </div>
         )}
         {!data && !problem && <p className="text-sm text-text-secondary">Reading this machine's health…</p>}
         {data && (
-          <>
+          <div className={cn('flex flex-col gap-5', offline && 'opacity-60')}>
             <DiskSection data={data} />
-            <MemorySection data={data} hours={machineId === 'local' ? pauseHours : 2} busy={pausing || readOnlyReason !== null} onPause={async () => {
+            <MemorySection data={data} hours={data.relief.idle.hours ?? (remote ? null : pauseHours)} runsOn={runsOn} readOnlyReason={readOnlyReason} busy={pausing} onPause={async () => {
               setPausing(true);
               try {
                 await runHealthAction(machineId, 'pause-idle', { source: 'ui' });
@@ -495,15 +593,14 @@ export function ResourcesView() {
                 setPausing(false);
               }
             }} />
-            <Recommendations data={data} machineId={machineId} reload={() => reload()} readOnlyReason={readOnlyReason} />
-            <PerPane data={data} />
+            <Recommendations key={machineId} data={data} machineId={machineId} reload={() => reload()} readOnlyReason={readOnlyReason} runsOn={runsOn} />
+            <PerPane key={machineId} data={data} machineId={machineId} />
             <NotManaged data={data} />
             <History data={data} />
-            {!data.inventory && <p className="text-sm text-text-secondary">Pane has not measured storage on this machine yet. <button type="button" className="underline" onClick={() => { void reload(true); }}>Measure now</button></p>}
-          </>
+            {!data.inventory && !data.pending && !offline && <p className="text-sm text-text-secondary">Pane has not measured storage on this machine yet. <button type="button" className="underline" onClick={() => { void reload(true); }}>Measure now</button></p>}
+          </div>
         )}
       </div>
     </div>
   );
 }
-

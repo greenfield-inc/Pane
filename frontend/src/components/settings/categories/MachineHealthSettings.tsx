@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { MACHINE_HEALTH_CLEANUP_CHANNEL, type MachineHealthSettings as HealthSettings } from '../../../../../shared/types/machineHealth';
+import { MACHINE_HEALTH_INVENTORY_CHANNEL, type MachineHealthSettings as HealthSettings } from '../../../../../shared/types/machineHealth';
 import { Button } from '../../ui/Button';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
@@ -8,7 +8,6 @@ import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { SettingsSettingId } from '../../../types/settings';
 import { showActionError } from '../../../stores/errorStore';
 import { cn } from '../../../utils/cn';
-import { formatBytes } from '../../../../../shared/utils/formatBytes';
 
 interface NumberFieldProps {
   label: string;
@@ -83,15 +82,15 @@ export function MachineHealthSettings({ persistence }: { persistence: SettingsPe
         ))}
       </SettingsSection>
       <SettingsSection title="Pane's own leftovers">
-        <SettingRow settingId="machine-health-run-now" label="Remove Pane's leftovers now" description="Replaced update copies and old migration backups go by themselves every day and when disk runs low. Run that pass now." saveState={undefined}>
+        <SettingRow settingId="machine-health-run-now" label="Remove Pane's leftovers now" description="Replaced update copies and old migration backups go by themselves after each storage scan: daily and when disk runs low. Scan and run that pass now." saveState={undefined}>
           <div className="flex items-center gap-3">
             {ran && <span className="text-sm text-text-secondary" role="status">{ran}</span>}
             <Button size="sm" variant="secondary" disabled={running} onClick={async () => {
               setRunning(true);
               try {
-                // SAFETY: the cleanup channel answers a CleanupRun.
-                const run = await window.electronAPI.invoke(MACHINE_HEALTH_CLEANUP_CHANNEL, { kinds: ['update-snapshot', 'migration-backup'], source: 'ui' }) as { removed: unknown[]; freedBytes: number };
-                setRan(run.removed.length ? `Removed ${run.removed.length}, freed ${formatBytes(run.freedBytes)}.` : 'Nothing to remove.');
+                // A fresh scan finds what the last one missed; the pass runs when it ends.
+                await window.electronAPI.invoke(MACHINE_HEALTH_INVENTORY_CHANNEL, { refresh: true });
+                setRan('Scanning. Pane removes its leftovers when the scan ends; Recent cleanups in Resources lists them.');
               } catch (error) {
                 showActionError('Could not remove Pane\'s leftovers', error);
               } finally {

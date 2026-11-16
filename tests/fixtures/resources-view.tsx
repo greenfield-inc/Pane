@@ -1,15 +1,30 @@
 import { createRoot } from 'react-dom/client';
 import { ResourcesView } from '../../frontend/src/components/machineHealth/ResourcesView';
 import { useNavigationStore } from '../../frontend/src/stores/navigationStore';
-import type { MachineCommand, MachineState } from '../../shared/types/machineConnections';
+import { usePanelStore } from '../../frontend/src/stores/panelStore';
+import { useConfigStore } from '../../frontend/src/stores/configStore';
+import { MachineHealthSettings } from '../../frontend/src/components/settings/categories/MachineHealthSettings';
+import { useSettingsPersistence } from '../../frontend/src/components/settings/useSettingsPersistence';
+import type { AppConfig, UpdateConfigRequest } from '../../frontend/src/types/config';
+import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../../shared/types/machineConnections';
+import type { ToolPanel } from '../../shared/types/panels';
 import type { CleanupRun, MachineHealthSnapshot, StorageInventory } from '../../shared/types/machineHealth';
 import '../../frontend/src/index.css';
 
-// The Resources page on canned machines: ?machine=local|devbox, ?theme=dark, ?leak=1 (a leaking dev server).
+// The Resources page on canned machines: ?machine=local|devbox, ?theme=dark, ?leak=1 (a leaking dev server),
+// ?housekeeping=off (another Pane owns the data folder, so this one runs no cleanup), ?view=settings (Settings › Machine health).
 // The build-box runs an older Pane (no machine health channels) and travel-laptop is offline.
-// Every machine health command lands in window.qaRuns.
-declare global { interface Window { qaRuns: Array<{ machineId: string; command: MachineCommand }> } }
+// Every machine health command lands in window.qaRuns; window.qaSetStatus(id, status) changes a machine's status.
+declare global {
+  interface Window {
+    qaRuns: Array<{ machineId: string; command: MachineCommand }>;
+    qaInvokes: Array<{ channel: string; args: unknown[] }>;
+    qaSetStatus: (machineId: string, status: MachineState['status']) => void;
+    qaConfigUpdates: UpdateConfigRequest[];
+  }
+}
 window.qaRuns = [];
+window.qaConfigUpdates = [];
 const params = new URLSearchParams(location.search);
 const theme = params.get('theme') === 'dark' ? ['dark', 'dusk', 'dusk-oled'] : ['light', 'folio'];
 document.documentElement.classList.add(...theme);
@@ -17,26 +32,26 @@ document.documentElement.style.colorScheme = theme[0];
 
 const GB = 1024 ** 3;
 const now = Date.now();
-const machines: MachineState[] = [
-  { id: 'local', label: 'Studio-Mac', kind: 'local', status: 'online', offlineSince: null },
+let machines: MachineState[] = [
+  { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
   { id: 'devbox', label: 'devbox', kind: 'remote', status: 'online', offlineSince: null },
   { id: 'build-box', label: 'build-box', kind: 'remote', status: 'online', offlineSince: null },
-  { id: 'travel-laptop', label: 'travel-laptop', kind: 'remote', status: 'offline', offlineSince: now - 3_600_000 },
+  { id: 'travel-laptop', label: 'travel-laptop', kind: 'remote', status: 'offline', offlineSince: new Date(now - 3_600_000).toISOString() },
 ];
 
 function snapshot(machine: 'local' | 'devbox'): MachineHealthSnapshot {
   const mac = machine === 'local';
-  const proc = (pid: number, name: string, sessionId: string, rssMB: number, panelId: string | null = 'tab') =>
-    ({ pid, started: 'Sun Nov 15 12:00:00 2026', name, sessionId, panelId, rssMB, cpuPercent: 3, escaped: false });
+  const proc = (pid: number, name: string, sessionId: string, rssMB: number, panelId: string | null, cpuPercent: number) =>
+    ({ pid, started: 'Sun Nov 15 12:00:00 2026', name, sessionId, panelId, rssMB, cpuPercent, escaped: false });
   return {
     sampledAt: now, platform: mac ? 'darwin' : 'win32', hostname: mac ? 'Studio-Mac' : 'devbox', cpuPercent: mac ? 38 : 12,
     disk: { level: mac ? 'critical' : 'ok', volumes: [{ path: '/', roles: ['pane-data', 'worktrees', 'temp'], totalBytes: 926 * GB, freeBytes: (mac ? 13 : 212) * GB, level: mac ? 'critical' : 'ok' }] },
     memory: { level: mac ? 'warning' : 'ok', source: mac ? 'macos-pressure' : 'available', detail: '', totalBytes: (mac ? 32 : 64) * GB, freeBytes: (mac ? 1.1 : 30) * GB, swapUsedBytes: mac ? 3 * GB : null },
     app: { rssMB: 2600, cpuPercent: 4 },
     panes: [
-      { sessionId: 's1', name: 'glassly-port', rssMB: 1200, cpuPercent: 4, processes: [proc(11, 'claude', 's1', 900), proc(12, 'node', 's1', 300)] },
-      { sessionId: 's2', name: 'homepage-alpine', rssMB: 2400, cpuPercent: 9, processes: [proc(21, 'vite', 's2', 2400, null)] },
-      { sessionId: 's3', name: 'remote-access-bench', rssMB: 1100, cpuPercent: 1, processes: [proc(31, 'codex', 's3', 1100)] },
+      { sessionId: 's1', name: 'glassly-port', rssMB: 1200, cpuPercent: 4, processes: [proc(11, 'claude', 's1', 900, 'p1', 3), proc(12, 'node', 's1', 300, 'p2', 1), proc(13, '/usr/local/bin/node', 's1', 120, 'p2', 0.4)] },
+      { sessionId: 's2', name: 'homepage-alpine', rssMB: 2400, cpuPercent: 9, processes: [proc(21, 'vite', 's2', 2400, null, 9)] },
+      { sessionId: 's3', name: 'remote-access-bench', rssMB: 1100, cpuPercent: 1, processes: [proc(31, 'codex', 's3', 1100, 'p3', 1)] },
     ],
     leaks: params.has('leak') && mac ? [{ pid: 21, started: 'Sun Nov 15 12:00:00 2026', name: 'vite', sessionId: 's2', panelId: null, memoryMB: 2400, growthMB: 1229, windowMs: 1_800_000, series: [1180, 1390, 1600, 1810, 2050, 2240, 2400] }] : [],
   };
@@ -69,10 +84,17 @@ function outdated(): never {
   throw new Error('Error invoking remote method \'machines:read\': Error [ERR_UNKNOWN_CHANNEL]: No Pane daemon command registered for channel "resource-monitor:machine-health".');
 }
 
+const listeners = new Set<(event: MachineConnectionsEvent) => void>();
+window.qaSetStatus = (machineId, status) => {
+  machines = machines.map(machine => (machine.id === machineId ? { ...machine, status, offlineSince: status === 'offline' ? new Date().toISOString() : null } : machine));
+  for (const listener of listeners) listener({ type: 'machines', machines });
+};
+
+window.qaInvokes = [];
 const api = {
   machines: {
     list: async () => machines,
-    onEvent: () => () => {},
+    onEvent: (listener: (event: MachineConnectionsEvent) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
     read: async (machineId: string, channel: string) => {
       if (machineId === 'build-box') outdated();
       if (machineId === 'travel-laptop') throw new Error('Error invoking remote method \'machines:read\': Error [ERR_MACHINE_OFFLINE]: travel-laptop is offline.');
@@ -80,17 +102,44 @@ const api = {
       const data = channel === 'resource-monitor:machine-health' ? snapshot(machine)
         : channel === 'resource-monitor:machine-inventory' ? inventory
           : channel === 'resource-monitor:machine-finished-panes' ? finished
-            : channel === 'resource-monitor:machine-relief' ? { idle: { paneIds: ['a', 'b'], memoryMB: 2250 }, leftBehind: [{ pid: 77, started: 's', name: 'fake-runpane.js', sessionId: 's1', panelId: null, rssMB: 40, cpuPercent: 0, escaped: true }] }
+            : channel === 'resource-monitor:machine-relief' ? {
+              idle: { paneIds: ['a', 'b'], memoryMB: 2250, hours: machine === 'local' ? 2 : 6 },
+              leftBehind: [{ pid: 77, started: 's', name: 'fake-runpane.js', sessionId: 's1', panelId: null, rssMB: 40, cpuPercent: 0, escaped: true }],
+              restartable: [21],
+              housekeeping: params.get('housekeeping') !== 'off',
+            }
               : history;
       return { machineId, data };
     },
     run: async (machineId: string, command: MachineCommand) => { window.qaRuns.push({ machineId, command }); return { machineId, data: null }; },
   },
-  invoke: async () => null,
+  invoke: async (channel: string, ...args: unknown[]) => { window.qaInvokes.push({ channel, args }); return null; },
 };
 Object.assign(window, { electronAPI: api });
+const tab = (id: string, sessionId: string, title: string): ToolPanel => ({
+  id, sessionId, type: 'terminal', title, state: { isActive: false }, metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+});
+usePanelStore.setState({ panels: { s1: [tab('p1', 's1', 'Claude'), tab('p2', 's1', 'Terminal 1')], s3: [tab('p3', 's3', 'Codex')] } });
 useNavigationStore.setState({ activeView: 'resources', resourcesMachineId: params.get('machine') ?? 'local' });
 
+// SAFETY: these screens read only machineHealth from the config.
+useConfigStore.setState({ config: { machineHealth: { autoClearAgentTemp: true, finishedIdleDays: 14 } } as AppConfig });
+useConfigStore.setState({
+  updateConfig: async updates => {
+    window.qaConfigUpdates.push(updates);
+    const config = useConfigStore.getState().config;
+    // SAFETY: the fixture's config holds only machineHealth; main merges machineHealth field by field the same way.
+    const next = { ...config, machineHealth: { ...config?.machineHealth, ...updates.machineHealth } } as AppConfig;
+    useConfigStore.setState({ config: next });
+    return next;
+  },
+});
+
+function Settings() {
+  const persistence = useSettingsPersistence(false);
+  return <div className="w-full overflow-y-auto p-8"><MachineHealthSettings persistence={persistence} /></div>;
+}
+
 createRoot(document.getElementById('root')!).render(
-  <div className="flex h-screen bg-surface-primary"><ResourcesView /></div>,
+  <div className="flex h-screen bg-surface-primary">{params.get('view') === 'settings' ? <Settings /> : <ResourcesView />}</div>,
 );
