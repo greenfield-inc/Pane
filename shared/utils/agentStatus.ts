@@ -61,3 +61,20 @@ export function toAgentDisplayStatus(
   if (raw === 'idle') return unseen ? 'done' : 'idle';
   return raw;
 }
+
+/** Status reasons for a state a program reported itself (OSC 7501) start with this. */
+export const PROGRAM_STATUS_REASON = 'program_status';
+
+/** The status event's reason says a program reported this state itself (OSC 7501). */
+export function isProgramStatusReason(reason: string | null | undefined): boolean {
+  return reason?.startsWith(`${PROGRAM_STATUS_REASON}:`) ?? false;
+}
+
+/**
+ * A program reported that it finished (OSC 7501 `done` or `error`). Main
+ * announces each such report once, so it is a completed turn even when the
+ * tab already read idle.
+ */
+export function isReportedFinish(reason: string | null | undefined): boolean {
+  return reason === `${PROGRAM_STATUS_REASON}:done` || reason === `${PROGRAM_STATUS_REASON}:error`;
+}

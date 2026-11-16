@@ -72,7 +72,8 @@ above that component describes the activation lifecycle; read it before you
 change how panels show, hide or refresh.
 
 Agent status (working, idle, blocked) is derived in
-`main/src/services/agentStatus/`.
+`main/src/services/agentStatus/`, from each tab's screen or from the program's
+own OSC 7501 reports ([PROGRAM_STATUS.md](PROGRAM_STATUS.md)).
 
 ## File previews
 

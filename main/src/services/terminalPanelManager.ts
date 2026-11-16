@@ -50,6 +50,7 @@ import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
 import { runpaneWaits, terminalMidTurn } from './agentStatus/midTurn';
 import { blockedPromptKey, blockedScreenLines, detectAgentState } from './agentStatus/manifestEngine';
 import { getManifestForAgent } from './agentStatus/manifests';
+import { detectionFromProgramStatus, PROGRAM_STATUS_QUERY_REPLY } from './agentStatus/programStatus';
 import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { PaneEventArgument } from '../core/eventSink';
 import { STREAM_FRAME_MS } from '../../../shared/constants/streamCadence';
@@ -73,6 +74,8 @@ const OUTPUT_BATCH_SIZE = 131072; // 128KB — timer-based flush preferred; size
 const OUTPUT_BATCH_SIZE_HIDDEN = 80_000; // 80KB — cap hidden flush size to avoid foreground backpressure churn
 const MAX_CONCURRENT_SPAWNS = 3;
 const AGENT_STATUS_POLL_MS = 500; // cadence for re-deriving blocked/working/done from the live screen
+/** After a script run by Pane's own shell program is seen holding the foreground, check again this often. */
+const PROGRAM_EXIT_RECHECK_MS = 5_000;
 /** Pause between moving to "Yes, I accept" and confirming, so Claude's menu takes the keys one at a time. */
 const BYPASS_WARNING_CONFIRM_DELAY_MS = 300;
 /** Consecutive status polls whose screen must show an agent's signature before Pane adopts it. */
@@ -349,6 +352,12 @@ interface TerminalProcess {
   workedVisibly?: boolean;
   /** Reason sent with the last `panel:agentStatus` event. */
   lastStatusPromptKey?: string;
+  /** When the next foreground read may check whether the program behind an OSC 7501 record exited. */
+  programExitCheckAfter?: number;
+  /** The foreground process name at the last status poll. */
+  lastForegroundName?: string;
+  /** The OSC 7501 done or error record last announced, so each finish is announced once. */
+  announcedFinish?: string;
   /** Pane answered Claude's bypass-permissions warning in this terminal. */
   bypassWarningAnswered?: boolean;
   /** Last status scan, reused while the emulator pushes no new screen. */
@@ -2339,6 +2348,14 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   private setupTerminalHandlers(terminal: TerminalProcess): void {
+    if (terminal.screenEmulator) terminal.screenEmulator.onProgramStatusQuery = () => {
+      if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
+      try {
+        terminal.pty.write(PROGRAM_STATUS_QUERY_REPLY);
+      } catch (error) {
+        console.warn(`[TerminalPanelManager] Could not answer an OSC 7501 query in ${terminal.panelId}:`, error);
+      }
+    };
     // Handle terminal output
     terminal.pty.onData((data: string) => {
       if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
@@ -2527,6 +2544,13 @@ export class TerminalPanelManager extends EventEmitter {
       // A write failure alone does not prove process death; onExit owns cleanup.
       console.warn(`[TerminalPanelManager] Failed to write to terminal ${panelId}:`, err);
       return;
+    }
+    // Typing in the tab means its OSC 7501 done or error result has been seen.
+    const reportedState = terminal.screenEmulator?.state.programStatus?.state;
+    if (reportedState === 'done' || reportedState === 'error') {
+      terminal.screenEmulator?.dropProgramStatus('finished');
+      // A rerun that reports the same result is a new finish.
+      terminal.announcedFinish = undefined;
     }
     terminal.lastActivity = new Date();
   }
@@ -2932,6 +2956,7 @@ export class TerminalPanelManager extends EventEmitter {
         const emulator = terminal.screenEmulator;
         if (!emulator) continue;
 
+        this.endStaleProgramRecords(terminal);
         // The pushed screen is at most ~50 ms old, well inside this poll's cadence.
         // The emulator only pushes a new object when the screen changed, so an
         // idle panel reuses its last detection instead of rescanning.
@@ -2941,21 +2966,25 @@ export class TerminalPanelManager extends EventEmitter {
         let detection = terminal.lastStatusScan?.screen === screen ? terminal.lastStatusScan.detection : null;
         if (!detection) {
           terminal.screenChangedAt = Date.now();
-          detection = detectAgentState(manifest, {
-            screen: screen.screenText,
-            oscTitle: screen.oscTitle,
-            oscProgress: screen.oscProgress,
-          });
+          detection = this.detectStatus(manifest, screen);
           terminal.lastStatusScan = { screen, detection };
         }
-        if (detection.visibleWorking) terminal.workedVisibly = true;
+        const reported = detection.reported ? screen.programStatus : null;
+        // A done or error report is a finish even when the tab already read idle.
+        const finish = reported?.state === 'done' || reported?.state === 'error'
+          ? [reported.state, reported.app, reported.title, reported.msg].join('\n')
+          : undefined;
+        const newFinish = finish !== undefined && finish !== terminal.announcedFinish;
+        terminal.announcedFinish = finish;
+        if (detection.visibleWorking || newFinish) terminal.workedVisibly = true;
         const next = this.agentStatusMonitor.update(terminal.panelId, detection, Date.now());
-        const promptLines = () => blockedScreenLines(manifest, detection.matchedRuleId, {
+        const promptLines = () => reported ? (reported.msg ? [reported.msg] : []) : blockedScreenLines(manifest, detection.matchedRuleId, {
           screen: screen.screenText,
           oscTitle: screen.oscTitle,
           oscProgress: screen.oscProgress,
         });
         if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId, next === 'blocked' ? promptLines() : undefined);
+        else if (newFinish && this.agentStatusMonitor.getState(terminal.panelId) === 'idle') this.emitAgentStatus(terminal, 'idle', detection.matchedRuleId);
         // A new blocking screen (folder trust giving way to another prompt) keeps
         // the state but carries a new reason, which the Session view reads.
         else if (
@@ -2976,6 +3005,63 @@ export class TerminalPanelManager extends EventEmitter {
       }
     } catch (error) {
       console.error('[TerminalPanelManager] agent status poll failed:', error);
+    }
+  }
+
+  /**
+   * The tab's status detection. A program's own OSC 7501 report outranks its
+   * screen, except that a prompt the screen shows as blocked outranks a report
+   * that isn't blocked: blocked is the most urgent state from either source.
+   */
+  private detectStatus(manifest: ReturnType<typeof getManifestForAgent>, screen: ScreenState): AgentDetectionResult {
+    const fromScreen = detectAgentState(manifest, {
+      screen: screen.screenText,
+      oscTitle: screen.oscTitle,
+      oscProgress: screen.oscProgress,
+    });
+    const reported = screen.programStatus;
+    if (!reported || (fromScreen.state === 'blocked' && reported.state !== 'blocked')) return fromScreen;
+    return detectionFromProgramStatus(reported);
+  }
+
+  /**
+   * An OSC 7501 working, blocked or idle record lasts while its program runs.
+   * It ends when an agent takes the foreground after it (a wrapper that
+   * reported, then started Claude) or when Pane's own shell holds the
+   * foreground again (the program exited); the tab then reads its screen.
+   * Done and error records stay until the person types (writeToTerminal).
+   * Windows, WSL and ptyHost terminals cannot name their foreground, so their
+   * records last until replaced or cleared.
+   */
+  private endStaleProgramRecords(terminal: TerminalProcess): void {
+    const name = this.readForegroundProcessName(terminal);
+    const previousName = terminal.lastForegroundName;
+    terminal.lastForegroundName = name;
+    const emulator = terminal.screenEmulator;
+    const state = emulator?.state.programStatus?.state;
+    if (!emulator || !name || !state || state === 'done' || state === 'error') return;
+    if (name !== previousName && (resolveAgentTypeFromProcessName(name) || isVersionedExecutableName(name))) {
+      emulator.dropProgramStatus('running');
+      return;
+    }
+    // A script run by the same shell program has a process group of its own;
+    // after such an answer, look again only every few seconds.
+    if (!this.isInteractiveShellProcess(terminal, name) || Date.now() < (terminal.programExitCheckAfter ?? 0)) return;
+    terminal.programExitCheckAfter = Number.POSITIVE_INFINITY;
+    void this.isOwnShellInForeground(terminal).then((exited) => {
+      terminal.programExitCheckAfter = exited ? 0 : Date.now() + PROGRAM_EXIT_RECHECK_MS;
+      if (exited && this.terminals.get(terminal.panelId) === terminal && !terminal.destroying) emulator.dropProgramStatus('running');
+    });
+  }
+
+  /** Pane's own shell owns the foreground process group: whatever it ran has exited. */
+  private async isOwnShellInForeground(terminal: TerminalProcess): Promise<boolean> {
+    const name = this.readForegroundProcessName(terminal);
+    if (!name || !this.isInteractiveShellProcess(terminal, name)) return false;
+    try {
+      return await this.readForegroundGroup(terminal.pty.pid) === terminal.pty.pid;
+    } catch {
+      return false;
     }
   }
 
@@ -3107,14 +3193,7 @@ export class TerminalPanelManager extends EventEmitter {
     const terminal = this.terminals.get(panelId);
     if (!terminal || terminal.destroying || terminal.launchCommandWrittenAt === undefined) return false;
     if (Date.now() - terminal.launchCommandWrittenAt < LAUNCH_EXIT_GRACE_MS) return false;
-    // Only Pane's own shell can be back at its prompt; skip the `ps` read for any other foreground.
-    const name = this.readForegroundProcessName(terminal);
-    if (!name || !this.isInteractiveShellProcess(terminal, name)) return false;
-    try {
-      return await this.readForegroundGroup(terminal.pty.pid) === terminal.pty.pid;
-    } catch {
-      return false;
-    }
+    return this.isOwnShellInForeground(terminal);
   }
 
   private readForegroundProcessName(terminal: TerminalProcess): string | undefined {
@@ -3242,12 +3321,7 @@ export class TerminalPanelManager extends EventEmitter {
   private isIdleForPromotion(terminal: TerminalProcess): boolean {
     const emulator = terminal.screenEmulator;
     if (emulator) {
-      const { screenText, oscTitle, oscProgress } = emulator.state;
-      const detection = detectAgentState(getManifestForAgent(terminal.agentType), {
-        screen: screenText,
-        oscTitle,
-        oscProgress,
-      });
+      const detection = this.detectStatus(getManifestForAgent(terminal.agentType), emulator.state);
       if (detection.visibleWorking || detection.visibleBlocker || detection.skipStateUpdate) return false;
       // The sidebar deliberately holds "working" after output. A live input
       // prompt is stronger evidence for this explicit user-requested move.

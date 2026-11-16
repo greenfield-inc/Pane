@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { parentPort, Worker, workerData } from 'worker_threads';
 import { TerminalStateEmulator } from './terminalStateEmulator';
+import type { ProgramStatus } from './agentStatus/programStatus';
 
 /**
  * Hosts every panel's TerminalStateEmulator on one worker thread so xterm's
@@ -18,6 +19,8 @@ export interface ScreenState {
   isAlternateScreen: boolean;
   oscTitle: string;
   oscProgress: string;
+  /** The most urgent OSC 7501 record a program reported, or null. */
+  programStatus: ProgramStatus | null;
 }
 
 /**
@@ -39,13 +42,16 @@ export type EmulatorRequest =
   | { op: 'write'; id: number; data: string }
   | { op: 'resize'; id: number; cols: number; rows: number }
   | { op: 'clear'; id: number }
+  | { op: 'dropProgramStatus'; id: number; which: 'running' | 'finished' }
   | (EmulatorQuery & { req: number });
 
 export type EmulatorReply =
   | { op: 'reply'; req: number; state: ScreenState | RestoreSnapshot | null }
   | { op: 'scrollbackReply'; req: number; text: string | null }
   /** Unsolicited: the screen changed. Throttled to STATE_PUSH_MS per terminal. */
-  | { op: 'screen'; id: number; state: ScreenState };
+  | { op: 'screen'; id: number; state: ScreenState }
+  /** Unsolicited: a program asked whether the terminal reads OSC 7501. */
+  | { op: 'programStatusQuery'; id: number };
 
 /** The main side's view of the emulator thread (a Worker, or a MessagePort in tests). */
 export interface EmulatorHost {
@@ -72,6 +78,7 @@ function readState(emulator: TerminalStateEmulator): ScreenState {
     isAlternateScreen: emulator.isAlternateScreen,
     oscTitle: emulator.getOscTitle(),
     oscProgress: emulator.getOscProgress(),
+    programStatus: emulator.getProgramStatus() ?? null,
   };
 }
 
@@ -82,7 +89,13 @@ function sameState(a: ScreenState | undefined, b: ScreenState): boolean {
     && a.ghostScreenText === b.ghostScreenText
     && a.isAlternateScreen === b.isAlternateScreen
     && a.oscTitle === b.oscTitle
-    && a.oscProgress === b.oscProgress;
+    && a.oscProgress === b.oscProgress
+    && sameProgramStatus(a.programStatus, b.programStatus);
+}
+
+function sameProgramStatus(a: ProgramStatus | null, b: ProgramStatus | null): boolean {
+  return a === b || (a !== null && b !== null
+    && a.state === b.state && a.kind === b.kind && a.app === b.app && a.title === b.title && a.msg === b.msg);
 }
 
 export function serveTerminalEmulators(port: HostPort): void {
@@ -110,7 +123,10 @@ export function serveTerminalEmulators(port: HostPort): void {
 
   port.on('message', (message) => {
     if (message.op === 'create') {
-      emulators.set(message.id, new TerminalStateEmulator(message.cols, message.rows));
+      const emulator = new TerminalStateEmulator(message.cols, message.rows);
+      const { id } = message;
+      emulator.onProgramStatusQuery = () => port.postMessage({ op: 'programStatusQuery', id });
+      emulators.set(id, emulator);
       return;
     }
     const emulator = emulators.get(message.id);
@@ -125,6 +141,10 @@ export function serveTerminalEmulators(port: HostPort): void {
         return;
       case 'clear':
         emulator?.clearScrollback();
+        return;
+      case 'dropProgramStatus':
+        emulator?.dropProgramStatus(message.which);
+        schedulePush(message.id);
         return;
       case 'scrollback': {
         const { req, maxLines } = message;
