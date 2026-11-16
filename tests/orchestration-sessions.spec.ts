@@ -5,6 +5,8 @@ import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import type { PanelActivationRequest, PanelLayoutNode, SessionPanelLayout, ToolPanel } from '../shared/types/panels';
 import type { TailnetMachine, TailnetMachineList } from '../shared/types/workspaceAccess';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
+import { CONFIGURED_AGENT_IDS } from '../shared/agents';
+import { isAgentSupportedOnPlatform } from '../shared/constants/agentLaunchPresets';
 
 type UiAssociationFixture = {
   paneId: string;
@@ -748,6 +750,11 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
 });
 
+/** The agents the Create Session picker offers on a platform: every configured agent that runs there. */
+function sessionAgentsOn(platform: string): string[] {
+  return CONFIGURED_AGENT_IDS.filter(id => isAgentSupportedOnPlatform(id, platform));
+}
+
 test('Session creation agent picker supports native radio keyboard semantics', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Linux' });
@@ -762,7 +769,7 @@ test('Session creation agent picker supports native radio keyboard semantics', a
   await page.getByTestId('new-orchestration-session').click();
   const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
   const radios = dialog.getByRole('radio');
-  await expect(radios).toHaveCount(3);
+  await expect(radios).toHaveCount(sessionAgentsOn('linux').length);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
 
   await radios.first().focus();
@@ -789,7 +796,7 @@ test('Session creation hides unsupported Cursor on Windows', async ({ page }) =>
 
   await page.getByTestId('new-orchestration-session').click();
   const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
-  await expect(dialog.getByRole('radio')).toHaveCount(2);
+  await expect(dialog.getByRole('radio')).toHaveCount(sessionAgentsOn('win32').length);
   await expect(dialog.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
