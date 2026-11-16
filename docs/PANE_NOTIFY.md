@@ -27,7 +27,8 @@ its question and `why`, adds its `files` as links, and turns an `ask` with no
 other JSON shows one `summary`, `step` or `title` line, or none. On `--update`
 the new context is read the same way, but the card keeps its `ui`, and its
 choices and links unless the update passes them. Prose stays as written, even
-when it starts with `[` or `{`. Any card also
+when it starts with `[` or `{`. A card shows up to 6 links; when a status file's `files` add more, the context's
+last line names the rest (`More links: …`). Any card also
 takes up to 6 `links` (`--links`), related files and pages shown as chips:
 `{label, path}` for a file on the asking machine (relative to its working
 directory), `{label, url}` for an http or https page, or `{label, approval}`

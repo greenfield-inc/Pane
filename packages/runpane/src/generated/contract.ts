@@ -5650,7 +5650,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
         "",
-        "On this machine it runs in the Pane's worktree. When the device runs on a linked Mac, Pane first syncs the worktree there (uncommitted changes included) and runs in Pane's checkout on the Mac. It waits up to --wait-ms (default 120000) and returns the exit code and log tail, or a jobId while it still runs. --background keeps a server such as Metro running until device_close. Pass an empty command to sync only.",
+        "On this machine it runs in the Pane's worktree. When the device runs on a linked Mac, Pane first syncs the worktree there (uncommitted changes included) and runs in Pane's checkout on the Mac. It waits up to --wait-ms (default 120000) and returns the exit code and log tail (the last 16 KB, starting with [earlier output cut] when output was dropped), or a jobId while it still runs. --background keeps a server such as Metro running until device_close. Pass an empty command to sync only.",
         "",
         "Options:",
         "  --background                   Keep the command running after the call returns (Metro); it stops at device_close",
@@ -21402,7 +21402,7 @@ export const RUNPANE_CONTRACT = {
       "panels output": {
         "name": "panels output",
         "summary": "Read recent terminal output from a panel.",
-        "details": "Use this to inspect recent terminal output from a terminal-backed panel without loading the full history by default. Live terminal scrollback is returned as bounded recent lines; persisted output fallback is returned as bounded records. Terminal control noise is stripped before returning text.",
+        "details": "Use this to inspect recent terminal output from a terminal-backed panel without loading the full history by default. Live terminal scrollback is returned as bounded recent lines; persisted output fallback is returned as bounded records. Terminal control noise is stripped before returning text. When older output exists, hasMore is true and the text output says so on stderr.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -21556,7 +21556,7 @@ export const RUNPANE_CONTRACT = {
       "panels screen": {
         "name": "panels screen",
         "summary": "Read a compact current-screen view from a terminal panel.",
-        "details": "Use this for token-safe current terminal state. It prefers active alternate-screen/TUI output, then live scrollback, then persisted output. On a chat tab it returns the newest transcript lines with source acpTranscript. Default output is bounded to 80 lines.",
+        "details": "Use this for token-safe current terminal state. It prefers active alternate-screen/TUI output, then live scrollback, then persisted output. On a chat tab it returns the newest transcript lines with source acpTranscript. Default output is bounded to 80 lines. When older lines exist, hasMore is true and the text output says so on stderr.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -26011,7 +26011,7 @@ export const RUNPANE_CONTRACT = {
       "devices run": {
         "name": "devices run",
         "summary": "Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.",
-        "details": "On this machine it runs in the Pane's worktree. When the device runs on a linked Mac, Pane first syncs the worktree there (uncommitted changes included) and runs in Pane's checkout on the Mac. It waits up to --wait-ms (default 120000) and returns the exit code and log tail, or a jobId while it still runs. --background keeps a server such as Metro running until device_close. Pass an empty command to sync only.",
+        "details": "On this machine it runs in the Pane's worktree. When the device runs on a linked Mac, Pane first syncs the worktree there (uncommitted changes included) and runs in Pane's checkout on the Mac. It waits up to --wait-ms (default 120000) and returns the exit code and log tail (the last 16 KB, starting with [earlier output cut] when output was dropped), or a jobId while it still runs. --background keeps a server such as Metro running until device_close. Pass an empty command to sync only.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
