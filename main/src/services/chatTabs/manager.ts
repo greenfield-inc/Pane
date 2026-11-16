@@ -492,13 +492,18 @@ export class ChatTabManager {
     if (!body) return;
     const content = promptContent(body);
     tab.steering = next.operationId;
-    let injected = false;
-    try { injected = await runtime.steer(content); }
-    catch (error) { console.warn(`[ChatTabs] Send now could not deliver into ${panelId}'s turn: ${reasonOf(error)}. The message is sent when the turn ends.`); }
+    let outcome: string;
+    try { outcome = await runtime.steer(content); }
+    catch (error) { outcome = reasonOf(error); }
     finally { tab.steering = undefined; }
     const state = this.options.store.state(panelId);
-    if (injected && tab.runtime === runtime && state?.queue?.some(item => item.operationId === next.operationId)) {
-      for (const event of tab.transcript?.userMessage(next.operationId, content) ?? []) this.options.send('chat-tab:event', event);
+    if (outcome !== 'injected' && outcome !== 'promptRequired' && tab.runtime === runtime) {
+      console.warn(`[ChatTabs] Send now could not deliver into ${panelId}'s turn: ${outcome}. The message is sent when the turn ends.`);
+      tab.notice = 'Send now could not reach the agent. Your message stays queued and is sent when this turn ends.';
+      this.publish(panelId);
+    }
+    if (outcome === 'injected' && tab.runtime === runtime && state?.queue?.some(item => item.operationId === next.operationId)) {
+      for (const event of tab.transcript?.userMessage(next.operationId, content, true) ?? []) this.options.send('chat-tab:event', event);
       this.update(panelId, current => ({
         ...current, queue: current.queue?.filter(item => item.operationId !== next.operationId),
         receipts: current.receipts?.map(receipt => receipt.operationId === next.operationId ? { ...receipt, state: 'completed' } : receipt),

@@ -273,14 +273,14 @@ export class ChatTabRuntime {
   }
 
   /**
-   * Delivers `content` into the running turn. False when no turn is running, so nothing was
-   * delivered and the caller sends it as a prompt.
+   * Delivers `content` into the running turn: `injected`. `promptRequired` when no turn is running,
+   * so the caller sends it as a prompt; anything else (codex-acp's `failed`) delivered nothing.
    */
-  async steer(content: ContentBlock[]): Promise<boolean> {
+  async steer(content: ContentBlock[]): Promise<string> {
     if (!this.sessionId) throw new PaneError('CHAT_NOT_READY', 'The conversation has not started yet. Nothing was sent.', 'Wait for the tab to finish starting.');
     const result = await this.bounded(this.agent().request(STEER, { sessionId: this.sessionId, prompt: content, _meta: { steering: { idleBehavior: 'promptRequired' } } }))
       .catch(error => { throw chatFailure(error, { code: 'CHAT_STEER_FAILED', next: 'The message stays queued and is sent when the turn ends.' }); });
-    return decodeBoundary(result, steerResult).outcome === 'injected';
+    return decodeBoundary(result, steerResult).outcome;
   }
 
   async cancel(): Promise<void> {

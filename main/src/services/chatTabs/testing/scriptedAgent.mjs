@@ -33,7 +33,7 @@
 //   background          replies, then runs a turn of its own with no prompt open (as Claude does for a
 //                       finished background task), announced as an async task to a client that takes them
 //
-// SCRIPTED_AGENT_NO_STEERING=1 does not offer steering; SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired; SCRIPTED_AGENT_LIST_FAILS=1 refuses session/list.
+// SCRIPTED_AGENT_NO_STEERING=1 does not offer steering; SCRIPTED_AGENT_STEER_FAILS=1 answers each steer `failed` (as codex-acp can); SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired; SCRIPTED_AGENT_LIST_FAILS=1 refuses session/list.
 import { agent, methods, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
 import { Readable, Writable } from 'node:stream';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -140,6 +140,7 @@ const app = agent()
   .onRequest('_session/steering', { parse: value => value }, ({ params }) => {
     const session = sessions.get(params.sessionId);
     if (!session?.running) return { outcome: 'promptRequired', reason: 'noRunningTurn' };
+    if (process.env.SCRIPTED_AGENT_STEER_FAILS === '1') return { outcome: 'failed' };
     (session.steered ??= []).push(params.prompt.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'));
     return { outcome: 'injected' };
   })

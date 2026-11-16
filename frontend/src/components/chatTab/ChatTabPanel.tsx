@@ -6,7 +6,7 @@ import {
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, messageTime, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
+import { chatTurns, messageTime, steeredMessageId, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -207,7 +207,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   /** The sent message's transcript ID: when the host's copy of it renders, the chat follows the live end once more. */
   const followSent = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!followSent.current || !messages.some(message => message.id === followSent.current)) return;
+    const sent = followSent.current;
+    if (!sent || !messages.some(message => message.id === `user:${sent}` || message.id === steeredMessageId(sent))) return;
     followSent.current = undefined;
     followLiveEnd.current?.();
   }, [messages]);
@@ -319,7 +320,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       const request: ChatTabSend = { operationId, text, images: imageParts };
       // Send now only means something while a turn runs; otherwise it is a plain send.
       if (now && working) request.now = true;
-      followSent.current = `user:${operationId}`;
+      followSent.current = operationId;
       if (!await deliver(request, true)) return;
       // Typing while an approval waits tells the agent what to do instead (round 2): once the message is in.
       await Promise.all(waitingPermissions.map(permission => {

@@ -53,8 +53,12 @@ export function planEntryKeys(entries: readonly PlanEntry[]): string[] {
   });
 }
 
+/** The transcript ID of a message Send now delivered into the running turn: it stays inside that turn. */
+export function steeredMessageId(operationId: string): string { return `steer:${operationId}`; }
+
 export type TurnItem =
   | { type: 'text'; id: string; text: string }
+  | { type: 'user'; id: string; message: AgentChatMessage }
   | { type: 'thought'; id: string; text: string }
   | { type: 'image'; id: string; mimeType: string; data: string }
   | { type: 'steps'; id: string; groups: StepGroup[] }
@@ -222,6 +226,12 @@ export function chatTurns(messages: readonly AgentChatMessage[], options: { runn
     return turn;
   };
   for (const message of messages) {
+    if (message.role === 'user' && message.id.startsWith(steeredMessageId('')) && turn && !turn.endedAt) {
+      flush();
+      turn.items.push({ type: 'user', id: message.id, message });
+      sources.at(-1)!.messages.push(message);
+      continue;
+    }
     if (message.role === 'user') { open(`turn:${message.id}`, message, -1, message); continue; }
     for (const [index, part] of message.parts.entries()) {
       const id = `${message.id}:${index}`;
@@ -313,7 +323,7 @@ export function waitingToolIds(permissions: readonly AgentChatPermission[] = [],
 }
 
 export function turnDisplay(turn: ChatTurn, options: TurnDisplayOptions = {}): TurnDisplay {
-  const isShown = (item: TurnItem) => item.type === 'text' || item.type === 'image';
+  const isShown = (item: TurnItem) => item.type === 'text' || item.type === 'image' || item.type === 'user';
   const shown = turn.items.filter(isShown);
   const activity = turn.items.filter(item => !isShown(item));
   const firstActivity = turn.items.findIndex(item => !isShown(item));
