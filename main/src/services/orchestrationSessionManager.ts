@@ -102,7 +102,6 @@ function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
 
 export class OrchestrationSessionManager extends EventEmitter {
   private initialized = false;
-  /** The line a person is typing into each Session agent panel, until its first message names the Session. */
   /** Each counted tab's type, from the last member read, so the 500 ms check reads no database. */
   private activityPanelTypes = new Map<string, 'chat' | 'terminal'>();
   /** Each Session's live working/idle activity; bootstrap starts it, events.ts relays it. */

@@ -188,7 +188,7 @@ Distinguish plans from verified results. Opening this Session is not an instruct
 /** Only while the Session still has the default name Pane gave it, so a name the person chose is never replaced. */
 function sessionNameRule(sessionId: string): string {
   return `## Session name
-This Session still has its default name. In your first reply that works on a task, once you understand the Session's work, run runpane sessions get --session ${sessionId} --json. If it still shows "nameIsDefault": true, rename the Session with runpane sessions update --session ${sessionId} --from-json - and {"name": "<name>"}: 3 to 5 words that name the work, up to 8 when the name uses parentheses. Rename it this once only.`;
+This Session still has its default name. In your first reply that works on a task, once you understand the Session's work, run runpane sessions get --session ${sessionId} --json. If it still shows "nameIsDefault": true, rename the Session with echo '{"name":"<name>"}' | runpane sessions update --session ${sessionId} --from-json -, where the name is 3 to 5 words that name the work, up to 8 when the name uses parentheses. Rename it this once only.`;
 }
 
 /**
