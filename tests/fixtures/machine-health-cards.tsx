@@ -1,0 +1,123 @@
+import { createRoot } from 'react-dom/client';
+import { HealthCardBody } from '../../frontend/src/components/machineHealth/HealthCardBody';
+import { HealthCardDialog } from '../../frontend/src/components/machineHealth/HealthCardDialog';
+import { useNotifyStore } from '../../frontend/src/stores/notifyStore';
+import { DEFAULT_NOTIFY_SETTINGS } from '../../shared/types/notify';
+import type { HealthNotifyItem } from '../../frontend/src/components/machineHealth/healthCardActions';
+import type { MachineHealthCard } from '../../shared/types/machineHealth';
+import '../../frontend/src/index.css';
+
+// One machine health card body: ?kind=memory|disk|leak|finished, ?theme=dark, ?remote=1 (raised by a
+// linked machine). Answers land in window.qaAnswers and Ask an agent in window.qaAsked.
+declare global { interface Window { qaAnswers: string[]; qaAsked: number } }
+window.qaAnswers = [];
+window.qaAsked = 0;
+const params = new URLSearchParams(location.search);
+const theme = params.get('theme') === 'dark' ? ['dark', 'dusk', 'dusk-oled'] : ['light', 'folio'];
+document.documentElement.classList.add(...theme);
+document.documentElement.style.colorScheme = theme[0];
+
+const GB = 1024 ** 3;
+const MB = 1024 ** 2;
+const remote = params.has('remote');
+const host = remote ? 'build-box' : 'This Mac';
+const kind = params.get('kind') ?? 'memory';
+
+interface FixtureCard { title: string; context: string; choices: string[]; card: MachineHealthCard }
+const cards = {
+  memory: {
+    title: remote ? 'build-box: memory is tight' : 'Memory is tight',
+    context: `${host} is using 30.9 GB of 32 GB, plus 3.0 GB of swap. Agents and dev servers may slow down.`,
+    choices: ['Pause idle Panes', 'Not now'],
+    card: {
+      kind: 'memory', level: 'warning', machine: remote ? 'm-build' : 'local', hostname: host, usedBytes: 30.9 * GB, totalBytes: 32 * GB, swapUsedBytes: 3 * GB,
+      rows: [
+        { label: 'claude', detail: 'glassly-port', bytes: 3.7 * GB },
+        { label: 'Pane', detail: 'the app', bytes: 2.6 * GB },
+        { label: 'vite', detail: 'homepage-alpine', bytes: 2.4 * GB },
+        { label: 'next-server', detail: 'forms-scanner', bytes: 980 * MB },
+        { label: 'fake-runpane.js', detail: 'release-2.4.223', bytes: 512 * MB },
+      ],
+      pauseOffer: { paneCount: 14, memoryMB: 2250, hours: 2 },
+      agentPrompt: 'This Mac is short of memory.',
+    },
+  },
+  disk: {
+    title: 'Disk almost full',
+    context: 'This Mac has 13 GB free. Pane can free about 23 GB of its own leftovers and finished work.',
+    choices: ['Clean up', 'Not now'],
+    card: {
+      kind: 'disk', level: 'warning', machine: 'local', hostname: host, freeBytes: 13 * GB, totalBytes: 926 * GB, freesBytes: 23 * GB,
+      rows: [
+        { label: 'u-2.4.212', detail: 'The rollback copy of an update a newer update replaced.', bytes: 9.3 * GB, note: 'Tier 1' },
+        { label: 'sessions.db.pre-panel-buffers.bak', detail: 'A database backup from a migration more than 30 days ago.', bytes: 1.8 * GB, note: 'Tier 1' },
+        { label: 'qa1344.noindex', detail: 'Agent temp files nobody touched for 2 days.', bytes: 11.8 * GB, note: 'Tier 2' },
+      ],
+      agentPrompt: 'This Mac has 13 GB of disk free.',
+    },
+  },
+  leak: {
+    title: 'vite in homepage-alpine keeps using more memory',
+    context: 'It grew 1.2 GB in 30 min and kept climbing. It now uses 2.3 GB.',
+    choices: ['Restart it', 'Stop it', 'Ignore for this process'],
+    card: {
+      kind: 'leak', level: 'warning', machine: 'local', hostname: host,
+      rows: [{ label: 'vite', detail: 'homepage-alpine', bytes: 2.4 * GB }],
+      leak: { pid: 4242, started: 'Sun Nov 15 12:00:00 2026', growthMB: 1229, windowMs: 1_800_000, series: [1180, 1390, 1600, 1810, 2050, 2240, 2400], canRestart: true },
+      agentPrompt: 'vite grew 1.2 GB.',
+    },
+  },
+  finished: {
+    title: 'Archive 5 finished Panes',
+    context: 'Their work is done. Archiving keeps each branch, and you can restore them.',
+    choices: ['Archive 5 Panes', 'Not now'],
+    card: {
+      kind: 'finished', level: 'warning', machine: 'local', hostname: host, freesBytes: 17.3 * GB,
+      rows: [
+        { label: 'Spanner schema diff fix', detail: 'bloom-mono', bytes: 6.2 * GB, note: 'PR #808 merged' },
+        { label: 'STOP line option', detail: 'bloom-mono', bytes: 5.1 * GB, note: 'PR #1335 merged' },
+        { label: 'Cloud: service and fleet API contracts', detail: 'Pane', bytes: 3.1 * GB, note: 'PR #1256 merged' },
+        { label: 'release-2.4.223', detail: 'Pane', bytes: 2.9 * GB, note: 'It is pinned.', skipped: true },
+        { label: 'ademark-hillclimb', detail: 'Pane', bytes: 1.1 * GB, note: 'Folder missing' },
+      ],
+      agentPrompt: 'Pane found finished Panes.',
+    },
+  },
+} satisfies Record<string, FixtureCard>;
+
+const chosen: FixtureCard = kind === 'disk' ? cards.disk : kind === 'leak' ? cards.leak : kind === 'finished' ? cards.finished : cards.memory;
+const item: HealthNotifyItem = {
+  id: 'h1', ui: 'options', title: chosen.title, context: chosen.context,
+  choices: chosen.choices.map((label, index) => ({ label, recommended: index === 0 })),
+  source: { name: 'Pane', agent: 'Pane' }, state: 'waiting', createdAt: Date.now(), machineHealth: chosen.card,
+};
+if (remote) {
+  item.machineId = 'm-build';
+  item.machine = 'build-box';
+}
+
+// ?dialog=1: the in-window dialog over two waiting cards (disk, then memory).
+if (params.has('dialog')) {
+  const toItem = (id: string, fixture: FixtureCard, createdAt: number): HealthNotifyItem => ({
+    id, ui: 'options', title: fixture.title, context: fixture.context, choices: fixture.choices.map(label => ({ label })),
+    source: { name: 'Pane', agent: 'Pane' }, state: 'waiting', createdAt, machineHealth: fixture.card,
+  });
+  const items = [toItem('d1', cards.disk, 1), toItem('m1', cards.memory, 2)];
+  Object.assign(window, { electronAPI: { notify: { run: async (command: { answer?: { choice?: string } }) => { window.qaAnswers.push(command.answer?.choice ?? ''); } } } });
+  useNotifyStore.setState({ snapshot: { settings: DEFAULT_NOTIFY_SETTINGS, items, queue: items.map(item => item.id), hidden: [], strip: null, stripSurface: null, pausedUntil: null,
+    shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [], cardsOn: { kind: 'any' }, thisMachine: null } });
+}
+
+createRoot(document.getElementById('root')!).render(
+  params.has('dialog') ? <HealthCardDialog /> : <div className="bg-bg-primary" style={{ padding: 32, minHeight: '100vh' }}>
+    <div className="rounded-2xl border border-border-primary bg-surface-primary p-6 shadow-xl" style={{ width: 720 }}>
+      <HealthCardBody
+        item={item}
+        machineName={remote ? 'build-box' : undefined}
+        onAnswer={choice => { window.qaAnswers.push(choice); }}
+        onAskAgent={() => { window.qaAsked += 1; }}
+        onReview={params.has('review') ? () => {} : undefined}
+      />
+    </div>
+  </div>
+);

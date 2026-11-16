@@ -43,6 +43,7 @@ export class CardGate {
 
 const GB = 1024 ** 3;
 const MB = 1024 * 1024;
+const mbText = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
 /** "13 GB", "2.4 GB", "40 MB": the same wording as the Resources page. */
 const formatGB = (bytes: number) => (bytes >= 10 * GB ? `${Math.round(bytes / GB)} GB` : bytes >= GB ? `${(bytes / GB).toFixed(1)} GB` : `${Math.round(bytes / (1024 * 1024))} MB`);
 
@@ -115,7 +116,7 @@ export function leakCard(leak: LeakWarning, paneName: string, canRestart: boolea
   const minutes = Math.round(leak.windowMs / 60_000);
   return {
     title: `${name} in ${paneName} keeps using more memory`,
-    context: `It grew ${leak.growthMB >= 1024 ? `${(leak.growthMB / 1024).toFixed(1)} GB` : `${leak.growthMB} MB`} in ${minutes} min and kept climbing. It now uses ${leak.memoryMB} MB.`,
+    context: `It grew ${mbText(leak.growthMB)} in ${minutes} min and kept climbing. It now uses ${mbText(leak.memoryMB)}.`,
     choices: canRestart ? [RESTART_IT, STOP_IT, IGNORE_PROCESS] : [STOP_IT, IGNORE_PROCESS],
     card: {
       kind: 'leak', level: 'warning', machine, hostname: snapshot.hostname,
