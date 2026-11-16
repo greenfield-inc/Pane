@@ -371,6 +371,14 @@ describe('MobilePushSender', () => {
       expect(alerts()).toEqual([]);
     });
 
+    it("says a plain shell is blocked when a program in it reports so itself (OSC 7501)", async () => {
+      const { sender, alerts } = await apnsHost();
+      const shell = { sessionId: 'pane-1', panelId: 'shell-1' } as const;
+      await sender.observeStatus({ ...shell, state: 'working', reason: 'program_status:working' });
+      await sender.observeStatus({ ...shell, state: 'blocked', reason: 'program_status:blocked:auth', screenLines: ['Password required'] });
+      expect(alerts()).toEqual([alert('api-fix', 'api-fix is blocked')]);
+    });
+
     it('replaces and groups alerts per pane', async () => {
       const { sender, requests } = await apnsHost({ 'pane-1': 'api-fix', 'pane-2': 'docs' });
       for (const sessionId of ['pane-1', 'pane-1', 'pane-2']) {

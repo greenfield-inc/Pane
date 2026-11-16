@@ -6,7 +6,7 @@ import { TerminalEmulatorHostConnection } from './terminalEmulatorClient';
 describe('RemoteTerminalEmulator', () => {
   it('pushes screen changes so synchronous reads catch up without a refresh', async () => {
     const emulator = inProcessEmulatorHost().createEmulator(20, 3);
-    emulator.write('\x1b]0;agent title\x07\x1b[?1049h\x1b[Hworking');
+    emulator.write('\x1b]0;agent title\x07\x1b[?1049h\x1b[Hworking\x1b]7501;state=working:app=cargo\x1b\\');
 
     await vi.waitFor(() => expect(emulator.state).toEqual({
       screenText: 'working',
@@ -15,6 +15,7 @@ describe('RemoteTerminalEmulator', () => {
       isAlternateScreen: true,
       oscTitle: 'agent title',
       oscProgress: '',
+      programStatus: { state: 'working', app: 'cargo' },
     }));
     emulator.dispose();
   });

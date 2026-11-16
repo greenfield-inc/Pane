@@ -16,6 +16,7 @@ import {
 } from '../../../shared/types/remoteDaemon';
 import type { ApnsCredentialConfig } from '../../../shared/types/sharedCredentials';
 import type { NotifyItem } from '../../../shared/types/notify';
+import { isProgramStatusReason } from '../services/agentStatus/programStatus';
 
 interface MobilePushConfigManager {
   getConfig(): { remoteDaemon?: RemoteDaemonConfig; apns?: ApnsCredentialConfig };
@@ -247,8 +248,9 @@ export class MobilePushSender {
   }
 
   observeStatus(event: PanelAgentStatusEvent): Promise<void> {
-    // Plain shells go quiet all the time; only agents tell the phone anything.
-    if (!event.agentType) return Promise.resolve();
+    // Plain shells go quiet all the time; only agents, and programs that
+    // report their own status (OSC 7501), tell the phone anything.
+    if (!event.agentType && !isProgramStatusReason(event.reason)) return Promise.resolve();
     this.scheduleFinished(event);
     return this.mutate(() => this.processStatus(event));
   }

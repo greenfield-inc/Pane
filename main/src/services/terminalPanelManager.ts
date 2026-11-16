@@ -50,6 +50,7 @@ import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
 import { runpaneWaits, terminalMidTurn } from './agentStatus/midTurn';
 import { blockedPromptKey, blockedScreenLines, detectAgentState } from './agentStatus/manifestEngine';
 import { getManifestForAgent } from './agentStatus/manifests';
+import { detectionFromProgramStatus, PROGRAM_STATUS_QUERY_REPLY } from './agentStatus/programStatus';
 import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { PaneEventArgument } from '../core/eventSink';
 import { STREAM_FRAME_MS } from '../../../shared/constants/streamCadence';
@@ -349,6 +350,8 @@ interface TerminalProcess {
   workedVisibly?: boolean;
   /** Reason sent with the last `panel:agentStatus` event. */
   lastStatusPromptKey?: string;
+  /** A foreground read is checking whether the program behind an OSC 7501 record exited. */
+  programExitCheck?: boolean;
   /** Pane answered Claude's bypass-permissions warning in this terminal. */
   bypassWarningAnswered?: boolean;
   /** Last status scan, reused while the emulator pushes no new screen. */
@@ -2339,6 +2342,14 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   private setupTerminalHandlers(terminal: TerminalProcess): void {
+    if (terminal.screenEmulator) terminal.screenEmulator.onProgramStatusQuery = () => {
+      if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
+      try {
+        terminal.pty.write(PROGRAM_STATUS_QUERY_REPLY);
+      } catch (error) {
+        console.warn(`[TerminalPanelManager] Could not answer an OSC 7501 query in ${terminal.panelId}:`, error);
+      }
+    };
     // Handle terminal output
     terminal.pty.onData((data: string) => {
       if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
@@ -2528,6 +2539,9 @@ export class TerminalPanelManager extends EventEmitter {
       console.warn(`[TerminalPanelManager] Failed to write to terminal ${panelId}:`, err);
       return;
     }
+    // Typing in the tab means its OSC 7501 done or error result has been seen.
+    const reportedState = terminal.screenEmulator?.state.programStatus?.state;
+    if (reportedState === 'done' || reportedState === 'error') terminal.screenEmulator?.dropProgramStatus('finished');
     terminal.lastActivity = new Date();
   }
   
@@ -2938,19 +2952,22 @@ export class TerminalPanelManager extends EventEmitter {
         const screen = emulator.state;
         if (!terminal.agentType) this.detectForegroundAgent(terminal, screen);
         const manifest = getManifestForAgent(terminal.agentType);
+        // A program's own OSC 7501 report outranks reading its screen.
+        const reported = screen.programStatus;
+        if (reported) this.endRecordsOfExitedProgram(terminal, reported.state);
         let detection = terminal.lastStatusScan?.screen === screen ? terminal.lastStatusScan.detection : null;
         if (!detection) {
           terminal.screenChangedAt = Date.now();
-          detection = detectAgentState(manifest, {
+          detection = reported ? detectionFromProgramStatus(reported) : detectAgentState(manifest, {
             screen: screen.screenText,
             oscTitle: screen.oscTitle,
             oscProgress: screen.oscProgress,
           });
           terminal.lastStatusScan = { screen, detection };
         }
-        if (detection.visibleWorking) terminal.workedVisibly = true;
+        if (detection.visibleWorking || reported?.state === 'done' || reported?.state === 'error') terminal.workedVisibly = true;
         const next = this.agentStatusMonitor.update(terminal.panelId, detection, Date.now());
-        const promptLines = () => blockedScreenLines(manifest, detection.matchedRuleId, {
+        const promptLines = () => reported ? (reported.msg ? [reported.msg] : []) : blockedScreenLines(manifest, detection.matchedRuleId, {
           screen: screen.screenText,
           oscTitle: screen.oscTitle,
           oscProgress: screen.oscProgress,
@@ -2977,6 +2994,29 @@ export class TerminalPanelManager extends EventEmitter {
     } catch (error) {
       console.error('[TerminalPanelManager] agent status poll failed:', error);
     }
+  }
+
+  /**
+   * An OSC 7501 working, blocked or idle record lasts until its program exits.
+   * When Pane's own shell holds the foreground again, end those records so the
+   * tab reads its screen again. Done and error records stay until the person
+   * types (writeToTerminal). Windows, WSL and ptyHost terminals cannot name
+   * their foreground, so their records last until replaced or cleared.
+   */
+  private endRecordsOfExitedProgram(terminal: TerminalProcess, state: string): void {
+    if (state === 'done' || state === 'error' || terminal.programExitCheck) return;
+    const name = this.readForegroundProcessName(terminal);
+    if (!name || !this.isInteractiveShellProcess(terminal, name)) return;
+    terminal.programExitCheck = true;
+    // A script run by the same shell program has a process group of its own.
+    this.readForegroundGroup(terminal.pty.pid)
+      .then((group) => {
+        if (group === terminal.pty.pid && this.terminals.get(terminal.panelId) === terminal && !terminal.destroying) {
+          terminal.screenEmulator?.dropProgramStatus('running');
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => { terminal.programExitCheck = false; });
   }
 
   /** Pane is answering the trust menu on this screen itself, for a Session's own folder. */
@@ -3242,8 +3282,8 @@ export class TerminalPanelManager extends EventEmitter {
   private isIdleForPromotion(terminal: TerminalProcess): boolean {
     const emulator = terminal.screenEmulator;
     if (emulator) {
-      const { screenText, oscTitle, oscProgress } = emulator.state;
-      const detection = detectAgentState(getManifestForAgent(terminal.agentType), {
+      const { screenText, oscTitle, oscProgress, programStatus } = emulator.state;
+      const detection = programStatus ? detectionFromProgramStatus(programStatus) : detectAgentState(getManifestForAgent(terminal.agentType), {
         screen: screenText,
         oscTitle,
         oscProgress,
