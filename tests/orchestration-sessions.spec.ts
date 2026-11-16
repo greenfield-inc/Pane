@@ -750,6 +750,17 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
 });
 
+/**
+ * Pins the renderer to macOS. Pane draws its own title bar only on macOS (and
+ * Windows with the overlay); Linux keeps native decorations, so a test that
+ * reads the title bar must pin the platform or it passes only on a Mac.
+ */
+async function pinMacPlatform(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' });
+  });
+}
+
 /** The agents the Create Session picker offers on a platform: every configured agent that runs there. */
 function sessionAgentsOn(platform: string): string[] {
   return CONFIGURED_AGENT_IDS.filter(id => isAgentSupportedOnPlatform(id, platform));
@@ -1117,6 +1128,7 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
 });
 
 test('Sessions stay collapsed until you open one, and this computer remembers it per host', async ({ page }) => {
+  await pinMacPlatform(page);
   await page.setViewportSize({ width: 1400, height: 900 });
   const association = (paneId: string) => [{ paneId, panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z' }];
   await installSessionsFixture(page, [
@@ -2286,6 +2298,7 @@ test('Sessions can be renamed from their right-click menu', async ({ page }) => 
 });
 
 test('the Session "+" menu opens terminals and browsers as tabs, apart from the terminal dock', async ({ page }) => {
+  await pinMacPlatform(page);
   await installSessionsFixture(page, [sessionFixture('addtool', 'Add tool demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
   await page.getByTestId('orchestration-session-addtool').click();
