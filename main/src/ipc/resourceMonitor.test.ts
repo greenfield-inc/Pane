@@ -56,26 +56,29 @@ describe('stopping or restarting a process from outside', () => {
 });
 
 describe('Ask an agent', () => {
-  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>) {
+  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>, agent: { resume?: string; ready?: boolean[]; panelType?: string } = {}) {
     const typed: Array<{ panelId: string; input: string }> = [];
+    const inputs: Array<{ panelId: string; input: string }> = [];
+    const readiness = [...(agent.ready ?? [])];
     const created: Array<{ name: string }> = [];
-    const view = (id: string, name: string) => ({ session: { id, name }, panel: { id: `panel-${id}`, type: 'chat' }, internalSession: { worktreePath: '/tmp' } });
+    const view = (id: string, name: string) => ({ session: { id, name }, panel: { id: `panel-${id}`, type: agent.panelType ?? 'chat' }, internalSession: { worktreePath: '/tmp' } });
     const sessions = partial<OrchestrationSessionManager>({
       list: async () => partial({ sessions: saved.map(session => partial(session)) }),
       getView: async ({ sessionId }) => partial(view(sessionId ?? '', saved.find(session => session.id === sessionId)?.name ?? '')),
       create: async input => { created.push({ name: input.name }); return partial(view('new', input.name)); },
     });
     const registry = new PaneCommandRegistry();
-    registry.register('runpane:panels:resume', async () => ({ action: 'already-running' }));
-    registry.register('runpane:panels:wait', async () => ({ ok: true }));
+    registry.register('runpane:panels:resume', async () => ({ action: agent.resume ?? 'already-running' }));
+    registry.register('runpane:panels:wait', async () => ({ ok: readiness.shift() ?? true }));
+    registry.register('runpane:panels:input', async request => { inputs.push(partial(request)); return { ok: true }; });
     registry.register('runpane:panels:submit', async request => { typed.push(partial(request)); return { ok: true }; });
     registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions }), registry);
-    return { ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: 'Free memory.' }]), typed, created };
+    return { ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: 'Free memory.' }]), typed, created, inputs };
   }
 
   it('hands the request to the numbered Session that replaced an archived one, and starts no other', async () => {
     const { ask, typed, created } = asker([{ id: 'old', name: 'Clean up devbox', archived: true }, { id: 'two', name: 'Clean up devbox 2' }]);
-    await expect(ask()).resolves.toEqual({ sessionId: 'two', panelId: 'panel-two' });
+    await expect(ask()).resolves.toEqual({ sessionId: 'two', panelId: 'panel-two', typed: true });
     expect(typed).toMatchObject([{ panelId: 'panel-two', input: 'Free memory.' }]);
     expect(created).toEqual([]);
   });
@@ -86,7 +89,14 @@ describe('Ask an agent', () => {
     // Creating reads the preferred shell to decide how the request reaches the new agent.
     setPaneRuntime(partial<PaneRuntime>({ getConfigManager: () => partial<ConfigManager>({ getPreferredShell: () => 'auto' }) }));
     const { ask, created } = asker([{ id: 'old', name: 'Clean up devbox', archived: true }, { id: 'x', name: 'Clean up devbox tools' }]);
-    await expect(ask()).resolves.toEqual({ sessionId: 'new', panelId: 'panel-new' });
+    await expect(ask()).resolves.toMatchObject({ sessionId: 'new', panelId: 'panel-new' });
     expect(created).toEqual([{ name: 'Clean up devbox 2' }]);
+  });
+
+  it('shows the Session when its agent is slow to start, and later leaves the request in the agent\'s input box for the person to send', async () => {
+    const { ask, typed, inputs } = asker([{ id: 'one', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, true], panelType: 'terminal' });
+    await expect(ask()).resolves.toEqual({ sessionId: 'one', panelId: 'panel-one', typed: false });
+    await vi.waitFor(() => expect(inputs).toMatchObject([{ panelId: 'panel-one', input: 'Free memory.' }]));
+    expect(typed).toEqual([]);
   });
 });

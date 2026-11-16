@@ -40,6 +40,9 @@ const DAEMON_RESOURCE_MONITOR_CHANNELS = [
   MACHINE_HEALTH_ASK_AGENT_CHANNEL,
 ] as const;
 
+/** How long an agent that missed the first 30 s may take to start before its request is dropped. */
+const LATE_AGENT_WAIT_MS = 10 * 60_000;
+
 export function registerResourceMonitorHandlers(
   ipcMain: IpcMain,
   services: AppServices,
@@ -150,12 +153,24 @@ export function registerResourceMonitorHandlers(
     if (!sessions) {
       throw new PaneError('ERR_MACHINE_HEALTH_UNAVAILABLE', 'Sessions are not running in this Pane process, so no agent was asked.', 'Restart Pane, then try Ask an agent again.');
     }
-    const typeWhenReady = async (panelId: string, sessionName: string) => {
-      const ready = await commandRegistry.invoke('runpane:panels:wait', [{ panelId, condition: 'ready' }]);
-      if (decodeOptionalBoundary(ready, boundary.object({ ok: boundary.boolean }))?.ok !== true) {
-        throw new PaneError('ERR_MACHINE_HEALTH_AGENT_NOT_READY', `Session “${sessionName}” is open, but its agent was not ready for the request, so nothing was typed.`, 'Open the Session and paste the request when the agent is ready.');
+    const submit = (panelId: string) => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: prompt, source: 'user', expectReport: false }]);
+    const ready = async (panelId: string, timeoutMs?: number) =>
+      decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:wait', [{ panelId, condition: 'ready', timeoutMs }]), boundary.object({ ok: boundary.boolean }))?.ok === true;
+    /**
+     * Types the request once the agent is ready (30 s). An agent still starting gets it later: a
+     * terminal agent in its input box, for the person to send; a chat tab as a queued message.
+     */
+    const typeWhenReady = async (panelId: string, panelType: string): Promise<boolean> => {
+      if (await ready(panelId)) {
+        await submit(panelId);
+        return true;
       }
-      await commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: prompt, source: 'user', expectReport: false }]);
+      void (async () => {
+        if (!(await ready(panelId, LATE_AGENT_WAIT_MS))) return;
+        if (panelType === 'chat') await submit(panelId);
+        else await commandRegistry.invoke('runpane:panels:input', [{ panelId, input: prompt, source: 'user' }]);
+      })().catch(error => console.warn('[MachineHealth] Ask an agent: the late agent did not get the request:', error));
+      return false;
     };
     const key = (sessionName: string) => sessionName.trim().toLocaleLowerCase();
     // The machine's Session, or the numbered one that replaced it after it was archived.
@@ -166,9 +181,11 @@ export function registerResourceMonitorHandlers(
       const view = await sessions.getView({ sessionId: open.id });
       const resumed = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId: view.panel.id }]), boundary.object({ action: boundary.string }));
       // A running agent queues the request behind its turn; one just started gets it once it is ready.
-      if (resumed?.action === 'already-running') await commandRegistry.invoke('runpane:panels:submit', [{ panelId: view.panel.id, input: prompt, source: 'user', expectReport: false }]);
-      else await typeWhenReady(view.panel.id, view.session.name);
-      return { sessionId: view.session.id, panelId: view.panel.id };
+      if (resumed?.action === 'already-running') {
+        await submit(view.panel.id);
+        return { sessionId: view.session.id, panelId: view.panel.id, typed: true };
+      }
+      return { sessionId: view.session.id, panelId: view.panel.id, typed: await typeWhenReady(view.panel.id, view.panel.type) };
     }
     // An archived Session keeps its name, so the new one takes the next free number.
     let fresh = name;
@@ -181,8 +198,8 @@ export function registerResourceMonitorHandlers(
     });
     if (view.panel.type === 'terminal') await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
     // PowerShell and cmd cannot carry it on the launch line: type it once the agent is ready.
-    if (!atLaunch) await typeWhenReady(view.panel.id, view.session.name);
-    return { sessionId: view.session.id, panelId: view.panel.id };
+    const typed = atLaunch || await typeWhenReady(view.panel.id, view.panel.type);
+    return { sessionId: view.session.id, panelId: view.panel.id, typed };
   });
 
   commandRegistry.bindChannels(ipcMain, DAEMON_RESOURCE_MONITOR_CHANNELS);
