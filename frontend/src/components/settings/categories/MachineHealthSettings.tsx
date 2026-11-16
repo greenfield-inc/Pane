@@ -8,6 +8,7 @@ import type { SettingsPersistence } from '../useSettingsPersistence';
 import type { SettingsSettingId } from '../../../types/settings';
 import { showActionError } from '../../../stores/errorStore';
 import { cn } from '../../../utils/cn';
+import { formatBytes } from '../../../../../shared/utils/formatBytes';
 
 interface NumberFieldProps {
   label: string;
@@ -36,13 +37,12 @@ function NumberField({ label, unit, saved, min, max, onSave }: NumberFieldProps)
   );
 }
 
-const AUTOMATIC: Array<{ key: keyof HealthSettings; label: string; description: string }> = [
-  { key: 'autoArchiveFinished', label: 'Archive finished Panes automatically', description: 'Panes whose PR merged or closed, whose folder is missing, or that sat idle for the days set above. Branches stay and Restore works.' },
-  { key: 'autoClearAgentTemp', label: 'Clear agent temp files automatically', description: 'Temp folders of Panes that are gone, and items nobody touched for 2 days with no process working in them.' },
-  { key: 'autoClearPausedScratch', label: 'Clear scratch of paused Panes automatically', description: 'QA and scratch folders of Panes whose tabs are all paused.' },
-  { key: 'autoClearArchivedFolders', label: 'Remove folders left by archived Panes automatically', description: 'Only folders git confirms were that Pane\'s worktree.' },
-  { key: 'autoPauseUnderPressure', label: 'Pause idle Panes automatically when memory is tight', description: 'Once per pressure episode, with the same skips as auto-pause.' },
-  { key: 'autoStopLeftovers', label: 'Stop leftover processes automatically', description: 'Processes that left a Pane that is not archived. Those of archived and paused Panes always stop by themselves.' },
+const AUTOMATIC: Array<{ key: keyof HealthSettings; settingId: SettingsSettingId; label: string; description: string }> = [
+  { key: 'autoArchiveFinished', settingId: 'machine-health-auto-archive', label: 'Archive finished Panes automatically', description: 'Panes whose PR merged or closed, whose folder is missing, or that sat idle for the days set above. Branches stay and Restore works.' },
+  { key: 'autoClearAgentTemp', settingId: 'machine-health-auto-agent-temp', label: 'Clear agent temp files automatically', description: 'Temp folders of Panes that are gone, and items nobody touched for 2 days with no process working in them.' },
+  { key: 'autoClearPausedScratch', settingId: 'machine-health-auto-paused-scratch', label: 'Clear scratch of paused Panes automatically', description: 'QA and scratch folders of Panes whose tabs are all paused.' },
+  { key: 'autoClearArchivedFolders', settingId: 'machine-health-auto-archived-folders', label: 'Remove folders left by archived Panes automatically', description: 'Only folders git confirms were that Pane\'s worktree.' },
+  { key: 'autoPauseUnderPressure', settingId: 'machine-health-auto-pause', label: 'Pause idle Panes automatically when memory is tight', description: 'Once per pressure episode, with the same skips as auto-pause.' },
 ];
 
 /** Settings → Machine health: thresholds, the automatic switch for each kind Pane otherwise asks about, and Run now. */
@@ -50,8 +50,8 @@ export function MachineHealthSettings({ persistence }: { persistence: SettingsPe
   const health = persistence.config!.machineHealth ?? {};
   const [running, setRunning] = useState(false);
   const [ran, setRan] = useState<string | null>(null);
-  const save = (settingId: SettingsSettingId, update: HealthSettings) =>
-    persistence.saveConfig(settingId, { machineHealth: { ...health, ...update } });
+  // Main merges machine health settings field by field, so each save sends only what changed.
+  const save = (settingId: SettingsSettingId, update: HealthSettings) => persistence.saveConfig(settingId, { machineHealth: update });
 
   return (
     <SettingsPage title="Machine health" description="Pane watches free disk, memory pressure and every process it started. It removes its own leftovers by itself and asks before anything else; each kind below can be switched to automatic.">
@@ -66,7 +66,7 @@ export function MachineHealthSettings({ persistence }: { persistence: SettingsPe
           <NumberField label="Idle hours" unit="hours" saved={health.pauseIdleHours ?? 2} min={1} max={720} onSave={value => { void save('machine-health-memory', { pauseIdleHours: value }); }} />
         </SettingRow>
         <SettingRow settingId="machine-health-finished" label="A Pane is finished after" description="Days with no activity before Pane offers to archive a Pane whose PR is still open or has none." saveState={persistence.saveStates['machine-health-finished']}>
-          <NumberField label="Idle days" unit="days" saved={health.finishedIdleDays ?? 14} min={0} max={365} onSave={value => { void save('machine-health-finished', { finishedIdleDays: value }); }} />
+          <NumberField label="Idle days" unit="days" saved={health.finishedIdleDays ?? 14} min={1} max={365} onSave={value => { void save('machine-health-finished', { finishedIdleDays: value }); }} />
         </SettingRow>
         <SettingRow settingId="machine-health-leak" label="Leak window" description="A Pane process counts as leaking when it has grown in every slice of this window, by at least 500 MB and 50%." saveState={persistence.saveStates['machine-health-leak']}>
           <div className="flex items-center gap-4">
@@ -77,8 +77,8 @@ export function MachineHealthSettings({ persistence }: { persistence: SettingsPe
       </SettingsSection>
       <SettingsSection title="Do it automatically">
         {AUTOMATIC.map(item => (
-          <SettingRow key={item.key} settingId="machine-health-automatic" label={item.label} description={item.description} saveState={persistence.saveStates['machine-health-automatic']}>
-            <ImmediateToggle label={item.label} value={health[item.key] === true} onSave={value => save('machine-health-automatic', { [item.key]: value })} />
+          <SettingRow key={item.key} settingId={item.settingId} label={item.label} description={item.description} saveState={persistence.saveStates[item.settingId]}>
+            <ImmediateToggle label={item.label} value={health[item.key] === true} onSave={value => save(item.settingId, { [item.key]: value })} />
           </SettingRow>
         ))}
       </SettingsSection>
@@ -91,7 +91,7 @@ export function MachineHealthSettings({ persistence }: { persistence: SettingsPe
               try {
                 // SAFETY: the cleanup channel answers a CleanupRun.
                 const run = await window.electronAPI.invoke(MACHINE_HEALTH_CLEANUP_CHANNEL, { kinds: ['update-snapshot', 'migration-backup'], source: 'ui' }) as { removed: unknown[]; freedBytes: number };
-                setRan(run.removed.length ? `Removed ${run.removed.length}, freed ${Math.round(run.freedBytes / 1024 ** 2)} MB.` : 'Nothing to remove.');
+                setRan(run.removed.length ? `Removed ${run.removed.length}, freed ${formatBytes(run.freedBytes)}.` : 'Nothing to remove.');
               } catch (error) {
                 showActionError('Could not remove Pane\'s leftovers', error);
               } finally {
