@@ -75,10 +75,10 @@ Every flag also reads the environment variable in brackets.
 | `--direct-quic` [`PANE_RELAY_DIRECT_QUIC`] | off | UDP address for QUIC address discovery on direct paths; clients expect port 7842, such as `0.0.0.0:7842` |
 | `--blocklist` [`PANE_RELAY_BLOCKLIST`] | | File of blocked ids, one per line, reread every 5 s when it changes |
 | `--max-connections` | 20000 | Total open client connections |
-| `--limit-bytes-per-min` | 50000000 | Per computer and client address, and per client address on the iroh relay; that address is slowed above it and refused above twice it |
-| `--limit-conns-per-min` | 100 | New connections, counted like `--limit-bytes-per-min` |
-| `--limit-ip-bytes-per-min` | 200000000 | Per client address across all computers; slowed above it, refused above twice it |
-| `--limit-ip-conns-per-min` | 400 | New connections, counted like `--limit-ip-bytes-per-min` |
+| `--limit-mbit-per-sec` | 500 | Sustained traffic per computer and client address, and per client address on the iroh relay; past it that address is slowed to this rate, never cut off |
+| `--limit-conns-per-min` | 100 | New connections, counted like `--limit-mbit-per-sec`; slowed above it, refused above twice it |
+| `--limit-ip-mbit-per-sec` | 2000 | Sustained traffic per client address across all computers; slowed to this rate past it |
+| `--limit-ip-conns-per-min` | 400 | New connections per client address across all computers; slowed above it, refused above twice it |
 | `--limit-agent-conns-per-min` | 60 | Control connections per address (IPv6 per /56); slowed above it, refused above twice it |
 | `--limit-new-ids-per-hour` | 20 | Computers new to this relay per address (IPv6 per /56); refused above it |
 | `--max-computers` | 250000 | Computers the registry holds; a new one replaces the one offline longest, and is refused only when all are online |

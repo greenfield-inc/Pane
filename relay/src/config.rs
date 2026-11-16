@@ -136,14 +136,10 @@ pub struct Config {
     #[arg(long, env = "PANE_RELAY_MAX_CONNECTIONS", default_value_t = 20_000)]
     pub max_connections: usize,
 
-    /// Per computer and client address: client bytes a minute before slowing
-    /// that address (refused at twice this).
-    #[arg(
-        long,
-        env = "PANE_RELAY_LIMIT_BYTES_PER_MIN",
-        default_value_t = 50_000_000
-    )]
-    pub limit_bytes_per_min: u64,
+    /// Per computer and client address: sustained client traffic in Mbit/s, both
+    /// directions together. Past it that address is slowed to this rate, never cut off.
+    #[arg(long, env = "PANE_RELAY_LIMIT_MBIT_PER_SEC", default_value_t = 500)]
+    pub limit_mbit_per_sec: u64,
 
     /// Per computer and client address: new client connections a minute before
     /// slowing that address (refused at twice this).
@@ -178,13 +174,10 @@ pub struct Config {
     #[arg(long, hide = true, default_value_t = 600)]
     pub txt_ttl_secs: u64,
 
-    /// Per client address across all computers: bytes a minute before slowing (refused at twice this).
-    #[arg(
-        long,
-        env = "PANE_RELAY_LIMIT_IP_BYTES_PER_MIN",
-        default_value_t = 200_000_000
-    )]
-    pub limit_ip_bytes_per_min: u64,
+    /// Per client address across all computers: sustained traffic in Mbit/s; past it the
+    /// address is slowed to this rate, never cut off.
+    #[arg(long, env = "PANE_RELAY_LIMIT_IP_MBIT_PER_SEC", default_value_t = 2000)]
+    pub limit_ip_mbit_per_sec: u64,
 
     /// Per client address across all computers: new connections a minute before
     /// slowing (refused at twice this).

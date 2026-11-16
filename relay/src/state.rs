@@ -50,8 +50,23 @@ pub enum Level {
 struct Usage {
     start: Instant,
     window: Duration,
-    bytes: u64,
-    conns: u64,
+    count: u64,
+}
+
+/// A token bucket of bytes that refills at `rate` a second and holds one second's worth.
+/// Taking more than it holds leaves it in debt, and the sender waits the debt out.
+struct Bucket {
+    tokens: f64,
+    rate: f64,
+    at: Instant,
+}
+
+impl Bucket {
+    fn refill(&mut self, now: Instant) {
+        let earned = now.duration_since(self.at).as_secs_f64() * self.rate;
+        self.tokens = (self.tokens + earned).min(self.rate);
+        self.at = now;
+    }
 }
 
 const MINUTE: Duration = Duration::from_secs(60);
@@ -59,11 +74,11 @@ const HOUR: Duration = Duration::from_secs(3600);
 /// A control connection sending more frames than this a minute is cut off.
 const MAX_FRAMES_PER_MIN: u64 = 600;
 
-/// What a usage counter charges, each with its own limits (see PROTOCOL.md, Limits).
+/// What a usage counter counts, each with its own limit (see PROTOCOL.md, Limits).
 pub enum Charge<'a> {
-    /// A client connection to a computer, by computer id and client source.
+    /// Client connections to a computer, by computer id and client source.
     Client(&'a str, &'a str),
-    /// Everything one client source sends to or through this relay's computers.
+    /// Client connections from one source to any of this relay's computers.
     Source(&'a str),
     /// A client of the iroh relay, by source.
     Direct(&'a str),
@@ -116,6 +131,7 @@ pub struct State {
     pending: Mutex<HashMap<String, oneshot::Sender<BoxStream>>>,
     status: Mutex<HashMap<String, Status>>,
     usage: Mutex<HashMap<String, Usage>>,
+    buckets: Mutex<HashMap<String, Bucket>>,
     blocked: RwLock<HashSet<String>>,
     open_clients: AtomicUsize,
     next_session: AtomicU64,
@@ -162,6 +178,7 @@ impl State {
             pending: Mutex::default(),
             status: Mutex::default(),
             usage: Mutex::default(),
+            buckets: Mutex::default(),
             blocked: RwLock::default(),
             open_clients: AtomicUsize::new(0),
             next_session: AtomicU64::new(1),
@@ -271,85 +288,100 @@ impl State {
         (n < self.cfg.max_connections).then_some(slot)
     }
 
-    /// Adds to a counter and returns its level: over its limit slows, over twice refuses.
-    pub fn charge(&self, charge: Charge, bytes: u64, conns: u64) -> Level {
+    /// Adds `n` to a counter and returns its level: over its limit slows, over twice refuses.
+    pub fn charge(&self, charge: Charge, n: u64) -> Level {
         let cfg = &self.cfg;
-        let (key, window, byte_limit, conn_limit) = match charge {
+        let (key, window, limit) = match charge {
             Charge::Client(id, source) => (
                 format!("client {id} {source}"),
                 MINUTE,
-                cfg.limit_bytes_per_min,
                 cfg.limit_conns_per_min,
             ),
             Charge::Source(source) => (
                 format!("source {source}"),
                 MINUTE,
-                cfg.limit_ip_bytes_per_min,
                 cfg.limit_ip_conns_per_min,
             ),
-            Charge::Direct(source) => (
-                format!("direct {source}"),
-                MINUTE,
-                cfg.limit_bytes_per_min,
-                cfg.limit_conns_per_min,
-            ),
-            Charge::Frames(id) => (format!("frames {id}"), MINUTE, u64::MAX, MAX_FRAMES_PER_MIN),
+            Charge::Direct(source) => (format!("direct {source}"), MINUTE, cfg.limit_conns_per_min),
+            Charge::Frames(id) => (format!("frames {id}"), MINUTE, MAX_FRAMES_PER_MIN),
             Charge::AgentConns(source) => (
                 format!("agent {source}"),
                 MINUTE,
-                u64::MAX,
                 cfg.limit_agent_conns_per_min,
             ),
-            Charge::NewIds(source) => (
-                format!("new {source}"),
-                HOUR,
-                u64::MAX,
-                cfg.limit_new_ids_per_hour,
-            ),
+            Charge::NewIds(source) => (format!("new {source}"), HOUR, cfg.limit_new_ids_per_hour),
         };
         let mut usage = self.usage.lock().unwrap();
         let now = Instant::now();
         let fresh = Usage {
             start: now,
             window,
-            bytes: 0,
-            conns: 0,
+            count: 0,
         };
         let u = usage.entry(key).or_insert(fresh);
         if now.duration_since(u.start) >= u.window {
             u.start = now;
-            u.bytes = 0;
-            u.conns = 0;
+            u.count = 0;
         }
-        u.bytes = u.bytes.saturating_add(bytes);
-        u.conns = u.conns.saturating_add(conns);
-        let level = |used: u64, limit: u64| {
-            if used > limit.saturating_mul(2) {
-                Level::Over
-            } else if used > limit {
-                Level::Slow
-            } else {
-                Level::Ok
-            }
-        };
-        level(u.bytes, byte_limit).max(level(u.conns, conn_limit))
+        u.count = u.count.saturating_add(n);
+        if u.count > limit.saturating_mul(2) {
+            Level::Over
+        } else if u.count > limit {
+            Level::Slow
+        } else {
+            Level::Ok
+        }
     }
 
-    /// Charges a client connection (`conns` 1) or its bytes to both the
-    /// computer-and-source counter and the source's own.
-    pub fn charge_client(&self, id: &str, source: &str, bytes: u64, conns: u64) -> Level {
-        let pair = self.charge(Charge::Client(id, source), bytes, conns);
-        pair.max(self.charge(Charge::Source(source), bytes, conns))
+    /// Counts a new client connection against both the computer-and-source
+    /// counter and the source's own.
+    pub fn charge_client(&self, id: &str, source: &str) -> Level {
+        let pair = self.charge(Charge::Client(id, source), 1);
+        pair.max(self.charge(Charge::Source(source), 1))
     }
 
     /// True while the computer is past twice its own control-frame limit.
     pub fn over_limit(&self, id: &str) -> bool {
-        self.charge(Charge::Frames(id), 0, 0) == Level::Over
+        self.charge(Charge::Frames(id), 0) == Level::Over
     }
 
-    /// How long to pause after `n` bytes so a slowed connection runs at the per-computer limit.
-    pub fn slow_delay(&self, n: u64) -> Duration {
-        Duration::from_secs_f64(n as f64 * 60.0 / self.cfg.limit_bytes_per_min.max(1) as f64)
+    /// Takes `bytes` a client connection carried, and returns how long it waits
+    /// before the next so its address holds its rates: per computer, and across all computers.
+    pub fn pace_client(&self, id: &str, source: &str, bytes: u64) -> Duration {
+        let cfg = &self.cfg;
+        let pair = self.take(
+            format!("client {id} {source}"),
+            cfg.limit_mbit_per_sec,
+            bytes,
+        );
+        pair.max(self.take(format!("source {source}"), cfg.limit_ip_mbit_per_sec, bytes))
+    }
+
+    /// Like `pace_client`, for a client of the iroh relay.
+    pub fn pace_direct(&self, source: &str, bytes: u64) -> Duration {
+        self.take(
+            format!("direct {source}"),
+            self.cfg.limit_mbit_per_sec,
+            bytes,
+        )
+    }
+
+    fn take(&self, key: String, mbit_per_sec: u64, bytes: u64) -> Duration {
+        let rate = mbit_per_sec.max(1) as f64 * 125_000.0;
+        let now = Instant::now();
+        let mut buckets = self.buckets.lock().unwrap();
+        let b = buckets.entry(key).or_insert(Bucket {
+            tokens: rate,
+            rate,
+            at: now,
+        });
+        b.refill(now);
+        b.tokens -= bytes as f64;
+        if b.tokens >= 0.0 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs_f64(-b.tokens / rate)
+        }
     }
 
     /// Drops expired counters, and computers offline past the registry TTL.
@@ -359,6 +391,10 @@ impl State {
             .lock()
             .unwrap()
             .retain(|_, u| now.duration_since(u.start) < u.window);
+        self.buckets.lock().unwrap().retain(|_, b| {
+            b.refill(now);
+            b.tokens < b.rate
+        });
         let ttl = Duration::from_secs(self.cfg.registry_ttl_secs);
         let unproven_ttl = Duration::from_secs(self.cfg.unproven_ttl_secs);
         let txt_ttl = Duration::from_secs(self.cfg.txt_ttl_secs);
@@ -405,7 +441,7 @@ mod tests {
         let state = State::new(cfg, "pane.localhost".into(), registry, alerts, direct, 8443);
         let new_id = |ip: &str| {
             let source = registration_source(ip.parse().unwrap());
-            state.charge(Charge::NewIds(&source), 0, 1)
+            state.charge(Charge::NewIds(&source), 1)
         };
         // 2001:db8:0:<n>::1 for n in 0..20: twenty /64s inside 2001:db8::/56.
         for n in 0..20 {
