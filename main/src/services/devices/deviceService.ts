@@ -659,6 +659,14 @@ export class DeviceService {
     try {
       await this.agentDevice(paneId, device, ['open']);
     } catch (cause) {
+      // Another Pane's session outlived its lease (this Pane restarted while the daemon kept it):
+      // the lease is this Pane's now, so that session closes and this one opens.
+      const stale = cause instanceof PaneError ? /in use by session "(pane-[^"]+)"/.exec(cause.message)?.[1] : undefined;
+      if (stale && stale !== `pane-${paneId}` && this.lifecycle.holderOf(device.id) === paneId) {
+        await runAgentDevice(this.paths().agentDevice, ['close'], { ...this.target(paneId, device), session: stale }, { node: this.node, stateDir: this.stateDir() });
+        await this.agentDevice(paneId, device, ['open']);
+        return;
+      }
       // A session that outlived Pane's own lease (a restart) is the one this Pane would open.
       if (!(cause instanceof PaneError && /Session already active/i.test(cause.message))) throw cause;
     }

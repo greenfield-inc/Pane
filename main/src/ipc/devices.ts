@@ -519,13 +519,8 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
         await setPanelState(panel, { phase: 'off' });
         return true;
       }
-      if (!state.machineId) {
-        await openOnMac(services, caller, undefined);
-        return true;
-      }
-      await setPanelState(panel, { phase: 'booting' });
-      const { lease, device } = await remoteDevices(services).open(caller.paneId, caller.paneName, state.platform, state.deviceId);
-      await setPanelState(panel, { deviceId: device.id, machineId: lease.macId, phase: 'live', heldBy: undefined });
+      // The same open an agent's device_open does, so the tab names the device and Mac again.
+      await openOnMac(services, caller, state.machineId ? state.deviceId : undefined);
       return true;
     }
     if (state.deviceId && (action === 'shutdown' || action === 'restart')) await devices().shutdownDevice(state.deviceId);
