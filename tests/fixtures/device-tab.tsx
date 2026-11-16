@@ -64,9 +64,9 @@ const STATES: { label: string; state: Partial<DevicePanelState> }[] = [
   { label: 'Booting', state: { phase: 'booting' } },
   { label: 'Off after idle', state: { phase: 'off' } },
   { label: 'In use by another Pane', state: { phase: 'in-use', heldBy: { paneId: 'other', paneName: 'onboarding-copy' } } },
-  { label: 'Runs on a linked Mac', state: { machine: "Parsa's MacBook Pro", machineId: 'mbp', machineReason: { kind: 'automatic', text: "Runs on Parsa's MacBook Pro. This PC has no Xcode." } } },
+  { label: 'Runs on a linked Mac', state: { machine: "Studio MacBook Pro", machineId: 'mbp', machineReason: { kind: 'automatic', text: "Runs on Studio MacBook Pro. This PC has no Xcode." } } },
   { label: 'No Mac linked', state: { phase: 'no-mac', name: 'iPhone', machine: 'This PC' } },
-  { label: 'Linked Mac offline', state: { phase: 'mac-offline', name: 'iPhone', machine: 'This PC', macName: "Parsa's MacBook Pro" } },
+  { label: 'Linked Mac offline', state: { phase: 'mac-offline', name: 'iPhone', machine: 'This PC', macName: "Studio MacBook Pro" } },
 ];
 
 const openResult = JSON.stringify({ ok: true, panelId: 'device', paneDevice: { kind: 'pane-device', panelId: 'device', name: 'iPhone 17 Pro', os: 'iOS 27', machine: 'This Mac' } });
@@ -111,7 +111,7 @@ if (params.get('view') === 'states') {
     <DeviceClientContext.Provider value={client}>
       <div className="flex bg-bg-primary" style={{ height: '100vh' }}>
         <div className="border-r border-border-primary" style={{ width: 560, height: '100%' }}><ChatTabPanel panelId="chat" client={chatClient} actions={actions} /></div>
-        <div className="flex-1"><DevicePanel panel={devicePanel('device', params.get('mac') ? { machine: "Parsa's MacBook Pro", machineReason: { kind: 'automatic', text: "Runs on Parsa's MacBook Pro. This PC has no Xcode." } } : {})} isActive /></div>
+        <div className="flex-1"><DevicePanel panel={devicePanel('device', params.get('mac') ? { machine: "Studio MacBook Pro", machineReason: { kind: 'automatic', text: "Runs on Studio MacBook Pro. This PC has no Xcode." } } : {})} isActive /></div>
       </div>
     </DeviceClientContext.Provider>,
   );

@@ -23,9 +23,9 @@ test('every state covers the screen inside the same phone, with the words for th
   await expect(page.getByTestId('state-Booting')).toContainText('Booting iPhone 17 Pro');
   await expect(page.getByTestId('state-Off after idle')).toContainText('Shut down after 10 minutes idle');
   await expect(page.getByTestId('state-In use by another Pane')).toContainText('In use by onboarding-copy');
-  await expect(page.getByTestId('state-Runs on a linked Mac')).toContainText("Runs on Parsa's MacBook Pro. This PC has no Xcode.");
+  await expect(page.getByTestId('state-Runs on a linked Mac')).toContainText("Runs on Studio MacBook Pro. This PC has no Xcode.");
   await expect(page.getByTestId('state-No Mac linked')).toContainText('iOS needs a Mac');
-  await expect(page.getByTestId('state-Linked Mac offline')).toContainText("Parsa's MacBook Pro is offline");
+  await expect(page.getByTestId('state-Linked Mac offline')).toContainText("Studio MacBook Pro is offline");
   for (const theme of ['light', 'dark']) {
     if (theme === 'dark') await open(page, 'view=states&theme=dark');
     await expect(page.getByTestId('state-Live').getByTestId('device-screen')).toBeVisible();
