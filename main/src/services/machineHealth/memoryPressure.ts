@@ -40,6 +40,11 @@ function fromAvailable(available: number, total: number): MemoryPressureReading 
 
 /** Each OS's own signal: the macOS kernel level, Linux PSI (else MemAvailable), Windows available memory. */
 export async function readMemoryPressure(platform: NodeJS.Platform = process.platform, deps: MemoryPressureDeps = defaultDeps): Promise<MemoryPressureReading> {
+  // Tests and QA only: simulate a level for this Pane without signalling every app on the machine.
+  const simulated = process.env.PANE_MEMORY_PRESSURE_TEST_LEVEL;
+  if (simulated === 'ok' || simulated === 'warning' || simulated === 'critical') {
+    return { level: simulated, source: 'available', detail: 'simulated (PANE_MEMORY_PRESSURE_TEST_LEVEL)' };
+  }
   const freemem = deps.freemem ?? os.freemem;
   const totalmem = deps.totalmem ?? os.totalmem;
   if (platform === 'darwin') {
