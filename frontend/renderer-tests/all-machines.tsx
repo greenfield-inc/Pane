@@ -17,6 +17,7 @@ import { NewDialog } from '../src/components/NewDialog';
 import { startHostNavigationMemoryWrites } from '../src/utils/hostNavigationMemory';
 import { createDefaultRemoteDaemonConfig, createDefaultRemotePaneConnectionState, type RemotePaneConnectionState } from '../../shared/types/remoteDaemon';
 import type { OrchestrationSessionRecord } from '../../shared/types/orchestrationSession';
+import { convertProfiles } from '../../shared/types/remoteComputers';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { AppConfig } from '../src/types/config';
@@ -79,7 +80,7 @@ window.addEventListener('pane:host-restored', () => { restores += 1; });
 const routed = (): HostKey => connection.mode === 'remote' ? 'R' : 'local';
 const publish = (next: RemotePaneConnectionState) => { connection = next; connectionListener?.(next); };
 // SAFETY: The mounted views read only these config fields in this fixture.
-const config = (): AppConfig => ({ appearance: DEFAULT_APPEARANCE, theme: 'dark', analytics: { enabled: false }, customCommands: [], defaultOrchestratorAgent: 'claude', remoteDaemon: { ...createDefaultRemoteDaemonConfig(), client: { ...createDefaultRemoteDaemonConfig().client, profiles, mode: committed.mode, activeProfileId: committed.activeProfileId } } } as AppConfig);
+const config = (): AppConfig => ({ appearance: DEFAULT_APPEARANCE, theme: 'dark', analytics: { enabled: false }, customCommands: [], defaultOrchestratorAgent: 'claude', remoteDaemon: { ...createDefaultRemoteDaemonConfig(), client: { ...createDefaultRemoteDaemonConfig().client, profiles, computers: convertProfiles(profiles, null).computers, mode: committed.mode, activeProfileId: committed.activeProfileId } } } as AppConfig);
 const ok = <T extends object | null>(data: T): TransportReply => ({ success: true, data });
 const defaultMethod = () => Promise.resolve(ok(null));
 const methods = new Proxy({}, { get: () => defaultMethod });
@@ -219,7 +220,7 @@ useConfigStore.setState({ config: config() });
 useSessionStore.setState({ sessions: [], isLoaded: true, activeSessionId: null });
 useOrchestrationSessionStore.setState({ sessions: hostSessions.get('local') ?? [], selectedSessionId: 'x', availability: 'ready' });
 useNavigationStore.setState({ activeView: 'pane-chat' });
-const snapshot = (host: HostKey) => ({ projects: [], sessions: hostSessions.get(host) ?? [], statuses: [], notify: null, permissions: [] });
+const snapshot = (host: HostKey) => ({ projects: [], sessions: hostSessions.get(host) ?? [], statuses: [], activity: [], notify: null, permissions: [] });
 useAllMachinesStore.setState({
   enabled: true,
   machines: machineStates,

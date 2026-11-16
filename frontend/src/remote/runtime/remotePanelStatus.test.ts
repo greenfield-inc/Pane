@@ -5,12 +5,14 @@ import { usePanelStore } from '../../stores/panelStore';
 import { useRemoteSessionStore } from '../stores/remoteSessionStore';
 import type { RemoteBrowserConnectionState } from './remoteDaemonBrowserClient';
 import { subscribeRemotePanelStatus } from './remotePanelStatus';
+import { useSessionActivityStore } from '../../services/sessionActivitySync';
 
 type Reply = (value: JsonValue) => void;
 
 let emit: (event: RemoteDaemonEventEnvelope) => void;
 let setConnection: (status: RemoteBrowserConnectionState['status']) => void;
 let replies: Reply[];
+let activityReplies: JsonValue[] = [];
 let cleanup: () => void;
 
 const statusEvent = (panelId: string, sessionId: string, state: string): RemoteDaemonEventEnvelope => ({
@@ -27,15 +29,20 @@ function subscribe(initial: RemoteBrowserConnectionState['status']) {
   replies = [];
   const listeners: Array<typeof emit> = [];
   emit = event => listeners.forEach(listener => listener(event));
+  const statusListeners: Array<(state: RemoteBrowserConnectionState) => void> = [];
+  let current = initial;
+  setConnection = status => { current = status; statusListeners.forEach(listener => listener({ status, lastError: null, lastSeenAt: null })); };
   const adapter = {
     onEvent: (listener: typeof emit) => { listeners.push(listener); return vi.fn(); },
     onStatus: (listener: (state: RemoteBrowserConnectionState) => void) => {
-      setConnection = status => listener({ status, lastError: null, lastSeenAt: null });
-      setConnection(initial);
+      statusListeners.push(listener);
+      listener({ status: current, lastError: null, lastSeenAt: null });
       return vi.fn();
     },
     // The adapter unwraps the host's { success, data } envelope.
-    invoke: vi.fn((): Promise<JsonValue> => new Promise(resolve => replies.push(resolve))),
+    invoke: vi.fn((channel: string): Promise<JsonValue> => channel === 'panels:agent-statuses'
+      ? new Promise(resolve => replies.push(resolve))
+      : Promise.resolve(activityReplies.shift() ?? [])),
   };
   cleanup = subscribeRemotePanelStatus(adapter);
 }
@@ -50,6 +57,32 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('remote panel status', () => {
+  it('reads each Session\'s activity from the host, and clears it for the next host', async () => {
+    cleanup();
+    activityReplies = [[{ sessionId: 's1', state: 'working', workingPanes: 1 }]];
+    subscribe('connected');
+    await flush();
+    expect(useSessionActivityStore.getState().activity.s1?.state).toBe('working');
+    emit({ channel: 'orchestration-sessions:activity', args: [{ sessionId: 's1', state: 'idle', workingPanes: 0 }], timestamp: '2026-10-08T00:00:00.000Z' });
+    expect(useSessionActivityStore.getState().activity.s1?.state).toBe('idle');
+    cleanup();
+    expect(useSessionActivityStore.getState().activity).toEqual({});
+    subscribe('connected');
+  });
+
+  it('shows each Session idle while the connection is down, then the host\'s answer again', async () => {
+    cleanup();
+    activityReplies = [[{ sessionId: 's1', state: 'working', workingPanes: 1 }], [{ sessionId: 's1', state: 'working', workingPanes: 1 }]];
+    subscribe('connected');
+    await flush();
+    expect(useSessionActivityStore.getState().activity.s1?.state).toBe('working');
+    setConnection('reconnecting');
+    expect(useSessionActivityStore.getState().activity).toEqual({});
+    setConnection('connected');
+    await flush();
+    expect(useSessionActivityStore.getState().activity.s1?.state).toBe('working');
+  });
+
   it('shows a Pane that was already blocked before any status event arrives', async () => {
     replies[0]([{ sessionId: 'P', panelId: 'p1', state: 'blocked' }]);
     await flush();

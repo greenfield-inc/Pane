@@ -19,7 +19,7 @@ import {
  * The Even app serves the glasses app from http://127.0.0.1 on a new port each launch, and a
  * loopback origin matches on any port (see `originKey`). A page on that address still needs a
  * glasses token or pairing secret. The owner adds more on one machine from
- * Settings › Remote Access › Devices (`workspaces.glassesOrigins`), and `PANE_GLASSES_ORIGINS` (comma separated) adds them for a dev run, such as the Even simulator's.
+ * Settings › Remote Access › Phones and glasses (`workspaces.glassesOrigins`), and `PANE_GLASSES_ORIGINS` (comma separated) adds them for a dev run, such as the Even simulator's.
  */
 const EVEN_APP_ORIGINS: readonly string[] = ['http://127.0.0.1'];
 const ORIGINS_ENV = 'PANE_GLASSES_ORIGINS';
@@ -88,7 +88,7 @@ const GLASSES_RATE_LIMITS = { vouch: 5 * 60_000, session: 30_000 } as const;
 type GlassesRateLimitedAction = keyof typeof GLASSES_RATE_LIMITS;
 const COUNTED_FAILURES: ReadonlySet<GlassesFailureReason> = new Set(['token', 'pairing-secret', 'identity', 'credential-in-url']);
 
-export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key' | 'vouch' | 'session';
+export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key' | 'submit' | 'vouch' | 'session';
 
 const { up, down, enter, escape, tab } = RUNPANE_CONTRACT.terminalKeys;
 /** The keys the glasses may send, one per request: ↑ ↓ Enter Esc Tab, and a menu choice's number. */
@@ -102,6 +102,17 @@ const keyRequestSchema = boundary.object({ panelId: boundary.nonEmptyString, inp
 export function glassesKeyInput(request: JsonValue | undefined): { panelId: string; input: string; source: 'user' } | null {
   const key = decodeOptionalBoundary(request, keyRequestSchema);
   return key && GLASSES_KEYS.has(key.input) ? { panelId: key.panelId, input: key.input, source: 'user' } : null;
+}
+
+const submitRequestSchema = boundary.object({ panelId: boundary.nonEmptyString, input: boundary.nonEmptyString });
+
+/**
+ * The `runpane:panels:submit` request the glasses may run: one panel and the text they dictated, sent
+ * as the user. Every other field (attachments, file pointers, interrupts) is dropped. Null when malformed.
+ */
+export function glassesSubmitInput(request: JsonValue | undefined): { panelId: string; input: string; source: 'user' } | null {
+  const submit = decodeOptionalBoundary(request, submitRequestSchema);
+  return submit ? { panelId: submit.panelId, input: submit.input, source: 'user' } : null;
 }
 
 const MAX_SESSION_NAME_LENGTH = 120;
@@ -156,7 +167,8 @@ interface GlassesAccessOptions {
 }
 
 /**
- * Per-device access for the Pane glasses app on the workspace listener. Device tokens and
+ * Per-device access for the Pane glasses app, on the workspace listener and the paired listener
+ * phones reach through the relay. Device tokens and
  * single-use pairing secrets are 256-bit, stored only as SHA-256 hashes and compared in constant
  * time. Device records live in `remoteDaemon.host.clients` with `kind: 'glasses'`. Pending pairing
  * secrets and the failure counters live in memory and end with the process.
@@ -198,7 +210,7 @@ export class GlassesAccess {
     if (index !== -1) this.refusedOrigins.splice(index, 1);
     this.refusedOrigins.unshift({ origin, at: new Date(this.now()).toISOString() });
     this.refusedOrigins.splice(MAX_REFUSED_ORIGINS);
-    if (index === -1) this.log(`[Pane glasses] refused browser origin ${origin}; if this is the Even app, allow it in Settings › Remote Access › Devices`);
+    if (index === -1) this.log(`[Pane glasses] refused browser origin ${origin}; if this is the Even app, allow it in Settings › Remote Access › Phones and glasses`);
   }
 
   state(): GlassesAccessState {
@@ -368,7 +380,7 @@ export class GlassesAccess {
     this.lastUsedWrites.set(id, now);
     const lastUsedAt = new Date(now).toISOString();
     void this.write((clients) => clients.map((client) => (client.id === id ? { ...client, lastUsedAt } : client)))
-      .catch((error) => this.log(`[Pane glasses] could not save last use: ${error instanceof Error ? error.message : String(error)}`));
+      .catch((error) => this.log(`[Pane devices] could not save when a device was last used: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   /** Milliseconds left on this source's lockout, or 0. */
@@ -377,10 +389,15 @@ export class GlassesAccess {
     return state ? Math.max(0, state.lockedUntil - this.now()) : 0;
   }
 
-  /** Logs a refused glasses request and counts it toward the source's lockout. Never logs a credential. */
+  /** Logs a refused glasses request. Never logs a credential. */
+  logRefusal(source: string, reason: GlassesFailureReason, detail?: string): void {
+    this.log(`[Pane glasses] refused ${reason} from ${source} at ${new Date(this.now()).toISOString()}${detail ? ` (${detail})` : ''}`);
+  }
+
+  /** Logs a refused glasses request and counts it toward the source's lockout. */
   recordFailure(source: string, reason: GlassesFailureReason, detail?: string): void {
     const now = this.now();
-    this.log(`[Pane glasses] refused ${reason} from ${source} at ${new Date(now).toISOString()}${detail ? ` (${detail})` : ''}`);
+    this.logRefusal(source, reason, detail);
     // Only guesses at a credential count. A command outside the scope is a bug or an old app,
     // and any web page on the owner's phone can send a wrong origin or reach a Funnel, so
     // counting those would let a page lock the real glasses out.

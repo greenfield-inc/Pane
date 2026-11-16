@@ -7,7 +7,7 @@ import type { Project } from './project';
 import type { Folder } from './folder';
 import type { AppConfig, UpdateConfigRequest } from './config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
-import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory, LaunchChat } from '../../../shared/types/hostNavigation';
 import type { TestNotificationResult } from '../../../shared/types/notifications';
 import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type {
@@ -60,6 +60,7 @@ import type {
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
   OrchestrationSessionSelector,
+  SessionActivity,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
@@ -76,6 +77,7 @@ import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpa
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
+import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../../shared/types/relay';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
 import type {
@@ -106,6 +108,7 @@ interface MachineReadAnswers {
   'sessions:get-all-with-projects': IPCResponse<Array<Project & { sessions: Session[] }>>;
   'orchestration-sessions:list': IPCResponse<OrchestrationSessionListResult>;
   'panels:agent-statuses': IPCResponse<PanelAgentStatusEvent[]>;
+  'orchestration-sessions:activity-list': IPCResponse<SessionActivity[]>;
   'permission:getPending': IPCResponse<PanePermissionRequest[]>;
   'notify:remote-snapshot': NotifySharedState | null;
 }
@@ -154,8 +157,14 @@ interface ElectronAPI {
   // first render already knows whether the page owns the title bar.
   windowControlsOverlayEnabled: boolean;
   appearanceSnapshot?: import('../../../shared/types/appearance').AppearanceSnapshot;
+  /** The chat this launch reopens, drawn in the window's first frame (index.html); absent when there is none. */
+  launchChat?: import('../../../shared/types/hostNavigation').LaunchChatOutline;
   setTitleBarOverlay: (colors: { color: string; symbolColor: string }) => Promise<IPCResponse>;
-  setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').Theme; color: string }) => Promise<IPCResponse>;
+  setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').ThemeChoice; color: string }) => Promise<IPCResponse>;
+  customTheme?: {
+    get: () => Promise<IPCResponse<import('../../../shared/types/customTheme').CustomThemeState>>;
+    reset: () => Promise<IPCResponse>;
+  };
   notifyRendererReady: () => void;
 
   // Version checking
@@ -249,6 +258,8 @@ interface ElectronAPI {
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     detach: (selector: OrchestrationSessionSelector, paneId?: string) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     overview: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionOverview>>;
+    /** Every open Session's live activity; absent on an older host. */
+    activityList?: () => Promise<IPCResponse<SessionActivity[]>>;
     archivePreview: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionArchivePreview>>;
     archive: (selector: OrchestrationSessionSelector, selection: OrchestrationSessionArchiveSelection) => Promise<IPCResponse<OrchestrationSessionArchiveResult>>;
   };
@@ -558,6 +569,7 @@ interface ElectronAPI {
     saveExpandedArchivedProjects: (projectIds: number[]) => Promise<IPCResponse>;
     getNavigationMemory: (hostId: string | null) => Promise<IPCResponse<HostNavigationMemory | null>>;
     saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory) => Promise<IPCResponse>;
+    getLaunchChat: () => Promise<IPCResponse<LaunchChat | null>>;
     getSessionWorkspaceLayout: (hostId: string | null) => Promise<IPCResponse<SessionWorkspaceLayout | null>>;
     saveSessionWorkspaceLayout: (hostId: string | null, layout: SessionWorkspaceLayout | null) => Promise<IPCResponse>;
     getPaneLayout: (hostId: string | null, paneId: string) => Promise<IPCResponse<SessionPanelLayout | null>>;
@@ -578,6 +590,10 @@ interface ElectronAPI {
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;
+    onRelayStatusChanged: (callback: (status: RelayStatus) => void) => () => void;
+    onRelayPaired: (callback: (event: RelayPairedEvent) => void) => () => void;
+    onRelayLinkOpened: (callback: (event: RelayLinkOpenedEvent) => void) => () => void;
+    onSshRouteProgress: (callback: (progress: { host: string; step: 'connecting' | 'checking-node' | 'installing' | 'starting' | 'linked' | 'failed'; message: string }) => void) => () => void;
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
     /** A phone or another window saved settings on this host; refetch the config. */
     onRemoteSettingsChanged: (callback: () => void) => () => void;
@@ -588,6 +604,7 @@ interface ElectronAPI {
     onSessionLogsCleared: (callback: (data: { sessionId: string }) => void) => () => void;
     onSessionOutputAvailable: (callback: (info: { sessionId: string; hasNewOutput: boolean }) => void) => () => void;
     onOrchestrationSessionsChanged?: (callback: (change: { sessionId: string; kind: string; selectionChanged?: boolean }) => void) => () => void;
+    onOrchestrationSessionActivity?: (callback: (activity: SessionActivity) => void) => () => void;
     onOrchestrationSessionsOverviewUpdated?: (callback: (change: { panelId: string; sessionId?: string; state: string }) => void) => () => void;
     onGitStatusUpdated: (callback: (data: { sessionId: string; gitStatus: GitStatus }) => void) => () => void;
     onGitStatusLoading: (callback: (data: { sessionId: string }) => void) => () => void;
@@ -654,6 +671,7 @@ interface ElectronAPI {
     // Terminal font config events
     onTerminalFontUpdated: (callback: (data: { terminalFontFamily: string; terminalFontSize: number }) => void) => () => void;
     onNativeAppearanceUpdated: (callback: (data: { prefersDark: boolean }) => void) => () => void;
+    onCustomThemeUpdated?: (callback: (state: import('../../../shared/types/customTheme').CustomThemeState) => void) => () => void;
 
     removeAllListeners: (channel: string) => void;
   };
@@ -762,8 +780,6 @@ interface ElectronAPI {
   // Resource monitor
   resourceMonitor: {
     getSnapshot: () => Promise<IPCResponse>;
-    startActive: () => Promise<IPCResponse>;
-    stopActive: () => Promise<IPCResponse>;
   };
 
   // Agent subscription usage
@@ -814,6 +830,8 @@ interface ElectronAPI {
   window: {
     consumeUncleanShutdown: () => Promise<boolean>;
     isFocused: () => Promise<boolean>;
+    /** Tells main whether the window is on screen, so Pane knows when nobody is looking. */
+    reportVisibility: (visible: boolean) => void;
     /** Raises the window and opens a pane:// link, like one opened from the OS. */
     openPaneLink: (link: string) => Promise<void>;
   };

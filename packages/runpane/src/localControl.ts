@@ -5,9 +5,9 @@ import type { Readable } from 'node:stream';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
-import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
+import { invokeDaemon, PaneDaemonClientError, routedOtherMachine } from './daemonClient';
 import { confirmMutation } from './daemonActions';
-import { RunpaneError } from './errors';
+import { RunpaneError, describeFailure } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import {
   CONVERSATION_ID_PATTERN,
@@ -43,6 +43,9 @@ interface OrchestrationAssociation {
   paneId: string;
   panelIds: string[];
   attachedAt: string;
+  /** A Pane on another saved machine, and its name there. */
+  machine?: { id: string; label: string };
+  name?: string;
 }
 
 interface OrchestrationActivity {
@@ -130,6 +133,8 @@ interface PanelReport extends AgentReport {
 interface OrchestrationPaneOverview {
   paneId: string;
   name: string;
+  /** A Pane on another saved machine: `unreachable` when it didn't answer, `older-pane` when its Pane can't send reports here. */
+  machine?: { id: string; label: string; state: 'online' | 'unreachable' | 'older-pane' };
   worktreePath?: string;
   branch?: string;
   archived: boolean;
@@ -314,6 +319,7 @@ interface PaneCreateRequest {
   /** The calling tab ($PANE_PANEL_ID); Pane records it as the opener of the tabs this creates. */
   callerPanelId?: string;
   associateSession?: string;
+  noAssociate?: boolean;
   expectReport?: boolean;
 }
 
@@ -335,7 +341,9 @@ interface PaneAdoptRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: 'user' | 'agent';
+  callerPanelId?: string;
   associateSession?: string;
+  noAssociate?: boolean;
 }
 
 interface PaneCreateItem {
@@ -375,7 +383,8 @@ interface PaneCreateSuccessItem {
   nextCommand?: string;
   readiness?: PanelReadiness;
   initialInput?: InitialInputDeliveryResult;
-  association?: { sessionId: string; ok: boolean; error?: string };
+  /** `machine`: the other machine the Pane runs on, when it joined this machine's Session from there. */
+  association?: { sessionId: string; ok: boolean; error?: string; machine?: string; code?: string; next?: string };
   promptFile?: string;
   attachments?: string[];
   warnings?: PromptWarning[];
@@ -1135,6 +1144,8 @@ interface WorkspaceEntry {
   expectedSince?: string;
   screenLines?: string[];
   itemId?: string;
+  /** A remote Session member's entry: the saved machine it came from, and its epoch and generation there. */
+  machine?: { id: string; label: string; epoch: string; gen: number };
 }
 
 interface WorkspaceStateResult {
@@ -1184,6 +1195,7 @@ interface PaneCreateRequestInput {
   focus?: boolean;
   source?: 'user' | 'agent';
   associateSession?: string;
+  noAssociate?: boolean;
 }
 
 interface PaneAdoptRequestInput extends Omit<PaneAdoptRequest, 'panes'> {
@@ -1506,6 +1518,8 @@ const orchestrationAssociationSchema: BoundarySchema<OrchestrationAssociation> =
   paneId: boundary.nonEmptyString,
   panelIds: boundary.array(boundary.nonEmptyString),
   attachedAt: boundary.nonEmptyString,
+  machine: boundary.optional(boundary.object({ id: boundary.nonEmptyString, label: boundary.nonEmptyString })),
+  name: boundary.optional(boundary.nonEmptyString),
 });
 const orchestrationActivitySchema: BoundarySchema<OrchestrationActivity> = boundary.object({
   id: boundary.nonEmptyString,
@@ -1592,6 +1606,11 @@ const orchestrationPaneOverviewSchema: BoundarySchema<OrchestrationPaneOverview>
     prState: boundary.optional(boundary.string),
   })),
   report: boundary.optional(boundary.object({ ...agentReportFields, panelId: boundary.nonEmptyString })),
+  machine: boundary.optional(boundary.object({
+    id: boundary.nonEmptyString,
+    label: boundary.nonEmptyString,
+    state: boundary.enumeration('online', 'unreachable', 'older-pane'),
+  })),
 });
 const lockOwnerSchema: BoundarySchema<LockOwner> = boundary.object({
   kind: boundary.enumeration('pane', 'external'),
@@ -1766,6 +1785,9 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
         sessionId: boundary.string,
         ok: boundary.boolean,
         error: boundary.optional(boundary.string),
+        machine: boundary.optional(boundary.string),
+        code: boundary.optional(boundary.string),
+        next: boundary.optional(boundary.string),
       })),
       promptFile: boundary.optional(boundary.string),
       attachments: boundary.optional(boundary.array(boundary.string)),
@@ -2189,6 +2211,7 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   expectedSince: boundary.optional(boundary.string),
   screenLines: boundary.optional(boundary.array(boundary.string)),
   itemId: boundary.optional(boundary.string),
+  machine: boundary.optional(boundary.object({ id: boundary.string, label: boundary.string, epoch: boundary.string, gen: boundary.number })),
 });
 export const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
   ok: boundary.literal(true),
@@ -2245,6 +2268,7 @@ const paneCreateRequestInputSchema: BoundarySchema<PaneCreateRequestInput> = bou
   focus: boundary.optional(boundary.boolean),
   source: boundary.optional(boundary.enumeration('user', 'agent')),
   associateSession: boundary.optional(boundary.string),
+  noAssociate: boundary.optional(boundary.boolean),
 });
 const paneAdoptRequestInputSchema: BoundarySchema<PaneAdoptRequestInput> = boundary.object({
   repo: repoSelectorSchema,
@@ -2265,6 +2289,7 @@ const paneAdoptRequestInputSchema: BoundarySchema<PaneAdoptRequestInput> = bound
   focus: boundary.optional(boundary.boolean),
   source: boundary.optional(boundary.enumeration('user', 'agent')),
   associateSession: boundary.optional(boundary.string),
+  noAssociate: boundary.optional(boundary.boolean),
 });
 
 export async function runReposList(parsed: ParsedArgs): Promise<number> {
@@ -2575,8 +2600,10 @@ export async function runSessionsOverview(parsed: ParsedArgs): Promise<number> {
   }
   console.log(`${result.session.name}: ${result.status}`);
   for (const pane of result.panes) {
-    const details = pane.missing ? 'missing' : pane.archived ? 'archived' : pane.panels.map(panel => `${panel.title}=${panel.type === undefined || panel.type === 'terminal' ? panel.state : panel.type}`).join(', ') || 'no panels';
-    console.log(`  ${pane.name}: ${details}`);
+    const details = pane.machine?.state === 'unreachable' ? 'unreachable'
+      : pane.machine?.state === 'older-pane' ? `older Pane on ${pane.machine.label}: update it there for its reports to reach this Session`
+        : pane.missing ? 'missing' : pane.archived ? 'archived' : pane.panels.map(panel => `${panel.title}=${panel.type === undefined || panel.type === 'terminal' ? panel.state : panel.type}`).join(', ') || 'no panels';
+    console.log(`  ${pane.name}${pane.machine ? ` (${pane.machine.label})` : ''}: ${details}`);
     if (pane.panels.some(panel => panel.report)) {
       for (const panel of pane.panels) console.log(`    ${describePanelOverview(panel)}`);
     } else if (pane.report) {
@@ -3296,11 +3323,16 @@ export async function runPanesCreate(parsed: ParsedArgs): Promise<number> {
   if (parsed.waitForResult && request.panes.length !== 1) throw new RunpaneError('ERR_RUNPANE_WAIT_MULTI_PANE', 'panes create --wait accepts one Pane, but this request has several. No workers were created.', 'Create several without --wait, then dispatch each with panels submit --wait.');
   if (parsed.expectReport !== undefined) request.expectReport = parsed.expectReport;
   await confirmPaneCreate(parsed, request);
+  // Created on another machine for this machine's Session: that machine has no such Session, so this one records the member.
+  const remoteMachine = routedOtherMachine();
+  const joinSession = remoteMachine && !request.dryRun ? request.associateSession : undefined;
+  if (joinSession) delete request.associateSession;
 
   const result = await invokeDaemon('runpane:panes:create', [request], paneCreateResultSchema, {
     paneDir: parsed.paneDir,
     timeoutMs: (parsed.timeoutMs ?? 120_000) + (parsed.readyTimeoutMs ?? 30_000) + 10_000,
   });
+  if (joinSession && remoteMachine) await joinRemoteMembers(parsed, result, joinSession, remoteMachine);
   if (parsed.waitForResult) {
     const [item] = result.items;
     if (result.items.length !== 1) {
@@ -3336,7 +3368,9 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
         pinned: resolvePinnedOverride(parsed) ?? pane.pinned ?? !process.env.PANE_ORCHESTRATION_SESSION_ID,
         tool: parsePaneToolSpecPayload(pane.tool, index),
       })),
+      callerPanelId: resolveCallerPanelId(),
       associateSession: parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? decoded.associateSession,
+      noAssociate: parsed.noAssociate || decoded.noAssociate || undefined,
     };
   } else {
     if (!parsed.repo || !parsed.repoPath || !parsed.name) {
@@ -3364,7 +3398,9 @@ export async function runPanesAdopt(parsed: ParsedArgs): Promise<number> {
     noFocus: parsed.noFocus || undefined,
     focus: parsed.focus || undefined,
     source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+    callerPanelId: resolveCallerPanelId(),
     associateSession: resolveAssociateSession(parsed),
+    noAssociate: parsed.noAssociate || undefined,
     };
   }
   if (parsed.dryRun) request.dryRun = true;
@@ -3958,6 +3994,7 @@ function describeReportDelivery(result: ReportResult): string[] {
     ? `No Session recorded this report. ${stored}, and only watchers that list agent.report receive it.`
     : `No Session recorded this report and no watcher was waiting for it. ${stored}, `
       + 'and a watch with a named cursor (runpane watch --as <name> --kinds agent.report) still receives it when it next waits.');
+  lines.push('If this Pane belongs to a Session on another computer, that computer records it there.');
   return [...lines, ...warnings];
 }
 
@@ -4566,6 +4603,7 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
     }));
     applyPaneFocusOptions(parsed, request);
     request.associateSession = parsed.noAssociate ? undefined : resolveAssociateSession(parsed) ?? request.associateSession;
+    if (parsed.noAssociate) request.noAssociate = true;
     request.callerPanelId = resolveCallerPanelId();
     return request;
   }
@@ -4602,9 +4640,35 @@ export async function buildPaneCreateRequest(parsed: ParsedArgs): Promise<PaneCr
     source,
     callerPanelId: resolveCallerPanelId(),
     associateSession: resolveAssociateSession(parsed),
+    noAssociate: parsed.noAssociate || undefined,
   };
 
   return request;
+}
+
+const remoteAssociationResultSchema = boundary.object({
+  machine: boundary.object({ id: boundary.string, label: boundary.string }),
+  warning: boundary.optional(boundary.object({ code: boundary.string, message: boundary.string, next: boundary.string })),
+});
+
+/** Records each Pane created on `machine` as a member of this machine's Session, and says how it went on the item. */
+async function joinRemoteMembers(parsed: ParsedArgs, result: PaneCreateResult, sessionId: string, machine: string): Promise<void> {
+  for (const item of result.items) {
+    if (!('pinned' in item) || !item.paneId) continue;
+    try {
+      const joined = await invokeDaemon('runpane:sessions:associate-remote', [{
+        selector: { sessionId },
+        machine,
+        paneId: item.paneId,
+        name: item.name ?? item.paneId,
+      }], remoteAssociationResultSchema, { paneDir: parsed.paneDir, thisMachine: true });
+      item.association = { sessionId, ok: true, machine: joined.machine.label };
+      if (joined.warning) Object.assign(item.association, { error: joined.warning.message, code: joined.warning.code, next: joined.warning.next });
+    } catch (error) {
+      const failure = describeFailure(error);
+      item.association = { sessionId, ok: false, machine, error: failure.message, code: failure.code, next: failure.next };
+    }
+  }
 }
 
 /** Inside a Session orchestrator, new Panes join that Session unless --no-associate. */
@@ -5144,9 +5208,11 @@ function printPaneCreateResult(result: PaneCreateResult, dryRun = false, action:
       if (item.readiness) printReadiness(item.readiness, '  ');
       printInitialInputDelivery(item.initialInput, '  ');
       if (item.association) {
+        const where = item.association.machine ? ` from ${item.association.machine}` : '';
         console.log(item.association.ok
-          ? `  Associated with Session ${item.association.sessionId}`
+          ? `  Associated with Session ${item.association.sessionId}${where}${item.association.error ? `. ${item.association.error}` : ''}`
           : `  Not associated with Session ${item.association.sessionId}: ${item.association.error ?? 'unknown error'}`);
+        if (item.association.next) console.log(`  Next: ${item.association.next}`);
       }
       printPromptNotes(item, '  ');
       if (item.base?.notice) {

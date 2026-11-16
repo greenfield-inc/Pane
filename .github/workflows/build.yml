@@ -118,6 +118,10 @@ jobs:
     # On macOS, electron-builder rebuilds the native modules for each target
     # arch while packaging (npmRebuild), so the install-time rebuild for the
     # host arch is skipped there.
+    # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+
     - run: pnpm install ${{ runner.os == 'macOS' && '--ignore-scripts' || '' }}
 
     - name: Patch electron-builder temporary keychain password handling
@@ -180,7 +184,7 @@ jobs:
   # computes the checksums, then uploads and publishes. Dry runs stop after the
   # merge and checksums and keep them as an artifact to check.
   publish:
-    needs: [build, build-windows]
+    needs: [build, build-windows, build-relay]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -217,6 +221,30 @@ jobs:
         pattern: pane-ubuntu-*-${{ env.RELEASE_TAG }}
         path: release-files
         merge-multiple: true
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-relay-*-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        merge-multiple: true
+
+    # `runpane relay` downloads pane-relay-<platform> from the release when npm
+    # has no @pane/relay-* package, and checks it against pane-relay-sha256.txt.
+    - name: Name the relay binaries for the release and list their SHA-256
+      run: |
+        mkdir -p relay-release
+        for dir in relay-bin/*/; do
+          platform="$(basename "$dir")"
+          for binary in "$dir"pane-relay*; do
+            cp "$binary" "relay-release/pane-relay-${platform}${binary##*pane-relay}"
+          done
+        done
+        cd relay-release
+        sha256sum pane-relay-* > pane-relay-sha256.txt
+        cat pane-relay-sha256.txt
+        test "$(wc -l < pane-relay-sha256.txt)" -eq 6
+        # The guide downloads compose.yaml from the latest release, pinned to that release's image.
+        sed "s/:-latest}/:-${RELEASE_TAG#v}}/" ../relay/compose.yaml > compose.yaml
+        grep -q "pane-relay:\${PANE_RELAY_VERSION:-${RELEASE_TAG#v}}" compose.yaml
 
     - name: Merge macOS updater metadata
       run: |
@@ -270,13 +298,15 @@ jobs:
         path: |
           checksums/*
           release-files/*.yml
+          relay-release/pane-relay-sha256.txt
+          relay-release/compose.yaml
         if-no-files-found: error
         retention-days: ${{ env.ARTIFACT_DAYS }}
 
-    - name: Upload macOS and Windows assets and checksums
+    - name: Upload macOS, Windows and relay assets and checksums
       if: env.PUBLISH == 'true'
       run: |
-        gh release upload "$RELEASE_TAG" mac-release/* windows-release/* checksums/SHA256SUMS.txt checksums/continuity.json \
+        gh release upload "$RELEASE_TAG" mac-release/* windows-release/* checksums/SHA256SUMS.txt checksums/continuity.json relay-release/* \
           --repo "${{ github.repository }}" --clobber
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -287,8 +317,94 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # pane-relay for each platform runpane's npm package ships it on, one
+  # @pane/relay-<platform>-<arch> package each (scripts/runpane-relay-packages.js).
+  # Runs on every build, so the release branch check catches a broken cross build.
+  build-relay:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: darwin-arm64, os: macos-latest }
+          - { platform: darwin-x64, os: macos-latest }
+          - { platform: linux-x64, os: ubuntu-latest }
+          - { platform: linux-arm64, os: ubuntu-24.04-arm }
+          - { platform: win32-x64, os: windows-2022 }
+          - { platform: win32-arm64, os: windows-2022 }
+    name: build-relay (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      with:
+        node-version: '22.23.4'
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+    # Linux binaries link musl statically, so they run on any distribution.
+    - name: Install musl
+      if: runner.os == 'Linux'
+      run: sudo apt-get update && sudo apt-get install -y musl-tools
+    - run: node scripts/runpane-relay-packages.js build ${{ matrix.platform }} relay-bin
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: pane-relay-${{ matrix.platform }}-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        if-no-files-found: error
+        retention-days: ${{ env.ARTIFACT_DAYS }}
+
+  # ghcr.io/greenfield-inc/pane-relay for linux/amd64 and linux/arm64, tagged with
+  # the version and latest, from the static Linux binaries build-relay made.
+  # Every build checks the image starts; only a publishing run pushes it.
+  relay-image:
+    needs: build-relay
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/pane-relay
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-relay-linux-*-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        merge-multiple: true
+    - name: Lay out the binaries by Docker architecture
+      run: |
+        mkdir -p relay-image/amd64 relay-image/arm64
+        cp relay-bin/linux-x64/pane-relay relay-image/amd64/
+        cp relay-bin/linux-arm64/pane-relay relay-image/arm64/
+    - name: Check that the amd64 image answers /healthz
+      run: |
+        docker build -f relay/release.Dockerfile -t pane-relay:check relay-image
+        docker run -d --name relay-check -p 8443:8443 pane-relay:check --dev --listen 0.0.0.0:8443
+        for _ in $(seq 30); do
+          if curl -fsSk https://127.0.0.1:8443/healthz; then exit 0; fi
+          sleep 1
+        done
+        docker logs relay-check
+        exit 1
+    - name: Push both architectures
+      if: env.PUBLISH == 'true'
+      run: |
+        version="${RELEASE_TAG#v}"
+        tags=(-t "$IMAGE:$version")
+        # Only a tag push is the newest release; a recovery run of an older tag leaves latest alone.
+        if [ "$GITHUB_REF_TYPE" = tag ]; then tags+=(-t "$IMAGE:latest"); fi
+        echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+        docker buildx create --use
+        docker buildx build --platform linux/amd64,linux/arm64 -f relay/release.Dockerfile \
+          "${tags[@]}" --push relay-image
+        docker buildx imagetools inspect "$IMAGE:$version"
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   validate-runpane-packages:
     if: github.ref_type == 'tag' || inputs.publish == true
+    needs: build-relay
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -310,6 +426,17 @@ jobs:
     - run: pnpm run test:runpane-managed-cli
     - run: pnpm run test:runpane-telemetry
     - run: pnpm run test:runpane-package-smoke
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-relay-*-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        merge-multiple: true
+    - name: Check that every relay package packs its binary, without publishing
+      run: node scripts/runpane-relay-packages.js stage relay-bin "$RUNNER_TEMP/relay-npm"
+    - name: Run runpane relay on this release's Linux binary
+      run: node --test scripts/test-runpane-relay.js
+      env:
+        PANE_RELAY_BIN: ${{ github.workspace }}/relay-bin/linux-x64/pane-relay
 
   publish-npm:
     if: github.ref_type == 'tag' || inputs.publish == true
@@ -331,6 +458,33 @@ jobs:
       run: npm install -g npm@^11.5.1
     - run: pnpm install --filter runpane --ignore-scripts
     - run: pnpm --filter runpane build
+    - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+      with:
+        pattern: pane-relay-*-${{ env.RELEASE_TAG }}
+        path: relay-bin
+        merge-multiple: true
+    # The relay packages go first, so runpane never names a version npm lacks.
+    # A recovery run skips the ones this version already published.
+    - name: Publish the relay packages to npm
+      run: |
+        node scripts/runpane-relay-packages.js stage relay-bin "$RUNNER_TEMP/relay-npm"
+        if [[ -n "$NPM_TOKEN" ]]; then
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+        fi
+        for dir in "$RUNNER_TEMP"/relay-npm/*/; do
+          id="$(cd "$dir" && node -p "const p = require('./package.json'); p.name + '@' + p.version")"
+          if npm view "$id" version >/dev/null 2>&1; then
+            echo "$id is already on npm"
+            continue
+          fi
+          # A package npm refuses (no @pane organisation or trusted publisher yet) must not stop
+          # runpane itself from publishing: pin lists only what npm has.
+          if ! (cd "$dir" && npm publish --provenance --access public); then
+            echo "::warning::$id did not publish; see RUNBOOK.md for the npm setup the relay packages need."
+          fi
+        done
+    - name: List the relay packages as runpane's optional dependencies
+      run: node scripts/runpane-relay-packages.js pin
     - name: Publish runpane to npm with token fallback
       if: ${{ env.NPM_TOKEN != '' }}
       working-directory: packages/runpane
@@ -397,6 +551,10 @@ jobs:
           ~/AppData/Local/electron-builder/Cache
         key: windows-${{ matrix.arch }}-electron-${{ hashFiles('**/pnpm-lock.yaml') }}
         restore-keys: windows-${{ matrix.arch }}-electron-
+    # afterPack builds the pane-direct helper (direct/) for each packaged arch.
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+
     - run: pnpm install
 
     - name: Build Windows artifact

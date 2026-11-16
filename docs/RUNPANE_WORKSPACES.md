@@ -1,8 +1,8 @@
 # Workspaces: reach all your machines with runpane
 
-`runpane workspace` lets your Macs, Windows PCs, and Linux machines read files, write files, run commands, and drive each other's Pane over the Tailscale network you already use. There is no SSH, no keys, and no pairing code: each request is trusted because Tailscale says which login it comes from. Your own login is always let in; a teammate's machine lets you in when its owner shares it with everyone on the tailnet.
+`runpane workspace` lets your Macs, Windows PCs, and Linux machines read files, write files, run commands, and drive each other's Pane over the Tailscale network you already use, or over any route of a computer saved in Pane, such as one linked with a [one-time link](QR_PAIRING.md#link-another-computer). On Tailscale each request is trusted because Tailscale says which login it comes from, and a linked computer is trusted by the token it got when the two were linked. Your own login is always let in; a teammate's machine lets you in when its owner shares it with everyone on the tailnet.
 
-The same listener powers codeless desktop remote mode: the sidebar's machine menu and Settings → Remote Access → **Switch to** list the machines on your tailnet, including ones you have never connected to (a teammate's machine that accepts only its owner shows as "Owner only" and can't be picked), and picking one switches the desktop app to that machine with no `pane-remote://` code. `runpane workspace` reaches the same machines. Who may connect is set under **Access** → **Who can connect** (see [Who is trusted](#who-is-trusted)).
+The same listener powers codeless desktop remote mode: the sidebar's machine menu and Settings › Remote Access › **Computers** list the machines on your tailnet, including ones you have never connected to (a teammate's machine that accepts only its owner shows as "Owner only" and can't be picked), and picking one switches the desktop app to that machine with no `pane-remote://` code. A computer that is both on your tailnet and saved in Pane shows once, with a pill for each route. `runpane workspace` reaches the same machines. Who may connect is set under Settings › Remote Access › **Tailscale** › **Who can connect** (see [Who is trusted](#who-is-trusted)).
 
 **All machines**, the first item in the machine menu, fills the sidebar with the Sessions and Panes of this computer and every saved machine, live, each row marked with its machine. A repository on several machines shows as one project row, with a mark for each machine it is on: each host reads its projects' origin remote (`host/owner/repo`, so SSH and HTTPS clones match, whatever the folder is called), and a fork with a different origin is its own row. A project with no origin, or from a machine on an older Pane, joins a row by name. Opening a row on another machine switches the app to that machine and keeps the sidebar in All machines; pin, pause, resume, archive, rename and permission answers from a row's menu run on its machine without switching, and **Allow** first shows the request in the permission dialog. Archived and the collapsed sidebar show the machine you're on. Search covers every machine's rows. A machine that stops answering keeps its rows, dimmed, with when it went offline and **Retry**. Rows keep the order you give them: drag a Session (across machines) or a Pane (within its project), or move a focused row with Alt+Up/Down, and the arrangement is saved on this computer only, never on the machines it shows. The first time a machine answers, its rows join in that machine's own order, placed by the machine menu however late it answers; Sessions and Panes that appear after that go first, and agent status never moves a row. Projects and Sessions start closed; what you open and close is remembered on this computer. Picking one machine returns to its own sidebar, and the choice is kept across relaunch.
 
@@ -14,11 +14,17 @@ runpane workspace <machine> exec -- <command>     # runs in that machine's shell
 runpane workspace <machine> <runpane command>     # e.g. sessions list --json
 ```
 
-`<machine>` is the Tailscale machine name (`parsa-devbox`), a unique prefix (`devbox`), the MagicDNS name, or a Tailscale IP.
+`<machine>` is the Tailscale machine name (`parsa-devbox`), a unique prefix (`devbox`), the MagicDNS name, or a Tailscale IP. A computer saved in Pane also answers to its name in lower case with dashes (`travel-laptop`), its Pane id, its install id, its relay id (the `<id>` in its `<id>.runpane.net` address) and the host name of any of its routes. `runpane workspace list --json` shows them under `ids`.
 
-`runpane workspace list` shows your own machines first, then other people's machines on the tailnet labeled with their owner's login (`tylers-mac-mini (macOS, online, owner tbrownio@github)`). Each machine decides who it lets in. A machine set to "Only me" refuses other logins, and the error says how its owner can change that. A path shaped like another OS's (`C:\...` on a Mac) routes only to your own machines; reach someone else's machine by name.
+Each computer is one entry. A computer saved in Pane is matched with its tailnet entry by its Tailscale route, or else by a name no other saved computer has, so two computers with the same name stay two entries. runpane reaches it on its routes in the order Pane saved them, adding Tailscale when the computer is on your tailnet without a saved Tailscale route. A route that doesn't connect within 2.5 seconds (1.5 seconds on the same network, and a same-network address is tried only when it is on one of this computer's subnets), whose Pane isn't running, or that refuses the credential gives way to the next. A request that reached a Pane never goes to a second route, so nothing runs twice. When the tailnet says the computer is offline (Tailscale signed out there), Tailscale is tried last. A saved computer works with Tailscale off.
+
+`runpane workspace list` shows your own machines first, then other people's machines on the tailnet labeled with their owner's login (`tylers-mac-mini (macOS, online, owner tbrownio@github)`). A saved computer lists its routes and the one that answered (`parsa-devbox (Windows, online) [Tailscale, Pane relay]: joined through Pane relay, shell bash`). Each machine decides who it lets in. A machine set to "Only me" refuses other logins, and the error says how its owner can change that. A path shaped like another OS's (`C:\...` on a Mac) routes only to your own machines; reach someone else's machine by name.
 
 Agents can call them as MCP tools too: `workspace_list`, `workspace_read`, `workspace_write`, and `workspace_exec` are in the [Pane MCP server](PANE_MCP.md#toolsets)'s default toolset. `workspace_write` requires `content`, since a tool call has no stdin, and file contents and command output come back exactly as the CLI's `--json` prints them.
+
+## Link a computer from the command line
+
+`runpane link '<link>'` links this computer with the one that made a [one-time link](QR_PAIRING.md#link-another-computer), for a computer with no screen. Copy the link on the other computer (**Add a device › Computer**). Pane must be running here with phone access on. When both computers already have linked computers, it names both groups and asks before joining them; in a script or with `--json`, pass `--yes`, or it exits with `ERR_LINK_NEEDS_CONFIRM` and leaves the link unused. Then `runpane workspace list` shows the new computer.
 
 These commands ship in the npm CLI (`npm i -g runpane`, or `npx --yes runpane@latest workspace list`). The Python package prints the workspaces status block but does not run them.
 
@@ -58,7 +64,7 @@ Pane must be running on a machine for others to reach it. Pane checks Tailscale 
 
 ## Who is trusted
 
-Two settings decide, in Settings → Remote Access → **Access**. Every request must pass both: its login is allowed by **visibility**, and, when **password protection** is on, it carries the password.
+Two settings decide, in the **Access** group of Settings › Remote Access › **Tailscale**. Every request must pass both: its login is allowed by **visibility**, and, when **password protection** is on, it carries the password.
 
 | Visibility | Who can connect | |
 |---|---|---|
@@ -68,7 +74,7 @@ Two settings decide, in Settings → Remote Access → **Access**. Every request
 
 Pane learns the owner from the `Self` entry in `tailscale status --json`, and Serve adds a `Tailscale-User-Login` header to every request after removing any copy the caller sent. Under "Everyone on tailnet", the people on the tailnet are the owners of its untagged devices, re-read every minute; people a device was shared with from another tailnet (Tailscale's sharee nodes) are not among them, even though Serve signs their requests too.
 
-Password protection is off by default. When it is on, every client must send the password, your own machines included; the desktop app asks for it once and saves it with that machine's connection. Pane stores only a scrypt hash of it, and only someone at the machine itself can change visibility or the password: remote clients are refused. The `runpane workspace` CLI does not send a password yet, so it cannot reach a password-protected machine.
+Password protection is off by default. When it is on, every client must send the password, your own machines included; the desktop app asks for it once and saves it with that machine's connection. Pane stores only a scrypt hash of it, and only someone at the machine itself can change visibility or the password: remote clients are refused. `runpane workspace` sends the password the desktop app saved for that computer. To reach a password-protected machine from the CLI, connect to it once from Settings › Remote Access › Computers and enter the password.
 
 - Under "Only me", a device signed in as another Tailscale user, including a teammate's Mac shared into your tailnet, is refused.
 - A tagged device is refused: Serve sends no identity for it.
@@ -85,6 +91,26 @@ Password protection is off by default. When it is on, every client must send the
 Every admitted login can also reach any port listening on the machine from desktop Pane, as [forwarded ports](SELF_HOSTED_REMOTE_DAEMON.md#forwarded-ports).
 
 `write` and `exec` give your agents SSH-level control of every joined machine, and so does anyone the machine's visibility lets in: under "Everyone on tailnet" that includes the other people on the tailnet. A local agent's permission prompts and sandbox see only `runpane workspace ... exec`, not what runs on the other machine. Turn workspaces off on any machine that should not accept this.
+
+## Workers on another machine join your Session
+
+A Session orchestrator on this computer can run workers on your other machines. `runpane workspace parsa-devbox panes create --repo "Pane (win)" --tool-command "codex -m gpt-5.5" --prompt "..." --json`, run from inside a Session, creates the Pane on that machine and adds it to this computer's Session; `association.machine` names the machine. Pick a saved WSL repository there to run the worker in WSL. Its `runpane report` states, blocked questions and tab exits reach this computer's `runpane watch --session`, Approvals and phone, and an answer you give goes back to its tab. `sessions overview` and the Session's Overview tab list it with its machine; a machine that doesn't answer shows its workers as unreachable.
+
+The machine must be saved on this computer (the machine switcher > **Add a machine**): only saved machines send their workers' reports here, over the connection All machines already uses. Creating a Pane on an unsaved machine still works and returns `association.ok: false` with `ERR_MACHINE_NOT_SAVED`. Both machines need a Pane release with remote Session members; a machine on an older one returns `association.code: ERR_MACHINE_OLDER_PANE`, and its row says to update it. Reports sent while either computer was asleep or offline arrive when they reconnect, once each and in order.
+
+## Ask another model a question
+
+`runpane ask` asks any agent and model one read-only question and prints the answer. Nothing is left open: the agent's own headless mode runs once and exits.
+
+```bash
+runpane ask --agent claude --model sonnet --prompt "Is this migration safe to run twice?" --repo Pane --json
+runpane ask --agent codex --machine parsa-devbox --repo "Pane (win)" --prompt "Why does this test fail on Windows?"
+runpane ask --agent opencode --model openrouter/deepseek/deepseek-chat --machine parsa-devbox --repo "experiments (wsl)" --prompt-file question.md
+```
+
+`--machine` runs it on another machine in your workspace, `--repo` in a saved repository there (a WSL repository runs in WSL) and `--pane` in a Pane's worktree. The agent can read files but not edit them, run shell commands or call MCP tools: Claude runs with only Read, Grep and Glob, Codex in its read-only sandbox without your Codex config, MCP servers or apps, Cursor in ask mode, and OpenCode's plan agent with edit, bash and every MCP tool denied. Pi has no such mode, so ask refuses it. `--json` prints the answer, agent, model, machine, environment, duration and cost when the agent reports one. A missing agent, a sign-in problem, an unknown model and a timeout (`--timeout`, 10 minutes by default) each fail with the agent's own words and what to do next. The MCP tool is `agents_ask`.
+
+`runpane models` lists the models each installed agent offers, from the agent's own list, with its sign-in in the agent's words. `--all` covers this computer, every saved machine and the WSL of each machine with a saved WSL repository; `--agent` and `--search` narrow it. Claude has no list command and takes `fable`, `opus`, `sonnet`, `haiku` or a full model name. To give a terminal worker a model, put the agent's model flag in `--tool-command`.
 
 ## Hand a task to another machine
 
@@ -128,7 +154,7 @@ Workspaces and the [self-hosted remote daemon](SELF_HOSTED_REMOTE_DAEMON.md) bot
 | Port | 8443 | 443 |
 | Setup | None | `runpane setup` on the host, then paste the code |
 
-Machine commands (`read`, `write`, `exec`) are served only to workspace identity, never to pairing tokens.
+On the workspace listener (port 8443), machine commands (`read`, `write`, `exec`) run for every request Pane admits there. On the other listeners they run only for a linked computer's token, never for a phone's or a `pane-remote://` code's token. On Pane relay and same-network routes, `runpane workspace` checks the computer's key before it sends the token.
 
 ## Troubleshooting
 

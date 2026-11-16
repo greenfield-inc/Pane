@@ -70,12 +70,14 @@ describe.skipIf(process.platform === 'win32')('how a chat tab starts each kind o
       expect(token).toMatch(/^\S{40,}$/);
       expect(claude.command.env.PANE_MCP_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
       expect(claude.mcpServers).toEqual([{ type: 'http', name: 'pane', url: '${PANE_MCP_URL}', headers: [{ name: 'Authorization', value: 'Bearer ${PANE_MCP_TOKEN}' }] }]);
+      // The Claude plugin's own `pane` server is hidden, so the chat sees one Pane server.
+      expect(claude.meta).toEqual({ claudeCode: { options: { settings: { deniedMcpServers: [{ serverName: 'plugin:pane:pane' }] } } } });
 
       // Pane's bundled adapter hands MCP servers to `claude` as a command-line argument, which any local user can read.
       adapter = spawn(claude.command.executable, claude.command.args, { cwd: bin, env: { ...claude.command.env, ARGV_OUT: argvFile }, stdio: ['pipe', 'ignore', 'ignore'] });
       const send = (id: number, method: string, params: JsonObject) => adapter?.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
       send(1, 'initialize', { protocolVersion: 1, clientCapabilities: {} });
-      send(2, 'session/new', { cwd: bin, mcpServers: claude.mcpServers });
+      send(2, 'session/new', { cwd: bin, mcpServers: claude.mcpServers, _meta: claude.meta ?? {} });
       const deadline = Date.now() + 20_000;
       while (!(existsSync(argvFile) && readFileSync(argvFile, 'utf8').includes('--mcp-config'))) {
         if (Date.now() > deadline) throw new Error('the adapter never started claude');
@@ -84,6 +86,7 @@ describe.skipIf(process.platform === 'win32')('how a chat tab starts each kind o
       const argv = readFileSync(argvFile, 'utf8');
       expect(argv).toContain('Bearer ${PANE_MCP_TOKEN}');
       expect(argv).not.toContain(token);
+      expect(argv).toContain('plugin:pane:pane');
 
       expect((await resolve('cursor', { kind: 'agent' })).mcpServers).toBeUndefined();
     } finally {

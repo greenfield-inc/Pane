@@ -3,9 +3,38 @@ import type { NotifyItem } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
 import { machineDocFailure, machineFileLinks, readMachineDoc, type MachineDoc } from './machineDoc';
 
+/**
+ * What a linked document from another machine shows: opening, its page or text, or one line saying
+ * why not, with Retry when the machine didn't answer.
+ */
+export function MachineDocView({ doc, label, machine, onRetry }: { doc: MachineDoc | null; label: string; machine: string; onRetry?: () => void }) {
+  if (!doc) return <p className="m-auto text-[13px] text-text-tertiary" role="status">Opening {label}…</p>;
+  const failure = machineDocFailure(doc, label, machine);
+  if (failure) {
+    return (
+      <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" role="status" data-testid="approvals-doc-failed">
+        <p>{failure}</p>
+        {doc.kind === 'unreachable' && onRetry && (
+          <button type="button" onClick={onRetry} className="mt-2 font-medium text-interactive hover:underline" data-testid="approvals-doc-retry">Retry</button>
+        )}
+      </div>
+    );
+  }
+  if (doc.kind === 'html') {
+    // Another machine's page, sent as text: no scripts (Pane's own content policy would block them anyway), no forms, no navigation.
+    return <iframe title={label} srcDoc={doc.html} sandbox="" className="min-h-0 w-full flex-1 border-0" data-testid="approvals-machine-page" />;
+  }
+  return (
+    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="approvals-machine-text">
+      {doc.kind === 'text' ? doc.text : ''}
+    </pre>
+  );
+}
+
 /** One linked document, read from the item's machine. A failure is one line, and nothing keeps spinning. */
-function MachineDocument({ item, path, label, machine }: { item: NotifyItem; path: string; label: string; machine: string }) {
+export function MachineDocument({ item, path, label, machine }: { item: NotifyItem; path: string; label: string; machine: string }) {
   const [doc, setDoc] = useState<MachineDoc | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
     setDoc(null);
@@ -13,19 +42,15 @@ function MachineDocument({ item, path, label, machine }: { item: NotifyItem; pat
     return () => { live = false; };
     // The item's id and machine stay with its key; a new snapshot of it isn't a new document.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path]);
-  if (!doc) return <p className="m-auto text-[13px] text-text-tertiary" role="status">Opening {label}…</p>;
-  const failure = machineDocFailure(doc, label, machine);
-  if (failure) return <p className="m-auto max-w-sm text-center text-[13px] text-text-secondary" role="status" data-testid="approvals-doc-failed">{failure}</p>;
-  if (doc.kind === 'html') {
-    // Another machine's page: scripts may run, but it reaches nothing of Pane's.
-    return <iframe title={label} srcDoc={doc.html} sandbox="allow-scripts" className="min-h-0 w-full flex-1 border-0" data-testid="approvals-machine-page" />;
-  }
-  return (
-    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="approvals-machine-text">
-      {doc.kind === 'text' ? doc.text : ''}
-    </pre>
-  );
+  }, [path, attempt]);
+  const retry = () => {
+    setDoc(null);
+    // Reconnect now rather than at the machine's next scheduled retry, then read again.
+    const machineId = item.machineId ?? 'local';
+    const reconnect = machineId === 'local' ? Promise.resolve() : window.electronAPI.machines.retry(machineId).catch(() => undefined);
+    void reconnect.then(() => setAttempt((current) => current + 1));
+  };
+  return <MachineDocView doc={doc} label={label} machine={machine} onRetry={retry} />;
 }
 
 /**

@@ -117,12 +117,15 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'ports:',
   'orchestration-sessions:',
   'projects:',
+  'relay:',
   'prompts:',
   'resource-monitor:',
   'runpane:',
   'session-import:',
   'sessions:',
   'ssh-hosts:',
+  'ssh:route-',
+  'computers:',
   'terminal:',
   'usage:',
   'voice:',
@@ -151,6 +154,8 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'permission:respond',
   'notify:remote-snapshot',
   'notify:remote-command',
+  // A Session on another computer types an owed answer into one of this computer's tabs.
+  'notify:type-into-tab',
   'notify:summary-page',
   'file:copy',
   'file:delete',
@@ -180,6 +185,17 @@ export const ELECTRON_ADAPTER_ONLY_CHANNELS = [
 ] as const;
 
 const ELECTRON_ADAPTER_ONLY_CHANNEL_SET = new Set<string>(ELECTRON_ADAPTER_ONLY_CHANNELS);
+
+/**
+ * Settings about this computer itself: phone access, linking, saved computers and SSH routes. The desktop
+ * answers them on this computer even while switched to another one; the commands refuse remote callers.
+ * `relay:client:` commands are the ones other computers call, so they are not among them.
+ */
+const THIS_COMPUTER_CHANNEL_PREFIXES = ['relay:', 'computers:', 'ssh:route-'] as const;
+
+export function runsOnThisComputer(channel: string): boolean {
+  return THIS_COMPUTER_CHANNEL_PREFIXES.some((prefix) => channel.startsWith(prefix)) && !channel.startsWith('relay:client:');
+}
 
 export function isDaemonOwnedChannel(channel: string): boolean {
   if (ELECTRON_ADAPTER_ONLY_CHANNEL_SET.has(channel)) {

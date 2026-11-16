@@ -1,7 +1,9 @@
 import type { PaneChatAgent } from './paneChat';
+import type { ComputerRouteLabel } from './remoteComputers';
 import type { VoiceTranscriptionMode } from './voiceTranscription';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { BoundarySchema, JsonObject, JsonValue } from '../validation/boundaryDecoder';
+import { convertProfiles, decodeComputers, type RemoteComputer } from './remoteComputers';
 
 export type RemoteDaemonTransport = 'http+sse';
 export type RemoteDaemonClientMode = 'local' | 'remote';
@@ -50,7 +52,6 @@ export interface RemoteDaemonConnectedClient {
   deviceLabel: string | null;
   remoteAddress: string | null;
   connectedAt: string;
-  lastSeenAt: string;
 }
 
 /** What Settings shows about this host's tailnet: a problem and its fix, or that the host moved. */
@@ -80,10 +81,21 @@ export interface RemoteDaemonClientRecord {
   createdAt: string;
   tokenHash: string;
   lastUsedAt?: string;
-  /** "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope. Absent: a paired client with full access. */
-  kind?: 'glasses';
-  /** Glasses only: the install id of the phone that paired them; pairing again from that phone replaces them. */
+  /**
+   * "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope.
+   * "computer": a linked computer (QR pairing), with full access. Absent: a paired phone or client with full access.
+   */
+  kind?: 'glasses' | 'computer';
+  /** The install id of the phone: for glasses, the phone that paired them; for a QR-paired phone, the phone itself. */
   phoneId?: string;
+  /** Linked computers only: the computer's relay id. */
+  computerId?: string;
+  /** Shown as "Linked by <name>": the phone whose scan linked this computer, or the computer that handed this phone its token. */
+  linkedBy?: string;
+  /** A phone token handed out by a linked computer: that computer's relay id, so unlinking it revokes the token. */
+  grantedBy?: string;
+  /** Linked computers only: the client id of the phone whose scan minted this link, so removing that phone revokes it. */
+  mintedBy?: string;
 }
 
 export interface RemotePaneConnectionProfile {
@@ -101,6 +113,16 @@ export interface RemotePaneConnectionProfile {
    */
   tailnetMachine?: string;
   tailnetDomain?: string;
+  /** A computer reached through a relay (QR pairing): its id and key fingerprint. */
+  relay?: RemoteRelayProfile;
+}
+
+export interface RemoteRelayProfile {
+  computerId: string;
+  /** base64url SHA-256 of the computer's public key; connections to any other key are refused. */
+  fingerprint: string;
+  /** Shown as "Linked by <name>" when a phone's scan linked it. */
+  linkedBy?: string;
 }
 
 export interface RemoteDaemonHostAccess {
@@ -209,6 +231,8 @@ export interface RemoteDaemonHostSettings {
   clients: RemoteDaemonClientRecord[];
   mobilePush: RemoteMobilePushSettings;
   access?: RemoteDaemonHostAccess;
+  /** This computer's own HTTPS address (a reverse proxy in front of Pane); linked computers reach it there. */
+  publicUrl?: string;
 }
 
 export type RemoteMobilePlatform = 'ios' | 'android';
@@ -228,6 +252,8 @@ export interface RemoteMobilePushRegistration {
   notifyButtons?: boolean;
   /** The APNs endpoint that accepted this token after the key's own environment refused it. */
   apnsEnvironment?: 'sandbox' | 'production';
+  /** The relay's grant for this computer and token, which the phone received as a push and handed back (relay/PROTOCOL.md, Alerts). */
+  relayGrant?: string;
   createdAt: string;
   updatedAt: string;
   revokedAt?: string;
@@ -254,6 +280,15 @@ export interface RemoteMobilePushStatus {
 }
 
 export interface RemoteDaemonClientSettings {
+  /**
+   * Every computer this one can reach, one record each with its routes (D-51). `activeProfileId`
+   * names one of them.
+   */
+  computers: RemoteComputer[];
+  /**
+   * The entries saved before computers, one per route. Kept as read, so an older Pane still finds
+   * the pairings made before the upgrade; nothing reads or writes them except the conversion.
+   */
   profiles: RemotePaneConnectionProfile[];
   activeProfileId: string | null;
   mode: RemoteDaemonClientMode;
@@ -262,6 +297,14 @@ export interface RemoteDaemonClientSettings {
 export interface RemoteDaemonConfig {
   host: RemoteDaemonHostSettings;
   client: RemoteDaemonClientSettings;
+  /** Phone access through Pane's relays (QR pairing). Absent: off. */
+  relay?: RemoteRelaySettings;
+}
+
+export interface RemoteRelaySettings {
+  enabled: boolean;
+  /** "Relay address": a self-hosted relay's `host[:port]`. Absent: Pane's relays. */
+  relayAddress?: string;
 }
 
 export interface RemoteDaemonConnectionPair {
@@ -340,6 +383,8 @@ export interface RemotePaneConnectionState {
   activeProfileId: string | null;
   activeProfileLabel: string | null;
   activeBaseUrl: string | null;
+  /** The route the active computer is on (`ComputerRoute.id`): the dot on its pill. */
+  activeRouteId?: string | null;
   lastError: string | null;
   lastSeenAt: string | null;
   /** The latest connection checklist, while a connect the user started runs, failed or warns. */
@@ -388,8 +433,8 @@ export interface RemoteConnectionCheck {
   id: number;
   profileId: string;
   hostLabel: string;
-  /** How this computer reaches the host, for the card's subtitle. */
-  route: 'Tailscale' | 'SSH tunnel' | 'URL';
+  /** How this computer reaches the host, for the card's subtitle: the route's name when the computer has several. */
+  route: 'Tailscale' | 'SSH tunnel' | 'URL' | ComputerRouteLabel;
   address: string;
   /** `warning`: connected, but a row warns, so the card waits for "Continue to workspace". */
   outcome: 'running' | 'failed' | 'warning' | 'passed';
@@ -503,6 +548,7 @@ export function createDefaultRemoteDaemonConfig(): RemoteDaemonConfig {
         mobilePush: { registrations: [], attentionSequence: 0, panelStates: {} },
     },
     client: {
+      computers: [],
       profiles: [],
       activeProfileId: null,
       mode: 'local',
@@ -558,8 +604,12 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   createdAt: boundary.nonEmptyString,
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
-  kind: boundary.optional(boundary.literal('glasses')),
+  kind: boundary.optional(boundary.enumeration('glasses', 'computer')),
   phoneId: boundary.optional(boundary.nonEmptyString),
+  computerId: boundary.optional(boundary.nonEmptyString),
+  linkedBy: boundary.optional(boundary.nonEmptyString),
+  grantedBy: boundary.optional(boundary.nonEmptyString),
+  mintedBy: boundary.optional(boundary.nonEmptyString),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),
@@ -577,6 +627,11 @@ const remoteProfileFieldsSchema: BoundarySchema<RemotePaneConnectionProfile> = b
   tunnel: boundary.optional(remoteTunnelSchema),
   tailnetMachine: boundary.optional(boundary.nonEmptyString),
   tailnetDomain: boundary.optional(boundary.nonEmptyString),
+  relay: boundary.optional(boundary.object({
+    computerId: boundary.nonEmptyString,
+    fingerprint: boundary.nonEmptyString,
+    linkedBy: boundary.optional(boundary.nonEmptyString),
+  })),
 });
 /** Only a codeless profile may have no token; Tailscale identity stands in for it. */
 const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {
@@ -685,6 +740,13 @@ export function getActiveRemoteHostId(value: unknown): string | null {
   return client.mode === 'remote' ? client.activeProfileId : null;
 }
 
+/** A saved config whose client entries have not been converted to computers yet. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Reads the raw saved config before it is normalized.
+export function needsComputersConversion(value: unknown): boolean {
+  const client = readJsonObject(readJsonObject(value)?.client);
+  return client !== undefined && readJsonArray(client.profiles).length > 0 && !Array.isArray(client.computers);
+}
+
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
 export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig {
   const defaults = createDefaultRemoteDaemonConfig();
@@ -714,8 +776,13 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
     }
   });
 
-  let activeProfileId = readOptionalString(client.activeProfileId) ?? null;
-  if (activeProfileId && !profiles.some((profile) => profile.id === activeProfileId)) {
+  // A config from before computers converts from its entries; the entries stay as they were.
+  const converted = Array.isArray(client.computers)
+    ? { computers: decodeComputers(client.computers), activeProfileId: readOptionalString(client.activeProfileId) ?? null }
+    : convertProfiles(profiles, readOptionalString(client.activeProfileId) ?? null);
+  const { computers } = converted;
+  let { activeProfileId } = converted;
+  if (activeProfileId && !computers.some((computer) => computer.id === activeProfileId)) {
     activeProfileId = null;
   }
 
@@ -736,15 +803,26 @@ export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig 
   if (access) {
     hostSettings.access = access;
   }
+  const publicUrl = readOptionalString(host.publicUrl)?.trim();
+  if (publicUrl) hostSettings.publicUrl = publicUrl;
 
-  return {
+  const normalized: RemoteDaemonConfig = {
     host: hostSettings,
     client: {
+      computers,
       profiles: [...profiles],
       activeProfileId,
       mode: activeProfileId && client.mode === 'remote' ? 'remote' : 'local',
     },
   };
+  const relay = readJsonObject(config.relay);
+  if (relay) {
+    const relaySettings: RemoteRelaySettings = { enabled: readBoolean(relay.enabled, false) };
+    const relayAddress = readOptionalString(relay.relayAddress)?.trim();
+    if (relayAddress) relaySettings.relayAddress = relayAddress;
+    normalized.relay = relaySettings;
+  }
+  return normalized;
 }
 
 function normalizeRemoteMobilePushSettings(value: JsonValue | undefined): RemoteMobilePushSettings {
@@ -775,6 +853,8 @@ function normalizeRemoteMobilePushSettings(value: JsonValue | undefined): Remote
     if (revokedAt) normalized.revokedAt = revokedAt;
     if (raw.notifyButtons === true) normalized.notifyButtons = true;
     if (raw.apnsEnvironment === 'sandbox' || raw.apnsEnvironment === 'production') normalized.apnsEnvironment = raw.apnsEnvironment;
+    const relayGrant = readOptionalString(raw.relayGrant);
+    if (relayGrant) normalized.relayGrant = relayGrant;
     return [normalized];
   });
   const decodedAttentionSequence = decodeOptionalBoundary(settings.attentionSequence, boundary.number);

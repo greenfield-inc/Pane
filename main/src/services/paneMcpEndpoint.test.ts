@@ -1,13 +1,15 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import http from 'http';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { tokenizeShellCommand } from './agents/agentIdentity';
-import { PaneMcpEndpoint, setPaneMcpEndpoint, withPaneMcpConfig, type PaneMcpTab } from './paneMcpEndpoint';
+import { withClaudePromptHooks } from './claudePrompts';
+import { PaneMcpEndpoint, paneMcpTabSettings, setPaneMcpEndpoint, withPaneMcpConfig, type PaneMcpTab } from './paneMcpEndpoint';
 import { PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
 import { TabListener } from './tabListener';
+import { syncNotifyInstructions } from './notify/notifyInstructions';
 
 const appDir = mkdtempSync(path.join(os.tmpdir(), 'pane-mcp-endpoint-'));
 
@@ -95,6 +97,18 @@ function callRepos(grant: { url: string; token: string }, init: { token?: string
   return fetch(grant.url, { method: 'POST', headers, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params }), signal: init.signal });
 }
 
+/** The instructions the endpoint answers a 2025-era `initialize` with, as Claude Code sends it. */
+async function instructionsFor(grant: { url: string; token: string }): Promise<string> {
+  const response = await fetch(grant.url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${grant.token}` },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '1' } } }),
+  });
+  const text = await response.text();
+  const data = text.split('\n').find(line => line.startsWith('data: '));
+  return decodeBoundary(JSON.parse(data ? data.slice('data: '.length) : text), boundary.object({ result: boundary.object({ instructions: boundary.string }) })).result.instructions;
+}
+
 /** fetch never sends a Host header of its own choosing, so this one request goes through node:http. */
 function statusWithHost(grant: { url: string; token: string }, host: string): Promise<number | undefined> {
   const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
@@ -146,6 +160,29 @@ describe('PaneMcpEndpoint', () => {
   it("names a client that didn't name itself on the request after the tab's agent, so notify keeps its long wait", async () => {
     const ran = await ranAs(await callRepos(grantOf(start().grant(tab('panel-a')))));
     expect(ran).toMatchObject({ agent: 'Claude', returnAfter: null });
+  });
+
+  it("leaves out what the tab's CLAUDE.md block already says, and only while the block is there", async () => {
+    const home = mkdtempSync(path.join(os.tmpdir(), 'pane-mcp-claude-'));
+    const claudeDir = path.join(home, 'claude');
+    mkdirSync(claudeDir);
+    const grant = grantOf(start().grant(tab('panel-a', { CLAUDE_CONFIG_DIR: claudeDir })));
+
+    let without: string;
+    let beside: string;
+    try {
+      without = await instructionsFor(grant);
+      syncNotifyInstructions(true, { homeSkill: true }, { CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: path.join(home, 'codex') }, home);
+      beside = await instructionsFor(grant);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+
+    expect(without).toContain('Scratch: in Pane');
+    expect(without).toContain('`notify` asks the person');
+    expect(beside).not.toContain('Scratch: in Pane');
+    expect(beside).not.toContain('`notify` asks the person');
+    expect(beside).toContain('`docs_search` and `docs_read` answer how Pane works.');
   });
 
   it('refuses a request without a token, with a made-up token, and after the tab closes', async () => {
@@ -236,6 +273,25 @@ describe('withPaneMcpConfig', () => {
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({
       mcpServers: { pane: { type: 'http', url: '${PANE_MCP_URL}', headers: { Authorization: 'Bearer ${PANE_MCP_TOKEN}' } } },
     });
+  });
+
+  it("hides the Claude plugin's own pane server in the one settings file a tab on HTTP launches with", () => {
+    start().grant(tab('panel-a'));
+    // A Session's folder access arrives as settings JSON on the command; Claude keeps only the last --settings.
+    const sessionFolder = { permissions: { additionalDirectories: ['/s'], deny: ['Edit(//s/**)'] } };
+    for (const command of ["claude 'fix it'", `claude 'fix it' --settings '${JSON.stringify(sessionFolder)}'`]) {
+      const withHooks = withClaudePromptHooks('panel-a', command, appDir, 'zsh', paneMcpTabSettings('panel-a', 'claude')) ?? command;
+      const launched = words(withPaneMcpConfig('panel-a', 'claude', withHooks, 'zsh'));
+      const at = launched.findIndex(word => word === '--settings' || word.startsWith('--settings='));
+      const value = launched[at] === '--settings' ? launched[at + 1] : launched[at].slice('--settings='.length);
+
+      expect(launched.filter(word => word === '--settings' || word.startsWith('--settings='))).toHaveLength(1);
+      const settings = JSON.parse(readFileSync(value, 'utf8'));
+      expect(settings.deniedMcpServers).toEqual([{ serverName: 'plugin:pane:pane' }]);
+      if (command.includes('permissions')) expect(settings.permissions).toEqual(sessionFolder.permissions);
+      expect(launched).toContain('fix it');
+    }
+    expect(paneMcpTabSettings('panel-b', 'claude')).toBeUndefined();
   });
 
   it('leaves wrappers, agents without the flag, and commands that keep MCP servers out unchanged', () => {

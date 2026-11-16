@@ -1,0 +1,29 @@
+# Publishes runpane's entry (packages/runpane/server.json) to the official MCP Registry under
+# io.github.greenfield-inc. Run it by hand after the npm release that server.json names is out:
+# the registry checks that release's package.json mcpName. GitHub OIDC proves the namespace.
+name: Publish to MCP Registry
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install mcp-publisher 1.8.9
+        run: curl -fsSL https://github.com/modelcontextprotocol/registry/releases/download/v1.8.9/mcp-publisher_linux_amd64.tar.gz | tar xz mcp-publisher
+      - name: Validate
+        working-directory: packages/runpane
+        run: ../../mcp-publisher validate
+      - name: Log in with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+      - name: Publish
+        working-directory: packages/runpane
+        run: ../../mcp-publisher publish

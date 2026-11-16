@@ -145,11 +145,16 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
       closeSettings();
     });
     const unsubscribeHost = window.electronAPI.remoteDaemon.onHostStateChanged(setHostState);
+    // Phones and linked computers change the device list too (a removed phone, a new link); main announces every config change.
+    const unsubscribeConfig = window.electronAPI.events.onConfigUpdated(() => {
+      void refresh().catch((loadError) => setError(loadError instanceof Error ? loadError.message : 'Failed to load Remote Pane'));
+    });
     return () => {
       unsubscribeConnection();
       unsubscribeHost();
+      unsubscribeConfig();
     };
-  }, [closeSettings, isOpen, reload]);
+  }, [closeSettings, isOpen, refresh, reload]);
 
   /** Runs a connect; once main publishes its checklist, Settings closes. Errors before that stay inline. */
   const showChecklist = useCallback(async <T,>(connect: () => Promise<T>): Promise<T> => {
@@ -324,10 +329,11 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     return 'Using local runtime.';
   });
 
-  const deleteProfile = (profileId: string) => runRemoteAction(async () => {
-    const response = await API.remoteDaemon.deleteConnectionProfile(profileId);
-    if (!response.success) throw new Error(response.error || 'Failed to delete profile');
-    return 'Remote profile deleted.';
+  /** Removes a saved computer, every route with it, from this computer's list. */
+  const forgetComputer = (computerId: string) => runRemoteAction(async () => {
+    const response = await API.remoteDaemon.deleteConnectionProfile(computerId);
+    if (!response.success) throw new Error(response.error || 'Pane could not forget this computer. Nothing changed; try again.');
+    return 'Computer forgotten.';
   });
 
   const saveHostConfig = () => runRemoteAction(async () => {
@@ -455,7 +461,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     importConnection,
     useProfile,
     useLocal,
-    deleteProfile,
+    forgetComputer,
     saveHostConfig,
     createPair,
     saveProfile,

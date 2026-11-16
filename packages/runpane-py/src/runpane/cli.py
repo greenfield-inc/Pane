@@ -94,6 +94,7 @@ from .local_control import (
     run_workspace_state,
 )
 from .notify import RunpaneError, run_notify
+from .pairing_link import run_link
 from .secrets import run_secrets_delete, run_secrets_exec, run_secrets_list, run_secrets_request, run_secrets_set
 from .platforms import detect_platform
 from .releases import resolve_release
@@ -322,6 +323,8 @@ class ParsedArgs:
     wait_timeout_ms: Optional[int] = None
     all: bool = False
     inbox_ids: List[str] = field(default_factory=list)
+    # link: the one-time link from another computer's Pane.
+    pairing_link: Optional[str] = None
     # inbox ack --decision: the D-n to record on each item.
     inbox_decision: Optional[str] = None
     # autopilot stack push: --item, the repeatable --tab <path-or-url>, and --next.
@@ -617,6 +620,11 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     parsed = ParsedArgs(command=command)
     if parsed.command == "secrets exec":
         parsed.exec_command = take_exec_command(args)
+    if parsed.command == "relay":
+        # Every word after `relay` is pane-relay's; this package points to npx instead.
+        del args[:]
+    if parsed.command == "link" and args and not args[0].startswith("-"):
+        parsed.pairing_link = args.pop(0)
     if parsed.command == "inbox ack":
         while args and not args[0].startswith("-"):
             parsed.inbox_ids.append(args.pop(0))
@@ -1748,11 +1756,16 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "watch": lambda parsed, context: run_watch(parsed),
     "workspace list": lambda parsed, context: run_unsupported_contract(parsed, context),
     "workspace enable": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "theme read": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "theme set": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "theme reset": lambda parsed, context: run_unsupported_contract(parsed, context),
     "workspace disable": lambda parsed, context: run_unsupported_contract(parsed, context),
     "workspace read": lambda parsed, context: run_unsupported_contract(parsed, context),
     "workspace write": lambda parsed, context: run_unsupported_contract(parsed, context),
     "workspace exec": lambda parsed, context: run_unsupported_contract(parsed, context),
     "handoff": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "ask": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "models": lambda parsed, context: run_unsupported_contract(parsed, context),
     "panes create": lambda parsed, context: run_panes_create(parsed),
     "panes archive": lambda parsed, context: run_panes_archive(parsed),
     "panes pin": lambda parsed, context: run_panes_pin(parsed, True),
@@ -1792,6 +1805,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "install": lambda parsed, context: install_or_update(parsed, context),
     "update": lambda parsed, context: run_update(parsed),
     "mcp": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "relay": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "link": lambda parsed, context: run_link(parsed),
     "panes git-status": lambda parsed, context: run_daemon_action(parsed, contract_command(parsed.command)["daemonAction"]),
     "panes commit": lambda parsed, context: run_daemon_action(parsed, contract_command(parsed.command)["daemonAction"]),
     "panes push": lambda parsed, context: run_daemon_action(parsed, contract_command(parsed.command)["daemonAction"]),

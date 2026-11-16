@@ -19,6 +19,8 @@ export interface OpenTarget {
 
 export type IncomingLink =
   | { type: 'open'; target: OpenTarget }
+  /** `https://<domain>/glasses` (the desktop's Wearables QR code) or `pane://glasses`: Settings › Glasses. */
+  | { type: 'glasses' }
   /** Anything else: let Expo Router match it as a path. */
   | { type: 'route' };
 
@@ -42,6 +44,17 @@ export function parsePushTarget(request: unknown): OpenTarget | null {
   const sessionPaneId = notifyId ? stringField(data, 'sessionPaneId') : undefined;
   const base = notifyId ? (sessionPaneId ? { host, notifyId, sessionPaneId } : { host, notifyId }) : { host };
   return withPane(base, stringField(data, 'paneId'), stringField(data, 'panelId'));
+}
+
+/**
+ * Pane's relay confirms a computer for this phone's alerts by pushing a grant for that computer
+ * (relay/PROTOCOL.md, Alerts); the phone hands it to the saved computer `host` names.
+ */
+export function parseGrantPush(value: unknown): { host: string; grant: string } | null {
+  const data = [pushData(value), field(value, 'data')].find(candidate => stringField(candidate, 'paneGrant') !== undefined);
+  const host = stringField(data, 'hostProfileId');
+  const grant = stringField(data, 'paneGrant');
+  return host && grant ? { host, grant } : null;
 }
 
 /** A Notify question's alert, as the host sends it (main/src/daemon/mobilePushSender.ts, observeQuestion). */
@@ -123,12 +136,15 @@ function parseJson(value: unknown): unknown {
   }
 }
 
+const GLASSES_LINK = /^(?:https:\/\/[^/?#\s]+|pane:\/)\/glasses\/?(?:[?#].*)?$/u;
+
 /**
- * Recognises `pane://pane/<paneId>?host=<profile id or base URL>&panel=<panelId>`,
+ * Recognises `pane://glasses` and `https://<domain>/glasses`, and `pane://pane/<paneId>?host=<profile id or base URL>&panel=<panelId>`,
  * a pane on a given host. `pane-remote://` pairing links are handled in features/pairing.
  */
 export function parseIncomingLink(url: string): IncomingLink {
   const trimmed = url.trim();
+  if (GLASSES_LINK.test(trimmed)) return { type: 'glasses' };
   const match = /^pane:\/\/pane\/([^/?#]+)\/?(?:\?([^#]*))?/.exec(trimmed);
   if (!match) return { type: 'route' };
   const params = new URLSearchParams(match[2] ?? '');

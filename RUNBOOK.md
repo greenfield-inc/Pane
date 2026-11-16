@@ -1,15 +1,16 @@
 # Pane runbook
 
-How Pane ships and what runs outside a developer's machine. Pane has no server
-and no production database: the desktop app keeps its data on each user's
-machine. The things that ship are installers, two CLI packages, a preview
-build of the Remote PWA, and over-the-air updates for the phone app.
+How Pane ships and what runs outside a developer's machine. Pane has no
+production database: the desktop app keeps its data on each user's machine.
+The things that ship are installers, two CLI packages, a preview build of the
+Remote PWA, over-the-air updates for the phone app, and three relays that give
+each computer its `runpane.net` address for QR pairing.
 
 ## Surfaces
 
 | Surface | Workflow | Trigger | What it does |
 | --- | --- | --- | --- |
-| Stable release | `Build & Release` (`.github/workflows/build.yml`) | `v*` tag push | Builds macOS, Linux and Windows installers, publishes the GitHub release, uploads `SHA256SUMS.txt`, publishes `runpane` to npm and PyPI, and notifies the website repo |
+| Stable release | `Build & Release` (`.github/workflows/build.yml`) | `v*` tag push | Builds macOS, Linux and Windows installers, publishes the GitHub release, uploads `SHA256SUMS.txt` and the `pane-relay` binaries, pushes the relay image `ghcr.io/greenfield-inc/pane-relay`, publishes `runpane` to npm and PyPI, and notifies the website repo |
 | Release build check | `Build & Release` | push to the `release` branch | Builds the same installers as artifacts; publishes nothing |
 | Release recovery | `Build & Release` | manual, with `release_tag` and `publish` | Rebuilds and republishes an existing tag |
 | Nightly / canary | `Nightly / Canary Release` (`nightly-release.yml`) | manual, with `channel` and `source_ref` | Publishes a GitHub prerelease that is not marked Latest and has no update metadata, so auto-update never moves stable users onto it |
@@ -17,6 +18,7 @@ build of the Remote PWA, and over-the-air updates for the phone app.
 | Phone app updates | `Native OTA Updates` (`native-updates.yml`) | push to `main` touching `native/`, `shared/`, `pnpm-lock.yaml` or `deploy/native-updates/`; manual on `main` | Exports the phone app's JavaScript, writes one update manifest per platform, and deploys it to the Cloud Run service `pane-native-updates`. On pull requests it builds and smoke-tests the image without deploying |
 | Native runtime check | `Native Runtime` (`native-runtime.yml`) | pull requests that touch `native/` or `pnpm-lock.yaml` | Fails when the phone app's native code changed without a `runtimeVersion` bump, and labels bumped PRs `native-change` |
 | Android build check | `Native Android Build` (`native-android.yml`) | pull requests and pushes to `main` whose Expo Android fingerprint changed, or that change the workflow; weekly; manual | Builds the Android dev client APK with the Firebase config. Pull requests build `arm64-v8a` only; pushes to `main`, the weekly run and manual runs build all four ABIs, one job per ABI |
+| Relays | `Deploy Pane relays` (`relay-deploy.yml`) | manual only | Builds `relay/`, pushes the image to Google Artifact Registry, and creates or updates the three relay VMs; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
 | PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux, macOS and Windows (glasses included, with the Glassly miniapp build), the runpane wrapper matrix, and the Playwright smoke suite |
 | Glasses app on Glassly | none: published by hand (see [Glassly release](#glassly-release)) | a person, after QA on real G2 | Submits `com.runpane.glasses` to the Glassly store for review |
@@ -83,18 +85,58 @@ from source and fails if one uses AVX, BMI, MOVBE, LZCNT or POPCNT instructions
 outside SQLite's runtime-dispatched AEGIS cipher code, since those crash older
 CPUs with SIGILL. It also fails if objdump prints no instructions for a module.
 
+Every installer carries `pane-direct`, the Rust helper for direct paths to linked
+computers (`direct/`). `scripts/after-pack.js` builds it in release mode for each
+packaged platform and arch (`scripts/build-pane-direct.js`, which adds the Rust
+target with rustup) and copies it into the app's resources folder, where main
+finds it. A universal macOS app merges the two copies. Every packaging job
+installs the stable Rust toolchain first, and CI fails without it. A local
+package build without cargo warns and leaves the helper out, so its linked
+computers connect through the relay only.
+
 ```
 build (macOS arm64,   ─┐
   macOS x64, Linux)    │                        ┌─ notify-website
                        ├─ publish ──────────────┼─ homebrew (after packaging)
 build-windows (x64,  ──┘                        ├─ publish-npm   ┐
-  arm64)                validate-runpane-packages ┴─ publish-pypi  ┘
+  arm64)  build-relay ─ validate-runpane-packages ┴─ publish-pypi  ┘
+          build-relay ─ relay-image
 ```
+
+`publish` also needs `build-relay`.
 
 `publish` merges the macOS and Windows updater files, computes
 `SHA256SUMS.txt` and `continuity.json`, uploads them with the macOS and
-Windows installers, and publishes the draft release. `publish-npm` and `publish-pypi` each need both `publish` and
+Windows installers, and publishes the draft release. It also uploads each
+`pane-relay` binary as `pane-relay-<platform>-<arch>` (`.exe` on Windows) with
+`pane-relay-sha256.txt`; `runpane relay` downloads and checks these when npm
+has no relay package for it. It also attaches `relay/compose.yaml` with the
+image pinned to that release, which the self-hosted relay guide downloads. `publish-npm` and `publish-pypi` each need both `publish` and
 `validate-runpane-packages`.
+
+`build-relay` builds `pane-relay` (`relay/`) for each platform `runpane relay`
+supports; Linux binaries link musl statically. `validate-runpane-packages`
+packs each `@pane/relay-<platform>-<arch>` package without publishing and
+runs `runpane relay` on the Linux binary. `publish-npm` publishes those six
+packages first, skipping any this version already has, then lists the ones npm
+has as runpane's `optionalDependencies` and publishes runpane
+(`scripts/runpane-relay-packages.js`). A relay package npm refuses is a warning,
+not a failed release: runpane still publishes, and `runpane relay` downloads the
+binary from the GitHub release instead. The packages need the npm
+organisation `pane`, and a trusted publisher (this repository, `build.yml`)
+on each package once it exists; the first publish needs `NPM_TOKEN` with
+rights on `@pane`.
+
+`relay-image` packs the two static Linux binaries into
+`ghcr.io/greenfield-inc/pane-relay` (`relay/release.Dockerfile`) for
+linux/amd64 and linux/arm64. Every run starts the amd64 image and checks
+`/healthz`; a publishing run pushes it tagged with the version, with the
+workflow's `GITHUB_TOKEN`, and a tag push also moves `latest` (a recovery run
+of an older tag leaves it). GitHub creates a new container package as
+private, so after the first release that pushes it, an organisation owner
+opens the package's **Package settings** and sets **Change visibility** to
+Public; later pushes keep it public. Until then the self-hosted relay guide
+fails at `docker compose up` with `denied`, so make it part of that release.
 
 `publish-release` (`scripts/publish-github-release.sh`) fills an empty draft's
 notes from GitHub's generated notes and keeps a hand-written body. Either way it
@@ -102,6 +144,8 @@ appends a Download section with one link per installer on that tag, through
 `runpane.com/api/download?file=…&v=<tag>&source=gh-release`, so GitHub downloads
 are counted like the website's and still land on the exact file. A body that
 already has the section (`<!-- pane-download-links -->`) is left alone.
+Pane's update dialog shows only the notes above that marker, without HTML
+comments.
 
 ### Verify
 
@@ -111,6 +155,8 @@ git tag --points-at origin/main
 gh run list --limit 10
 gh release view vX.Y.Z
 npm view runpane version
+npm view @pane/relay-linux-x64 version
+docker logout ghcr.io; docker manifest inspect ghcr.io/greenfield-inc/pane-relay:X.Y.Z  # public: works signed out
 python3 -m pip index versions runpane
 ```
 
@@ -142,6 +188,38 @@ unchecked. Manual runs are named after their choices, for example
 `Build & Release v0.0.0-bench (publish=false, sign=false)`.
 `HOMEBREW_TAP_TOKEN` permits the cask push; without it, the Homebrew job logs
 a notice and skips. npm publishes with `--provenance`.
+
+### Claude plugin
+
+Anthropic's plugin directory lists `claude-plugin/` from the `claude-plugin`
+branch, which moves only when the plugin needs a new version. Every version
+that runs a pinned `npx` package waits for an Anthropic reviewer, so bump it
+rarely: the pinned `runpane` hands each call to the installed Pane's newer CLI,
+so tool and server fixes reach users without a plugin release.
+
+1. Run `pnpm sync:claude-plugin` after changing either skill or the icon; the
+   `claudePlugin.test.ts` main test fails while a copy is stale.
+2. To release the plugin, set the `runpane@x.y.z` pin in
+   `claude-plugin/.claude-plugin/plugin.json` to a published npm release that
+   serves `--toolsets plugin`, raise the plugin's `version`, and run
+   `claude plugin validate --strict claude-plugin` (Claude Code 2.1.281 or later).
+3. After that change is on `main`, push it to the `claude-plugin` branch, for
+   example `git push origin <commit>:refs/heads/claude-plugin`. The directory
+   picks it up through its GitHub webhook and holds it for review.
+
+Submitting, the portal's Validate step and its data-handling answers are done
+by hand at claude.ai/directory/manage.
+
+### MCP Registry
+
+`packages/runpane/server.json` is runpane's entry in the official MCP Registry,
+`io.github.greenfield-inc/runpane`; `package.json` `mcpName` must match it, and
+the release sync keeps its version on the release. After the npm release is
+out, run the `Publish to MCP Registry` workflow by hand
+(`gh workflow run mcp-registry.yml`). It signs in with GitHub OIDC, because the
+interactive `mcp-publisher login github` cannot publish to an organization
+namespace. Check the listing with
+`curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=runpane"`.
 
 `CI result` is the check branch protection requires. It fails if another
 `Code Quality` job fails or is cancelled, except Markdown Links, which it does
@@ -226,6 +304,7 @@ Names only; values live in the GitHub repository settings.
 | `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | `build.yml` | macOS signing. It turns on only when all five are set and the `sign` input is not unchecked; otherwise builds are unsigned |
 | `SITE_REPO_DISPATCH_TOKEN` | `build.yml`, `notify-website.yml` | Sends the `pane-release` event to the website repo |
 | `TRAFFIC_TOKEN` | `traffic-snapshot.yml` | Reads repository traffic |
+| `PANE_RELAY_ACME_EMAIL`, `PANE_RELAY_APNS_KEY_ID`, `PANE_RELAY_APNS_TEAM_ID`, `PANE_RELAY_ANDROID_CERT_SHA256` variables | `relay-deploy.yml` | Relay certificates, iOS alerts and app links; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
 | `GCP_*`, `CLOUD_RUN_*` variables | `deploy-remote-pwa-preview.yml`, `native-updates.yml` (all but `CLOUD_RUN_SERVICE`) | See [Remote PWA preview](#remote-pwa-preview) |
 
 Local development needs no secrets and no `.env` file.

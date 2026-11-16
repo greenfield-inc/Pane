@@ -27,7 +27,8 @@ const containerSizeClasses = {
 };
 
 /**
- * At-a-glance agent status indicator. Working renders as a blue spinner; blocked
+ * At-a-glance agent status indicator. Working renders as a blue ring that spins
+ * a few turns when work starts, then rests (tailwind.config.js); blocked
  * (red), done (blue), and idle (green) render as a dot — the "dot + spinner"
  * variation. Renders nothing for `unknown` so non-agent panels show no badge.
  */
@@ -74,7 +75,8 @@ export const AgentStatusDot: React.FC<AgentStatusDotProps> = ({ status, size = '
   if (!visual) return null;
 
   if (status === 'working') {
-    // Amber ring spinner conveys active work more clearly than a pulsing dot.
+    // A ring with one bright arc: it turns when the agent starts working, then
+    // holds still. Its ring shape, not its colour, sets it apart from the dots.
     return (
       <span
         className={cn('inline-flex items-center justify-center', containerSizeClasses[size], className)}
@@ -84,7 +86,7 @@ export const AgentStatusDot: React.FC<AgentStatusDotProps> = ({ status, size = '
       >
         <span
           className={cn(
-            'inline-block rounded-full border-status-info/30 border-t-status-info animate-spin',
+            'inline-block rounded-full border-status-info/30 border-t-status-info animate-working-spin',
             spinnerSizeClasses[size],
           )}
         />
@@ -104,7 +106,7 @@ export const AgentStatusDot: React.FC<AgentStatusDotProps> = ({ status, size = '
           'inline-block rounded-full transition-all',
           sizeClasses[size],
           visual.colorClass,
-          visual.animate && 'animate-pulse',
+          visual.attention && 'animate-attention-pulse ring-status ring-status-error/20',
         )}
       />
     </span>

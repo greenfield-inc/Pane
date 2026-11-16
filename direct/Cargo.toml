@@ -1,0 +1,42 @@
+[package]
+name = "pane-direct"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+description = "Direct QUIC paths to a Pane computer, carrying its TLS byte stream"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+data-encoding = "2.11"
+iroh = { version = "1.4.1", default-features = false, features = ["tls-ring", "portmapper", "fast-apple-datapath"] }
+n0-future = "0.3"
+ring = "0.17"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "time", "sync", "fs"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+webpki = { package = "rustls-webpki", version = "0.103", default-features = false, features = ["alloc"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { version = "0.21", default-features = false }
+
+# libc 0.2.190 dropped net/route.h and in6_ifreq on iOS, which iroh's netwatch
+# and netdev use, so the Pane app's iOS build stays below it (the version
+# holds for every target: Cargo picks one libc).
+[target.'cfg(target_os = "ios")'.dependencies]
+libc = ">=0.2.189, <0.2.190"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+# The Pane app's library build (native/modules/pane-direct): a panic must not
+# take the app down, so the C ABI catches it.
+[profile.mobile]
+inherits = "release"
+panic = "unwind"
+

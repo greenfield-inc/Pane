@@ -17,6 +17,7 @@ import {
   glassesDeviceName,
   listGlassesOnComputers,
   pairableComputers,
+  relayGlassesComputers,
   type GlassesInvoke,
 } from './glassesPairing';
 
@@ -61,8 +62,8 @@ async function readPending(): Promise<string[]> {
 }
 
 /**
- * Settings › Glasses: the computers on this phone's Tailscale login, these glasses on each, and
- * pairing and revoking across all of them at once.
+ * Settings › Glasses: the computers on this phone's Tailscale login and the ones it paired by QR,
+ * these glasses on each, and pairing and revoking across all of them at once.
  */
 export function useGlasses() {
   const queryClient = useQueryClient();
@@ -73,7 +74,9 @@ export function useGlasses() {
     : profiles.find(profile => profile.tailnetMachine) ?? null;
   const machines = useComputers(directory);
   const list = machines.data?.ok ? machines.data : null;
-  const { computers, skipped } = list ? pairableComputers(list.machines, list.domain, profiles) : { computers: [], skipped: [] };
+  const tailnet = list ? pairableComputers(list.machines, list.domain, profiles) : { computers: [], skipped: [] };
+  const computers = [...tailnet.computers, ...relayGlassesComputers(profiles, tailnet.computers)];
+  const { skipped } = tailnet;
   const deviceName = glassesDeviceName(DEVICE_LABEL, Platform.OS === 'ios' ? 'ios' : 'android');
   const names = computers.map(computer => computer.machine.name).join(',');
 

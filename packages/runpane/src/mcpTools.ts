@@ -14,7 +14,7 @@ export const CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT = 16384;
  * The slice of the runpane contract that MCP tools are generated from. Every
  * command with result `jsonSchemas` becomes a tool; its inputs are the union of
  * the flags in its `usage` lines and its `agentContext` arguments, plus
- * `--pane-dir` for daemon commands. Arguments named `<word>` become inputs placed where the first
+ * `--pane-dir` for daemon commands, minus its `cliOnlyFlags`. Arguments named `<word>` become inputs placed where the first
  * usage line puts them, `<word>...` an array input named `<word>s`, and `-- <word>` the text after
  * `--`. Inputs are strings or booleans unless the argument declares a `schema`. Its output schema
  * is the command's `*Result` schema.
@@ -22,12 +22,16 @@ export const CLAUDE_CODE_TOOL_SEARCH_DESCRIPTION_LIMIT = 16384;
 export interface McpToolContract {
   commands: readonly {
     name: string;
+    /** The tool's name when it isn't the command name with underscores. */
+    mcpName?: string;
     summary: string;
     usage: readonly string[];
     mutates?: boolean;
     additive?: boolean;
     idempotent?: boolean;
     openWorld?: boolean;
+    /** Flags the CLI accepts that the tool leaves out. */
+    cliOnlyFlags?: readonly string[];
     toolsets?: readonly string[];
     jsonSchemas?: readonly string[];
   }[];
@@ -169,8 +173,9 @@ function buildTool(
   const words = usageTokens.slice(0, firstOption === -1 ? undefined : firstOption)
     .map((token) => token.replace(/^\[(.*)\]$/, '$1'))
     .filter((token) => commandWords.has(token) || wordNames.has(token));
+  const cliOnly = new Set(command.cliOnlyFlags ?? []);
   for (const flag of flagNames) {
-    if (OMITTED_FLAGS.has(flag)) continue;
+    if (OMITTED_FLAGS.has(flag) || cliOnly.has(flag)) continue;
     const contextArg = contextArgs.get(flag);
     const globalFlag = globalFlags.get(flag);
     const placeholder = contextArg?.value ?? globalFlag?.value ?? usagePlaceholder(usage, flag);
@@ -205,7 +210,7 @@ function buildTool(
 
   const title = `runpane ${command.name}`;
   return {
-    name: toToolName(command.name),
+    name: command.mcpName ?? toToolName(command.name),
     title,
     command: command.name,
     words,

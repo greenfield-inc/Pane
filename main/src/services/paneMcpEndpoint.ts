@@ -8,7 +8,7 @@ import { agentConfig } from '../../../shared/agents';
 import { getAppDirectory, getAppSubdirectory } from '../utils/appDirectory';
 import { tokenizeShellCommand } from './agents/agentIdentity';
 import { quoteShellWord } from './agents/shellWord';
-import { PANE_MCP_SERVER_NAME, PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV } from './paneMcpNames';
+import { PANE_MCP_SERVER_NAME, PANE_MCP_TOKEN_ENV, PANE_MCP_URL_ENV, PANE_MCP_PLUGIN_DENY_SETTINGS } from './paneMcpNames';
 import { bundledRunpanePath } from './runpaneShim';
 import { readBody, sendError, tabListener, type TabListener } from './tabListener';
 
@@ -133,7 +133,7 @@ export class PaneMcpEndpoint {
           // Pane points only agents it measured holding a call open (Claude: 40 minutes over HTTP) at this endpoint.
           clientFor: (auth) => {
             const tab = auth && this.tabs.get(auth.token);
-            return tab ? { name: tab.agentLabel, waitsLong: true } : undefined;
+            return tab ? { name: tab.agentLabel, waitsLong: true, env: tab.env } : undefined;
           },
           onerror: (error) => console.warn('[PaneMcp]', error.message),
         }),
@@ -256,6 +256,16 @@ export function withPaneMcpConfig(panelId: string, agentType: string | undefined
     return command;
   }
   return `${command.slice(0, spans[0].end)} ${word}${command.slice(spans[0].end)}`;
+}
+
+/**
+ * Claude settings for a tab that reaches Pane's tools over HTTP: they hide the `pane` server Pane's
+ * Claude plugin brings, so the tab sees one Pane server. Claude keeps only the last `--settings`,
+ * so these go into the one settings file the launch names (withClaudePromptHooks).
+ */
+export function paneMcpTabSettings(panelId: string, agentType: string | undefined): typeof PANE_MCP_PLUGIN_DENY_SETTINGS | undefined {
+  const agent = agentType ? agentConfig(agentType) : undefined;
+  return agent?.terminal.paneMcpConfigFlag && current?.granted(panelId) ? PANE_MCP_PLUGIN_DENY_SETTINGS : undefined;
 }
 
 /**

@@ -25,6 +25,15 @@ export interface RunpaneSessionListResult {
   selectedSessionId?: string;
 }
 
+/** `sessions associate-remote`: a Pane on another saved machine joined this computer's Session. */
+export interface RunpaneRemoteAssociationResult {
+  ok: true;
+  session: OrchestrationSessionRecord;
+  machine: { id: string; label: string };
+  /** Set when that machine's Pane can't send this Pane's reports here yet. */
+  warning?: { code: string; message: string; next: string };
+}
+
 export interface RunpaneSessionResult {
   ok: true;
   session: OrchestrationSessionRecord;
@@ -254,6 +263,18 @@ export interface RunpaneWorkspaceEntry {
   screenLines?: string[];
   /** The Notify item of an `item.created` or `item.answered` entry (`runpane autopilot stack push --item <id>`). */
   itemId?: string;
+  /**
+   * Set on an entry a remote Session member's machine sent: that saved machine, and the entry's
+   * journal epoch and generation there, so each one is recorded once.
+   */
+  machine?: RunpaneWorkspaceEntryMachine;
+}
+
+export interface RunpaneWorkspaceEntryMachine {
+  id: string;
+  label: string;
+  epoch: string;
+  gen: number;
 }
 
 export interface RunpaneWorkspacePanelSummary {
@@ -554,6 +575,8 @@ export interface RunpanePaneCreateRequest {
   callerPanelId?: string;
   /** Session to associate each new Pane with (the calling orchestrator's PANE_ORCHESTRATION_SESSION_ID). */
   associateSession?: string;
+  /** Without associateSession, Pane joins new Panes to the Session the caller's Pane belongs to; true skips that. */
+  noAssociate?: boolean;
   /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
   expectReport?: boolean;
 }
@@ -578,7 +601,11 @@ export interface RunpanePaneAdoptRequest {
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;
+  /** The calling tab ($PANE_PANEL_ID); its open Session is the one adopted Panes join. */
+  callerPanelId?: string;
   associateSession?: string;
+  /** Without associateSession, Pane joins adopted Panes to the caller's Session; true skips that. */
+  noAssociate?: boolean;
 }
 
 export type RunpanePaneAdoptResult = RunpanePaneCreateResult;

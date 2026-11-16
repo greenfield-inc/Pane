@@ -299,9 +299,11 @@ export class LoopManager {
   private arm(): void {
     if (!this.started || this.timer) return;
     const nowMs = this.now();
+    const enabled = this.options.repo.list().filter(loop => loop.enabled);
+    // Nothing can come due; saving or turning on a loop wakes the timer again.
+    if (enabled.length === 0) return;
     let sleepMs = MAX_SLEEP_MS;
-    for (const loop of this.options.repo.list()) {
-      if (!loop.enabled) continue;
+    for (const loop of enabled) {
       const next = nextLoopRun(loop.cron, Math.max(this.countsFrom(loop), nowMs));
       if (next !== null) sleepMs = Math.min(sleepMs, next - nowMs);
     }

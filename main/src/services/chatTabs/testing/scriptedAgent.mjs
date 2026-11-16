@@ -14,6 +14,11 @@
 //   env NAME [NAME...]  replies with those environment variables as JSON
 //   caps                replies with the client capabilities, session _meta and mode
 //   steps N             N completed steps of mixed kinds, then a reply
+//   turn S              a turn of S seconds that streams a dot every second, then replies "Done."
+//   hold S              a tool call that runs silently for S seconds, then replies "Held."
+//   stall               sends one chunk, then goes silent with no tool running until cancelled
+//   run COMMAND         runs COMMAND in a shell as a tool call (the real one, with this tab's
+//                       environment), then replies with its output
 //   [Pane · Start]      Autopilot's Start: reads `runpane autopilot waiting --json`, puts the
 //                       topmost Session's items on the stack, and lists them in an
 //                       autopilot-items block (the real CLI, through the daemon)
@@ -21,6 +26,9 @@
 //   usage               reports context usage (usage_update 1234 of 200000), then replies
 //   task [quick]        starts a background shell (an async task) and replies; it runs until stopped
 //                       with _session/async_task/stop, or with "quick" ends by itself shortly after
+//   call COMMAND        a tool call for COMMAND (not run) that stays in progress until cancelled
+//   abandon             ends its turn with a tool call left open (as some agents do on cancel), then
+//                       runs a silent turn of its own that sends nothing until stopped
 //   background          replies, then runs a turn of its own with no prompt open (as Claude does for a
 //                       finished background task), announced as an async task to a client that takes them
 //
@@ -30,7 +38,7 @@ import { Readable, Writable } from 'node:stream';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 
 const store = process.env.SCRIPTED_AGENT_STORE ?? path.join(process.cwd(), '.scripted-agent');
 mkdirSync(store, { recursive: true });
@@ -67,7 +75,7 @@ function configOptions(session) {
 const app = agent()
   .onRequest(methods.agent.initialize, ({ params }) => {
     clientCapabilities = params.clientCapabilities ?? {};
-    return { protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: true }, sessionCapabilities: { close: {}, list: {} } } };
+    return { protocolVersion: 1, agentCapabilities: { loadSession: process.env.SCRIPTED_AGENT_NO_LOAD !== '1', promptCapabilities: { image: true }, sessionCapabilities: { close: {}, list: {} } } };
   })
   .onRequest(methods.agent.session.new, async ({ params, client }) => {
     if (process.env.SCRIPTED_AGENT_SIGNED_OUT === '1') throw RequestError.authRequired();
@@ -133,7 +141,8 @@ const app = agent()
     session.cancelled = false;
     const text = params.prompt.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
     const send = async update => { session.updates.push(update); persist(id); await client.notify(methods.client.session.update, { sessionId: id, update }); };
-    const say = async reply => { for (const chunk of reply.match(/[\s\S]{1,12}/g) ?? []) await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } }); };
+    // Each reply carries its own message id, as claude-agent-acp's live and replayed updates do.
+    const say = async reply => { const messageId = randomUUID(); for (const chunk of reply.match(/[\s\S]{1,12}/g) ?? []) await send({ sessionUpdate: 'agent_message_chunk', messageId, content: { type: 'text', text: chunk } }); };
     await send({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } });
     const [word, ...rest] = text.trim().split(/\s+/);
     if (word === 'signout') throw RequestError.authRequired();
@@ -173,6 +182,46 @@ const app = agent()
     if (word === 'slow') {
       while (!session.cancelled) { await say('.'); await new Promise(resolve => setTimeout(resolve, 30)); }
       return { stopReason: 'cancelled' };
+    }
+    if (word === 'turn') {
+      const seconds = Number(rest[0] ?? 0);
+      for (let second = 0; second < seconds && !session.cancelled; second += 1) {
+        await say('.');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      if (session.cancelled) return { stopReason: 'cancelled' };
+      await say('Done.');
+      return { stopReason: 'end_turn' };
+    }
+    if (word === 'hold') {
+      const toolCallId = `tool-${randomUUID()}`;
+      await send({ sessionUpdate: 'tool_call', toolCallId, title: `sleep ${rest[0] ?? 0}`, kind: 'execute', status: 'in_progress', rawInput: { command: `sleep ${rest[0] ?? 0}` } });
+      const until = Date.now() + Number(rest[0] ?? 0) * 1000;
+      while (Date.now() < until && !session.cancelled) await new Promise(resolve => setTimeout(resolve, 100));
+      await send({ sessionUpdate: 'tool_call_update', toolCallId, status: session.cancelled ? 'failed' : 'completed' });
+      if (session.cancelled) return { stopReason: 'cancelled' };
+      await say('Held.');
+      return { stopReason: 'end_turn' };
+    }
+    if (word === 'stall') {
+      await say('Thinking');
+      while (!session.cancelled) await new Promise(resolve => setTimeout(resolve, 100));
+      return { stopReason: 'cancelled' };
+    }
+    if (word === 'run') {
+      const command = rest.join(' ');
+      const toolCallId = `tool-${randomUUID()}`;
+      await send({ sessionUpdate: 'tool_call', toolCallId, title: command, kind: 'execute', status: 'in_progress', rawInput: { command } });
+      const output = await new Promise(resolve => {
+        const child = spawn('/bin/sh', ['-c', command], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+        let text = '';
+        child.stdout.on('data', chunk => { text += chunk; });
+        child.stderr.on('data', chunk => { text += chunk; });
+        child.on('close', code => resolve({ text, code }));
+      });
+      await send({ sessionUpdate: 'tool_call_update', toolCallId, status: output.code === 0 ? 'completed' : 'failed', rawOutput: { stdout: output.text } });
+      await say(`Ran: ${output.text.trim().slice(0, 200)}`);
+      return { stopReason: 'end_turn' };
     }
     if (word === 'permission') {
       const toolCallId = `tool-${randomUUID()}`;
@@ -221,6 +270,25 @@ const app = agent()
       if (rest[0] === 'quick') setTimeout(() => { if (liveTasks.delete(asyncTaskId)) void notify({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: 'completed' }); }, 150);
       await say('Started a task.');
       return { stopReason: 'end_turn' };
+    }
+    if (word === 'call') {
+      const command = rest.join(' ');
+      const toolCallId = `tool-${randomUUID()}`;
+      await send({ sessionUpdate: 'tool_call', toolCallId, title: command, kind: 'execute', status: 'in_progress', rawInput: { command } });
+      while (!session.cancelled) await new Promise(resolve => setTimeout(resolve, 100));
+      await send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'failed' });
+      return { stopReason: 'cancelled' };
+    }
+    if (word === 'abandon') {
+      await send({ sessionUpdate: 'tool_call', toolCallId: `tool-${randomUUID()}`, title: 'sleep 30', kind: 'execute', status: 'in_progress' });
+      void (async () => {
+        await new Promise(resolve => setTimeout(resolve, 40));
+        const asyncTaskId = `autonomous-turn-${randomUUID()}`;
+        await send({ sessionUpdate: 'async_task_spawned', asyncTaskId, name: 'Claude is working', taskType: 'turn', description: 'A background task finished.', showInTranscript: false, canStop: true });
+        while (!session.ownTurnStopped) await new Promise(resolve => setTimeout(resolve, 100));
+        await send({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: 'stopped' });
+      })();
+      return { stopReason: 'cancelled' };
     }
     if (word === 'background') {
       void ownTurn(session, send);

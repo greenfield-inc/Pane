@@ -19,12 +19,35 @@ export {
   connectionPresence,
   type ConnectionNotice,
   type ConnectionPresence,
+  type RelayNoticeContext,
 } from './connectionPresence';
 export { createFetchEventStreamTransport } from './fetchEventStreamTransport';
 export { decodeRemoteConnectionCode } from './pairing';
+export {
+  DEFAULT_RELAY_DOMAIN,
+  RelayPairingError,
+  exchangeRelayPairing,
+  fetchNewRelayProfiles,
+  isRelayProfile,
+  linkRelayComputers,
+  linkWithSavedRelayComputers,
+  parseRelayPairingLink,
+  relayAsleepSince,
+  relayComputerAddress,
+  relayComputerOf,
+  relayKeyMatchesId,
+  relayProfile,
+  withNewProfiles,
+  type RelayCommandClient,
+  type RelayConnectionProfile,
+  type RelayLinkPeer,
+  type RelayPairingLink,
+  type StoredRelayProfile,
+} from './relay';
 export {
   getOrCreateRuntimeId,
   loadRemoteProfiles,
   saveRemoteProfiles,
   type RemoteKeyValueStorage,
 } from './storage';
+export { terminalSnapshotText, type HostTerminalSnapshot } from './terminalSnapshot';

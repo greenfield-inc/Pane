@@ -365,3 +365,73 @@ describe('ConfigManager agent context defaults', () => {
     expect(manager.getConfig().agentContext?.cleanupPending).toBe(true);
   });
 });
+
+describe('ConfigManager analytics gate', () => {
+  let paneDir: string;
+  let configPath: string;
+
+  beforeEach(async () => {
+    paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-analytics-gate-'));
+    process.env.PANE_DIR = paneDir;
+    configPath = path.join(paneDir, 'config.json');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    delete process.env.PANE_DIR;
+    await fs.rm(paneDir, { recursive: true, force: true });
+  });
+
+  async function load(): Promise<ConfigManager> {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    return manager;
+  }
+
+  it.each([
+    ['is not JSON', '{"analytics": {"enabled": false'],
+    ['has a field that cannot be decoded', JSON.stringify({ analytics: { enabled: false }, notifications: { enabled: 'yes' } })],
+  ])('keeps analytics off when config.json %s, and leaves the file alone', async (_case, text) => {
+    await fs.writeFile(configPath, text);
+    const manager = await load();
+    expect(manager.isAnalyticsEnabled()).toBe(false);
+    expect(await fs.readFile(configPath, 'utf8')).toBe(text);
+  });
+
+  it.each([true, false])('keeps the saved analytics settings (enabled: %s) once a broken config.json is fixed', async (enabled) => {
+    const saved = { enabled, installId: 'install_1111', distinctId: 'person_1', posthogApiKey: 'phc_saved', posthogHost: 'http://127.0.0.1:9' };
+    await fs.writeFile(configPath, `${JSON.stringify({ analytics: saved, theme: 'folio' })},`);
+    const manager = await load();
+    // What every launch writes, while the file still does not parse.
+    const installId = await manager.getOrCreateAnalyticsInstallId();
+    await manager.setAnalyticsIdentity({ distinctId: 'person_2', identitySource: 'anonymous', installId });
+    await manager.setAnalyticsDistinctId('person_2');
+    await manager.updateConfig({ theme: 'light' });
+
+    await fs.writeFile(configPath, JSON.stringify({ analytics: saved, theme: 'folio' }));
+    await manager.updateConfig({});
+
+    const file = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    expect(file.analytics).toEqual(saved);
+    expect(file.theme).toBe('light');
+    expect(manager.isAnalyticsEnabled()).toBe(enabled);
+  });
+
+  it('turns analytics on for a new install and a readable config that does not mention it', async () => {
+    expect((await load()).isAnalyticsEnabled()).toBe(true);
+    await fs.writeFile(configPath, JSON.stringify({ theme: 'folio' }));
+    expect((await load()).isAnalyticsEnabled()).toBe(true);
+  });
+
+  it.each([
+    ['DO_NOT_TRACK', '1', false],
+    ['RUNPANE_TELEMETRY_DISABLED', 'yes', false],
+    ['DO_NOT_TRACK', '0', true],
+  ])('with analytics on in config, %s=%s leaves analytics on: %s', async (name, value, expected) => {
+    vi.stubEnv(name, value);
+    await fs.writeFile(configPath, JSON.stringify({ analytics: { enabled: true } }));
+    expect((await load()).isAnalyticsEnabled()).toBe(expected);
+  });
+});

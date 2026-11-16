@@ -1,11 +1,14 @@
+import { existsSync } from 'node:fs';
 import { DatabaseService } from '../database/database';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { decodeHostNavigationMemory } from '../../../shared/types/hostNavigation';
-import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { HostNavigationMemory, LaunchChat, LaunchChatOutline } from '../../../shared/types/hostNavigation';
+import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
+import type { ToolPanel } from '../../../shared/types/panels';
 import { decodeSessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import { decodeSessionPanelLayout } from '../../../shared/types/panels';
-import type { SessionPanelLayout } from '../../../shared/types/panels';
+import type { PanelLayoutNode, SessionPanelLayout } from '../../../shared/types/panels';
 
 type SidebarSection = 'pinned' | 'repositories' | 'sshHosts' | 'sessions' | 'archived';
 
@@ -31,6 +34,26 @@ interface ExpandedUiState {
 }
 
 type UiStateStore = Pick<DatabaseService, 'getUIState' | 'setUIState' | 'deleteUIState'>;
+
+/** What the launch check reads about a Pane and its tabs. */
+interface LaunchPanes {
+  getSession(id: string): { archived?: boolean; worktree_path: string } | undefined;
+  getPanel(id: string): { sessionId: string; type: string } | null;
+}
+
+/** The launch outline also reads the Pane's tabs, for its terminal strip. */
+interface LaunchOutlinePanes extends LaunchPanes {
+  getPanelsForSession(sessionId: string): ToolPanel[];
+}
+
+function groupTab(node: PanelLayoutNode, groupId: string | undefined): string | null {
+  if (node.type === 'group') return !groupId || node.id === groupId ? node.activePanelId : null;
+  for (const child of node.children) {
+    const tab = groupTab(child, groupId);
+    if (tab) return tab;
+  }
+  return null;
+}
 
 class UIStateManager {
   private db: UiStateStore;
@@ -227,6 +250,35 @@ class UIStateManager {
       return;
     }
     this.db.setUIState(key, JSON.stringify(layout));
+  }
+
+  /**
+   * The chat a launch reopens: the tab that was in front in the last Pane this
+   * computer showed, when that tab is a chat. Null (launch shows Home) for any
+   * other last view, a terminal tab, an archived Pane, a Pane whose folder is
+   * gone, or while another computer is the active host. Restoring a Pane only
+   * for a chat keeps launch from starting terminals: a chat starts its agent
+   * when shown, and only the tab in front is shown.
+   */
+  getLaunchChat(panes: LaunchPanes): LaunchChat | null {
+    if (this.getRemoteHostId() !== null) return null;
+    const memory = this.getNavigationMemory(null);
+    if (memory?.view !== 'sessions' || !memory.paneId) return null;
+    const pane = panes.getSession(memory.paneId);
+    if (!pane || pane.archived || !existsSync(pane.worktree_path)) return null;
+    const layout = this.getPaneLayout(null, memory.paneId);
+    if (!layout) return null;
+    const panelId = groupTab(layout.root, layout.focusedGroupId) ?? groupTab(layout.root, undefined);
+    const panel = panelId ? panes.getPanel(panelId) : null;
+    if (!panelId || panel?.sessionId !== memory.paneId || panel.type !== 'chat') return null;
+    return { paneId: memory.paneId, panelId };
+  }
+
+  /** The launch chat for the window's first frame, when its Pane shows one group of tabs. */
+  getLaunchChatOutline(panes: LaunchOutlinePanes): LaunchChatOutline | null {
+    const chat = this.getLaunchChat(panes);
+    if (!chat || this.getPaneLayout(null, chat.paneId)?.root.type !== 'group') return null;
+    return { panelId: chat.panelId, dockTerminal: !!getDockTerminalPanel(panes.getPanelsForSession(chat.paneId)) };
   }
 
   getExpandedState(): ExpandedUiState {

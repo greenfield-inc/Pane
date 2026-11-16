@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
 import type { AgentChatConfigOption } from '../../shared/types/agentChat';
@@ -35,6 +36,18 @@ const view: ChatTabView = {
     { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Nothing is waiting on you right now.' }] },
   ] },
 };
+// ?pending=1: the latest message is yours and the agent's reply has not started (with ?working, only the Working row shows).
+if (params.has('pending') && params.has('conversation')) view.transcript!.messages.pop();
+// ?long=1: enough turns to scroll, for what shows above the composer at the bottom.
+if (params.has('long')) {
+  const messages = view.transcript!.messages;
+  view.transcript!.messages = [...Array.from({ length: 4 }, (_, round) => messages.map(message => ({ ...message, id: `${message.id}:${round}` }))).flat(), ...messages];
+}
+// ?permission=1: an approval docked above the composer.
+if (params.has('permission')) {
+  view.permissions = [{ id: 'perm', generation: 1, title: 'Run pnpm test', toolCall: { kind: 'execute', title: 'pnpm test', rawInput: { command: 'pnpm test' } }, options: [option('allow', 'Allow once'), option('always', 'Always allow'), option('reject', 'Reject')].map(({ value, name }) => ({ optionId: value, name, kind: value === 'reject' ? 'reject_once' : value === 'always' ? 'allow_always' : 'allow_once' })) }];
+  view.status = 'blocked';
+}
 // ?banner=most-recent|none|known-empty|list-failed: what Switch to chat did (D-282); ✕ closes it.
 const bannerParam = params.get('banner');
 const banner: ChatTabSwitchBanner | undefined = bannerParam === 'most-recent' || bannerParam === 'none' || bannerParam === 'known-empty' ? { kind: bannerParam }
@@ -123,10 +136,20 @@ const client: ChatTabClient = {
   dismissBanner: async () => { window.qaDismissed++; delete view.banner; stateListeners.forEach(listener => listener(structuredClone(view))); },
 };
 const width = Number(params.get('width') ?? 360);
-createRoot(document.getElementById('root')!).render(
+const root = createRoot(document.getElementById('root')!);
+// window.qaSwitchAway(): unmounts the panel and mounts it again, as leaving its Pane and coming back does.
+// In StrictMode, as the desktop app's development build renders it.
+const render = (mounted: boolean) => root.render(<StrictMode>
   <div className="bg-bg-secondary" style={{ height: '100vh', display: 'flex' }}>
     <div data-testid="column" className="bg-bg-primary" style={{ width, height: '100%', borderRight: '1px solid var(--color-border-primary)' }}>
-      <ChatTabPanel panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} pr={pr} workers={workers} actions={actions} />
+      {mounted && <ChatTabPanel panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} pr={pr} workers={workers} actions={actions} />}
     </div>
-  </div>,
-);
+  </div>
+</StrictMode>);
+declare global { interface Window { qaSwitchAway: () => Promise<void> } }
+window.qaSwitchAway = async () => {
+  render(false);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  render(true);
+};
+render(true);

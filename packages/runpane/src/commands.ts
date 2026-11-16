@@ -80,6 +80,10 @@ export interface ParsedArgs {
   only?: string[];
   secretFiles?: string[];
   reason?: string;
+  /** `runpane theme set`: --theme, --colors (JSON text) and --css. --base arrives as baseBranch. */
+  themeId?: string;
+  themeColors?: string;
+  themeCss?: string;
   timeoutMs?: number;
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -214,6 +218,8 @@ export interface ParsedArgs {
   cwd?: string;
   /** `workspace write --content`; without it, write reads stdin. */
   writeContent?: string;
+  /** `runpane link <link>`: a one-time link from another computer's Pane. */
+  pairingLink?: string;
   /** `runpane handoff <destination...>` */
   handoffDestination?: string;
   handoffTemplate?: boolean;
@@ -283,6 +289,9 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
   ['--reason', ['secrets request', 'autopilot close']],
+  ['--theme', ['theme set']],
+  ['--colors', ['theme set']],
+  ['--css', ['theme set']],
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
 ]);
@@ -449,7 +458,8 @@ function invalidAgentError(value: string): Error {
 const WAIT_FOR_RESULT_COMMANDS: ReadonlySet<string> = new Set(['panels submit', 'panels create', 'panes create']);
 
 function validateWaitForResultArgs(parsed: ParsedArgs): void {
-  if (parsed.waitTimeoutMs !== undefined && !parsed.waitForResult) {
+  // `ask` bounds its one agent turn with --timeout.
+  if (parsed.waitTimeoutMs !== undefined && !parsed.waitForResult && parsed.command !== 'ask') {
     throw new Error('--timeout only applies with --wait.');
   }
   if (!parsed.waitForResult) return;
@@ -519,8 +529,9 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
   return args.splice(1, 1)[0];
 }
 
-/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item'> {
+/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one; link takes the link. */
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink'> {
+  if (command === 'link') return args[0] !== undefined && !args[0].startsWith('-') ? { pairingLink: args.shift() ?? '' } : {};
   if (AUTOPILOT_ITEM_COMMANDS.has(command)) {
     return args[0] !== undefined && !args[0].startsWith('-') ? { item: args.shift() ?? '' } : {};
   }
@@ -534,6 +545,8 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
     while (args[0] !== undefined && !args[0].startsWith('-')) words.push(args.shift() ?? '');
     return words.length ? { handoffDestination: words.join(' ') } : {};
   }
+  // Every word after `relay` is pane-relay's, --help included.
+  if (command === 'relay') return { execCommand: args.splice(0) };
   if (command === 'workspace exec' || command === 'secrets exec') {
     const separator = args.indexOf('--');
     if (separator !== -1) return { execCommand: args.splice(separator).slice(1) };
@@ -1154,6 +1167,18 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.reason = value;
     return;
   }
+  if (flag === '--theme') {
+    parsed.themeId = value;
+    return;
+  }
+  if (flag === '--colors') {
+    parsed.themeColors = value;
+    return;
+  }
+  if (flag === '--css') {
+    parsed.themeCss = value;
+    return;
+  }
   if (flag === '--timeout-ms') {
     const timeoutMs = parsed.command === 'watch' ? parseWatchDuration(flag, value) : Number(value);
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || (timeoutMs === 0 && parsed.command !== 'watch')) {
@@ -1300,7 +1325,7 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.message = value;
     return;
   }
-  if (flag === '--query') {
+  if (flag === '--query' || flag === '--search') {
     parsed.query = value;
     return;
   }

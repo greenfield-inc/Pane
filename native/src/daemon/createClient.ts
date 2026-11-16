@@ -12,6 +12,9 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import { secureStore } from '@/auth/secureStore';
 import { demoConnection, isDemoProfile } from '@/features/demo/demoHost';
 
+import { routedFetch } from './direct/directRoute';
+import { sameNetworkFetch } from './direct/sameNetwork';
+
 // expo/fetch streams response bodies, which the /events stream needs.
 export const streamingFetch = expoFetch;
 
@@ -32,17 +35,18 @@ export function getRuntimeId(): Promise<string> {
 }
 
 export function createDaemonClient(profile: RemotePaneConnectionProfile): RemoteDaemonClient {
+  // A relay computer's requests take its same-network address when one answers, else its direct
+  // connection while that path is picked, else the relay.
+  const fetch = sameNetworkFetch(profile, routedFetch(profile, streamingFetch));
   return new RemoteDaemonClient({
     profile,
     // The demo's sample computers answer in the app, whichever screen builds the client.
     ...(isDemoProfile(profile)
       ? demoConnection()
-      : { transport: createFetchEventStreamTransport(streamingFetch), fetch: streamingFetch }),
+      : { transport: createFetchEventStreamTransport(fetch), fetch }),
     runtimeId: getRuntimeId,
     clientLabel: CLIENT_LABEL,
     deviceLabel: DEVICE_LABEL,
-    // Mobile networks drop idle sockets silently; the host heartbeats every 5 s.
-    staleStreamTimeoutMs: 20_000,
   });
 }
 

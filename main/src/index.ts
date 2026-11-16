@@ -123,6 +123,7 @@ import { setupAutoUpdater } from './autoUpdater';
 import { getUpdateCapabilities } from './utils/updateCapabilities';
 import { UIStateManager } from './services/uiStateManager';
 import { getActiveRemoteHostId } from '../../shared/types/remoteDaemon';
+import { encodeLaunchChatArg } from '../../shared/types/hostNavigation';
 import { cancelRestartToUpdate, setUpdateAvailable, setUpdateReady, startRestartToUpdate } from './services/restartToUpdate/restartToUpdate';
 import type { CliManagerFactory } from './services/cliManagerFactory';
 import { setupConsoleWrapper } from './utils/consoleWrapper';
@@ -134,7 +135,8 @@ import { worktreePoolManager } from './services/worktreePoolManager';
 import { removePaneFsmonitorConfig } from './services/gitPerformanceConfig';
 import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
-import { MachineConnections } from './services/machineConnections';
+import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
+import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
 import { followSavedMachines, prepareNotifyForQuit } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
@@ -143,7 +145,7 @@ import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
 import { syncAutoStartOnBoot } from './utils/autoStart';
 import { addRunpaneToUserPathBestEffort } from './services/runpaneShim';
 import { syncPaneMcpForApp } from './services/paneMcpRegistration';
-import { findPaneLinkArg, forwardPaneLinkToRunningPane, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME, parsePaneLink } from './services/paneLinks';
+import { findPaneLinkArg, forwardPaneLinkToRunningPane, isPanePairLink, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME, parsePaneLink } from './services/paneLinks';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
 import { remotePaneClientController } from './daemon/client/remotePaneClient';
 import { startHeadlessPaneProcess } from './daemon/startHeadless';
@@ -179,8 +181,10 @@ let shutdownInProgress = false;
 // On macOS, closing the window hides it unless Pane is quitting.
 let appIsQuitting = false;
 let mainWindowRevealed = false;
+// The renderer's first render with data; menu actions and pane:// links wait for it.
+let rendererReady = false;
 let flushWindowState: (() => void) | null = null;
-// A menu action chosen before the window is revealed waits for the renderer.
+// A menu action chosen before the renderer is ready waits for it.
 let pendingMenuAction: AppMenuAction | null = null;
 const RENDERER_READY_CHANNEL = 'window:renderer-ready';
 const RENDERER_READY_TIMEOUT_MS = 3_000;
@@ -293,6 +297,12 @@ function openPaneLink(link: string): void {
     return;
   }
   pendingPaneLink = undefined;
+  // Another computer's one-time link opens the confirm page, in local and remote mode alike.
+  if (isPanePairLink(link)) {
+    showMainWindow();
+    mainWindow?.webContents.send('relay:link-opened', { link });
+    return;
+  }
   if (remotePaneClientController.isRemoteModeActive()) {
     // The link names the active host's Panes, which only the renderer holds in remote mode.
     try {
@@ -311,7 +321,7 @@ function openPaneLink(link: string): void {
 let powerSaveManager: PowerSaveManager | null = null;
 
 function sendMenuAction(action: AppMenuAction): void {
-  if (!mainWindowRevealed || !mainWindow || mainWindow.isDestroyed()) {
+  if (!rendererReady || !mainWindow || mainWindow.isDestroyed()) {
     pendingMenuAction = action;
     return;
   }
@@ -438,6 +448,20 @@ function readSavedWindowState() {
   }
 }
 
+/** The chat this launch reopens, for the window's first frame; none when it cannot be read. */
+function readLaunchChatArg(): string[] {
+  // A pane:// link that launched Pane opens its own view, not the launch chat.
+  if (pendingPaneLink) return [];
+  try {
+    const uiState = new UIStateManager(databaseService, () => getActiveRemoteHostId(configManager.getConfig().remoteDaemon));
+    const outline = uiState.getLaunchChatOutline(databaseService);
+    return outline ? [encodeLaunchChatArg(outline)] : [];
+  } catch (error) {
+    console.warn('[Main] Could not read the chat this launch reopens:', error);
+    return [];
+  }
+}
+
 async function createWindow() {
   // Strip iframe-blocking headers for localhost URLs (enables embedded browser panel)
   session.defaultSession.webRequest.onHeadersReceived(
@@ -468,20 +492,25 @@ async function createWindow() {
   const windowControlsOverlay = shouldEnableWindowControlsOverlay(process.platform, process.env);
   const appearance = normalizeAppearance(configManager.getConfig()).appearance;
   const osPrefersDark = resolveOsPrefersDark();
-  applyNativeThemeSource(appearance);
+  const customTheme = configManager.customTheme;
+  applyNativeThemeSource(appearance, customTheme.getState().base);
   // Appearance edits that arrive through the config file watcher (not the
   // config:update IPC) must re-point nativeTheme too, or System mode resolves
   // against a themeSource still pinned by a previous Fixed palette.
   if (!appearanceConfigSyncRegistered) {
     appearanceConfigSyncRegistered = true;
     configManager.on('config-updated', (updated: AppConfig) => {
-      applyNativeThemeSource(normalizeAppearance(updated).appearance);
+      applyNativeThemeSource(normalizeAppearance(updated).appearance, customTheme.getState().base);
+    });
+    customTheme.on('changed', () => {
+      applyNativeThemeSource(normalizeAppearance(configManager.getConfig()).appearance, customTheme.getState().base);
     });
   }
   const appearanceOptions = buildWindowAppearanceOptions(
     appearance,
     osPrefersDark,
     readStoredBackgroundColors(),
+    customTheme.getState().base,
   );
 
   // An icon path Electron cannot load is worse than none: on Windows it sets an
@@ -497,7 +526,7 @@ async function createWindow() {
 
   const mainWindowOptions: BrowserWindowConstructorOptions = {
     ...(restoredBounds ?? { width: 1400, height: 900 }),
-    // Shown once the renderer has painted its first frame with data.
+    // Shown on its first painted frame: the launch outline (frontend/index.html).
     show: false,
     backgroundColor: appearanceOptions.backgroundColor,
     webPreferences: {
@@ -510,6 +539,7 @@ async function createWindow() {
       additionalArguments: [
         ...appearanceOptions.additionalArguments,
         ...(windowControlsOverlay ? [WINDOW_CONTROLS_OVERLAY_ARG] : []),
+        ...readLaunchChatArg(),
       ],
     },
   };
@@ -534,9 +564,7 @@ async function createWindow() {
   mainWindow = win;
   ensureNativeThemeForwarding(() => mainWindow);
 
-  const revealWindow = (reason: 'renderer ready' | 'timeout') => {
-    clearTimeout(revealFallback);
-    ipcMain.removeListener(RENDERER_READY_CHANNEL, onRendererReady);
+  const revealWindow = (reason: 'first paint' | 'timeout') => {
     if (mainWindowRevealed || win.isDestroyed()) return;
     mainWindowRevealed = true;
     console.log(`[Main] Showing window (${reason})`);
@@ -544,17 +572,30 @@ async function createWindow() {
     if (savedWindowState?.isMaximized) win.maximize();
     else win.show();
     if (savedWindowState?.isFullScreen) win.setFullScreen(true);
+  };
+  const markRendererReady = () => {
+    clearTimeout(rendererFallback);
+    ipcMain.removeListener(RENDERER_READY_CHANNEL, onRendererReady);
+    if (rendererReady || win.isDestroyed()) return;
+    rendererReady = true;
     if (pendingMenuAction) {
       win.webContents.send(APP_MENU_ACTION_CHANNEL, pendingMenuAction);
       pendingMenuAction = null;
     }
+    // A pane:// link that launched Pane opens once the renderer can act on it.
+    paneLinksReady = true;
+    if (pendingPaneLink) openPaneLink(pendingPaneLink);
   };
   const onRendererReady = (event: IpcMainEvent) => {
-    if (event.sender === win.webContents) revealWindow('renderer ready');
+    if (event.sender === win.webContents) markRendererReady();
   };
+  win.once('ready-to-show', () => revealWindow('first paint'));
   ipcMain.on(RENDERER_READY_CHANNEL, onRendererReady);
-  // A renderer that fails before its first render must not leave the window hidden.
-  const revealFallback = setTimeout(() => revealWindow('timeout'), RENDERER_READY_TIMEOUT_MS);
+  // A renderer that fails before its first paint or render must not leave the window hidden.
+  const rendererFallback = setTimeout(() => {
+    revealWindow('timeout');
+    markRendererReady();
+  }, RENDERER_READY_TIMEOUT_MS);
 
   flushWindowState = trackWindowState(win, (state) => {
     try {
@@ -838,6 +879,9 @@ async function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
     mainWindowRevealed = false;
+    rendererReady = false;
+    // No window is no one looking; a new window's renderer reports itself on screen.
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused: false, visible: false });
   });
 
   // Log any console messages from the renderer
@@ -1092,6 +1136,7 @@ async function createWindow() {
   // instead of document.hasFocus() (which lies when DevTools is focused).
   mainWindow.on('focus', () => {
     mainWindow?.webContents.send('window:focus-changed', true);
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused: true });
     if (gitStatusManager) {
       gitStatusManager.handleVisibilityChange(false); // false = visible/focused
     }
@@ -1100,6 +1145,7 @@ async function createWindow() {
 
   mainWindow.on('blur', () => {
     mainWindow?.webContents.send('window:focus-changed', false);
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused: false });
     if (gitStatusManager) {
       gitStatusManager.handleVisibilityChange(true); // true = hidden/blurred
     }
@@ -1108,6 +1154,7 @@ async function createWindow() {
 
   mainWindow.on('minimize', () => {
     mainWindow?.webContents.send('window:focus-changed', false);
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused: false, visible: false });
     if (gitStatusManager) {
       gitStatusManager.handleVisibilityChange(true); // true = hidden/minimized
     }
@@ -1119,6 +1166,7 @@ async function createWindow() {
     // actually focuses the window; that is what restarts git/resource work.
     const focused = mainWindow?.isFocused() ?? false;
     mainWindow?.webContents.send('window:focus-changed', focused);
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ focused, visible: true });
   });
 }
 
@@ -1162,7 +1210,14 @@ async function initializeServices() {
   logger = services.logger;
   archiveProgressManager = services.archiveProgressManager;
   analyticsManager = services.analyticsManager;
-  powerSaveManager = new PowerSaveManager(configManager, sessionManager, terminalPanelManager, { logger });
+  const backgroundActivity = services.backgroundActivity;
+  // Linux reports a locked screen only when asked; the keep-awake poll asks while agents work.
+  powerSaveManager = new PowerSaveManager(configManager, sessionManager, terminalPanelManager, {
+    logger,
+    onPoll: () => backgroundActivity?.evaluate('the Linux power poll ran'),
+  });
+  backgroundActivity?.on('change', (away: boolean) => usageManager.setPaused(away));
+  usageManager.setPaused(backgroundActivity?.isAway() ?? false);
   powerSaveManager.sync();
   const navigationMemory = new UIStateManager(databaseService);
   startRestartToUpdate({
@@ -1184,6 +1239,10 @@ async function initializeServices() {
   machineConnections = new MachineConnections({
     configManager,
     invokeLocal: (channel, args) => commandRegistry.invoke(channel, args),
+    routes: {
+      prepare: (route) => remotePaneClientController.prepareRoute(route),
+      saveReport: (computerId, routeId, report) => remotePaneClientController.saveRoutesReport(computerId, routeId, report),
+    },
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
   const machines = machineConnections;
@@ -1191,6 +1250,17 @@ async function initializeServices() {
   powerMonitor.on('resume', () => machines.resume());
   // The Notify inbox, badge and tray count cover every saved machine, in any mode.
   followSavedMachines(machineConnections);
+  // A Session's members on saved machines: their reports reach this computer's journal and overview.
+  const sessionsManager = services.orchestrationSessionManager;
+  if (sessionsManager && services.workspaceJournal) {
+    const remoteMembers = new RemoteMemberEvents({
+      machines: { subscribe: listener => machines.subscribe(listener), invoke: (machineId, channel, args) => machines.invokeOn(machineId, channel, args) },
+      journal: services.workspaceJournal,
+      members: sessionsManager,
+    });
+    remoteMembers.start();
+    sessionsManager.setRemoteMachines(remoteMachineAccess(machines));
+  }
 
   // Read before the first identity lookup overwrites it, so the renderer can
   // tell when the desktop id changed since the last launch.
@@ -1345,6 +1415,10 @@ if (launchRemoteSetup) {
         onAction: sendMenuAction,
         paneChords: activePaneChords(config),
         settingsAccelerator: settingsMenuAccelerator(config),
+        resetCustomTheme: configManager ? {
+          enabled: configManager.customTheme.getState().theme !== null || configManager.customTheme.getState().error !== null,
+          onClick: () => void configManager.customTheme.reset().catch((error) => console.error('[CustomTheme] Reset failed:', error)),
+        } : undefined,
       });
     };
     installMenu({});
@@ -1365,6 +1439,7 @@ if (launchRemoteSetup) {
     await initializeServices();
     installMenu(configManager.getConfig());
     configManager.on('config-updated', () => installMenu(configManager.getConfig()));
+    configManager.customTheme.on('changed', () => installMenu(configManager.getConfig()));
     syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
     void addRunpaneToUserPathBestEffort();
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') setTimeout(() => syncPaneMcpForApp({
@@ -1377,6 +1452,10 @@ if (launchRemoteSetup) {
   // Register before any renderer loads. useNotifications pulls this on mount
   // and will race a late registration inside createWindow/loadURL.
   ipcMain.handle('window:is-focused', () => mainWindow?.isFocused() ?? true);
+  // The renderer knows when the window is covered or hidden (document.visibilityState); main does not.
+  ipcMain.on('window:visibility-changed', (_event, visible: PaneCommandValue) => {
+    paneDaemonHost?.services.backgroundActivity?.setWindowState({ visible: decodeBoundary(visible, boundary.boolean) });
+  });
   // A clicked desktop notification opens its tab the way an OS pane:// link does.
   // The window comes forward even when the tab has since been closed.
   ipcMain.handle('window:open-pane-link', (_event, link: PaneCommandValue) => {
@@ -1436,8 +1515,6 @@ if (launchRemoteSetup) {
 
   await createWindow();
   console.log('[Main] Window created successfully');
-  paneLinksReady = true;
-  if (pendingPaneLink) openPaneLink(pendingPaneLink);
 
   analyticsManager.startHeartbeat();
 
@@ -1563,7 +1640,7 @@ if (launchRemoteSetup) {
 
     app.on('activate', () => {
       if (mainWindow) {
-        // Before the first reveal, the renderer-ready gate decides when to show.
+        // Before the first reveal, the window's first paint decides when to show.
         if (mainWindowRevealed) showMainWindow();
         return;
       }
@@ -1663,9 +1740,6 @@ if (launchRemoteSetup) {
       await paneDaemonHost.paneDaemonServer.stop();
       console.log('[Main] Local daemon server stopped');
     }
-
-    // Stop resource monitoring
-    resourceMonitorService.stop();
 
     // Terminals exiting because Pane is quitting are not owners releasing their
     // named locks; resumed agents still hold them after the restart.

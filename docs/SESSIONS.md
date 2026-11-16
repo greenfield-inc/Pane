@@ -309,6 +309,38 @@ ignored, timestamps are kept), `sessions:sort-panes` (`{ order: "newest" |
 "oldest" }`) and `sessions:get-pane-order` (`{ newPanes: "top" | "bottom",
 chosen }`).
 
+### The Session row's icon
+
+A Session row's icon spins only while the Session really works, and is an empty
+grey ring otherwise; it is never red (the amber approvals count and the expanded
+Pane rows show what needs you). It spins once the orchestrator's agent tab, or
+an agent tab in one of the Session's Panes (not archived), has been mid-turn
+without a break for 10 s, and stops 10 s after the last one ends, so a short
+wake-up never shows. Mid-turn is stricter than a Pane's own status dot:
+
+- A terminal agent needs its working chrome on screen (the spinner in its title,
+  its thinking or working line), and that screen must have changed in the last
+  15 s. Output alone (a dev server, typing, a redraw) never counts, and a frozen
+  spinner stops counting.
+- A chat tab needs an open turn that sent an update in the last 5 minutes, or a
+  tool call still running.
+- A tab waiting on `runpane watch`, `runpane panels wait`, `runpane notify` or
+  `runpane secrets request` is waiting, not working. A chat tab counts as
+  waiting only while the tool call it is running is that wait; one sent to the
+  background doesn't hide its real turns. A terminal tab counts as waiting
+  while any such call from it is open, so an orchestrator in a terminal tab
+  with a background watch or card open doesn't spin the Session on its own;
+  its workers do.
+- A permission prompt, a menu, a usage-limit screen, a plain shell, and anything
+  Pane cannot tell, read as idle.
+
+The host that runs the agents decides this once and tells every client, so the
+sidebar, All machines (each machine's Sessions by that machine) and the web and
+phone apps agree; while a client can't reach the host it shows the Session
+idle, and a reconnect reads it again. "N working" counts the Panes with
+a working tab by the same rule. A machine that is offline, or too old to report
+it, shows its Sessions idle.
+
 The experimental **Attention inbox** (Settings > Advanced > Experimental) turns
 the Projects list into an Inbox of the Panes that need you: an agent waiting on
 input or approval, an agent that completed a real turn since Pane started (it
@@ -334,7 +366,11 @@ Session's blockers, goal, next step, and decisions when they are set, then its
 Panes and recent activity. Each Pane card lists the Session's tabs in that Pane
 with their type icons: every tab when the Pane is linked whole, with Files and
 Changes last, or exactly the tabs a link names. Click a tab to open the Pane on
-it; Files and Changes open in the Pane's inspector. Agent state changes stay out
+it; Files and Changes open in the Pane's inspector. A Pane on another saved
+machine ([workers on another machine](RUNPANE_WORKSPACES.md#workers-on-another-machine-join-your-session))
+shows "On <machine>" with its tabs' states as that machine reports them, or
+"unreachable" when it doesn't answer, or "needs a Pane update" when its Pane is
+too old to report here; its card is read-only and opens from All machines. Agent state changes stay out
 of Activity; the status dot shows them. Files browses the Session workspace.
 Changes summarizes the Session's Panes and opens a Pane for detailed review. The upper-right sidebar
 button shows or hides the selected tab. A single Session uses two rows at the
@@ -590,11 +626,12 @@ worktree; archive it then.
 ## Pane association before delegation
 
 Management is a Pane-level relationship; tabs inherit the relationship and
-share the Pane's worktree. Panes the orchestrator creates or adopts with
-`runpane panes create` or `panes adopt` are associated with its Session in the
-same call: the CLI reads `PANE_ORCHESTRATION_SESSION_ID`, each result item
-reports `association: { sessionId, ok, error? }`, and `--no-associate` opts
-out. A failed association never undoes the new Pane. Before delegating to an
+share the Pane's worktree. Panes created or adopted with `runpane panes
+create` or `panes adopt` from inside a Session are associated with it in the
+same call: from the orchestrator (the CLI reads `PANE_ORCHESTRATION_SESSION_ID`)
+or from any tab in a Pane that belongs to the open Session (Pane looks up the
+calling tab, `$PANE_PANEL_ID`). Each result item reports `association: {
+sessionId, ok, error? }`, and `--no-associate` opts out. A failed association never undoes the new Pane. Before delegating to an
 existing Pane, or when automatic association failed, the orchestrator
 associates it explicitly. The supported command is:
 
@@ -1026,21 +1063,26 @@ Pause stops a tab's process the way quitting Pane does, without asking, and
 keeps its panel and conversation: `runpane panels pause --panel <panel-id>
 --yes`, `runpane panes pause --pane <pane-id> --yes`, or `runpane sessions
 pause --session <session-id>` for the terminal tabs of the Session's chat and
-every Pane in it. A chat tab can't pause yet: its agent keeps running, the
-result counts it in `chatTabsNotPaused` and says so, and `panels pause` refuses
-one. A Session whose orchestrator is a chat tab therefore never reads as paused.
-A paused tab stays stopped through clicks, app restarts and updates until
+every Pane in it. Pause leaves a chat tab running: the result counts it in
+`chatTabsNotPaused` and says so, and `panels pause` refuses one. Auto-pause
+(Settings > Pause) does stop the agent of a chat tab idle for
+`chatIdleReleaseMinutes` (30 by default), outside the Pane on screen and never
+while it works, holds a queued message or waits on the person. Opening the tab
+or sending it a message resumes it in its conversation, and it reports no
+`panel.paused`. A Session whose orchestrator is a chat tab therefore never reads as paused.
+A paused terminal tab stays stopped through clicks, app restarts and updates until
 `runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
 <pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts
 it in its conversation. The watch reports each paused tab once as
 `panel.paused` (`PAUSED <pane-name> pane <pane-id> panel <panel-id>`) and each
 resumed one as `panel.unpaused` (`UNPAUSED ...`), followed by its usual ready
 signal. An orchestrator leaves paused workers paused unless the person asks.
-Any other start of a paused tab (opening it, a retry, another machine) fails
-with `ERR_PANEL_PAUSED` and starts nothing.
+Any other start of a paused terminal tab (opening it, a retry, another machine)
+fails with `ERR_PANEL_PAUSED` and starts nothing.
 `runpane panes list --json` reports each Pane's `paused` mark (`{ at, by:
 "manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal
-output or input in its tabs or the last time the person selected it;
+output or input or chat agent activity in its tabs or the last time the person
+selected it;
 `runpane panels list` reports each tab's `paused`.
 
 If a stopped panel's previous shell or agent process is still exiting, resume

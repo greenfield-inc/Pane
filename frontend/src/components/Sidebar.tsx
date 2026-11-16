@@ -122,7 +122,6 @@ interface SidebarProps {
   onAboutClick: () => void;
   onSettingsClick: () => void;
   onRemoteSettingsClick: () => void;
-  onAddMachineClick: () => void;
   /** Opens Remote Access with this Tailscale machine's password field. */
   onMachinePasswordRequest: (machineName: string) => void;
   width: number;
@@ -153,7 +152,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onAddMachineClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
+export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   // Maximize spreads the sidebar over the main area; minimize collapses it to its rail (P4).
   const shellRef = useRef<HTMLDivElement>(null);
@@ -312,7 +311,8 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   // step through the machines in its order, skipping ones that cannot be
   // picked, and ⌃⌘0 goes between All machines and the machine it shows.
   const stepMachine = useCallback((delta: 1 | -1) => {
-    const pickable = machines.filter((machine) => machine.active || machine.action !== 'none');
+    // Next and previous skip a computer that is offline or can't be reached here; the switcher still offers it.
+    const pickable = machines.filter((machine) => machine.active || (machine.action !== 'none' && machine.presence !== 'dimmed'));
     if (pickable.length === 0) return;
     const current = allMachines ? -1 : pickable.findIndex((machine) => machine.active);
     const next = pickable[(current + delta + pickable.length) % pickable.length];
@@ -359,7 +359,6 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
       allMachines={{ selected: allMachines, machines: savedMachines, onSelect: () => setAllMachines(true) }}
       onNeedsPassword={(machine) => onMachinePasswordRequest(machine.name)}
       onOpenChange={(open) => { if (open) void refreshMachines(); }}
-      onAddMachine={onAddMachineClick}
       onOpenRemoteAccess={onRemoteSettingsClick}
     />
   );
@@ -626,6 +625,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
       <>
         <div
           data-testid="sidebar"
+          data-pane-part="sidebar"
           data-focus-region="sidebar"
           className="pane-sidebar-shell pane-sidebar-shell-collapsed bg-surface-secondary text-text-primary h-full flex flex-col flex-shrink-0"
           style={{ width: '48px' }}
@@ -961,6 +961,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
       <div
         ref={shellRef}
         data-testid="sidebar"
+        data-pane-part="sidebar"
         data-focus-region="sidebar"
         className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: maximized ? '100%' : `${width}px` }}

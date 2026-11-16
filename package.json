@@ -1,6 +1,6 @@
 {
   "name": "Pane",
-  "version": "2.4.220",
+  "version": "2.4.230",
   "private": true,
   "description": "Pane - Terminal-first AI code assistant manager with Windows support",
   "author": {
@@ -50,6 +50,8 @@
     "test:runpane-mcp": "pnpm --filter runpane build && node --test scripts/test-runpane-mcp.js",
     "test:runpane-workspace": "pnpm --filter runpane build && node --test scripts/test-runpane-workspace.js",
     "test:runpane-handoff": "pnpm --filter runpane build && node --test scripts/test-runpane-handoff.js",
+    "test:runpane-ask": "pnpm --filter runpane build && node --test scripts/test-runpane-ask.js",
+    "test:runpane-relay": "pnpm --filter runpane build && node --test scripts/test-runpane-relay.js",
     "test:runpane-managed-cli": "pnpm --filter runpane build && node --test scripts/test-runpane-managed-cli.js",
     "test:runpane-telemetry": "pnpm --filter runpane build && node --test scripts/test-runpane-telemetry.js",
     "test:runpane-package-smoke": "pnpm --filter runpane build && node scripts/test-runpane-package-smoke.js",
@@ -80,6 +82,7 @@
     "anim:evidence:render": "node scripts/render-anim-evidence.mjs",
     "typecheck": "pnpm run -r typecheck",
     "check:fast": "node scripts/check-fast.mjs",
+    "sync:claude-plugin": "pnpm --filter main exec vitest run src/services/claudePlugin.test.ts --update",
     "postinstall": "electron-builder install-app-deps",
     "electron:rebuild": "pnpm exec electron-rebuild --force --only better-sqlite3-multiple-ciphers --module-dir ./main",
     "setup": "pnpm install && pnpm run electron:rebuild && pnpm run build:main",
@@ -103,6 +106,7 @@
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/addon-unicode11": "0.9.0",
     "@xterm/headless": "^6.0.0",
+    "acme-client": "5.4.0",
     "better-sqlite3-multiple-ciphers": "12.11.1",
     "bull": "^4.16.3",
     "chokidar": "^5.0.0",

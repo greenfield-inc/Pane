@@ -233,7 +233,7 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   every surface. Its header pages through what's waiting (‹ n of N ›, dots, ←
   and → while it has focus) and ✕ closes it. Its tabs are **Decide** (the
   subtitle, each question with its why and options, recommended ones
-  pre-selected, the references and one reply box that grows up to half the
+  marked but none selected until you pick, the references and one reply box that grows up to half the
   column), **Summary** (one HTML page: the asker's own, an `.html` passed as a
   worker's `--summary-file` or `summary` in `needs_you`, else one Pane writes
   from the card and the worker's status file; it renders with scripts and
@@ -273,7 +273,8 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   selected.
 - **The round**: press ⌃⇧Space (Ctrl+Shift+Space on Windows and Linux) from
   any other app for a centered panel that works through the queue by
-  keyboard: number keys or arrows choose, ↵ sends, → skips, Tab adds a note,
+  keyboard: nothing starts chosen; number keys or arrows choose, ↵ sends,
+  → skips, Tab adds a note (a note with no pick goes as a reply on its own),
   Esc closes.
 - **The menu bar or tray icon** shows an amber dot while questions wait. Its
   menu lists them and holds Show outside Pane, Pause for 1 hour, a way into
@@ -631,7 +632,9 @@ To remove the block, turn Approvals off in Settings → Approvals. Pane writes i
 again when you turn Approvals back on, or at the next launch with Approvals on.
 
 The `pane` MCP server's instructions say only to call `notify` instead of asking
-in the terminal. Cursor, which gets no user-level block, learns the rest from
+in the terminal. Claude Code gets that line, the agents intro and the scratch
+rule from its CLAUDE.md block, so while the block is there the server leaves
+all three out of its instructions to Claude Code. Cursor, which gets no user-level block, learns the rest from
 the `notify` tool's description and the repository's managed `AGENTS.md` block,
 which also carries the secrets rule.
 

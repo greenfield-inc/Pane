@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
+  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore, type Attachment as ComposerAttachment,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
@@ -31,6 +31,7 @@ import { ChatCopyButton } from './ChatCopyButton';
 import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
+import { takeLaunchDraft } from '../../utils/launchOutline';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -173,11 +174,19 @@ export interface ChatTabPanelProps {
   working?: readonly WorkingAgent[];
 }
 
+/**
+ * The attachments of each chat's unsent draft, kept with its viewer as the draft text is: the
+ * composer is rebuilt when the tab or its Pane is shown again, and they go back into it then.
+ */
+const draftAttachments = new WeakMap<ChatTabViewer, readonly ComposerAttachment[]>();
+
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
 const PASTE_LIMIT = 1024 * 1024;
 
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
 const NO_ACTIONS: ChatTurnActions = {};
+/** How long after the handover an Enter pressed before the chat loaded may still send. */
+const LAUNCH_SEND_MS = 5_000;
 const NO_RENDERING: ChatRendering = {};
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
@@ -272,6 +281,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     }
   };
 
+  const sendDisabled = disabled || !!snapshot.pendingDelivery || copying > 0;
   const runtime = useExternalStoreRuntime({
     messages, convertMessage: toAssistantMessage,
     // The host queues a message sent while the agent works, so the composer never locks
@@ -279,7 +289,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     isRunning: false,
     isLoading: !snapshot.transcript && view?.status !== 'stopped',
     // A file still copying to the chat's machine has no path yet to send.
-    isSendDisabled: disabled || !!snapshot.pendingDelivery || copying > 0,
+    isSendDisabled: sendDisabled,
     unstable_persistsHistory: true, unstable_enableToolInvocations: false,
     adapters: attachments ? { attachments } : undefined,
     onNew: async message => {
@@ -318,7 +328,85 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       }));
     },
   });
-  useEffect(() => { runtime.thread.composer.setText(viewer.snapshot().draft); }, [runtime, viewer]);
+  /**
+   * The draft's attachments going back into this runtime's composer: once, though development
+   * mode runs the effect twice. `mounted` counts the effect runs still in place.
+   */
+  const restore = useRef<{ runtime: typeof runtime; done: boolean; mounted: number } | undefined>(undefined);
+  // A layout effect: its cleanup runs as the panel leaves, before assistant-ui disposes the
+  // composer (a microtask queued on unmount) and cancels the adds still waiting.
+  useLayoutEffect(() => {
+    const composer = runtime.thread.composer;
+    const save = () => draftAttachments.set(viewer, composer.getState().attachments);
+    if (restore.current?.runtime !== runtime) {
+      const restoring: NonNullable<typeof restore.current> = { runtime, done: false, mounted: 0 };
+      restore.current = restoring;
+      composer.setText(viewer.snapshot().draft);
+      const saved = draftAttachments.get(viewer) ?? [];
+      // In their order: a file already copied to the chat's machine comes back with its path; an
+      // image (or a file still copying) is added again from the file itself. One the chat now
+      // refuses says why through attachmentAddError, below.
+      void (async () => {
+        for (const { id, type, name, contentType, content, file } of saved) {
+          const restored = content ? { id, type, name, contentType, content } : file;
+          if (!restored) continue;
+          // On to the next once this one shows, without waiting for a file to copy again.
+          const count = composer.getState().attachments.length;
+          let stopWatching = () => {};
+          const shown = new Promise<void>(resolve => {
+            stopWatching = composer.subscribe(() => { if (composer.getState().attachments.length > count) resolve(); });
+          });
+          await Promise.race([composer.addAttachment(restored).catch(() => undefined), shown]);
+          stopWatching();
+        }
+        restoring.done = true;
+        // Left before every attachment was back: the saved list stays whole for next time.
+        if (restoring.mounted > 0) save();
+      })();
+    }
+    const run = restore.current;
+    run.mounted += 1;
+    // Sending empties the composer's attachments, and with them the saved ones.
+    const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
+    return () => { run.mounted -= 1; unsubscribe(); };
+  }, [runtime, viewer]);
+  // The launch outline's message box (index.html) hands over as this tab first paints: its text and
+  // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
+  // once (D-62) if the chat can send it soon after; an edit or a chat that stays unable drops it.
+  const launchSend = useRef<{ text: string; until: number } | null>(null);
+  /** Re-runs the launch send check: the handover can land after mount, once the box settles, and the send window closes. */
+  const [launchTick, setLaunchTick] = useState(0);
+  useLayoutEffect(() => {
+    const input = () => document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
+    return takeLaunchDraft(panelId, input, draft => {
+      viewer.setDraft(draft.text);
+      runtime.thread.composer.setText(draft.text);
+      if (draft.send) launchSend.current = { text: draft.text, until: Date.now() + LAUNCH_SEND_MS };
+      setLaunchTick(tick => tick + 1);
+      const box = input();
+      if (!box) return;
+      // Set here, not on React's next render, so the text and caret show in the same frame.
+      box.value = draft.text;
+      if (!draft.focused) return;
+      box.focus({ preventScroll: true });
+      box.setSelectionRange(draft.selectionStart, draft.selectionEnd);
+    });
+  }, [panelId, runtime, viewer]);
+  useEffect(() => {
+    const pending = launchSend.current;
+    if (!pending) return;
+    if (Date.now() > pending.until || runtime.thread.composer.getState().text !== pending.text) {
+      launchSend.current = null;
+      return;
+    }
+    if (sendDisabled) {
+      // Re-checked when the window closes, so a chat that never becomes able to send never sends.
+      const timer = setTimeout(() => setLaunchTick(tick => tick + 1), pending.until - Date.now() + 1);
+      return () => clearTimeout(timer);
+    }
+    launchSend.current = null;
+    void runtime.thread.composer.send();
+  }, [runtime, sendDisabled, launchTick]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {
@@ -471,7 +559,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         {view && <ChatStatusBar context={view.context} tasks={view.tasks}
           queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
-        <ComposerPrimitive.Root className="chat-composer">
+        <ComposerPrimitive.Root className="chat-composer" data-pane-part="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
           <ComposerPrimitive.Input data-chat-composer={panelId} readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? 'Ask anything'} rows={1}

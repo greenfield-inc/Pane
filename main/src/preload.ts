@@ -48,16 +48,18 @@ import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionArchiveSelection,
   OrchestrationSessionSelector,
+  SessionActivity,
   OrchestrationSessionUpdateInput,
 } from '../../shared/types/orchestrationSession';
 import type { AgentUsageSnapshot } from '../../shared/types/agentUsage';
-import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
+import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../shared/types/relay';
+import type { SshRouteProgress } from './daemon/sshRouteSetup';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -66,7 +68,9 @@ import type {
 // The main build bundles this runtime dependency into preload.js; the sandbox
 // verification step rejects any remaining require other than Electron itself.
 import { boundary, decodeBoundary, type JsonObject } from '../../shared/validation/boundaryDecoder';
-import { decodeAppearanceSnapshotArg, type Theme } from '../../shared/types/appearance';
+import { decodeAppearanceSnapshotArg, type ThemeChoice } from '../../shared/types/appearance';
+import { decodeLaunchChatArg } from '../../shared/types/hostNavigation';
+import type { CustomThemeState } from '../../shared/types/customTheme';
 
 interface LogEntry {
   timestamp: string;
@@ -255,14 +259,6 @@ try {
     }
   });
 
-  ipcRenderer.on('resource-monitor:update', (_event: Electron.IpcRendererEvent, data: ResourceSnapshot) => {
-    try {
-      window.dispatchEvent(new CustomEvent('resource-monitor:update', { detail: data }));
-    } catch (e) {
-      console.error('Failed to dispatch resource-monitor:update to window:', e);
-    }
-  });
-
   // Bridge synthetic keydown events from main process (used for Ctrl+W interception
   // and forwarding app hotkeys from webview panels whose keyboard events don't reach
   // the renderer's window listener).
@@ -408,11 +404,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // its first render instead of awaiting IPC and flashing the wrong layout.
   windowControlsOverlayEnabled: process.argv.includes(WINDOW_CONTROLS_OVERLAY_ARG),
   appearanceSnapshot: decodeAppearanceSnapshotArg(process.argv),
+  // The chat this launch reopens, drawn in the window's first frame (frontend/index.html).
+  launchChat: decodeLaunchChatArg(process.argv),
   setTitleBarOverlay: (colors: WindowControlsOverlayColors): Promise<IPCResponse> =>
     invokeIpc('window:set-title-bar-overlay', colors),
-  setBackgroundColor: (payload: { theme: Theme; color: string }): Promise<IPCResponse> =>
+  setBackgroundColor: (payload: { theme: ThemeChoice; color: string }): Promise<IPCResponse> =>
     invokeIpc('window:set-background-color', payload),
-  // The window stays hidden until the first render with data; see createWindow.
+  // This machine's Custom theme (custom-theme.json); never the remote host's.
+  customTheme: {
+    get: (): Promise<IPCResponse<CustomThemeState>> => ipcRenderer.invoke('custom-theme:get'),
+    reset: (): Promise<IPCResponse> => ipcRenderer.invoke('custom-theme:reset'),
+  },
+  // The first render with data: main then sends menu actions and pane:// links; see createWindow.
   notifyRendererReady: (): void => ipcRenderer.send('window:renderer-ready'),
 
   // Version checking
@@ -548,6 +551,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
     overview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:overview', selector),
+    activityList: (): Promise<IPCResponse> => invokeIpc('orchestration-sessions:activity-list'),
     archivePreview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:archive-preview', selector),
     archive: (selector: OrchestrationSessionSelector, selection: OrchestrationSessionArchiveSelection): Promise<IPCResponse> => invokeIpc('orchestration-sessions:archive', selector, selection),
   },
@@ -928,6 +932,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // can still be showing the outgoing host while main has switched runtimes.
     getNavigationMemory: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-navigation-memory', hostId),
     saveNavigationMemory: (hostId: string | null, memory: HostNavigationMemory): Promise<IPCResponse> => invokeIpc('ui-state:save-navigation-memory', hostId, memory),
+    // The chat tab a launch reopens, or null for Home.
+    getLaunchChat: (): Promise<IPCResponse> => invokeIpc('ui-state:get-launch-chat'),
     // Per-host Session tiling, the layout counterpart of navigation memory.
     getSessionWorkspaceLayout: (hostId: string | null): Promise<IPCResponse> => invokeIpc('ui-state:get-session-workspace-layout', hostId),
     saveSessionWorkspaceLayout: (hostId: string | null, layout: SessionWorkspaceLayout | null): Promise<IPCResponse> => invokeIpc('ui-state:save-session-workspace-layout', hostId, layout),
@@ -939,6 +945,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Event listeners for real-time updates
   events: {
     /** Config changed in main (Settings, another window, or a hand edit of config.json). */
+    onCustomThemeUpdated: (callback: (state: CustomThemeState) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, state: CustomThemeState) => callback(state);
+      ipcRenderer.on('custom-theme:updated', wrappedCallback);
+      return () => ipcRenderer.removeListener('custom-theme:updated', wrappedCallback);
+    },
     onConfigUpdated: (callback: (config: AppConfig) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config);
       ipcRenderer.on('config:updated', wrappedCallback);
@@ -979,6 +990,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, snapshot: ListeningPortsSnapshot) => callback(snapshot);
       ipcRenderer.on('ports:changed', wrappedCallback);
       return () => ipcRenderer.removeListener('ports:changed', wrappedCallback);
+    },
+    /** This computer's relay (QR pairing) moved to a new phase. */
+    onRelayStatusChanged: (callback: (status: RelayStatus) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, status: RelayStatus) => callback(status);
+      ipcRenderer.on('relay:status-changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('relay:status-changed', wrappedCallback);
+    },
+    /** A phone or computer used this computer's pairing code or link. */
+    onRelayPaired: (callback: (event: RelayPairedEvent) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, paired: RelayPairedEvent) => callback(paired);
+      ipcRenderer.on('relay:paired', wrappedCallback);
+      return () => ipcRenderer.removeListener('relay:paired', wrappedCallback);
+    },
+    /** A `pane://pair` link reached this Pane: the renderer shows its confirm page. */
+    onRelayLinkOpened: (callback: (event: RelayLinkOpenedEvent) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, opened: RelayLinkOpenedEvent) => callback(opened);
+      ipcRenderer.on('relay:link-opened', wrappedCallback);
+      return () => ipcRenderer.removeListener('relay:link-opened', wrappedCallback);
+    },
+    /** A step of Add a device › SSH connecting a host. */
+    onSshRouteProgress: (callback: (progress: SshRouteProgress) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: SshRouteProgress) => callback(progress);
+      ipcRenderer.on('ssh:route-progress', wrappedCallback);
+      return () => ipcRenderer.removeListener('ssh:route-progress', wrappedCallback);
     },
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkTarget) => callback(target);
@@ -1044,6 +1079,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, change: { sessionId: string; kind: string; selectionChanged?: boolean }) => callback(change);
       ipcRenderer.on('orchestration-sessions:changed', wrappedCallback);
       return () => ipcRenderer.removeListener('orchestration-sessions:changed', wrappedCallback);
+    },
+    onOrchestrationSessionActivity: (callback: (activity: SessionActivity) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, activity: SessionActivity) => callback(activity);
+      ipcRenderer.on('orchestration-sessions:activity', wrappedCallback);
+      return () => ipcRenderer.removeListener('orchestration-sessions:activity', wrappedCallback);
     },
     onOrchestrationSessionsOverviewUpdated: (callback: (change: { panelId: string; sessionId?: string; state: string }) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, change: { panelId: string; sessionId?: string; state: string }) => callback(change);
@@ -1341,8 +1381,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Resource monitor
   resourceMonitor: {
     getSnapshot: (): Promise<IPCResponse> => invokeIpc('resource-monitor:get-snapshot'),
-    startActive: (): Promise<IPCResponse> => invokeIpc('resource-monitor:start-active'),
-    stopActive: (): Promise<IPCResponse> => invokeIpc('resource-monitor:stop-active'),
   },
 
   // Agent subscription usage
@@ -1408,6 +1446,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   window: {
     consumeUncleanShutdown: async (): Promise<boolean> => decodeBoundary(await invokeIpc('app:consume-unclean-shutdown'), boundary.boolean),
     isFocused: async (): Promise<boolean> => decodeBoundary(await invokeIpc('window:is-focused'), boundary.boolean),
+    reportVisibility: (visible: boolean): void => {
+      ipcRenderer.send('window:visibility-changed', visible);
+    },
     openPaneLink: async (link: string): Promise<void> => {
       await invokeIpc('window:open-pane-link', link);
     },

@@ -1,7 +1,16 @@
 import { assignMachineColorSlots, preferredMachineColorSlot } from '../../../shared/utils/machineColor';
 import { assignMachineLetters, machineMarkKey, resolveMachineMark, type MachineMarkOverrides } from '../../../shared/utils/machineMarks';
+import { formatDistanceToNow } from './timestampUtils';
+import {
+  COMPUTER_ROUTE_LABELS,
+  findComputer,
+  routeProfile,
+  type ComputerRouteKind,
+  type RemoteComputer,
+} from '../../../shared/types/remoteComputers';
 import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemoteDaemonHostRuntimeState, RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import type { MachineState } from '../../../shared/types/machineConnections';
 import type { ConnectionPresence } from '../../../shared/remoteClient/connectionPresence';
 
 export type MachineOs = TailnetMachine['os'];
@@ -15,15 +24,29 @@ export type MachinePresence = 'solid' | 'pulsing' | 'dimmed';
  */
 type MachineAction = 'switch' | 'connect' | 'password' | 'retry' | 'none';
 
-/** Id of "this computer": the local runtime, next to saved profile ids. */
+/** Id of "this computer": the local runtime, next to saved computer ids. */
 const LOCAL_RUNTIME_ID = 'local';
 
+/** One way Pane reaches a computer, as its pill shows it. */
+export interface RoutePill {
+  /** The saved route's id; `tailscale:<url>` for a Tailscale machine not saved yet. */
+  id: string;
+  kind: ComputerRouteKind;
+  /** "Same network", "Tailscale", "SSH", "Public URL", "Pane relay". */
+  label: string;
+  /** The route the connection uses now: the pill's dot. */
+  inUse: boolean;
+  /** It cannot work from here now (a Tailscale route while Tailscale is signed out here): struck through. */
+  down: boolean;
+}
+
 export interface MachineEntry {
-  /** `local`, a saved profile id, or `tailnet:<dnsName>` for a machine never connected. */
+  /** `local`, a saved computer id, or `tailnet:<dnsName>` for a Tailscale machine not saved yet. */
   id: string;
   name: string;
   os: MachineOs | null;
-  kind: 'local' | 'tailnet' | 'code';
+  /** This computer, a saved computer, or a Tailscale machine not saved yet. */
+  kind: 'local' | 'computer' | 'tailnet';
   /** Its colour slot, a saved colour included. */
   slot: number;
   /** Its letter mark, saved letters included. */
@@ -34,18 +57,25 @@ export interface MachineEntry {
   customMark: boolean;
   active: boolean;
   presence: MachinePresence;
-  /** "Ready", "Agents run here", "Reconnecting…": the state part of the subtitle. */
+  /** "Online", "Agents run here", "Reconnecting…": the state part of the subtitle. */
   stateText: string;
   /** "<OS> · <state>", as menus and Settings rows show it. */
   subtitle: string;
   action: MachineAction;
+  /** Its routes in the order Pane tries them; none for this computer. */
+  routes?: RoutePill[];
+  /** Every route it has is down from here, so it takes a new link (the row's Link button). */
+  needsLink?: boolean;
+  computer?: RemoteComputer;
+  /** The saved computer on the route in use, else its first: the shape the connection code takes. */
   profile?: RemotePaneConnectionProfile;
   tailnet?: TailnetMachine;
 }
 
 export interface MachineListInput {
   connectionState: RemotePaneConnectionState;
-  profiles: readonly RemotePaneConnectionProfile[];
+  /** `config.remoteDaemon.client.computers`. */
+  computers: readonly RemoteComputer[];
   /** Null until the first Tailscale listing answers. */
   tailnet: TailnetMachineList | null;
   /** This computer's Tailscale name, when it has one. */
@@ -55,10 +85,12 @@ export interface MachineListInput {
   connectionPresence?: ConnectionPresence;
   /** Marks chosen on this computer (`AppConfig.machineMarks`). */
   marks?: MachineMarkOverrides;
+  /** What All machines knows of each saved computer (online, route in use); empty while it is off. */
+  machineStates?: readonly MachineState[];
 }
 
 const TAILNET_STATE_TEXT = {
-  available: 'Ready',
+  available: 'Online',
   'password-required': 'Needs password',
   outdated: 'Older Pane',
   refused: 'Owner only',
@@ -67,6 +99,8 @@ const TAILNET_STATE_TEXT = {
 } satisfies Record<TailnetMachine['state'], string>;
 
 export const THIS_COMPUTER = 'This computer';
+
+const SIGNED_OUT = 'Only on Tailscale, which is signed out here';
 
 export function machineOsFromPlatform(platform: string): MachineOs | null {
   if (platform === 'darwin') return 'macOS';
@@ -92,9 +126,9 @@ function subtitle(os: MachineOs | null, ...parts: Array<string | false | null | 
 }
 
 /**
- * Every machine agents can run on, in one list: this computer first, then the Tailscale
- * machines in the order the listing gives, then saved Tailscale machines it did not list,
- * then hosts added with a connection code.
+ * Every machine agents can run on, in one list: this computer first, then each saved computer
+ * with its routes, then the Tailscale machines not saved yet. A Tailscale machine that is a saved
+ * computer joins its row.
  */
 export function buildMachineList(input: MachineListInput): MachineEntry[] {
   const machines = listMachines(input);
@@ -108,9 +142,26 @@ export function buildMachineList(input: MachineListInput): MachineEntry[] {
 
 type ListedMachine = Omit<MachineEntry, 'letters' | 'markKey' | 'customMark'>;
 
-function listMachines({ connectionState, profiles, tailnet, localName, localOs, connectionPresence }: MachineListInput): ListedMachine[] {
+/** The listed Tailscale machine each saved computer is, keyed by computer id; the rest are not saved. */
+function joinTailnet(computers: readonly RemoteComputer[], listed: readonly TailnetMachine[]) {
+  const joined = new Map<string, TailnetMachine>();
+  const unsaved: TailnetMachine[] = [];
+  for (const machine of listed) {
+    const free = computers.filter((computer) => !joined.has(computer.id));
+    // The install id wins; a name joins only a computer whose id does not say otherwise (journey 16).
+    const byProfile = free.find((computer) => computer.id === machine.profileId
+      && (!machine.machineId || !computer.machineId || computer.machineId === machine.machineId));
+    const computer = findComputer(free, { machineId: machine.machineId, tailnetName: machine.name }) ?? byProfile;
+    if (computer) joined.set(computer.id, machine);
+    else unsaved.push(machine);
+  }
+  return { joined, unsaved };
+}
+
+function listMachines({ connectionState, computers, tailnet, localName, localOs, connectionPresence, machineStates = [] }: MachineListInput): ListedMachine[] {
   const remote = connectionState.mode === 'remote';
-  const activeProfileId = remote ? connectionState.activeProfileId : null;
+  const activeId = remote ? connectionState.activeProfileId : null;
+  const tailscaleDown = tailnet?.ok === false;
   const listed = tailnet?.ok ? tailnet.machines : [];
   // The phone colours from the same set: the computers it can reach, itself included.
   const slots = assignMachineColorSlots([
@@ -118,7 +169,8 @@ function listMachines({ connectionState, profiles, tailnet, localName, localOs, 
     ...listed.filter((machine) => machine.state !== 'refused').map((machine) => machine.name),
   ]);
   const slotFor = (name: string) => slots.get(name) ?? preferredMachineColorSlot(name);
-  const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+  const statesById = new Map(machineStates.map((state) => [state.id, state]));
+  const { joined, unsaved } = joinTailnet(computers, listed);
 
   const local: ListedMachine = {
     id: LOCAL_RUNTIME_ID,
@@ -132,75 +184,99 @@ function listMachines({ connectionState, profiles, tailnet, localName, localOs, 
     // The active row is checked, so the subtitle stays one short line in the menu.
     subtitle: subtitle(localOs, localName && THIS_COMPUTER),
     action: remote ? 'switch' : 'none',
+    routes: [],
+    needsLink: false,
   };
 
-  const remoteEntry = (entry: Omit<ListedMachine, 'active' | 'presence' | 'stateText' | 'subtitle' | 'action'>, idle: {
-    presence: MachinePresence; stateText: string; action: MachineAction; extra?: Array<string | false | undefined>;
-  }): ListedMachine => {
-    const active = entry.profile !== undefined && entry.profile.id === activeProfileId;
-    // An active machine that now wants a password asks for it instead of retrying the stored one.
+  const saved = computers.map((computer): ListedMachine => {
+    const active = computer.id === activeId;
+    const machine = joined.get(computer.id);
+    const state = statesById.get(computer.id);
+    const routeInUse = active ? connectionState.activeRouteId : state?.routeId;
+    const routes = computer.routes.map((route): RoutePill => ({
+      id: route.id,
+      kind: route.kind,
+      label: COMPUTER_ROUTE_LABELS[route.kind],
+      inUse: route.id === routeInUse,
+      down: tailscaleDown && route.kind === 'tailscale',
+    }));
+    const needsLink = routes.every((route) => route.down);
+    const tailscaleOnly = computer.routes.every((route) => route.kind === 'tailscale');
+    const inUse = computer.routes.find((route) => route.id === routeInUse) ?? computer.routes[0];
+    const os = computer.os ?? machine?.os ?? null;
+    const base = { id: computer.id, name: computer.label, os, kind: 'computer' as const, slot: slotFor(computer.label), routes, needsLink, computer, profile: routeProfile(computer, inUse), tailnet: machine };
+
+    const idle = idleState({ machine, state, needsLink, tailscaleOnly, tailnetListed: tailnet?.ok === true });
+    // An active computer that now wants a password asks for it instead of retrying the stored one.
     const needsPassword = active && connectionState.status !== 'connected' && idle.action === 'password';
-    const prefix = entry.kind === 'code' ? 'Added with a code' : null;
-    const stateText = needsPassword ? idle.stateText : active ? activeStateText(connectionState) : idle.stateText;
+    if (!active) return { ...base, active, presence: idle.presence, stateText: idle.stateText, subtitle: subtitle(os, idle.stateText), action: idle.action };
+    const stateText = needsPassword ? idle.stateText : activeStateText(connectionState);
     return {
-      ...entry,
+      ...base,
       active,
-      presence: active ? activePresence(connectionState, connectionPresence) : idle.presence,
+      presence: activePresence(connectionState, connectionPresence),
       stateText,
-      subtitle: subtitle(entry.os, prefix, stateText, ...(active ? [] : idle.extra ?? [])),
-      action: needsPassword ? 'password' : !active ? idle.action : connectionState.status === 'connected' ? 'none' : 'retry',
+      subtitle: subtitle(os, stateText),
+      action: needsPassword ? 'password' : connectionState.status === 'connected' ? 'none' : 'retry',
     };
-  };
+  });
 
-  const listedProfileIds = new Set<string>();
-  const tailnetEntries = listed.map((machine) => {
-    const profile = machine.profileId ? profilesById.get(machine.profileId) : undefined;
-    if (profile) listedProfileIds.add(profile.id);
+  const discovered = unsaved.map((machine): ListedMachine => {
     const reachable = machine.state === 'available' || machine.state === 'outdated';
-    return remoteEntry({
-      id: profile?.id ?? `tailnet:${machine.dnsName}`,
+    const stateText = TAILNET_STATE_TEXT[machine.state];
+    return {
+      id: `tailnet:${machine.dnsName}`,
       name: machine.name,
       os: machine.os,
       kind: 'tailnet',
       slot: slotFor(machine.name),
-      profile,
-      tailnet: machine,
-    }, {
+      active: false,
       presence: reachable || machine.state === 'password-required' ? 'solid' : 'dimmed',
-      stateText: TAILNET_STATE_TEXT[machine.state],
-      action: machine.state === 'password-required' ? 'password' : !reachable ? 'none' : profile ? 'switch' : 'connect',
-      extra: [!profile && 'Never connected', !machine.mine && machine.ownerLogin],
-    });
+      stateText,
+      subtitle: subtitle(machine.os, stateText, 'Not linked', !machine.mine && machine.ownerLogin),
+      action: machine.state === 'password-required' ? 'password' : reachable ? 'connect' : 'none',
+      routes: [{ id: `tailscale:${machine.url}`, kind: 'tailscale', label: COMPUTER_ROUTE_LABELS.tailscale, inUse: false, down: false }],
+      needsLink: false,
+      tailnet: machine,
+    };
   });
 
-  // Saved Tailscale machines the listing left out stay pickable, as they always were.
-  const unlisted = profiles
-    .filter((profile) => profile.tailnetMachine && !listedProfileIds.has(profile.id))
-    .map((profile) => remoteEntry({
-      id: profile.id,
-      name: profile.tailnetMachine ?? profile.label,
-      os: null,
-      kind: 'tailnet',
-      slot: slotFor(profile.tailnetMachine ?? profile.label),
-      profile,
-    }, {
-      presence: tailnet?.ok ? 'dimmed' : 'solid',
-      stateText: tailnet?.ok ? 'Not on this tailnet' : 'Saved',
-      action: 'switch',
-    }));
+  return [local, ...saved, ...discovered];
+}
 
-  const codeHosts = profiles
-    .filter((profile) => !profile.tailnetMachine)
-    .map((profile) => remoteEntry({
-      id: profile.id,
-      name: profile.label,
-      os: null,
-      kind: 'code',
-      slot: slotFor(profile.label),
-      profile,
-    }, { presence: 'solid', stateText: '', action: 'switch' }));
+/** How a computer agents do not run on now shows in a list. */
+interface IdleState {
+  presence: MachinePresence;
+  stateText: string;
+  action: MachineAction;
+}
 
-  return [local, ...tailnetEntries, ...unlisted, ...codeHosts];
+/** A saved computer agents do not run on now: what All machines or the Tailscale listing says of it. */
+function idleState({ machine, state, needsLink, tailscaleOnly, tailnetListed }: {
+  machine: TailnetMachine | undefined;
+  /** The Tailscale listing answered. */
+  tailnetListed: boolean;
+  state: MachineState | undefined;
+  needsLink: boolean;
+  tailscaleOnly: boolean;
+}): IdleState {
+  if (needsLink) return { presence: 'dimmed', stateText: SIGNED_OUT, action: 'none' };
+  if (state?.status === 'online') return { presence: 'solid', stateText: 'Online', action: 'switch' };
+  if (state?.status === 'offline') {
+    return { presence: 'dimmed', stateText: state.offlineSince ? `Last seen ${formatDistanceToNow(state.offlineSince)}` : 'Offline', action: 'switch' };
+  }
+  if (state?.status === 'connecting') return { presence: 'solid', stateText: 'Connecting…', action: 'switch' };
+  // Only the Tailscale listing knows; it speaks for the computer when Tailscale is its only route.
+  if (machine && (tailscaleOnly || machine.state === 'available')) {
+    const reachable = machine.state === 'available' || machine.state === 'outdated';
+    return {
+      presence: reachable || machine.state === 'password-required' ? 'solid' : 'dimmed',
+      stateText: TAILNET_STATE_TEXT[machine.state],
+      action: machine.state === 'password-required' ? 'password' : reachable ? 'switch' : 'none',
+    };
+  }
+  if (tailscaleOnly && tailnetListed) return { presence: 'dimmed', stateText: 'Not on this tailnet', action: 'switch' };
+  return { presence: 'solid', stateText: 'Saved', action: 'switch' };
 }
 
 /** Set when this machine is also hosting, so the switcher can link to it. */

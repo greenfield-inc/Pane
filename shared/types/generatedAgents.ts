@@ -60,6 +60,35 @@ export const AGENTS_CONFIG = {
         "registryIds": [
           "claude-acp"
         ]
+      },
+      "models": {
+        "flag": "--model",
+        "effortFlag": "--effort",
+        "aliases": [
+          "fable",
+          "opus",
+          "sonnet",
+          "haiku"
+        ],
+        "status": {
+          "args": [
+            "auth",
+            "status"
+          ],
+          "format": "json-logged-in"
+        }
+      },
+      "ask": {
+        "args": [
+          "-p",
+          "--output-format",
+          "json",
+          "--permission-mode",
+          "default",
+          "--strict-mcp-config",
+          "--tools=Read,Grep,Glob"
+        ],
+        "output": "result-json"
       }
     },
     "codex": {
@@ -112,6 +141,38 @@ export const AGENTS_CONFIG = {
         "registryIds": [
           "codex-acp"
         ]
+      },
+      "models": {
+        "flag": "-m",
+        "effortConfig": "model_reasoning_effort",
+        "list": {
+          "args": [
+            "debug",
+            "models"
+          ],
+          "format": "json-models"
+        },
+        "status": {
+          "args": [
+            "login",
+            "status"
+          ],
+          "format": "text"
+        }
+      },
+      "ask": {
+        "args": [
+          "exec",
+          "--json",
+          "--ephemeral",
+          "--skip-git-repo-check",
+          "--ignore-user-config",
+          "--disable",
+          "apps",
+          "-s",
+          "read-only"
+        ],
+        "output": "codex-jsonl"
       }
     },
     "cursor": {
@@ -165,6 +226,32 @@ export const AGENTS_CONFIG = {
         "registryIds": [
           "cursor"
         ]
+      },
+      "models": {
+        "flag": "--model",
+        "list": {
+          "args": [
+            "models"
+          ],
+          "format": "dash-lines"
+        },
+        "status": {
+          "args": [
+            "status"
+          ],
+          "format": "text"
+        }
+      },
+      "ask": {
+        "args": [
+          "-p",
+          "--trust",
+          "--mode",
+          "ask",
+          "--output-format",
+          "json"
+        ],
+        "output": "result-json"
       }
     },
     "opencode": {
@@ -208,6 +295,35 @@ export const AGENTS_CONFIG = {
           "opencode",
           "opencode-v2"
         ]
+      },
+      "models": {
+        "flag": "--model",
+        "list": {
+          "args": [
+            "models"
+          ],
+          "format": "lines"
+        },
+        "status": {
+          "args": [
+            "auth",
+            "list"
+          ],
+          "format": "text"
+        }
+      },
+      "ask": {
+        "args": [
+          "run",
+          "--format",
+          "json",
+          "--agent",
+          "plan"
+        ],
+        "env": {
+          "OPENCODE_CONFIG_CONTENT": "{\"permission\":{\"edit\":\"deny\",\"bash\":\"deny\"},\"tools\":{\"*_*\":false}}"
+        },
+        "output": "opencode-jsonl"
       }
     },
     "pi": {
@@ -245,7 +361,10 @@ export const AGENTS_CONFIG = {
       },
       "transcriptDirs": [
         ".pi/agent/sessions"
-      ]
+      ],
+      "models": {
+        "flag": "--model"
+      }
     }
   }
 } as const;

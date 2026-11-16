@@ -33,6 +33,17 @@ const CONTENT_TYPES: ContentTypeByExtension = {
   '.woff2': 'font/woff2',
 };
 
+/**
+ * The app's origin holds every saved computer's token. Only its own files may run scripts in it,
+ * and no other site may frame it: every `<id>.runpane.net` counts as the same site to a browser.
+ */
+const APP_SECURITY_HEADERS = {
+  'Content-Security-Policy': "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+};
+
 export function isRemotePwaPath(pathname: string): boolean {
   return pathname === REMOTE_PWA_PREFIX || pathname.startsWith(`${REMOTE_PWA_PREFIX}/`);
 }
@@ -90,13 +101,14 @@ function findRemotePwaDistRoot(): string | null {
   }));
   const candidates = [
     process.env.PANE_REMOTE_PWA_DIST,
-    path.resolve(process.cwd(), 'frontend/dist'),
     resourcesPath
       ? path.resolve(resourcesPath, 'app/frontend/dist')
       : undefined,
     path.resolve(__dirname, '../../../frontend/dist'),
     path.resolve(__dirname, '../../../../frontend/dist'),
     path.resolve(__dirname, '../../../../../frontend/dist'),
+    // Last: Pane started from inside a checkout must not serve that checkout's files as the app.
+    path.resolve(process.cwd(), 'frontend/dist'),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   for (const candidate of candidates) {
@@ -158,6 +170,7 @@ async function readAsset(filePath: string, cacheControl: string): Promise<Remote
       'Cache-Control': cacheControl,
       'Content-Length': String(body.byteLength),
       'Content-Type': getContentType(filePath),
+      ...APP_SECURITY_HEADERS,
     },
     body,
   };

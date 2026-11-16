@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigManager } from './configManager';
 import { MachineConnections, type CreateMachineClient, type MachineClient } from './machineConnections';
 import { SharedCredentialSync } from './sharedCredentialSync';
-import { createDefaultRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
+import { readingMachines } from '../daemon/readingMachines';
+import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import type { MachineConnectionsEvent } from '../../../shared/types/machineConnections';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
@@ -17,13 +18,20 @@ function profile(id: string): RemotePaneConnectionProfile {
   return { id, label: id, baseUrl: `http://${id}.tail1234.ts.net:4800/`, token: `token-${id}`, transport: 'http+sse' };
 }
 
+const started: MachineConnections[] = [];
+
+afterEach(async () => {
+  await Promise.all(started.splice(0).map(machines => machines.stop()));
+});
+
 function setup(ids: string[]) {
   const configManager = new ConfigManager();
   const defaults = createDefaultRemoteDaemonConfig();
   vi.spyOn(configManager, 'getConfig').mockReturnValue({
     gitRepoPath: '',
     verbose: false,
-    remoteDaemon: { ...defaults, client: { ...defaults.client, profiles: ids.map(profile) } },
+    // Saved before computers: each entry converts to one computer.
+    remoteDaemon: normalizeRemoteDaemonConfig({ ...defaults, client: { ...defaults.client, computers: undefined, profiles: ids.map(profile) } }),
   });
   const clients = new Map<string, FakeClient>();
   const invokeLocal = vi.fn(async () => ({ success: true }));
@@ -47,6 +55,7 @@ function setup(ids: string[]) {
   const events: MachineConnectionsEvent[] = [];
   machines.subscribe(event => events.push(event));
   machines.start();
+  started.push(machines);
   const client = (id: string): FakeClient => {
     const found = clients.get(id);
     if (!found) throw new Error(`no client for ${id}`);
@@ -177,6 +186,22 @@ describe('MachineConnections', () => {
     connect('build-box');
 
     expect(machines.list().find(machine => machine.id === 'build-box')).toMatchObject({ installId: 'c3d4-book', status: 'online', onlineSince: '2026-11-12T20:00:00.000Z' });
+  });
+
+  it('retries its offline machines at once when another Pane starts reading this computer, as a computer back from sleep does', () => {
+    const { client, connect } = setup(['devbox', 'mini']);
+    connect('mini');
+    client('devbox').options.onConnectionStateChange?.('reconnecting');
+
+    // A stream left half-open from before the devbox slept is still counted when its new one opens.
+    readingMachines.add('devbox-install');
+    expect(client('devbox').retryNow).toHaveBeenCalledTimes(1);
+    readingMachines.add('devbox-install');
+    readingMachines.remove('devbox-install');
+    readingMachines.remove('devbox-install');
+
+    expect(client('devbox').retryNow).toHaveBeenCalledTimes(2);
+    expect(client('mini').retryNow).not.toHaveBeenCalled();
   });
 
   it('closes every saved machine\'s stream while this computer sleeps, and reopens them on wake', () => {

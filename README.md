@@ -122,7 +122,7 @@ Each of these is a small thing. Together they compound fast.
 | **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, reads local orchestration instructions, and can coordinate Claude, Codex, Cursor, OpenCode, or Pi across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
 | **Pane Workspaces** | Let an agent on one of your machines read files, run commands, and drive Pane on another over Tailscale. Hand off a task with its branch and a written note; a handoff to the same agent continues your own session there. | [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) |
-| **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, open a Pane for each new issue, and add agent tabs to existing Panes for review and fixes (one Pane per feature). Claude Code, Codex, and Cursor get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
+| **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, open a Pane for each new issue, and add agent tabs to existing Panes for review and fixes (one Pane per feature). Claude Code, Codex, and Cursor get the same commands as MCP tools, and Claude can also get them, with Pane's skills, from the [Pane Claude plugin](claude-plugin/README.md). | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
 | **Approvals** | Agents ask you through the `notify` MCP tool instead of waiting in their terminal. Inside Pane, an Approvals row in the sidebar opens everything that waits on you, newest first, or by Session or project, beside that Session's live tabs; over other apps a strip shows the question, and one click sends the answer back as the tool's result. ⌃⇧Space answers the whole queue by keyboard. In a Session, workers relay to their orchestrator, which posts for them. A Pane desktop shows the questions of every machine it has saved, and your phone gets an alert. | [Approvals](docs/PANE_NOTIFY.md) |
 | **Pane secrets** | An agent asks you for an API key on a masked card, then runs its command with `runpane secrets exec`; the value never enters chat. Secrets are shared by every agent and synced to every machine you have saved, and Project Settings variables can point at them. | [Pane secrets](docs/PANE_SECRETS.md) |
 | **Pane on Even G2 glasses** | See every Notify card from all your computers on Even Realities G2 glasses, in the Even app or Glassly, answer with the R1 ring or your voice, and open any Pane's live terminal to read it and dictate into it. Pair once from the Pane phone app. | [Even G2 glasses](docs/EVEN_G2_GLASSES.md) |
@@ -131,7 +131,7 @@ Each of these is a small thing. Together they compound fast.
 | **Clipboard Shortcuts** | `Cmd+Option+[key]` on macOS (`Ctrl+Alt+[key]` on Windows and Linux) pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
 | **Terminal Popover** | Highlight any text in a terminal and an intelligent popover offers the right action: copy, open in browser, or show in explorer. Right-click offers the same actions, plus Paste and Select All. Prefer copy on select? Turn it on in Settings → Terminal. | <img src="images/qol-terminal-popover.png" alt="Terminal text selection popover" width="420"> |
 | **Custom Links** | Turn any pattern in terminal output into a link: an issue key like `PROJ-123` opens your tracker, a build number opens CI. Set a regex and a URL with `$0`–`$9` in Settings → Links, then Ctrl/Cmd+Click. | |
-| **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. When a Pane's terminal or agent starts a web server, Pane offers to open a live preview of it beside the agent; the preview is that Pane's tab, so it follows the Pane. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Remote Pane app opens the same ports and HTML pages over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
+| **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. When a Pane's terminal or agent starts a web server, Pane offers to open a live preview of it beside the agent; the preview is that Pane's tab, so it follows the Pane. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Pane app opens the same ports and HTML pages through the computer's own address ([QR pairing](docs/QR_PAIRING.md)) or over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
 | **Resource Manager** | Built-in CPU and memory monitor broken down per pane and per process, so you can catch a runaway agent before it eats your laptop. | <img src="images/qol-resource-manager.png" alt="Built-in resource manager" width="420"> |
 | **Status Cues** | Every AI pane reports its state at a glance — a red dot when an agent is blocked waiting on your approval, an amber pulse while it works, and a "done" cue when it finishes while you're looking elsewhere. The same rollup colors the project dots and pane tabs, on the desktop and in the phone app, so a whole screen of parallel agents reads in one glance. | <img src="images/qol-status-dots.png" alt="Session agent status dots: blocked, working, done" width="280"> |
 | **Jump + Refresh** | Jump to top, jump to bottom, or hard-refresh any terminal from the toolbar to unstick a frozen state in one click. | <img src="images/qol-jump-refresh.png" alt="Terminal jump and refresh controls" width="120"> |
@@ -150,14 +150,20 @@ Pane lists every host in your SSH config (`~/.ssh/config`, or `C:\Users\<you>\.s
 
 ## Remote Pane
 
-Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: the host machine runs the repos, terminals, git state, files, agent credentials, and compute; the client just connects with a `pane-remote://...` code.
+Run agents on a VM, WSL box, home server, desktop, Mac mini, or cloud machine while you keep the Pane UI on your laptop or phone. Remote Pane is self-hosted and open source: the host machine runs the repos, terminals, git state, files, agent credentials, and compute.
 
-The easiest setup path is in the app:
+### Add a phone or another computer
+
+On the computer, open Pane and choose **Pair a phone** on Home, or **Add a device** in Settings › Remote Access. Point your phone's camera at the code and tap the link: it opens the Pane app, or Pane in the phone's browser. For another computer, copy a one-time link from **Add a device › Computer** and open it there. It works on any network, with terminals, alerts and dev server previews. Linked computers reach each other for remote mode, ports and `runpane workspace`, and each shows once in Settings › Remote Access › Computers, where Pane reaches it on the nearest route that answers: same network, Tailscale, SSH, a public URL or Pane's relay. Pane's servers pass the encrypted connection along without reading it, or you can [run your own relay](docs/SELF_HOSTED_RELAY.md). See [Add a device](docs/QR_PAIRING.md).
+
+### Connect with a code or Tailscale
+
+The original setup path, with a `pane-remote://...` code over Tailscale or SSH:
 
 1. Install Pane normally on the machine that should host your projects and agents.
-2. Open `Settings > Remote Access` on that host machine.
-3. Set it up as a remote host and copy the generated `pane-remote://...` connection code.
-4. On another desktop, open Pane, go to `Settings > Remote Access`, paste the code under **Add connection**, and connect.
+2. Open `Settings > Remote Access > Tailscale` on that host machine.
+3. Click **Set Up Host** and copy the generated `pane-remote://...` connection code.
+4. On another desktop, open Pane, go to `Settings > Remote Access > Tailscale`, paste the code under **Paste a connection code**, and connect.
 5. On a phone or tablet, open [runpane.com/app](https://runpane.com/app/), paste the same code, and connect.
 
 A connected desktop reaches the host's dev servers at their usual `localhost` address: browser tabs, terminal links and live reload work as on the host. See [Forwarded ports](docs/SELF_HOSTED_REMOTE_DAEMON.md#forwarded-ports).
@@ -221,7 +227,7 @@ Integration keys (voice dictation, iPhone notifications) set on one host reach y
 
 Your agent can work across your Macs, Windows PCs, and Linux machines. Read a file on your desktop, run a command on your build machine, or check the agents running on your laptop — from the same terminal.
 
-Workspaces use your Tailscale login, without SSH keys or pairing codes. Install and sign in to Tailscale on both machines, enable HTTPS Certificates in the Tailscale admin console (see [setup](docs/RUNPANE_WORKSPACES.md#turning-it-on)), and keep Pane running on the machine you want to reach. Workspaces are on by default for the normal desktop install; `runpane workspace list` shows which machines are answering. Other people's machines on your tailnet appear too, labeled with their owner, and answer when their owner sets Who can connect to Everyone on tailnet. Tagged devices are refused.
+On Tailscale, workspaces use your Tailscale login, with no SSH keys or pairing codes. Install and sign in to Tailscale on both machines, enable HTTPS Certificates in the Tailscale admin console (see [setup](docs/RUNPANE_WORKSPACES.md#turning-it-on)), and keep Pane running on the machine you want to reach. Workspaces are on by default for the normal desktop install; `runpane workspace list` shows which machines are answering. Other people's machines on your tailnet appear too, labeled with their owner, and answer when their owner sets Who can connect to Everyone on tailnet. Tagged devices are refused. Computers you linked in Pane appear too, one entry each, and answer with Tailscale off; link one with no screen with `runpane link '<link>'`.
 
 Use the npm CLI (`npm i -g runpane`); the Python wrapper does not run workspace commands. Replace `devbox` with a machine name from the list:
 
@@ -235,6 +241,14 @@ runpane workspace devbox panes list --json
 Paths belong to the destination machine. `read` and `write` translate Windows and WSL path forms; `exec` uses that machine's shell. Workspaces give your agents file and command access on your joined machines. Run `runpane workspace disable` on a machine that should stop accepting it.
 
 See [Workspaces setup, trust, and troubleshooting](docs/RUNPANE_WORKSPACES.md) for path examples and startup diagnostics. Remote Pane's [pairing codes](#remote-pane) remain the way to connect a desktop or browser UI.
+
+### Workers on your other machines
+
+A Session on this computer can run workers anywhere in your workspace. From the Session's agent, `runpane workspace devbox panes create --repo "Pane (win)" --tool-command "codex -m <model>" --prompt "..."` starts a worker on that machine (pick a saved WSL repository to run it in WSL), and it joins the Session: its reports, blocked questions and exits reach this computer's `runpane watch`, Approvals and phone, and your answers go back to its tab. The machine must be saved on this computer. See [Workers on another machine](docs/RUNPANE_WORKSPACES.md#workers-on-another-machine-join-your-session).
+
+### Ask another model
+
+`runpane ask --agent codex --model <model> --machine devbox --repo "Pane (win)" --prompt "Why does this fail on Windows?"` asks any agent and model one read-only question, on any of your machines, and prints the answer; nothing is left open. `runpane models --all` lists the models each installed agent offers on each machine. See [Ask another model a question](docs/RUNPANE_WORKSPACES.md#ask-another-model-a-question).
 
 ### Hand off a task
 

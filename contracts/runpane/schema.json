@@ -391,6 +391,15 @@
           "description": "The command can reach services outside the local Pane app (MCP openWorldHint).",
           "type": "boolean"
         },
+        "cliOnlyFlags": {
+          "description": "Flags the CLI accepts that the command's MCP tool leaves out, such as a mode that changes state on a command otherwise read-only.",
+          "$ref": "#/$defs/stringList"
+        },
+        "mcpName": {
+          "description": "The MCP tool's name, when it differs from the command name with spaces as underscores.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
         "toolsets": {
           "description": "MCP toolsets that serve this command; see runpane mcp --toolsets.",
           "$ref": "#/$defs/stringList"
@@ -502,6 +511,124 @@
           "items": {
             "type": "string",
             "minLength": 1
+          }
+        },
+        "models": {
+          "description": "How the CLI takes a model and lists its models. runpane models and runpane ask read it.",
+          "type": "object",
+          "required": [
+            "flag"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "flag": {
+              "description": "The flag that takes a model name for one launch, as `<flag> <model>`.",
+              "type": "string",
+              "pattern": "^-"
+            },
+            "effortFlag": {
+              "description": "The flag that takes a reasoning effort, as `<flag> <effort>`.",
+              "type": "string",
+              "pattern": "^-"
+            },
+            "effortConfig": {
+              "description": "The config key that takes a reasoning effort, passed as `-c <key>=<effort>`.",
+              "type": "string",
+              "minLength": 1
+            },
+            "aliases": {
+              "description": "Model names the CLI accepts when it has no list command.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "list": {
+              "description": "The command (after the executable) that prints the models this install offers, and how to read it.",
+              "type": "object",
+              "required": [
+                "args",
+                "format"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "format": {
+                  "description": "`json-models`: {models:[{slug,visibility}]}, rows with visibility hide are skipped; `lines`: one model per line; `dash-lines`: `<model> - <name>` lines.",
+                  "enum": [
+                    "json-models",
+                    "lines",
+                    "dash-lines"
+                  ]
+                }
+              }
+            },
+            "status": {
+              "description": "The command (after the executable) that reports sign-in, and how to read it.",
+              "type": "object",
+              "required": [
+                "args",
+                "format"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "format": {
+                  "description": "`json-logged-in`: JSON with loggedIn and authMethod; `text`: the output as the CLI words it.",
+                  "enum": [
+                    "json-logged-in",
+                    "text"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "ask": {
+          "description": "One read-only headless turn for runpane ask: the executable, these args, the model flag, then the prompt as the last argument. An agent without it is not offered by ask.",
+          "type": "object",
+          "required": [
+            "args",
+            "output"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "description": "Flags that run one turn headless and refuse edits and shell commands.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "env": {
+              "description": "Environment variables set for the run.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "output": {
+              "description": "Where the answer is: `result-json` one JSON object with result, is_error and total_cost_usd; `codex-jsonl` JSON lines whose last agent_message item is the answer; `opencode-jsonl` JSON lines whose last step's text parts are the answer.",
+              "enum": [
+                "result-json",
+                "codex-jsonl",
+                "opencode-jsonl"
+              ]
+            }
           }
         },
         "transcriptDirs": {
@@ -797,6 +924,10 @@
         "secrets delete",
         "secrets exec",
         "secrets request",
+        "theme",
+        "theme read",
+        "theme set",
+        "theme reset",
         "panes",
         "panes list",
         "panes cost",
@@ -809,6 +940,8 @@
         "workspace write",
         "workspace exec",
         "handoff",
+        "ask",
+        "models",
         "watch",
         "panes create",
         "panes adopt",
@@ -837,6 +970,8 @@
         "panels close",
         "agent-context",
         "mcp",
+        "relay",
+        "link",
         "panes git-status",
         "panes commit",
         "panes push",
@@ -956,6 +1091,18 @@
         "secrets request": {
           "$ref": "#/$defs/helpLines"
         },
+        "theme": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "theme read": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "theme set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "theme reset": {
+          "$ref": "#/$defs/helpLines"
+        },
         "panes": {
           "$ref": "#/$defs/helpLines"
         },
@@ -990,6 +1137,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "handoff": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "ask": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "models": {
           "$ref": "#/$defs/helpLines"
         },
         "watch": {
@@ -1074,6 +1227,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "mcp": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "relay": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "link": {
           "$ref": "#/$defs/helpLines"
         },
         "panes git-status": {

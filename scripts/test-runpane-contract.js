@@ -1163,7 +1163,8 @@ async function checkReportDeliveryLine() {
   const base = { ok: true, paneId: 'pane-1', panelId: 'panel-1', report, sessionIds: [] };
   const hint = 'No Session recorded this report and no watcher was waiting for it. It is stored on the panel '
     + '(runpane agents status --panel panel-1), and a watch with a named cursor '
-    + '(runpane watch --as <name> --kinds agent.report) still receives it when it next waits.';
+    + '(runpane watch --as <name> --kinds agent.report) still receives it when it next waits.\n'
+    + 'If this Pane belongs to a Session on another computer, that computer records it there.';
   const cases = [
     [{ ...base, liveWatchers: 1 }, 'Reported blocked for panel panel-1. Delivered to 1 waiting watcher.\n'],
     [{ ...base, report: { ...report, state: 'done' }, sessionIds: ['s-1', 's-2'], liveWatchers: 2 },
@@ -1171,7 +1172,8 @@ async function checkReportDeliveryLine() {
     [{ ...base, liveWatchers: 0 }, `Reported blocked for panel panel-1.\n${hint}\n`],
     [{ ...base, sessionIds: ['s-1'], liveWatchers: 0 }, 'Reported blocked for panel panel-1. Recorded on Session s-1.\n'],
     [base, 'Reported blocked for panel panel-1.\nNo Session recorded this report. It is stored on the panel '
-      + '(runpane agents status --panel panel-1), and only watchers that list agent.report receive it.\n'],
+      + '(runpane agents status --panel panel-1), and only watchers that list agent.report receive it.\n'
+      + 'If this Pane belongs to a Session on another computer, that computer records it there.\n'],
   ];
   for (const runtime of ['npm', 'pip']) {
     const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-report-line-${runtime}-`));
@@ -2507,7 +2509,9 @@ async function checkCreateAssociationSource() {
     assert.strictEqual((await request()).associateSession, 'explicit-session');
     process.env.PANE_ORCHESTRATION_SESSION_ID = 'current-session';
     assert.strictEqual((await request()).associateSession, 'current-session');
-    assert.strictEqual((await request('--no-associate')).associateSession, undefined);
+    const optedOut = await request('--no-associate');
+    assert.strictEqual(optedOut.associateSession, undefined);
+    assert.strictEqual(optedOut.noAssociate, true, '--no-associate also stops the app joining the caller\'s Session');
   } finally {
     if (previousSession === undefined) delete process.env.PANE_ORCHESTRATION_SESSION_ID;
     else process.env.PANE_ORCHESTRATION_SESSION_ID = previousSession;
@@ -2519,7 +2523,7 @@ import json
 import os
 import tempfile
 from runpane.cli import parse_args
-from runpane.local_control import build_pane_create_request
+from runpane.local_control import build_pane_adopt_request, build_pane_create_request
 
 with tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8") as handle:
     json.dump({"repo": "active", "panes": [{"name": "child", "tool": {"command": "echo ready"}}], "associateSession": "explicit-session"}, handle)
@@ -2529,7 +2533,11 @@ try:
     assert build_pane_create_request(parse_args(args))["associateSession"] == "explicit-session"
     os.environ["PANE_ORCHESTRATION_SESSION_ID"] = "current-session"
     assert build_pane_create_request(parse_args(args))["associateSession"] == "current-session"
-    assert "associateSession" not in build_pane_create_request(parse_args(args + ["--no-associate"]))
+    opted_out = build_pane_create_request(parse_args(args + ["--no-associate"]))
+    assert "associateSession" not in opted_out and opted_out["noAssociate"] is True
+    adopted = build_pane_adopt_request(parse_args(["panes", "adopt", "--from-json", handle.name, "--no-associate"]))
+    assert "associateSession" not in adopted and adopted["noAssociate"] is True
+    assert build_pane_adopt_request(parse_args(["panes", "adopt", "--from-json", handle.name]))["associateSession"] == "current-session"
 finally:
     os.unlink(handle.name)
 `);
@@ -4036,6 +4044,8 @@ async function checkPaneAdoptOverrides() {
     });
     await runPanesAdopt(parseRunpaneArgs(['panes', 'adopt', '--from-json', inputPath, '--yes', '--json']));
     assert.deepStrictEqual(requests.pop(), payload, 'absent flags preserve the JSON request');
+    await runPanesAdopt(parseRunpaneArgs(['panes', 'adopt', '--from-json', inputPath, '--no-associate', '--yes', '--json']));
+    assert.strictEqual(requests.pop().noAssociate, true, '--no-associate also stops the app joining the caller\'s Session');
 
     fs.writeFileSync(inputPath, JSON.stringify({
       ...payload, noFocus: false, focus: true, source: 'user',

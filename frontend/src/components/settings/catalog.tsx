@@ -36,18 +36,18 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'general',
     label: 'General',
-    description: 'Startup, application updates, feedback, pausing idle Panes, and opening files.',
+    description: 'Startup, application updates, feedback, power, pausing idle Panes, and opening files.',
     icon: Settings,
-    settingIds: ['automatic-updates', 'check-updates-now', 'send-feedback', 'start-on-login', 'keep-awake', 'resume-paused-on-open', 'auto-pause', 'html-file-open-mode'],
-    aliases: ['startup', 'updates', 'feedback', 'bug report', 'feature request', 'github issue', 'login', 'sleep', 'caffeinate', 'awake', 'power', 'battery', 'plugged in', 'lid', 'pause', 'paused', 'resume', 'idle', 'auto-pause', 'html', 'preview', 'open html', 'explorer', 'source'],
+    settingIds: ['automatic-updates', 'check-updates-now', 'send-feedback', 'start-on-login', 'keep-awake', 'background-activity', 'resume-paused-on-open', 'auto-pause', 'html-file-open-mode'],
+    aliases: ['startup', 'updates', 'feedback', 'bug report', 'feature request', 'github issue', 'login', 'sleep', 'caffeinate', 'awake', 'power', 'battery', 'plugged in', 'lid', 'background', 'low power', 'battery saver', 'ports', 'usage', 'pause', 'paused', 'resume', 'idle', 'auto-pause', 'html', 'preview', 'open html', 'explorer', 'source'],
   },
   {
     id: 'appearance',
     label: 'Appearance',
     description: 'Theme, scale, and sidebar presentation.',
     icon: Monitor,
-    settingIds: ['appearance-mode', 'theme', 'system-light-theme', 'system-dark-theme', 'high-contrast', 'ui-scale', 'sidebar-pane-rows'],
-    aliases: ['theme', 'display', 'sidebar', 'zoom', 'contrast', 'accessibility'],
+    settingIds: ['appearance-mode', 'theme', 'system-light-theme', 'system-dark-theme', 'custom-theme', 'high-contrast', 'ui-scale', 'sidebar-pane-rows'],
+    aliases: ['theme', 'display', 'sidebar', 'zoom', 'contrast', 'accessibility', 'custom theme', 'css', 'restyle', 'colors'],
   },
   {
     id: 'terminal',
@@ -124,10 +124,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'remote-access',
     label: 'Remote Access',
-    description: 'Your machines, who can connect, and paired phones and glasses.',
+    description: 'Your machines, who can connect, and paired phones, computers and glasses.',
     icon: Link2,
-    settingIds: ['remote-machines', 'remote-visibility', 'remote-address', 'remote-password', 'remote-glasses', 'remote-pane', 'remote-host-setup', 'remote-advanced-host'],
-    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'machines', 'switch machine', 'workspaces', 'glasses', 'even g2', 'phone', 'devices', 'connection code'],
+    settingIds: ['remote-machines', 'remote-visibility', 'remote-address', 'remote-password', 'remote-pair-phone', 'remote-glasses', 'remote-linked-computers', 'remote-relay-address', 'remote-pane', 'remote-host-setup', 'remote-advanced-host'],
+    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'machines', 'switch machine', 'workspaces', 'glasses', 'even g2', 'phone', 'mobile', 'devices', 'connection code', 'qr', 'qr code', 'scan', 'pair', 'pair a phone', 'relay', 'relay address', 'self-host', 'linked computers', 'your computers', 'unlink'],
   },
   {
     id: 'integrations',

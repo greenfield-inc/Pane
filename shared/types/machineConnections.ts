@@ -24,6 +24,10 @@ export interface MachineState {
   onlineSince?: string;
   /** The machine's install id ("Show cards on" names it by this): this computer's own, or a saved machine's from its last connection. Absent until it answers, and from releases before it. */
   installId?: string;
+  /** The route a saved computer's connection is on (`ComputerRoute.id`): the dot on its pill. */
+  routeId?: string;
+  /** Whether the machine's Pane sends its Session members' reports; absent until it first answers. */
+  workspaceEntries?: boolean;
 }
 
 /** The reads `machines:read` serves; each takes the arguments the same channel takes today. */
@@ -36,6 +40,7 @@ export const MACHINE_READ_CHANNELS = [
   'autopilot:read-doc',
   'notify:summary-page',
   'panels:agent-statuses',
+  'orchestration-sessions:activity-list',
   'projects:get-all',
   'projects:list-branches',
   'projects:detect-branch',
@@ -55,12 +60,14 @@ export const MACHINE_EVENT_CHANNELS = [
   'panel:agentStatus',
   'panel:activityStatus',
   'orchestration-sessions:changed',
+  'orchestration-sessions:activity',
   'project:updated',
   'project:list-changed',
   'permission:request',
   'permission:resolved',
   'notify:shared-changed',
   'remote:settings-changed',
+  'workspace:entry',
 ] as const;
 export type MachineEventChannel = typeof MACHINE_EVENT_CHANNELS[number];
 

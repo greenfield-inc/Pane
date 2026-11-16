@@ -1,3 +1,20 @@
+import defaultTheme from 'tailwindcss/defaultTheme.js';
+
+/**
+ * A status dot that stays on screen (a blocked agent, a running script) pulses
+ * this many times when it appears, then holds steady. An endless pulse keeps the
+ * GPU display clock ticking for as long as the window is in front, about 300
+ * wakeups a second.
+ */
+const ATTENTION_PULSES = 3;
+
+/**
+ * A working agent's spinner turns this many times when the agent starts working,
+ * then holds still. 6 turns of 1 s settle at the same moment as the attention
+ * pulse (3 x 2 s), so every status dot on a surface rests together.
+ */
+const WORKING_TURNS = 6;
+
 /** @type {import('tailwindcss').Config} */
 const config = {
   darkMode: 'class',
@@ -152,6 +169,7 @@ const config = {
           'DEFAULT': 'var(--discord-primary, #5865F2)',
           'hover': 'var(--discord-hover, #4752C4)',
           'secondary': 'var(--discord-secondary, #7289DA)',
+          'foreground': 'var(--discord-foreground, #FFFFFF)',
         },
         // Modal colors
         'modal': {
@@ -271,6 +289,10 @@ const config = {
       },
       animation: {
         shimmer: 'shimmer 2s linear infinite',
+        // Tailwind's `animate-pulse`, run a set number of times instead of forever.
+        'attention-pulse': defaultTheme.animation.pulse.replace('infinite', String(ATTENTION_PULSES)),
+        // Tailwind's `animate-spin`, run a set number of turns instead of forever.
+        'working-spin': defaultTheme.animation.spin.replace('infinite', String(WORKING_TURNS)),
         'status-working': 'status-working-sweep 1.4s ease-in-out infinite alternate',
         'in': 'in 0.2s ease-out',
         'fade-in': 'fade-in 0.2s ease-out',
@@ -328,6 +350,12 @@ const config = {
       },
       ringColor: {
         'focus-ring-subtle': 'var(--color-focus-ring-subtle)',
+      },
+      ringWidth: {
+        // `ring-status`: the halo that marks a status dot needing the person
+        // (a blocked agent, a waiting Notify question). It stays inside the
+        // dot's fixed box, so adding it never shifts the row.
+        status: '3px',
       },
     },
   },

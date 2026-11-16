@@ -24,7 +24,7 @@ async function launch(paneDir: string, baseURL: string | undefined): Promise<{ a
 }
 
 async function dismissDialogs(page: Page): Promise<void> {
-  for (const name of ['No thanks', 'Get Started', 'Skip']) {
+  for (const name of ['No thanks', 'Get Started', 'Skip', 'Skip for now']) {
     const button = page.getByRole('button', { name, exact: true });
     if (await button.isVisible({ timeout: 1500 }).catch(() => false)) await button.click();
   }
@@ -78,14 +78,15 @@ test('a chat tab streams, asks for approval, and comes back after a restart with
     await expect(page.getByRole('button', { name: 'Stop agent turn' })).toBeVisible();
     await app.close();
 
+    // The last thing shown was this chat, so the relaunch reopens it with its message box focused.
     ({ app, page } = await launch(paneDir, baseURL));
     await dismissDialogs(page);
-    await page.getByText('New Task').first().click();
     const reopened = page.getByRole('region', { name: 'Conversation messages' });
     await expect(reopened).toContainText('You said: hello there', { timeout: 20_000 });
     await expect(reopened).toContainText('Stopped when Pane closed.');
     await expect(page.getByRole('alert', { name: 'Chat stopped' })).toHaveCount(0);
     const again = page.getByRole('textbox', { name: 'Message Claude' });
+    await expect(again).toBeFocused();
     await again.fill('after restart');
     await again.press('Enter');
     await expect(reopened).toContainText('You said: after restart');

@@ -10,9 +10,12 @@ import { runAgentsSend, runAgentsStart, runAgentsStatus } from './agentTasks';
 import { daemonActionFor, runDaemonAction } from './daemonActions';
 import { runDocsRead, runDocsSearch } from './docs';
 import { runHandoff } from './handoff';
+import { runAsk, runModels } from './ask';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
+import { runLink } from './pairingLink';
 import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
+import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo } from './daemonClient';
@@ -95,11 +98,12 @@ import {
   type WrapperTelemetryContext
 } from './telemetry';
 import { printVersion } from './version';
+import { runRelay } from './relay';
 import { handOffToManagedCli } from './managedCli';
 import { assertSupportedCliRuntime } from './nodeRuntime';
 import {
-  readTailnet,
   readWorkspaceSummary,
+  requireTailnet,
   resolveMachine,
   runWorkspaceExec,
   runWorkspaceList,
@@ -118,7 +122,8 @@ export async function main(argv: string[]): Promise<number> {
   if (hooked !== null) return hooked;
   assertSupportedCliRuntime(process.versions.node, process.versions.electron);
   if (argv[0] === '__update-runner' && argv.length === 2) return runUpdateHelper(argv[1]);
-  const handedOff = await handOffToManagedCli(argv);
+  // runpane relay runs the relay of this runpane's own version, so it never hands off.
+  const handedOff = argv[0] === 'relay' ? null : await handOffToManagedCli(argv);
   if (handedOff !== null) return handedOff;
   const telemetryContext = createInitialTelemetryContext(argv);
   if (argv.length === 0) {
@@ -158,7 +163,9 @@ export async function main(argv: string[]): Promise<number> {
 /** Commands that run on this machine only; everything else is a daemon call another machine can answer. */
 const THIS_MACHINE_ONLY = new Set<string>([
   'help', 'setup', 'install', 'update', 'version', 'doctor', 'daemon repair', 'agent-context', 'mcp',
-  'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff',
+  'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff', 'relay',
+  // These pick their own machine with --machine (or --all).
+  'ask', 'models',
   // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
   'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
   // These read or change this machine's own secret store; another machine runs its own.
@@ -171,9 +178,9 @@ async function runOnMachine(machineQuery: string, command: string[]): Promise<nu
   if (THIS_MACHINE_ONLY.has(parsed.command)) {
     throw new Error(`runpane ${parsed.command} runs on this machine only. On ${machineQuery}, use: runpane workspace ${machineQuery} exec -- runpane ${command.join(' ')}`);
   }
-  const tailnet = await readTailnet();
-  if (!tailnet.ok) throw new Error(`runpane workspace needs Tailscale: ${tailnet.reason}. ${tailnet.fix}`);
-  routeDaemonCallsTo(workspaceTarget(resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines])));
+  const tailnet = await requireTailnet(parsed.paneDir);
+  const machine = resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines]);
+  routeDaemonCallsTo(workspaceTarget(machine), machine.self);
   try {
     return await main(command);
   } finally {
@@ -260,6 +267,9 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'secrets delete': async (parsed) => runSecretsDelete(parsed),
   'secrets exec': async (parsed) => runSecretsExec(parsed),
   'secrets request': async (parsed) => runSecretsRequest(parsed),
+  'theme read': async (parsed) => runThemeRead(parsed),
+  'theme set': async (parsed) => runThemeSet(parsed),
+  'theme reset': async (parsed) => runThemeReset(parsed),
   'panes list': async (parsed, telemetryContext) => {
     return runPanesList(parsed);
   },
@@ -320,6 +330,10 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'workspace write': async (parsed) => runWorkspaceWrite(parsed),
   'workspace exec': async (parsed) => runWorkspaceExec(parsed),
   'handoff': async (parsed) => runHandoff(parsed),
+  'ask': async (parsed) => runAsk(parsed),
+  'models': async (parsed) => runModels(parsed),
+  'relay': async (parsed) => runRelay(parsed.execCommand ?? []),
+  'link': async (parsed) => runLink(parsed),
   'pr watch': async parsed => runPrWatchCommand(parsed),
   'pr unwatch': async parsed => runPrWatchCommand(parsed),
   'pr list': async parsed => runPrWatchCommand(parsed),

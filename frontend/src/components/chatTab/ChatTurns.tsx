@@ -1,7 +1,8 @@
-import { memo, useContext, useMemo, useState, type ComponentProps } from 'react';
+import { memo, useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { ChatBlocksContext } from './chatRendering';
 import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Terminal, Wrench, XCircle } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import { markdownBlocks } from './markdownBlocks';
 import remarkGfm from 'remark-gfm';
 import { describeChatContent } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
@@ -36,9 +37,15 @@ function blockLanguage(node: HastNode | undefined): string | undefined {
   return language?.slice('language-'.length);
 }
 
-const Markdown = memo(({ text }: { text: string }) => {
+/**
+ * `live`: the turn is still writing. Text that mounts while its turn writes parses block by block,
+ * so each token re-parses only the block being written; text that mounts finished parses whole,
+ * which mounts faster. The choice holds for the text's lifetime, so a turn ending never remounts
+ * its blocks and the state inside them (a half-typed form) survives.
+ */
+const Markdown = memo(({ text, live }: { text: string; live: boolean }) => {
   const { blocks } = useContext(ChatBlocksContext);
-  const components = useMemo(() => ({
+  const components = useMemo<Components>(() => ({
     a: ({ children, ...props }: ComponentProps<'a'>) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>,
     pre: ({ node, children, ...props }: ComponentProps<'pre'> & { node?: HastNode }) => {
       const language = blockLanguage(node);
@@ -46,9 +53,15 @@ const Markdown = memo(({ text }: { text: string }) => {
       return render ? <>{render(hastText(node).replace(/\n$/, ''))}</> : <CodeBlock {...props}>{children}</CodeBlock>;
     },
   }), [blocks]);
-  return <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown></div>;
+  const split = useRef(live).current;
+  const parts = split ? markdownBlocks(text) : [text];
+  return <div className="chat-markdown">{parts.map((block, index) => <MarkdownBlock key={index} text={block} components={components} />)}</div>;
 });
 Markdown.displayName = 'Markdown';
+
+const MarkdownBlock = memo(({ text, components }: { text: string; components: Components }) =>
+  <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{text}</ReactMarkdown>);
+MarkdownBlock.displayName = 'MarkdownBlock';
 
 const VERBS = { explore: ['Exploring', 'Explored'], edit: ['Edit', 'Edited'], run: ['Run', 'Ran'], think: ['Thinking', 'Thought'], other: ['Using', 'Used'] } satisfies Record<ChatStep['kind'], [string, string]>;
 const ICONS = { explore: Eye, edit: Pencil, run: Terminal, think: Brain, other: Wrench };
@@ -117,9 +130,9 @@ function TodoList({ entries }: { entries: PlanEntry[] }) {
   </section>;
 }
 
-function Item({ item, waiting, actions }: { item: TurnItem; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
+function Item({ item, waiting, actions, live }: { item: TurnItem; waiting: ReadonlySet<string>; actions: ChatTurnActions; live: boolean }) {
   switch (item.type) {
-    case 'text': return <div data-anchor-id={item.id}><Markdown text={item.text} /></div>;
+    case 'text': return <div data-pane-part="chat-message" data-anchor-id={item.id}><Markdown text={item.text} live={live} /></div>;
     case 'thought': return <details className="chat-thought"><summary><Brain aria-hidden="true" />Thinking</summary><div className="whitespace-pre-wrap">{item.text}</div></details>;
     case 'image': return <img className="chat-image" alt="Sent by the agent" src={`data:${item.mimeType};base64,${item.data}`} />;
     case 'plan': return <TodoList entries={item.entries} />;
@@ -142,7 +155,7 @@ function UserMessage({ turn }: { turn: ChatTurn }) {
   const custom = userMessage?.(turn.user.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'));
   if (custom !== undefined) return <>{custom}</>;
   return <div className="chat-user-row" title={messageTime(turn.startedAt)?.full}>
-    <div className="chat-user" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
+    <div className="chat-user" data-pane-part="chat-message" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
       ? <span key={`${turn.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
       : part.type === 'content' ? <UserImage key={`${turn.id}:${index}`} content={part.content} /> : null)}</div>
     {userMarkdown(turn) && <div className="chat-message-actions"><ChatCopyButton label="Copy message" text={() => userMarkdown(turn)} /></div>}
@@ -177,13 +190,13 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
         {open ? <ChevronDown className="chat-fold-chevron" /> : <ChevronRight className="chat-fold-chevron" />}
       </button>
       : <p className="chat-fold">{icon}<span className="chat-fold-label">{row.label}</span></p>}
-    {open && <div className="chat-fold-body">{activity.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>}
+    {open && <div className="chat-fold-body">{activity.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>}
   </div>;
   return <div className="chat-turn" data-anchor-id={turn.id} data-running={turn.running}>
     <UserMessage turn={turn} />
-    <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>
+    <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {fold}
-    <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>
+    <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}
       {latest && !activity.length && ended && <span className="chat-turn-time" title={ended.full}>{ended.short}</span>}

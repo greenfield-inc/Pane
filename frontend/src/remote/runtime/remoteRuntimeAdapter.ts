@@ -25,7 +25,8 @@ import type { Project } from '../../types/project';
 import type { SessionWorkerSource } from '../../components/chatTab/sessionWorkers';
 import { watchHostSessionChanges } from './hostSessionChanges';
 import { savedFilePath } from '../../components/chatTab/chatAttachments';
-import type { CreateSessionRequest, Session, SessionOutput } from '../../types/session';
+import type { CreateSessionRequest, Session } from '../../types/session';
+import type { HostTerminalSnapshot } from '../../../../shared/remoteClient/terminalSnapshot';
 import { RemoteDaemonBrowserClient, type RemoteBrowserConnectionState } from './remoteDaemonBrowserClient';
 
 export interface RemoteProjectWithSessions extends Project {
@@ -364,8 +365,9 @@ export class RemoteRuntimeAdapter {
     return this.invoke<void>('panels:initialize', [panelId, options]);
   }
 
-  getPanelOutput(panelId: string, limit = 5_000): Promise<SessionOutput[]> {
-    return this.invoke<SessionOutput[]>('panels:get-output', [panelId, limit]);
+  /** What the host's terminal shows now, or null when its PTY isn't running. */
+  getTerminalState(panelId: string): Promise<HostTerminalSnapshot | null> {
+    return this.invoke<HostTerminalSnapshot | null>('terminal:getState', [panelId]);
   }
 
   sendTerminalInput(panelId: string, data: string): Promise<void> {
@@ -376,8 +378,8 @@ export class RemoteRuntimeAdapter {
     return this.invoke<void>('terminal:clearScrollback', [panelId]);
   }
 
-  resizeTerminal(panelId: string, cols: number, rows: number): Promise<void> {
-    return this.invoke<void>('terminal:resize', [panelId, cols, rows]);
+  resizeTerminal(panelId: string, cols: number, rows: number, options?: { force?: boolean }): Promise<void> {
+    return this.invoke<void>('terminal:resize', options ? [panelId, cols, rows, options] : [panelId, cols, rows]);
   }
 
   setTerminalVisibility(panelId: string, visible: boolean, viewerId: string): Promise<void> {

@@ -58,10 +58,8 @@ function AnswerControls({ model, onAnswer }: { model: DecisionModel; onAnswer: (
           {model.options.map((option) => (
             <button key={option.key} type="button" onClick={() => onAnswer(option.answer)} data-testid="autopilot-decision-option"
               className="flex w-full items-start gap-2.5 border-t border-border-primary px-3.5 py-2.5 text-left first:border-t-0 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover">
-              {/* A fixed-size ring: options never shift as one is hovered or chosen. */}
-              <span className={cn('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2', option.recommended ? 'border-text-primary' : 'border-border-secondary')} aria-hidden="true">
-                <span className={cn('h-1.5 w-1.5 rounded-full bg-text-primary', !option.recommended && 'invisible')} />
-              </span>
+              {/* A fixed-size, empty ring: a click answers, so none looks chosen beforehand, recommended or not (D-385). */}
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 border-border-secondary" aria-hidden="true" />
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-1.5 text-[13.5px] font-medium text-text-primary">
                   {option.label}

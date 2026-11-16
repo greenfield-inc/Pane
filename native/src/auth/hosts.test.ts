@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
-import { addHost, EMPTY_HOSTS, loadHosts, removeHost, saveHosts, type KeyValueStore } from './hosts';
+import { addHost, addHosts, EMPTY_HOSTS, loadHosts, removeHost, saveHosts, type KeyValueStore } from './hosts';
 
 function profile(label: string, baseUrl: string, token: string): RemotePaneConnectionProfile {
   return { id: `${label}:${baseUrl}:${token.slice(-8)}`, label, baseUrl, token, transport: 'http+sse' };
@@ -37,6 +37,27 @@ describe('saved hosts', () => {
     const hosts = addHost(addHost(EMPTY_HOSTS, office), repaired);
     expect(hosts.profiles).toEqual([repaired]);
     expect(hosts.activeId).toBe(repaired.id);
+  });
+
+  it('adds the computers a pairing brings along without replacing ones the phone already saved', () => {
+    const relay = (id: string, token: string, fingerprint: string): RemotePaneConnectionProfile => ({
+      id: `relay:${id}`, label: id, baseUrl: `https://${id}.runpane.net`, token, transport: 'http+sse', relay: { computerId: id, fingerprint },
+    });
+    const workMac = relay('workmac', 'token-mine', 'fp-mine');
+    const saved = addHost(EMPTY_HOSTS, workMac);
+    const scanned = relay('stranger', 'token-stranger', 'fp-stranger');
+
+    const hosts = addHosts(saved, [relay('workmac', 'token-from-stranger', 'fp-attacker'), relay('buildbox', 'token-build', 'fp-build')], scanned);
+
+    expect(hosts.profiles.find(p => p.id === 'relay:workmac')).toEqual(workMac);
+    expect(hosts.profiles.map(p => p.id).sort()).toEqual(['relay:buildbox', 'relay:stranger', 'relay:workmac']);
+    expect(hosts.activeId).toBe('relay:stranger');
+  });
+
+  it('replaces a saved computer when its own code is scanned again', () => {
+    const before: RemotePaneConnectionProfile = { id: 'relay:workmac', label: 'Work Mac', baseUrl: 'https://workmac.runpane.net', token: 'old', transport: 'http+sse' };
+    const after = { ...before, token: 'new' };
+    expect(addHosts(addHost(EMPTY_HOSTS, before), [], after).profiles).toEqual([after]);
   });
 
   it('falls back to the next host when the active one is removed', () => {

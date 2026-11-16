@@ -64,6 +64,15 @@ export interface OrchestrationAssociation {
   /** An empty list means the whole Pane. Tabs share a Pane worktree. */
   panelIds: string[];
   attachedAt: string;
+  /** Set for a Pane on another saved machine: that machine's saved profile id and label. */
+  machine?: OrchestrationMemberMachine;
+  /** A remote Pane's name when it joined; a local Pane's name is read from this computer. */
+  name?: string;
+}
+
+export interface OrchestrationMemberMachine {
+  id: string;
+  label: string;
 }
 
 export type OrchestrationActivityKind =
@@ -218,6 +227,12 @@ export interface OrchestrationPaneOverview {
   git?: OrchestrationGitSummary;
   /** The newest `runpane report` among the Pane's panels, with the panel that sent it. */
   report?: TerminalAgentReport & { panelId: string };
+  /**
+   * Set for a Pane on another saved machine. `unreachable`: that machine did not answer, so the
+   * rest of the row is what was known when it joined. `older-pane`: its Pane predates remote
+   * members, so its reports don't reach this computer until it is updated.
+   */
+  machine?: OrchestrationMemberMachine & { state: 'online' | 'unreachable' | 'older-pane' };
 }
 
 export interface OrchestrationSessionOverview {
@@ -324,4 +339,17 @@ export interface OrchestrationSessionSelector {
 export interface OrchestrationAssociationInput {
   paneId: string;
   panelIds?: string[];
+}
+
+/**
+ * A Session's live activity, decided on the host that runs its agents (sessionActivity.ts):
+ * `working` while its orchestrator or one of its Panes is really mid-turn, else `idle`.
+ * Sent as `orchestration-sessions:activity` and read as a baseline with
+ * `orchestration-sessions:activity-list`. A host without them reads as idle.
+ */
+export interface SessionActivity {
+  sessionId: string;
+  state: 'working' | 'idle';
+  /** Panes of the Session with a tab working, for the "N working" label. */
+  workingPanes: number;
 }

@@ -1,4 +1,5 @@
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
+import { AddDeviceHost } from './components/addDevice/AddDeviceDialog';
 import { ConnectionChecklist } from './components/ConnectionChecklist';
 import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from './hooks/useConnectionPresence';
@@ -36,6 +37,7 @@ import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
 import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
+import { subscribeSessionActivity } from './services/sessionActivitySync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
 import { subscribeNotify, useNotifyStore } from './stores/notifyStore';
 import { subscribeAutopilot } from './stores/autopilotStore';
@@ -46,7 +48,8 @@ import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
 import { onOpenFirstRunRequest } from './utils/openFirstRun';
-import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { dropLaunchOutline, revealApp } from './utils/launchOutline';
+import { prepareLaunchChat, restoreHostNavigation, restoreLaunchChat, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { useRegionNavigation } from './hooks/useRegionNavigation';
 import { KeySequenceHint } from './components/KeySequenceHint';
 import { KeymapNotice } from './components/KeymapNotice';
@@ -185,6 +188,7 @@ function App() {
 
   // Subscribe to live statuses and reconcile the daemon baseline on attach/reconnect.
   useEffect(() => subscribePanelStatus(), []);
+  useEffect(() => subscribeSessionActivity(), []);
   useEffect(() => {
     void useAttentionInboxStore.getState().loadEnabled();
     return subscribeAttentionInbox();
@@ -351,6 +355,7 @@ function App() {
   useEffect(() => {
     const stopWrites = startHostNavigationMemoryWrites();
     void restoreSessionSelection();
+    prepareLaunchChat();
     return stopWrites;
   }, []);
 
@@ -422,7 +427,9 @@ function App() {
     await captureAppFirstOpened(identity);
   }, []);
 
-  // Apply the default-on experiment only when no explicit legacy choice exists.
+  // Apply the default-on experiment only to an undecided install whose config
+  // doesn't store analytics off. A stored false stays off: a fresh install's
+  // default is true, and builds before 2026-08-31 stored false by default.
   useEffect(() => {
     if (!appConfig || hasCheckedAnalyticsDefault || analyticsCheckStarted.current) return;
     analyticsCheckStarted.current = true;
@@ -442,35 +449,34 @@ function App() {
         const hasLegacyChoice = legacyConsentResult === 'true';
         const hasAppliedDefault = defaultAppliedResult === 'true';
 
-        if (!hasLegacyChoice && !hasAppliedDefault) {
-          const identity = await resolveAnalyticsIdentity();
-          // A config change during the identity lookup restarts this effect;
-          // only the latest run captures and aliases.
-          if (cancelled) return;
-
-          initPostHog({
-            enabled: true,
-            posthogApiKey: appConfig.analytics?.posthogApiKey,
-            posthogHost: appConfig.analytics?.posthogHost,
-            identity,
-          }, { flushPendingEvents: false });
-
-          aliasInstallIdentity(identity);
-          if (identity?.webDistinctId) {
-            aliasWebVisitor(identity.webDistinctId, identity.distinctId);
-            void window.electronAPI?.analytics?.redeemAttribution?.();
-          }
-
-          await captureUnconditionally('analytics_default_enabled', { experiment: 'analytics_default_on' }, identity);
-          await captureFirstOpenOnce(identity);
-          flushPendingEvents();
+        // The environment's off is not a choice to record: once it is gone, the default applies.
+        if (hasLegacyChoice || hasAppliedDefault || appConfig.analytics?.disabledByEnvironment) return;
+        if (appConfig.analytics?.enabled === false) {
           await API.preferences.set('analytics_default_applied', 'true');
-          if (appConfig.analytics?.enabled !== true) {
-            await useConfigStore.getState().updateConfig({
-              analytics: { ...appConfig.analytics, enabled: true },
-            });
-          }
+          return;
         }
+        const identity = await resolveAnalyticsIdentity();
+        // A config change during the identity lookup restarts this effect;
+        // only the latest run captures and aliases.
+        if (cancelled) return;
+
+        initPostHog({
+          enabled: true,
+          posthogApiKey: appConfig.analytics?.posthogApiKey,
+          posthogHost: appConfig.analytics?.posthogHost,
+          identity,
+        }, { flushPendingEvents: false });
+
+        aliasInstallIdentity(identity);
+        if (identity?.webDistinctId) {
+          aliasWebVisitor(identity.webDistinctId, identity.distinctId);
+          void window.electronAPI?.analytics?.redeemAttribution?.();
+        }
+
+        await captureUnconditionally('analytics_default_enabled', { experiment: 'analytics_default_on' }, identity);
+        await captureFirstOpenOnce(identity);
+        flushPendingEvents();
+        await API.preferences.set('analytics_default_applied', 'true');
       } catch (error) {
         console.error('[App] Error applying analytics default:', error);
       } finally {
@@ -587,6 +593,10 @@ function App() {
     document.documentElement.classList.toggle('window-hidden', !windowVisible);
     document.documentElement.classList.toggle('window-blurred', !windowFocused);
   }, [windowVisible, windowFocused]);
+
+  useEffect(() => {
+    window.electronAPI.window?.reportVisibility?.(windowVisible);
+  }, [windowVisible]);
 
   // Check if onboarding should be shown after analytics defaults are resolved.
   useEffect(() => {
@@ -774,7 +784,8 @@ function App() {
   // Check for resumable sessions on startup and on each host switch (auto-resume feature).
   // A reconnect to the same host does not prompt again. The launch after a restart to
   // update skips the prompt: main has already resumed every agent, so reopen the
-  // remembered Pane and say what came back instead.
+  // remembered Pane and say what came back instead. Any other launch reopens the
+  // last chat when a chat tab was the last thing shown.
   useEffect(() => {
     if (!isLoaded) return;
     let cancelled = false;
@@ -798,9 +809,12 @@ function App() {
         if (restored) {
           useRestartToUpdateStore.getState().showRestoreResult(restored);
           if (!useConfigStore.getState().config) await useConfigStore.getState().fetchConfig();
+          dropLaunchOutline();
           if (!cancelled) await restoreHostNavigation(() => true, restored.navigation);
           // Panes whose agents could not resume stay interrupted; offer them as on any launch.
           if (cancelled || restored.panesFailed === 0) return;
+        } else {
+          void restoreLaunchChat();
         }
       }
       let sessions: ResumableSession[] = [];
@@ -825,10 +839,13 @@ function App() {
     };
   }, [isLoaded]);
 
-  // Main keeps the window hidden until the first frame with sessions is painted.
+  // The first frame with sessions replaces the launch outline (index.html), and main may now send menu actions and links.
   useEffect(() => {
     if (!isLoaded) return;
-    const frame = requestAnimationFrame(() => window.electronAPI?.notifyRendererReady?.());
+    const frame = requestAnimationFrame(() => {
+      revealApp();
+      window.electronAPI?.notifyRendererReady?.();
+    });
     return () => cancelAnimationFrame(frame);
   }, [isLoaded]);
 
@@ -965,13 +982,14 @@ function App() {
 
   return (
     <ContextMenuProvider>
-      <div className="pane-app-shell relative h-screen flex flex-col overflow-hidden bg-bg-primary">
+      <div data-pane-part="app" className="pane-app-shell relative h-screen flex flex-col overflow-hidden bg-bg-primary">
         <div className={isSettingsOpen ? 'hidden' : 'contents'}>
           <WindowTitleBar projects={projects} sidebarWidth={sidebarWidth} sidebarCollapsed={sidebarCollapsed} controlsSlotRef={setTitleBarControlsSlot} />
           {/* Settings draws its own title-bar spacer, which the window controls overlap. */}
           <TailnetHttpsBanner />
         </div>
         <RemoteConnectionBanner onSettings={() => openSettings({ category: 'remote-access' })} />
+        <AddDeviceHost />
         <div className="pane-main-layout relative flex flex-1 min-h-0">
         <MainProcessLogger />
         {isSettingsOpen && (
@@ -1004,7 +1022,6 @@ function App() {
             onAboutClick={() => setIsAboutOpen(true)}
             onSettingsClick={() => openSettings()}
             onRemoteSettingsClick={() => openSettings({ category: 'remote-access' })}
-            onAddMachineClick={() => openSettings({ category: 'remote-access', setting: 'remote-add-code' })}
             onMachinePasswordRequest={(machine) => openSettings({ category: 'remote-access', setting: 'remote-machines', machine })}
             width={sidebarWidth}
             maximized={sidebarMaximized}

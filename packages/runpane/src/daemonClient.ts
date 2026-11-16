@@ -1,8 +1,12 @@
-import { createHash } from 'node:crypto';
+import { createHash, X509Certificate } from 'node:crypto';
+import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import tls, { type PeerCertificate } from 'node:tls';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
 
@@ -68,6 +72,8 @@ export interface PaneDaemonEndpoint {
 
 interface InvokeOptions {
   paneDir?: string;
+  /** Ask this machine's Pane even while `runpane workspace <machine>` routes calls elsewhere. */
+  thisMachine?: boolean;
   /** `Infinity` waits as long as the call takes, for requests that wait on a person. */
   timeoutMs?: number;
   eventInclude?: string[] | null;
@@ -140,13 +146,6 @@ function decodeResult<T>(channel: string, result: JsonValue | undefined, resultS
   }
 }
 
-/** Failures that happen before a connection exists, so no request was sent. */
-const CONNECT_ERROR_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
-
-function errorCodeOf(cause: unknown): string {
-  return cause instanceof Error && 'code' in cause ? String(cause.code) : '';
-}
-
 /** The doctor command for the Pane this call used, so it checks the same instance. */
 function doctorCommand(paneDir: string | undefined): string {
   if (!paneDir) return '`runpane doctor`';
@@ -173,10 +172,105 @@ export function getPaneDaemonEndpoint(appDirectory: string, platform: NodeJS.Pla
   };
 }
 
-/** Another machine's Pane, reached through `tailscale serve` (see `runpane workspace`). */
+const ROUTE_LABELS = new Map([
+  ['lan', 'Same network'], ['tailscale', 'Tailscale'], ['ssh', 'SSH'], ['public', 'Public URL'], ['relay', 'Pane relay'],
+]);
+
+/** A route kind as Settings names it. */
+export function routeLabel(kind: string): string {
+  return ROUTE_LABELS.get(kind) ?? kind;
+}
+
+/** One way to reach another machine's Pane. */
+export interface RemoteRoute {
+  /** `lan`, `tailscale`, `ssh`, `public` or `relay`. */
+  kind: string;
+  baseUrl: string;
+  /** Sent as a bearer: a link token, or a Tailscale route's password. Without one a Tailscale machine checks the login. */
+  token?: string;
+  /** Relay and same-network routes: base64url SHA-256 of the computer's SubjectPublicKeyInfo. Any other key is refused before the token is sent. */
+  fingerprint?: string;
+}
+
+/** Another machine's Pane (see `runpane workspace`), with its routes in the order they are tried. */
 export interface RemoteDaemonTarget {
   machine: string;
-  baseUrl: string;
+  routes: RemoteRoute[];
+}
+
+/**
+ * How long a route has to connect (TCP, plus TLS for https) before the next route is tried. Three
+ * dead routes and a working fourth still answer within 10 seconds. The last route has no such
+ * bound: nothing comes after it.
+ */
+const ROUTE_CONNECT_TIMEOUT_MS = 2_500;
+/** A computer on this network connects in milliseconds; an address that only looks local waits on ARP. */
+const LAN_ROUTE_CONNECT_TIMEOUT_MS = 1_500;
+
+/**
+ * A certificate check that also requires the linked computer's own key, so a certificate issued
+ * to anyone else for the same name (such as by whoever runs its relay's DNS) is refused.
+ */
+function pinnedServerIdentity(fingerprint: string, machine: string): (host: string, certificate: PeerCertificate) => Error | undefined {
+  return (host, certificate) => {
+    const identity = tls.checkServerIdentity(host, certificate);
+    if (identity) return identity;
+    const key = new X509Certificate(certificate.raw).publicKey.export({ format: 'der', type: 'spki' });
+    if (createHash('sha256').update(key).digest('base64url') === fingerprint) return undefined;
+    return Object.assign(new Error(`${machine} presented a key it did not link with, so runpane did not send the request`), { code: 'ERR_KEY_PIN_MISMATCH' });
+  };
+}
+
+// A type alias, not an interface, so it passes as Node's header record.
+type InvokeHeaders = { 'Content-Type': string; Authorization?: string };
+
+/** A route's reply, or how it failed. `connected: false` means the request never left this machine. */
+type RouteOutcome =
+  | { reply: { status: number; text: string } }
+  | { error: Error; connected: boolean };
+
+/** POSTs `/invoke` on one route, with its key pinned when it has one. */
+function postRoute(
+  route: RemoteRoute,
+  machine: string,
+  headers: InvokeHeaders,
+  body: string,
+  timeoutMs: number,
+  connectTimeoutMs: number | undefined,
+): Promise<RouteOutcome> {
+  return new Promise((resolve) => {
+    const url = `${route.baseUrl.replace(/\/+$/u, '')}/invoke`;
+    const secure = url.startsWith('https:');
+    const signal = Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined;
+    let connected = false;
+    let connectTimer: ReturnType<typeof setTimeout> | undefined;
+    const markConnected = () => {
+      connected = true;
+      clearTimeout(connectTimer);
+    };
+    // A fresh connection per call: a pooled one would keep this process alive after its last call.
+    const options: https.RequestOptions = { method: 'POST', headers, signal, agent: false };
+    if (route.fingerprint) options.checkServerIdentity = pinnedServerIdentity(route.fingerprint, machine);
+    const request = (secure ? https : http).request(url, options, (response) => {
+      markConnected();
+      let text = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => { text += chunk; });
+      response.on('end', () => resolve({ reply: { status: response.statusCode ?? 502, text } }));
+      response.on('error', (error) => resolve({ error, connected }));
+    });
+    if (connectTimeoutMs !== undefined) {
+      connectTimer = setTimeout(() => {
+        request.destroy(Object.assign(new Error(`no connection within ${connectTimeoutMs / 1000} s`), { code: 'ERR_ROUTE_CONNECT_TIMEOUT' }));
+      }, connectTimeoutMs);
+    }
+    request.on('socket', (socket) => socket.once(secure ? 'secureConnect' : 'connect', markConnected));
+    request.on('error', (error) => {
+      clearTimeout(connectTimer);
+      resolve({ error: signal?.aborted && signal.reason instanceof Error ? signal.reason : error, connected });
+    });
+    request.end(body);
+  });
 }
 
 const remoteInvokeResponseSchema = boundary.union(
@@ -185,12 +279,36 @@ const remoteInvokeResponseSchema = boundary.union(
 );
 
 let routedTarget: RemoteDaemonTarget | null = null;
+let routedToSelf = false;
 
 /** Sends every later daemon call in this process to another machine (`runpane workspace <machine> <command>`). */
-export function routeDaemonCallsTo(target: RemoteDaemonTarget | null): void {
+export function routeDaemonCallsTo(target: RemoteDaemonTarget | null, self = false): void {
   routedTarget = target;
+  routedToSelf = self;
 }
 
+/** The other machine daemon calls go to, or null when they stay on this one (this machine named by its own name included). */
+export function routedOtherMachine(): string | null {
+  return routedTarget && !routedToSelf ? routedTarget.machine : null;
+}
+
+/** The route that last answered for each target, tried first on its next call. */
+const answeredRoutes = new WeakMap<RemoteDaemonTarget, RemoteRoute>();
+
+/** The route that answered this target's last call, if one did. */
+export function answeringRoute(target: RemoteDaemonTarget): RemoteRoute | undefined {
+  return answeredRoutes.get(target);
+}
+
+function routeName(route: RemoteRoute): string {
+  return `${routeLabel(route.kind)} (${route.baseUrl})`;
+}
+
+/**
+ * Calls `channel` on another machine's Pane. Routes are tried in order: one that does not connect,
+ * whose Pane is not running, or that refuses the credential gives way to the next. A request that
+ * reached a Pane never goes to a second route, so nothing runs twice.
+ */
 export async function invokeRemoteDaemon<T>(
   target: RemoteDaemonTarget,
   channel: string,
@@ -198,57 +316,102 @@ export async function invokeRemoteDaemon<T>(
   resultSchema: BoundarySchema<T>,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<T> {
-  // Only a failure before the request reached the machine proves nothing changed there.
-  const unreachable = (detail: string, sent: boolean) => new PaneDaemonClientError(
-    sent
-      ? `Lost the reply from Pane on ${target.machine} (${target.baseUrl}): ${detail}. The request was sent, so Pane there may have finished ${channel}.`
-      : `Could not reach Pane on ${target.machine} (${target.baseUrl}): ${detail}. Pane must be running there with workspaces on. Nothing was changed.`,
-    'ERR_WORKSPACE_UNREACHABLE',
-    false,
-    sent
-      ? 'Check whether the command took effect there before running it again; see the machine\'s status with `runpane workspace list`.'
-      : 'Check the machine with `runpane workspace list`.',
-  );
   // The caller goes to other machines too, so their guard refuses what this tab may not do (D-66).
   const body: RemoteInvokeBody = { channel, args };
   const caller = daemonCaller();
   if (caller) body.caller = caller;
-  let response: Response;
-  try {
-    response = await fetch(`${target.baseUrl}/invoke`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined,
-    });
-  } catch (error) {
-    if (error instanceof Error && error.name === 'TimeoutError') {
+  const text = JSON.stringify(body);
+  const remembered = answeredRoutes.get(target);
+  const routes = remembered && target.routes.includes(remembered)
+    ? [remembered, ...target.routes.filter((route) => route !== remembered)]
+    : target.routes;
+  if (!routes.length) {
+    throw new PaneDaemonClientError(
+      `${target.machine} has no saved route, so runpane cannot reach it. Nothing was changed.`,
+      'ERR_WORKSPACE_UNREACHABLE',
+      false,
+      'Add a route in Pane: Settings › Remote Access › Computers › Add route.',
+    );
+  }
+  const missed: string[] = [];
+  let refusal: PaneDaemonClientError | undefined;
+  for (const [index, route] of routes.entries()) {
+    const headers: InvokeHeaders = { 'Content-Type': 'application/json' };
+    if (route.token) headers.Authorization = `Bearer ${route.token}`;
+    const last = index === routes.length - 1;
+    const outcome = await postRoute(route, target.machine, headers, text, timeoutMs, last ? undefined : route.kind === 'lan' ? LAN_ROUTE_CONNECT_TIMEOUT_MS : ROUTE_CONNECT_TIMEOUT_MS);
+    const answer = readRouteOutcome(target.machine, route, channel, timeoutMs, outcome);
+    if ('result' in answer) {
+      answeredRoutes.set(target, route);
+      return decodeResult(channel, answer.result, resultSchema);
+    }
+    missed.push(routes.length > 1 ? `${routeName(route)}: ${answer.missed}` : answer.missed);
+    refusal = answer.refusal;
+  }
+  if (refusal) throw refusal;
+  throw new PaneDaemonClientError(
+    routes.length > 1
+      ? `Could not reach Pane on ${target.machine} by any route: ${missed.join('; ')}. Pane must be running there. Nothing was changed.`
+      : `Could not reach Pane on ${target.machine} (${routes[0].baseUrl}): ${missed[0]}. Pane must be running there with workspaces on. Nothing was changed.`,
+    'ERR_WORKSPACE_UNREACHABLE',
+    false,
+    'Check the machine with `runpane workspace list`.',
+  );
+}
+
+/**
+ * What one route's attempt means: Pane's result, a miss the next route may retry (the request
+ * never reached a Pane, or was refused before it ran), or a failure after the request was sent.
+ */
+function readRouteOutcome(
+  machine: string,
+  route: RemoteRoute,
+  channel: string,
+  timeoutMs: number,
+  outcome: RouteOutcome,
+): { result: JsonValue | undefined } | { missed: string; refusal?: PaneDaemonClientError } {
+  const lost = (detail: string) => new PaneDaemonClientError(
+    `Lost the reply from Pane on ${machine} (${route.baseUrl}): ${detail}. The request was sent, so Pane there may have finished ${channel}.`,
+    'ERR_WORKSPACE_UNREACHABLE',
+    false,
+    'Check whether the command took effect there before running it again; see the machine\'s status with `runpane workspace list`.',
+  );
+  if ('error' in outcome) {
+    const { error } = outcome;
+    const timedOut = error.name === 'TimeoutError';
+    if (!outcome.connected) return { missed: timedOut ? `no connection within ${timeoutMs} ms` : errorDetail(error) };
+    if (timedOut) {
       throw new PaneDaemonClientError(
-        `${target.machine} did not answer within ${timeoutMs} ms. It may still finish ${channel}.`,
+        `${machine} did not answer within ${timeoutMs} ms. It may still finish ${channel}.`,
         'ERR_WORKSPACE_TIMEOUT',
         false,
         'Check whether the command took effect there before running it again; see the machine\'s status with `runpane workspace list`.',
       );
     }
-    const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
-    throw unreachable(cause instanceof Error ? cause.message : String(cause), !CONNECT_ERROR_CODES.has(errorCodeOf(cause)));
+    throw lost(errorDetail(error));
   }
-  const text = await response.text();
+  const { status, text } = outcome.reply;
   let payload: ReturnType<typeof remoteInvokeResponseSchema.decode>;
   try {
     payload = decodeBoundary(JSON.parse(text), remoteInvokeResponseSchema);
   } catch {
     // tailscale serve answers 502 itself when nothing listens behind it.
-    throw unreachable(response.status === 502 ? 'Pane is not running there' : `HTTP ${response.status} with a reply this runpane cannot read`, response.status !== 502);
+    if (status === 502) return { missed: 'Pane is not running there' };
+    throw lost(`HTTP ${status} with a reply this runpane cannot read`);
   }
-  if (!payload.ok) {
-    // The machine's own visibility setting refused this login; only its owner can change that.
-    const fix = payload.error.code === 'ERR_WORKSPACE_IDENTITY_REFUSED'
-      ? ' Its owner can let you in from Pane on that machine: Settings → Remote Access → Access → Who can connect → Everyone on tailnet.'
-      : '';
-    throw new PaneDaemonClientError(`${target.machine}: ${payload.error.message}${fix}`, payload.error.code, false, payload.error.next);
-  }
-  return decodeResult(channel, payload.result, resultSchema);
+  if (payload.ok) return { result: payload.result };
+  // The machine's own visibility setting refused this login; only its owner can change that.
+  const fix = payload.error.code === 'ERR_WORKSPACE_IDENTITY_REFUSED'
+    ? ' Its owner can let you in from Pane on that machine: Settings → Remote Access → Access → Who can connect → Everyone on tailnet.'
+    : '';
+  const failure = new PaneDaemonClientError(`${machine}: ${payload.error.message}${fix}`, payload.error.code, false, payload.error.next);
+  // A refused credential ran nothing, so another route (with its own credential) may still answer.
+  if (status === 401 || status === 403) return { missed: payload.error.message, refusal: failure };
+  throw failure;
+}
+
+function errorDetail(error: Error): string {
+  return error.cause instanceof Error ? error.cause.message : error.message;
 }
 
 export async function invokeDaemon<T>(
@@ -257,7 +420,7 @@ export async function invokeDaemon<T>(
   resultSchema: BoundarySchema<T>,
   options: InvokeOptions = {},
 ): Promise<T> {
-  if (routedTarget) {
+  if (routedTarget && !options.thisMachine) {
     return invokeRemoteDaemon(routedTarget, channel, args, resultSchema, options.timeoutMs);
   }
   const appDirectory = resolvePaneDirectory(options.paneDir);
@@ -350,7 +513,10 @@ export async function invokeDaemon<T>(
           `Could not connect to Pane daemon at ${endpoint.path} (${error.code ?? error.message}). Pane is not running for ${appDirectory}, or it was started with a different PANE_DIR. Nothing was changed.`,
           code,
           true,
-          `Open Pane on this machine, then check the connection with ${doctorCommand(options.paneDir)}.`,
+          // Pane creates its data folder on first launch, so without one Pane has never run here.
+          fs.existsSync(appDirectory)
+            ? `Open Pane on this machine, then check the connection with ${doctorCommand(options.paneDir)}.`
+            : `Pane has not run on this machine yet. Install Pane from https://runpane.com (free), open it, then restart this agent session so its Pane tools connect.`,
         ) });
     });
 

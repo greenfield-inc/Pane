@@ -42,7 +42,7 @@ export async function downloadArtifact(
   return { path: targetPath, fileName, usedFallback };
 }
 
-async function downloadToFile(url: string, targetPath: string, verbose: boolean): Promise<void> {
+export async function downloadToFile(url: string, targetPath: string, verbose: boolean): Promise<void> {
   if (verbose) {
     console.log(`Downloading ${url}`);
   }
@@ -102,7 +102,7 @@ async function verifyChecksumIfAvailable(resolved: ResolvedRelease, artifactPath
   }
 }
 
-function parseChecksum(checksums: string, fileName: string): string | undefined {
+export function parseChecksum(checksums: string, fileName: string): string | undefined {
   for (const line of checksums.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed.endsWith(fileName)) continue;

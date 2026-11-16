@@ -46,6 +46,7 @@ export const REMOTE_READ_CHANNELS = new Set([
   'panels:list',
   'panels:getActive',
   'panels:agent-statuses',
+  'orchestration-sessions:activity-list',
   'panels:checkInitialized',
   'panels:get-output',
   'ports:list',
@@ -90,12 +91,16 @@ export const REMOTE_DEDUPLICATED_CHANNELS = new Set(['agent-chat:send', 'chat-ta
  */
 export const REMOTE_STREAMLESS_CHANNELS = new Set([
   'credentials:shared:get', 'credentials:shared:apply',
-  'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke',
+  'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke', 'mobile:push-grant',
+  // QR pairing: linking computers and refreshing "Your computers" reach computers the phone isn't on.
+  // A repeat mints one more token or saves the same link again.
+  'relay:client:computer', 'relay:client:computers', 'relay:client:mint-link', 'relay:client:save-link',
+  'relay:client:preview-address',
 ]);
 
-/** Idempotent viewer bookkeeping required to restore a connected workspace. */
+/** Idempotent viewer bookkeeping required to restore a connected workspace. `panels:initialize` starts a terminal only once. */
 export const REMOTE_RESTORE_CHANNELS = new Set([
-  'terminal:resize', 'panels:resize-terminal', 'terminal:setVisibility',
+  'panels:initialize', 'terminal:resize', 'panels:resize-terminal', 'terminal:setVisibility',
   'terminal:ack', 'terminal:resetFlowControl', 'sessions:mark-viewed',
   'panels:set-active', 'terminal:reply',
 ]);

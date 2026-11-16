@@ -5,9 +5,10 @@ import type { MachineMarkOverrides } from '../../../shared/utils/machineMarks';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
+import type { BackgroundActivityProfile } from '../../../shared/types/backgroundActivity';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
-import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
+import type { AppearanceMode, ThemeChoice } from '../../../shared/types/appearance';
 import type { AnalyticsEnvironment } from '../../../shared/types/analyticsEnvironment';
 import type { KeyboardShortcutOverrides } from '../../../shared/utils/keyboardBindings';
 import type { SessionRetention } from '../../../shared/types/orchestrationSession';
@@ -52,6 +53,8 @@ export interface AnalyticsIdentity {
 
 interface AnalyticsConfig {
   enabled: boolean;
+  // DO_NOT_TRACK or RUNPANE_TELEMETRY_DISABLED turned analytics off; the Settings toggle can't change that.
+  disabledByEnvironment?: boolean;
   posthogApiKey?: string;
   posthogHost?: string;
   installId?: string;
@@ -100,17 +103,21 @@ export interface AppConfig {
   // Under the master toggle: on AC power (default on) and on battery (default off)
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
+  // When Pane pauses its own background checks (ports, usage) while nobody is looking (default balanced)
+  backgroundActivity?: BackgroundActivityProfile;
   // Pause: selecting a paused Pane or Session chat resumes it (default off)
   resumePausedOnOpen?: boolean;
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   archiveRetentionDays?: number;
+  // Under the same switch: stop a chat tab's agent after this many idle minutes (default 30; whole minutes 5 to 1440)
+  chatIdleReleaseMinutes?: number;
   // Theme preference
   appearanceMode?: AppearanceMode;
-  theme?: Theme;
-  systemLightTheme?: Theme;
-  systemDarkTheme?: Theme;
+  theme?: ThemeChoice;
+  systemLightTheme?: ThemeChoice;
+  systemDarkTheme?: ThemeChoice;
   // Opt-in high contrast mode: raises muted chrome text to AAA and the terminal's
   // minimumContrastRatio so dim CLI output stays legible
   highContrast?: boolean;
@@ -245,14 +252,16 @@ export interface UpdateConfigRequest {
   keepAwakeWhileSessionsActive?: boolean;
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
+  backgroundActivity?: AppConfig['backgroundActivity'];
   resumePausedOnOpen?: boolean;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   archiveRetentionDays?: number;
+  chatIdleReleaseMinutes?: number;
   theme?: AppConfig['theme'];
   appearanceMode?: AppearanceMode;
-  systemLightTheme?: Theme;
-  systemDarkTheme?: Theme;
+  systemLightTheme?: ThemeChoice;
+  systemDarkTheme?: ThemeChoice;
   highContrast?: boolean;
   uiScale?: number;
   notifications?: AppConfig['notifications'];

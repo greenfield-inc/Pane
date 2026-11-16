@@ -36,8 +36,9 @@ folder is void and runs again, up to 3 attempts; the report gives the void
 rate. Relative paths that climb out of the run folder are not detected.
 
 A stub stands in for Pane on both the CLI and the MCP server. It logs every
-call; answers with the scenario's script or, for anything unscripted, a
-minimal valid example of the command's result; and passes `--help`,
+call; answers with the scenario's script (where `$NAME` becomes the call's
+`--name`) or, for anything unscripted, a minimal valid example of the
+command's result; and passes `--help`,
 `agent-context` and `docs` to the version under test, so no card, Pane or
 secret is touched. Before the first session, every scripted answer is checked
 against the MCP tool's output schema, and a script key that names no runpane
@@ -71,6 +72,30 @@ node scripts/benchmark-cold-start.mjs 20 before=main/dist-before after=main/dist
 
 Uses an isolated Pane directory, profile and HOME under
 `~/.pane_bench_cold_start.noindex` (`PANE_BENCH_DIR`) and CDP port 4160 (`PORT`).
+
+## benchmark-startup-milestones.mjs
+
+Launches the built app repeatedly against an isolated Pane directory and reports
+p50/p75 of wall time from spawn to each launch milestone: main's first script,
+Electron ready, the window created, its first painted frame and when it showed,
+first contentful paint, and then either the sidebar row and terminal of
+`--open-pane`, or with `--chat` the A1 replica of ADEMark: a focused message box
+on screen, and two probe letters typed into it at 50 ms intervals appearing.
+The window shows without taking focus. Pass `--app label=dir` once per build to
+compare them (rounds alternate), and `--fresh` to run each launch from a new
+APFS copy of the app, so its files are not in the OS cache. Each run clears
+Chromium's caches; `--relaunch` keeps them, as a launch right after quitting
+finds them.
+
+```bash
+pnpm build:frontend && pnpm build:main
+# Seed ~/.pane_bench_a1 once: a repo adopted as a Pane, a chat tab in front, then quit.
+node scripts/benchmark-startup-milestones.mjs --pane-dir ~/.pane_bench_a1 --home ~/.pane_bench_a1/home \
+  --chat --runs 10 --app base=../pane-base --app change=.
+```
+
+The Pane directory also holds the Chromium profile (`chromium-user-data`, whose
+caches every run clears), the main-process probe and the run's log.
 
 ## benchmark-session-output.js
 

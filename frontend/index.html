@@ -46,15 +46,34 @@
           cached = parsed?.v === 1 ? parsed : undefined;
         } catch { cached = undefined; }
         const legacy = localStorage.getItem('theme');
-        const hasTheme = (value) => typeof value === 'string' && Object.prototype.hasOwnProperty.call(themeClasses, value);
+        const hasTheme = (value) => value === 'custom' || (typeof value === 'string' && Object.prototype.hasOwnProperty.call(themeClasses, value));
         const source = snapshot || cached || (hasTheme(legacy) ? { ...defaults, appearanceMode: 'fixed', theme: legacy } : defaults);
         const fixedTheme = hasTheme(source.theme) ? source.theme : defaults.theme;
         const lightTheme = hasTheme(source.systemLightTheme) ? source.systemLightTheme : defaults.systemLightTheme;
         const darkTheme = hasTheme(source.systemDarkTheme) ? source.systemDarkTheme : defaults.systemDarkTheme;
         const mode = source.appearanceMode === 'fixed' ? 'fixed' : 'system';
         const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
-        const resolved = mode === 'fixed' ? fixedTheme : (prefersDark ? darkTheme : lightTheme);
-        window.__paneBootstrapThemeClasses = themeClasses[resolved];
+        let resolved = mode === 'fixed' ? fixedTheme : (prefersDark ? darkTheme : lightTheme);
+        let custom = [];
+        if (resolved === 'custom') {
+          // The Custom theme shows as its base with its cached colours; its CSS follows from src/utils/customTheme.ts,
+          // which also replaces these colours with its own checked sheet.
+          let cachedCustom;
+          try { cachedCustom = JSON.parse(localStorage.getItem('pane.custom-theme.v1') || 'null'); } catch { cachedCustom = undefined; }
+          const base = cachedCustom?.base;
+          custom = Object.prototype.hasOwnProperty.call(themeClasses, base) ? ['pane-custom-theme'] : [];
+          resolved = custom.length ? base : (mode === 'system' && prefersDark ? defaults.systemDarkTheme : defaults.theme);
+          // Only colour tokens with plain hex or rgb() values, which cannot load anything.
+          const colors = Object.entries(cachedCustom?.theme?.colors || {}).filter(([token, value]) =>
+            /^--color-[a-z0-9-]+$/.test(token) && typeof value === 'string' && /^(#[0-9a-f]{3,8}|rgba?\([0-9.,%\/\s-]+\))$/i.test(value.trim()));
+          if (custom.length && colors.length) {
+            const style = document.createElement('style');
+            style.id = 'pane-launch-custom-theme';
+            style.textContent = `html:root.pane-custom-theme { ${colors.map(([token, value]) => `${token}: ${value.trim()};`).join(' ')} }`;
+            document.head.append(style);
+          }
+        }
+        window.__paneBootstrapThemeClasses = [...themeClasses[resolved], ...custom];
         document.documentElement.classList.add(...window.__paneBootstrapThemeClasses);
         document.documentElement.style.colorScheme = themeClasses[resolved][0];
         if (localStorage.getItem('high-contrast') === 'true') document.documentElement.classList.add('high-contrast');
@@ -73,6 +92,122 @@
       if (localStorage.getItem('high-contrast') === 'true') document.body.classList.add('high-contrast');
     </script>
     <div id="root"></div>
+    <script>
+      // The launch outline: the window's first frame, drawn before the app's code loads (main shows
+      // the window on it). The title bar, sidebar and, when launch reopens a chat, that chat's message
+      // box, each where the app draws it, with the app's own classes. A person can type into the box
+      // at once; the chat takes its text when it mounts (src/utils/launchOutline.ts). Sizes follow
+      // the app's: the sidebar (useResizable in App.tsx), the inspector and terminal dock
+      // (utils/outerPanelSizing.ts, SessionView.tsx). tests/launch-outline.spec.ts holds them equal.
+      (() => {
+        const api = window.electronAPI;
+        if (!api) return; // A plain browser keeps the app's own fallback.
+        const read = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
+        const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+        const preferred = (key, legacyKey, legacyMin, legacyMax, legacyDefault) => {
+          try {
+            const value = JSON.parse(read(key));
+            if (value?.version === 2 && Number.isInteger(value.preferredPx) && value.preferredPx >= 1 && value.preferredPx <= 8192) return value.preferredPx;
+          } catch { /* the legacy key decides */ }
+          const legacy = read(legacyKey);
+          if (legacy === null || !/^(?:0|[1-9]\d*)$/.test(legacy)) return undefined;
+          const value = Number(legacy);
+          return value < legacyMin || value > legacyMax || value === legacyDefault ? undefined : value;
+        };
+        const hasTitleBar = navigator.platform.toUpperCase().includes('MAC') || api.windowControlsOverlayEnabled;
+        const storedWidth = parseInt(read('pane-sidebar-width') ?? '', 10);
+        const sidebarWidth = read('pane-sidebar-collapsed') === 'true' ? 48 : (storedWidth >= 200 && storedWidth <= 500 ? storedWidth : 352);
+        const edge = 'var(--border-hairline) solid var(--color-border-primary)';
+        const el = (tag, className, style, ...children) => {
+          const node = document.createElement(tag);
+          if (className) node.className = className;
+          Object.assign(node.style, style);
+          node.append(...children);
+          return node;
+        };
+        // Decorative, except the message box, which takes typing and so stays in the accessibility tree.
+        const part = (name, node) => { node.dataset.launchOutline = name; node.setAttribute('aria-hidden', 'true'); return node; };
+        const outline = el('div', 'flex flex-col bg-bg-primary', { position: 'fixed', inset: '0', zIndex: '2147483000' });
+        outline.id = 'pane-launch-outline';
+        if (hasTitleBar) {
+          outline.append(part('title', el('div', 'pane-window-title-bar relative flex-shrink-0 bg-bg-chrome', { height: '38px', boxShadow: 'inset 0 calc(-1 * var(--border-hairline)) 0 var(--color-border-primary)', WebkitAppRegion: 'drag' },
+            el('div', 'absolute inset-y-0 left-0 bg-surface-secondary', { width: `${sidebarWidth}px`, borderRight: edge }))));
+        }
+        const main = part('main', el('div', 'flex min-h-0 flex-1 flex-col bg-bg-primary'));
+        outline.append(el('div', 'relative flex min-h-0 flex-1', {},
+          part('sidebar', el('div', 'pane-sidebar-shell flex-shrink-0 bg-surface-secondary', { width: `${sidebarWidth}px` })), main));
+        // The launch chat, laid out as SessionView's default layout draws a Pane with one group of tabs.
+        // A reload is not a launch: the person is already somewhere else in the app.
+        const reload = performance.getEntriesByType('navigation')[0]?.type === 'reload';
+        const chat = reload ? undefined : api.launchChat;
+        const swapped = chat?.dockTerminal && read('pane-layout-swapped') === 'true';
+        if (chat && !swapped) {
+          const sessionWidth = Math.max(0, innerWidth - sidebarWidth);
+          const centerHeight = Math.max(0, innerHeight - (hasTitleBar ? 38 : 0) - 39);
+          const inspectorCap = Math.max(0, Math.min(720, sessionWidth - 320));
+          const inspectorBounds = inspectorCap >= 96 ? [Math.min(240, inspectorCap), inspectorCap] : [0, 0];
+          const inspector = read('pane-detail-panel-visible') === 'false' ? 0
+            : clamp(Math.round(preferred('pane-detail-panel-width:v2', 'pane-detail-panel-width', 240, 720, 360) ?? 360), ...inspectorBounds);
+          const terminalCap = Math.max(0, Math.min(centerHeight, Math.max(32, centerHeight - 160)));
+          const terminalBounds = terminalCap >= 64 ? [Math.min(100, terminalCap), terminalCap] : [Math.min(32, centerHeight), Math.min(32, centerHeight)];
+          const dock = !chat.dockTerminal ? 0 : read('pane-terminal-collapsed') !== 'false' ? Math.min(32, centerHeight)
+            : clamp(Math.round(preferred('pane-bottom-terminal-height:v2', 'pane-bottom-terminal-height', 100, 500, 200) ?? Math.round(centerHeight * 0.32)), ...terminalBounds);
+          const input = el('textarea', 'chat-input', {});
+          input.rows = 1;
+          input.placeholder = 'Ask anything';
+          input.setAttribute('aria-label', 'Message');
+          input.dataset.launchComposer = chat.panelId;
+          // Enter sends this text once the chat is ready (D-62): typing after it takes the send back.
+          // Shift+Enter is a new line, and IME keys are the input method's.
+          input.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+            event.preventDefault();
+            if (input.value.trim()) input.dataset.send = 'pending';
+          });
+          // Megabytes of text stall the window: the chat's box refuses pastes over 1 MiB too (ChatTabPanel.tsx).
+          input.addEventListener('paste', (event) => {
+            if ((event.clipboardData?.getData('text/plain').length ?? 0) > 1024 * 1024) event.preventDefault();
+          });
+          // An IME composition finishes here before the chat takes the text (src/utils/launchOutline.ts).
+          input.addEventListener('compositionstart', () => { input.dataset.composing = 'true'; });
+          input.addEventListener('compositionend', () => { delete input.dataset.composing; });
+          // Grows with its text as the chat's box does (react-textarea-autosize), up to the CSS max-height.
+          input.addEventListener('input', () => {
+            delete input.dataset.send;
+            input.style.height = 'auto';
+            input.style.height = `${input.scrollHeight}px`;
+          });
+          const attach = el('button', 'chat-icon', {});
+          attach.type = 'button';
+          attach.tabIndex = -1;
+          attach.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-plus h-4 w-4" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>';
+          const send = el('button', 'chat-send', {});
+          send.type = 'button';
+          send.disabled = true;
+          send.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-arrow-up h-4 w-4" aria-hidden="true"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg>';
+          main.append(
+            el('div', 'panel-tab-bar bg-bg-chrome flex-shrink-0', {}, el('div', 'min-h-[38px]')),
+            el('div', 'relative flex min-h-0 min-w-0 flex-1 flex-row', {},
+              el('div', 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden', {},
+                el('div', 'relative min-h-0 flex-1 overflow-hidden bg-bg-editor', {},
+                  el('div', 'agent-chat chat-tab absolute inset-0 flex min-h-0 flex-col', {},
+                    el('div', 'min-h-0 flex-1'),
+                    el('div', 'chat-composer-footer', {},
+                      el('div', 'chat-composer', {}, input,
+                        el('div', 'chat-composer-actions', {}, attach, el('div', 'chat-composer-end', {}, send)))))),
+                dock ? el('div', 'flex-shrink-0 border-t border-border-primary', { height: `${dock}px` },
+                  el('div', 'h-8 border-b border-border-primary bg-surface-primary')) : ''),
+              inspector ? el('div', 'flex-shrink-0 border-l border-border-primary bg-bg-primary', { width: `${inspector}px` },
+                el('div', 'h-8 border-b border-border-primary bg-surface-secondary')) : ''));
+          main.removeAttribute('aria-hidden');
+          for (const node of main.querySelectorAll('div, button')) if (!node.contains(input)) node.setAttribute('aria-hidden', 'true');
+          document.body.append(outline);
+          input.focus({ preventScroll: true });
+        } else {
+          document.body.append(outline);
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

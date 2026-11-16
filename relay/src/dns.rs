@@ -1,0 +1,424 @@
+//! Authoritative DNS for <D> over UDP and TCP (helper role).
+
+use crate::agent::is_private;
+use crate::id::is_valid_id;
+use crate::state::{State, prefix};
+use hickory_proto::op::{Edns, Message, MessageType, OpCode, ResponseCode};
+use hickory_proto::rr::rdata::caa::KeyValue;
+use hickory_proto::rr::rdata::{A, CAA, NS, SOA, TXT};
+use hickory_proto::rr::{Name, RData, Record, RecordType};
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
+
+const TTL: u32 = 60;
+const TXT_TTL: u32 = 10;
+/// For the names of a computer the registry doesn't know, answered as if it were on this relay.
+const UNKNOWN_TTL: u32 = 10;
+
+enum Lookup {
+    /// The name exists; these are its records of the asked type (possibly none).
+    Found(Vec<RData>),
+    /// A name of a computer the registry doesn't know (asleep and forgotten, or never seen). It
+    /// answers like one on this relay, which refuses its clients until it connects, and briefly:
+    /// "no such name" would be cached past the computer's return, on macOS for up to an hour.
+    Unknown(Vec<RData>),
+    NxDomain,
+    /// Outside <D>.
+    Refused,
+}
+
+fn ns_names(state: &State) -> Vec<String> {
+    if state.cfg.ns.is_empty() {
+        vec![
+            format!("ns1.{}", state.domain),
+            format!("ns2.{}", state.domain),
+        ]
+    } else {
+        state
+            .cfg
+            .ns
+            .iter()
+            .map(|n| n.trim_end_matches('.').to_ascii_lowercase())
+            .collect()
+    }
+}
+
+fn name(s: &str) -> Name {
+    Name::from_ascii(format!("{s}.")).unwrap_or_else(|_| Name::root())
+}
+
+/// The CAA issuer: `--caa-issuer` as a domain without the trailing dot (RFC 8659), or None
+/// when it is empty and no CAA records are served.
+fn caa_issuer(state: &State) -> Option<Name> {
+    let issuer = state.cfg.caa_issuer.trim().trim_end_matches('.');
+    if issuer.is_empty() {
+        return None;
+    }
+    Name::from_ascii(issuer).ok()
+}
+
+fn soa(state: &State) -> SOA {
+    let ns = ns_names(state);
+    SOA::new(
+        name(&ns[0]),
+        name(&format!("hostmaster.{}", state.domain)),
+        1,
+        3600,
+        600,
+        86400,
+        TTL,
+    )
+}
+
+/// `_acme-challenge.<D>` or `_acme-challenge.<region>.relay.<D>` for a known region:
+/// the only names whose TXT values relays set for their own certificates.
+pub fn is_relay_acme_name(state: &State, name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("_acme-challenge.") else {
+        return false;
+    };
+    if rest == state.domain {
+        return true;
+    }
+    rest.strip_suffix(&state.domain)
+        .and_then(|p| p.strip_suffix(".relay."))
+        .is_some_and(|region| !region.contains('.') && known_region(state, region))
+}
+
+fn known_region(state: &State, region: &str) -> bool {
+    region == state.cfg.region
+        || state.cfg.relays.get(region).is_some()
+        || state.cfg.region_ip.get(region).is_some()
+}
+
+fn lookup(state: &State, qname: &str, qtype: RecordType) -> Lookup {
+    let d = state.domain.as_str();
+    let qname = qname.trim_end_matches('.').to_ascii_lowercase();
+    let prefix = if qname == d {
+        ""
+    } else if let Some(p) = qname.strip_suffix(d).and_then(|p| p.strip_suffix('.')) {
+        p
+    } else {
+        return Lookup::Refused;
+    };
+    let labels: Vec<&str> = if prefix.is_empty() {
+        Vec::new()
+    } else {
+        prefix.split('.').collect()
+    };
+    let a = |ip: Option<Ipv4Addr>| ip.map(|ip| RData::A(A(ip)));
+    let (addr, txt): (Option<RData>, Option<Vec<String>>) = match labels.as_slice() {
+        [] => {
+            let records = match qtype {
+                RecordType::A => a(state.cfg.region_addr(&state.cfg.region))
+                    .into_iter()
+                    .collect(),
+                RecordType::NS => ns_names(state)
+                    .iter()
+                    .map(|n| RData::NS(NS(name(n))))
+                    .collect(),
+                RecordType::SOA => vec![RData::SOA(soa(state))],
+                // One CA, and no `*.<D>`: that one certificate would cover every computer's name.
+                RecordType::CAA => caa_issuer(state)
+                    .map(|issuer| {
+                        vec![
+                            RData::CAA(CAA::new_issue(false, Some(issuer), Vec::new())),
+                            RData::CAA(CAA::new_issuewild(false, None, Vec::new())),
+                        ]
+                    })
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            return Lookup::Found(records);
+        }
+        ["_acme-challenge"] | ["_acme-challenge", _, "relay"] => {
+            if !is_relay_acme_name(state, &qname) {
+                return Lookup::NxDomain;
+            }
+            (None, Some(state.registry.acme_txt(&qname)))
+        }
+        [ns, ..] if ns_names(state).contains(&qname) => {
+            let ip = state.cfg.ns_ip.get(ns).and_then(|ip| ip.parse().ok());
+            (a(ip.or(state.cfg.public_ip)), None)
+        }
+        [region, "relay"] if known_region(state, region) => {
+            (a(state.cfg.region_addr(region)), None)
+        }
+        [.., id] if is_valid_id(id) => {
+            let entry = state.registry.get(id);
+            let region = entry.as_ref().map_or(&state.cfg.region, |e| &e.region);
+            let records = match labels.as_slice() {
+                // A computer's own names, `*.<id>.<D>` included, only through DNS-01 at Let's Encrypt.
+                [_] if qtype == RecordType::CAA => {
+                    let dns01 = || vec![KeyValue::new("validationmethods", "dns-01")];
+                    match caa_issuer(state) {
+                        Some(issuer) => vec![
+                            RData::CAA(CAA::new_issue(false, Some(issuer.clone()), dns01())),
+                            RData::CAA(CAA::new_issuewild(false, Some(issuer), dns01())),
+                        ],
+                        None => Vec::new(),
+                    }
+                }
+                [_] => by_type(qtype, a(state.cfg.region_addr(region)), None),
+                ["_acme-challenge", _] => {
+                    by_type(qtype, None, entry.as_ref().map(|e| e.txt.clone()))
+                }
+                [sub, _] if *sub == "files" || is_port_label(sub) => {
+                    by_type(qtype, a(state.cfg.region_addr(region)), None)
+                }
+                [sub, _] => match local_address(sub) {
+                    Some(ip) => by_type(qtype, Some(RData::A(A(ip))), None),
+                    None => return Lookup::NxDomain,
+                },
+                _ => return Lookup::NxDomain,
+            };
+            return if entry.is_some() {
+                Lookup::Found(records)
+            } else {
+                Lookup::Unknown(records)
+            };
+        }
+        _ => return Lookup::NxDomain,
+    };
+    Lookup::Found(by_type(qtype, addr, txt))
+}
+
+/// A name's records of the asked type, from its address and TXT values.
+fn by_type(qtype: RecordType, addr: Option<RData>, txt: Option<Vec<String>>) -> Vec<RData> {
+    match qtype {
+        RecordType::A => addr.into_iter().collect(),
+        RecordType::TXT => txt
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| RData::TXT(TXT::new(vec![v])))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `p<port>` with a port in 1..=65535.
+fn is_port_label(label: &str) -> bool {
+    label
+        .strip_prefix('p')
+        .filter(|p| !p.starts_with('0') && p.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|p| p.parse::<u16>().ok())
+        .is_some_and(|p| p > 0)
+}
+
+/// `l<a>-<b>-<c>-<d>` for a private IPv4 address.
+fn local_address(label: &str) -> Option<Ipv4Addr> {
+    let rest = label.strip_prefix('l')?;
+    let parts: Vec<u8> = rest
+        .split('-')
+        .map(|p| {
+            if p.len() > 1 && p.starts_with('0') {
+                None
+            } else {
+                p.parse().ok()
+            }
+        })
+        .collect::<Option<_>>()?;
+    let [a, b, c, d] = parts.as_slice() else {
+        return None;
+    };
+    let ip = Ipv4Addr::new(*a, *b, *c, *d);
+    is_private(ip).then_some(ip)
+}
+
+/// Builds the answer to one DNS query message. `None` for undecodable input.
+pub fn answer(state: &State, query: &[u8], max_len: usize) -> Option<Vec<u8>> {
+    let req = Message::from_vec(query).ok()?;
+    if req.metadata.message_type != MessageType::Query {
+        return None;
+    }
+    let mut resp = Message::response(req.metadata.id, req.metadata.op_code);
+    resp.metadata.recursion_desired = req.metadata.recursion_desired;
+    if let Some(edns) = &req.edns {
+        let mut e = Edns::new();
+        e.set_max_payload(1232.min(edns.max_payload().max(512)));
+        resp.set_edns(e);
+    }
+    let code = match (req.metadata.op_code, req.queries.as_slice()) {
+        (OpCode::Query, [q]) => {
+            resp.add_query(q.clone());
+            let qname = q.name().to_ascii();
+            let looked = lookup(state, &qname, q.query_type());
+            let ttl = match (&looked, q.query_type()) {
+                (_, RecordType::TXT) => TXT_TTL,
+                (Lookup::Unknown(_), _) => UNKNOWN_TTL,
+                _ => TTL,
+            };
+            match looked {
+                Lookup::Found(records) | Lookup::Unknown(records) => {
+                    resp.metadata.authoritative = true;
+                    if records.is_empty() {
+                        resp.add_authority(Record::from_rdata(
+                            name(&state.domain),
+                            TTL,
+                            RData::SOA(soa(state)),
+                        ));
+                    }
+                    for r in records {
+                        resp.add_answer(Record::from_rdata(q.name().clone(), ttl, r));
+                    }
+                    ResponseCode::NoError
+                }
+                Lookup::NxDomain => {
+                    resp.metadata.authoritative = true;
+                    resp.add_authority(Record::from_rdata(
+                        name(&state.domain),
+                        TTL,
+                        RData::SOA(soa(state)),
+                    ));
+                    ResponseCode::NXDomain
+                }
+                Lookup::Refused => ResponseCode::Refused,
+            }
+        }
+        (OpCode::Query, _) => ResponseCode::FormErr,
+        _ => ResponseCode::NotImp,
+    };
+    resp.metadata.response_code = code;
+    let bytes = resp.to_vec().ok()?;
+    if bytes.len() <= max_len {
+        return Some(bytes);
+    }
+    let mut truncated = resp.truncate();
+    truncated.metadata.truncation = true;
+    truncated.to_vec().ok()
+}
+
+/// The most client prefixes the rate limiter tracks at once.
+const RATE_PREFIXES: usize = 65_536;
+
+/// Response-rate limiting: answers per client prefix in the current second.
+#[derive(Default)]
+struct Rate {
+    seen: HashMap<IpAddr, (Instant, u32)>,
+    pruned: Option<Instant>,
+}
+
+impl Rate {
+    /// Counts one answer for `ip`'s /24 (IPv6 /56); false past `limit` this second. While the
+    /// table is full, new prefixes are over the limit: pruning it runs at most once a second, so
+    /// a flood from spoofed sources can't make every packet scan the whole table.
+    fn admit(&mut self, ip: IpAddr, limit: u32, now: Instant) -> bool {
+        let key = prefix(ip, 24, 56);
+        if self.seen.len() >= RATE_PREFIXES && !self.seen.contains_key(&key) {
+            if self
+                .pruned
+                .is_none_or(|at| now.duration_since(at) >= Duration::from_secs(1))
+            {
+                self.seen
+                    .retain(|_, (start, _)| now.duration_since(*start) < Duration::from_secs(1));
+                self.pruned = Some(now);
+            }
+            if self.seen.len() >= RATE_PREFIXES {
+                return false;
+            }
+        }
+        let (start, count) = self.seen.entry(key).or_insert((now, 0));
+        if now.duration_since(*start) >= Duration::from_secs(1) {
+            *start = now;
+            *count = 0;
+        }
+        *count += 1;
+        *count <= limit
+    }
+}
+
+pub async fn serve_udp(state: Arc<State>, socket: UdpSocket) {
+    let mut buf = vec![0u8; 4096];
+    let mut rate = Rate::default();
+    loop {
+        let (n, from) = tokio::select! {
+            _ = state.shutdown.cancelled() => return,
+            r = socket.recv_from(&mut buf) => match r {
+                Ok(r) => r,
+                Err(_) => continue,
+            },
+        };
+        let max = Message::from_vec(&buf[..n])
+            .ok()
+            .and_then(|m| m.edns.map(|e| e.max_payload() as usize))
+            .unwrap_or(512)
+            .clamp(512, 1232);
+        // Over the rate, max 0 truncates every answer to its header and question.
+        let max = if rate.admit(from.ip(), state.cfg.dns_responses_per_sec, Instant::now()) {
+            max
+        } else {
+            0
+        };
+        if let Some(resp) = answer(&state, &buf[..n], max) {
+            let _ = socket.send_to(&resp, from).await;
+        }
+    }
+}
+
+pub async fn serve_tcp(state: Arc<State>, listener: TcpListener) {
+    loop {
+        let stream = tokio::select! {
+            _ = state.shutdown.cancelled() => return,
+            r = listener.accept() => match r {
+                Ok((s, _)) => s,
+                Err(_) => continue,
+            },
+        };
+        let state = state.clone();
+        tokio::spawn(async move {
+            let _ = tokio::time::timeout(Duration::from_secs(30), tcp_conn(&state, stream)).await;
+        });
+    }
+}
+
+async fn tcp_conn(state: &State, mut s: TcpStream) -> std::io::Result<()> {
+    loop {
+        let len = s.read_u16().await? as usize;
+        let mut msg = vec![0u8; len];
+        s.read_exact(&mut msg).await?;
+        let Some(resp) = answer(state, &msg, u16::MAX as usize) else {
+            return Ok(());
+        };
+        s.write_u16(resp.len() as u16).await?;
+        s.write_all(&resp).await?;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    fn client(n: u32) -> IpAddr {
+        // One address per /24.
+        IpAddr::V4(Ipv4Addr::from(n << 8))
+    }
+
+    #[test]
+    fn a_full_table_turns_new_clients_away_until_a_second_passes_without_scanning_per_packet() {
+        let mut rate = Rate::default();
+        let start = Instant::now();
+        for n in 0..RATE_PREFIXES as u32 {
+            assert!(rate.admit(client(n), 20, start));
+        }
+        // Spoofed sources in fresh /24s within the same second: refused, and the table is not rescanned.
+        let flood = Instant::now();
+        for n in 0..100_000u32 {
+            assert!(!rate.admit(client(RATE_PREFIXES as u32 + n), 20, start));
+        }
+        assert!(
+            flood.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            flood.elapsed()
+        );
+        // A client already counted this second is still answered.
+        assert!(rate.admit(client(7), 20, start));
+        // A second later the old entries are dropped and new clients are answered again.
+        assert!(rate.admit(client(1_000_000), 20, start + Duration::from_secs(1)));
+    }
+}

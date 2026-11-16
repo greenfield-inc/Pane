@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
+import { runForwardingSignals } from './forwardedChild';
 import { resolvePaneDirectory } from './daemonClient';
 import { findNpm, runNpm } from './updatePackage';
 import { findUpdateRuntime } from './updatePreflight';
@@ -90,31 +90,12 @@ export async function handOffToManagedCli(argv: string[]): Promise<number | null
   const managed = findManagedCli(explicitPaneDir(argv));
   if (!managed || compareVersions(managed.version, getWrapperVersion()) <= 0) return null;
   const env = { ...process.env, [NO_HANDOFF_ENV]: '1' };
-  // From a terminal, Ctrl-C and Ctrl-\ reach the child through the process group
-  // it shares with this CLI, so forwarding them would deliver them twice. Without
-  // a terminal the child gets its own group and every signal is forwarded once.
-  const ownGroup = process.platform !== 'win32' && !process.stdin.isTTY;
-  const child = process.platform === 'win32'
-    ? spawn(managed.runtime ?? process.execPath, [managed.entrypoint, ...argv], {
-      stdio: 'inherit',
+  const result = process.platform === 'win32'
+    ? await runForwardingSignals(managed.runtime ?? process.execPath, [managed.entrypoint, ...argv], {
       env: { PANE_DIR: path.dirname(managed.binDir), ...env },
     })
-    : spawn('/bin/sh', [managed.shim, ...argv], { stdio: 'inherit', env, detached: ownGroup });
-  const forward = (signal: NodeJS.Signals) => { child.kill(signal); };
-  const interrupt = (signal: NodeJS.Signals) => () => { if (ownGroup) forward(signal); };
-  const handlers: Array<[NodeJS.Signals, () => void]> = [
-    ['SIGINT', interrupt('SIGINT')],
-    ['SIGQUIT', interrupt('SIGQUIT')],
-    ['SIGTERM', () => forward('SIGTERM')],
-    ['SIGHUP', () => forward('SIGHUP')],
-  ];
-  for (const [signal, handler] of handlers) process.on(signal, handler);
-  const result = await new Promise<{ status: number | null; signal: NodeJS.Signals | null } | null>((resolve) => {
-    child.once('error', () => resolve(null));
-    child.once('close', (status, signal) => resolve({ status, signal }));
-  });
-  for (const [signal, handler] of handlers) process.off(signal, handler);
-  if (!result) return null;
+    : await runForwardingSignals('/bin/sh', [managed.shim, ...argv], { env });
+  if ('error' in result) return null;
   if (result.signal) process.kill(process.pid, result.signal);
   return result.status ?? 1;
 }

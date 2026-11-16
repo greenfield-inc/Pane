@@ -18,6 +18,8 @@ const twMerge = extendTailwindMerge({
           ],
         },
       ],
+      // tailwind.config.js ringWidth; without it `ring-status` reads as a ring colour and is dropped.
+      'ring-w': [{ ring: ['status'] }],
     },
   },
 })

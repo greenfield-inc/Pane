@@ -7,16 +7,19 @@ live terminal so you can read it and dictate into it. Glassly also runs it on ot
 glasses: the full app on glasses with a screen at least 576 × 288 and tap, double tap and swipes
 (today G2), and a read-only glance on the rest. See [Pane on Glassly](#pane-on-glassly).
 
-It talks straight to each of your computers over Tailscale. Pane has no relay.
+It talks straight to each of your computers over Tailscale, or through each computer's own address when your phone paired with it by [QR code](QR_PAIRING.md).
 
 ## What you need
 
 - G2 glasses (the R1 ring is optional; the temple touchpads do the same gestures).
 - The Even Realities app or the Glassly app on your phone, and the Pane app
   ([iOS and Android](NATIVE_MOBILE.md)). Use one of them for Pane at a time.
-- Tailscale on the phone and on each computer, signed in with the same login.
-- Pane open on each computer, with **Settings › Remote Access › Who can connect** set to
-  **Only me** or **Everyone on tailnet** (on by default for the Pane that owns `~/.pane`).
+- Each computer reachable from the Pane phone app in one of two ways:
+  - paired with the phone by [QR code](QR_PAIRING.md); or
+  - over Tailscale: Tailscale on the phone and the computer, signed in with the same login, and
+    Pane's **Settings › Remote Access › Tailscale › Who can connect** set to **Only me** or **Everyone on
+    tailnet** (on by default for the Pane that owns `~/.pane`).
+- Pane open on each computer.
 - For dictation and voice answers, a Deepgram key (live) or a fal key (recorded) on the computer
   you talk to: **Settings › Integrations › Voice transcription** on the computer, or **Settings › Voice** in the
   Pane phone app.
@@ -24,12 +27,15 @@ It talks straight to each of your computers over Tailscale. Pane has no relay.
 ## Install and pair
 
 1. In the Even Realities app, open **Even Hub** and install **Pane**.
-2. In the Pane phone app, open **Settings › Glasses** and tap **Pair glasses**. The phone asks each
-   of your computers for a one-time pairing secret and copies them as one code. The code works for
-   10 minutes and only once per computer.
+2. In the Pane phone app, open **Settings › Glasses** and tap **Pair glasses**. (To get there from a
+   computer, scan the code in Pane's **Add a device › Wearables** with your phone.) The phone asks each
+   of your computers (the ones on your Tailscale login and the ones it paired by QR code) for a
+   one-time pairing secret and copies them as one code. The code works for 10 minutes and only once
+   per computer. A computer the phone reaches both ways is paired once, over Tailscale, when its
+   Tailscale name matches its name in Pane.
 3. Tap **Open Even app**, open Pane there, and tap **Paste**, then **Connect**.
 4. The glasses show **Pane · N computers**. Each computer now lists the glasses under
-   **Settings › Remote Access › Devices**, named after your phone, with when they were last used.
+   **Settings › Remote Access › Phones and glasses**, named after your phone, with when they were last used.
 
 Pair once; your other computers join on their own on launch and every 10 minutes. The glasses ask
 one paired computer to get pairing secrets from your other Pane computers on Tailscale (yours, with
@@ -45,6 +51,9 @@ gets a dim row at the end of the home list with the reason; press it for what to
 | needs its password | Connect to that computer once from Pane on a paired computer, so it saves the password. |
 | Funnel is on | Turn Funnel off for port 8443 on that computer. |
 | not answering | Check that Pane is open there and Tailscale is on. |
+
+Computers reached only by QR code don't join on their own: tap **Add computers** in Settings ›
+Glasses after you pair the phone with a new one.
 
 A paired computer on an older Pane can't ask for the others; the glasses skip it until the next
 10-minute round, so once you update Pane there it asks within 10 minutes. You can still add
@@ -217,7 +226,7 @@ Pane in the Glassly app is the same app with these differences:
 
 - On the phone: **Settings › Glasses › Revoke Glasses** revokes them on every computer it can reach,
   and finishes the rest when they next answer.
-- On a computer: **Settings › Remote Access › Devices**, then **Revoke** next to the glasses for
+- On a computer: **Settings › Remote Access › Phones and glasses**, then **Revoke** next to the glasses for
   that computer only, or **Revoke on all my computers** for this computer and every computer of
   yours it can reach. It names the computers it could not reach, such as "Not reached: laptop
   (offline)", and offers **Retry on my other computers** while that page stays open.
@@ -243,23 +252,28 @@ are lost. Two gaps remain:
 The glasses app is a web page inside the Even app, or a miniapp inside the Glassly app, which sends
 the Even app's origin. Each computer lets it in only when all of these hold:
 
-- The request comes through Tailscale Serve on your tailnet with **your** Tailscale login. Other
-  people on your tailnet are refused even with a valid glasses token. Funnel is never used: while
-  Funnel is on for the computer's workspace port, glasses are refused.
+- Over Tailscale, the request comes through Tailscale Serve on your tailnet with **your**
+  Tailscale login. Other people on your tailnet are refused even with a valid glasses token.
+  Funnel is never used: while Funnel is on for the computer's workspace port, glasses are refused
+  there.
+- Through the computer's own address (QR pairing), only a phone paired with that computer can ask
+  it for a pairing secret, so a glasses token there was issued through a phone you paired.
 - It carries this computer's **glasses token**: 256 random bits, one per pair of glasses, stored on
   the computer only as a hash. Tokens travel only in the `Authorization` header (and the voice
   WebSocket's subprotocol), never in a URL.
 - It comes from an **allowed origin**: the Even app's `http://127.0.0.1` on any port, or one the
-  owner allowed in **Settings › Remote Access › Devices**, matched exactly except that a loopback
+  owner allowed in **Settings › Remote Access › Phones and glasses**, matched exactly except that a loopback
   origin matches on any port. Null and wildcard origins are never accepted. HTTP requests always
   need an allowed origin. A page served from `127.0.0.1` on your phone still needs a glasses token,
   which only the paired glasses hold.
 - The one exception is the **voice WebSocket**: it may arrive with no `Origin` when it carries a
   glasses token. Browsers always send an `Origin` on a WebSocket, so this admits only a native
   glasses runtime, such as Glassly's, that cannot set one. Every other check above still applies,
-  and a revoke or Funnel still closes the socket.
-- The source is not **locked out**: 5 refused attempts in 10 minutes lock it out for a minute,
-  doubling on each repeat up to an hour. Each refusal is logged with the source and reason, never
+  over Tailscale or through the computer's own address, and a revoke or Funnel still closes the socket.
+- Over Tailscale, the source is not **locked out**: 5 refused attempts in 10 minutes lock it out
+  for a minute, doubling on each repeat up to an hour. Through the computer's own address every
+  connection arrives from the computer's TLS listener, so refusals there are not counted, and no
+  stranger can lock your glasses out. Each refusal is logged with the source and reason, never
   the token.
 
 A glasses token reaches only what the glasses use: listing Sessions and Panes, starting a Session
@@ -268,7 +282,9 @@ default agent), reading and typing
 into terminals, pressing one key at a time, dictation, and Notify. The keys are ↑, ↓, Enter, Esc,
 Tab and the digits 1 to 9, one per request, and nothing else: text, two keys at once, Ctrl-C,
 Ctrl-D, ← → and 0 are refused before they reach the terminal (`ERR_GLASSES_KEY_REFUSED`), logged
-without the input, and not counted toward the lockout. These keys are enough to answer an agent's permission menu, so the
+without the input, and not counted toward the lockout. Dictation sends only the Pane and the
+text: attachments and other submit options are dropped, and a request without text is refused
+(`ERR_GLASSES_SUBMIT_REFUSED`). These keys are enough to answer an agent's permission menu, so the
 glasses can approve what an agent asks to do. Opening a stopped Pane restarts its saved agent or command,
 in its own folder.
 
@@ -287,8 +303,10 @@ computers, reach anyone else's computer, change settings, write files, commit, r
 commands, or choose what a terminal runs, and its event stream never carries terminal output.
 
 Typing into a terminal can run commands, so treat the glasses like your phone: whoever holds a
-working token on your tailnet and login can type into your shells. The Even app or the Glassly app
-runs the glasses app's code, so a compromised build of either could read the token on your phone; revoke the glasses if
+working token can type into your shells, from your tailnet or, for a computer paired by QR code,
+from anywhere. Through a computer's own address the glasses trust its public certificate; unlike
+the Pane app, they don't check the computer's key. The Even app or the Glassly app runs the glasses
+app's code, so a compromised build of either could read the token on your phone; revoke the glasses if
 you lose the phone, and check **Last used** on each computer.
 
 The pairing code on your clipboard holds one-time pairing secrets, not tokens, and expires after
@@ -298,7 +316,7 @@ The pairing code on your clipboard holds one-time pairing secrets, not tokens, a
 
 | On the glasses | Fix |
 |---|---|
-| Can't reach any computer | Turn Tailscale on in the phone's Tailscale app. The glasses reconnect on their own. |
+| Can't reach any computer | Turn Tailscale on in the phone's Tailscale app; for computers paired by QR code, check the phone's internet connection. The glasses reconnect on their own. |
 | Allow this app on the computer | Update Pane on that computer (see above). |
 | Not paired, or revoked | Pair again from Settings › Glasses in the Pane phone app. |
 | Locked out for N s | Wait. If you did not cause the refusals, revoke the glasses on that computer. |
