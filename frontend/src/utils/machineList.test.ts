@@ -252,8 +252,8 @@ describe('getHostingSummary', () => {
   it('summarizes hosting when this machine also serves remote clients', () => {
     const idle = createDefaultRemoteDaemonHostRuntimeState();
     const client = { id: 'phone', clientId: null, label: null, deviceLabel: 'iPhone', remoteAddress: null, connectedAt: '' };
-    expect(getHostingSummary({ ...idle, status: 'live', connectedClients: [client] })).toBe('Hosting · 1 client connected');
-    expect(getHostingSummary({ ...idle, status: 'error' })).toBe('Hosting offline');
+    expect(getHostingSummary({ ...idle, status: 'live', connectedClients: [client] })).toEqual({ label: 'Hosting', detail: '1 client connected', state: 'live' });
+    expect(getHostingSummary({ ...idle, status: 'error' })).toEqual({ label: 'Hosting offline', state: 'error' });
     expect(getHostingSummary(idle)).toBeNull();
   });
 });

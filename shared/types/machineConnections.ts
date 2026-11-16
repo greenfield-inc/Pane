@@ -30,6 +30,12 @@ export interface MachineState {
   workspaceEntries?: boolean;
 }
 
+/** A saved machine's round trip: `ms` null when it did not answer; `routeId` the route it was measured over (`ComputerRoute.id`). */
+export interface MachineLatency {
+  ms: number | null;
+  routeId: string | null;
+}
+
 /** The reads `machines:read` serves; each takes the arguments the same channel takes today. */
 export const MACHINE_READ_CHANNELS = [
   'sessions:get-all-with-projects',

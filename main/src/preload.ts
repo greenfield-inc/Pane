@@ -43,7 +43,7 @@ import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
 import type { NotifyCommand, NotifyNavigateTarget, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
 import type { AutopilotDocument, AutopilotInstructionsView, AutopilotSnapshot, AutopilotStackCommand, AutopilotStackPushRequest } from '../../shared/types/autopilot';
-import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
+import type { MachineCommand, MachineConnectionsEvent, MachineLatency, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -1441,6 +1441,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('machines:read', machineId, channel, args),
     run: (machineId: string, command: MachineCommand): Promise<MachineResult> => ipcRenderer.invoke('machines:run', machineId, command),
     retry: (machineId: string): Promise<void> => ipcRenderer.invoke('machines:retry', machineId),
+    latency: (machineId: string): Promise<MachineLatency> => ipcRenderer.invoke('machines:latency', machineId),
     onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, event: MachineConnectionsEvent) => callback(event);
       ipcRenderer.on('machines:event', listener);
