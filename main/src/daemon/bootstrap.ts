@@ -418,6 +418,18 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     archiveRun: sessionId => archiveLoopRun(commandRegistry, sessionId),
     projectExists: projectId => Boolean(databaseService.getProject(projectId)),
     prepareSession: (target, loop) => prepareLoopSession(commandRegistry, target, loop),
+    ask: async card => {
+      const queue = services.notifyService?.queue;
+      if (!queue) return null;
+      const result = await queue.ask({
+        question: { ui: 'options', title: card.title, context: card.context, choices: card.choices.map((label, index) => ({ label, recommended: index === 0 })) },
+        source: { name: 'Loops', agent: 'Pane', ...(card.session && { session: card.session }) },
+      });
+      return 'answer' in result ? result.answer : null;
+    },
+    archiveSession: async sessionId => {
+      await commandRegistry.invoke('runpane:sessions:update', [{ selector: { sessionId }, input: { archived: true, source: 'user' } }]);
+    },
     onChange: () => getPaneEventSink().send('loops:changed'),
     logger,
   });

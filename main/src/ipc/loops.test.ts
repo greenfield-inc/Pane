@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { StoredLoop } from '../services/loops/loopRepository';
 import { prepareLoopSession, startLoopRun } from './loops';
+import { PaneError } from '../../../shared/paneError';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 // Slot times are worked for New York: 07:00 UTC on Oct 24 2026 is 03:00 EDT.
 process.env.TZ = 'America/New_York';
@@ -161,19 +163,30 @@ function sessionRegistry(options: {
   session?: Record<string, PaneCommandValue>;
   resume?: Record<string, PaneCommandValue>;
   submit?: Record<string, PaneCommandValue>;
+  /** The Session is gone: `sessions get` answers as the host does for an unknown id. */
+  missing?: boolean;
+  /** Names `sessions create` refuses because a Session (an archived one, say) has them. */
+  takenNames?: string[];
 } = {}) {
   const calls: Array<{ channel: string; request: PaneCommandValue }> = [];
   const registry = new PaneCommandRegistry();
-  const session = { id: SESSION_ID, name: 'Standups', agent: 'claude', launchCommand: '', panelIds, ...options.session };
-  const answer = (channel: string, result: PaneCommandValue) => registry.register(channel, (request: PaneCommandValue) => {
+  const session = { id: SESSION_ID, name: 'Standups', agent: 'claude', launchCommand: '', internalSessionId: 'standups-pane', panelIds, ...options.session };
+  const answer = (channel: string, result: (request: PaneCommandValue) => PaneCommandValue) => registry.register(channel, (request: PaneCommandValue) => {
     calls.push({ channel, request });
-    return result;
+    return result(request);
   });
-  answer('runpane:sessions:get', { ok: true, session });
-  answer('runpane:sessions:create', { ok: true, session: { ...session, name: 'Morning standup' } });
-  answer('runpane:sessions:update', { ok: true, session });
-  answer('runpane:panels:resume', { ok: true, readiness: { ok: true, state: { running: true, agentType: session.agent } }, ...options.resume });
-  answer('runpane:panels:submit', { ok: true, ...options.submit });
+  answer('runpane:sessions:get', () => {
+    if (options.missing) throw new PaneError('ERR_SESSION_NOT_FOUND', `Session ${SESSION_ID} not found`, 'Pick a Session from `runpane sessions list --json`.');
+    return { ok: true, session };
+  });
+  answer('runpane:sessions:create', request => {
+    const { name } = decodeBoundary(request, boundary.object({ name: boundary.string }));
+    if (options.takenNames?.includes(name)) throw new Error(`A Session named ${name} already exists`);
+    return { ok: true, session: { ...session, id: '__orchestration_session_2222__', name, internalSessionId: 'new-pane' } };
+  });
+  answer('runpane:sessions:update', () => ({ ok: true, session }));
+  answer('runpane:panels:resume', () => ({ ok: true, readiness: { ok: true, state: { running: true, agentType: session.agent } }, ...options.resume }));
+  answer('runpane:panels:submit', () => ({ ok: true, ...options.submit }));
   return { registry, calls };
 }
 
@@ -254,23 +267,50 @@ describe('startLoopRun for a Session loop', () => {
     await expect(startLoopRun(restarted.registry, standup, slotAtMs, { launchedCommand: () => 'claude --dangerously-skip-permissions --resume 5f0c' })).resolves.toEqual({ sessionId: null });
   });
 
-  it('warns when the prompt was not confirmed, and fails when the Session is archived', async () => {
+  it('warns when the prompt was not confirmed', async () => {
     const unconfirmed = sessionRegistry({ submit: { ok: false, blocked: { message: 'The agent is waiting for input.' } } });
     await expect(startLoopRun(unconfirmed.registry, standup, slotAtMs, noLaunches)).resolves.toEqual({
       sessionId: null,
       // App words only: no CLI commands from the submit result.
       warning: 'When this run started, Pane could not confirm the Session\'s agent got the prompt. Open the Session to check whether it arrived.',
     });
-    const archived = sessionRegistry({ session: { archived: true } });
-    await expect(startLoopRun(archived.registry, standup, slotAtMs, noLaunches)).rejects.toThrow('Session Standups is archived, so the prompt was not sent.');
+  });
+
+  it('restores an archived Session, unpinned, and sends the run there', async () => {
+    const { registry, calls } = sessionRegistry({ session: { archived: true, isPinned: true } });
+    await expect(startLoopRun(registry, standup, slotAtMs, noLaunches)).resolves.toEqual({
+      sessionId: null,
+      recovered: { kind: 'restored', sessionId: SESSION_ID, sessionName: 'Standups', sessionPaneId: 'standups-pane' },
+    });
+    expect(calls.map(call => call.channel)).toEqual(['runpane:sessions:get', 'runpane:sessions:update', 'runpane:panels:resume', 'runpane:panels:submit']);
+    expect(calls[1].request).toEqual({ selector: { sessionId: SESSION_ID }, input: { archived: false, isPinned: false, source: 'user' } });
+  });
+
+  it('recreates a missing Session from the loop\'s name and agent, numbered when an archived one keeps the name', async () => {
+    const { registry, calls } = sessionRegistry({ missing: true, takenNames: ['Nightly bug sweep'] });
+    await expect(startLoopRun(registry, standup, slotAtMs, noLaunches)).resolves.toEqual({
+      sessionId: null,
+      recovered: { kind: 'recreated', sessionId: '__orchestration_session_2222__', sessionName: 'Nightly bug sweep 2', sessionPaneId: 'new-pane' },
+    });
+    expect(calls.filter(call => call.channel === 'runpane:sessions:create').map(call => call.request)).toEqual([
+      { name: 'Nightly bug sweep', agent: 'claude', launchCommand: '' },
+      { name: 'Nightly bug sweep 2', agent: 'claude', launchCommand: '' },
+    ]);
+    expect(calls.at(-1)).toEqual({ channel: 'runpane:panels:submit', request: { panelId: 'claude-panel', input: 'Post the standup.', source: 'agent', expectReport: false } });
   });
 });
 
 describe('prepareLoopSession', () => {
   it('creates a new Session named after the loop, already unattended by its default command', async () => {
     const { registry, calls } = sessionRegistry();
-    await expect(prepareLoopSession(registry, 'new', { name: 'Morning standup', agent: 'claude' })).resolves.toBe(SESSION_ID);
+    await expect(prepareLoopSession(registry, 'new', { name: 'Morning standup', agent: 'claude' })).resolves.toBe('__orchestration_session_2222__');
     expect(calls).toEqual([{ channel: 'runpane:sessions:create', request: { name: 'Morning standup', agent: 'claude', launchCommand: '' } }]);
+  });
+
+  it('unpins the Session it targets: a loop\'s Session lives under Loops', async () => {
+    const { registry, calls } = sessionRegistry({ session: { isPinned: true } });
+    await prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'claude' });
+    expect(calls[1]).toEqual({ channel: 'runpane:sessions:update', request: { selector: { sessionId: SESSION_ID }, input: { isPinned: false, source: 'user' } } });
   });
 
   it('finds a Session by name and adds the missing unattended flag to its custom command', async () => {
