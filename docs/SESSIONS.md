@@ -179,7 +179,10 @@ Choose a session ID source and provide first-launch and resume templates:
   `PANE_AGENT_SESSION_ID=your-session-id` line. IDs may contain letters, digits,
   periods, underscores, colons, and hyphens (up to 256 characters).
 
-`{command}` expands to the saved command; `{sessionId}` expands to the quoted ID.
+`{command}` expands to the saved command; `{sessionId}` expands to the ID quoted
+for the terminal's own shell (PowerShell, cmd, fish or POSIX). If that shell
+can't pass the ID literally (cmd with `%`, `!` or `"`, PowerShell with `"`),
+Pane doesn't launch and says why in the terminal.
 Leave the ID placeholder unquoted. For a launcher that forwards native arguments
 through `--`, Claude templates could be `{command} -- --session-id {sessionId}`
 and `{command} -- --resume {sessionId}`. Codex could use `{command}` initially

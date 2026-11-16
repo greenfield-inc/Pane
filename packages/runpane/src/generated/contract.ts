@@ -2895,7 +2895,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--resume",
         "value": "<agent-session-id>",
-        "description": "Agent session id to persist and resume in an adopted pane."
+        "description": "Agent session id to persist and resume in an adopted pane. It must have the agent's id shape (a UUID for Claude and Codex, ses_... for OpenCode), or nothing is created."
       },
       {
         "name": "--agent",
