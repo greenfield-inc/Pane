@@ -58,6 +58,7 @@ import { setupEventListeners } from '../events';
 import { getAppDirectory } from '../utils/appDirectory';
 import { resourceMonitorService } from '../services/resourceMonitorService';
 import { MachineHealthService } from '../services/machineHealth/machineHealthService';
+import { readFootprints } from '../services/machineHealth/footprint';
 import { MACHINE_HEALTH_CHANGED_EVENT } from '../../../shared/types/machineHealth';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
@@ -421,6 +422,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         .map(folder => ({ path: folder, role: 'worktrees' as const })),
     ],
     processes: () => resourceMonitorService.getSnapshot(),
+    readFootprints: process.platform === 'darwin' ? readFootprints : undefined,
   });
   const daemonServices: DaemonHostServices = {
     machineHealth,

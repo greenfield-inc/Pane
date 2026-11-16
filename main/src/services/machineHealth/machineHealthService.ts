@@ -38,6 +38,8 @@ export interface MachineHealthDeps {
   readSwap?: () => Promise<number | null>;
   memory?: () => { totalBytes: number; freeBytes: number };
   cpuTimes?: () => CpuTimes;
+  /** macOS footprints (pid → MB); when given, the leak rule reads these once a slice instead of RSS every sample. */
+  readFootprints?: () => Promise<Map<number, number> | null>;
 }
 
 /** Summed CPU times of every core, in ms. */
@@ -81,6 +83,7 @@ export class MachineHealthService extends EventEmitter {
   private flagged = new Set<string>();
   private ignored = new Set<string>();
   private lastCpu: CpuTimes | null = null;
+  private footprintsAt = -Infinity;
   private timer: NodeJS.Timeout | null = null;
   private inFlight: Promise<MachineHealthSnapshot> | null = null;
 
@@ -103,6 +106,7 @@ export class MachineHealthService extends EventEmitter {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
   }
+
 
   /** The latest sample, taking one first when none exists yet. */
   async getSnapshot(): Promise<MachineHealthSnapshot> {
@@ -137,6 +141,13 @@ export class MachineHealthService extends EventEmitter {
       (this.deps.readSwap ?? (() => readSwapUsedBytes()))(),
       this.deps.processes(),
     ]);
+
+    const rule = leakRuleOf(settings);
+    let footprints: Map<number, number> | null = null;
+    if (this.deps.readFootprints && now - this.footprintsAt >= Math.max(MINUTE, rule.sliceMs)) {
+      footprints = await this.deps.readFootprints();
+      if (footprints) this.footprintsAt = now;
+    }
 
     this.memoryHistory = [...this.memoryHistory, memoryReading.level].slice(-2);
     const memory = this.deps.memory?.() ?? { totalBytes: os.totalmem(), freeBytes: os.freemem() };
@@ -175,7 +186,7 @@ export class MachineHealthService extends EventEmitter {
         cpuPercent: Math.round(processes.electronProcesses.reduce((sum, p) => sum + p.cpuPercent, 0) * 10) / 10,
       },
       panes,
-      leaks: this.updateLeaks(panes, now, leakRuleOf(settings)),
+      leaks: this.updateLeaks(panes, now, rule, footprints),
     };
 
     const previous = this.latest;
@@ -195,7 +206,8 @@ export class MachineHealthService extends EventEmitter {
     return snapshot;
   }
 
-  private updateLeaks(panes: PaneUsage[], now: number, rule: LeakRule): LeakWarning[] {
+  private updateLeaks(panes: PaneUsage[], now: number, rule: LeakRule, footprints: Map<number, number> | null): LeakWarning[] {
+    const usesFootprints = !!this.deps.readFootprints;
     const live = new Set<string>();
     const leaks: LeakWarning[] = [];
     const keepMs = rule.windowMs + rule.sliceMs;
@@ -204,15 +216,19 @@ export class MachineHealthService extends EventEmitter {
         const key = `${proc.pid}:${proc.started}`;
         live.add(key);
         const entry = this.history.get(key) ?? { startedAt: this.startedAtOf(proc.started, now), samples: [] };
-        entry.samples.push({ at: now, rssMB: proc.rssMB });
+        const footprint = footprints?.get(proc.pid);
+        if (!usesFootprints) entry.samples.push({ at: now, rssMB: proc.rssMB });
+        else if (footprint !== undefined) entry.samples.push({ at: now, rssMB: footprint });
         while (entry.samples.length > 1 && entry.samples[1].at <= now - keepMs) entry.samples.shift();
         this.history.set(key, entry);
         if (this.ignored.has(key)) continue;
+        const flaggedBefore = this.flagged.has(key);
+        if (usesFootprints && footprint === undefined && !flaggedBefore) continue;
         const finding = findLeak(entry.samples, entry.startedAt, now, rule);
         if (!finding) continue;
         const warning: LeakWarning = {
           pid: proc.pid, started: proc.started, name: proc.name, sessionId: proc.sessionId, panelId: proc.panelId,
-          rssMB: finding.rssMB, growthMB: finding.growthMB, windowMs: finding.windowMs,
+          memoryMB: finding.rssMB, growthMB: finding.growthMB, windowMs: finding.windowMs,
           series: entry.samples.filter(s => s.at >= now - rule.windowMs).map(s => Math.round(s.rssMB)),
         };
         leaks.push(warning);

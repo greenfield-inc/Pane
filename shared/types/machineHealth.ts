@@ -45,10 +45,11 @@ export interface LeakWarning {
   name: string;
   sessionId: string;
   panelId: string | null;
-  rssMB: number;
+  /** Memory now: the footprint on macOS (RSS leaves out compressed and swapped pages there), RSS elsewhere. */
+  memoryMB: number;
   growthMB: number;
   windowMs: number;
-  /** RSS readings in MB across the window, oldest first, for a sparkline. */
+  /** Memory readings in MB across the window, oldest first, for a sparkline. */
   series: number[];
 }
 

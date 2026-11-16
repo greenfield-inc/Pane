@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { HealthLevel, LeakWarning } from '../../../../shared/types/machineHealth';
 import type { ResourceSnapshot } from '../../../../shared/types/resourceMonitor';
-import { MachineHealthService, type LevelChange } from './machineHealthService';
+import { MachineHealthService, type LevelChange, type MachineHealthDeps } from './machineHealthService';
 
 const GB = 1024 ** 3;
 const MIN = 60_000;
 const STARTED = 'Sun Nov 15 00:00:00 2026';
 const T0 = Date.parse(STARTED);
 
-function harness() {
+function harness(extra: Partial<MachineHealthDeps> = {}) {
   const memory: HealthLevel = 'ok';
   const state = { now: T0, freeGB: 100, memory, rssMB: 100 };
   const processes = async (): Promise<ResourceSnapshot> => ({
@@ -28,6 +28,7 @@ function harness() {
     memory: () => ({ totalBytes: 32 * GB, freeBytes: 8 * GB }),
     cpuTimes: () => ({ idle: 0, total: 0 }),
     processes,
+    ...extra,
   });
   const changes: LevelChange[] = [];
   const leaks: LeakWarning[] = [];
@@ -63,12 +64,27 @@ describe('MachineHealthService', () => {
       await service.sample();
     }
     expect(leaks).toHaveLength(1);
-    expect(leaks[0]).toMatchObject({ pid: 42, name: 'vite', sessionId: 'A', panelId: 'A1', growthMB: 200, rssMB: 400, series: [200, 240, 280, 320, 360, 400] });
+    expect(leaks[0]).toMatchObject({ pid: 42, name: 'vite', sessionId: 'A', panelId: 'A1', growthMB: 200, memoryMB: 400, series: [200, 240, 280, 320, 360, 400] });
     expect((await service.getSnapshot()).leaks).toHaveLength(1);
 
     service.ignoreLeak(42, STARTED);
     state.now = T0 + 8 * MIN;
     state.rssMB = 520;
     expect((await service.sample()).leaks).toEqual([]);
+  });
+
+  it('on macOS reads the footprint once a slice, so a leak shows while swapping keeps RSS flat', async () => {
+    let footprintMB = 200;
+    let reads = 0;
+    const { state, service, leaks } = harness({ readFootprints: async () => { reads++; return new Map([[42, footprintMB]]); } });
+    state.rssMB = 60;
+    for (let s = 0; s <= 14; s++) {
+      state.now = T0 + s * 30_000;
+      footprintMB = 200 + Math.floor(s / 2) * 40;
+      await service.sample();
+    }
+    expect(reads).toBe(8);
+    expect(leaks).toHaveLength(1);
+    expect(leaks[0]).toMatchObject({ memoryMB: 400, growthMB: 200, series: [200, 240, 280, 320, 360, 400] });
   });
 });
