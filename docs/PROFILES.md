@@ -44,7 +44,8 @@ runs:                       # optional example runs the viewer lights up
   types the first message.
 - An agent step has a `goal` and at least one outcome. A command (`run:`) has
   two outcomes or none: the first is taken on exit 0, the second on any other
-  exit, and with none the run ends after the command. An ask has `choices` (buttons) or `next` (a typed answer). Any outcome,
+  exit, and with none the run ends after the command. It runs as the tab's own
+  process (`exec /bin/sh -c '<command>'` on macOS, Linux and WSL). An ask has `choices` (buttons) or `next` (a typed answer). Any outcome,
   choice or next may point to `end`.
 - `reads` are file ids in the profile's folder (`instructions/<id>.md` or
   `<id>.md`, never outside it; for a bundled profile, the bundled Agent Farm
@@ -62,7 +63,7 @@ Validation (`shared/profiles/validateProfile.ts`) names the step and outcome of
 each error and says how to fix it, for example: "Step review, outcome findings
 has 1 sample. Every outcome of an agent step needs at least 2, so its picture
 can show how results vary." A key Pane doesn't read is an error, so a misspelt
-one isn't silently dropped. Pane refuses YAML aliases and files over 512 KB. A
+one isn't silently dropped. Pane refuses files over 512 KB, and nested YAML aliases that expand past that. A
 profile with any error is listed as invalid and can't launch.
 
 ## Where profiles come from
