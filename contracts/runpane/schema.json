@@ -1069,7 +1069,12 @@
         "loops run",
         "loops pause",
         "loops resume",
-        "loops delete"
+        "loops delete",
+        "profiles",
+        "profiles list",
+        "profiles show",
+        "profiles launch",
+        "profiles runs"
       ],
       "properties": {
         "default": {
@@ -1475,6 +1480,21 @@
           "$ref": "#/$defs/helpLines"
         },
         "loops delete": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "profiles": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "profiles list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "profiles show": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "profiles launch": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "profiles runs": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions pin": {

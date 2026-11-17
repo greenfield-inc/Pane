@@ -2745,6 +2745,76 @@ export const RUNPANE_CONTRACT = {
         "loopDeleteResult"
       ],
       "localControl": true
+    },
+    {
+      "name": "profiles list",
+      "summary": "List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.",
+      "usage": [
+        "runpane profiles list [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "core",
+        "profiles",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "profileListResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "profiles show",
+      "summary": "Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.",
+      "usage": [
+        "runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]"
+      ],
+      "cliOnlyFlags": [
+        "--yaml"
+      ],
+      "toolsets": [
+        "core",
+        "profiles",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "profileShowResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "profiles launch",
+      "summary": "Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.",
+      "usage": [
+        "runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core",
+        "profiles",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "profileLaunchRequest",
+        "profileLaunchResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "profiles runs",
+      "summary": "List profile runs: each run's profile, state and current step.",
+      "usage": [
+        "runpane profiles runs [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "core",
+        "profiles",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "profileRunsResult"
+      ],
+      "localControl": true
     }
   ],
   "flags": {
@@ -3317,6 +3387,21 @@ export const RUNPANE_CONTRACT = {
         "description": "autopilot stack push only: the waiting item (an id from `runpane autopilot waiting`) to put on the stack."
       },
       {
+        "name": "--harness",
+        "value": "<cli[/model]>",
+        "description": "profiles launch: one CLI (`cli` or `cli/model`) for every agent of the profile."
+      },
+      {
+        "name": "--agent-harness",
+        "value": "<agent>=<cli[/model]>",
+        "description": "profiles launch: the CLI for one agent of the profile; repeat it per agent."
+      },
+      {
+        "name": "--command",
+        "value": "<cli>=<command>",
+        "description": "profiles launch: the command that starts a CLI Pane does not know; repeat it per CLI."
+      },
+      {
         "name": "--relays",
         "value": "<item>",
         "description": "notify only: relay into this waiting item (an id from `runpane inbox`): the same card gains the choices, context and links, and the call waits on it."
@@ -3581,6 +3666,10 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--idle",
         "description": "devices free: shut down Pane's devices no Pane holds."
+      },
+      {
+        "name": "--yaml",
+        "description": "profiles show: print the profile's file text only."
       }
     ]
   },
@@ -3642,6 +3731,9 @@ export const RUNPANE_CONTRACT = {
         "  runpane loops list [--json]",
         "  runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  runpane loops update|run|pause|resume|delete --loop <id> --yes",
+        "  runpane profiles list|runs [--json]",
+        "  runpane profiles show <name> [--yaml] [--json]",
+        "  runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] --yes [--json]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -4360,7 +4452,7 @@ export const RUNPANE_CONTRACT = {
         "The MCP server ships in the npm package and inside the Pane app. The Python package does not include it.",
         "",
         "Options:",
-        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, workspace, machine, git, docs, links, admin",
+        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, loops, profiles, workspace, machine, git, docs, links, admin",
         "  --read-only                    Serve only read-only tools"
       ],
       "relay": [
@@ -5343,6 +5435,84 @@ export const RUNPANE_CONTRACT = {
         "  --json                          Print JSON output.",
         "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
+      "profiles": [
+        "Usage:",
+        "  runpane profiles <list|show|launch|runs> [options]",
+        "",
+        "A profile is one YAML file that defines a team of agents and a fixed workflow.",
+        "Pane runs a launched profile's workflow itself, step by step: each step opens as a tab",
+        "in the run's Pane, and an agent step ends when its agent runs",
+        "`runpane report --outcome \"<outcome>\"`. See docs/PROFILES.md.",
+        "",
+        "Commands:",
+        "  runpane profiles list [--json] [--pane-dir <path>]",
+        "  runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]",
+        "  runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]",
+        "  runpane profiles runs [--json] [--pane-dir <path>]"
+      ],
+      "profiles list": [
+        "Usage:",
+        "runpane profiles list [--json] [--pane-dir <path>]",
+        "",
+        "List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.",
+        "",
+        "Each line: name, version, bundled or yours, on or off, and launchable, team only",
+        "(no workflow), or invalid with its first error.",
+        "",
+        "Options:",
+        "  --json                          Print JSON output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "profiles show": [
+        "Usage:",
+        "runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]",
+        "",
+        "Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.",
+        "",
+        "Options:",
+        "  <name>                          The profile's name, from runpane profiles list.",
+        "  --yaml                          Print the profile's file text only.",
+        "  --json                          Print JSON output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "profiles launch": [
+        "Usage:",
+        "runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]",
+        "",
+        "Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.",
+        "",
+        "Without --repo it runs in the repo of the Pane this terminal is in, else the active repo.",
+        "Without --session a Session orchestrator's runs join its Session; anything else gets a new Session.",
+        "It prints the run id, its Session, its first step and its Pane. Follow it with `runpane profiles runs`.",
+        "",
+        "Options:",
+        "  <name>                          The profile's name, from runpane profiles list.",
+        "  --prompt <text>                 What you want done: the first agent step's request. Required.",
+        "  --repo <selector>               Repository: active, id, exact path, or saved name.",
+        "  --session <id|name>             An existing Session to run in.",
+        "  --harness <cli[/model]>         One CLI for every agent, over the file's runs.",
+        "  --agent-harness <agent>=<cli>   The CLI for one agent; repeat per agent.",
+        "  --command <cli>=<command>       The command that starts a CLI Pane does not know; repeat.",
+        "  --yes                           Confirm the launch.",
+        "  --json                          Print JSON output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory.",
+        "",
+        "Examples:",
+        "  runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes",
+        "  runpane profiles launch greenfield --prompt \"Fix the flaky test\" --agent-harness planner=claude/opus --yes --json"
+      ],
+      "profiles runs": [
+        "Usage:",
+        "runpane profiles runs [--json] [--pane-dir <path>]",
+        "",
+        "List profile runs: each run's profile, state and current step.",
+        "",
+        "Each line: run id, profile, state (running, asking, paused, ended or failed) and step.",
+        "",
+        "Options:",
+        "  --json                          Print JSON output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
       "workspace list": [
         "Usage:",
         "  runpane workspace list [--json] [--pane-dir <path>]",
@@ -5967,6 +6137,9 @@ export const RUNPANE_CONTRACT = {
         "  python -m runpane loops list [--json]",
         "  python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  python -m runpane loops update|run|pause|resume|delete --loop <id> --yes",
+        "  python -m runpane profiles list|runs [--json]",
+        "  python -m runpane profiles show <name> [--yaml] [--json]",
+        "  python -m runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] --yes [--json]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -7553,6 +7726,84 @@ export const RUNPANE_CONTRACT = {
         "  --json                          Print JSON output.",
         "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
+      "profiles": [
+        "Usage:",
+        "  python -m runpane profiles <list|show|launch|runs> [options]",
+        "",
+        "A profile is one YAML file that defines a team of agents and a fixed workflow.",
+        "Pane runs a launched profile's workflow itself, step by step: each step opens as a tab",
+        "in the run's Pane, and an agent step ends when its agent runs",
+        "`runpane report --outcome \"<outcome>\"`. See docs/PROFILES.md.",
+        "",
+        "Commands:",
+        "  python -m runpane profiles list [--json] [--pane-dir <path>]",
+        "  python -m runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]",
+        "  python -m runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]",
+        "  python -m runpane profiles runs [--json] [--pane-dir <path>]"
+      ],
+      "profiles list": [
+        "Usage:",
+        "python -m runpane profiles list [--json] [--pane-dir <path>]",
+        "",
+        "List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.",
+        "",
+        "Each line: name, version, bundled or yours, on or off, and launchable, team only",
+        "(no workflow), or invalid with its first error.",
+        "",
+        "Options:",
+        "  --json                          Print JSON output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "profiles show": [
+        "Usage:",
+        "python -m runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]",
+        "",
+        "Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.",
+        "",
+        "Options:",
+        "  <name>                          The profile's name, from runpane profiles list.",
+        "  --yaml                          Print the profile's file text only.",
+        "  --json                          Print JSON output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
+      "profiles launch": [
+        "Usage:",
+        "python -m runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]",
+        "",
+        "Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.",
+        "",
+        "Without --repo it runs in the repo of the Pane this terminal is in, else the active repo.",
+        "Without --session a Session orchestrator's runs join its Session; anything else gets a new Session.",
+        "It prints the run id, its Session, its first step and its Pane. Follow it with `runpane profiles runs`.",
+        "",
+        "Options:",
+        "  <name>                          The profile's name, from runpane profiles list.",
+        "  --prompt <text>                 What you want done: the first agent step's request. Required.",
+        "  --repo <selector>               Repository: active, id, exact path, or saved name.",
+        "  --session <id|name>             An existing Session to run in.",
+        "  --harness <cli[/model]>         One CLI for every agent, over the file's runs.",
+        "  --agent-harness <agent>=<cli>   The CLI for one agent; repeat per agent.",
+        "  --command <cli>=<command>       The command that starts a CLI Pane does not know; repeat.",
+        "  --yes                           Confirm the launch.",
+        "  --json                          Print JSON output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory.",
+        "",
+        "Examples:",
+        "  python -m runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes",
+        "  python -m runpane profiles launch greenfield --prompt \"Fix the flaky test\" --agent-harness planner=claude/opus --yes --json"
+      ],
+      "profiles runs": [
+        "Usage:",
+        "python -m runpane profiles runs [--json] [--pane-dir <path>]",
+        "",
+        "List profile runs: each run's profile, state and current step.",
+        "",
+        "Each line: run id, profile, state (running, asking, paused, ended or failed) and step.",
+        "",
+        "Options:",
+        "  --json                          Print JSON output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
+      ],
       "workspace list": [
         "Usage:",
         "  runpane workspace list [--json] [--pane-dir <path>]",
@@ -8094,6 +8345,8 @@ export const RUNPANE_CONTRACT = {
       "runpane loops create --repo active --name nightly-bug-sweep --cron \"0 3 * * *\" --agent claude --prompt \"Fix one bug from yesterday's issues\" --yes --json",
       "runpane loops list --json",
       "runpane loops run --loop <loop-id> --yes --json",
+      "runpane profiles list --json",
+      "runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes --json",
       "runpane agents start --repo active --name fix-login --agent claude --prompt \"Fix the login redirect\" --yes --json",
       "runpane agents start --pane <pane-id> --agent codex --prompt \"Review the PR from this branch and report findings\" --yes --json",
       "runpane agents status --pane <pane-id> --json",
@@ -8170,6 +8423,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
       "`runpane machine health` shows this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free by tier. `runpane machine cleanup --kind <kind>` lists one kind of tier 1 or 2 item (a dry run) and deletes them with `--yes`; tier 3 items are not Pane's, so it refuses them and says how to free them. Agents free disk only through this command, never with rm.",
       "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
+      "`runpane profiles list|show|launch|runs` work with Pane profiles: a profile is one YAML file that defines a team of agents and a fixed workflow, and Pane runs a launched profile's workflow itself (see [PROFILES.md](PROFILES.md)). `list` prints each profile in the library with its version, origin (`bundled` or `yours`), whether it is on, and whether it can launch (`launchable`, `team only` for a profile with no workflow, or `invalid` with its first error); `--json` adds the bundled Agent Farm's state and the person's own Agent Farm profiles. `show <name>` prints its agents, steps and outcomes, and errors (`--yaml` prints the file text only; `--json` carries both as `profile` and `yaml`). `launch <name> --prompt <text> --yes` starts a run and prints it (`run`: id, Session, step, Pane): it runs in `--repo`, else the repo of the Pane the caller's terminal is in (`PANE_SESSION_ID`), else the active repo; in `--session`, else the caller's orchestrated Session (`PANE_ORCHESTRATION_SESSION_ID`), else a new Session. `--harness <cli[/model]>` picks one CLI for every agent, `--agent-harness <agent>=<cli[/model]>` one agent's CLI, and `--command <cli>=<command>` the command that starts a CLI Pane does not know (each repeatable, or one JSON object). A launch without `--prompt` fails with `ERR_PROFILES_PROMPT_REQUIRED`; Pane refuses a profile it cannot launch with `PROFILE_NOT_FOUND`, `PROFILE_NOT_LAUNCHABLE` or `PROFILE_TEAM_ONLY` and a next step. `runs` lists runs with their state (`running`, `asking`, `paused`, `ended`, `failed`) and current step. The MCP tools are `profiles_list`, `profiles_show`, `profiles_launch` and `profiles_runs`, in the `core`, `profiles` and `plugin` toolsets.",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered, with its buttons as `--choices` or `--questions` in notify's JSON), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
       "`runpane report --outcome <name>` ends one step of a Pane profile workflow: it names which of the step's declared outcomes happened (`runpane report --outcome \"plan ready\" --summary-file status.json`) and sends `state: done` with `outcome`. `--state` is then optional and may only be `done` (otherwise `ERR_REPORT_OUTCOME_STATE`), and `--question` is refused (`ERR_REPORT_OUTCOME_QUESTION`): an outcome ends the step, a question would block it. Pane checks the outcome against the step the panel runs and refuses an undeclared one with an error that lists the allowed outcomes.",
@@ -9414,6 +9668,47 @@ export const RUNPANE_CONTRACT = {
       ],
       [
         "loops",
+        "--help"
+      ],
+      [
+        "profiles",
+        "list",
+        "--json"
+      ],
+      [
+        "profiles",
+        "show",
+        "greenfield",
+        "--yaml"
+      ],
+      [
+        "profiles",
+        "launch",
+        "greenfield",
+        "--prompt",
+        "Add dark mode",
+        "--repo",
+        "active",
+        "--session",
+        "Nightly",
+        "--harness",
+        "claude/opus",
+        "--agent-harness",
+        "planner=codex",
+        "--agent-harness={\"reviewer\":\"claude\"}",
+        "--command",
+        "aider=aider --yes-always",
+        "--yes",
+        "--json"
+      ],
+      [
+        "profiles",
+        "runs",
+        "--pane-dir",
+        "/tmp/pane"
+      ],
+      [
+        "profiles",
         "--help"
       ],
       [
@@ -17015,6 +17310,394 @@ export const RUNPANE_CONTRACT = {
       },
       "additionalProperties": false
     },
+    "libraryProfile": {
+      "type": "object",
+      "description": "A profile in the library. `profile` is the normalized profile (agents, flow, samples, runs); absent when the file could not be read as one.",
+      "required": [
+        "name",
+        "origin",
+        "file",
+        "valid",
+        "launchable",
+        "teamOnly",
+        "enabled",
+        "errors"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "bundled",
+            "yours"
+          ]
+        },
+        "file": {
+          "type": "string"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "launchable": {
+          "type": "boolean"
+        },
+        "teamOnly": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "fix"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "fix": {
+                "type": "string"
+              },
+              "step": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "profile": {
+          "type": "object"
+        }
+      }
+    },
+    "profileRun": {
+      "type": "object",
+      "description": "A launched profile: where its steps run and where it is now.",
+      "required": [
+        "id",
+        "profile",
+        "profileVersion",
+        "sessionId",
+        "repoId",
+        "prompt",
+        "state",
+        "step",
+        "wait",
+        "history"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "profileVersion": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "repoId": {
+          "type": "number"
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "harness": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "commands": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "state": {
+          "enum": [
+            "running",
+            "asking",
+            "paused",
+            "ended",
+            "failed"
+          ]
+        },
+        "step": {
+          "type": "string"
+        },
+        "wait": {
+          "type": "object"
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "error": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      }
+    },
+    "profileListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "profiles"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/libraryProfile"
+          }
+        },
+        "agentFarm": {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "missing",
+                "installing",
+                "ready",
+                "failed"
+              ]
+            },
+            "version": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        },
+        "ownAgentFarm": {
+          "type": "object",
+          "required": [
+            "profiles"
+          ],
+          "properties": {
+            "profiles": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "source"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "harness": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "error": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "profileShowResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "profile",
+        "yaml"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "profile": {
+          "$ref": "#/jsonSchemas/libraryProfile"
+        },
+        "yaml": {
+          "type": "string"
+        }
+      }
+    },
+    "profileLaunchRequest": {
+      "type": "object",
+      "description": "What `runpane profiles launch` sends to Pane.",
+      "required": [
+        "name",
+        "prompt",
+        "repo"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "path"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "active"
+              ],
+              "properties": {
+                "active": {
+                  "const": true
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "session": {
+          "type": "string",
+          "minLength": 1
+        },
+        "harness": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agentHarness": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "commands": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "callerPanelId": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "profileLaunchResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "run"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "run": {
+          "$ref": "#/jsonSchemas/profileRun"
+        }
+      }
+    },
+    "profileRunsResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "runs"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/profileRun"
+          }
+        }
+      }
+    },
     "notifyChoice": {
       "type": "object",
       "required": [
@@ -20101,7 +20784,8 @@ export const RUNPANE_CONTRACT = {
       "Session: where a workstream lives, and the default home for orchestrated work. Its folder ($PANE_SESSION_DIR) holds plans, notes and reports.",
       "Pane: one per feature (one worktree, one branch). Before creating one, find the feature's Pane (`runpane panes list --json`, match the branch) and create one only when none exists.",
       "Tab: reviews, review reruns, QA, fixes and follow-ups for a feature go in new tabs in its Pane (`runpane panels create --pane <id>`), never a new Pane or a plain `git worktree`.",
-      "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up."
+      "Scratch: in Pane, put temporary files, clones, captures, downloads, logs and test instances (an isolated PANE_DIR and HOME for QA) in `$PANE_SCRATCH_DIR`, not /tmp or your tool's own scratchpad. When the feature is done, archive the Pane and Pane cleans it up.",
+      "Profiles: a profile is a team and a fixed workflow Pane runs from its file (docs/PROFILES.md). `runpane profiles list` and `runpane profiles launch <name> --prompt <text>` start one; in a profile step's tab, end the step with `runpane report --outcome \"<one of the step's outcomes>\"`, which the step's first message names."
     ],
     "brief": {
       "title": "Pane agent context",
@@ -20820,7 +21504,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--toolsets",
             "value": "<name,...>",
             "required": false,
-            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, machine, git, docs, links, admin."
+            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, profiles, workspace, machine, git, docs, links, admin."
           },
           {
             "name": "--read-only",
@@ -26073,6 +26757,198 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": []
       },
+      "profiles list": {
+        "name": "profiles list",
+        "summary": "List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.",
+        "details": "Lists every profile in Pane's library: name, version, title, origin (bundled with Pane, or yours in <PANE_DIR>/profiles), file, enabled, valid, launchable (valid and has a workflow), teamOnly (a team with no workflow), errors ({code, message, fix, step?, outcome?}) and the normalized profile. agentFarm is the state of the Agent Farm bundled in Pane; ownAgentFarm lists the person's own Agent Farm profiles when one is installed.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane profiles list --json"
+        ],
+        "jsonSchemas": [
+          "profileListResult"
+        ],
+        "notes": [
+          "Launch a profile whose launchable is true with `runpane profiles launch <name> --prompt <text> --yes`; a team-only or invalid one is refused."
+        ]
+      },
+      "profiles show": {
+        "name": "profiles show",
+        "summary": "Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.",
+        "details": "Returns the profile as `profiles list` does, plus `yaml`, its file's text. The normalized profile names its agents ({id, runs, cli, model?, reads, skills}) and its flow: start, and steps that are agent steps (agent, goal, outcomes), command steps (run, outcomes) or asks (ask, choices, next?). Each outcome or choice is {name, to}, where to is a step id or end.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<name>",
+            "required": true,
+            "description": "The profile's name, from `runpane profiles list`."
+          },
+          {
+            "name": "--yaml",
+            "required": false,
+            "description": "Print the profile's file text only (CLI only)."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane profiles show greenfield --json",
+          "runpane profiles show greenfield --yaml"
+        ],
+        "jsonSchemas": [
+          "profileShowResult"
+        ],
+        "notes": [
+          "A name not in the library fails with PROFILE_NOT_FOUND; see names with `runpane profiles list`."
+        ]
+      },
+      "profiles launch": {
+        "name": "profiles launch",
+        "summary": "Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.",
+        "details": "Starts a run of the profile: Pane makes (or joins) a Session, opens the first step as a tab in a new Pane of the repo, and follows the workflow from there. Each agent step ends when its agent runs `runpane report --outcome \"<outcome>\"` with one of the step's declared outcomes, a command step when its tab exits, and an ask when the person answers its card. Returns the run: id, sessionId, paneId, state, step and wait.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<name>",
+            "required": true,
+            "description": "The profile's name, from `runpane profiles list`."
+          },
+          {
+            "name": "--prompt",
+            "value": "<text>",
+            "required": true,
+            "description": "What the person wants done: the first agent step's request."
+          },
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": false,
+            "description": "Repository: active, id, exact path, or saved name. Defaults to the repo of the Pane the caller runs in, else the active repo."
+          },
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": false,
+            "description": "An existing Session to run in. Defaults to the caller's orchestrated Session (PANE_ORCHESTRATION_SESSION_ID); otherwise Pane makes a new Session."
+          },
+          {
+            "name": "--harness",
+            "value": "<cli[/model]>",
+            "required": false,
+            "description": "One CLI (`cli` or `cli/model`) for every agent, over the file's runs."
+          },
+          {
+            "name": "--agent-harness",
+            "value": "<agent>=<cli[/model]>",
+            "required": false,
+            "description": "Agent id → the CLI (`cli` or `cli/model`) that agent runs, over the file's runs and --harness.",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "name": "--command",
+            "value": "<cli>=<command>",
+            "required": false,
+            "description": "A CLI Pane doesn't know → the command that starts it.",
+            "schema": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm the launch."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes --json",
+          "runpane profiles launch greenfield --prompt \"Fix the flaky test\" --repo active --agent-harness planner=claude/opus --agent-harness implementer=codex --yes --json"
+        ],
+        "jsonSchemas": [
+          "profileLaunchRequest",
+          "profileLaunchResult"
+        ],
+        "notes": [
+          "A launch without --prompt fails with ERR_PROFILES_PROMPT_REQUIRED and starts nothing.",
+          "Pane refuses a profile it cannot launch: PROFILE_NOT_FOUND (no such profile), PROFILE_TEAM_ONLY (a team with no workflow) or PROFILE_NOT_LAUNCHABLE (invalid, or off); the error's next says what to do.",
+          "A --harness or --agent-harness CLI that Pane doesn't know needs --command <cli>=<command that starts it>; without one the launch fails with PROFILE_CLI_UNKNOWN and starts nothing.",
+          "Follow the run with `runpane profiles runs --json`; its steps are tabs in the run's Pane (`runpane agents status --pane <paneId>`)."
+        ]
+      },
+      "profiles runs": {
+        "name": "profiles runs",
+        "summary": "List profile runs: each run's profile, state and current step.",
+        "details": "Lists every profile run Pane knows: id, profile and profileVersion, sessionId, repoId, paneId, prompt, state (running, asking, paused, ended or failed), step (the current one, or the last once ended), wait (a step's tab, a card, or none), history of finished steps, and error when it failed.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane profiles runs --json"
+        ],
+        "jsonSchemas": [
+          "profileRunsResult"
+        ],
+        "notes": [
+          "A run waits on a step's tab (wait.kind step, with its panelId), a card for the person (wait.kind card), or nothing once it has ended. Read a step's agent with `runpane agents status --panel <panelId>`."
+        ]
+      },
       "notify": {
         "name": "notify",
         "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
@@ -27181,6 +28057,7 @@ export const RUNPANE_CONTRACT = {
       "To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).",
       "",
       "Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.",
+      "Profiles: a profile is a team of agents and a fixed workflow in one file. `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `\"$PANE_RUNPANE_BIN\" report --outcome \"<outcome>\"`, using one of the outcomes its first message lists.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",

@@ -51,7 +51,8 @@ export interface AgentFarmProcess {
 
 /** `agent-farm <args> --config-root <root>` with the bundled copy. */
 export function bundledAgentFarmProcess(bundle: BundledAgentFarm, args: string[], configRoot: string, env: NodeJS.ProcessEnv = process.env, runtime: string = process.execPath): AgentFarmProcess {
-  const { AGENT_FARM_CONFIG_ROOT: _ignored, ...rest } = env;
+  const rest = { ...env };
+  delete rest.AGENT_FARM_CONFIG_ROOT;
   return { executable: runtime, args: [bundle.entry, ...args, '--config-root', configRoot], env: { ...rest, ELECTRON_RUN_AS_NODE: '1' } };
 }
 
@@ -132,7 +133,20 @@ export interface InstallBundledAgentFarmOptions {
  * manifest there records; an unchanged bundle installs nothing. Called at startup without
  * waiting. Never throws: a failure is logged and returned in the status, for the Profiles page.
  */
+let lastStatus: BundledAgentFarmStatus | undefined;
+
+/** The bundled Agent Farm's state since this start; undefined before the installer first ran. */
+export function bundledAgentFarmStatus(): BundledAgentFarmStatus | undefined {
+  return lastStatus;
+}
+
 export async function installBundledAgentFarm(options: InstallBundledAgentFarmOptions): Promise<BundledAgentFarmStatus> {
+  const status = await installOnce(options);
+  lastStatus = status;
+  return status;
+}
+
+async function installOnce(options: InstallBundledAgentFarmOptions): Promise<BundledAgentFarmStatus> {
   let status: BundledAgentFarmStatus;
   const log = options.log ?? ((message: string) => console.log(message));
   const configRoot = agentFarmConfigRoot(options.paneDir);
@@ -164,6 +178,7 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     return status;
   }
   status = { state: 'installing', configRoot, version: bundle.version, plugins: {} };
+  lastStatus = status;
   log(`[AgentFarm] Setting up bundled Agent Farm ${bundle.version} in ${configRoot} (${previous ? `bundle changed from ${previous.agentFarmVersion}` : 'first start'}).`);
   const run = options.run ?? runAgentFarm;
   const plugins: Record<string, string> = {};
