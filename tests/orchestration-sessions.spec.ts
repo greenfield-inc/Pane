@@ -2376,6 +2376,34 @@ test('a saved split without the Overview gains it as the leftmost tab and keeps 
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
 });
 
+test('a Session link lands on its Overview, from another Session and when already open', async ({ page }) => {
+  const sessionId = '__orchestration_session_plansterminal__';
+  const now = new Date(0).toISOString();
+  const planPage = { id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+    { type: 'group', id: 'g1', panelIds: ['__orchestration_panel_plans_claude'], activePanelId: '__orchestration_panel_plans_claude' },
+    { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
+  ] }, focusedGroupId: 'g1' };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now), sessionFixture('other', 'Other work', '', '', now)], [], { initialPanels: [planPage], initialLayout: savedLayout });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-other').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Other work', exact: true })).toBeAttached();
+  const openLink = () => page.evaluate(() => {
+    // SAFETY: installElectronApiMock adds these controls before the app loads.
+    (window as typeof window & { __paneTestElectronMock: { emitPaneOpenLink: (target: { kind: 'session'; sessionId: string }) => void } }).__paneTestElectronMock.emitPaneOpenLink({ kind: 'session', sessionId: 'plans' });
+  });
+  await openLink();
+  await expect(page.getByRole('heading', { level: 1, name: 'Plan demo', exact: true })).toBeAttached();
+  const sideStrip = page.locator('.panel-group-tab-bar').nth(1);
+  await expect.poll(() => tabNames(sideStrip)).toEqual(['Overview', 'plan.html']);
+  await expect(sideStrip.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
+  // Already open on another tab, the link brings the Overview back.
+  await sideStrip.getByRole('tab', { name: 'plan.html' }).click();
+  await expect(sideStrip.getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
+  await openLink();
+  await expect(sideStrip.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
 test('agent-opened pages open as tabs in a split beside the Session conversation', async ({ page }, testInfo) => {
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())]);
   await page.addInitScript(() => {

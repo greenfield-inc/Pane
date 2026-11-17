@@ -41,6 +41,7 @@ import {
   applyPanelReplacements,
   placeCreatedPanel,
   placeLeadingSideTab,
+  sessionOverviewTabId,
   reconcile,
   removePanelFromLayout,
   showPanelInSplit,
@@ -53,11 +54,6 @@ import {
 const EMPTY_PANELS: ToolPanel[] = [];
 const SESSION_INSPECTOR_TABS = ['files', 'changes'] as const;
 type SessionInspectorTab = typeof SESSION_INSPECTOR_TABS[number];
-
-/** The id of a Session's Overview tab, which has no panel record: Pane draws it, so it never closes. */
-function sessionOverviewTabId(sessionId: string): string {
-  return `session-overview:${sessionId}`;
-}
 
 /** The Overview tab as the tab strip sees it: a permanent tab named Overview. */
 function sessionOverviewTab(sessionId: string): ToolPanel {
@@ -75,8 +71,8 @@ function sessionOverviewTab(sessionId: string): ToolPanel {
  * A layout with the Overview tab in it: first in the right split, opening one beside the
  * conversation when there is none. Wherever the person moved it, it stays.
  */
-function withOverviewTab(layout: SessionPanelLayout, overviewId: string): SessionPanelLayout {
-  const root = placeLeadingSideTab(layout.root, overviewId);
+function withOverviewTab(layout: SessionPanelLayout, overviewId: string, chatId: string): SessionPanelLayout {
+  const root = placeLeadingSideTab(layout.root, overviewId, chatId);
   return root === layout.root ? layout : { ...layout, root };
 }
 /** Panels that always live on the Session stage as tabs; Files docks in the inspector. */
@@ -226,7 +222,7 @@ export function SessionWorkspacePanels({
   const agentPanelId = agentPanel.id;
   // With no tab left but the conversation, the layout still holds the Overview beside it.
   const freshLayout = useCallback(
-    () => withOverviewTab(createSingleGroupLayout([agentPanelId], agentPanelId), overviewId),
+    () => withOverviewTab(createSingleGroupLayout([agentPanelId], agentPanelId), overviewId, agentPanelId),
     [agentPanelId, overviewId],
   );
   // The panel events below outlive the render that subscribed them, so they read
@@ -314,7 +310,7 @@ export function SessionWorkspacePanels({
         ? { ...stored, root: applyPanelReplacements(stored.root, live.filter(panel => panel.id !== replaced)) }
         : createSingleGroupLayout([agentPanelId], agentPanelId);
       // The Overview goes first in the right split unless this layout already places it.
-      const withOverview = withOverviewTab(base, overviewId);
+      const withOverview = withOverviewTab(base, overviewId, agentPanelId);
       const storedIds = layoutPanelIds(withOverview);
       const stage = live
         .filter(panel => isStagePanel(panel, agentPanelIdsRef.current, storedIds));
@@ -371,6 +367,11 @@ export function SessionWorkspacePanels({
     const store = usePanelStore.getState();
     store.clearActivationRequest(sessionId);
     const current = store.layouts[sessionId];
+    // A Session link asks for the Overview, which has no panel record.
+    if (current && activationRequest.panelId === overviewId) {
+      applyLayout(activatePanelInLayout(withOverviewTab(current, overviewId, agentPanelId), overviewId));
+      return;
+    }
     const panel = store.panels[sessionId]?.find(saved => saved.id === activationRequest.panelId);
     if (!current || !panel) return;
     if (panel.id !== agentPanelId && !isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) return;
@@ -380,7 +381,7 @@ export function SessionWorkspacePanels({
       ? showPanelInSplit(current.root, panel.id)
       : addPanelToGroup(current.root, focused.id, panel.id);
     applyLayout(activatePanelInLayout({ ...current, root }, panel.id));
-  }, [activationRequest, loaded, sessionId, agentPanelId, applyLayout]);
+  }, [activationRequest, loaded, sessionId, agentPanelId, overviewId, applyLayout]);
 
   async function toggleTool(type: 'terminal' | 'explorer') {
     if (!loaded || creating.current) return;

@@ -226,16 +226,24 @@ export function placePanelInSplit(root: PanelLayoutNode, panelId: string, activa
     : splitGroup(root, primary.id, panelId, 'row', true);
 }
 
+/** The id of a Session's Overview tab, which has no panel record: Pane draws it, so it never closes. */
+export function sessionOverviewTabId(sessionId: string): string {
+  return `session-overview:${sessionId}`;
+}
+
 /**
  * Put a tab first in the right split (the top group of the last column of a side-by-side
  * root), keeping the tab selected there; with no right split, open one beside the primary
- * group showing it. A tab already in the layout stays where the person put it.
+ * group showing it. When the right split holds `besideId` (the conversation, moved right),
+ * open one right of that group instead, so the tab is not hidden behind it.
+ * A tab already in the layout stays where the person put it.
  */
-export function placeLeadingSideTab(root: PanelLayoutNode, panelId: string): PanelLayoutNode {
+export function placeLeadingSideTab(root: PanelLayoutNode, panelId: string, besideId?: string): PanelLayoutNode {
   if (allPanelIds(root).includes(panelId)) return root;
   const right = root.type === 'split' && root.direction === 'row' ? root.children.at(-1) : undefined;
   const side = right ? allGroups(right)[0] : undefined;
   if (!side) return splitGroup(root, primaryGroup(root).id, panelId, 'row', true);
+  if (besideId && side.panelIds.includes(besideId)) return splitGroup(root, side.id, panelId, 'row', true);
   const insert = (node: PanelLayoutNode): PanelLayoutNode => {
     if (node.type !== 'group') return { ...node, children: node.children.map(insert) };
     if (node.id !== side.id) return node;

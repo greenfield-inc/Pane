@@ -443,6 +443,11 @@ describe('placeLeadingSideTab', () => {
     expect(findGroup(root, 'g2')?.panelIds).toEqual(['plan']);
   });
 
+  it('opens a split right of the conversation when the person moved it to the right', () => {
+    const root = placeLeadingSideTab(split('s1', 'row', [group('g1', ['plan']), group('g2', ['agent'])]), 'overview', 'agent');
+    expect(allGroups(root).map(g => [g.panelIds, g.activePanelId])).toEqual([[['plan'], 'plan'], [['agent'], 'agent'], [['overview'], 'overview']]);
+  });
+
   it('leaves the tab where the person put it', () => {
     const root = group('g1', ['agent', 'overview']);
     expect(placeLeadingSideTab(root, 'overview')).toBe(root);

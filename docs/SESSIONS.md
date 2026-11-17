@@ -372,7 +372,8 @@ the right, the **Overview** tab first, before any page, file or browser tab
 opened beside the chat. A Session with no split yet gets one; an existing
 right split gains Overview as its leftmost tab and keeps the tab that was
 selected there. Overview can be dragged like any tab and stays where you put
-it on this computer, but it has no close button. When the Session
+it on this computer, but it has no close button. A `pane://open?session=` link
+opens the Session with Overview selected. When the Session
 folder holds a status page at `session/index.html` (an orchestrator renders it
 there from a status JSON with the `orchestrate-sessions` skill's bundled
 renderer), Overview shows that page under a header with the Session name, Rename,
