@@ -188,6 +188,20 @@ export interface ChatTabPanelProps {
  * composer is rebuilt when the tab or its Pane is shown again, and they go back into it then.
  */
 const draftAttachments = new WeakMap<ChatTabViewer, readonly ComposerAttachment[]>();
+/** The composer each shown chat has now, so another tab (the device tab's Screenshot to chat) can add to its draft. */
+const shownComposers = new Map<ChatTabViewer, { addAttachment(file: File): Promise<void> }>();
+
+/**
+ * Adds `file` to a chat's unsent draft, never sending it: straight into its composer when the chat
+ * is shown, else into its saved draft, which goes back into the composer when the chat shows.
+ */
+export async function addDraftAttachment(client: ChatTabClient, panelId: string, file: File): Promise<void> {
+  const viewer = chatTabViewer(client, panelId);
+  const composer = shownComposers.get(viewer);
+  if (composer) return composer.addAttachment(file);
+  const pending: ComposerAttachment = { id: `added-${Date.now()}`, type: file.type.startsWith('image/') ? 'image' : 'file', name: file.name, contentType: file.type, file, status: { type: 'requires-action', reason: 'composer-send' } };
+  draftAttachments.set(viewer, [...(draftAttachments.get(viewer) ?? []), pending]);
+}
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
 const PASTE_LIMIT = 1024 * 1024;
@@ -386,9 +400,14 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     }
     const run = restore.current;
     run.mounted += 1;
+    shownComposers.set(viewer, composer);
     // Sending empties the composer's attachments, and with them the saved ones.
     const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
-    return () => { run.mounted -= 1; unsubscribe(); };
+    return () => {
+      run.mounted -= 1;
+      unsubscribe();
+      if (shownComposers.get(viewer) === composer) shownComposers.delete(viewer);
+    };
   }, [runtime, viewer]);
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text

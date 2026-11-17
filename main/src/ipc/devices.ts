@@ -2,7 +2,7 @@ import type { IpcMain } from 'electron';
 import os from 'os';
 import path from 'path';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
-import type { DeviceInput, DeviceMac, DeviceOpenMarker, DevicePanelState, DevicePlatform, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
+import type { DeviceCapture, DeviceControls, DeviceDriver, DeviceInput, DeviceLogPage, DeviceMac, DeviceRecording, DeviceOrientation, DevicePosture, DeviceOpenMarker, DevicePanelState, DevicePlatform, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
 import type { MachineConnections } from '../services/machineConnections';
 import { DEFAULT_DEVICE_SETTINGS } from '../../../shared/types/devices';
 import type { ToolPanel } from '../../../shared/types/panels';
@@ -14,6 +14,11 @@ import { DeviceBusyError, DeviceService, type DeviceCaller, type DeviceChange } 
 import { findExecutableInPath } from '../utils/shellPath';
 import { DeviceInputSockets, inputMessages } from '../services/devices/deviceInput';
 import { StreamFrameRates, sizeStream, streamSize } from '../services/devices/deviceStream';
+import { EmulatorLogs, simulatorLogs } from '../services/devices/deviceLogs';
+import { terminalPanelManager } from '../services/terminalPanelManager';
+import { bracketedPaste, normalizePromptNewlines, stripTrailingNewlines } from '../services/agents/promptDelivery';
+import { agentLabel } from '../../../shared/agents';
+import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { refuseRetarget } from '../services/devices/deviceHelpers';
 import { MacUnavailableError, RemoteDevices } from '../services/devices/remoteDevices';
 import { registerMacDeviceHandler, remotePaneName } from './macDevices';
@@ -32,12 +37,28 @@ const targetSchema = boundary.object({ platform: platformField });
 const actSchema = boundary.object({ args: boundary.array(boundary.string), platform: platformField });
 const runSchema = boundary.object({ command: boundary.optional(boundary.string), background: boundary.optional(boundary.boolean), waitMs: boundary.optional(boundary.number), platform: platformField });
 const freeSchema = boundary.object({ mode: boundary.enumeration('idle', 'all') });
+const orientationSchema = boundary.enumeration('portrait', 'landscape_left', 'portrait_upside_down', 'landscape_right');
 const inputSchema = boundary.union(
   boundary.object({ kind: boundary.literal('touch'), phase: boundary.enumeration('begin', 'move', 'end'), x: boundary.number, y: boundary.number }),
   boundary.object({ kind: boundary.literal('button'), button: boundary.enumeration('home', 'back') }),
+  boundary.object({ kind: boundary.literal('rotate'), orientation: orientationSchema }),
+  boundary.object({ kind: boundary.literal('fold'), posture: boundary.enumeration('closed', 'half', 'open') }),
+  boundary.object({ kind: boundary.literal('scroll'), x: boundary.number, y: boundary.number, dx: boundary.number, dy: boundary.number }),
+  boundary.object({ kind: boundary.literal('key'), key: boundary.string }),
 );
+/** The hub's screen config for a simulator (GET …/config): only the fields the tab's controls read. */
+const simConfigSchema = boundary.object({
+  orientation: boundary.optional(boundary.string),
+  supportsHingeAngle: boundary.optional(boundary.boolean),
+  hingePose: boundary.optional(boundary.nullable(boundary.string)),
+  hingeAngle: boundary.optional(boundary.nullable(boundary.number)),
+});
+const emuFoldSchema = boundary.object({ fold: boundary.optional(boundary.object({ supported: boundary.boolean, posture: boundary.optional(boundary.nullable(boundary.string)), hingeAngle: boundary.optional(boundary.nullable(boundary.number)) })) });
+/** serve-emu's GET /api/orientation: `pose` names the turn when it is locked; free rotation has none. */
+const emuOrientationSchema = boundary.object({ orientation: boundary.optional(boundary.object({ pose: boundary.optional(boundary.nullable(boundary.string)) })) });
 const inputSockets = new DeviceInputSockets();
 const frameRates = new StreamFrameRates();
+const emulatorLogs = new EmulatorLogs();
 
 /** How device tabs and results name this machine. */
 function localMachineLabel(): string {
@@ -174,6 +195,10 @@ const panelStateSchema = boundary.object({
   heldBy: boundary.optional(holderSchema),
   macName: boundary.optional(boundary.string),
   openedBy: boundary.optional(boundary.string),
+  driver: boundary.optional(boundary.union(
+    boundary.object({ by: boundary.literal('agent'), agent: boundary.string }),
+    boundary.object({ by: boundary.literal('person'), agentWaiting: boundary.optional(boundary.string) }),
+  )),
 });
 
 /** A device tab's state, or undefined for any other tab. */
@@ -279,6 +304,62 @@ async function openOnMac(services: AppServices, caller: DeviceCaller, device: st
   }
 }
 
+/** How long an agent's device_act waits for the person to hand the device back before it gives up. */
+const PERSON_WAIT_MS = 10 * 60_000;
+const PERSON_POLL_MS = 500;
+/** The driver chip stays this long after an agent's last call, so a run of calls reads as one. */
+const AGENT_DRIVE_LINGER_MS = 2_000;
+const agentDriveTimers = new Map<string, NodeJS.Timeout>();
+
+/** The device tab of `paneId` for `platform`, or for the platform it opened last. */
+function deviceTabOf(paneId: string, platform: DevicePlatform | undefined): ToolPanel | undefined {
+  const wanted = platform ?? lastPlatform.get(paneId);
+  return devicePanels(paneId).find(panel => wanted === undefined || panelState(panel)?.platform === wanted);
+}
+
+/** The agent in the tab that called a device tool, by its configured name ("Claude Code"). */
+function callerAgent(caller: DeviceCaller): string {
+  const panel = caller.panelId ? panelManager.getPanel(caller.panelId) : undefined;
+  const custom = decodeOptionalBoundary(panel?.state.customState, boundary.object({ agent: boundary.optional(boundary.string), agentType: boundary.optional(boundary.string) }));
+  const id = custom?.agent ?? custom?.agentType;
+  return id ? agentLabel(id) : 'The agent';
+}
+
+function driverOf(panelId: string): DeviceDriver | undefined {
+  const panel = panelManager.getPanel(panelId);
+  return panel ? panelState(panel)?.driver : undefined;
+}
+
+/**
+ * Runs an agent's device call as the driver: while the person has taken over, it waits until they
+ * hand the device back (D-100); then the tab shows the agent driving until shortly after the call.
+ */
+async function driving<Result>(caller: DeviceCaller, platform: DevicePlatform | undefined, work: () => Promise<Result>): Promise<Result> {
+  const tab = deviceTabOf(caller.paneId, platform);
+  if (!tab) return work();
+  const agent = callerAgent(caller);
+  const deadline = Date.now() + PERSON_WAIT_MS;
+  while (driverOf(tab.id)?.by === 'person') {
+    if (Date.now() > deadline) {
+      await setPanelState(tab, { driver: { by: 'person' } });
+      throw new PaneError('ERR_DEVICE_PERSON_DRIVING', `The person took over this device in its tab and has not handed it back in ${PERSON_WAIT_MS / 60_000} minutes. Nothing ran.`, 'Ask them to press Hand to agent in the device tab, then try again.');
+    }
+    const driver = driverOf(tab.id);
+    if (driver?.by === 'person' && driver.agentWaiting !== agent) await setPanelState(tab, { driver: { by: 'person', agentWaiting: agent } });
+    await new Promise(resolve => setTimeout(resolve, PERSON_POLL_MS));
+  }
+  clearTimeout(agentDriveTimers.get(tab.id));
+  if (driverOf(tab.id)?.by !== 'agent') await setPanelState(tab, { driver: { by: 'agent', agent } });
+  try {
+    return await work();
+  } finally {
+    agentDriveTimers.set(tab.id, setTimeout(() => {
+      agentDriveTimers.delete(tab.id);
+      if (driverOf(tab.id)?.by === 'agent') void setPanelState(tab, { driver: undefined });
+    }, AGENT_DRIVE_LINGER_MS));
+  }
+}
+
 export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   appServices = services;
   const devices = () => deviceService(services);
@@ -333,7 +414,7 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
     const caller = deviceCaller(services);
     const { args, platform } = decode(request, actSchema, 'devices act');
     refuseRetarget(args);
-    return { ok: true, ...(onMac(caller.paneId, platform) ? await remoteDevices(services).act(caller.paneId, args) : await devices().act(caller, args, platform)) };
+    return driving(caller, platform, async () => ({ ok: true, ...(onMac(caller.paneId, platform) ? await remoteDevices(services).act(caller.paneId, args) : await devices().act(caller, args, platform)) }));
   });
 
   commandRegistry.register('runpane:devices:run', async (request: PaneCommandValue) => {
@@ -431,6 +512,26 @@ async function emulatorInput(service: DeviceService, deviceId: string, input: De
     await service.emulatorCall(deviceId, 'key', { key: input.button });
     return;
   }
+  if (input.kind === 'rotate') {
+    await service.emulatorCall(deviceId, 'orientation', { orientation: input.orientation });
+    return;
+  }
+  if (input.kind === 'fold') {
+    await service.emulatorCall(deviceId, 'fold', input.posture === 'half' ? { hingeAngle: 90 } : { posture: input.posture === 'open' ? 'opened' : 'closed' });
+    return;
+  }
+  if (input.kind === 'key') {
+    // An emulator types text; Enter and Backspace have no key route there, so they are typed as text too.
+    const text = input.key === 'Enter' ? '\n' : input.key.length === 1 ? input.key : undefined;
+    if (text !== undefined) await service.emulatorCall(deviceId, 'text', { text });
+    return;
+  }
+  if (input.kind === 'scroll') {
+    // An emulator scrolls by a swipe the other way, from the pointer.
+    const to = (from: number, delta: number) => Math.min(1, Math.max(0, from - delta));
+    await service.emulatorCall(deviceId, 'swipe', { x1: input.x, y1: input.y, x2: to(input.x, input.dx), y2: to(input.y, input.dy) });
+    return;
+  }
   if (input.phase === 'begin') {
     touchStarts.set(deviceId, { x: input.x, y: input.y });
     return;
@@ -440,6 +541,14 @@ async function emulatorInput(service: DeviceService, deviceId: string, input: De
   touchStarts.delete(deviceId);
   if (Math.hypot(input.x - start.x, input.y - start.y) < TAP_SLOP) await service.emulatorCall(deviceId, 'tap', { x: input.x, y: input.y });
   else await service.emulatorCall(deviceId, 'swipe', { x1: start.x, y1: start.y, x2: input.x, y2: input.y });
+}
+
+function orientationOf(value: string | undefined): DeviceOrientation | undefined {
+  return value === 'portrait' || value === 'landscape_left' || value === 'portrait_upside_down' || value === 'landscape_right' ? value : undefined;
+}
+
+function withPosture(posture: DevicePosture | undefined): NonNullable<DeviceControls['fold']> {
+  return posture ? { posture } : {};
 }
 
 /** A frame as a data URL: PNG from an emulator, JPEG from a simulator's stream. */
@@ -503,6 +612,119 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     if (!state.deviceId) throw new PaneError('ERR_DEVICE_NOT_OPEN', 'This tab has no device yet.', 'Wait for it to boot.');
     const frame = state.machineId ? await remoteDevices(services).frame(panel.sessionId) : await devices().latestFrame(state.deviceId);
     return imageDataUrl(frame);
+  }));
+
+  /** What the device can do now (turn, fold) and how it is turned and folded, for the tab's controls. */
+  commandRegistry.register('devices:controls', (panelId: PaneCommandValue) => respond(async (): Promise<DeviceControls> => {
+    const { panel, state } = panelOf(panelId);
+    const deviceId = state.deviceId;
+    if (!deviceId || state.phase !== 'live') return {};
+    if (state.platform === 'android' && !state.machineId) {
+      const [fold, orientation] = await Promise.all([
+        devices().emulatorCall(deviceId, 'fold').then(async response => decodeOptionalBoundary(await response.json(), emuFoldSchema)),
+        devices().emulatorCall(deviceId, 'orientation').then(async response => decodeOptionalBoundary(await response.json(), emuOrientationSchema)),
+      ]);
+      const controls: DeviceControls = {};
+      controls.orientation = orientationOf(orientation?.orientation?.pose ?? undefined) ?? 'portrait';
+      if (fold?.fold?.supported) controls.fold = withPosture(fold.fold.posture === 'closed' ? 'closed' : fold.fold.posture === 'half_opened' ? 'half' : fold.fold.posture === 'opened' ? 'open' : undefined);
+      return controls;
+    }
+    const info = state.machineId ? await remoteDevices(services).stream(panel.sessionId) : await devices().stream(deviceId);
+    const response = await fetch(info.streamUrl.replace(/\/stream\.mjpeg$/, '/config'), { headers: { Authorization: `Bearer ${info.token}` }, signal: AbortSignal.timeout(5_000) });
+    if (!response.ok) return {};
+    const config = decodeOptionalBoundary(await response.json(), simConfigSchema);
+    const controls: DeviceControls = {};
+    const turned = orientationOf(config?.orientation);
+    if (turned) controls.orientation = turned;
+    if (config?.supportsHingeAngle) {
+      const pose = config.hingePose;
+      controls.fold = withPosture(pose === 'closed' ? 'closed' : pose === 'open' ? 'open' : pose ? 'half' : undefined);
+    }
+    return controls;
+  }));
+
+  /**
+   * A full-resolution screenshot for Copy, Save, Mark up and Screenshot to chat, saved as a PNG on
+   * the host. Given `image` (a marked-up screenshot as a PNG data URL), it saves that instead.
+   */
+  commandRegistry.register('devices:capture', (panelId: PaneCommandValue, image: PaneCommandValue) => respond(async (): Promise<DeviceCapture> => {
+    const { panel, state } = panelOf(panelId);
+    const drawn = decodeOptionalBoundary(image, boundary.string);
+    if (drawn !== undefined) {
+      const png = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(drawn)?.[1];
+      if (!png) throw new PaneError('ERR_DEVICE_INVALID_REQUEST', 'The marked-up screenshot is not a PNG, so nothing was saved.', 'Mark it up again.');
+      const folder = path.join(getAppDirectory(), 'devices', 'screenshots');
+      mkdirSync(folder, { recursive: true });
+      const file = path.join(folder, `${panel.sessionId}-${Date.now()}-marked.png`);
+      writeFileSync(file, Buffer.from(png, 'base64'));
+      return { path: file, dataUrl: drawn };
+    }
+    if (!state.deviceId || state.phase !== 'live') throw new PaneError('ERR_DEVICE_OFF', 'The device is not running, so there is no screen to capture.', 'Boot it from the device tab.');
+    const caller = { paneId: panel.sessionId, paneName: paneNameOf(services, panel.sessionId) };
+    const shot = state.machineId ? await remoteDevices(services).screenshot(caller.paneId) : await devices().screenshot(caller, state.platform);
+    return { path: shot.path, dataUrl: `data:image/png;base64,${readFileSync(shot.path).toString('base64')}` };
+  }));
+
+  /**
+   * Types `text` at the prompt of a terminal agent tab in the device tab's Pane, unsent: a
+   * screenshot's path, a recording's path or log lines. Newlines stay text inside one bracketed paste.
+   */
+  commandRegistry.register('devices:stage', (panelId: PaneCommandValue, targetPanelId: PaneCommandValue, text: PaneCommandValue) => respond(() => {
+    const { panel } = panelOf(panelId);
+    const targetId = decodeOptionalBoundary(targetPanelId, boundary.string);
+    const content = decodeOptionalBoundary(text, boundary.string);
+    const target = targetId ? panelManager.getPanel(targetId) : undefined;
+    if (!target || target.sessionId !== panel.sessionId || target.type !== 'terminal' || content === undefined) {
+      throw new PaneError('ERR_DEVICE_STAGE_TARGET', 'That agent tab is gone from this Pane, so nothing was typed.', 'Open the agent tab again, then try once more.');
+    }
+    const staged = stripTrailingNewlines(normalizePromptNewlines(content));
+    terminalPanelManager.writeToTerminal(target.id, terminalPanelManager.isBracketedPasteEnabled(target.id) ? bracketedPaste(staged) : staged.replace(/\n+/gu, ' '));
+    return true;
+  }));
+
+  /** Starts a screen recording, or stops it and returns the MP4 (beside screenshots on the host, or on the linked Mac). */
+  commandRegistry.register('devices:record', (panelId: PaneCommandValue, action: PaneCommandValue) => respond(async (): Promise<DeviceRecording | null> => {
+    const { panel, state } = panelOf(panelId);
+    if (!state.deviceId || state.phase !== 'live') throw new PaneError('ERR_DEVICE_OFF', 'The device is not running, so there is nothing to record.', 'Boot it from the device tab.');
+    const caller = { paneId: panel.sessionId, paneName: paneNameOf(services, panel.sessionId) };
+    const act = (args: string[]) => state.machineId ? remoteDevices(services).act(caller.paneId, args) : devices().act(caller, args, state.platform);
+    if (action === 'start') {
+      const args = ['record', 'start'];
+      if (!state.machineId) {
+        const folder = path.join(getAppDirectory(), 'devices', 'recordings');
+        mkdirSync(folder, { recursive: true });
+        args.push(path.join(folder, `${caller.paneId}-${Date.now()}.mp4`));
+      }
+      const started = await act([...args, '--scope', 'device', '--hide-touches']);
+      if (started.exitCode !== 0) throw new PaneError('ERR_DEVICE_RECORD', `The recording did not start: ${started.output.split('\n').pop() ?? 'agent-device failed'}.`, 'Try again; if an agent is recording this device, wait for it to stop.');
+      return null;
+    }
+    const stopped = await act(['record', 'stop', '--json']);
+    const file = /"(?:path|outPath|output)"\s*:\s*"([^"]+\.mp4)"/.exec(stopped.output)?.[1] ?? /(\S+\.mp4)/.exec(stopped.output)?.[1];
+    if (stopped.exitCode !== 0 || !file) throw new PaneError('ERR_DEVICE_RECORD', `The recording did not save: ${stopped.output.split('\n').pop() ?? 'agent-device failed'}.`, 'Try recording again.');
+    const recording: DeviceRecording = { path: file };
+    if (state.machineId) recording.machine = state.machine;
+    return recording;
+  }));
+
+  /** The device's app log after `since`, for the tab's Logs view. */
+  commandRegistry.register('devices:logs', (panelId: PaneCommandValue, since: PaneCommandValue) => respond(async (): Promise<DeviceLogPage> => {
+    const { panel, state } = panelOf(panelId);
+    const deviceId = state.deviceId;
+    const after = decodeOptionalBoundary(since, boundary.number) ?? 0;
+    if (!deviceId || state.phase !== 'live') return { lines: [], next: after, problem: 'The device is not running.' };
+    const info = state.machineId ? await remoteDevices(services).stream(panel.sessionId) : await devices().stream(deviceId);
+    if (state.platform === 'ios') return simulatorLogs(info, deviceId, after);
+    const serial = /\/serve-emu\/([^/]+)\//.exec(info.streamUrl)?.[1] ?? deviceId;
+    const base = info.streamUrl.slice(0, info.streamUrl.indexOf('/vendor/'));
+    return emulatorLogs.page(serial, after, signal => fetch(`${base}/vendor/serve-emu/api/logcat?device=${serial}`, { signal, headers: { Authorization: `Bearer ${info.token}`, Accept: 'text/event-stream' } }));
+  }));
+
+  /** Take over (the person drives; the agent's device calls wait) and Hand to agent. */
+  commandRegistry.register('devices:driver', (panelId: PaneCommandValue, who: PaneCommandValue) => respond(async () => {
+    const { panel } = panelOf(panelId);
+    await setPanelState(panel, { driver: who === 'person' ? { by: 'person' } : undefined });
+    return true;
   }));
 
   /** The frames per second the tab's stream delivers now, for its readout; null when it streams nothing through main. */
@@ -579,6 +801,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
 
 export async function disposeDevices(): Promise<void> {
   inputSockets.closeAll();
+  emulatorLogs.stopAll();
   await remote?.dispose();
   await service?.dispose();
 }

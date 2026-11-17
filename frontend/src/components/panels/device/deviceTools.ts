@@ -1,0 +1,143 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { agentLabel } from '../../../../../shared/agents';
+import { boundary, decodeOptionalBoundary } from '../../../../../shared/validation/boundaryDecoder';
+import type { DeviceCapture, DeviceLogLine, DeviceRecording } from '../../../../../shared/types/devices';
+import type { ToolPanel } from '../../../../../shared/types/panels';
+import type { DeviceTabClient } from './deviceClient';
+
+/** The agent tab in the device tab's Pane that screenshots, recordings and log lines go to. */
+export interface AgentTab {
+  id: string;
+  kind: 'chat' | 'terminal';
+  /** Its agent's name, such as "Claude Code". */
+  agent: string;
+}
+
+const agentStateSchema = boundary.object({ agent: boundary.optional(boundary.string), agentType: boundary.optional(boundary.string) });
+
+function asAgentTab(panel: ToolPanel): AgentTab | undefined {
+  const custom = decodeOptionalBoundary(panel.state.customState, agentStateSchema);
+  if (panel.type === 'chat' && custom?.agent) return { id: panel.id, kind: 'chat', agent: agentLabel(custom.agent) };
+  if (panel.type === 'terminal' && custom?.agentType) return { id: panel.id, kind: 'terminal', agent: agentLabel(custom.agentType) };
+  return undefined;
+}
+
+/** The tab whose agent opened the device; else the Pane's newest chat or agent terminal. */
+export function agentTabOf(panels: readonly ToolPanel[], openedBy: string | undefined): AgentTab | undefined {
+  const opener = panels.find(panel => panel.id === openedBy);
+  const tab = opener && asAgentTab(opener);
+  if (tab) return tab;
+  for (let index = panels.length - 1; index >= 0; index--) {
+    const candidate = asAgentTab(panels[index]);
+    if (candidate) return candidate;
+  }
+  return undefined;
+}
+
+async function dataUrlFile(dataUrl: string, name: string): Promise<File> {
+  const blob = await (await fetch(dataUrl)).blob();
+  return new File([blob], name, { type: blob.type });
+}
+
+/** A file name for a capture of `device` now, such as "iPhone 17 Pro 19.04.12.png". */
+export function captureName(device: string, extension: string): string {
+  const time = new Date().toTimeString().slice(0, 8).replaceAll(':', '.');
+  return `${device} ${time}.${extension}`;
+}
+
+/**
+ * Puts a screenshot in front of the agent, unsent: a chat tab gets it in its composer; a terminal
+ * agent gets the PNG's path typed at its prompt.
+ */
+export async function deliverCapture(client: DeviceTabClient, devicePanelId: string, target: AgentTab, capture: DeviceCapture, name: string): Promise<void> {
+  if (target.kind === 'chat') await client.attachToChat(target.id, await dataUrlFile(capture.dataUrl, name));
+  else await client.stage(devicePanelId, target.id, `${capture.path} `);
+}
+
+/** Puts text (log lines) in front of the agent, unsent: a chat gets a text file; a terminal agent gets the text at its prompt. */
+export async function deliverText(client: DeviceTabClient, devicePanelId: string, target: AgentTab, text: string, name: string): Promise<void> {
+  if (target.kind === 'chat') await client.attachToChat(target.id, new File([text], name, { type: 'text/plain' }));
+  else await client.stage(devicePanelId, target.id, text);
+}
+
+export async function copyImage(dataUrl: string): Promise<void> {
+  const blob = await (await fetch(dataUrl)).blob();
+  await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+}
+
+export function saveImage(dataUrl: string, name: string): void {
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = name;
+  link.click();
+}
+
+/** A recording in progress: when it started, and the seconds since, ticking each second. */
+export function useRecording(client: DeviceTabClient, panelId: string) {
+  const [startedAt, setStartedAt] = useState<number>();
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (startedAt === undefined) return;
+    const tick = () => setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [startedAt]);
+  const start = useCallback(async () => {
+    await client.record(panelId, 'start');
+    setElapsed(0);
+    setStartedAt(Date.now());
+  }, [client, panelId]);
+  const stop = useCallback(async (): Promise<DeviceRecording> => {
+    try {
+      const recording = await client.record(panelId, 'stop');
+      if (!recording) throw new Error('The recording did not save.');
+      return recording;
+    } finally {
+      setStartedAt(undefined);
+    }
+  }, [client, panelId]);
+  return { recording: startedAt !== undefined, elapsed, start, stop };
+}
+
+export function clock(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+const LOG_POLL_MS = 1_000;
+const LOG_KEEP = 5_000;
+
+/** The device's log lines while `open`, read every second from where the last read ended. */
+export function useDeviceLogs(client: DeviceTabClient, panelId: string, open: boolean): { lines: DeviceLogLine[]; problem?: string } {
+  const [lines, setLines] = useState<DeviceLogLine[]>([]);
+  const [problem, setProblem] = useState<string>();
+  const next = useRef(0);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const read = async () => {
+      const page = await client.logs(panelId, next.current).catch((cause: unknown) => ({ lines: [], next: next.current, problem: cause instanceof Error ? cause.message : 'Pane could not read the log.' }));
+      if (cancelled) return;
+      next.current = page.next;
+      setProblem(page.problem);
+      if (page.lines.length > 0) setLines(current => [...current, ...page.lines].slice(-LOG_KEEP));
+      timer = window.setTimeout(() => { void read(); }, LOG_POLL_MS);
+    };
+    void read();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [client, panelId, open]);
+  return problem === undefined ? { lines } : { lines, problem };
+}
+
+/** The last capture, shown in a card beside the phone with what happened to it and Copy, Save and Mark up. */
+export interface CaptureNotice {
+  capture: DeviceCapture;
+  name: string;
+  /** What happened, such as "Added to chat". */
+  title: string;
+}
+

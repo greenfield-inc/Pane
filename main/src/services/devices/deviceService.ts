@@ -416,8 +416,8 @@ export class DeviceService {
     throw new PaneError('ERR_DEVICE_OFF', 'This device is shut down and Pane has no earlier frame of it.', 'Boot it from the device tab.');
   }
 
-  /** An Android emulator's REST call on the hub (serve-emu), after selecting that emulator. */
-  async emulatorCall(id: string, route: 'screenshot' | 'tap' | 'swipe' | 'key', body: EmulatorRequest): Promise<Response> {
+  /** An Android emulator's REST call on the hub (serve-emu), after selecting that emulator; a GET when `body` is undefined. */
+  async emulatorCall(id: string, route: 'screenshot' | 'tap' | 'swipe' | 'key' | 'text' | 'orientation' | 'fold', body?: EmulatorRequest): Promise<Response> {
     const hub = await this.ensureHub();
     const device = (await this.devices()).find(candidate => candidate.id === id && candidate.platform === 'android');
     if (!device?.serial) throw new PaneError('ERR_DEVICE_OFF', 'That emulator is not running.', 'Boot it from the device tab or with device_open.');
@@ -425,7 +425,7 @@ export class DeviceService {
       await hub.post('/vendor/serve-emu/api/devices/select', { serial: device.serial });
       this.selectedEmulator = device.serial;
     }
-    return hub.post(`/vendor/serve-emu/api/${route}`, body);
+    return body === undefined ? hub.request(`/vendor/serve-emu/api/${route}`) : hub.post(`/vendor/serve-emu/api/${route}`, body);
   }
 
   /** One frame of the device's screen: JPEG from an iOS simulator's MJPEG stream, PNG from an emulator. */
@@ -934,7 +934,16 @@ export class DeviceService {
 }
 
 /** serve-emu's REST bodies: a normalized tap or swipe, a key, or nothing for a screenshot. */
-export type EmulatorRequest = { x: number; y: number } | { x1: number; y1: number; x2: number; y2: number } | { key: 'home' | 'back' } | Record<string, never>;
+/** A body for serve-emu's REST routes: a tap or swipe, a key, typed text, a turn, a fold, or nothing. */
+export type EmulatorRequest =
+  | { x: number; y: number }
+  | { x1: number; y1: number; x2: number; y2: number }
+  | { key: 'home' | 'back' }
+  | { text: string }
+  | { orientation: string }
+  | { posture: 'closed' | 'opened' }
+  | { hingeAngle: number }
+  | Record<string, never>;
 
 export interface DeviceScreenshot { path: string; width?: number; height?: number }
 

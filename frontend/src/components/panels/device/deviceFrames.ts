@@ -27,13 +27,3 @@ export function useDeviceFrames(client: DeviceTabClient, panelId: string, everyM
   }, [client, panelId, everyMs]);
   return frame;
 }
-
-/** A JPEG data URL as a PNG blob, for the clipboard. */
-export async function jpegToPng(dataUrl: string): Promise<Blob> {
-  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
-  const canvas = document.createElement('canvas');
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
-  return new Promise((resolve, reject) => canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('The screen could not be encoded'))), 'image/png'));
-}

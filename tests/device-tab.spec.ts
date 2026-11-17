@@ -78,6 +78,97 @@ test('turning the device mid-session reshapes the phone to landscape', async ({ 
   await expect(page.getByTestId('device-turn-mask')).toHaveClass(/opacity-0/);
 });
 
+test('Screenshot to chat adds the image to the chat composer, unsent, and offers Copy, Save and Mark up', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, 'view=pane');
+  await page.getByRole('button', { name: 'Screenshot to chat' }).click();
+  await expect(page.getByTestId('device-capture-card')).toContainText('Added to chat');
+  expect(await page.evaluate(() => window.qaAttached)).toEqual([expect.stringMatching(/^chat:iPhone 17 Pro .*\.png$/)]);
+  await shoot(page, 'device-tab-screenshot-light');
+  await page.getByTestId('device-capture-card').getByRole('button', { name: 'Mark up' }).click();
+  const canvas = page.getByTestId('device-markup-canvas');
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('No canvas');
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.3);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.4, { steps: 8 });
+  await page.mouse.up();
+  await shoot(page, 'device-tab-markup-light');
+  await page.getByTestId('device-markup').getByRole('button', { name: 'Send to chat' }).click();
+  await expect.poll(() => page.evaluate(() => window.qaAttached.length)).toBe(2);
+});
+
+test('for a terminal agent, Screenshot to chat types the PNG path at its prompt without sending', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, 'view=pane&agent=terminal');
+  await page.getByRole('button', { name: 'Screenshot to chat' }).click();
+  await expect(page.getByTestId('device-capture-card')).toContainText("prompt");
+  expect(await page.evaluate(() => window.qaStaged)).toEqual(['agent:/tmp/pane/devices/screenshots/pane-1.png ']);
+});
+
+test('the rail turns the device, folds a foldable, and records with a running time', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, 'view=pane&fold=1');
+  await expect(page.getByRole('button', { name: 'Half open' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Rotate' }).click();
+  await page.getByRole('button', { name: 'Closed' }).click();
+  await expect.poll(() => page.evaluate(() => window.qaInputs)).toEqual([{ kind: 'rotate', orientation: 'landscape_left' }, { kind: 'fold', posture: 'closed' }]);
+  await page.getByRole('button', { name: 'Record' }).click();
+  await expect(page.getByTestId('device-recording')).toHaveText('0:00');
+  await expect(page.getByTestId('device-recording')).toHaveText('0:01', { timeout: 3000 });
+  await shoot(page, 'device-tab-foldable-recording-light');
+  await page.getByRole('button', { name: /Stop recording/ }).click();
+  await expect(page.getByText(/Recording saved/)).toContainText('pane-1.mp4');
+});
+
+test('a phone with no fold shows no fold buttons', async ({ page }) => {
+  await open(page, 'view=pane');
+  await expect(page.getByRole('button', { name: 'Rotate' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Half open' })).toHaveCount(0);
+});
+
+test('Logs shows the app log, filters it, and sends the matching lines to chat', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, 'view=pane');
+  await page.getByRole('button', { name: 'Logs' }).click();
+  await expect(page.getByTestId('device-log-line')).toHaveCount(3);
+  await page.getByTestId('device-logs-filter').fill('cache');
+  await expect(page.getByTestId('device-log-line')).toHaveCount(1);
+  for (const theme of ['light', 'dark']) {
+    if (theme === 'dark') {
+      await open(page, 'view=pane&theme=dark&fold=1&driver=agent');
+      await page.getByRole('button', { name: 'Logs' }).click();
+      await expect(page.getByTestId('device-log-line')).toHaveCount(3);
+    }
+    await shoot(page, `device-tab-logs-${theme}`);
+  }
+  await page.getByTestId('device-logs').getByRole('button', { name: 'To chat' }).click();
+  await expect.poll(() => page.evaluate(() => window.qaAttached)).toEqual([expect.stringMatching(/^chat:.*log.*\.txt$/)]);
+});
+
+test('while the agent drives, the chip names it and Take over hands the device to the person', async ({ page }) => {
+  await open(page, 'view=pane&driver=agent');
+  await expect(page.getByTestId('device-driver')).toContainText('is driving');
+  await page.getByTestId('device-driver').getByRole('button', { name: 'Take over' }).click();
+  await open(page, 'view=pane&driver=person');
+  await expect(page.getByTestId('device-driver')).toContainText("You're driving");
+  await page.getByTestId('device-driver').getByRole('button', { name: /Hand to/ }).click();
+  await expect.poll(() => page.evaluate(() => window.qaPower)).toEqual(['driver:agent']);
+});
+
+test('at phone width the rail lies under the phone as a bar', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const theme of ['light', 'dark']) {
+    await open(page, `view=phone&driver=person${theme === 'dark' ? '&theme=dark' : ''}`);
+    const rail = await page.getByTestId('device-rail').boundingBox();
+    const screen = await page.getByTestId('device-screen').boundingBox();
+    if (!rail || !screen) throw new Error('No rail or screen');
+    expect(rail.width).toBeGreaterThan(rail.height);
+    expect(rail.y).toBeGreaterThan(screen.y + screen.height);
+    await shoot(page, `device-tab-phone-${theme}`);
+  }
+});
+
 test('a chat shows the device it opened as a live card that opens the device tab', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   for (const theme of ['light', 'dark']) {
