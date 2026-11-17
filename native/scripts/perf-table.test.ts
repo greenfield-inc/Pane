@@ -1,28 +1,31 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatTable, scenarioMetrics } from './perf-table.mjs';
+import { formatTable, runCountMismatches, scenarioMetrics } from './perf-table.mjs';
 
-// Two returns to a Session's terminal tab, as the simulator log stream prints them.
+// Two returns to a Pane's terminal tab, as the simulator log stream prints them.
 const log = `
 2026-11-16 16:40:01.000 Pane[123:456] [javascript] [perf] return start 0
 2026-11-16 16:40:01.020 Pane[123:456] [javascript] [perf] return first-frame 18
-[perf] return send=runpane:workspace:state@abc123 20
-[perf] return send=terminal:getState@abc123 22
-[perf] return stream-request@abc123 25
-[perf] return send=mobile:push-status@ffff00 30
-[perf] return read=runpane:workspace:state@abc123 310
-[perf] return stream-open@abc123 900
+[perf] return send=runpane:workspace:state#a1b2@k9x0 20
+[perf] return send=terminal:getState#c3d4@k9x0 22
+[perf] return stream-request@k9x0 25
+[perf] return write=mobile:push-status@zz11 30
+[perf] return write=terminal:setVisibility@k9x0 31
+[perf] return read=runpane:workspace:state#a1b2@k9x0 310
+[perf] return stream-open@k9x0 900
 [perf] return status=restoring 1210
-[perf] return send=runpane:workspace:state@abc123 1215
-[perf] return send=terminal:getState@abc123 1300
+[perf] return send=runpane:workspace:state#a1b2@k9x0 1215
+[perf] return send=panels:list#e5f6@k9x0 1216
+[perf] return send=panels:list#0000@k9x0 1217
+[perf] return send=terminal:getState#c3d4@k9x0 1300
 [perf] return terminal-screen 1700
 [perf] return status=connected 1900
 [perf] return terminal-live 1950
 [perf] app stall 140
 [perf] return start 0
 [perf] return first-frame 16
-[perf] return stream-open@abc123 700
-[perf] return send=terminal:getState@abc123 710
+[perf] return stream-open@k9x0 700
+[perf] return send=terminal:getState#c3d4@k9x0 710
 [perf] return terminal-screen 1100
 [perf] return terminal-live 1000
 [perf] return status=connected 990
@@ -39,15 +42,23 @@ describe('scenarioMetrics', () => {
     expect(metrics['return: terminal live']).toEqual([1950, 1100]);
   });
 
-  it('counts reads to the machine the stream goes to, and the ones sent twice', () => {
-    expect(metrics['return: reads sent']).toEqual([4, 1]);
+  it('counts reads to the machine the stream goes to, a read again only with the same arguments, and writes apart', () => {
+    expect(metrics['return: reads sent']).toEqual([6, 1]);
     expect(metrics['return: reads sent again']).toEqual([2, 0]);
+    expect(metrics['return: writes sent']).toEqual([1, 0]);
     expect(metrics['return: terminal handshakes']).toEqual([2, 1]);
   });
 
   it('collects stalls across the log', () => {
     expect(metrics['stalls over 100 ms']).toEqual([2]);
     expect(metrics['longest stall']).toEqual([260]);
+  });
+});
+
+describe('runCountMismatches', () => {
+  it('names each journey that ran a different number of times than asked', () => {
+    expect(runCountMismatches(log, 2)).toEqual([]);
+    expect(runCountMismatches(log, 5)).toEqual(['return: 2']);
   });
 });
 

@@ -5,10 +5,11 @@
 #   journeys.sh <out-dir> [scenario ...]     # default: every scenario
 #
 # Needs Maestro on PATH (navigation answers iOS's link prompt).
+# Starts by resetting the hosts to their seeded snapshot (hosts.sh reset); NO_RESET=1 skips it.
 # Env: UDID (required), RUNS (5), AWAY_S (10), APP (com.dcouple.pane.mobile),
 #      LAUNCH_URL (how a cold launch opens the app: a dev client's Metro link, or empty for an
 #      installed release build), PERF_ROOT (as hosts.sh).
-# Then: node native/scripts/perf-table.mts <out-dir>/*.log
+# Then: node native/scripts/perf-table.mts --runs 5 <out-dir>/*.log
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 OUT=${1:?usage: journeys.sh <out-dir> [scenario ...]}; shift
@@ -21,9 +22,9 @@ LAUNCH_URL=${LAUNCH_URL:-}
 mkdir -p "$OUT"
 
 runpane() { HOME="$ROOT/home" node "$REPO/packages/runpane/dist/cli.js" "$@"; }
-# HOST_A, HOST_B, PANE_A, PANE_B, TERMINAL_A, SESSION_A, APPROVAL_A from the seeded hosts.
+# HOST_A, HOST_B, PANE_A, PANE_B, TERMINAL_A, SESSION_A, CHAT_A, APPROVAL_A from the seeded hosts,
+# read after the reset below.
 fixture() { node "$REPO/native/scripts/perf/fixture.mjs" "$ROOT" "$@"; }
-eval "$(fixture ids)"
 
 # iOS asks before opening a pane:// link; Maestro answers it.
 open_link() {
@@ -115,14 +116,42 @@ scenario() {
       fresh
       capture_start switch
       for _ in $(seq "$RUNS"); do tap machine-chip-Perf-B; sleep 10; tap machine-chip-Perf-A; sleep 10; done
-      capture_stop ;;
+      capture_stop
+      # Back to All on Perf-A, where every other scenario starts.
+      tap machine-chip-all; sleep 3 ;;
     *) echo "unknown scenario $1" >&2; exit 1 ;;
+  esac
+}
+
+# The mark each scenario must log; without it the scenario measured the wrong thing (the phone on
+# another machine, a screen that never opened), and its numbers must not be used.
+expected_mark() {
+  case $1 in
+    cold-launch) echo 'launch home-fresh' ;;
+    return-home) echo 'return home-fresh' ;;
+    return-session-chat) echo 'return chat-live' ;;
+    return-pane-terminal) echo 'return terminal-live' ;;
+    open-terminal|reopen-terminal) echo 'terminal screen' ;;
+    open-session-chat|reopen-session-chat) echo 'chat messages' ;;
+    open-approval) echo 'approval card=' ;;
+    switch) echo 'switch home-fresh' ;;
   esac
 }
 
 SCENARIOS=("$@")
 [ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(cold-launch return-home return-session-chat return-pane-terminal open-terminal reopen-terminal open-session-chat reopen-session-chat open-approval switch)
+# Every column starts from the same fixture: the returns add Panes, chat messages and terminal output.
+[ "${NO_RESET:-}" = 1 ] || "$REPO/native/scripts/perf/hosts.sh" reset
+eval "$(fixture ids)"
+failed=0
 for name in "${SCENARIOS[@]}"; do
   echo "$(date +%T) $name (load $(uptime | sed 's/.*load averages: //'))"
   scenario "$name"
+  mark=$(expected_mark "$name")
+  if ! grep -q "\[perf\] $mark" "$OUT/$name.log"; then
+    echo "  FAILED: $name logged no '[perf] $mark'. Is the phone on Perf-A (pair with perf-pair.yaml), and did the screen open?" >&2
+    failed=1
+  fi
 done
+exit "$failed"
+

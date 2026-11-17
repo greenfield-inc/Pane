@@ -96,7 +96,7 @@ pnpm --filter @pane/native typecheck
 
 ### Timing
 
-The app logs a `[perf] <journey> <mark> <ms>` line at each moment the mobile perf targets name (return to the app, first frame, each read answered, screen live, terminal and chat content). [`scripts/perf/`](scripts/perf/README.md) seeds two hosts behind a 200 ms round trip, runs the journeys on a simulator and turns the logs into a table with `node scripts/perf-table.mts <logs>`.
+A perf build (a bundle built with `EXPO_PUBLIC_PANE_PERF=1`) logs a `[perf] <journey> <mark> <ms>` line at each moment the mobile perf targets name (return to the app, first frame, each read answered, screen live, terminal and chat content); other builds log nothing. [`scripts/perf/`](scripts/perf/README.md) seeds two hosts behind a 200 ms round trip, runs the journeys on a simulator and turns the logs into a table with `node scripts/perf-table.mts <logs>`.
 
 ### End-to-end tests (Maestro)
 

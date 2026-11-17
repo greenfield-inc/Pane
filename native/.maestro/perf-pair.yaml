@@ -1,5 +1,5 @@
 # Pairs a fresh install with the two perf hosts (scripts/perf/README.md) through their
-# pane-remote:// links. Needs CONNECTION_CODE (host A) and SECOND_CODE (host B).
+# pane-remote:// links: B_CODE first, then A_CODE, so host A is the machine the phone is on.
 appId: com.dcouple.pane.mobile
 env:
   METRO_PORT: ${METRO_PORT || "8137"}
@@ -18,7 +18,7 @@ env:
 - extendedWaitUntil:
     visible: "Paste a connection code"
     timeout: 30000
-- openLink: ${CONNECTION_CODE}
+- openLink: ${B_CODE}
 - runFlow:
     when:
       visible: "Open"
@@ -34,7 +34,7 @@ env:
     visible:
       id: panes-list
     timeout: 60000
-- openLink: ${SECOND_CODE}
+- openLink: ${A_CODE}
 - runFlow:
     when:
       visible: "Open"

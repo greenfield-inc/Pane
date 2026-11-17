@@ -1,14 +1,17 @@
 import type { RemoteFetch } from '@shared/remoteClient';
+import { REMOTE_READ_CHANNELS } from '@shared/remoteClient/readChannels';
 
 import { connectionMark } from './perfMarks';
 
 /**
- * Marks each read sent and answered, and the event stream opening, against the connection
- * journeys (return, switch, launch), as `send=<channel>@<machine>`. The machine is the first
- * characters of its profile id. Repeats are logged, so a read sent twice shows twice.
+ * Marks each request sent and answered, and the event stream opening, against the connection
+ * journeys (return, switch, launch). A read logs as `send=<channel>#<args>@<machine>` and
+ * `read=…`, so the same read sent twice shows twice with the same key; anything else logs as
+ * `write=<channel>@<machine>`. The machine and the arguments are short hashes, never names.
+ * Wired only into a perf build (createClient).
  */
 export function perfFetch(inner: RemoteFetch, profileId: string): RemoteFetch {
-  const machine = profileId.slice(0, 6);
+  const machine = shortHash(profileId);
   return async (url, init) => {
     const path = new URL(url).pathname;
     if (path.endsWith('/events')) {
@@ -18,17 +21,36 @@ export function perfFetch(inner: RemoteFetch, profileId: string): RemoteFetch {
       return response;
     }
     if (!path.endsWith('/invoke')) return inner(url, init);
-    // The transport writes the channel first in the body, so the head of it is enough.
-    const body = typeof init?.body === 'string' ? init.body.slice(0, 160) : '';
-    const channel = /"channel":"([^"]+)"/.exec(body)?.[1] ?? 'unknown';
-    connectionMark(`send=${channel}@${machine}`, { repeat: true });
+    const { channel, args } = requestOf(init?.body);
+    const read = REMOTE_READ_CHANNELS.has(channel);
+    const key = read ? `${channel}#${shortHash(JSON.stringify(args))}@${machine}` : `${channel}@${machine}`;
+    connectionMark(`${read ? 'send' : 'write'}=${key}`, { repeat: true });
     try {
       const response = await inner(url, init);
-      connectionMark(`read=${channel}@${machine}`, { repeat: true });
+      if (read) connectionMark(`read=${key}`, { repeat: true });
       return response;
     } catch (error) {
-      connectionMark(`fail=${channel}@${machine}`, { repeat: true });
+      connectionMark(`fail=${key}`, { repeat: true });
       throw error;
     }
   };
+}
+
+function requestOf(body: string | undefined): { channel: string; args: unknown } {
+  try {
+    const parsed = JSON.parse(body ?? '') as { channel?: unknown; args?: unknown };
+    return { channel: typeof parsed.channel === 'string' ? parsed.channel : 'unknown', args: parsed.args };
+  } catch {
+    return { channel: 'unknown', args: null };
+  }
+}
+
+/** Four base-36 characters of an FNV-1a hash: tells values apart in a log without revealing them. */
+function shortHash(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36).slice(-4);
 }

@@ -2,7 +2,7 @@
 // a repository with N Panes, one terminal past the 2,500-line cap, open approvals and a
 // Session whose chat holds 200 messages. Every write goes to the host named by --pane-dir.
 //
-//   node seed.mjs --pane-dir <dir> --code <connection-code-file> --panes 68 [--approvals 7] [--chat] [--big-terminal]
+//   node seed.mjs --pane-dir <dir> --code <connection-code-file> [--panes 68] [--approvals 7] [--chat] [--big-terminal]
 import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
@@ -17,7 +17,7 @@ const { values: opts } = parseArgs({
   options: {
     'pane-dir': { type: 'string' },
     code: { type: 'string' },
-    panes: { type: 'string', default: '10' },
+    panes: { type: 'string', default: '0' },
     approvals: { type: 'string', default: '0' },
     chat: { type: 'boolean', default: false },
     'big-terminal': { type: 'boolean', default: false },
@@ -30,6 +30,8 @@ if (!paneDir || !opts.code) {
 }
 
 const connection = decodeCode(readFileSync(opts.code, 'utf8'));
+// runpane writes its own state under HOME: keep it with the fixture, never in this machine's ~/.pane.
+const env = { ...process.env, HOME: path.join(paneDir, '..', 'home') };
 
 function decodeCode(code) {
   const body = code.trim().slice('pane-remote://'.length);
@@ -37,7 +39,7 @@ function decodeCode(code) {
 }
 
 function runpane(...args) {
-  const out = execFileSync('node', [runpaneCli, ...args, '--pane-dir', paneDir, '--json'], { encoding: 'utf8', env: process.env });
+  const out = execFileSync('node', [runpaneCli, ...args, '--pane-dir', paneDir, '--json'], { encoding: 'utf8', env });
   return JSON.parse(out);
 }
 
@@ -98,7 +100,7 @@ for (let index = 1; index <= approvals; index += 1) {
   const pane = livePanes.find(candidate => candidate.name === `perf-${index + 1}`);
   const panel = (await invoke('panels:list', pane.id)).find(candidate => candidate.type === 'terminal');
   // notify waits for an answer; the question stays open after this process stops waiting.
-  const child = spawn('node', [runpaneCli, 'notify', '--ui', 'options', '--title', `Perf approval ${index}: pick one`, '--context', 'A seeded question for the mobile perf journeys.', '--choices', JSON.stringify([{ label: 'Yes', recommended: true }, { label: 'No' }]), '--pane-dir', paneDir, '--json'], { detached: true, stdio: 'ignore', env: { ...process.env, PANE_SESSION_ID: pane.id, PANE_PANEL_ID: panel.id } });
+  const child = spawn('node', [runpaneCli, 'notify', '--ui', 'options', '--title', `Perf approval ${index}: pick one`, '--context', 'A seeded question for the mobile perf journeys.', '--choices', JSON.stringify([{ label: 'Yes', recommended: true }, { label: 'No' }]), '--pane-dir', paneDir, '--json'], { detached: true, stdio: 'ignore', env: { ...env, PANE_SESSION_ID: pane.id, PANE_PANEL_ID: panel.id } });
   child.unref();
   // hosts.sh down stops the waiting askers too.
   appendFileSync(path.join(paneDir, '..', `${path.basename(paneDir)}.notify.pids`), `${child.pid}\n`);

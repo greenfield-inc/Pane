@@ -3,6 +3,7 @@
 //   node fixture.mjs <perf-root> ids                          # shell assignments: HOST_A, HOST_B (the
 //                                                             # proxied addresses the phone uses), PANE_A,
 //                                                             # PANE_B, TERMINAL_A, SESSION_A, CHAT_A, APPROVAL_A
+//   node fixture.mjs <perf-root> close-approvals                # close the seeded approvals still waiting
 //   node fixture.mjs <perf-root> call <host> <channel> [json-args]   # one /invoke straight to the host
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -30,8 +31,15 @@ if (command === 'call') {
   await new Promise(resolve => process.stdout.write(`${answer}\n`, resolve));
   process.exit(0);
 }
+if (command === 'close-approvals') {
+  // Approvals whose asker went with a host restart; prime asks fresh ones.
+  const waiting = (await invoke('hostA', 'notify:remote-snapshot')).items.filter(item => item.title.startsWith('Perf approval') && item.state === 'waiting');
+  for (const item of waiting) await invoke('hostA', 'notify:remote-command', { type: 'close', id: item.id, reason: 'perf fixture primed again' });
+  console.log(`${waiting.length} approvals closed`);
+  process.exit(0);
+}
 if (command !== 'ids') {
-  console.error('Usage: node fixture.mjs <perf-root> ids|call <host> <channel> [json-args]');
+  console.error('Usage: node fixture.mjs <perf-root> ids|close-approvals|call <host> <channel> [json-args]');
   process.exit(1);
 }
 

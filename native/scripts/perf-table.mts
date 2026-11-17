@@ -4,6 +4,7 @@
  *   node scripts/perf-table.mts <scenario>.log [...]
  *
  * Each file holds one scenario's runs (a simulator `log stream`, or a phone's Console export).
+ * With `--runs <n>`, a journey that ran a different number of times is reported on stderr.
  * Only `[perf] <journey> <mark> <ms>` lines count (src/features/perf/perfMarks.ts). A run begins
  * at `<journey> start 0`. For each scenario the script prints every metric its runs carry: the
  * median, the slowest run and the number of runs.
@@ -64,8 +65,10 @@ export function runMetrics(run: Run): Record<string, number | undefined> {
     case 'switch':
     case 'launch': {
       const machine = currentMachine(run);
-      const sends = run.marks.filter(mark => mark.mark.startsWith('send=') && (!machine || mark.mark.endsWith(`@${machine}`)));
-      const channels = new Set(sends.map(mark => mark.mark));
+      const toCurrent = (mark: Mark) => !machine || mark.mark.endsWith(`@${machine}`);
+      // A read is keyed by its channel and arguments, so only the same read sent twice counts again.
+      const sends = run.marks.filter(mark => mark.mark.startsWith('send=') && toCurrent(mark));
+      const distinctReads = new Set(sends.map(mark => mark.mark));
       const counts = countChanges(run);
       return {
         'first frame': first(run, run.journey === 'return' ? 'first-frame' : 'home-frame'),
@@ -76,8 +79,9 @@ export function runMetrics(run: Run): Record<string, number | undefined> {
         'chat live': first(run, 'chat-live'),
         'terminal live': both(first(run, 'terminal-live'), first(run, 'terminal-screen')),
         'reads sent': sends.length,
-        'reads sent again': sends.length - channels.size,
-        'terminal handshakes': sends.filter(mark => mark.mark.startsWith('send=terminal:getState@')).length,
+        'reads sent again': sends.length - distinctReads.size,
+        'writes sent': run.marks.filter(mark => mark.mark.startsWith('write=') && toCurrent(mark)).length,
+        'terminal handshakes': sends.filter(mark => mark.mark.startsWith('send=terminal:getState#')).length,
         'count changes': counts.changes,
         'wrong counts shown': counts.wrong,
       };
@@ -108,7 +112,17 @@ export function median(values: readonly number[]): number {
 
 /** Every metric of every journey in a scenario's log, values in run order. */
 export function scenarioMetrics(log: string): Metric[] {
-  const { runs, stalls } = parseRuns(log);
+  return metricsOf(parseRuns(log));
+}
+
+/** Journeys whose run count differs from `expected`, as `journey: count`. */
+export function runCountMismatches(log: string, expected: number): string[] {
+  const counts = new Map<string, number>();
+  for (const run of parseRuns(log).runs) counts.set(run.journey, (counts.get(run.journey) ?? 0) + 1);
+  return [...counts].filter(([, count]) => count !== expected).map(([journey, count]) => `${journey}: ${count}`);
+}
+
+function metricsOf({ runs, stalls }: { runs: Run[]; stalls: number[] }): Metric[] {
   const metrics = new Map<string, number[]>();
   for (const run of runs) {
     for (const [name, value] of Object.entries(runMetrics(run))) {
@@ -135,11 +149,19 @@ export function formatTable(scenarios: ReadonlyArray<{ scenario: string; metrics
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const files = process.argv.slice(2);
-  if (files.length === 0) {
-    console.error('Usage: node scripts/perf-table.mts <scenario>.log [...]');
+  const args = process.argv.slice(2);
+  const runsAt = args.indexOf('--runs');
+  const expected = runsAt === -1 ? undefined : Number(args.splice(runsAt, 2)[1]);
+  if (args.length === 0) {
+    console.error('Usage: node scripts/perf-table.mts [--runs <n>] <scenario>.log [...]');
     process.exit(1);
   }
-  const scenarios = files.map(file => ({ scenario: path.basename(file, path.extname(file)), metrics: scenarioMetrics(readFileSync(file, 'utf8')) }));
+  const scenarios = args.map(file => {
+    const log = readFileSync(file, 'utf8');
+    const scenario = path.basename(file, path.extname(file));
+    // A journey that ran a different number of times than asked usually means a step failed.
+    if (expected !== undefined) for (const mismatch of runCountMismatches(log, expected)) console.error(`warning: ${scenario} ${mismatch} runs, expected ${expected}`);
+    return { scenario, metrics: scenarioMetrics(log) };
+  });
   console.log(formatTable(scenarios));
 }
