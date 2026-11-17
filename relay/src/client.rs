@@ -143,3 +143,39 @@ async fn watch_idle(last: &AtomicU64, started: Instant, idle: Duration) {
         tokio::time::sleep_until(deadline.into()).await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::io::test_tls;
+
+    // As `direct::tests`: the end of a request reaches the computer while the client waits.
+    #[tokio::test]
+    async fn copy_delivers_the_last_bytes_while_the_client_waits() {
+        let state = State::for_tests();
+        let last = AtomicU64::new(0);
+        let meter = Meter {
+            state: &state,
+            id: "test",
+            source: "test",
+            last: &last,
+            started: Instant::now(),
+        };
+        let (mut tls, mut computer) = test_tls::pair().await;
+        let sent = vec![7u8; 4 * test_tls::PIPE];
+        // The client stays open after its bytes, so `copy` never reaches the shutdown that
+        // would also flush.
+        let (mut client, source) = tokio::io::duplex(sent.len());
+        client.write_all(&sent).await.unwrap();
+        let count = AtomicU64::new(0);
+        let mut got = vec![0u8; sent.len()];
+        tokio::select! {
+            _ = meter.copy(source, &mut tls, &count) => panic!("copy ended while the client was open"),
+            read = tokio::time::timeout(Duration::from_secs(5), computer.read_exact(&mut got)) => {
+                read.expect("the computer got every byte").unwrap();
+            }
+        }
+        assert_eq!(got, sent);
+        drop(client);
+    }
+}
