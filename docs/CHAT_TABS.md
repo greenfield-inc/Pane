@@ -137,8 +137,8 @@ opens.
 Code's `SessionStart` hook, which fires on start, `/resume`, `/clear` and
 compact (D-269). Pane adds the hook to plain `claude` tabs through the tab's
 `--settings` file, and Agent Farm ships it in the plugin it compiles for every
-Claude it launches. The hook runs `runpane panels conversation --hook`, which
-records the conversation on the tab and as the one its next restart resumes.
+Claude it launches. The hook runs `runpane panels conversation --hook` (Agent
+Farm since #220 runs `runpane session-start`, the same thing), which records the conversation on the tab and as the one its next restart resumes.
 Pane never asks the running Claude.
 
 - **Sure**: the hook reported since the terminal's current launch started. The

@@ -3915,11 +3915,19 @@ async function runPanelsConversationHook(
   return 0;
 }
 
+/** The one argument Agent Farm's SessionStart hook passes to the host's `AGENT_FARM_SESSION_HOOK`. */
+const AGENT_FARM_SESSION_START = 'session-start';
+
 /**
- * `runpane panels conversation --hook` straight from argv, before anything else in the CLI runs (no
+ * `runpane panels conversation --hook` (or `runpane session-start`, its Agent Farm alias) straight from argv, before anything else in the CLI runs (no
  * managed-CLI handoff, no telemetry, no output). Returns null for any other command line.
  */
-export async function runConversationHookFromArgv(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<0 | null> {
+export async function runConversationHookFromArgv(rawArgv: string[], env: NodeJS.ProcessEnv = process.env): Promise<0 | null> {
+  // Agent Farm's host-neutral hook runs `"$AGENT_FARM_SESSION_HOOK" session-start`, and Pane points that at runpane (D-403).
+  // The WSL Session bridge appends `--pane-dir <dir>`, so the alias keeps its other arguments.
+  const argv = hookWords(rawArgv)[0] === AGENT_FARM_SESSION_START
+    ? ['panels', 'conversation', '--hook', ...rawArgv.filter((_arg, index) => index !== rawArgv.indexOf(AGENT_FARM_SESSION_START))]
+    : rawArgv;
   if (!isConversationHookArgv(argv)) return null;
   let paneDir: string | undefined;
   try {
@@ -3932,8 +3940,13 @@ export async function runConversationHookFromArgv(argv: string[], env: NodeJS.Pr
   return runPanelsConversationHook(env, process.stdin, paneDir);
 }
 
+/** The command words of an argv: everything but flags and the `--pane-dir` value. */
+function hookWords(argv: string[]): string[] {
+  return argv.filter((arg, index) => !arg.startsWith('-') && argv[index - 1] !== '--pane-dir');
+}
+
 function isConversationHookArgv(argv: string[]): boolean {
-  const words = argv.filter((arg, index) => !arg.startsWith('-') && argv[index - 1] !== '--pane-dir');
+  const words = hookWords(argv);
   return words[0] === 'panels' && words[1] === 'conversation' && argv.includes('--hook');
 }
 

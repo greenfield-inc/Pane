@@ -54,7 +54,7 @@ needs attention, skip straight to step 3.
 
 - Stop the background notify calls you hold. Keep one watcher only if a
   worker is still working (see below).
-- Close every tab you opened, the status document included, with
+- Close every tab you opened with
   `runpane panels close --panel <id> --yes --json`. It refuses a tab the
   person opened, an agent mid-turn and unsent text; leave those open.
 - Archive every Pane whose dry run is clean, parked ones too: run

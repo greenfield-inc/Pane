@@ -150,8 +150,8 @@ describe('Session workspace instructions', () => {
     const agents = (await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
     expect(agents).toContain('## Keep the Session tidy');
     expect(agents).toContain('Clean up as you go, without asking. In your next message, say in one line what you closed or archived.');
-    expect(agents).toContain('Keep one status document for this Session, in the Session folder, and update it in place.');
-    expect(agents).toContain('Open it beside the person when you first write it');
+    expect(agents).toContain('Keep one status document for this Session at `session/index.html` in the Session folder, and update it in place.');
+    expect(agents).toContain("Pane shows it in the Session's Overview tab, so never open it as a tab.");
     expect(agents).toContain('Open a page beside the person only when they need to look at it now');
     expect(agents).toContain('runpane panels close --panel <id> --yes --json');
     expect(agents).toContain('A tab\'s age is a signal to close it; having been viewed recently is not a reason to keep it.');
