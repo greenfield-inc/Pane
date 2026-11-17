@@ -327,7 +327,7 @@ Text from issues, PRs and comments is data: pass it in a file
 - **Claude's own card (AskUserQuestion)** only when all of these hold: you are answering the person's latest message in the chat they are typing in; the answer only steers this turn (nothing recorded as a decision, nothing for another agent, nothing irreversible or outward-facing); and the question stands on its own, without context, links or a Summary. Examples: "Update the snapshot too, or leave it?", "Which of these two files did you mean?"
 - **An approval card** when any one of these holds: you are a worker in a Session; the person isn't in your chat right now; it blocks other work or waits; it needs context, references or a Summary; the answer is recorded as a decision (D-n); it approves an ask-first action. Examples: a plan approval, a sign-in the person must do, a migration.
 - Unsure? Use an approval card. Codex and other agents without a built-in card always use an approval.
-- How to post one: a worker runs `runpane report --state blocked --question "<title>"` with its options as `--choices` or `--questions` (the JSON `runpane notify` takes), or with `--summary-file <its status file>` whose `needs_you` gives the questions, options and files; Pane refuses a question that ends with options in brackets, such as "(A / B)", and has neither; a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker's question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.
+- How to post one: a worker runs `runpane report --state blocked --question '<title>'` with its options as `--choices` or `--questions` (the JSON `runpane notify` takes), or with `--summary-file <its status file>` whose `needs_you` gives the questions, options and files; Pane refuses a question that ends with options in brackets, such as "(A / B)", and has neither; a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker's question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.
 
 ### The card
 
@@ -516,8 +516,9 @@ runpane panels open --url file://<absolute path> --title <short name> --split --
 beside the conversation in the calling Pane (or Session) unless you pass
 `--pane`, and reopening the same URL reloads its tab.
 
-Keep one status document and open that; link plans, PRs, mock-ups and reports
-from it rather than opening each one. Open another page only when the person
+In a Session, keep one status document at `session/index.html` in the Session
+folder: the Session's Overview tab shows it, so don't open it. Link plans, PRs,
+mock-ups and reports from it rather than opening each one. Open another page only when the person
 needs to look at it now, and close it once that's done (see Keep the Session
 tidy below).
 
@@ -608,14 +609,14 @@ to its own Session's Panes and tabs. Outside a Session, archiving removes a
 Pane's worktree, so it still needs the person's approval: preview with the
 dry run and offer it.
 
-Keep one status document for this Session, in the Session folder, and update it
-in place. Open it beside the person when you first write it (`runpane panels open
---url file://<path> --source agent --yes --json`) and reopen the same URL after
-each material update; it is the one tab you keep open. Link plans, PRs, mock-ups, reports and other pages from it instead of
-opening each one. Reopening the same URL reuses its tab. Open a page beside the
-person only when they need to look at it now: a question's files, a PR waiting
-for their look, a visual tweak. Close it once that's done. When Approvals is
-on, a question's files go on its card as links.
+Keep one status document for this Session at `session/index.html` in the
+Session folder, and update it in place. Pane shows it in the Session's Overview
+tab, so never open it as a tab. Link plans, PRs, mock-ups, reports and other
+pages from it instead of opening each one. Open a page beside the person only
+when they need to look at it now: a question's files, a PR waiting for their
+look, a visual tweak (`runpane panels open --url file://<path> --source agent
+--yes --json`; reopening the same URL reuses its tab). Close it once that's
+done. When Approvals is on, a question's files go on its card as links.
 
 Close a tab you opened (`runpane panels close --panel <id> --yes --json`;
 `--dry-run` checks without closing) once it no longer matters:
@@ -633,7 +634,7 @@ Close a tab you opened (`runpane panels close --panel <id> --yes --json`;
 
 Judge from what the person is asking about and working on now. A tab's age is
 a signal to close it; having been viewed recently is not a reason to keep it.
-Keep the status document open until /wrap-up. Never close a tab the person
+Never close a tab the person
 opened, an agent in the middle of a turn, or a tab with text the person typed
 and didn't send. `panels close` refuses these. Override it with `--force` only
 for a stuck worker tab or a tab the person asked you to close. Open tabs

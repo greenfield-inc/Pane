@@ -38,6 +38,9 @@ full working rules.
   `runpane panes create --repo <repo> --name <name> --agent <codex|claude|cursor> --prompt "<task>" --source agent --no-focus --wait-ready --yes --json`
 - For work that already has a Pane (review, audit, fixes, QA), open a new agent tab in that Pane, never a new Pane. Inside a Pane, `$PANE_SESSION_ID` is that Pane's id:
   `runpane panels create --pane <pane-id> --agent <codex|claude|cursor> --initial-input "<task>" --source agent --no-focus --wait-ready --yes --json`
+- To run a wrapper launcher in a tab (an Agent Farm profile, say) instead of a built-in agent, add its command as `--tool-command` and keep `--agent` naming the agent it runs:
+  `runpane panels create --pane <pane-id> --agent <codex|claude|cursor> --tool-command "<launcher command>" --initial-input "<task>" --source agent --no-focus --wait-ready --yes --json`.
+  Put every choice on the command line, since a launcher that asks before it starts holds the tab. When the person should open it themselves, give them that command.
 - When `runpane agent-context --command "panels open" --json` lists the
   command, show the user a page or file with
   `runpane panels open --file <path> --source agent --yes --json` or
@@ -74,7 +77,7 @@ rather than asking in the terminal.
 - **Claude's own card (AskUserQuestion)** only when all of these hold: you are answering the person's latest message in the chat they are typing in; the answer only steers this turn (nothing recorded as a decision, nothing for another agent, nothing irreversible or outward-facing); and the question stands on its own, without context, links or a Summary. Examples: "Update the snapshot too, or leave it?", "Which of these two files did you mean?"
 - **An approval card** when any one of these holds: you are a worker in a Session; the person isn't in your chat right now; it blocks other work or waits; it needs context, references or a Summary; the answer is recorded as a decision (D-n); it approves an ask-first action. Examples: a plan approval, a sign-in the person must do, a migration.
 - Unsure? Use an approval card. Codex and other agents without a built-in card always use an approval.
-- How to post one: a worker runs `runpane report --state blocked --question "<title>"` with its options as `--choices` or `--questions` (the JSON `runpane notify` takes), or with `--summary-file <its status file>` whose `needs_you` gives the questions, options and files; Pane refuses a question that ends with options in brackets, such as "(A / B)", and has neither; a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker's question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.
+- How to post one: a worker runs `runpane report --state blocked --question '<title>'` with its options as `--choices` or `--questions` (the JSON `runpane notify` takes), or with `--summary-file <its status file>` whose `needs_you` gives the questions, options and files; Pane refuses a question that ends with options in brackets, such as "(A / B)", and has neither; a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker's question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.
 
 ### The card
 
@@ -137,11 +140,17 @@ orchestrator that relayed a worker's question, else Autopilot.
 - **A worker in a Session** (`PANE_SESSION_DIR` is set and
   `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator
   or a parent status file) doesn't call `notify`. Run
-  `runpane report --state blocked --question "<question>"`, with its options
+  `runpane report --state blocked --question '<question>'`, with its options
   as `--choices '<json>'` or `--questions '<json>'` (the JSON `notify`
   takes), or with `--summary-file <status file>` when you keep one, after
   writing the question in its `needs_you`. Never pack options into the
-  question as "(A / B)": Pane refuses that and shows nothing. It shows at once in Approvals with an answer box, and it rings when
+  question as "(A / B)": Pane refuses that and shows nothing. Start the
+  question with its Q-n when your orchestrator gave you one
+  (`Q-3: <question>`), and pass each value as one literal argument: in a
+  POSIX shell, single quotes with each `'` inside written `'\''`
+  (`''` in PowerShell), never double quotes or no quotes, where `$(…)`,
+  backticks and `$name` run as shell. That one blocked report is the card;
+  keep working on whatever the question doesn't block. It shows at once in Approvals with an answer box, and it rings when
   your orchestrator relays it or after 10 minutes. The answer reaches this tab as
   `answer: Q-n → <answer> (by you)`; `closed: Q-n (by you)` and
   `correction: Q-n → <answer> (by you)` are the person's word too. A typed

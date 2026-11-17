@@ -677,8 +677,9 @@ section (`main/src/services/sessionTidyRules.ts`, used by the Session folder's
 `pane-orchestration` skill carries the same rules). The orchestrator cleans up
 as it goes without asking, and says in one line what it closed or archived:
 
-- It keeps one status document in the Session folder, updated in place, and
-  links plans, PRs, mock-ups and reports from it. It opens a page beside the
+- It keeps one status document at `session/index.html` in the Session folder,
+  updated in place, which the Session's Overview tab shows (it never opens it
+  as a tab), and links plans, PRs, mock-ups and reports from it. It opens a page beside the
   person only when they need to look at it now, and closes it once that's
   done.
 - It closes tabs it opened once they no longer matter, with
@@ -712,7 +713,7 @@ replaced one with your own (it has no Pane marker). It:
    covered, agents still working and open work-list items. It posts this as
    an info notification and writes it in the conversation; it doesn't ask or
    wait.
-3. Stops its watchers, closes every tab it opened (the status document too),
+3. Stops its watchers, closes every tab it opened,
    archives every Pane whose dry run is clean (parked ones too; their PRs stay
    open), keeps unsafe Panes, and marks the other open work-list items
    dropped. A worker still working keeps its Pane; once it finishes, its Pane
