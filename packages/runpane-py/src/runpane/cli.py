@@ -31,6 +31,7 @@ from .installers import (
     should_reuse_existing_pane,
     spawn_pane,
     spawn_pane_captured,
+    unfinished_install_error,
 )
 from .workspaces import read_workspace_summary
 from .daemon_client import resolve_pane_directory
@@ -1671,6 +1672,11 @@ def install_or_update(parsed: ParsedArgs, telemetry_context: Optional[WrapperTel
         context["failure_stage"] = "install"
         context["failure_category"] = categorize_failure(error)
         raise
+    unfinished = unfinished_install_error(installed, resolved.format, target, artifact.file_name)
+    if unfinished is not None:
+        context["failure_stage"] = "install"
+        context["failure_category"] = categorize_failure(unfinished)
+        raise unfinished
 
     if target == "daemon":
         print("runpane: starting remote setup...")

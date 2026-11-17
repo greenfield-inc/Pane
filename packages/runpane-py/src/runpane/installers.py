@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from .download import DownloadedArtifact
+from .notify import RunpaneError
 from .platforms import PanePlatform, default_install_root
 
 
@@ -15,6 +16,18 @@ from .platforms import PanePlatform, default_install_root
 class InstalledPane:
     executable_path: str
     install_kind: str
+
+
+def unfinished_install_error(installed: InstalledPane, format_name: str, target: str, file_name: str) -> Optional[RunpaneError]:
+    """A macOS disk image only opens in Finder: Pane is installed once someone drags it into Applications,
+    which nobody does in a remote or headless install. The zip installs without help."""
+    if installed.install_kind != "launched-installer" or format_name != "dmg":
+        return None
+    return RunpaneError(
+        "ERR_RUNPANE_INSTALL_UNFINISHED",
+        f"Pane was not installed (launched-installer): runpane opened {file_name} in Finder for someone at this Mac to drag Pane into Applications, and that has not happened, so /Applications/Pane.app is unchanged.",
+        f"Drag Pane into Applications in the window that opened, then start Pane. With no one at this Mac, rerun `runpane install {target} --format zip`, which installs Pane into ~/Applications without help.",
+    )
 
 
 def resolve_existing_pane_path(pane_path: Optional[str] = None) -> Optional[str]:
