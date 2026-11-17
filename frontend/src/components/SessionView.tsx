@@ -91,7 +91,7 @@ import { useRegionActions } from '../hooks/useRegionNavigation';
 import { announceTerminalReflow } from '../utils/terminalReflow';
 import { focusActiveTabSoon } from '../services/regionFocus';
 import { useLoopsStore } from '../stores/loopsStore';
-import { LoadingStatus, useSkeletonHold } from './ui/Skeleton';
+import { LoadingStatus } from './ui/Skeleton';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
   return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
@@ -1893,13 +1893,8 @@ export const SessionView = memo(() => {
 
   // Removed unused variables - now handled by panels
 
-  // Opening a Pane: a terminal on the stage holds its own skeleton (its mask), so the Pane's
-  // skeleton holds its minimum only when the stage shows something else.
+  // The tab the Pane's stage showed last; a revisited terminal there makes the Pane's skeleton quiet.
   const stagePanelId = usePanelStore(state => (selectedPaneId ? state.activePanels[selectedPaneId] : undefined));
-  const stageIsTerminal = usePanelStore(state => Boolean(selectedPaneId && stagePanelId
-    && state.panels[selectedPaneId]?.some(panel => panel.id === stagePanelId && panel.type === 'terminal')));
-  const paneOpening = Boolean(selectedPaneId && (!activeSession || !ownsPanelLoad) && !selectionError && !(ownsPanelLoad && panelLoad?.error));
-  const paneHold = useSkeletonHold(paneOpening && !stageIsTerminal, selectedPaneId ?? undefined);
 
   // Live grid of every agent pane — spans all projects.
   if (activeView === 'mission-control' && missionControlEnabled) {
@@ -1967,7 +1962,7 @@ export const SessionView = memo(() => {
   }
 
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);
-  const paneLoading = selectedPaneId && (!activeSession || !ownsPanelLoad || loadError || paneHold.holding)
+  const paneLoading = selectedPaneId && (!activeSession || !ownsPanelLoad || loadError)
     ? <div className="flex flex-1 flex-col bg-bg-primary">
       {loadError ? <div className="p-6 text-text-secondary"><p role="alert">{loadError}</p>
         <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => {
