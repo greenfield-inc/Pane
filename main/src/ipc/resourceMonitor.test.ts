@@ -10,6 +10,7 @@ import { registerResourceMonitorHandlers } from './resourceMonitor';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PaneRuntime } from '../core/runtime';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import type { ConfigManager } from '../services/configManager';
+import type { NotifyService } from '../services/notify/notifyService';
 
 function partial<Contract>(value: Partial<Contract>): Contract {
   // SAFETY: Each fixture supplies every member the stop and restart handlers read.
@@ -57,23 +58,42 @@ describe('stopping or restarting a process from outside', () => {
 });
 
 describe('Ask an agent', () => {
-  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>, agent: { resume?: string; ready?: boolean[]; panelType?: string; draft?: boolean; prompt?: string } = {}) {
+  function asker(saved: Array<{ id: string; name: string; archived?: boolean }>, agent: { resume?: string; ready?: Array<boolean | Error>; panelType?: string; draft?: boolean; prompt?: string; hostname?: string } = {}) {
     const typed: Array<{ panelId: string; input: string }> = [];
     const readiness = [...(agent.ready ?? [])];
     const created: Array<{ name: string }> = [];
+    const cards: Array<{ context?: string }> = [];
     const view = (id: string, name: string) => ({ session: { id, name }, panel: { id: `panel-${id}`, type: agent.panelType ?? 'chat' }, internalSession: { worktreePath: '/tmp' } });
     const sessions = partial<OrchestrationSessionManager>({
       list: async () => partial({ sessions: saved.map(session => partial(session)) }),
       getView: async ({ sessionId }) => partial(view(sessionId ?? '', saved.find(session => session.id === sessionId)?.name ?? '')),
-      create: async input => { created.push({ name: input.name }); return partial(view('new', input.name)); },
+      create: async input => {
+        // As the real manager does: a name already taken is refused. The await lets a racing click in.
+        await new Promise(resolve => setTimeout(resolve, 5));
+        if (saved.some(session => session.name === input.name)) throw new Error(`A Session named ${input.name} already exists`);
+        saved.push({ id: 'new', name: input.name });
+        created.push({ name: input.name });
+        return partial(view('new', input.name));
+      },
     });
     const registry = new PaneCommandRegistry();
     registry.register('runpane:panels:resume', async () => ({ action: agent.resume ?? 'already-running' }));
-    registry.register('runpane:panels:wait', async () => ({ ok: readiness.shift() ?? true }));
+    registry.register('runpane:panels:wait', async () => {
+      const next = readiness.shift() ?? true;
+      if (next instanceof Error) throw next;
+      return { ok: next };
+    });
     registry.register('runpane:panels:screen', async () => ({ composer: { hasUndeliveredText: agent.draft ?? false } }));
     registry.register('runpane:panels:submit', async request => { typed.push(partial(request)); return { ok: true }; });
-    registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions }), registry);
-    return { ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: agent.prompt ?? 'Free memory.' }]), typed, created };
+    const notifyService = partial<NotifyService>({ queue: partial<NotifyService['queue']>({ ask: async (input: { question: { context?: string } }) => { cards.push({ context: input.question.context }); return partial({}); } }) });
+    const machineHealth = partial<MachineHealthService>({ latestSnapshot: () => partial<MachineHealthSnapshot>({ hostname: agent.hostname ?? 'devbox' }) });
+    registerResourceMonitorHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({ orchestrationSessionManager: sessions, notifyService, machineHealth }), registry);
+    return {
+      ask: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ name: 'Clean up devbox', prompt: agent.prompt ?? 'Free memory.' }]),
+      /** As a desktop from before Sessions sends it: the prompt alone. */
+      askUnnamed: () => registry.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, [{ prompt: agent.prompt ?? 'Free memory.' }]),
+      typed, created, cards,
+    };
   }
 
   it('hands the request to the numbered Session that replaced an archived one, and starts no other', async () => {
@@ -110,5 +130,56 @@ describe('Ask an agent', () => {
     await expect(ask()).resolves.toMatchObject({ typed: false });
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(writes).not.toHaveBeenCalled();
+  });
+
+  it('names the Session for this machine when an older desktop sends no name (F-2)', async () => {
+    setPaneRuntime(partial<PaneRuntime>({ getConfigManager: () => partial<ConfigManager>({ getPreferredShell: () => 'auto' }) }));
+    const { askUnnamed, created } = asker([], { hostname: 'buildbox' });
+    await expect(askUnnamed()).resolves.toMatchObject({ sessionId: 'new', panelId: 'panel-new' });
+    expect(created).toEqual([{ name: 'Clean up buildbox' }]);
+  });
+
+  it('runs a quick second click after the first create, so it reuses that Session instead of failing (F-3)', async () => {
+    setPaneRuntime(partial<PaneRuntime>({ getConfigManager: () => partial<ConfigManager>({ getPreferredShell: () => 'auto' }) }));
+    const { ask, created } = asker([]);
+    const [first, second] = await Promise.all([ask(), ask()]);
+    expect(first).toMatchObject({ sessionId: 'new' });
+    expect(second).toMatchObject({ sessionId: 'new' });
+    expect(created).toEqual([{ name: 'Clean up devbox' }]);
+  });
+
+  it('forgets a late request when the 10-minute wait gives up, so the next slow start gets its own (F-7)', async () => {
+    const writes = vi.spyOn(terminalPanelManager, 'writeToTerminal').mockImplementation(() => undefined);
+    vi.spyOn(terminalPanelManager, 'isBracketedPasteEnabled').mockReturnValue(true);
+    // First click: 30 s miss, then the late wait gives up. Second click: 30 s miss, then ready.
+    const { ask } = asker([{ id: 'gave-up', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, false, false, true], panelType: 'terminal' });
+    await expect(ask()).resolves.toMatchObject({ typed: false });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await expect(ask()).resolves.toMatchObject({ typed: false });
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledWith('panel-gave-up', '\x1b[200~Free memory.\x1b[201~'));
+  });
+
+  it('forgets a late request when the late wait throws, so the next slow start gets its own (F-7)', async () => {
+    const writes = vi.spyOn(terminalPanelManager, 'writeToTerminal').mockImplementation(() => undefined);
+    vi.spyOn(terminalPanelManager, 'isBracketedPasteEnabled').mockReturnValue(true);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { ask } = asker([{ id: 'threw', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, new Error('panel closed'), false, true], panelType: 'terminal' });
+    await expect(ask()).resolves.toMatchObject({ typed: false });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await expect(ask()).resolves.toMatchObject({ typed: false });
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledWith('panel-threw', '\x1b[200~Free memory.\x1b[201~'));
+  });
+
+  it('tells a chat tab\'s person the request is sent for them, and a terminal\'s to press Enter (F-8)', async () => {
+    const chat = asker([{ id: 'chat', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, false], panelType: 'chat' });
+    await chat.ask();
+    expect(chat.cards).toHaveLength(1);
+    expect(chat.cards[0]?.context).not.toMatch(/Press Enter/u);
+    expect(chat.cards[0]?.context).toMatch(/sent to the agent when it is ready/u);
+
+    vi.spyOn(terminalPanelManager, 'writeToTerminal').mockImplementation(() => undefined);
+    const terminal = asker([{ id: 'term', name: 'Clean up devbox' }], { resume: 'resumed', ready: [false, false], panelType: 'terminal' });
+    await terminal.ask();
+    expect(terminal.cards[0]?.context).toMatch(/Press Enter there to send it/u);
   });
 });

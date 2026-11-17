@@ -1,3 +1,4 @@
+import os from 'node:os';
 import type { IpcMain } from 'electron';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
@@ -49,6 +50,16 @@ const DAEMON_RESOURCE_MONITOR_CHANNELS = [
 const LATE_AGENT_WAIT_MS = 10 * 60_000;
 /** Requests waiting for an agent that missed the first 30 s, by panel. */
 const lateRequests = new Map<string, string>();
+/**
+ * Finding or creating the machine's Session runs one request at a time: a quick second click would
+ * otherwise race the first create and fail with "A Session named ... already exists".
+ */
+let sessionLookup: Promise<unknown> = Promise.resolve();
+function oneAtATime<Result>(task: () => Promise<Result>): Promise<Result> {
+  const run = sessionLookup.then(task, task);
+  sessionLookup = run.catch(() => undefined);
+  return run;
+}
 
 export function registerResourceMonitorHandlers(
   ipcMain: IpcMain,
@@ -168,7 +179,10 @@ export function registerResourceMonitorHandlers(
   // The request goes to a Session named for the machine, started and shown, so it never depends
   // on a tab the window has not opened yet. A second request reuses that Session while it is open.
   commandRegistry.register(MACHINE_HEALTH_ASK_AGENT_CHANNEL, async (value: PaneCommandValue) => {
-    const { name, prompt } = decodeBoundary(value, boundary.object({ name: boundary.nonEmptyString, prompt: boundary.nonEmptyString }));
+    const request = decodeBoundary(value, boundary.object({ name: boundary.optional(boundary.nonEmptyString), prompt: boundary.nonEmptyString }));
+    const { prompt } = request;
+    // A desktop older than this host sends no name: the Session is named for this machine.
+    const name = request.name ?? `Clean up ${services.machineHealth?.latestSnapshot()?.hostname ?? os.hostname()}`;
     const sessions = services.orchestrationSessionManager;
     if (!sessions) {
       throw new PaneError('ERR_MACHINE_HEALTH_UNAVAILABLE', 'Sessions are not running in this Pane process, so no agent was asked.', 'Restart Pane, then try Ask an agent again.');
@@ -190,7 +204,14 @@ export function registerResourceMonitorHandlers(
         return true;
       }
       void services.notifyService?.queue.ask({
-        question: { ui: 'info', title: 'The agent is still starting', context: 'Your cleanup request will appear in its input box when it is ready. Press Enter there to send it.' },
+        question: {
+          ui: 'info',
+          title: 'The agent is still starting',
+          // A chat tab sends the queued request itself; a terminal agent leaves it for the person.
+          context: panelType === 'chat'
+            ? 'Your cleanup request is queued and will be sent to the agent when it is ready.'
+            : 'Your cleanup request will appear in its input box when it is ready. Press Enter there to send it.',
+        },
         source: { name: 'Pane', agent: 'Pane' },
       });
       // One late delivery per agent: a later click while it waits only updates the request.
@@ -198,30 +219,51 @@ export function registerResourceMonitorHandlers(
       lateRequests.set(panelId, prompt);
       if (waiting) return false;
       void (async () => {
-        if (!(await ready(panelId, LATE_AGENT_WAIT_MS))) return;
-        const request = lateRequests.get(panelId);
+        if (!(await ready(panelId, LATE_AGENT_WAIT_MS))) {
+          // Given up: forget the request so the next slow start waits for its own.
+          lateRequests.delete(panelId);
+          return;
+        }
+        const late = lateRequests.get(panelId);
         lateRequests.delete(panelId);
-        if (request === undefined) return;
+        if (late === undefined) return;
         if (panelType === 'chat') {
-          await commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: request, source: 'user', expectReport: false }]);
+          await commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: late, source: 'user', expectReport: false }]);
           return;
         }
         // Never into a draft the person is typing.
         const screen = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:screen', [{ panelId }]), boundary.object({ composer: boundary.object({ hasUndeliveredText: boundary.boolean }) }));
         if (screen?.composer.hasUndeliveredText !== false) return;
         // As runpane stages composer text: newlines stay text inside one bracketed paste, never Enter.
-        const text = stripTrailingNewlines(normalizePromptNewlines(request));
+        const text = stripTrailingNewlines(normalizePromptNewlines(late));
         terminalPanelManager.writeToTerminal(panelId, terminalPanelManager.isBracketedPasteEnabled(panelId) ? bracketedPaste(text) : text.replace(/\n+/gu, ' '));
-      })().catch(error => console.warn('[MachineHealth] Ask an agent: the late agent did not get the request:', error));
+      })().catch(error => {
+        lateRequests.delete(panelId);
+        console.warn('[MachineHealth] Ask an agent: the late agent did not get the request:', error);
+      });
       return false;
     };
     const key = (sessionName: string) => sessionName.trim().toLocaleLowerCase();
     // The machine's Session, or the numbered one that replaced it after it was archived.
     const ours = (sessionName: string) => key(sessionName) === key(name) || (key(sessionName).startsWith(`${key(name)} `) && /^\d+$/.test(key(sessionName).slice(key(name).length + 1)));
-    const { sessions: all } = await sessions.list();
-    const open = all.find(session => ours(session.name) && session.archived !== true);
-    if (open) {
-      const view = await sessions.getView({ sessionId: open.id });
+    const found = await oneAtATime(async () => {
+      const { sessions: all } = await sessions.list();
+      const open = all.find(session => ours(session.name) && session.archived !== true);
+      if (open) return { created: false, atLaunch: false, view: await sessions.getView({ sessionId: open.id }) };
+      // An archived Session keeps its name, so the new one takes the next free number.
+      let fresh = name;
+      for (let n = 2; all.some(session => key(session.name) === key(fresh)); n += 1) fresh = `${name} ${n}`;
+      // As the Pane Chat offer does: the request rides on the agent's launch line when the shell allows it.
+      const atLaunch = terminalPanelManager.launchShellIsPosix();
+      const view = await sessions.create({
+        name: fresh, launchCommand: '', customResume: null,
+        openingPrompt: atLaunch ? `${PANE_ONE_TIME_PROMPT_OPENING}, when you clicked Ask an agent in Resources: ${prompt}` : undefined,
+      });
+      if (view.panel.type === 'terminal') await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
+      return { created: true, atLaunch, view };
+    });
+    const { view } = found;
+    if (!found.created) {
       const resumed = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId: view.panel.id }]), boundary.object({ action: boundary.string }));
       // A running agent queues the request behind its turn; one just started gets it once it is ready.
       if (resumed?.action === 'already-running') {
@@ -230,18 +272,8 @@ export function registerResourceMonitorHandlers(
       }
       return { sessionId: view.session.id, panelId: view.panel.id, typed: await typeWhenReady(view.panel.id, view.panel.type) };
     }
-    // An archived Session keeps its name, so the new one takes the next free number.
-    let fresh = name;
-    for (let n = 2; all.some(session => key(session.name) === key(fresh)); n += 1) fresh = `${name} ${n}`;
-    // As the Pane Chat offer does: the request rides on the agent's launch line when the shell allows it.
-    const atLaunch = terminalPanelManager.launchShellIsPosix();
-    const view = await sessions.create({
-      name: fresh, launchCommand: '', customResume: null,
-      openingPrompt: atLaunch ? `${PANE_ONE_TIME_PROMPT_OPENING}, when you clicked Ask an agent in Resources: ${prompt}` : undefined,
-    });
-    if (view.panel.type === 'terminal') await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
     // PowerShell and cmd cannot carry it on the launch line: type it once the agent is ready.
-    const typed = atLaunch || await typeWhenReady(view.panel.id, view.panel.type);
+    const typed = found.atLaunch || await typeWhenReady(view.panel.id, view.panel.type);
     return { sessionId: view.session.id, panelId: view.panel.id, typed };
   });
 

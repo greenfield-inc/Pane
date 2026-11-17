@@ -47,6 +47,12 @@ export interface CleanupRequest {
 }
 
 /**
+ * What main answers to Ask an agent. A host older than this desktop types into its Pane Chat and
+ * answers with no sessionId, so the window opens Pane Chat instead of a Session.
+ */
+export const askAgentReplySchema = boundary.object({ sessionId: boundary.optional(boundary.nonEmptyString) });
+
+/**
  * Hands the request to the agent of the machine's "Clean up" Session (main starts one when none is
  * open) and shows it. A request about the machine the window is on runs there. Any other runs on
  * this computer, switching the window back to it if needed, since linked machine ids resolve only here.
@@ -72,9 +78,9 @@ export async function askAgentToCleanUp({ machineId, machineName, prompt }: Clea
       : `This is about the linked machine ${machineName}. Run each runpane command there as \`runpane workspace ${machineId} <command>\`. ${prompt}`;
     const { sessionId } = decodeBoundary(
       await window.electronAPI.invoke(MACHINE_HEALTH_ASK_AGENT_CHANNEL, { name: `Clean up ${machineName}`, prompt: request }),
-      boundary.object({ sessionId: boundary.nonEmptyString }),
+      askAgentReplySchema,
     );
-    await useOrchestrationSessionStore.getState().select({ sessionId });
+    if (sessionId) await useOrchestrationSessionStore.getState().select({ sessionId });
     useNavigationStore.getState().navigateToPaneChat();
   } catch (error) {
     showActionError('Could not ask an agent', error);
