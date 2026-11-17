@@ -1,0 +1,99 @@
+import type { TodoAttachment, TodoAttachmentGroup, TodoRecord } from '../../../../shared/types/todos';
+
+/**
+ * Every line Pane types into an agent's tab for a to-do. Tabs read these as plain text, so each
+ * names where it came from in brackets and the command to answer with.
+ */
+
+function attachmentLine(attachment: TodoAttachment, from?: string): string {
+  const where = attachment.machine ? `${attachment.target} (on ${attachment.machine})` : attachment.target;
+  return `- ${attachment.kind}: ${attachment.label} — ${where}${from ? ` [from ${from}]` : ''}${attachment.note ? ` — ${attachment.note}` : ''}`;
+}
+
+/** The attachments block every starting message carries: own first, then inherited. */
+export function attachmentsBlock(groups: readonly TodoAttachmentGroup[]): string {
+  const lines = groups.flatMap(group => group.attachments.map(attachment => attachmentLine(attachment, group.from ? `T-${group.from.number}` : undefined)));
+  if (lines.length === 0) return 'Attachments: none yet. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists.';
+  return ['Attachments (read these first):', ...lines].join('\n');
+}
+
+function doneWhenBlock(todo: TodoRecord): string {
+  if (todo.doneWhen.length === 0) return 'Done when: not set. Add checks with runpane todos update ' + todo.ref + ' --done-when "…".';
+  return ['Done when:', ...todo.doneWhen.map(item => `- [${item.met ? 'x' : ' '}] ${item.text}`)].join('\n');
+}
+
+/** The first message a to-do's new orchestrator gets. */
+export function orchestratorStartText(todo: TodoRecord, groups: readonly TodoAttachmentGroup[], subTodos: readonly TodoRecord[]): string {
+  return [
+    `[From Pane, To-dos] You are the orchestrator for ${todo.ref} "${todo.title}", requested by ${todo.requester.kind === 'person' ? 'the person' : todo.requester.name}.`,
+    todo.summary ? `Summary:\n${todo.summary}` : '',
+    doneWhenBlock(todo),
+    subTodos.length > 0 ? ['Sub-to-dos:', ...subTodos.map(sub => `- ${sub.ref} ${sub.title}`)].join('\n') : '',
+    attachmentsBlock(groups),
+    `Keep an agent working on ${todo.ref} until it is ready for review. Split it into sub-to-dos (runpane todos create --parent ${todo.ref} "…") and assign workers (runpane todos assign <T-n> --panel <tab>). Attach what you make or use (runpane todos attach ${todo.ref} <file|url>). Ask ${todo.requester.kind === 'person' ? 'the person with runpane todos ask' : 'your requester first with runpane todos ask'} ${todo.ref} "…". Reply here with short summaries (runpane todos comment ${todo.ref} "…"). When every done-when check is met, run runpane todos review ${todo.ref}. If an agent start fails with machine_busy, wait: Pane tells you when capacity is back. Full detail: runpane todos show ${todo.ref}.`,
+  ].filter(Boolean).join('\n\n');
+}
+
+/** After Pane restarted a to-do's orchestrator (launch, wake, or the supervisor). */
+export function restartText(todos: ReadonlyArray<{ todo: TodoRecord; groups: readonly TodoAttachmentGroup[] }>, why: 'launch' | 'supervisor' | 'load'): string {
+  const lead = why === 'launch' ? 'Pane restarted.' : why === 'load' ? 'Load came down, so Pane resumed you.' : 'Pane restarted you because nothing moved.';
+  const body = todos.map(({ todo, groups }) => `${todo.ref} "${todo.title}" (${todo.state === 'accepted' ? 'accepted: finish the wrap-up, then runpane todos done ' + todo.ref : 'in progress'})\n${attachmentsBlock(groups)}`).join('\n\n');
+  return `[From Pane, To-dos] ${lead} Still yours:\n\n${body}\n\nCarry them on; ask for review with runpane todos review <T-n> when ready.`;
+}
+
+export function personMessageText(todo: TodoRecord, body: string): string {
+  return `[From the person, via To-dos ${todo.ref}] ${body}`;
+}
+
+export function requesterReplyText(todo: TodoRecord, from: string, body: string): string {
+  return `[From ${from}, via To-dos ${todo.ref}] ${body}`;
+}
+
+export function requesterQuestionText(todo: TodoRecord, question: string): string {
+  return `[From To-dos ${todo.ref}, asked by its orchestrator] ${question}\nReply with runpane todos comment ${todo.ref} "…". If you can't settle it, run runpane todos comment ${todo.ref} --escalate "why" and Pane asks the person.`;
+}
+
+export type RequesterUpdate = 'review' | 'done' | 'dropped' | 'stuck';
+
+export function requesterUpdateText(todo: TodoRecord, update: RequesterUpdate): string {
+  const what = { review: 'asks the person for review', done: 'is done', dropped: 'was dropped', stuck: 'is stuck; the person has a card about it' }[update];
+  return `[From Pane, To-dos] ${todo.ref} "${todo.title}", which you requested, ${what}.`;
+}
+
+export function stopText(todo: TodoRecord): string {
+  return personMessageText(todo, `Stop ${todo.ref}: finish your current step, tell its workers to stop after theirs, then wait. Pane tells you when to resume.`);
+}
+
+export function resumeText(todo: TodoRecord): string {
+  return personMessageText(todo, `Resume ${todo.ref}: carry it on until it is ready for review.`);
+}
+
+export function acceptedText(todo: TodoRecord): string {
+  return personMessageText(todo, `Accepted. Do the post-acceptance work (merge only if the person asked for that, clean up, archive your Panes), then run runpane todos done ${todo.ref}.`);
+}
+
+export function changesText(todo: TodoRecord, note: string): string {
+  return personMessageText(todo, `Changes asked for${note ? `: ${note}` : '.'} ${todo.ref} is back in progress.`);
+}
+
+export function subTodoAddedText(parent: TodoRecord, sub: TodoRecord, groups: readonly TodoAttachmentGroup[]): string {
+  return `${personMessageText(parent, `Added sub-to-do ${sub.ref} "${sub.title}". Assign a worker to it with runpane todos assign ${sub.ref} --panel <tab>.`)}\n${attachmentsBlock(groups)}`;
+}
+
+export function assignedText(sub: TodoRecord, parent: TodoRecord | undefined, groups: readonly TodoAttachmentGroup[]): string {
+  return [
+    `[From Pane, To-dos] You are assigned ${sub.ref} "${sub.title}"${parent ? ` (part of ${parent.ref} "${parent.title}")` : ''}.`,
+    sub.summary,
+    doneWhenBlock(sub),
+    attachmentsBlock(groups),
+    `Reply with runpane todos comment ${sub.ref} "…" (short summaries), attach what you make (runpane todos attach ${sub.ref} <file|url>), and run runpane todos done ${sub.ref} when its done-when checks are met.`,
+  ].filter(Boolean).join('\n\n');
+}
+
+export function shedText(todo: TodoRecord): string {
+  return `[From Pane, To-dos] Pausing ${todo.ref} for machine load: finish your current step, commit, and stop. Pane resumes you when load comes down.`;
+}
+
+export function capacityBackText(machine: string): string {
+  return `[From Pane, To-dos] Capacity is back on ${machine}; you can start agents again.`;
+}

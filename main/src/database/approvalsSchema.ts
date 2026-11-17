@@ -43,6 +43,13 @@ const APPROVALS_SCHEMA_SQL = [
   )`,
 ] as const;
 
+interface ColumnInfo { name: string }
+
 export function ensureApprovalsSchema(db: Database.Database): void {
   for (const sql of [...APPROVALS_SCHEMA_SQL, IMPORT_MARKERS_TABLE_SQL]) db.prepare(sql).run();
+  // To-dos (D-408): the to-do a question is about. Added, never required, so an older Pane still writes rows.
+  // SAFETY: PRAGMA table_info always returns rows with a `name` column.
+  const columns = db.prepare('PRAGMA table_info(approvals)').all() as ColumnInfo[];
+  if (!columns.some(column => column.name === 'todo_id')) db.prepare('ALTER TABLE approvals ADD COLUMN todo_id INTEGER').run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_approvals_todo ON approvals(todo_id, state)').run();
 }

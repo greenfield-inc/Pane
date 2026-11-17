@@ -42,6 +42,7 @@ import {
   type PanelBufferMigrationResult,
 } from "./panelBufferMigration";
 import { ensureApprovalsSchema } from "./approvalsSchema";
+import { ensureTodosSchema } from "./todosSchema";
 
 /**
  * Hard ceiling on one serialized `tool_panels.state` row. Terminal bytes live
@@ -344,6 +345,7 @@ export class DatabaseService {
 
   private runMigrations(): void {
     ensureApprovalsSchema(this.db);
+    ensureTodosSchema(this.db);
 
     // Check if archived column exists
     interface SqliteTableInfo {
