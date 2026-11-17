@@ -206,6 +206,27 @@ unsent text there. **Agents reply** with `runpane todos comment T-n "<text>"`:
 a short summary of at most 2,000 characters; longer replies are refused. The
 page loads the newest 500 rows of activity.
 
+## On the phone
+
+To-dos come to the web app (the Remote PWA in a phone browser, and the
+Capacitor shell that bundles it) under **To-dos** in its drawer, with the
+waiting count. The iPhone app doesn't have them yet.
+
+- The list is one column: filter pills that scroll sideways, rows of two
+  lines (the title, then T-n and the reason) and **+** for a new to-do.
+- A to-do shows its title and chips, a **Plan · N files** button, the summary,
+  Done when, sub-to-dos with **+ Add**, and the thread, with the composer
+  pinned to the bottom above the keyboard and the home indicator.
+- **Plan · Files** opens the attachments full screen, with tabs that scroll
+  sideways and **Open ↗**. An approval opens full screen too; sending returns
+  to the to-do. New to-do and New sub-to-do are full-screen forms.
+- Back (the header's, the browser's, or Android's in the shell) steps out
+  approval → to-do → list, keeping your place.
+
+The web app reaches the host's to-dos through the same `todos:*` channels as
+the desktop, and its approvals through `notify:remote-snapshot` and
+`notify:remote-command`.
+
 ## Review, accept, done
 
 1. When every done-when check is met, the orchestrator runs
@@ -409,7 +430,10 @@ start a dev build with an isolated `PANE_DIR` and:
 
 Journeys run in an isolated Pane with the scripted agent:
 `tests/todos.spec.ts` and `tests/todos-page.spec.ts`
-(`playwright.chat-tabs.config.ts`). `tests/todos-real.spec.ts` runs real
+(`playwright.chat-tabs.config.ts`). The page frame, the thread and the web
+app also run on the renderer alone with fixture to-dos, in CI:
+`tests/todos-page-frame.spec.ts`, `tests/todos-thread.spec.ts` and
+`tests/remote-pwa-todos.spec.ts` (`playwright.ci.minimal.config.ts`). `tests/todos-real.spec.ts` runs real
 Claude Code and Codex, only with `TODOS_REAL=1`.
 
 The code is in `main/src/services/todos/`: `supervisorRules.ts` (the ladder

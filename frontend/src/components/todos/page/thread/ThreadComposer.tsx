@@ -16,7 +16,16 @@ const ICON_BUTTON = 'inline-flex h-[26px] w-[26px] shrink-0 items-center justify
  * (↑, ⌘↵). Comments go to the orchestrator; on a sub-to-do the "To" switch picks its agent or the
  * orchestrator, as before. An attached file becomes a to-do attachment and the comment names it.
  */
-export function ThreadComposer({ detail }: { detail: TodoDetail }) {
+export interface ThreadComposerProps {
+  detail: TodoDetail;
+  /**
+   * The phone's layout (P7): full width, 16 px text so Safari doesn't zoom, clear of the home
+   * indicator, and Send keeps the keyboard up.
+   */
+  phone?: boolean;
+}
+
+export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
   const { todo, chatTarget, orchestrator } = detail;
   const attach = useComposerAttach(todo.number);
   const [text, setText] = useState('');
@@ -77,25 +86,25 @@ export function ThreadComposer({ detail }: { detail: TodoDetail }) {
     ? { name: chatTarget.name, agentId: detail.agentId }
     : { name: orchestrator?.name ?? 'orchestrator', agentId: orchestrator?.agentId };
   return (
-    <div className="shrink-0 px-7 pb-3.5 pt-2.5" data-testid="todo-composer">
+    <div className={phone ? 'shrink-0 border-t border-border-primary bg-bg-primary px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2' : 'shrink-0 px-7 pb-3.5 pt-2.5'} data-testid="todo-composer">
       <div
         onDragOver={onDragOver}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        className={cn('mx-auto max-w-[760px] rounded-[10px] border bg-surface-primary px-3 pb-1.5 pt-2.5 focus-within:border-border-hover', dragging ? 'border-interactive' : 'border-border-primary')}
+        className={cn('mx-auto rounded-[10px] border', phone ? 'max-w-none' : 'max-w-[760px]', 'bg-surface-primary px-3 pb-1.5 pt-2.5 focus-within:border-border-hover', dragging ? 'border-interactive' : 'border-border-primary')}
         data-dragging={dragging || undefined}
       >
         <AttachedChips files={attach.files} onRemove={attach.remove} />
         <textarea
           ref={box}
-          rows={2}
+          rows={phone ? 1 : 2}
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKey}
           onPaste={onPaste}
           placeholder="Leave a comment…"
           aria-label={`Comment on ${todo.ref}`}
-          className="max-h-[160px] min-h-[40px] w-full resize-none bg-transparent p-0 text-[13px] leading-normal text-text-primary outline-none placeholder:text-text-tertiary"
+          className={cn('w-full resize-none bg-transparent p-0 leading-normal text-text-primary outline-none placeholder:text-text-tertiary', phone ? 'max-h-[120px] min-h-[24px] text-[16px]' : 'max-h-[160px] min-h-[40px] text-[13px]')}
           data-testid="todo-composer-input"
         />
         {error && <p className="mb-1 text-[12px] text-status-error" role="alert" data-testid="todo-composer-error">{error}</p>}
@@ -123,10 +132,11 @@ export function ThreadComposer({ detail }: { detail: TodoDetail }) {
             </span>
           ) : <span data-testid="todo-composer-to">Comments go to the orchestrator</span>}
           <span className="flex-1" />
-          <button type="button" onClick={() => void attach.pick()} disabled={attach.busy} aria-label="Attach a file" title="Attach a file (or paste or drop one)" className={cn(ICON_BUTTON, 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary')} data-testid="todo-composer-attach">
+          {attach.available && <button type="button" onClick={() => void attach.pick()} disabled={attach.busy} aria-label="Attach a file" title="Attach a file (or paste or drop one)" className={cn(ICON_BUTTON, 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary')} data-testid="todo-composer-attach">
             <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-          <button type="button" onClick={() => void send()} disabled={sending} aria-label="Send (⌘↵)" title="Send (⌘↵)" className={cn(ICON_BUTTON, ready ? 'bg-interactive text-text-on-interactive hover:bg-interactive-hover' : 'text-text-secondary hover:bg-surface-hover')} data-testid="todo-composer-send">
+          </button>}
+          {/* On a phone the box keeps focus through the tap, so the keyboard stays up. */}
+          <button type="button" onClick={() => void send()} onPointerDown={phone ? (event) => event.preventDefault() : undefined} disabled={sending} aria-label="Send (⌘↵)" title="Send (⌘↵)" className={cn(ICON_BUTTON, ready ? 'bg-interactive text-text-on-interactive hover:bg-interactive-hover' : 'text-text-secondary hover:bg-surface-hover')} data-testid="todo-composer-send">
             <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </div>

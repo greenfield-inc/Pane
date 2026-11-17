@@ -325,13 +325,13 @@ const PRIMARY_BUTTON = cn(BUTTON, 'border-transparent bg-interactive font-medium
 const TOGGLE = 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover disabled:opacity-40 disabled:hover:bg-transparent';
 
 /** The page's one state action: Start anyway, Start, Resume or Stop; none once it is closed. */
-interface StateAction {
+export interface StateAction {
   label: string;
   action: TodoAction;
   primary: boolean;
 }
 
-function stateAction(detail: TodoDetail): StateAction | null {
+export function stateAction(detail: TodoDetail): StateAction | null {
   const { todo, status } = detail;
   const number = todo.number;
   if (status.status === 'done' || status.status === 'dropped') return null;

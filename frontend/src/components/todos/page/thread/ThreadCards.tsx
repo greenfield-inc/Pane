@@ -361,9 +361,9 @@ function ReplyBox({ ctx, replyTo, placeholder }: { ctx: ThreadContext; replyTo: 
           className="max-h-[120px] min-h-[20px] flex-1 resize-none bg-transparent p-0 text-[13px] leading-normal text-text-primary outline-none placeholder:text-text-tertiary [field-sizing:content]"
           data-testid="todo-thread-reply-input"
         />
-        <button type="button" onClick={() => void attach.pick()} disabled={attach.busy} aria-label="Attach a file" title="Attach a file" className={ICON_BUTTON} data-testid="todo-thread-reply-attach">
+        {attach.available && <button type="button" onClick={() => void attach.pick()} disabled={attach.busy} aria-label="Attach a file" title="Attach a file" className={ICON_BUTTON} data-testid="todo-thread-reply-attach">
           <Paperclip className="h-3 w-3" aria-hidden="true" />
-        </button>
+        </button>}
         <button type="button" onClick={() => void send()} disabled={sending} aria-label="Send reply (⌘↵)" title="Send reply (⌘↵)" className={cn(ICON_BUTTON, ready ? 'bg-interactive text-text-on-interactive hover:bg-interactive-hover hover:text-text-on-interactive' : 'text-text-secondary')} data-testid="todo-thread-reply-send">
           <ArrowUp className="h-3 w-3" aria-hidden="true" />
         </button>

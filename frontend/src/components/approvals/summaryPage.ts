@@ -1,5 +1,6 @@
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { notifyApi } from '../../stores/notifyStore';
 
 /** An approval's Summary page as the column shows it, or why it can't. */
 export type SummaryRead =
@@ -10,7 +11,6 @@ export type SummaryRead =
 /** A read that has not answered by then has failed: no spinner stays up. */
 const READ_TIMEOUT_MS = 10_000;
 const SUMMARY_CHANNEL = 'notify:summary-page';
-type MachineRead = (machineId: string, channel: string, args: unknown[]) => Promise<{ data: unknown }>;
 
 const pageSchema = boundary.object({ kind: boundary.literal('page'), path: boundary.string, html: boundary.string });
 const templateSchema = boundary.object({ kind: boundary.literal('template'), html: boundary.string });
@@ -27,9 +27,10 @@ function hostItemId(item: Pick<NotifyItem, 'id' | 'machineId'>): string {
  * read the phone makes. Never rejects: a failed read is a state with its reason.
  */
 export async function readSummaryPage(item: NotifyItem, theme: 'light' | 'dark'): Promise<SummaryRead> {
-  // SAFETY: main refuses a channel it doesn't serve, and that refusal is a failed read below.
-  const read = window.electronAPI.machines.read as MachineRead;
+  // The desktop reads through its machine connections; the web app straight from its host.
+  const read = notifyApi()?.read;
   const machine = item.machine ?? 'this machine';
+  if (!read) return { kind: 'failed', message: `Couldn't read the Summary from ${machine}: approvals are not available here.` };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<SummaryRead>((resolve) => {
     timer = setTimeout(() => resolve({ kind: 'failed', message: `Couldn't reach ${machine} for the Summary. Try again once it's online.` }), READ_TIMEOUT_MS);

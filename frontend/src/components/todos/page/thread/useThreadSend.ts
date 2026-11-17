@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { TodoAction } from '../../../../../../shared/types/todos';
-import { useTodosStore } from '../../../../stores/todosStore';
+import { todosApi, useTodosStore } from '../../../../stores/todosStore';
 import { showActionError } from '../../../../stores/errorStore';
 import { ipcErrorMessage } from '../../../../utils/ipcErrorMessage';
 import { fileName, type ComposerFile } from './threadInputs';
@@ -17,7 +17,9 @@ export interface ThreadSendResult {
  */
 export async function sendThreadComment(action: TodoAction): Promise<ThreadSendResult> {
   try {
-    const response = await window.electronAPI.todos.act(action);
+    const api = todosApi();
+    if (!api) return { ok: false, error: 'To-dos are not available here. Nothing was sent.' };
+    const response = await api.act(action);
     if (!response.success || !response.data) return { ok: false, error: ipcErrorMessage(response.error, 'Pane did not say why. Nothing was sent.') };
     await useTodosStore.getState().refresh();
     return { ok: true };
@@ -42,6 +44,8 @@ function readDataUrl(file: File): Promise<string> {
 export interface ComposerAttach {
   files: ComposerFile[];
   busy: boolean;
+  /** False where the app can't pick or save a file (the web app): 📎 stays out of the composer. */
+  available: boolean;
   /** 📎: pick a file on this machine. */
   pick: () => Promise<void>;
   /** A pasted or dropped file: saved on this machine, then attached by its path. */
@@ -65,8 +69,7 @@ export function useComposerAttach(number: number): ComposerAttach {
   }, [act, number]);
 
   const pick = useCallback(async () => {
-    const response = await window.electronAPI.dialog.openFile().catch(() => null);
-    const path = response?.success ? response.data : null;
+    const path = await todosApi()?.files?.pick().catch(() => null);
     if (!path) return;
     setBusy(true);
     await attach(path, fileName(path));
@@ -74,7 +77,8 @@ export function useComposerAttach(number: number): ComposerAttach {
   }, [attach]);
 
   const addFiles = useCallback(async (dropped: readonly File[]) => {
-    if (dropped.length === 0) return;
+    const saver = todosApi()?.files;
+    if (dropped.length === 0 || !saver) return;
     setBusy(true);
     try {
       const payload = await Promise.all(dropped.map(async (file, index) => ({
@@ -83,7 +87,7 @@ export function useComposerAttach(number: number): ComposerAttach {
         type: file.type || 'application/octet-stream',
       })));
       // Saved as files on this machine the way the chat composer saves pasted images.
-      const paths = await window.electronAPI.sessions.saveImages(`pending_todo-${number}`, payload);
+      const paths = await saver.save(`pending_todo-${number}`, payload);
       for (const [index, path] of paths.entries()) await attach(path, payload[index]?.name ?? fileName(path));
     } catch (error) {
       showActionError('Could not attach the file', error);
@@ -94,5 +98,5 @@ export function useComposerAttach(number: number): ComposerAttach {
 
   const remove = useCallback((path: string) => setFiles((current) => current.filter((file) => file.path !== path)), []);
   const clear = useCallback(() => setFiles([]), []);
-  return { files, busy, pick, addFiles, remove, clear };
+  return { files, busy, available: todosApi()?.files !== undefined, pick, addFiles, remove, clear };
 }

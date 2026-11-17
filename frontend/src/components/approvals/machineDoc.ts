@@ -1,6 +1,7 @@
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { notifyApi, notifyReadsFilesHere, type NotifyMachineRead } from '../../stores/notifyStore';
 
 /** A document linked from an item, read from the machine that holds it. */
 export type MachineDoc =
@@ -20,7 +21,6 @@ const READ_TIMEOUT_MS = 10_000;
  * means nothing here.
  */
 const READ_DOC_CHANNEL = 'autopilot:read-doc';
-type MachineRead = (machineId: string, channel: string, args: unknown[]) => Promise<{ data: unknown }>;
 
 /** The item's file links. */
 export function machineFileLinks(item: NotifyItem): Array<{ path: string; label: string }> {
@@ -31,7 +31,7 @@ const textSchema = boundary.object({ kind: boundary.literal('text'), text: bound
 const htmlSchema = boundary.object({ kind: boundary.literal('html'), html: boundary.string });
 const missingSchema = boundary.object({ kind: boundary.literal('missing'), message: boundary.optional(boundary.string) });
 
-function decodeDoc(answer: Awaited<ReturnType<MachineRead>>['data']): MachineDoc {
+function decodeDoc(answer: Awaited<ReturnType<NotifyMachineRead>>['data']): MachineDoc {
   const text = decodeOptionalBoundary(answer, textSchema);
   if (text) return { kind: 'text', text: text.text };
   const page = decodeOptionalBoundary(answer, htmlSchema);
@@ -44,8 +44,9 @@ function decodeDoc(answer: Awaited<ReturnType<MachineRead>>['data']): MachineDoc
 
 /** Reads a linked file from the item's machine (a to-do's attachment passes its to-do's). Never rejects: a failed read is a state. */
 export async function readMachineDoc(item: Pick<NotifyItem, 'machineId'>, path: string): Promise<MachineDoc> {
-  // SAFETY: main refuses a channel it doesn't serve, and that refusal is a failed read below.
-  const read = window.electronAPI.machines.read as MachineRead;
+  // The desktop reads through its machine connections; the web app straight from its host.
+  const read = notifyApi()?.read;
+  if (!read) return { kind: 'unreachable' };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<{ kind: 'unreachable' }>((resolve) => {
     timer = setTimeout(() => resolve({ kind: 'unreachable' }), READ_TIMEOUT_MS);
@@ -74,5 +75,6 @@ export function machineDocFailure(doc: MachineDoc, label: string, machine: strin
  * That machine serves only files its own approvals link, read-only and under the same size limit.
  */
 export function linkedFileReadsHere(item: Pick<NotifyItem, 'machineId'>, activeMachineId: string): boolean {
+  if (!notifyReadsFilesHere()) return false;
   return (item.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID && activeMachineId === LOCAL_MACHINE_ID;
 }

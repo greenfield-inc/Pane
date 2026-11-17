@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type 
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import type { TodoDetail } from '../../../../../shared/types/todos';
 import { MarkdownPreview, type MarkdownImageProps } from '../../MarkdownPreview';
-import { useTodosStore } from '../../../stores/todosStore';
+import { todosApi, useTodosStore } from '../../../stores/todosStore';
 import { cn } from '../../../utils/cn';
 import { COMPACT_MARKDOWN, SectionAction, SectionLabel, SubTodoRows } from './TodoPageParts';
 
@@ -22,6 +22,8 @@ export interface TodoCardProps {
   detail: TodoDetail;
   onOpenTodo: (number: number) => void;
   onOpenImage: (src: string, label: string) => void;
+  /** The phone's + Add (P7): opens New sub-to-do full screen instead of the row under the list. */
+  onAddSubTodo?: () => void;
 }
 
 /** The sub-to-dos section's element id, which the chip row's 1/2 scrolls to. */
@@ -30,7 +32,7 @@ export function todoSubTodosAnchor(number: number): string {
 }
 
 /** The card under the title: description, DONE WHEN and SUB-TO-DOS with + Add. */
-export function TodoCard({ detail, onOpenTodo, onOpenImage }: TodoCardProps) {
+export function TodoCard({ detail, onOpenTodo, onOpenImage, onAddSubTodo }: TodoCardProps) {
   const { todo } = detail;
   const act = useTodosStore((state) => state.act);
   const isSub = todo.parentNumber !== null;
@@ -60,12 +62,12 @@ export function TodoCard({ detail, onOpenTodo, onOpenImage }: TodoCardProps) {
           </div>
         </>
       )}
-      {(!isSub || detail.subTodos.length > 0) && <SubTodos detail={detail} onOpenTodo={onOpenTodo} canAdd={!isSub} />}
+      {(!isSub || detail.subTodos.length > 0) && <SubTodos detail={detail} onOpenTodo={onOpenTodo} canAdd={!isSub} onAdd={onAddSubTodo} />}
     </div>
   );
 }
 
-function SubTodos({ detail, onOpenTodo, canAdd }: { detail: TodoDetail; onOpenTodo: (number: number) => void; canAdd: boolean }) {
+function SubTodos({ detail, onOpenTodo, canAdd, onAdd }: { detail: TodoDetail; onOpenTodo: (number: number) => void; canAdd: boolean; onAdd?: () => void }) {
   const create = useTodosStore((state) => state.create);
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState('');
@@ -96,7 +98,7 @@ function SubTodos({ detail, onOpenTodo, canAdd }: { detail: TodoDetail; onOpenTo
   const done = detail.subTodos.filter((row) => row.status.status === 'done').length;
   return (
     <section id={todoSubTodosAnchor(detail.todo.number)} aria-label="Sub-to-dos" className="scroll-mt-4" data-testid="todo-sub-todos">
-      <SectionLabel action={canAdd && !adding ? <SectionAction label="Add" onClick={() => setAdding(true)} testId="todo-add-sub" /> : undefined}>
+      <SectionLabel action={canAdd && !adding ? <SectionAction label="Add" onClick={onAdd ?? (() => setAdding(true))} testId="todo-add-sub" /> : undefined}>
         Sub-to-dos{detail.subTodos.length > 0 ? ` · ${done} of ${detail.subTodos.length}` : ''}
       </SectionLabel>
       {detail.subTodos.length > 0 ? <SubTodoRows rows={detail.subTodos} onOpen={onOpenTodo} /> : !adding && <p className="text-[12.5px] text-text-tertiary">None yet.</p>}
@@ -134,7 +136,12 @@ function DescriptionImage({ src, alt }: MarkdownImageProps) {
     let live = true;
     setLoaded(null);
     setFailed(false);
-    void window.electronAPI.autopilot.readDoc(src)
+    const api = todosApi();
+    if (!api) {
+      setFailed(true);
+      return;
+    }
+    void api.readDoc(src)
       .then(doc => { if (!live) return; if (doc.kind === 'image') setLoaded(doc.dataUrl); else setFailed(true); })
       .catch(() => { if (live) setFailed(true); });
     return () => { live = false; };

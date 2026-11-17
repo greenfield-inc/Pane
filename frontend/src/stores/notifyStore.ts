@@ -13,6 +13,52 @@ interface NotifyState {
 
 export const useNotifyStore = create<NotifyState>(() => ({ snapshot: null }));
 
+/** One read from the machine that holds an item: a linked document or its Summary. */
+export type NotifyMachineRead = (machineId: string, channel: string, args: unknown[]) => Promise<{ data: unknown }>;
+
+/**
+ * Where approvals are read and answered (P7). The desktop's is the preload's `notify` API; the web
+ * app installs one over its daemon connection (`notify:remote-snapshot`, `notify:remote-command`).
+ */
+export interface NotifyApi {
+  getSnapshot: () => Promise<NotifySnapshot>;
+  onSnapshot: (listener: (snapshot: NotifySnapshot) => void) => () => void;
+  run: (command: NotifyCommand) => Promise<void>;
+  read: NotifyMachineRead;
+  /** The desktop shows this machine's linked files in its own viewer; the web app reads them from the host. */
+  readsFilesHere: boolean;
+}
+
+function electronNotifyApi(): NotifyApi | null {
+  const api = window.electronAPI;
+  if (!api) return null;
+  return {
+    getSnapshot: () => api.notify.getSnapshot(),
+    onSnapshot: (listener) => api.notify.onSnapshot(listener),
+    run: (command) => api.notify.run(command),
+    // SAFETY: main refuses a channel it doesn't serve, and every caller treats that refusal as a failed read.
+    read: (machineId, channel, args) => (api.machines.read as NotifyMachineRead)(machineId, channel, args),
+    readsFilesHere: true,
+  };
+}
+
+let installedApi: NotifyApi | null = null;
+
+/** The web app's API, installed while it is connected to a host; null puts the desktop's back. */
+export function installNotifyApi(api: NotifyApi | null): void {
+  installedApi = api;
+}
+
+/** Whether this machine's linked files open in the app's own viewer: on the desktop, not in the web app. */
+export function notifyReadsFilesHere(): boolean {
+  return installedApi?.readsFilesHere ?? true;
+}
+
+/** The API approvals use now: the installed one, else the desktop's, else none. */
+export function notifyApi(): NotifyApi | null {
+  return installedApi ?? electronNotifyApi();
+}
+
 const NO_ITEMS: readonly NotifyItem[] = [];
 
 /** Every item, or one shared empty list before the first snapshot: a fresh `[]` per read would re-render forever. */
@@ -22,7 +68,7 @@ export function selectNotifyItems(state: NotifyState): readonly NotifyItem[] {
 
 /** Keeps the store in step with main. Returns the unsubscribe. */
 export function subscribeNotify(): () => void {
-  const api = window.electronAPI?.notify;
+  const api = installedApi ?? (window.electronAPI?.notify ? electronNotifyApi() : null);
   if (!api) return () => undefined;
   let pushed = false;
   const unsubscribe = api.onSnapshot((snapshot) => {
@@ -58,7 +104,9 @@ export function runNotify(command: NotifyCommand): void {
 /** Runs a card's command and says whether it was accepted, so a form keeps what was typed until it was (F-4). */
 export async function sendNotify(command: NotifyCommand): Promise<boolean> {
   try {
-    await window.electronAPI.notify.run(command);
+    const api = notifyApi();
+    if (!api) throw new Error('Approvals are not available here.');
+    await api.run(command);
     return true;
   } catch (error) {
     console.error(`Notify command ${command.type} failed:`, error);

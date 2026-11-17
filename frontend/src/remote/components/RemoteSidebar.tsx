@@ -14,6 +14,7 @@ import { createProjectById, getPinnedSessions } from '../../utils/sessionOrderin
 import { useRemoteSessionStore } from '../stores/remoteSessionStore';
 import { useRemoteSidebarSectionsStore, type RemoteSidebarSection } from '../stores/remoteSidebarSectionsStore';
 import { useRemoteExpandedSessionsStore } from '../stores/remoteExpandedSessionsStore';
+import { RemoteTodosEntry } from './RemoteTodos';
 
 /** Sidebar actions. Panes are the PWA's "sessions"; Sessions are orchestration Sessions. */
 export interface RemoteSidebarActions {
@@ -35,8 +36,16 @@ export interface RemoteSidebarActions {
   refresh: () => void;
 }
 
+/** The drawer's To-dos entry: whether To-dos is on screen, and how to open it. */
+interface RemoteSidebarTodos {
+  open: boolean;
+  onOpen: () => void;
+}
+
 interface RemoteSidebarProps {
   loading: boolean;
+  /** Hosts with To-dos show its entry first. */
+  todos?: RemoteSidebarTodos;
   /** A Pane or Session id whose pin, archive or restore is in flight. */
   actionId?: string | null;
   actions: RemoteSidebarActions;
@@ -56,6 +65,7 @@ export function RemoteSidebar({
   actions,
   selectedPane = null,
   onClose,
+  todos,
   className = 'flex w-80 shrink-0',
 }: RemoteSidebarProps) {
   const projects = useRemoteSessionStore(state => state.projects);
@@ -276,6 +286,7 @@ export function RemoteSidebar({
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+        {todos && <RemoteTodosEntry open={todos.open} onOpen={todos.onOpen} />}
         {hasPinned && (
           <SidebarSection section="pinned" label="Pinned" expanded={expanded.pinned} onToggle={toggleSection}>
             {pinnedSessions.map(session => sessionRow(session, 'pinned'))}

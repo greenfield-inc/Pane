@@ -7,6 +7,85 @@ import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../
 import { showActionError } from './errorStore';
 import { useNotifyStore } from './notifyStore';
 import type { NotifySnapshot } from '../../../shared/types/notify';
+import type { AutopilotDocument } from '../../../shared/types/autopilot';
+
+/** What one to-do channel answers: the IPC envelope `todos:*` replies in. */
+export interface TodosAnswer<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+/** A file from this device, as the composer and New to-do save pasted ones. */
+interface TodoSavedFile {
+  name: string;
+  dataUrl: string;
+  type: string;
+}
+
+/** Picking and saving files on the device the app runs on: the desktop has both, the web app neither. */
+interface TodoFilesApi {
+  /** 📎: a file picked on this machine, or null when the person cancelled. */
+  pick: () => Promise<string | null>;
+  /** Pasted or dropped files, saved as files on this machine; their paths. */
+  save: (draftId: string, files: TodoSavedFile[]) => Promise<string[]>;
+}
+
+/**
+ * Where the to-do screens read and act (P7). The desktop's is the preload's `todos` API; the web app
+ * (Remote PWA, and the Capacitor shell) installs one over its daemon connection with `installTodosApi`.
+ */
+export interface TodosApi {
+  snapshot: () => Promise<TodosAnswer<TodosSnapshot>>;
+  detail: (number: number) => Promise<TodosAnswer<TodoDetail>>;
+  create: (input: TodoCreateInput) => Promise<TodosAnswer<TodoRecord>>;
+  act: (action: TodoAction) => Promise<TodosAnswer<TodoActionResult>>;
+  /** `todos:changed`: something on the host changed its to-dos. Returns the unsubscribe. */
+  onChanged: (listener: () => void) => () => void;
+  /** An attached file or a description's image, read from the to-do's machine (an HTML page as its text where the app can't load a file URL). */
+  readDoc: (path: string) => Promise<AutopilotDocument>;
+  /** A web address, outside the app. */
+  openUrl: (url: string) => void;
+  /** Absent where the app can't pick or save a file (the web app): 📎 then stays out of the composer. */
+  files?: TodoFilesApi;
+  /** The host is the computer the app runs on: its name then reads "This Mac". */
+  hostIsHere: boolean;
+}
+
+/** The desktop's to-do API: the preload's, unchanged. Null outside Electron until one is installed. */
+function electronTodosApi(): TodosApi | null {
+  const api = window.electronAPI;
+  if (!api?.todos) return null;
+  return {
+    snapshot: () => api.todos.snapshot(),
+    detail: (number) => api.todos.detail(number),
+    create: (input) => api.todos.create(input),
+    act: (action) => api.todos.act(action),
+    onChanged: (listener) => api.events.onTodosChanged(listener),
+    readDoc: (path) => api.autopilot.readDoc(path),
+    openUrl: (url) => { void api.openExternal(url); },
+    files: {
+      pick: async () => {
+        const response = await api.dialog.openFile().catch(() => null);
+        return response?.success ? response.data ?? null : null;
+      },
+      save: (draftId, files) => api.sessions.saveImages(draftId, files),
+    },
+    hostIsHere: true,
+  };
+}
+
+let installedApi: TodosApi | null = null;
+
+/** The web app's API, installed while it is connected to a host; null puts the desktop's back. */
+export function installTodosApi(api: TodosApi | null): void {
+  installedApi = api;
+}
+
+/** The API the to-do screens use now: the installed one, else the desktop's, else none. */
+export function todosApi(): TodosApi | null {
+  return installedApi ?? electronTodosApi();
+}
 
 interface RemoteTodoAnswer {
   success: boolean;
@@ -78,19 +157,21 @@ export const useTodosStore = create<TodosState>((set, get) => ({
   watched: new Map(),
 
   refresh: async () => {
-    if (!window.electronAPI?.todos) return;
+    const api = todosApi();
+    if (!api) return;
     const generation = ++refreshGeneration;
-    const response = await window.electronAPI.todos.snapshot().catch(() => null);
+    const response = await api.snapshot().catch(() => null);
     if (generation !== refreshGeneration || !response?.success || !response.data) return;
-    set({ snapshot: asThisMachine(response.data) });
+    set({ snapshot: api.hostIsHere ? asThisMachine(response.data) : response.data });
     await Promise.all([...get().watched.keys()].map(number => get().loadDetail(number)));
   },
 
   loadDetail: async (number) => {
-    if (!window.electronAPI?.todos) return null;
-    const response = await window.electronAPI.todos.detail(number).catch(() => null);
+    const api = todosApi();
+    if (!api) return null;
+    const response = await api.detail(number).catch(() => null);
     if (!response?.success || !response.data) return null;
-    const detail = detailAsThisMachine(response.data);
+    const detail = api.hostIsHere ? detailAsThisMachine(response.data) : response.data;
     set(state => ({ details: new Map(state.details).set(number, detail) }));
     return detail;
   },
@@ -109,7 +190,9 @@ export const useTodosStore = create<TodosState>((set, get) => ({
 
   create: async (input) => {
     try {
-      const response = await window.electronAPI.todos.create(input);
+      const api = todosApi();
+      if (!api) throw new Error('To-dos are not available here.');
+      const response = await api.create(input);
       if (!response.success || !response.data) {
         showActionError('Could not create the to-do', response.error);
         return null;
@@ -124,7 +207,9 @@ export const useTodosStore = create<TodosState>((set, get) => ({
 
   act: async (action) => {
     try {
-      const response = await window.electronAPI.todos.act(action);
+      const api = todosApi();
+      if (!api) throw new Error('To-dos are not available here.');
+      const response = await api.act(action);
       if (!response.success || !response.data) {
         showActionError('That didn’t work', response.error);
         return null;
@@ -284,27 +369,40 @@ export function useMachineTodoSessionKeys(): ReadonlySet<string> {
 /** Keeps the snapshot current while the app is mounted: on start and whenever main says it changed. */
 export function useTodosRefresh(): void {
   const refresh = useTodosStore(state => state.refresh);
-  useEffect(() => {
-    if (!window.electronAPI?.todos) return;
-    void refresh();
-    const unsubscribe = window.electronAPI.events.onTodosChanged(() => { void refresh(); });
-    // A to-do's status follows its approvals: reread once an approval's state settles (an answer ends
-    // the Undo hold as sent → answered), so the page never shows Waiting on you for an answered card.
-    let approvals = approvalStates(useNotifyStore.getState().snapshot);
-    let timer: number | undefined;
-    const unsubscribeNotify = useNotifyStore.subscribe(state => {
-      const next = approvalStates(state.snapshot);
-      if (next === approvals) return;
-      approvals = next;
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => { void refresh(); }, 300);
-    });
-    return () => {
-      unsubscribe();
-      unsubscribeNotify();
-      window.clearTimeout(timer);
-    };
-  }, [refresh]);
+  useEffect(() => watchTodos(refresh), [refresh]);
+}
+
+/** Forgets every to-do read so far: the web app does this when it leaves a host. */
+export function resetTodos(): void {
+  refreshGeneration += 1;
+  useTodosStore.setState({ snapshot: null, details: new Map(), watched: new Map() });
+}
+
+/**
+ * Reads the snapshot now and again whenever the host says it changed, or an approval linked to a
+ * to-do settles. Returns the stop. The desktop runs it for the app's life; the web app per host.
+ */
+export function watchTodos(refresh: () => Promise<void> = useTodosStore.getState().refresh): () => void {
+  const api = todosApi();
+  if (!api) return () => undefined;
+  void refresh();
+  const unsubscribe = api.onChanged(() => { void refresh(); });
+  // A to-do's status follows its approvals: reread once an approval's state settles (an answer ends
+  // the Undo hold as sent → answered), so the page never shows Waiting on you for an answered card.
+  let approvals = approvalStates(useNotifyStore.getState().snapshot);
+  let timer: number | undefined;
+  const unsubscribeNotify = useNotifyStore.subscribe(state => {
+    const next = approvalStates(state.snapshot);
+    if (next === approvals) return;
+    approvals = next;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => { void refresh(); }, 300);
+  });
+  return () => {
+    unsubscribe();
+    unsubscribeNotify();
+    window.clearTimeout(timer);
+  };
 }
 
 /** How this machine is named on its own screens, as the design shows it ("This Mac is busy"). */

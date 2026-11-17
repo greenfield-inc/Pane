@@ -32,6 +32,8 @@ export interface TodoChipsProps {
   onOpenDetails: () => void;
   onShowSplit: () => void;
   onAttached: (target: string) => void;
+  /** The agents chip: the to-do's Session. The web app opens it there; the desktop by default. */
+  onOpenSession?: () => void;
 }
 
 /**
@@ -39,7 +41,7 @@ export interface TodoChipsProps {
  * sub-to-do progress and machine. Each chip opens what it names. While the split is hidden a
  * "Plan · 5 files" chip opens it; with nothing attached the row offers + Attach instead.
  */
-export function TodoChips({ detail, splitCount, splitLead, splitHidden, onOpenApproval, onOpenPr, onScrollToSubTodos, onOpenDetails, onShowSplit, onAttached }: TodoChipsProps) {
+export function TodoChips({ detail, splitCount, splitLead, splitHidden, onOpenApproval, onOpenPr, onScrollToSubTodos, onOpenDetails, onShowSplit, onAttached, onOpenSession }: TodoChipsProps) {
   const { status, todo } = detail;
   const [attaching, setAttaching] = useState(false);
   const waitingId = status.status === 'waiting' ? status.waitingApprovalId : undefined;
@@ -62,7 +64,7 @@ export function TodoChips({ detail, splitCount, splitLead, splitHidden, onOpenAp
         {TODO_STATUS_LABEL[status.status]}
       </Chip>
       {reason && <span className={cn('max-w-[280px] truncate text-[12px]', status.alert ? 'text-status-error' : 'text-text-tertiary')} title={reason} data-testid="todo-status-reason">{reason}</span>}
-      <Chip label={worker ? `Open its Session: orchestrator and ${worker.name ?? 'its agent'}` : 'Open its Session'} onClick={() => openTodoSession(detail)} disabled={!hasSession} testId="todo-chip-agents">
+      <Chip label={worker ? `Open its Session: orchestrator and ${worker.name ?? 'its agent'}` : 'Open its Session'} onClick={onOpenSession ?? (() => openTodoSession(detail))} disabled={!hasSession} testId="todo-chip-agents">
         <span className="inline-flex items-center">
           <AgentAvatar agentId={detail.orchestrator?.agentId ?? todo.agent ?? undefined} name="orchestrator" className="h-4 w-4 rounded" />
           {worker && <AgentAvatar agentId={detail.agentId} name={worker.name ?? 'agent'} className="-ml-[3px] h-4 w-4 rounded ring-[1.5px] ring-surface-primary" />}

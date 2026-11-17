@@ -21,6 +21,6 @@ export function TodoChatTimeline(props: TodoChatProps) {
 }
 
 /** The composer pinned under the thread: comments go to the orchestrator (or, on a sub-to-do, the "To" switch). */
-export function TodoComposer({ detail }: { detail: TodoDetail }) {
-  return <ThreadComposer detail={detail} />;
+export function TodoComposer({ detail, phone }: { detail: TodoDetail; phone?: boolean }) {
+  return <ThreadComposer detail={detail} phone={phone} />;
 }
