@@ -4,6 +4,7 @@ import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder
 import type { MachineState } from '../shared/types/machineConnections';
 import type { TailnetMachine, TailnetMachineList } from '../shared/types/workspaceAccess';
 import type { SessionMoveMark, SessionMovePreflight, SessionMoveProgress } from '../shared/types/sessionMove';
+import type { RemoteComputer } from '../shared/types/remoteComputers';
 
 /**
  * Move to machine… moving a whole Session (states 1–7 of the move dialog sketch), against a
@@ -104,6 +105,10 @@ type MoveState = {
   startWith: SessionMoveProgress | null;
   afterStop: SessionMoveProgress | null;
   progress: SessionMoveProgress | null;
+  /** Clone and Trust wait for `window.__releaseFix()` before they answer. */
+  holdFix?: boolean;
+  /** Set once a held fix has answered. */
+  fixAnswered?: boolean;
   calls: Array<{ channel: string; request: JsonValue; machineId?: string }>;
 };
 
@@ -136,6 +141,12 @@ async function installMoveHost(page: Page, initial: Pick<MoveState, 'preflights'
       const request = args[0] as { target?: string; recheck?: boolean };
       // SAFETY: the request is the plain JSON object the dialog built.
       state.calls.push({ channel, request: structuredClone(request) as JsonValue });
+      if (channel === 'runpane:sessions:move-fix' && state.holdFix) {
+        await new Promise<void>(resolve => { Object.assign(window, { __releaseFix: resolve }); });
+        const held = structuredClone(answer(channel, request));
+        state.fixAnswered = true;
+        return held;
+      }
       return structuredClone(answer(channel, request));
     };
     const run = window.electronAPI.machines.run;
@@ -267,16 +278,14 @@ async function openAllMachines(page: Page, theme: Theme, remote: JsonObject[], l
     { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
     { id: 'build', label: 'build-box', kind: 'remote', status: 'online', offlineSince: null },
   ];
+  // Saved before the app loads its config, so the Session's machine is known when its menu opens.
+  const computers: RemoteComputer[] = [{ id: 'build', name: 'build-box' }, { id: 'studio-b', name: 'studio-b' }].map(machine => ({
+    id: machine.id, label: machine.name,
+    routes: [{ id: `tailscale:https://${machine.name}.tail1234.ts.net:8443`, kind: 'tailscale', source: 'found', baseUrl: `https://${machine.name}.tail1234.ts.net:8443`, token: '', tailnetMachine: machine.name, tailnetDomain: 'tail1234.ts.net' }],
+  }));
   await openSidebar(page, theme, local, {
     machineConnections: { machines, reads: { local: allMachinesList(local), build: allMachinesList(remote) } },
-  });
-  await page.evaluate(async () => {
-    for (const machine of [{ id: 'build', name: 'build-box' }, { id: 'studio-b', name: 'studio-b' }]) {
-      await window.electronAPI.remoteDaemon.upsertConnectionProfile({
-        id: machine.id, label: machine.name, baseUrl: `https://${machine.name}.tail1234.ts.net:8443`, token: '', transport: 'http+sse',
-        tailnetMachine: machine.name, tailnetDomain: 'tail1234.ts.net',
-      });
-    }
+    computers,
   });
   await page.getByRole('button', { name: 'Agents run on studio-a. Switch machine' }).click();
   await page.getByRole('menuitemradio', { name: /All machines/ }).click();
@@ -413,7 +422,10 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(row).toBeVisible({ timeout: 10_000 });
     await runMoveFlow(page, theme, 'all-machines', async () => {
       await row.click({ button: 'right' });
-      await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
+      // The item is disabled until that machine reads as online; the row can show first.
+      const move = page.getByRole('menuitem', { name: 'Move to machine…' });
+      await expect.poll(() => move.getAttribute('title')).toBeNull();
+      await move.click();
     }, 'build');
   });
 
@@ -476,6 +488,44 @@ for (const theme of ['light', 'dark'] as const) {
     await shot(page, page.locator('[data-testid="sidebar"], aside, nav').first(), '7-old-machine', theme, 'all-machines');
   });
 }
+
+test('a Clone still running locks the destination, and its answer never lands on another check', async ({ page }) => {
+  await openSidebar(page, 'light', [sessionRecord('alpha', 'Pane UI/UX improvements')]);
+  const row = page.getByTestId('orchestration-session-alpha');
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  const openDialog = async () => {
+    await row.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  };
+  const dialog = dialogOf(page);
+  await openDialog();
+  await dialog.getByRole('radio', { name: 'studio-c' }).check({ force: true });
+  await expect(dialog.getByRole('button', { name: 'Clone' })).toBeVisible();
+  await setMove(page, { holdFix: true });
+  await dialog.getByRole('button', { name: 'Clone' }).click();
+
+  // While Clone runs, the destination and the mode stay put.
+  await expect(dialog.getByRole('radio', { name: 'studio-b', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('radio', { name: 'studio-c' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Hand off with a note…' })).toBeDisabled();
+
+  // Closing and opening again starts a new check; studio-c's late answer must not replace it.
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await openDialog();
+  await dialog.getByRole('radio', { name: 'studio-b', exact: true }).check({ force: true });
+  await expect(dialog.getByTestId('move-session-target-studio-b')).toContainText('ready · ~140 MB');
+  await page.evaluate(() => {
+    // SAFETY: the held move-fix call above set __releaseFix and is waiting on it.
+    (window as typeof window & { __releaseFix: () => void }).__releaseFix();
+  });
+  await expect.poll(async () => (await moveState(page)).fixAnswered).toBe(true);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(dialog.getByRole('list', { name: 'Checks on studio-b' })).toBeVisible();
+  await expect(dialog.getByRole('list', { name: 'Checks on studio-c' })).toHaveCount(0);
+  await expect(dialog.getByTestId('move-session-target-studio-b')).toContainText('ready · ~140 MB');
+  await expect(dialog.getByRole('radio', { name: 'studio-c' })).toBeEnabled();
+});
 
 test('Hand off with a note… keeps the agent handoff, teammates’ machines included', async ({ page }) => {
   await openSidebar(page, 'light', [sessionRecord('alpha', 'Pane UI/UX improvements')]);

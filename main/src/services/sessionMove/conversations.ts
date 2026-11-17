@@ -4,8 +4,8 @@ import path from 'path';
 import { divergedCopy, fileDigest } from '../../../../packages/runpane/src/checkedCopy';
 import { locateNativeSession, nativeStoreRoot } from '../../../../packages/runpane/src/nativeSession';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import type { ConversationFile, ConversationStore, MoveConversation } from './manifest';
-import { claudeProjectFolder } from './pathMap';
+import { claudeProjectDirName } from '../agentTranscript/claude';
+import { isSafePackagePath, type ConversationFile, type ConversationStore, type MoveConversation } from './manifest';
 
 /**
  * Conversations travel byte for byte (Q-374.4: their history is never rewritten). On the source
@@ -64,12 +64,39 @@ export async function locateConversation(store: ConversationStore, id: string, c
   return { conversation: { store, id, files }, sources };
 }
 
-/** Where a conversation file goes on this machine, for a tab whose working directory is `cwd` here. */
+/**
+ * Where a conversation file goes on this machine, for a tab whose working directory is `cwd` here.
+ * `relative` comes from the peer's manifest, so it must stay beneath the store: no absolute path,
+ * no `..`, and no symlinked folder on the way that leads out of it.
+ */
 function conversationTarget(store: ConversationStore, file: Pick<ConversationFile, 'scope' | 'relative'>, cwd: string, env: NodeJS.ProcessEnv = process.env): string {
   const root = storeRootOf(store, env);
-  return file.scope === 'project'
-    ? path.join(root, 'projects', claudeProjectFolder(cwd), ...file.relative.split('/'))
-    : path.join(root, ...file.relative.split('/'));
+  const refuse = (why: string) => new PaneError('ERR_MOVE_CONVERSATION_PATH',
+    `The package files a conversation at ${file.scope}/${file.relative}, which ${why}, so it was refused.`,
+    'Nothing was written. Check that both machines run the same Pane version, then move again.');
+  if (!isSafePackagePath(file.relative)) throw refuse(`isn't a plain path inside ${root}`);
+  const base = file.scope === 'project' ? path.join(root, 'projects', claudeProjectDirName(cwd)) : root;
+  const target = path.join(base, ...file.relative.split('/'));
+  if (!isWithin(root, target)) throw refuse(`leads outside ${root}`);
+  const existing = deepestExisting(path.dirname(target));
+  if (existing && isWithin(root, existing)) {
+    const realRoot = fs.realpathSync(root);
+    const realExisting = fs.realpathSync(existing);
+    if (!isWithin(realRoot, realExisting)) throw refuse(`goes through a symlink to ${realExisting}, outside ${realRoot}`);
+  }
+  return target;
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function deepestExisting(folder: string): string | undefined {
+  for (let current = folder; ; current = path.dirname(current)) {
+    if (fs.existsSync(current)) return current;
+    if (path.dirname(current) === current) return undefined;
+  }
 }
 
 /** A filed conversation: its main file, and how to take it back out until the move commits. */

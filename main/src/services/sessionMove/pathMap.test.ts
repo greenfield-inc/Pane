@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildPathMap, claudeProjectFolder, mapPath, rewriteText } from './pathMap';
+import { claudeProjectDirName } from '../agentTranscript/claude';
+import { buildPathMap, mapPath, rewriteText } from './pathMap';
 
 const map = buildPathMap({
   sourceHome: '/Users/tylerbrown',
   targetHome: '/Users/tbrownio',
   entries: [
     { from: '/Users/tylerbrown/repos/greenfield/pane', to: '/Users/tbrownio/code/pane' },
-    { from: '/Users/tylerbrown/repos/greenfield/pane/worktrees/fix-login', to: '/Users/tbrownio/code/pane/worktrees/fix-login' },
+    { from: '/Users/tylerbrown/repos/greenfield/pane/worktrees/fix-login', to: '/Users/tbrownio/elsewhere/fix-login' },
     { from: '/Users/tylerbrown/.pane/', to: '/Users/tbrownio/.pane' },
   ],
 });
@@ -14,7 +15,7 @@ const map = buildPathMap({
 describe('mapPath', () => {
   it('maps a worktree through its own entry, longest prefix first', () => {
     expect(mapPath(map, '/Users/tylerbrown/repos/greenfield/pane/worktrees/fix-login/src/a.ts'))
-      .toBe('/Users/tbrownio/code/pane/worktrees/fix-login/src/a.ts');
+      .toBe('/Users/tbrownio/elsewhere/fix-login/src/a.ts');
   });
 
   it('maps a repo path, and anything else under home through the home entry', () => {
@@ -41,7 +42,7 @@ describe('mapPath', () => {
 describe('rewriteText', () => {
   it('rewrites every path in text, including file:// links', () => {
     const text = 'See /Users/tylerbrown/repos/greenfield/pane/worktrees/fix-login/a.md and [link](file:///Users/tylerbrown/.pane/sessions/x/index.html).';
-    expect(rewriteText(map, text)).toBe('See /Users/tbrownio/code/pane/worktrees/fix-login/a.md and [link](file:///Users/tbrownio/.pane/sessions/x/index.html).');
+    expect(rewriteText(map, text)).toBe('See /Users/tbrownio/elsewhere/fix-login/a.md and [link](file:///Users/tbrownio/.pane/sessions/x/index.html).');
   });
 
   it('does not rewrite a longer name that only starts like an entry', () => {
@@ -60,12 +61,13 @@ describe('rewriteText', () => {
 
   it("rewrites Claude's project folder names", () => {
     expect(rewriteText(map, '~/.claude/projects/-Users-tylerbrown-repos-greenfield-pane-worktrees-fix-login/abc.jsonl'))
-      .toBe('~/.claude/projects/-Users-tbrownio-code-pane-worktrees-fix-login/abc.jsonl');
+      .toBe('~/.claude/projects/-Users-tbrownio-elsewhere-fix-login/abc.jsonl');
   });
-});
 
-describe('claudeProjectFolder', () => {
-  it('encodes a working directory the way Claude names its project folder', () => {
-    expect(claudeProjectFolder('/Users/tbrownio/code/pane/worktrees/fix.login_2')).toBe('-Users-tbrownio-code-pane-worktrees-fix-login-2');
+  it("rewrites a project folder name encoded the way Claude encodes it, beyond the BMP too", () => {
+    const rocket = buildPathMap({ sourceHome: '/Users/tylerbrown', targetHome: '/Users/tbrownio', entries: [{ from: '/work/🚀', to: '/Users/tbrownio/work/🚀' }] });
+    expect(claudeProjectDirName('/work/🚀')).toBe('-work--');
+    expect(rewriteText(rocket, `~/.claude/projects/${claudeProjectDirName('/work/🚀')}/abc.jsonl`))
+      .toBe(`~/.claude/projects/${claudeProjectDirName('/Users/tbrownio/work/🚀')}/abc.jsonl`);
   });
 });

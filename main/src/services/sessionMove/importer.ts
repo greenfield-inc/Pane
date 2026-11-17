@@ -7,8 +7,7 @@ import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import type { SessionMoveCheck, SessionMoveFix, SessionMoveMark, SessionMoveRecord } from '../../../../shared/types/sessionMove';
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
-import type { TerminalPausedMark, ToolPanelType } from '../../../../shared/types/panels';
-import type { NotifyItem } from '../../../../shared/types/notify';
+import type { TerminalPausedMark, ToolPanel, ToolPanelType } from '../../../../shared/types/panels';
 import { configuredAgent, isConfiguredAgent } from '../../../../shared/agents';
 import { teammatePaneCaller, type PaneCommandRegistry } from '../../daemon/commandRegistry';
 import type { AppServices } from '../../ipc/types';
@@ -20,6 +19,7 @@ import { getChatTabManager } from '../chatTabs';
 import { repositoryIdentityFromRemote } from '../repositoryIdentity';
 import { sessionWorkspacePath } from '../sessionWorkspace';
 import { thisMachineName } from '../approvals/approvalStore';
+import { isBinaryFile } from '../../utils/binaryFile';
 import { placeConversation, type PlacedConversation } from './conversations';
 import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, placeBranch, snapshotMatches } from './gitSnapshot';
 import { moveManifestSchema, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
@@ -63,6 +63,8 @@ export interface TargetStatus {
   approvals?: number;
   leftBehind?: string[];
   missingEnv?: string[];
+  /** A failed start the source may ask for again. */
+  retryable?: boolean;
 }
 
 interface Job {
@@ -77,7 +79,38 @@ interface Job {
   /** Tabs to start, and their cwd here. */
   tabs: Array<{ paneId: string; tab: MoveTab; cwd: string }>;
   replacedSession?: OrchestrationSessionRecord;
+  /** The build under way; abort waits for it to settle before undoing anything. */
+  building?: Promise<void>;
+  /** Set by abort: the build stops at its next step. */
+  abortRequested?: boolean;
+  /** Abort under way, so a second call waits for the same one. */
+  aborting?: Promise<TargetStatus>;
+  /** Start failed before any tab started; the source may ask again. */
+  startFailed?: boolean;
 }
+
+/** The tabs the importer creates, replaces and releases: Pane's own panel and terminal managers, or a test's. */
+export interface ImporterTabs {
+  getPanel(panelId: string): ToolPanel | undefined;
+  getPanelsForSession(paneId: string): ToolPanel[];
+  createPanel(request: Parameters<typeof panelManager.createPanel>[0]): Promise<ToolPanel>;
+  deletePanel(panelId: string): Promise<void>;
+  isTerminalInitialized(panelId: string): boolean;
+  destroyTerminal(panelId: string): Promise<void>;
+  clearPaused(panelIds: string[]): Promise<void>;
+  releaseChatMove(panelId: string): Promise<void>;
+}
+
+const liveTabs: ImporterTabs = {
+  getPanel: panelId => panelManager.getPanel(panelId),
+  getPanelsForSession: paneId => panelManager.getPanelsForSession(paneId),
+  createPanel: request => panelManager.createPanel(request),
+  deletePanel: async panelId => { await panelManager.deletePanel(panelId); },
+  isTerminalInitialized: panelId => terminalPanelManager.isTerminalInitialized(panelId),
+  destroyTerminal: async panelId => { await terminalPanelManager.destroyTerminal(panelId); },
+  clearPaused: async panelIds => { await terminalPanelManager.clearPaused(panelIds); },
+  releaseChatMove: async panelId => { await getChatTabManager().releaseMove(panelId); },
+};
 
 const POSIX = new Set(['darwin', 'linux']);
 /** How long a move may sit half-received with no new chunk before the target drops it. */
@@ -138,6 +171,29 @@ function compareVersions(left: string, right: string): number {
 }
 
 
+/**
+ * Sessions move only between one person's own machines: every move call, on the source and on the
+ * target, refuses a teammate admitted through a shared tailnet.
+ */
+export function refuseTeammateMove(): void {
+  const teammate = teammatePaneCaller();
+  if (teammate) {
+    throw new PaneError('ERR_MOVE_TEAMMATE', `${teammate} asked to move a Session on this machine, and Sessions move only between one person's own machines. Nothing was changed.`, 'Hand the work over with a note instead.');
+  }
+}
+
+/** A Session-folder file that reads as UTF-8 text all the way through; anything else travels byte for byte. */
+async function readTextFile(file: string, relative: string): Promise<string | null> {
+  if (!isTextFile(relative) || await isBinaryFile(file)) return null;
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(await fs.promises.readFile(file));
+  } catch {
+    return null;
+  }
+}
+
+const ABORTED = (): PaneError => new PaneError('ERR_MOVE_ABORTED', 'The move was cancelled while this machine set it up.', 'Nothing was kept here. Start the move again.');
+
 function tabCommand(tab: MoveTab): string | undefined {
   return readTabFields(tab.state).launch;
 }
@@ -151,7 +207,12 @@ export class MoveImporter {
   private readonly jobs = new Map<string, Job>();
   readonly receiver: MoveReceiver;
 
-  constructor(private readonly services: AppServices, private readonly registry: PaneCommandRegistry, private readonly root = path.join(getAppDirectory(), 'moves')) {
+  constructor(
+    private readonly services: AppServices,
+    private readonly registry: PaneCommandRegistry,
+    private readonly root = path.join(getAppDirectory(), 'moves'),
+    private readonly tabs: ImporterTabs = liveTabs,
+  ) {
     this.receiver = new MoveReceiver(root);
     // Staging left by a move that was under way when Pane quit can't be finished: it goes.
     fs.rmSync(root, { recursive: true, force: true });
@@ -170,10 +231,7 @@ export class MoveImporter {
   }
 
   private refuseTeammate(): void {
-    const teammate = teammatePaneCaller();
-    if (teammate) {
-      throw new PaneError('ERR_MOVE_TEAMMATE', `${teammate} asked to move a Session onto this machine, and Sessions move only between one person's own machines. Nothing was changed.`, 'Hand the work over with a note instead.');
-    }
+    refuseTeammateMove();
   }
 
   private job(moveId: string): Job {
@@ -372,7 +430,8 @@ export class MoveImporter {
     const job = this.job(moveId);
     if (job.status.stage !== 'receiving') return { ...job.status };
     job.status = { ...job.status, stage: 'building', detail: 'Checking the package' };
-    void this.runBuild(job).catch(async error => {
+    job.building = this.runBuild(job).catch(async error => {
+      if (job.abortRequested) return; // abort undoes it, once this settles
       console.error(`[SessionMove] Build of ${moveId} failed:`, error);
       await this.rollBack(job);
       job.status = { ...job.status, stage: 'failed', error: moveError(error) };
@@ -382,6 +441,7 @@ export class MoveImporter {
 
   private async runBuild(job: Job): Promise<void> {
     const moveId = job.status.moveId;
+    const step = () => { if (job.abortRequested) throw ABORTED(); };
     const manifestPath = this.receiver.filePath(moveId, 'manifest.json');
     const manifest = decodeBoundary(JSON.parse(await fs.promises.readFile(manifestPath, 'utf8')), moveManifestSchema);
     job.manifest = manifest;
@@ -389,6 +449,10 @@ export class MoveImporter {
       if (!(await this.receiver.verify(moveId, file))) {
         throw new PaneError('ERR_MOVE_DIGEST_MISMATCH', `${file.path} is missing or doesn't match ${manifest.source.machine}'s copy.`, 'Nothing was set up here. Try the move again.');
       }
+    }
+    // Open approvals don't move yet (the source refuses them); a package with any is refused here too.
+    if (manifest.approvals.length) {
+      throw new PaneError('ERR_MOVE_APPROVALS_OPEN', `${manifest.approvals.length} open approval${manifest.approvals.length === 1 ? '' : 's'} came with the move, and approvals can't move yet.`, 'Answer them on the other machine, then move again.');
     }
     const members = manifest.panes.filter(pane => pane.role === 'member');
     job.status.panesTotal = members.length;
@@ -417,7 +481,9 @@ export class MoveImporter {
 
     // Panes: worktree on the same branch, uncommitted work reapplied and checked, then setup.
     const leftBehind: string[] = [];
-    await Promise.all(members.map(async pane => {
+    // Every Pane settles before the build goes on or fails, so clean-up never races a sibling still setting up.
+    const settled = await Promise.allSettled(members.map(async pane => {
+      step();
       const placement = placements.get(pane.id);
       if (!placement || !pane.bundle || !pane.snapshot) return;
       job.status.detail = `Setting up ${pane.name}`;
@@ -425,8 +491,14 @@ export class MoveImporter {
       const incomingPrefix = `refs/pane/move-incoming/${pane.id}`;
       job.cleanup.push({ label: `refs for ${pane.name}`, undo: () => deleteRefs(repo, incomingPrefix) });
       const bundle = this.receiver.filePath(moveId, pane.bundle);
+      // Moving back: the snapshot an earlier move left here (for Restore) comes back if this one fails.
+      const previousSnapshot = await tryGit(repo, ['rev-parse', '--verify', '--quiet', pane.snapshot.ref]);
       const imported = await importBundle(repo, bundle, { branch: pane.branch, snapshotRef: pane.snapshot.ref, incomingPrefix });
-      job.cleanup.push({ label: `snapshot of ${pane.name}`, undo: async () => { await tryGit(repo, ['update-ref', '-d', pane.snapshot!.ref]); } });
+      job.cleanup.push({ label: `snapshot of ${pane.name}`, undo: async () => {
+        if (previousSnapshot) await tryGit(repo, ['update-ref', pane.snapshot!.ref, previousSnapshot]);
+        else await tryGit(repo, ['update-ref', '-d', pane.snapshot!.ref]);
+      } });
+      step();
       if (pane.branch && imported.branchHead) {
         const before = await tryGit(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${pane.branch}`]);
         try {
@@ -458,8 +530,10 @@ export class MoveImporter {
         throw new PaneError('ERR_MOVE_SNAPSHOT_MISMATCH', `The uncommitted work of Pane “${pane.name}” didn't come out the same on ${thisMachineName()}.`, 'Nothing was kept here. Try the move again.');
       }
       for (const entry of pane.ignored) leftBehind.push(`${entry} in ${pane.name}`);
-      // Moving a Session back: the archived Pane left here by the earlier move gives way to the arriving one.
-      if (this.services.databaseService.getSession(pane.id)?.archived) await this.removePane(pane.id);
+      step();
+      // Moving a Session back: the archived Pane left here by the earlier move gives way to the
+      // arriving one, and comes back, with its tabs, if this move fails.
+      if (this.services.databaseService.getSession(pane.id)?.archived) await this.setAsideArchivedPane(job, pane.id);
       const created = this.services.sessionManager.createSessionWithId(
         pane.id, pane.name, placement.worktreePath,
         pane.record.prompt,
@@ -483,6 +557,9 @@ export class MoveImporter {
       await this.services.sessionManager.updateSession(created.id, { status: 'stopped', statusMessage: undefined });
       job.status.panesDone += 1;
     }));
+    const failed = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed) throw failed.reason;
+    step();
 
     // The Session folder: text files rewritten for this machine's paths, others byte for byte.
     job.status.detail = 'Restoring the Session folder';
@@ -499,12 +576,9 @@ export class MoveImporter {
       const source = this.receiver.filePath(moveId, `session/${relative}`);
       const target = path.join(targetFolder, ...relative.split('/'));
       await fs.promises.mkdir(path.dirname(target), { recursive: true });
-      if (isTextFile(relative)) {
-        const text = await fs.promises.readFile(source, 'utf8');
-        await fs.promises.writeFile(target, rewriteText(map, text));
-      } else {
-        await fs.promises.copyFile(source, target);
-      }
+      const text = await readTextFile(source, relative);
+      if (text === null) await fs.promises.copyFile(source, target);
+      else await fs.promises.writeFile(target, rewriteText(map, text));
     }
     const moved: SessionMoveRecord = {
       moveId, from: manifest.source.machine, to: thisMachineName(), at: new Date().toISOString(), paths: map.entries,
@@ -527,11 +601,9 @@ export class MoveImporter {
     arriving.associations = arriving.associations.filter(association => !association.machine);
     // Moving back: the copy that moved away keeps its owner Pane (archiving and recreating a live
     // Pane would let its teardown remove the arriving tabs); only its old tabs give way.
+    step();
     if (existing) {
-      for (const panel of panelManager.getPanelsForSession(existing.internalSessionId)) {
-        if (terminalPanelManager.isTerminalInitialized(panel.id)) await terminalPanelManager.destroyTerminal(panel.id).catch(() => undefined);
-        await panelManager.deletePanel(panel.id).catch(() => undefined);
-      }
+      for (const panel of this.tabs.getPanelsForSession(existing.internalSessionId)) await this.setAsidePanel(job, panel);
     }
     await manager.importArriving(arriving);
     job.cleanup.push({ label: 'Session record', undo: () => manager.removeArriving(sessionId, job.replacedSession) });
@@ -572,9 +644,9 @@ export class MoveImporter {
           job.conversations.push(placed);
           job.cleanup.push({ label: `conversation ${tab.conversation.id}`, undo: () => placed.undo() });
         }
-        const existingPanel = panelManager.getPanel(tab.id);
-        if (existingPanel) await panelManager.deletePanel(tab.id).catch(() => undefined);
-        await panelManager.createPanel({
+        const existingPanel = this.tabs.getPanel(tab.id);
+        if (existingPanel) await this.setAsidePanel(job, existingPanel);
+        await this.tabs.createPanel({
           id: tab.id, sessionId: paneId,
           // SAFETY: the type is the source's own panel record's ToolPanelType, from a Pane of the same manifest version.
           type: tab.type as ToolPanelType,
@@ -583,42 +655,70 @@ export class MoveImporter {
           metadata: tab.metadata,
           activate: false,
         });
-        job.cleanup.push({ label: `tab ${tab.title}`, undo: async () => { await panelManager.deletePanel(tab.id).catch(() => undefined); } });
+        job.cleanup.push({ label: `tab ${tab.title}`, undo: async () => { await this.tabs.deletePanel(tab.id).catch(() => undefined); } });
         job.tabs.push({ paneId, tab, cwd });
       }
     }
     const owner = manifest.panes.find(pane => pane.role === 'owner');
     if (owner?.layout) sessionsDb.setSessionPanelLayout(arriving.internalSessionId, rewriteText(map, owner.layout));
 
-    // Open approvals, re-homed to this machine.
-    let approvals = 0;
-    const store = this.services.approvalStore;
-    if (store) {
-      for (const item of manifest.approvals) {
-        try {
-          // SAFETY: each is a NotifyItem the source's own approval store saved, with only its path strings rewritten.
-          store.saveItem(JSON.parse(rewriteText(map, JSON.stringify(item))) as NotifyItem);
-          approvals += 1;
-        } catch (error) {
-          console.warn('[SessionMove] An approval could not be re-homed:', error);
-        }
-      }
-    }
+    step();
     // The incoming refs did their job once the branches are placed; the snapshot refs stay for Restore.
     for (const pane of members) {
       const placement = placements.get(pane.id);
       if (placement) await deleteRefs(placement.projectPath, `refs/pane/move-incoming/${pane.id}`).catch(() => undefined);
     }
-    job.status = { ...job.status, stage: 'built', detail: undefined, approvals, leftBehind, missingEnv: manifest.source.envNames.filter(name => !this.envNamesHere().has(name)) };
+    job.status = { ...job.status, stage: 'built', detail: undefined, approvals: 0, leftBehind, missingEnv: manifest.source.envNames.filter(name => !this.envNamesHere().has(name)) };
   }
 
   private envNamesHere(): Set<string> {
     return new Set(this.projects().flatMap(project => this.services.databaseService.getProjectEnvVars(project.id).map(variable => variable.key)));
   }
 
+  /** Removes a tab that gives way to an arriving one; a failed move puts it back as it was. */
+  private async setAsidePanel(job: Job, panel: ToolPanel): Promise<void> {
+    if (this.tabs.isTerminalInitialized(panel.id)) await this.tabs.destroyTerminal(panel.id).catch(() => undefined);
+    await this.tabs.deletePanel(panel.id);
+    job.cleanup.push({ label: `earlier tab ${panel.title}`, undo: () => this.putBackPanel(panel) });
+  }
+
+  private async putBackPanel(panel: ToolPanel): Promise<void> {
+    await this.tabs.createPanel({
+      id: panel.id, sessionId: panel.sessionId, type: panel.type, title: panel.title,
+      initialState: { customState: panel.state.customState ?? {} },
+      metadata: panel.metadata, activate: false,
+    });
+  }
+
+  /**
+   * Moving back: the archived Pane an earlier move left here (what Restore here brings back) gives
+   * way to the arriving Pane of the same ID. A failed move recreates it, archived, with its tabs and
+   * layout; its old output log does not come back.
+   */
+  private async setAsideArchivedPane(job: Job, paneId: string): Promise<void> {
+    const db = this.services.databaseService;
+    const row = db.getSession(paneId);
+    if (!row) return;
+    const panels = this.tabs.getPanelsForSession(paneId);
+    const layout = db.getSessionPanelLayout(paneId);
+    await this.removePane(paneId);
+    job.cleanup.push({ label: `archived Pane ${row.name}`, undo: async () => {
+      const recreated = this.services.sessionManager.createSessionWithId(
+        row.id, row.name, row.worktree_path, row.initial_prompt ?? '', row.worktree_name,
+        row.permission_mode === 'approve' ? 'approve' : 'ignore',
+        row.project_id ?? undefined, false, row.folder_id ?? undefined,
+        row.tool_type === 'none' ? 'none' : undefined,
+        row.base_commit ?? undefined, row.base_branch ?? undefined, false,
+      );
+      for (const panel of panels) await this.putBackPanel(panel);
+      if (layout) db.setSessionPanelLayout(recreated.id, layout);
+      await this.services.sessionManager.archiveSession(recreated.id);
+    } });
+  }
+
   private async removePane(paneId: string): Promise<void> {
     const db = this.services.databaseService;
-    for (const panel of panelManager.getPanelsForSession(paneId)) await panelManager.deletePanel(panel.id).catch(() => undefined);
+    for (const panel of this.tabs.getPanelsForSession(paneId)) await this.tabs.deletePanel(panel.id).catch(() => undefined);
     if (this.services.sessionManager.getSession(paneId)) await this.services.sessionManager.archiveSession(paneId).catch(() => undefined);
     if (db.getSession(paneId) && !db.getSession(paneId)?.archived) db.archiveSession(paneId);
     db.deleteArchivedSessionPermanently(paneId);
@@ -640,13 +740,18 @@ export class MoveImporter {
   async abort(moveId: string): Promise<TargetStatus> {
     const job = this.jobs.get(moveId);
     if (!job) return { moveId, stage: 'aborted', panesDone: 0, panesTotal: 0 };
-    if (job.status.stage === 'starting' || job.status.stage === 'started') {
+    if (job.status.stage === 'starting' || job.status.stage === 'started' || job.startFailed) {
       throw new PaneError('ERR_MOVE_STARTED', 'The Session already started here, so the move can no longer be undone.', 'Use the Session here.');
     }
-    // A build still running finishes its current step first; its catch rolls back what it made.
-    await this.rollBack(job);
-    job.status = { ...job.status, stage: 'aborted' };
-    return { ...job.status };
+    job.aborting ??= (async () => {
+      // A build still running stops at its next step, and settles before anything is undone.
+      job.abortRequested = true;
+      await job.building;
+      await this.rollBack(job);
+      job.status = { ...job.status, stage: 'aborted', detail: undefined };
+      return { ...job.status };
+    })();
+    return job.aborting;
   }
 
   // ── Start ──────────────────────────────────────────────────────────────
@@ -655,11 +760,16 @@ export class MoveImporter {
   start(moveId: string): TargetStatus {
     this.refuseTeammate();
     const job = this.job(moveId);
-    if (job.status.stage !== 'built') return { ...job.status };
-    job.status = { ...job.status, stage: 'starting', detail: 'Resuming tabs' };
+    // A start that failed before any tab started may be asked again (the source's Check again).
+    const retry = job.startFailed && job.status.stage === 'failed';
+    if ((job.status.stage !== 'built' && !retry) || job.abortRequested) return { ...job.status };
+    job.status = { ...job.status, stage: 'starting', detail: 'Resuming tabs', error: undefined, retryable: undefined };
     void this.runStart(job).catch(error => {
+      // The Session isn't usable here yet, so the source must not retire its copy.
       console.error(`[SessionMove] Start of ${moveId} failed:`, error);
-      job.status = { ...job.status, stage: 'started', detail: undefined, error: moveError(error) };
+      job.startFailed = true;
+      const failure = moveError(error);
+      job.status = { ...job.status, stage: 'failed', detail: undefined, retryable: true, error: { message: `The Session didn't start on ${thisMachineName()}: ${failure.message}`, next: 'It stays paused on both machines. Check again to retry.' } };
     });
     return { ...job.status };
   }
@@ -683,12 +793,12 @@ export class MoveImporter {
       const isAgent = tab.type === 'chat' || !!readTabFields(tab.state).agentId;
       try {
         if (!isAgent && !tab.running) {
-          await terminalPanelManager.clearPaused([tab.id]);
+          await this.tabs.clearPaused([tab.id]);
           continue;
         }
         await this.releaseTab(tab.id, tab.type);
         if (tab.type === 'terminal') await this.registry.invoke('runpane:panels:resume', [{ panelId: tab.id }]);
-        const panel = panelManager.getPanel(tab.id);
+        const panel = this.tabs.getPanel(tab.id);
         const want = tab.conversation?.id;
         const have = readTabFields(toJsonObject(panel?.state.customState ?? {})).conversationId;
         if (isAgent && (!want || have === want)) resumed += 1;
@@ -711,9 +821,9 @@ export class MoveImporter {
   /** Clears an arriving tab's move mark so it can start. */
   private async releaseTab(panelId: string, type: string): Promise<void> {
     if (type === 'chat') {
-      await getChatTabManager().releaseMove(panelId);
+      await this.tabs.releaseChatMove(panelId);
       return;
     }
-    await terminalPanelManager.clearPaused([panelId]);
+    await this.tabs.clearPaused([panelId]);
   }
 }

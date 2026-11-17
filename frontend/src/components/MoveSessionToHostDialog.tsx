@@ -145,6 +145,9 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
   const [preflight, setPreflight] = useState<SessionMovePreflight | null>(null);
   const [checking, setChecking] = useState(false);
   const [fixing, setFixing] = useState<string | null>(null);
+  // Bumped whenever the dialog opens or checks a machine anew, so a Clone or Trust that finishes
+  // afterwards can tell it was started for a destination no longer on screen.
+  const checkGeneration = useRef(0);
   const [progress, setProgress] = useState<SessionMoveProgress | null>(null);
   // Until the host says whether a move is running, the chooser stays hidden.
   const [statusKnown, setStatusKnown] = useState(false);
@@ -162,6 +165,8 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
   useEffect(() => {
     if (!isOpen || !sessionId) return;
     let cancelled = false;
+    checkGeneration.current += 1;
+    setFixing(null);
     setMode('move'); setTargets(null); setPeers([]); setSelected(null); setPreflight(null); setError(null); setProgress(null); setStatusKnown(false);
     void sessionMoveStatus(where, sessionId).then(
       status => { if (!cancelled) { setProgress(isMoveRunning(status) ? shownProgress(status) : null); setStatusKnown(true); } },
@@ -206,6 +211,9 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
 
   // Choosing a machine runs its checks at once; nothing stops.
   useEffect(() => {
+    // A fix still running belongs to the check this one replaces.
+    checkGeneration.current += 1;
+    setFixing(null);
     setPreflight(null);
     if (!isOpen || !sessionId || !selected || mode !== 'move' || running || !statusKnown) return;
     let cancelled = false;
@@ -253,11 +261,15 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
   const runFix = (check: SessionMoveCheck) => {
     if (!sessionId || !selected || !check.fix) return;
     const fix = check.fix;
+    const target = selected;
+    // The destination can't change while a fix runs, but closing and opening the dialog can.
+    const generation = checkGeneration.current;
+    const current = () => checkGeneration.current === generation;
     setFixing(check.id); setError(null);
-    void fixSessionMove(where, sessionId, selected, fix).then(
-      setPreflight,
-      cause => setError(`${fix.label} didn’t finish on ${selected}: ${messageOf(cause, 'it did not answer')}. Nothing has been paused. Try ${fix.label} again.`),
-    ).finally(() => setFixing(null));
+    void fixSessionMove(where, sessionId, target, fix).then(
+      result => { if (current()) setPreflight(result); },
+      cause => { if (current()) setError(`${fix.label} didn’t finish on ${target}: ${messageOf(cause, 'it did not answer')}. Nothing has been paused. Try ${fix.label} again.`); },
+    ).finally(() => { if (current()) setFixing(null); });
   };
 
   const tryAgain = () => {
@@ -279,7 +291,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     <>
       {!shown.ok && <p className="mt-3 text-sm text-text-secondary">{shown.reason}. {shown.fix}</p>}
       {shown.ok && (
-        <fieldset className="mt-3 space-y-1.5" disabled={busy}>
+        <fieldset className="mt-3 space-y-1.5" disabled={busy || fixing !== null}>
           <legend className="sr-only">Destination machine</legend>
           {shown.noneReachable && (
             <p className="text-sm text-text-secondary">
@@ -483,7 +495,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
     );
     footer = (
       <>
-        <Button type="button" variant="ghost" className="mr-auto" disabled={busy || sessionHost.kind === 'paired'} onClick={() => { setMode('note'); setError(null); }}>Hand off with a note…</Button>
+        <Button type="button" variant="ghost" className="mr-auto" disabled={busy || fixing !== null || sessionHost.kind === 'paired'} onClick={() => { setMode('note'); setError(null); }}>Hand off with a note…</Button>
         <Button type="button" variant="secondary" disabled={busy} onClick={close}>Cancel</Button>
         <Button type="button" disabled={busy || checking || !ready || !destination || !session} onClick={startMove}>{busy ? 'Starting…' : 'Move'}</Button>
       </>

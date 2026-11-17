@@ -38,7 +38,7 @@ import { databaseService } from '../database';
 import { locateConversation } from './conversations';
 import { createBundle, createSnapshot, ignoredPaths } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
-import { agentFarmProfileOf } from './rules';
+import { agentFarmProfileOf, heldBackChecks } from './rules';
 import { keepIgnoredFiles } from './ignoredFiles';
 import { runpaneWaits } from '../agentStatus/midTurn';
 import { readTabFields, sessionMoveCheckSchema, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab, type PackageFile } from './manifest';
@@ -71,6 +71,7 @@ const targetStatusSchema = boundary.object({
   approvals: boundary.optional(boundary.number),
   leftBehind: boundary.optional(boundary.array(boundary.string)),
   missingEnv: boundary.optional(boundary.array(boundary.string)),
+  retryable: boundary.optional(boundary.boolean),
 });
 const doctorSchema = boundary.object({ daemon: boundary.optional(boundary.object({ features: boundary.optional(boundary.array(boundary.string)) })) });
 
@@ -129,6 +130,13 @@ async function git(cwd: string, args: string[]): Promise<string> {
 
 async function tryGit(cwd: string, args: string[]): Promise<string | null> {
   try { return await git(cwd, args); } catch { return null; }
+}
+
+/** Messages waiting in a chat tab's queue; their full text lives in this machine's chat spool, which doesn't travel. */
+function queuedMessages(panel: ToolPanel): number {
+  if (panel.type !== 'chat') return 0;
+  const queue = toJsonObject(panel.state.customState ?? {}).queue;
+  return Array.isArray(queue) ? queue.length : 0;
 }
 
 /**
@@ -319,10 +327,17 @@ export class MoveCoordinator {
         checks.push({ id: `diverged:${pane.id}`, level: 'block', title: `Branch ${pane.branch} has diverged on ${target}`, detail: `It exists there with ${count ?? 'some'} commit${count === '1' ? '' : 's'} this machine doesn't have. Push or delete branch ${pane.branch} on ${target}, then check again.` });
       }
     }
+    checks.push(...this.heldBackChecks(record));
     // Tabs as the person counts them: terminals and chats (Explorer and Diff come along on their own).
     const tabCount = manifest.panes.reduce((sum, pane) => sum + pane.tabs.filter(tab => tab.type === 'terminal' || tab.type === 'chat').length, 0);
     const bytes = await this.estimate(manifest);
     return { target, ready: !checks.some(check => check.level === 'block'), checks, paneCount: manifest.panes.filter(pane => pane.role === 'member').length, tabCount, bytes };
+  }
+
+  private heldBackChecks(record: OrchestrationSessionRecord, stopped = false): SessionMoveCheck[] {
+    const approvals = this.openApprovals(record, [record.internalSessionId, ...this.memberPaneIds(record)]).length;
+    const tabs = this.tabsOf(record).map(tab => ({ panelId: tab.panel.id, title: tab.panel.title, running: tab.running, queued: queuedMessages(tab.panel) }));
+    return heldBackChecks(approvals, tabs, stopped);
   }
 
   private async estimate(manifest: MoveManifest): Promise<number> {
@@ -377,7 +392,7 @@ export class MoveCoordinator {
   async status({ sessionId, recheck }: StatusRequest): Promise<SessionMoveProgress | null> {
     const job = this.jobs.get(sessionId) ?? await this.recoverFrozen(sessionId);
     if (!job) return null;
-    if (recheck && job.progress.phase === 'confirming') void this.confirm(job).catch(() => undefined);
+    if (recheck && job.progress.phase === 'confirming') void this.recheck(job).catch(() => undefined);
     return { ...job.progress, waiting: [...job.progress.waiting], steps: job.progress.steps.map(step => ({ ...step })) };
   }
 
@@ -440,6 +455,9 @@ export class MoveCoordinator {
     this.setStep(job, 'pack', 'running');
     await fs.promises.mkdir(job.outDir, { recursive: true });
     const record = await this.manager().get({ sessionId: job.record.id });
+    // Asked again once every tab stopped: Stop now can leave a queue, and an approval can open while turns end.
+    const held = this.heldBackChecks(record, true)[0];
+    if (held) throw new PaneError('ERR_MOVE_HELD_BACK', `${held.title}, so the Session didn't move.`, held.detail ?? 'Check again.');
     const { manifest, sources } = await this.manifest(record, job.progress.moveId, { outDir: job.outDir, tabs: job.tabs });
     this.setStep(job, 'pack', 'done', `${manifest.panes.filter(pane => pane.role === 'member').length} Panes, ${manifest.panes.reduce((sum, pane) => sum + pane.tabs.filter(tab => tab.conversation).length, 0)} conversations, the Session folder`);
     this.checkCancelled(job);
@@ -477,6 +495,13 @@ export class MoveCoordinator {
     await this.confirm(job, built);
   }
 
+  /** Check again after the freeze: a target whose start failed before any tab started is asked to start again. */
+  private async recheck(job: SourceJob): Promise<void> {
+    const status = await this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.status).catch(() => undefined);
+    if (status?.stage === 'failed' && status.retryable) await this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.start).catch(() => undefined);
+    await this.confirm(job);
+  }
+
   /** After the freeze: wait for the target to start the tabs, then retire here. Contact lost → confirming, never a restart. */
   private async confirm(job: SourceJob, built?: TargetStatus): Promise<void> {
     if (job.progress.phase === 'done') return;
@@ -491,27 +516,37 @@ export class MoveCoordinator {
       this.touch(job, { phase: 'confirming', error: { message: `${job.progress.target} hasn't confirmed the move yet.`, next: `The Session stays paused here so it never runs twice. Check again, or open it on ${job.progress.target}.` } });
       return;
     }
-    await this.retire(job);
+    const kept = await this.retire(job);
     this.setStep(job, 'start', 'done', `${status.resumed ?? 0} tabs resumed`);
     this.touch(job, {
       phase: 'done', error: undefined,
       summary: {
         panes: job.paneIds.length - 1, tabs: job.tabs.filter(tab => tab.kind === 'chat' || !!readTabFields(toJsonObject(tab.panel.state.customState ?? {})).agentId).length, resumed: status.resumed ?? 0, failedTabs: status.failedTabs ?? [],
-        approvals: status.approvals ?? built?.approvals ?? 0, leftBehind: status.leftBehind ?? built?.leftBehind ?? [], missingEnv: status.missingEnv ?? built?.missingEnv ?? [],
+        approvals: status.approvals ?? built?.approvals ?? 0, leftBehind: [...kept, ...(status.leftBehind ?? built?.leftBehind ?? [])], missingEnv: status.missingEnv ?? built?.missingEnv ?? [],
       },
     });
     await fs.promises.rm(job.outDir, { recursive: true, force: true }).catch(() => undefined);
   }
 
-  private async retire(job: SourceJob): Promise<void> {
+  /** Archives the moved Panes here; returns what stayed behind instead, for the summary. */
+  private async retire(job: SourceJob): Promise<string[]> {
     const manager = this.manager();
     await manager.setMoveMark(job.record.id, { state: 'moved', machine: job.progress.target, moveId: job.progress.moveId, at: new Date().toISOString() }, `Moved to ${job.progress.target}.`);
     // Archiving removes the worktrees; the snapshot refs stay in each repository for Restore, and
     // ignored files (which never travel) are kept beside them.
+    const kept: string[] = [];
     for (const paneId of job.paneIds.slice(1)) {
-      const worktree = this.services.sessionManager.getSession(paneId)?.worktreePath;
+      const pane = this.services.sessionManager.getSession(paneId);
+      const worktree = pane?.worktreePath;
       if (worktree && fs.existsSync(worktree)) {
-        await keepIgnoredFiles(worktree, paneId, await ignoredPaths(worktree).catch(() => [])).catch(error => console.warn(`[SessionMove] Pane ${paneId}'s ignored files weren't kept:`, error));
+        try {
+          await keepIgnoredFiles(worktree, paneId, await ignoredPaths(worktree));
+        } catch (error) {
+          // Archiving would delete the only copy of those files: this Pane keeps its worktree, still paused.
+          console.warn(`[SessionMove] Pane ${paneId}'s ignored files weren't set aside, so it wasn't archived:`, error);
+          kept.push(`Pane “${pane?.name ?? paneId}” stays here, paused, with its worktree: its ignored files couldn't be set aside (${reasonOf(error)}). Copy what you need from ${worktree}, then archive it.`);
+          continue;
+        }
       }
       try {
         await this.registry.invoke('sessions:delete', [paneId]);
@@ -519,6 +554,7 @@ export class MoveCoordinator {
         console.warn(`[SessionMove] Pane ${paneId} wasn't archived after the move:`, error);
       }
     }
+    return kept;
   }
 
   private async callTarget(job: SourceJob, channel: string): Promise<TargetStatus> {

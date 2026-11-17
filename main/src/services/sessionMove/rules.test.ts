@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentFarmProfileOf, movedLine } from './rules';
+import { agentFarmProfileOf, movedLine, heldBackChecks } from './rules';
 import { buildPathMap } from './pathMap';
 
 describe('agentFarmProfileOf', () => {
@@ -17,5 +17,21 @@ describe('movedLine', () => {
     expect(line).toContain('/Users/alice → /Users/robert-b');
     expect(line).toMatch(/re-arm your runpane watch/);
     expect(line).toMatch(/moved\.json/);
+  });
+});
+
+describe('heldBackChecks', () => {
+  const tab = (queued: number, running: boolean) => ({ panelId: 'p1', title: 'Chat', running, queued });
+
+  it('blocks a Session with open approvals, which the target\'s Notify would not show (F-9)', () => {
+    expect(heldBackChecks(2, [], false)).toEqual([expect.objectContaining({ id: 'approvals', level: 'block', title: '2 open approvals in this Session' })]);
+  });
+
+  it('blocks queued chat messages that would not send before the tab stops (F-5)', () => {
+    expect(heldBackChecks(0, [tab(1, true)], false)).toEqual([]);
+    expect(heldBackChecks(0, [tab(1, false)], false)).toEqual([expect.objectContaining({ id: 'queue:p1', level: 'block' })]);
+    // Once every tab stopped (Stop now), even a running tab's queue stays behind.
+    expect(heldBackChecks(0, [tab(3, true)], true)).toEqual([expect.objectContaining({ title: '3 messages waiting in Chat' })]);
+    expect(heldBackChecks(0, [tab(0, false)], true)).toEqual([]);
   });
 });

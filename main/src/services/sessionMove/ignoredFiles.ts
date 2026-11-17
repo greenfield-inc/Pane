@@ -26,25 +26,34 @@ async function moveEntry(from: string, to: string): Promise<void> {
 /**
  * Retiring a Pane that moved away removes its worktree. Its ignored files (`.env`, local config,
  * dependencies) never travel, so they move into the repository's git folder first, where Restore
- * here finds them. Returns the entries kept.
+ * here finds them. All or nothing: if any entry can't be set aside, the ones already moved go back,
+ * an earlier kept copy stays as it was, and it throws so the caller keeps the worktree. Returns the
+ * entries kept.
  */
 export async function keepIgnoredFiles(worktreePath: string, paneId: string, entries: readonly string[]): Promise<string[]> {
   if (entries.length === 0) return [];
   const kept = await keptFolder(worktreePath, paneId);
-  await fs.promises.rm(kept, { recursive: true, force: true });
+  const staging = `${kept}.incoming`;
+  await fs.promises.rm(staging, { recursive: true, force: true });
   const moved: string[] = [];
-  for (const entry of entries) {
-    const relative = entry.replace(/\/+$/, '');
-    if (!relative || relative.split('/').some(part => part === '..')) continue;
-    const from = path.join(worktreePath, ...relative.split('/'));
-    if (!fs.existsSync(from)) continue;
-    try {
-      await moveEntry(from, path.join(kept, ...relative.split('/')));
+  try {
+    for (const entry of entries) {
+      const relative = entry.replace(/\/+$/, '');
+      if (!relative || relative.split('/').some(part => part === '..')) continue;
+      const from = path.join(worktreePath, ...relative.split('/'));
+      if (!fs.existsSync(from)) continue;
+      await moveEntry(from, path.join(staging, ...relative.split('/')));
       moved.push(relative);
-    } catch (error) {
-      console.warn(`[SessionMove] ${relative} in ${worktreePath} wasn't kept for Restore:`, error);
     }
+  } catch (error) {
+    for (const relative of moved) {
+      await moveEntry(path.join(staging, ...relative.split('/')), path.join(worktreePath, ...relative.split('/'))).catch(() => undefined);
+    }
+    await fs.promises.rm(staging, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
   }
+  await fs.promises.rm(kept, { recursive: true, force: true });
+  if (fs.existsSync(staging)) await fs.promises.rename(staging, kept);
   return moved;
 }
 

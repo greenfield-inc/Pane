@@ -1,3 +1,4 @@
+import { claudeProjectDirName } from '../agentTranscript/claude';
 import type { SessionMovePathEntry } from '../../../../shared/types/sessionMove';
 
 /**
@@ -35,11 +36,6 @@ export function mapPath(map: PathMap, value: string): string | null {
   return null;
 }
 
-/** The folder name Claude Code files a working directory's conversations under. */
-export function claudeProjectFolder(cwd: string): string {
-  return cwd.replace(/[^A-Za-z0-9]/g, '-');
-}
-
 function escape(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -57,7 +53,7 @@ export function rewriteText(map: PathMap, text: string): string {
     'g',
   );
   const rewritten = text.replace(plainPattern, (match: string) => plain.get(match) ?? match);
-  const encoded = new Map(map.entries.map(entry => [claudeProjectFolder(entry.from), claudeProjectFolder(entry.to)]));
+  const encoded = new Map(map.entries.map(entry => [claudeProjectDirName(entry.from), claudeProjectDirName(entry.to)]));
   const encodedFroms = [...encoded.keys()].sort((a, b) => b.length - a.length);
   const encodedPattern = new RegExp(`(?<![A-Za-z0-9._-])(${encodedFroms.map(escape).join('|')})(?![A-Za-z0-9])`, 'g');
   return rewritten.replace(encodedPattern, (match: string) => encoded.get(match) ?? match);

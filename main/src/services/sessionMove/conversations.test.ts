@@ -77,4 +77,41 @@ describe('moving a Claude conversation', () => {
     expect(fs.readFileSync(theirs, 'utf8')).toBe('{"turn":1}\n');
     expect(fs.existsSync(path.join(path.dirname(theirs), ID))).toBe(false);
   });
+
+  it('refuses a package path that climbs out of the store, writing nothing outside it', async () => {
+    const { conversation, file } = await pack(a);
+    write(file('conversations/tab-1/store/evil'), 'export EVIL=1\n');
+    const outside = path.join(b.HOME!, 'shell-rc-fixture');
+    const hostile = { ...conversation, files: [...conversation.files, { package: 'conversations/tab-1/store/evil', scope: 'store' as const, relative: '../shell-rc-fixture' }] };
+    await expect(placeConversation(hostile, file, '/Users/robert-b/new', { here: 'b', source: 'a' }, b)).rejects.toMatchObject({ code: 'ERR_MOVE_CONVERSATION_PATH' });
+    expect(fs.existsSync(outside)).toBe(false);
+    expect(fs.existsSync(path.join(b.HOME!, '.claude'))).toBe(false);
+    for (const relative of ['/etc/x', 'a//b', 'a\\..\\b', 'a/./b', '']) {
+      const bad = { ...conversation, files: [{ package: 'conversations/tab-1/store/evil', scope: 'project' as const, relative }] };
+      await expect(placeConversation(bad, file, '/Users/robert-b/new', { here: 'b', source: 'a' }, b)).rejects.toMatchObject({ code: 'ERR_MOVE_CONVERSATION_PATH' });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a path through a symlinked folder that leads out of the store', async () => {
+    const { conversation, file } = await pack(a);
+    const elsewhere = path.join(dir, 'elsewhere');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.mkdirSync(path.join(b.HOME!, '.claude/file-history'), { recursive: true });
+    fs.symlinkSync(elsewhere, path.join(b.HOME!, '.claude/file-history', ID));
+    await expect(placeConversation(conversation, file, '/Users/robert-b/new', { here: 'b', source: 'a' }, b)).rejects.toMatchObject({ code: 'ERR_MOVE_CONVERSATION_PATH' });
+    expect(fs.readdirSync(elsewhere)).toEqual([]);
+    expect(fs.existsSync(path.join(b.HOME!, '.claude/projects'))).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('still files nested paths when the store itself is a symlink', async () => {
+    const real = path.join(dir, 'dotfiles/claude');
+    fs.mkdirSync(real, { recursive: true });
+    fs.mkdirSync(b.HOME!, { recursive: true });
+    fs.symlinkSync(real, path.join(b.HOME!, '.claude'));
+    const { conversation, file } = await pack(a);
+    const placed = await placeConversation(conversation, file, '/Users/robert-b/new', { here: 'b', source: 'a' }, b);
+    await placed.commit();
+    expect(fs.readFileSync(path.join(real, 'projects/-Users-robert-b-new', ID, 'subagents/agent-1.jsonl'), 'utf8')).toBe('{"sub":1}\n');
+    expect(fs.readFileSync(path.join(real, 'file-history', ID, 'v1'), 'utf8')).toBe('old file');
+  });
 });

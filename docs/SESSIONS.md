@@ -1133,14 +1133,19 @@ or sending it a message resumes it in its conversation, and it reports no
 A paused terminal tab stays stopped through clicks, app restarts and updates until
 `runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
 <pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts
-it in its conversation. The watch reports each paused tab once as
+it in its conversation. A tab held by a
+[Session move](#move-a-session-to-another-machine) is the exception: only the
+move starts it again. While it is held, submitting to it and resuming it are
+refused with `ERR_SESSION_MOVING` until the move finishes or is cancelled, or
+the Session is restored here. The watch reports each paused tab once as
 `panel.paused` (`PAUSED <pane-name> pane <pane-id> panel <panel-id>`) and each
 resumed one as `panel.unpaused` (`UNPAUSED ...`), followed by its usual ready
 signal. An orchestrator leaves paused workers paused unless the person asks.
 Any other start of a paused terminal tab (opening it, a retry, another machine)
 fails with `ERR_PANEL_PAUSED` and starts nothing.
 `runpane panes list --json` reports each Pane's `paused` mark (`{ at, by:
-"manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal
+"manual" | "auto" | "move", idleHours?, machine?, arriving?, interrupted? }`;
+`machine`, `arriving` and `interrupted` come only with `move`) and `inactiveSince`, the latest terminal
 output or input or chat agent activity in its tabs or the last time the person
 selected it;
 `runpane panels list` reports each tab's `paused`.
