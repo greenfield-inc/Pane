@@ -209,8 +209,52 @@ describe('NotifyQueue replies (the reply contract)', () => {
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Which two?' } });
     await vi.advanceTimersByTimeAsync(1);
     queue.took({ panelId: 'orch' }, 'Q-20', 'question');
-    expect(() => queue.update({ panelId: 'orch' }, 'Q-20', { asked: ' ', whatChanged: 'Named them' })).toThrow(/didn't say what it was/);
-    expect(item(queue, 'q20')).toMatchObject({ version: 2 });
+    // The reader got the words, so it must say what it answers; the refusal still shows them (#1464).
+    expect(() => queue.update({ panelId: 'orch' }, 'Q-20', { asked: ' ', whatChanged: 'Named them' })).toThrow(/has a question the person typed: "Which two\?", and this update didn't say what it was/);
+    expect(item(queue, 'q20')).toMatchObject({ version: 2, reply: { state: 'question', text: 'Which two?' } });
+    queue.update({ panelId: 'orch' }, 'Q-20', { asked: 'Which two?', whatChanged: 'Named them' });
+    expect(item(queue, 'q20')).toMatchObject({ version: 3, revision: { asked: 'Which two?', by: 'the Doozy orchestrator' } });
+    expect(item(queue, 'q20')?.reply).toBeUndefined();
+  });
+
+  it('a loop\'s next run gets the reply the person typed after the last run exited: its update quotes it, and says so (#1464)', async () => {
+    const run1: NotifySource = { name: 'nightly', agent: 'Claude', paneId: 'run-1', panelId: 'r1' };
+    const first = queueWith({ sameLoop: () => true });
+    void first.ask({ question: { ui: 'ask', title: 'Q-1: ship tonight?' }, source: run1, id: 'card' });
+    first.dispose();
+    const queue = queueWith({ sameLoop: () => true });
+    // The run that asked has exited; the person types on its card later.
+    gone.set('r1', 'its run ended');
+    queue.run({ type: 'answer', id: 'card', answer: { picks: [], text: 'only if the backup finished' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([]);
+    expect(item(queue, 'card')).toMatchObject({ state: 'waiting', reply: { state: 'unread', text: 'only if the backup finished' } });
+
+    // The next run refreshes the card as its own update, with no --asked: the person's words become it.
+    const updated = queue.update({ paneId: 'run-2', panelId: 'r2' }, 'Q-1', { asked: '', whatChanged: 'Checked the backup: it finished' }, 50_000);
+    expect(item(queue, 'card')).toMatchObject({ state: 'waiting', version: 2, revision: { asked: 'only if the backup finished', whatChanged: ['Checked the backup: it finished'] } });
+    expect(item(queue, 'card')?.reply).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(50_000);
+    const result = await updated;
+    expect(result).toMatchObject({ waiting: true, id: 'card' });
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings?.[0]).toContain('"only if the backup finished"');
+    expect(result.warnings?.[0]).toContain('saved it as this version\'s --asked');
+  });
+
+  it('the asker\'s update quotes a reply Autopilot read while its tab could not take it (#1464)', async () => {
+    const queue = restoredQ20();
+    tabs.set('orch', 'gone');
+    autopilot = { panelId: 'autopilot-chat' };
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Which two?' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(item(queue, 'q20')?.reply?.reader?.kind).toBe('autopilot');
+    tabs.delete('orch');
+    // The orchestrator never got the words: its update with no --asked quotes them, and says who read them.
+    const updated = queue.update({ panelId: 'orch' }, 'Q-20', { asked: '', whatChanged: 'Named them' }, 1_000);
+    expect(item(queue, 'q20')).toMatchObject({ state: 'waiting', version: 2, revision: { asked: 'Which two?' } });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await updated).warnings?.[0]).toContain('it went to Autopilot');
   });
 
   it('J7: --took question, then --update makes v2 with the question, what changed and v1 kept', async () => {

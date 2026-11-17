@@ -3347,7 +3347,7 @@
       {
         "name": "--asked",
         "value": "<text>",
-        "description": "notify --update: the person's question, as they typed it. Needed when the update answers their typed question; leave it out for your own update, such as a loop's next run."
+        "description": "notify --update: the person's question, as they typed it. Needed when the update answers their typed question; leave it out for your own update, such as a loop's next run. Left out while the card holds a reply this caller never read (one typed after the run that asked had exited), Pane saves that reply as --asked and says so in warnings."
       },
       {
         "name": "--what-changed",
@@ -5000,7 +5000,8 @@
         "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
         "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
         "  --asked <text>                 With --update: the person's question, as they typed it; leave out",
-        "                                  for your own update, such as a loop's next run",
+        "                                  for your own update, such as a loop's next run (a reply it never",
+        "                                  read is then saved as --asked, with a warning)",
         "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
@@ -7205,7 +7206,8 @@
         "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
         "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
         "  --asked <text>                 With --update: the person's question, as they typed it; leave out",
-        "                                  for your own update, such as a loop's next run",
+        "                                  for your own update, such as a loop's next run (a reply it never",
+        "                                  read is then saved as --asked, with a warning)",
         "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
@@ -26200,7 +26202,7 @@
             "name": "--asked",
             "value": "<text>",
             "required": false,
-            "description": "With update: the person's question, as they typed it. Required when the update answers their typed question; leave it out for your own update, such as a loop's next run."
+            "description": "With update: the person's question, as they typed it. Required when the update answers their typed question; leave it out for your own update, such as a loop's next run. Left out while the card holds a reply this caller never read (one typed after the run that asked had exited), Pane saves that reply as --asked and says so in warnings."
           },
           {
             "name": "--what-changed",

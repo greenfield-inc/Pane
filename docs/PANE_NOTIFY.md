@@ -419,7 +419,12 @@ answer` changes nothing: the reply is already the answer. `--update` reopens an
 answered approval as its new version. It needs `--what-changed` (one line per
 change), and `--asked` (the person's question) when it answers a question they
 typed; an update of your own, such as a loop's next run refreshing its card,
-leaves `--asked` out and shows no "You asked". It replaces whichever of
+leaves `--asked` out and shows no "You asked". A reply the caller never read
+(one the person typed after the run that asked had exited, so it waited unread,
+or one another reader took) isn't lost that way: Pane saves its words as the
+new version's `--asked` and adds a warning to the result quoting them. The
+reader of a reply still has to pass `--asked`, and the refusal quotes the reply
+so nothing is hidden. It replaces whichever of
 `--title`, `--context`, `--choices`, `--questions`
 and `--links` it passes. A reworded choice carries `"was"`, its old label.
 `--update` then waits for the answer like any notify call (`waiting`,
