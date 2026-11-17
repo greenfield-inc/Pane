@@ -100,10 +100,11 @@ runpane todos detach T-12 <attachment-id> --json
 ```
 
 `--kind` is `plan`, `mockup`, `design`, `pr`, `findings`, `decision`, `doc`,
-`image` or `link`; without it Pane picks one from the file. A file stays a
-path on its machine and opens from there. On the page, **+ Attach** takes a
-dropped file or a pasted link, and clicking an attachment opens it in the
-split beside the chat.
+`image` or `link`; without it Pane picks one from the file (a PR link is a
+`pr`, an image an `image`, a web address a `link`, and a file named `plan…`
+such as `plan.md` the `plan`). A file stays a path on its machine and opens
+from there. On the page, **+ Attach** takes a dropped file or a pasted link,
+and clicking an attachment opens it in the split beside the chat.
 
 **Inheritance is read, not copied.** A sub-to-do shows its own attachments,
 then its parent's under "From T-12 (parent)". A parent shows its own, then
@@ -132,23 +133,78 @@ Every message Pane types to start or restart a to-do's agents, or to assign a
 sub-to-do, lists the attachments (own and inherited) and says to read them
 first. `runpane todos show T-n` lists them first too.
 
+## The page
+
+Opening a to-do (from the list, search, Approvals or a link) shows its page
+with its **plan beside it** in a split at half the width.
+
+- **Under the title**, a row of chips names where it stands, and each one
+  opens what it names: the status (Waiting on you opens the approval), its
+  agents (opens the Session), the PR and its checks (opens the PR tab),
+  sub-to-do progress (scrolls to them) and the machine. With nothing
+  attached the row reads "Nothing attached yet · + Attach".
+- **The split** has a tab per attachment: the plan first, then mock-ups and
+  designs, PRs, findings, decisions, docs, images and links, each in the order
+  attached. A sub-to-do also shows its parent's, marked "from T-12". The plan
+  opens first, or else the first tab in that order; ←/→ move between tabs. The
+  bar under the tabs names the file, who attached it and when, with Open ↗ and
+  ⋯ (Reveal, Detach). Drag the split's edge to resize it; the width is
+  remembered for every to-do.
+- **Hide the split** with the split button at the top right or ⌘\ (Ctrl+\ on
+  Linux and Windows). It is the same key as a Session's Split Right, so
+  rebinding Split Right in Settings rebinds this too. Hidden is remembered per
+  to-do on this computer; the page then takes the full width and a
+  "Plan · N files" chip shows the split again, as does clicking any
+  attachment or approval. When the to-do area is under 1,000 px wide, every
+  to-do opens with the split hidden and showing it lasts for that visit.
+- **The details sidebar** (the panel button at the top right, as in a
+  Session) starts closed on every to-do. Its Details tab has the status,
+  Session, requester, who manages and works it, repo, machine, machine load
+  with Never pause, keep moving, created and the sub-to-dos; its Attachments
+  tab lists every attachment with who added it and when. Its width is
+  remembered; opening it narrows the split.
+- **Approvals cover the split**, as in a Session: Answer, the status chip or an
+  approval card in the thread shows the approval column over the split,
+  headed "Back to Plan" (whatever tab was showing). ✕, Back or Esc returns to
+  that tab, and so does answering.
+
 ## The chat
 
-The to-do's page has a chat with you, its agents and one-line events
-(created, assigned, attached, reminded, answered). It never shows an agent's
-tool steps.
+The thread under the to-do reads top to bottom, like an issue's activity:
 
-- **Your messages** are typed into the agent working the to-do when its tab
-  is idle and you have no unsent text there. The **To** switch picks its
-  assigned worker or its orchestrator.
-- **Agents reply** with `runpane todos comment T-n "<text>"`: a short summary
-  of at most 2,000 characters. Longer replies are refused. **Open in the
-  Session chat** shows the full turn.
-- **Questions** about the to-do are approvals linked to it. They show as
-  cards in the chat and in Approvals, labelled with the to-do. Answering in
+- **Events** (created, assigned, attached, reminded, answered) are one line
+  each. Two or more in a row fold into "Show N events: …"; an event whose
+  approval still waits never folds, because its card shows instead.
+- **Agent run cards**: one agent tab's messages and events in a row make one
+  card, until another author's message comes between. It reads Working while
+  that tab is mid-turn, Waiting on you while one of its approvals waits, or
+  Finished, with the first line of its latest message. Expanded, it shows the
+  messages, its steps and **Open in the Session chat**. Pane never shows an
+  agent's tool steps here.
+- **Comment cards** hold your messages and the requester's, with their
+  replies under them. Under each message you send is "Delivered to …" or
+  "Waiting for the agent to finish its turn".
+- **Approval cards**: questions about the to-do are approvals linked to it.
+  They show here and in Approvals, labelled with the to-do; answering in
   either place answers both. An agent links a question with `--todo T-n` on
   `runpane notify` or `runpane report`; without it, Pane links the question
   when the asking tab works on exactly one open to-do.
+
+**Comment or reply.** The box at the bottom ("Leave a comment…", ⌘↵ to send)
+goes to the to-do's orchestrator; on a sub-to-do the **To** switch picks its
+assigned worker or the orchestrator. 📎, paste or drop attaches a file to the
+to-do and names it in the comment. **Leave a reply…** under a card goes to
+the agent that wrote it, typed into that agent's own tab; on your own card or
+the requester's it goes wherever that card went. The agent's next message
+from that tab threads under your reply while it is your newest unanswered one
+to it. If that tab is closed, the reply goes to the orchestrator and the
+thread says so. A reply can only reach a tab in the to-do's own Session or a
+sub-to-do's assignee; anything else is refused (`ERR_TODO_REPLY_TARGET`).
+
+Pane types what you send into the tab only when it is idle and you have no
+unsent text there. **Agents reply** with `runpane todos comment T-n "<text>"`:
+a short summary of at most 2,000 characters; longer replies are refused. The
+page loads the newest 500 rows of activity.
 
 ## Review, accept, done
 
@@ -296,9 +352,11 @@ upgrade (`main/src/database/todosSchema.ts`):
   supervisor's and gate's counters.
 - `todo_attachments`: one row per attachment, with its kind, target, machine,
   who attached it and how (`attached`, `pr`, `approval` or `opened`).
-- `todo_activity`: the chat's messages and events.
+- `todo_activity`: the chat's messages and events; `reply_to` names the row a
+  reply answers.
 
-Approvals gain a `todo_id` column. All of it is additive, so an older Pane
+Approvals gain a `todo_id` column. All of it is additive (`reply_to` is added
+to databases from earlier to-do builds when they open), so an older Pane
 opening the same database still starts. Done and dropped to-dos, their
 attachments and activity are deleted 30 days after they close.
 
@@ -348,6 +406,11 @@ start a dev build with an isolated `PANE_DIR` and:
 - `PANE_TODOS_TIME_SCALE=<n>` runs the to-do clock n times faster, so with
   60 the supervisor's 10, 20, 30 and 40-minute ladder and the gate's windows
   pass in seconds. Unpackaged builds only; a packaged Pane ignores it.
+
+Journeys run in an isolated Pane with the scripted agent:
+`tests/todos.spec.ts` and `tests/todos-page.spec.ts`
+(`playwright.chat-tabs.config.ts`). `tests/todos-real.spec.ts` runs real
+Claude Code and Codex, only with `TODOS_REAL=1`.
 
 The code is in `main/src/services/todos/`: `supervisorRules.ts` (the ladder
 and limits), `loadGate.ts` (thresholds), `todoMessages.ts` (every line Pane
