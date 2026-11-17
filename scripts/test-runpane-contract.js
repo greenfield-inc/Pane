@@ -5997,15 +5997,31 @@ async function checkInstallReportsUnfinishedDmg() {
     existsSync: fs.existsSync,
     log: console.log,
     home: process.env.HOME,
+    userProfile: process.env.USERPROFILE,
+    localAppData: process.env.LOCALAPPDATA,
     telemetry: process.env.RUNPANE_TELEMETRY_DISABLED,
   };
   const nodeResults = {};
+  // The installers place files by the host's own rules (os.homedir(), defaultInstallRoot()), so the
+  // expected paths come from the same rules while HOME, USERPROFILE and LOCALAPPDATA point at `home`.
+  // That keeps every write inside `home` on macOS, Linux and Windows runners alike. The Python run
+  // below inherits these variables.
+  process.env.USERPROFILE = home;
+  process.env.LOCALAPPDATA = home;
+  let expectedZipPath;
+  let expectedAppImagePath;
+  // An AppImage install copies into the host's own install root. On a Windows host that root is not
+  // a Linux one, and the npm and Python CLIs name it differently, so the AppImage cases run only on
+  // macOS and Linux hosts.
+  const installReportCases = INSTALL_REPORT_CASES.filter((scenario) => !(process.platform === 'win32' && scenario.format === 'appimage'));
   try {
     process.env.HOME = home;
     process.env.RUNPANE_TELEMETRY_DISABLED = '1';
+    expectedZipPath = path.join(os.homedir(), 'Applications', 'Pane.app', 'Contents', 'MacOS', 'Pane');
+    expectedAppImagePath = path.join(platformModule.defaultInstallRoot(), 'pane');
     delete require.cache[require.resolve(dist('cli.js'))];
     const { installOrUpdate } = require(dist('cli.js'));
-    for (const scenario of INSTALL_REPORT_CASES) {
+    for (const scenario of installReportCases) {
       const artifactPath = path.join(home, scenario.fileName);
       fs.writeFileSync(artifactPath, 'fixture');
       const result = { lines: [], commands: [], launched: false, spawned: false };
@@ -6073,13 +6089,15 @@ async function checkInstallReportsUnfinishedDmg() {
     assert.strictEqual(result.spawned, false);
   }
   assert.strictEqual(nodeResults['mac client zip'].code, 0);
-  assert.deepStrictEqual(nodeResults['mac client zip'].reported, [`Pane installed: ${path.join(home, 'Applications', 'Pane.app', 'Contents', 'MacOS', 'Pane')}`]);
+  assert.deepStrictEqual(nodeResults['mac client zip'].reported, [`Pane installed: ${expectedZipPath}`]);
   assert.strictEqual(nodeResults['mac client zip'].launched, true);
-  assert.strictEqual(nodeResults['linux client appimage'].code, 0);
-  assert.deepStrictEqual(nodeResults['linux client appimage'].reported, [`Pane installed: ${path.join(home, '.local', 'bin', 'pane')}`]);
-  assert.strictEqual(nodeResults['linux client appimage'].launched, true);
-  assert.strictEqual(nodeResults['linux daemon appimage'].code, 0);
-  assert.strictEqual(nodeResults['linux daemon appimage'].spawned, true);
+  if (process.platform !== 'win32') {
+    assert.strictEqual(nodeResults['linux client appimage'].code, 0);
+    assert.deepStrictEqual(nodeResults['linux client appimage'].reported, [`Pane installed: ${expectedAppImagePath}`]);
+    assert.strictEqual(nodeResults['linux client appimage'].launched, true);
+    assert.strictEqual(nodeResults['linux daemon appimage'].code, 0);
+    assert.strictEqual(nodeResults['linux daemon appimage'].spawned, true);
+  }
   assert.strictEqual(nodeResults['linux client deb'].code, 0);
   assert.deepStrictEqual(nodeResults['linux client deb'].commands, ['sudo']);
   assert.match(nodeResults['linux client deb'].reported.join('\n'), /^Pane installed: \S+$/);
@@ -6136,7 +6154,7 @@ for scenario in payload["cases"]:
     result["reported"] = [line for line in captured.getvalue().splitlines() if line.startswith("Pane ")]
     results[scenario["name"]] = result
 print(json.dumps(results))
-`, JSON.stringify({ home, cases: INSTALL_REPORT_CASES }));
+`, JSON.stringify({ home, cases: installReportCases }));
   try {
     const pythonResults = JSON.parse(pythonOutput.split(/\r?\n/).filter(Boolean).pop());
     // deb resolves the installed executable by candidate paths; with every path "existing" each CLI
@@ -6146,6 +6164,9 @@ print(json.dumps(results))
     }
     assert.deepStrictEqual(pythonResults, nodeResults);
   } finally {
+    for (const [name, value] of [['USERPROFILE', original.userProfile], ['LOCALAPPDATA', original.localAppData]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
     fs.rmSync(home, { recursive: true, force: true });
   }
 }
