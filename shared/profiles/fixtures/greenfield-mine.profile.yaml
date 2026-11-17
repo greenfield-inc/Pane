@@ -1,0 +1,7 @@
+# An overlay: only the changes to greenfield.
+format: pane-profile/1
+name: greenfield-mine
+version: 1.0.0
+extends: greenfield@^1.0
+agents:
+  reviewer: { runs: claude/claude-opus-5-5 }

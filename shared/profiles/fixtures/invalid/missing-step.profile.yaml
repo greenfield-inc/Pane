@@ -1,0 +1,13 @@
+# expect: EDGE_TARGET_MISSING
+format: pane-profile/1
+name: missing-step
+version: 1.0.0
+agents:
+  writer: { runs: claude/claude-opus-5-5 }
+flow:
+  start: draft
+  draft: { agent: writer, goal: Draft it, outcomes: { done: publish, stuck: end } }
+samples:
+  draft:
+    done: ["Drafted.", "Drafted, with notes."]
+    stuck: ["Stuck on the intro.", "Stuck on sources."]

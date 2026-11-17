@@ -87,6 +87,8 @@ To free disk or memory, run `runpane machine health` and delete only with `runpa
 
 Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.
 
+Profiles: a profile is a team of agents and a fixed workflow in one file. `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `"$PANE_RUNPANE_BIN" report --outcome "<outcome>"`, using one of the outcomes its first message lists.
+
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 
 MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = "npx"` and `args = ["--yes", "runpane@latest", "mcp"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too.

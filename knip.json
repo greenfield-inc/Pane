@@ -43,6 +43,7 @@
         "@agentclientprotocol/codex-acp",
         "@agentclientprotocol/sdk",
         "@anthropic-ai/sdk",
+        "@greenfieldco/agent-farm",
         "@lydell/node-pty",
         "@modelcontextprotocol/sdk",
         "@xterm/addon-serialize",
