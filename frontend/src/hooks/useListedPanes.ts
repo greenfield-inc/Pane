@@ -27,7 +27,7 @@ export function useListedPanes(): Session[] {
   const todoPaneIds = useTodoSessionPaneIds();
   const snapshot = useNotifyStore(s => s.snapshot);
   return useMemo(
-    () => panes.filter(pane => (!runsBySessionId.has(pane.id) && !todoPaneIds.has(pane.id)) || pane.id === activeSessionId || paneHasWaitingQuestion(snapshot, pane.id)),
+    () => panes.filter(pane => pane.id === activeSessionId || (!todoPaneIds.has(pane.id) && (!runsBySessionId.has(pane.id) || paneHasWaitingQuestion(snapshot, pane.id)))),
     [panes, activeSessionId, runsBySessionId, todoPaneIds, snapshot],
   );
 }

@@ -203,6 +203,8 @@ test('the supervisor reminds, restarts and asks you on a quiet to-do, on a fast 
     await expect.poll(() => statusOf(page, 1), { timeout: 90_000, intervals: [2_000] }).toBe('waiting');
     const card = (await approvals(page)).items.find(item => item.todo?.number === 1 && item.state === 'waiting');
     expect(card?.title).toMatch(/^T-1 has been stuck for \d+ minutes/);
+    // J17: its own Session stays out of the sidebar even with a card waiting.
+    await expect(page.getByTestId(`orchestration-session-${todo.sessionId}`)).toHaveCount(0);
     await shot(page, 'j24-stuck-card');
     await answer(page, card?.id ?? '', 'Stop it');
     await expect.poll(async () => (await detail(page, 1)).status.reason, { timeout: 15_000 }).toBe('stopped by you');

@@ -128,7 +128,8 @@ export function OrchestrationSessionNav({
   // only while a card from it waits on you, or while it is open.
   const activeSessions = useMemo(
     () => sessions.filter(session => !isArchivedOrchestrationSession(session)
-      && ((!loopsBySessionTarget.has(session.id) && !todoSessionIds.has(session.id)) || session.id === openSessionId || sessionWaitingCount(notifySnapshot, session.id) > 0)),
+      // A to-do's own Session stays out even with a card waiting (J17): the to-do, search and Approvals reach it.
+      && (session.id === openSessionId || (!todoSessionIds.has(session.id) && (!loopsBySessionTarget.has(session.id) || sessionWaitingCount(notifySnapshot, session.id) > 0)))),
     [sessions, loopsBySessionTarget, todoSessionIds, notifySnapshot, openSessionId],
   );
   const pinnedSessions = useMemo(
