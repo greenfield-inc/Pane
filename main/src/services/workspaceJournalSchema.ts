@@ -9,6 +9,7 @@ export const agentReportFields = {
   summaryTruncated: boundary.optional(boundary.literal(true)),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  todo: boundary.optional(boundary.string),
   reportedAt: boundary.nonEmptyString,
 };
 const agentReportSchema = boundary.object(agentReportFields);

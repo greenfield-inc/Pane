@@ -163,6 +163,8 @@ export interface NotifyRequest extends Partial<NotifyQuestion> {
   aboutSession?: string;
   /** Return `waiting` after this long, for clients whose tool calls time out (Cursor's CLI). */
   returnAfterMs?: number;
+  /** To-dos (D-408): `--todo T-n`, as typed; Pane resolves it to `todo` on the question. */
+  todoRef?: string;
   caller: NotifyCaller;
 }
 

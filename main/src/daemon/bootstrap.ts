@@ -96,6 +96,10 @@ import { REMOTE_MEMBER_KINDS } from '../services/remoteMemberEvents';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { LoopManager } from '../services/loops/loopManager';
+import { TodoService } from '../services/todos/todoService';
+import { TodoStore } from '../services/todos/todoStore';
+import { createTodoHost } from '../services/todos/todoHost';
+import type { GitStatus } from '../types/session';
 import { AutoPauser } from '../services/autoPause';
 import { pausePanes } from '../services/panePause';
 import { updateHoldIsLive } from '../services/updateRestoration';
@@ -558,6 +562,54 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   };
 
   const commandRegistry = registerIpcHandlers(services);
+
+  // To-dos (D-409): the service answers reads everywhere; only the instance that does housekeeping
+  // runs the supervisor, the load gate and launch resume, so one data folder has one supervisor.
+  const todoService = new TodoService(new TodoStore(databaseService.getDb()), createTodoHost(services, commandRegistry));
+  services.todoService = todoService;
+  daemonServices.todoService = todoService;
+  let todosChangedTimer: ReturnType<typeof setTimeout> | undefined;
+  todoService.on('changed', () => {
+    if (todosChangedTimer) return;
+    todosChangedTimer = setTimeout(() => {
+      todosChangedTimer = undefined;
+      getPaneEventSink().send('todos:changed');
+    }, 150);
+  });
+  services.notifyService?.queue.on('change', () => {
+    const queue = services.notifyService?.queue;
+    if (queue) todoService.onApprovalsChanged(queue.snapshot().items);
+  });
+  const lastCommits = new Map<string, number>();
+  gitStatusManager.on('git-status-updated', (paneId: string, status: GitStatus) => {
+    if (status.prNumber && status.prUrl) todoService.onPr(paneId, { url: status.prUrl, number: status.prNumber, title: status.prTitle });
+    const commits = status.totalCommits ?? 0;
+    const before = lastCommits.get(paneId);
+    lastCommits.set(paneId, commits);
+    if (before !== undefined && commits > before) todoService.noteProgressForPane(paneId);
+  });
+  let todoTimer: ReturnType<typeof setInterval> | undefined;
+  let todoLaunchTimer: ReturnType<typeof setTimeout> | undefined;
+  if (duties.housekeeping) {
+    let ticking = false;
+    todoTimer = setInterval(() => {
+      if (ticking) return;
+      ticking = true;
+      void todoService.fastTick()
+        .then(() => todoService.loadTick())
+        .then(() => todoService.supervisorPass())
+        .catch(error => logger.warn('[Todos] tick failed', error))
+        .finally(() => { ticking = false; });
+    }, 2_000);
+    todoService.prune();
+    // Launch resume, once the window and tabs have settled.
+    todoLaunchTimer = setTimeout(() => {
+      void todoService.resumeOnLaunch('launch').catch(error => logger.warn('[Todos] launch resume failed', error));
+    }, 10_000);
+    powerMonitor.on('resume', () => {
+      setTimeout(() => { void todoService.resumeOnLaunch('wake').catch(error => logger.warn('[Todos] wake resume failed', error)); }, 10_000);
+    });
+  }
   const autoPauser = new AutoPauser({
     now: () => Date.now(),
     settings: () => ({ enabled: configManager.getConfig().autoPauseEnabled, hours: configManager.getConfig().autoPauseAfterHours, chatMinutes: configManager.getConfig().chatIdleReleaseMinutes }),
@@ -979,6 +1031,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       prepareNotifyForQuit();
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
+      clearInterval(todoTimer);
+      clearTimeout(todoLaunchTimer);
       machineHealth.stop();
       finishedPanes.stop();
       autoPauser.stop();

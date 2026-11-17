@@ -56,6 +56,8 @@ export interface TerminalAgentReport {
   summaryPath?: string;
   /** What the worker needs answered; present when `state` is `blocked`. */
   question?: string;
+  /** To-dos (D-408): `--todo T-14`, the to-do the report (and its question) is about. */
+  todo?: string;
   reportedAt: string;
 }
 

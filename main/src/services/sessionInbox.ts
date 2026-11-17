@@ -47,6 +47,7 @@ const reportSchema = boundary.object({
   summaryTruncated: boundary.optional(boundary.literal(true)),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  todo: boundary.optional(boundary.string),
   reportedAt: boundary.string,
 });
 const itemSchema = boundary.object({

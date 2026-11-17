@@ -57,7 +57,7 @@ type RegisteredPaneCommandHandler = {
   invoke(...args: PaneCommandValue[]): Promise<PaneCommandValue> | PaneCommandValue;
 }['invoke'];
 
-interface IpcMainHandleLike {
+export interface IpcMainHandleLike {
   handle(
     channel: string,
     listener: (_event: IpcMainInvokeEvent, ...args: PaneCommandValue[]) => Promise<PaneCommandValue> | PaneCommandValue,

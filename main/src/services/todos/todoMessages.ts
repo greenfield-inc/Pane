@@ -23,9 +23,10 @@ function doneWhenBlock(todo: TodoRecord): string {
 }
 
 /** The first message a to-do's new orchestrator gets. */
-export function orchestratorStartText(todo: TodoRecord, groups: readonly TodoAttachmentGroup[], subTodos: readonly TodoRecord[]): string {
+export function orchestratorStartText(todo: TodoRecord, groups: readonly TodoAttachmentGroup[], subTodos: readonly TodoRecord[], repo: string | null): string {
   return [
     `[From Pane, To-dos] You are the orchestrator for ${todo.ref} "${todo.title}", requested by ${todo.requester.kind === 'person' ? 'the person' : todo.requester.name}.`,
+    repo ? `Repo: ${repo}. Start worker Panes there with runpane panes create --repo "${repo}".` : '',
     todo.summary ? `Summary:\n${todo.summary}` : '',
     doneWhenBlock(todo),
     subTodos.length > 0 ? ['Sub-to-dos:', ...subTodos.map(sub => `- ${sub.ref} ${sub.title}`)].join('\n') : '',

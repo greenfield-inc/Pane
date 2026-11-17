@@ -43,6 +43,8 @@ export const MACHINE_READ_CHANNELS = [
   'orchestration-sessions:runtimes',
   'permission:getPending',
   'notify:remote-snapshot',
+  // To-dos (D-409): another machine's to-dos, for the To-dos list.
+  'todos:snapshot',
   'autopilot:read-doc',
   'notify:summary-page',
   'panels:agent-statuses',
@@ -58,6 +60,8 @@ export const MACHINE_READ_CHANNELS = [
   'resource-monitor:machine-relief',
   'resource-monitor:machine-cleanup-history',
   'resource-monitor:machine-apps',
+  // To-dos (D-409): the machine's to-do list, merged into the To-dos screen under that machine.
+  'todos:snapshot',
 ] as const;
 export type MachineReadChannel = typeof MACHINE_READ_CHANNELS[number];
 

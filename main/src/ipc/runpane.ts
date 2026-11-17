@@ -1,9 +1,10 @@
+import { RUNPANE_TODO_VERBS } from '../../../shared/types/todos';
 import { getChatTabManager } from '../services/chatTabs';
 import { computerTailnetName } from '../../../shared/types/remoteComputers';
 import { decodeChatPanelState } from '../services/chatTabs/state';
 import { createChatTab } from './chatTabs';
 import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, submitChatTab, waitForChatTab } from './runpaneChatTabs';
-import { paneCommandSignal } from '../daemon/commandRegistry';
+import { paneCommandCaller, paneCommandSignal } from '../daemon/commandRegistry';
 import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
 import { ownsRemovableWorktree } from '../utils/owns-removable-worktree';
@@ -91,7 +92,7 @@ import {
   TERMINAL_IMAGE_OPTIONS,
   terminalGraphicsProtocols,
 } from '../../../shared/constants/terminalGraphics';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { customCommandResumeSchema, effectiveCustomResume, type CustomCommandResume } from '../../../shared/types/customCommandResume';
 import {
   decodeOrchestrationSessionPayload,
@@ -337,6 +338,7 @@ const RUNPANE_CHANNELS = [
   'runpane:loops:set-enabled',
   'runpane:loops:run-now',
   'runpane:loops:preview',
+  ...RUNPANE_TODO_VERBS.map(verb => `runpane:todos:${verb}`),
   'runpane:secrets:list',
   'runpane:secrets:set',
   'runpane:secrets:delete',
@@ -1079,6 +1081,8 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panes:create', async (request: PaneCommandValue): Promise<RunpanePaneCreateResult> => {
     return withRunpaneAction(services, 'panes:create', {}, async () => {
       const normalized = parsePaneCreateRequest(request);
+      // To-dos: a start from a to-do's Session waits for the load gate (the CLI assigns --todo once the tab exists).
+      todoAgentStart(services, request, normalized.callerPanelId, normalized.dryRun !== true);
       const repo = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
       const repoSummary = projectToRepoSummary(repo, sessionManager.getSessionsForProject(repo.id).length);
 
@@ -1328,7 +1332,12 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'panels:create', {}, async () => {
       const normalized = parsePanelCreateRequest(request);
       const pane = resolvePane(sessionManager, normalized.paneId);
-      if (normalized.type === 'chat' && normalized.chat) return createRunpaneChatTab(services, pane.id, normalized, normalized.chat);
+      const todoStart = todoAgentStart(services, request, normalized.callerPanelId, normalized.type !== 'chat' ? Boolean(normalized.tool) : true);
+      if (normalized.type === 'chat' && normalized.chat) {
+        const chat = await createRunpaneChatTab(services, pane.id, normalized, normalized.chat);
+        todoStart?.assign(chat.panelId);
+        return chat;
+      }
       const repo = sessionManager.getProjectForSession(pane.id);
       if (!repo) {
         throw new Error(`No Pane repo found for pane ${pane.id}`);
@@ -1345,6 +1354,7 @@ export function registerRunpaneHandlers(
         readyTimeoutMs: normalized.readyTimeoutMs,
       });
       const expectedReport = services.expectedReportTracker?.expectation(panel.id);
+      todoStart?.assign(panel.id);
 
       return {
         ok: Boolean((!readiness || readiness.ok) && isInitialInputDelivered(initialInput, readiness)),
@@ -1382,6 +1392,10 @@ export function registerRunpaneHandlers(
         ? await resolvePanelOpenUrl(normalized.url, services, pane)
         : await resolvePanelOpenFile(services, pane, normalized.filePath ?? '');
       const placement = normalized.placement ?? 'split';
+      // To-dos (D-408): a page an assigned tab opens beside the person attaches to its to-do.
+      const opener = paneCommandCaller()?.panelId;
+      const openedFile = normalized.url?.startsWith('file://') ? normalized.url : normalized.filePath ? path.resolve(pane.worktreePath, normalized.filePath) : undefined;
+      if (opener && openedFile) services.todoService?.onPanelOpened(opener, openedFile);
       // Brings the tab forward on clients showing this Pane; never raises or focuses the window.
       const activate = normalized.noFocus !== true;
       const existing = panelManager.getPanelsForSession(pane.id).find(panel => panelShowsOpenTarget(panel, target));
@@ -1966,6 +1980,8 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'report', {}, async () => {
       const normalized = parseReportRequest(request);
       const panel = resolveAgentPanel(normalized.panelId);
+      // To-dos (D-408): a --todo that names no open to-do is refused before anything is recorded.
+      if (normalized.todo && services.todoService) services.todoService.todoLinkFor(panel.id, normalized.todo);
       if (normalized.paneId && normalized.paneId !== panel.sessionId) {
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
@@ -2522,6 +2538,17 @@ async function panelCloseRefusal(panel: ToolPanel, force: boolean): Promise<Runp
 }
 
 /** The opener a runpane request records on the tab it opens; none without an explicit source. */
+/**
+ * To-dos (D-408): an agent start from a to-do's Session, or naming one with --todo, asks the load
+ * gate first (machine_busy while Holding); with --todo the new tab is assigned that to-do.
+ */
+function todoAgentStart(services: AppServices, request: PaneCommandValue, callerPanelId: string | undefined, startsAgent: boolean): { assign: (panelId: string) => void } | undefined {
+  const todoService = services.todoService;
+  if (!todoService || !startsAgent) return undefined;
+  const todo = decodeOptionalBoundary(request, boundary.object({ todo: boundary.optional(boundary.string) }))?.todo?.trim();
+  return todoService.beforeAgentStart(callerPanelId ?? paneCommandCaller()?.panelId, todo);
+}
+
 function panelOpener(source: 'user' | 'agent' | undefined, callerPanelId: string | undefined): PanelOpener | undefined {
   if (source === 'agent') return callerPanelId ? { source, panelId: callerPanelId } : { source };
   if (source === 'user') return { source };
@@ -5590,6 +5617,7 @@ const reportRequestSchema = boundary.object({
   summary: boundary.optional(boundary.string),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  todo: boundary.optional(boundary.string),
 });
 
 function parseReportRequest(value: PaneCommandValue): RunpaneReportRequest {
@@ -5958,6 +5986,53 @@ async function archiveSessionPanesWith(
     } catch (error) {
       result.failedPanes.push({ paneId: pane.id, name: pane.name, error: error instanceof Error ? error.message : String(error) });
     }
+  }
+  return result;
+}
+
+/** To-dos (D-408): why a Pane was kept, in the words the to-do's chat shows. */
+const TODO_ARCHIVE_KEPT_REASON = {
+  'unsent-input': 'your unsent text',
+  'agent-busy': 'an agent is busy',
+  'status-unknown': "Pane couldn't check its changes",
+  'uncommitted-and-unpushed': 'uncommitted changes and unpushed commits',
+  'uncommitted-changes': 'uncommitted changes',
+  'unpushed-commits': 'unpushed commits',
+} as const satisfies Record<RunpanePaneArchiveBlockCode, string>;
+
+/** What archiving a to-do's own Session did (TodoService.archive). */
+export interface TodoSessionArchiveResult {
+  archived: string[];
+  kept: Array<{ name: string; reason: string }>;
+  sessionArchived: boolean;
+}
+
+/**
+ * To-dos (D-408): archives a to-do's own Session's Panes with Pane archive's usual checks, never
+ * forcing. A Pane with uncommitted changes, unpushed commits or a busy agent is kept and named. The
+ * Session itself is archived only once none of its Panes are left.
+ */
+export async function archiveTodoSessionPanes(services: AppServices, commandRegistry: PaneCommandRegistry, sessionId: string): Promise<TodoSessionArchiveResult> {
+  const manager = requireOrchestrationSessionManager(services);
+  const session = await manager.get({ sessionId });
+  const result: TodoSessionArchiveResult = { archived: [], kept: [], sessionArchived: false };
+  for (const pane of openSessionPanes(services, session)) {
+    try {
+      const check = await checkPaneArchive(services, pane, false);
+      if (check.blockCode) {
+        result.kept.push({ name: pane.name, reason: TODO_ARCHIVE_KEPT_REASON[check.blockCode] });
+        continue;
+      }
+      const { worktreeCleanup } = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, check.worktreeCleanupApplicable);
+      if (isArchiveCleanupOk(worktreeCleanup)) result.archived.push(pane.name);
+      else result.kept.push({ name: pane.name, reason: 'its worktree could not be removed' });
+    } catch (error) {
+      result.kept.push({ name: pane.name, reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  if (result.kept.length === 0) {
+    await manager.update({ sessionId }, { archived: true });
+    result.sessionArchived = true;
   }
   return result;
 }

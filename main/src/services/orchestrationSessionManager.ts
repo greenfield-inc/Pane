@@ -726,6 +726,30 @@ export class OrchestrationSessionManager extends EventEmitter {
     return session && { name: session.name, paneId: session.internalSessionId, archived: session.archived === true };
   }
 
+  /**
+   * To-dos (D-408): a Session's name, orchestrator tab, archived flag and live member Panes, read
+   * from the in-memory store without the lock (the to-do service reads it on every status).
+   */
+  todoSessionInfo(sessionId: string): TodoSessionRecord | undefined {
+    const record = this.store.read().sessions.find(session => session.id === sessionId);
+    if (!record) return undefined;
+    const paneIds = record.associations.map(association => association.paneId)
+      .filter(paneId => this.sessionManager.getSession(paneId)?.archived === false);
+    return {
+      id: record.id, name: record.name, agent: record.agent, orchestratorPanelId: record.panelIds[record.agent] ?? null,
+      ownPaneId: record.internalSessionId, archived: record.archived === true, paneIds,
+    };
+  }
+
+  /** To-dos: the Session a tab works in, and whether it is that Session's orchestrator. Reads without the lock. */
+  todoSessionOfPanel(panelId: string, paneId: string | undefined): TodoPanelSession | undefined {
+    const sessions = this.store.read().sessions;
+    const own = sessions.find(session => Object.values(session.panelIds).includes(panelId) || (paneId !== undefined && session.internalSessionId === paneId));
+    if (own) return { sessionId: own.id, sessionName: own.name, orchestrator: Object.values(own.panelIds).includes(panelId), agent: own.agent };
+    const member = paneId === undefined ? undefined : sessions.find(session => session.associations.some(association => association.paneId === paneId));
+    return member ? { sessionId: member.id, sessionName: member.name, orchestrator: false, agent: member.agent } : undefined;
+  }
+
   approvalSessionsById(): Map<string, NotifySession> {
     return new Map(this.store.memberships()
       .filter(session => !session.archived)
@@ -1764,4 +1788,23 @@ function isReportCurrent(record: OrchestrationSessionRecord): boolean {
 
 function isOrchestratorActivity(record: OrchestrationSessionRecord, activity: OrchestrationActivity): boolean {
   return activity.panelId !== undefined && Object.values(record.panelIds).includes(activity.panelId);
+}
+
+/** To-dos' view of a Session (todoSessionInfo). */
+export interface TodoSessionRecord {
+  id: string;
+  name: string;
+  agent: PaneChatAgent;
+  orchestratorPanelId: string | null;
+  ownPaneId: string;
+  archived: boolean;
+  paneIds: string[];
+}
+
+/** To-dos' view of the Session a tab works in (todoSessionOfPanel). */
+export interface TodoPanelSession {
+  sessionId: string;
+  sessionName: string;
+  orchestrator: boolean;
+  agent: PaneChatAgent;
 }

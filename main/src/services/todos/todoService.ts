@@ -1,9 +1,9 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { PaneError } from '../../../../shared/paneError';
-import type { NotifyItem, NotifyLink, NotifyResult } from '../../../../shared/types/notify';
+import type { NotifyItem, NotifyLink, NotifyResult, NotifyTodoLink } from '../../../../shared/types/notify';
 import {
-  MOVING_TODO_STATES, TODO_AGENT_REPLY_MAX, TODO_ATTACHMENT_KINDS, isOpenTodoState, todoRef,
+  MOVING_TODO_STATES, TODO_AGENT_REPLY_MAX, TODO_ATTACHMENT_KINDS, isOpenTodoState, parseTodoRef, todoRef,
   type LoadGateSnapshot, type TodoActivity, type TodoAttachment, type TodoAttachmentGroup, type TodoAttachmentKind,
   type TodoAttachmentSource, type TodoCreateInput, type TodoDetail, type TodoListRow, type TodoRecord, type TodoStatus, type TodosSnapshot,
 } from '../../../../shared/types/todos';
@@ -40,6 +40,12 @@ export interface TodoSessionInfo {
   agentId?: string;
 }
 
+export interface CreatedTodoSession {
+  sessionId: string;
+  orchestratorPanelId: string | null;
+  prompted: boolean;
+}
+
 export type TypeResult = 'delivered' | 'busy' | 'gone' | 'unsupported' | 'outdated';
 
 export interface TodoCard {
@@ -57,7 +63,8 @@ export interface TodoCard {
 /** What TodoService needs from the rest of Pane. The adapter in todoHost.ts wires the real services. */
 export interface TodoHost {
   machineName(): string;
-  createSession(input: { name: string; projectId: number | null; agent: string | null; openingPrompt: string }): Promise<{ sessionId: string; orchestratorPanelId: string | null }>;
+  /** Creates the to-do's own hidden Session; `prompted` says the opening prompt rode on its launch (else Pane types it once ready). */
+  createSession(input: { name: string; projectId: number | null; agent: string | null; openingPrompt: string }): Promise<CreatedTodoSession>;
   session(sessionId: string): TodoSessionInfo | null;
   panel(panelId: string): TodoPanelInfo | null;
   projectName(projectId: number): string | null;
@@ -65,7 +72,7 @@ export interface TodoHost {
   isMidTurn(panelId: string): boolean;
   hasUnsentText(panelId: string): Promise<boolean>;
   /** The tab's process stopped or its tab is gone. */
-  isPanelDown(panelId: string): boolean;
+  isPanelDown(panelId: string): Promise<boolean>;
   typeIntoTab(panelId: string, text: string): Promise<TypeResult>;
   resumePanel(panelId: string): Promise<boolean>;
   /** Pauses the tabs' processes, keeping their conversations. */
@@ -125,7 +132,8 @@ function labelOf(target: string): string {
 export class TodoService extends EventEmitter {
   readonly gate: LoadGate;
   private readonly outbox: OutboxEntry[] = [];
-  private flushing = false;
+  private flushing: Promise<void> | null = null;
+  private flushAgain: Promise<void> | null = null;
   /** Raw mid-turn since, and last seen mid-turn, per tab: settled into Working after 10 s. */
   private readonly activity = new Map<string, { since: number | null; lastSeen: number | null }>();
   private readonly settled = new Set<string>();
@@ -136,12 +144,15 @@ export class TodoService extends EventEmitter {
   private readonly ladderLog: Array<{ at: number; kind: 'reminder' | 'restart' }> = [];
   private readonly shedAsked = new Map<number, number>();
   private lastFastTick = 0;
+  private readonly answered = new Set<string>();
+  private readonly startedAt: number;
   private lastSupervisorPass = 0;
   private lastSampleAt = 0;
   private statusDigest = '';
 
   constructor(private readonly store: TodoStore, private readonly host: TodoHost, private readonly now: () => number = Date.now) {
     super();
+    this.startedAt = now();
     this.gate = new LoadGate(() => host.loadGateEnabled());
     for (const message of store.undelivered()) {
       if (message.toTab) this.outbox.push({ panelId: message.toTab, text: personMessageText(this.require(message.todoNumber), message.body), todoNumber: message.todoNumber, activityId: message.id, resumeIfDown: true });
@@ -205,8 +216,10 @@ export class TodoService extends EventEmitter {
     const projectId = todo.projectId ?? owner?.projectId ?? null;
     const agentId = (tab ? this.host.panel(tab)?.agentId : undefined) ?? todo.agent ?? session?.agentId;
     const pr = session ? this.host.prOf(todo.assignee?.paneId ? [todo.assignee.paneId] : session.paneIds) : undefined;
+    const requesterSession = todo.requester.kind === 'orchestrator' && todo.requester.sessionId ? this.host.session(todo.requester.sessionId) : undefined;
+    const shown = requesterSession === null || requesterSession?.archived ? { ...todo, requester: { ...todo.requester, gone: true } } : todo;
     return {
-      todo, status: this.statusOf(todo, children, waiting), machine: this.host.machineName(),
+      todo: shown, status: this.statusOf(todo, children, waiting), machine: this.host.machineName(),
       sessionName: session?.name,
       projectName: projectId !== null ? this.host.projectName(projectId) ?? undefined : undefined,
       subCounts: subs.length > 0 ? { done: subs.filter(sub => sub.state === 'done').length, total: subs.filter(sub => sub.state !== 'dropped').length } : undefined,
@@ -232,7 +245,7 @@ export class TodoService extends EventEmitter {
     const byNumber = new Map(todos.map(todo => [todo.number, todo]));
     const rows = todos.map(todo => this.rowOf(todo, children, waiting, byNumber));
     rows.sort((a, b) => STATUS_ORDER[a.status.status] - STATUS_ORDER[b.status.status] || b.todo.updatedAt - a.todo.updatedAt);
-    return { rows, gate: this.gateSnapshot(), machine: this.host.machineName() };
+    return { rows, gate: this.gateSnapshot(), machine: this.host.machineName(), ownSessionIds: this.store.ownSessionIds() };
   }
 
   /** Own attachments, then the parent's (for a sub-to-do) or each sub-to-do's (for a parent). Read, never copied. */
@@ -410,10 +423,11 @@ export class TodoService extends EventEmitter {
     const now = this.now();
     if (!todo.sessionId) {
       const subs = this.store.children(number);
-      const { sessionId } = await this.host.createSession({
-        name: `${todo.ref} · ${todo.title}`.slice(0, 120), projectId: todo.projectId, agent: todo.agent,
-        openingPrompt: orchestratorStartText({ ...todo, state: 'in_progress' }, this.attachmentGroups(todo), subs),
+      const openingPrompt = orchestratorStartText({ ...todo, state: 'in_progress' }, this.attachmentGroups(todo), subs, todo.projectId !== null ? this.host.projectName(todo.projectId) : null);
+      const { sessionId, orchestratorPanelId, prompted } = await this.host.createSession({
+        name: `${todo.ref} · ${todo.title}`.slice(0, 120), projectId: todo.projectId, agent: todo.agent, openingPrompt,
       });
+      if (!prompted && orchestratorPanelId) this.enqueue({ panelId: orchestratorPanelId, text: openingPrompt, todoNumber: number, resumeIfDown: false });
       this.store.transaction(() => {
         this.store.update(number, { sessionId, state: 'in_progress', startedAt: now, lastProgressAt: now, loadHold: null, loadHoldSince: null }, now);
         for (const sub of subs) this.store.update(sub.number, { sessionId }, now);
@@ -422,7 +436,7 @@ export class TodoService extends EventEmitter {
       return;
     }
     const orchestrator = this.orchestratorOf(todo);
-    if (orchestrator && this.host.isPanelDown(orchestrator)) await this.host.resumePanel(orchestrator);
+    if (orchestrator && await this.host.isPanelDown(orchestrator)) await this.host.resumePanel(orchestrator);
     this.store.update(number, { state: 'in_progress', startedAt: todo.startedAt ?? now, lastProgressAt: now, loadHold: null, loadHoldSince: null }, now);
     if (orchestrator) this.enqueue({ panelId: orchestrator, text: resumeText(todo), todoNumber: number, resumeIfDown: true });
   }
@@ -521,6 +535,26 @@ export class TodoService extends EventEmitter {
     return this.store.listOpen().filter(todo => todo.assignee?.panelId === panelId || (todo.parentNumber === null && this.orchestratorOf(todo) === panelId));
   }
 
+  /**
+   * The to-do a question is about (D-408): `--todo T-n` when given, which must exist and be open;
+   * else the one open to-do the asking tab is assigned to, if exactly one.
+   */
+  todoLinkFor(panelId: string | undefined, explicit: string | undefined): NotifyTodoLink | undefined {
+    let todo: TodoRecord | undefined;
+    if (explicit) {
+      const number = parseTodoRef(explicit);
+      todo = number === null ? undefined : this.store.get(number);
+      if (!todo) throw notFound(explicit);
+      this.requireOpen(todo, 'asked about');
+    } else if (panelId) {
+      todo = this.soleTodoOfPanel(panelId);
+    }
+    if (!todo) return undefined;
+    this.progress(todo);
+    this.changed();
+    return { number: todo.number, title: todo.title };
+  }
+
   /** The one open to-do a tab is assigned to, if exactly one (unlinked questions link to it). */
   soleTodoOfPanel(panelId: string): TodoRecord | undefined {
     const assigned = this.store.listOpen().filter(todo => todo.assignee?.panelId === panelId);
@@ -528,6 +562,16 @@ export class TodoService extends EventEmitter {
     if (assigned.length > 1) return undefined;
     const orchestrated = this.todosOfPanel(panelId).filter(todo => todo.parentNumber === null);
     return orchestrated.length === 1 ? orchestrated[0] : undefined;
+  }
+
+  /** A commit or push landed in a Pane: progress for the to-dos working there. */
+  noteProgressForPane(paneId: string): void {
+    for (const todo of this.store.listOpen()) {
+      if (!MOVING_TODO_STATES.includes(todo.state)) continue;
+      const owner = todo.parentNumber === null ? todo : this.store.get(todo.parentNumber);
+      const session = owner?.sessionId ? this.host.session(owner.sessionId) : null;
+      if (todo.assignee?.paneId === paneId || session?.paneIds.includes(paneId)) this.progress(todo);
+    }
   }
 
   onPanelOpened(panelId: string, target: string): void {
@@ -651,12 +695,29 @@ export class TodoService extends EventEmitter {
     this.changed();
   }
 
+  /** Approvals changed: attach linked approvals' files, log answers, and refresh statuses. */
+  onApprovalsChanged(items: readonly NotifyItem[]): void {
+    for (const item of items) {
+      // Only this machine's cards: another machine's to-dos are its own.
+      if (item.machineId !== undefined && item.machineId !== 'local') continue;
+      if (item.todo) this.onApprovalItem(item);
+    }
+    this.changed();
+  }
+
   /** An approval linked to a to-do changed (asked by an agent with --todo, or answered anywhere). */
   onApprovalItem(item: NotifyItem): void {
     const number = item.todo?.number;
     if (number === undefined) return;
     const todo = this.store.get(number);
     if (!todo) return;
+    // An answer is progress; Pane's own cards log theirs where they're handled.
+    if (item.state === 'answered' && !this.answered.has(item.id) && (item.resolvedAt ?? 0) >= this.startedAt && item.todo?.kind === undefined) {
+      this.answered.add(item.id);
+      this.progress(todo);
+      const qn = /^Q-\d+/.exec(item.title)?.[0];
+      this.event(todo, `You answered ${qn ?? 'its question'}: ${item.answerSummary ?? 'answered'}`, 'person', 'you');
+    }
     // Pane attaches the files on an approval linked to the to-do.
     for (const link of item.links ?? []) {
       if ('path' in link) this.autoAttach(number, link.path, 'approval', link.label);
@@ -789,6 +850,28 @@ export class TodoService extends EventEmitter {
     if (tab) this.enqueue({ panelId: tab, text: requesterUpdateText(todo, update), todoNumber: todo.number, resumeIfDown: false });
   }
 
+  /**
+   * Before an agent start (panes create, panels create, agents start): refused with machine_busy
+   * while the gate holds when the caller works in a to-do's Session or names a to-do. Returns how
+   * to assign the new tab to the named to-do once it exists.
+   */
+  beforeAgentStart(callerPanelId: string | undefined, todoArg: string | undefined): { assign: (panelId: string) => void } | undefined {
+    const number = todoArg ? parseTodoRef(todoArg) : null;
+    if (todoArg && (number === null || !this.store.get(number))) throw notFound(todoArg);
+    const sessionId = callerPanelId ? this.host.panel(callerPanelId)?.sessionId ?? null : null;
+    this.checkAgentStart(sessionId, number, callerPanelId ?? null);
+    if (number === null) return undefined;
+    return {
+      assign: panelId => {
+        try {
+          this.assign(number, panelId, { kind: 'agent', panelId: callerPanelId });
+        } catch (error) {
+          this.host.log(`[Todos] assigning ${todoRef(number)} failed`, error instanceof Error ? error : String(error));
+        }
+      },
+    };
+  }
+
   /** `agents start --todo T-n` and agent starts from a to-do's Session: refused while the gate holds. */
   checkAgentStart(sessionId: string | null, todoNumber: number | null, callerPanelId: string | null): void {
     const inTodoSession = sessionId !== null && this.store.inSession(sessionId).some(todo => isOpenTodoState(todo.state));
@@ -812,32 +895,43 @@ export class TodoService extends EventEmitter {
 
   /** Types queued messages into tabs that are idle with no unsent text; leaves the rest queued. */
   async flush(): Promise<void> {
-    if (this.flushing) return;
-    this.flushing = true;
+    if (this.flushing) {
+      // A flush asked for while one runs waits for it, then runs once more.
+      this.flushAgain ??= this.flushing.then(() => {
+        this.flushAgain = null;
+        return this.flush();
+      });
+      return this.flushAgain;
+    }
+    this.flushing = this.flushOnce();
     try {
-      const tried = new Set<string>();
-      for (const entry of [...this.outbox]) {
-        if (tried.has(entry.panelId)) continue;
-        tried.add(entry.panelId);
-        if (this.host.isPanelDown(entry.panelId)) {
-          if (!entry.resumeIfDown || !this.gate.allowsStart()) continue;
-          // Resume before delivery: the asker's tab is down after a restart.
-          await this.host.resumePanel(entry.panelId);
-          continue;
-        }
-        if (this.host.isMidTurn(entry.panelId) || await this.host.hasUnsentText(entry.panelId)) continue;
-        const result = await this.host.typeIntoTab(entry.panelId, entry.text);
-        if (result === 'busy') continue;
-        this.outbox.splice(this.outbox.indexOf(entry), 1);
-        if (entry.activityId !== undefined && result === 'delivered') this.store.markDelivered(entry.activityId, this.now());
-        if (result !== 'delivered') {
-          const todo = this.store.get(entry.todoNumber);
-          if (todo) this.event(todo, `Couldn't reach ${this.host.panel(entry.panelId)?.name ?? 'the tab'}: ${result === 'gone' ? 'its tab closed' : 'it takes no typed messages'}`);
-        }
-        if (entry.activityId !== undefined) this.changed();
-      }
+      await this.flushing;
     } finally {
-      this.flushing = false;
+      this.flushing = null;
+    }
+  }
+
+  private async flushOnce(): Promise<void> {
+    const tried = new Set<string>();
+    for (const entry of [...this.outbox]) {
+      if (tried.has(entry.panelId)) continue;
+      tried.add(entry.panelId);
+      if (await this.host.isPanelDown(entry.panelId)) {
+        if (!entry.resumeIfDown || !this.gate.allowsStart()) continue;
+        // Resume before delivery: the asker's tab is down after a restart.
+        await this.host.resumePanel(entry.panelId);
+        continue;
+      }
+      if (this.host.isMidTurn(entry.panelId) || await this.host.hasUnsentText(entry.panelId)) continue;
+      const result = await this.host.typeIntoTab(entry.panelId, entry.text);
+      if (result === 'busy') continue;
+      this.outbox.splice(this.outbox.indexOf(entry), 1);
+      if (entry.activityId !== undefined && result === 'delivered') this.store.markDelivered(entry.activityId, this.now());
+      if (result !== 'delivered') {
+        const todo = this.store.get(entry.todoNumber);
+        if (todo) this.event(todo, `Couldn't reach ${this.host.panel(entry.panelId)?.name ?? 'the tab'}: ${result === 'gone' ? 'its tab closed' : 'it takes no typed messages'}`);
+      }
+      if (entry.activityId !== undefined) this.changed();
     }
   }
 
@@ -942,12 +1036,17 @@ export class TodoService extends EventEmitter {
 
   private async resumeFromLoad(todo: TodoRecord): Promise<void> {
     const tabs = this.tabsOf(todo);
-    for (const tab of tabs) if (this.host.isPanelDown(tab)) await this.host.resumePanel(tab);
+    for (const tab of tabs) if (await this.host.isPanelDown(tab)) await this.host.resumePanel(tab);
     this.store.update(todo.number, { loadHold: null, loadHoldSince: null, lastProgressAt: this.now() }, this.now());
     const orchestrator = this.orchestratorOf(todo);
     if (orchestrator) this.enqueue({ panelId: orchestrator, text: restartText([{ todo, groups: this.attachmentGroups(todo) }], 'load'), todoNumber: todo.number, resumeIfDown: true });
     this.event(todo, 'Load came down: resumed in the same conversations');
     this.changed();
+  }
+
+  private async liveTabs(tabs: readonly string[]): Promise<string[]> {
+    const down = await Promise.all(tabs.map(tab => this.host.isPanelDown(tab)));
+    return tabs.filter((_, index) => !down[index]);
   }
 
   /** The tabs a to-do runs: its orchestrator (top-level), its assignee, and its open sub-to-dos' assignees. */
@@ -1000,7 +1099,7 @@ export class TodoService extends EventEmitter {
         this.shedAsked.delete(todo.number);
         continue;
       }
-      const tabs = this.tabsOf(todo).filter(tab => !this.host.isPanelDown(tab));
+      const tabs = await this.liveTabs(this.tabsOf(todo));
       const idle = tabs.every(tab => !this.host.isMidTurn(tab)) && this.queuedFor(this.orchestratorOf(todo) ?? '').length === 0;
       const unsent = (await Promise.all(tabs.map(tab => this.host.hasUnsentText(tab)))).some(Boolean);
       if (unsent) continue;
@@ -1061,7 +1160,7 @@ export class TodoService extends EventEmitter {
     const action = decideSupervisorAction({
       todo, now, waitingOnYou: (waiting.get(todo.number)?.length ?? 0) > 0 || children.some(child => (waiting.get(child.number)?.length ?? 0) > 0),
       anyMidTurn: tabs.some(tab => this.host.isMidTurn(tab)), unsentText: await this.host.hasUnsentText(orchestrator), usageLimitUntil: usage, offline: false,
-      orchestratorDown: this.host.isPanelDown(orchestrator), externalProgressAt: null, lastRestartAt: this.lastRestartAt.get(todo.number) ?? null,
+      orchestratorDown: await this.host.isPanelDown(orchestrator), externalProgressAt: null, lastRestartAt: this.lastRestartAt.get(todo.number) ?? null,
       machine: this.machineCounts(now), gateAllowsStart: this.gate.allowsStart(), hasAttachments: this.attachmentCount(todo) > 0,
     });
     const quietMinutes = Math.round((now - lastMovedAt(todo, null)) / MINUTE);
@@ -1158,7 +1257,9 @@ export class TodoService extends EventEmitter {
     for (const [, todos] of bySession) {
       const orchestrator = this.orchestratorOf(todos[0]);
       if (!orchestrator) continue;
-      const needed = [orchestrator, ...todos.flatMap(todo => this.tabsOf(todo))].filter((tab, index, all) => all.indexOf(tab) === index && this.host.isPanelDown(tab));
+      const all = [orchestrator, ...todos.flatMap(todo => this.tabsOf(todo))].filter((tab, index, list) => list.indexOf(tab) === index);
+      const live = new Set(await this.liveTabs(all));
+      const needed = all.filter(tab => !live.has(tab));
       if (needed.length === 0) continue;
       if (!this.gate.allowsStart()) {
         for (const todo of todos) this.store.update(todo.number, { loadHold: 'queued', loadHoldSince: now }, todo.updatedAt);

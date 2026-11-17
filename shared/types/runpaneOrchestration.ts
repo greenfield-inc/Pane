@@ -1436,6 +1436,8 @@ export interface RunpaneReportRequest {
   summary?: string;
   summaryPath?: string;
   question?: string;
+  /** To-dos (D-408): "T-14"; links a blocked question to that to-do. */
+  todo?: string;
 }
 
 export interface RunpaneReportResult {

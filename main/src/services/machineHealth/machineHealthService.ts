@@ -55,7 +55,8 @@ interface ProcessHistory {
   samples: RssSample[];
 }
 
-function machineCpuTimes(): CpuTimes {
+/** Summed CPU times across every core; two readings give machine-wide CPU. */
+export function machineCpuTimes(): CpuTimes {
   let idle = 0;
   let total = 0;
   for (const cpu of os.cpus()) {

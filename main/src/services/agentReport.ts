@@ -27,6 +27,8 @@ export interface AgentReportInput {
   summary?: string;
   summaryPath?: string;
   question?: string;
+  /** To-dos (D-408): the to-do this report is about, "T-14". */
+  todo?: string;
 }
 
 const agentReportSchema = boundary.object({
@@ -37,6 +39,7 @@ const agentReportSchema = boundary.object({
   summaryTruncated: boundary.optional(boundary.literal(true)),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  todo: boundary.optional(boundary.string),
   reportedAt: boundary.nonEmptyString,
 });
 
@@ -72,6 +75,8 @@ export function normalizeAgentReport(input: AgentReportInput, reportedAt: string
   }
   if (summaryPath) report.summaryPath = summaryPath;
   if (question) report.question = question.length > MAX_QUESTION_LENGTH ? `${question.slice(0, MAX_QUESTION_LENGTH - 1)}…` : question;
+  const todo = input.todo?.trim();
+  if (todo) report.todo = todo;
   return report;
 }
 
