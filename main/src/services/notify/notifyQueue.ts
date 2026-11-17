@@ -1166,7 +1166,7 @@ export class NotifyQueue extends EventEmitter {
     this.closeOpen(entry, { by, reason }, closedResult(`${who} closed this question${reason ? `: ${reason}` : ''}.`));
     if (!heardOnCall && entry.item.source.panelId) {
       const tail = `(by ${by === 'autopilot' ? 'Autopilot' : 'you'})${reason ? `: ${reason}` : ''}`;
-      this.enqueueTabMessage(entry.item, `closed: ${askerRef(entry.item)} ${tail}`, false, undefined, { ref: askerRef(entry.item), tail });
+      this.enqueueTabMessage(entry.item, closedLine([askerRef(entry.item)], tail), false, undefined, { ref: askerRef(entry.item), tail });
     }
   }
 
@@ -1259,8 +1259,7 @@ export class NotifyQueue extends EventEmitter {
     if (!panelId || !this.env.typeIntoTab) return;
     // The same reply is never typed twice (D-258).
     if (to?.reply && this.tabMessages.some(message => message.reply === to.reply)) return;
-    // One line: a newline in an answer would submit early, and a control character is a key press.
-    const message: TabMessage = { itemId: item.id, panelId, text: text.replace(/\p{Cc}+/gu, ' '), answer };
+    const message: TabMessage = { itemId: item.id, panelId, text: oneLine(text), answer };
     if (!to && item.source.paneId) message.paneId = item.source.paneId;
     if (to?.reply) message.reply = to.reply;
     if (closed) message.closed = closed;
@@ -1278,7 +1277,7 @@ export class NotifyQueue extends EventEmitter {
       if (message.reply) this.repliesTyping.add(message.reply);
       // Archive all on one asker's cards: their closes reach its tab as one line, so one turn.
       const batch = message.closed ? this.tabMessages.filter(other => other.panelId === message.panelId && other.closed?.tail === message.closed?.tail) : [message];
-      const text = batch.length > 1 && message.closed ? `closed: ${batch.map(other => other.closed?.ref).join(', ')} ${message.closed.tail}` : message.text;
+      const text = batch.length > 1 && message.closed ? closedLine(batch.map(other => other.closed?.ref ?? ''), message.closed.tail) : message.text;
       let again = false;
       void type(message.panelId, text, message.paneId).then((outcome) => {
         if (outcome === 'busy') return;
@@ -2149,6 +2148,16 @@ function unavailable(reason: string): NotifyResult {
 }
 
 /** How the asker recognises its question in a typed line: its Q-n, else its title. */
+/** One line: a newline in an answer would submit early, and a control character is a key press. */
+function oneLine(text: string): string {
+  return text.replace(/\p{Cc}+/gu, ' ');
+}
+
+/** A tab's close line, for one close or several waiting for the same tab: `closed: Q-1, Q-2 (by you): <reason>`. */
+function closedLine(refs: readonly string[], tail: string): string {
+  return oneLine(`closed: ${refs.join(', ')} ${tail}`);
+}
+
 function askerRef(item: NotifyItem): string {
   return leadingQn(item.title) ?? `"${item.title.length > 80 ? `${item.title.slice(0, 79)}…` : item.title}"`;
 }

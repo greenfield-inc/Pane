@@ -109,12 +109,14 @@ describe('Archive', () => {
   });
 
   it('keeps a sent row out until a snapshot shows it closed, and brings it back when the close is refused', async () => {
-    connect(withItems(item('a'), item('b')));
+    const run = connect(withItems(item('a'), item('b')));
     await vi.waitFor(() => expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(2));
     archiveApprovals([item('a')]);
     sendArchived();
-    await Promise.resolve();
-    // Main answered before its snapshot: the row stays out instead of flashing back.
+    // Main has answered the close…
+    await vi.waitFor(() => expect(run).toHaveBeenCalledWith({ type: 'close', id: 'a' }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // …and its next snapshot still lists the row as waiting: the row stays out instead of flashing back.
     push(withItems(item('a'), item('b')));
     expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(1);
     push(withItems(item('a', { state: 'expired' }), item('b')));
