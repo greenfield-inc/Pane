@@ -43,7 +43,7 @@ export interface TodosMockOptions {
 }
 
 /** One `todos:act` the page sent, as getInvokeCalls('todos:act') returns it. */
-export interface TodoActCall {
+interface TodoActCall {
   channel: 'todos:act';
   args: [TodoAction];
 }
