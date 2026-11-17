@@ -27,8 +27,9 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
   const keyboard = useAnimatedKeyboard();
   const returns = useReturnsToForeground();
   // The keyboard closes while the app is in the background, and that last update never reaches
-  // the screen; reading it again on each return puts the bar back on the bottom edge.
-  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: -Math.max(0, keyboard.height.value - insets.bottom) }] }), [returns]);
+  // the screen; reading it again on each return puts the bar back on the bottom edge. Listing
+  // deps replaces Reanimated's own, so the inset is listed too (a rotation changes it).
+  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: -Math.max(0, keyboard.height.value - insets.bottom) }] }), [returns, insets.bottom]);
   return (
     <Animated.View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 12) }, lift]}>
       <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
