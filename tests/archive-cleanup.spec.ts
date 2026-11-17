@@ -97,3 +97,21 @@ test('a failure seen first after a reconnect opens the panel, one from another h
   await resync(snapshot(task('other-host', 'failed', 'Old failure'), task('b', 'failed', 'Failed while offline')), false);
   await expect(header).toHaveAttribute('aria-expanded', 'true');
 });
+
+test('dismisses one completed row or clears all completed rows and keeps failed ones', async ({ page }) => {
+  await installElectronApiMock(page, {
+    initialArchiveProgress: snapshot(task('a', 'completed'), task('b', 'completed'), task('c', 'failed', 'Locked')),
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Archive Tasks' }).click();
+  await expect(page.getByRole('button', { name: 'Dismiss Pane c' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Dismiss Pane a' }).click({ force: true });
+  await expect(page.getByText('Pane a', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Pane b', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Clear completed' }).click();
+  await expect(page.getByText('Pane b', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Pane c', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Clear completed' })).toHaveCount(0);
+  const calls = await page.evaluate(() => window.__paneTestElectronMock.getInvokeCalls('archive:dismiss-completed'));
+  expect(calls.map(call => call.args)).toEqual([['a'], []]);
+});

@@ -35,7 +35,7 @@ import type { ProjectEnvVar } from "../../../shared/types/projectEnvVars";
 import { JOURNEYS, type Journey, type JourneyTimingSummary } from "../../../shared/types/journeyTimings";
 import { PanelBufferStore, splitPanelBufferState, type PanelBuffers } from "./panelBuffers";
 import { ensureUsageRollup } from "../services/usage/usageRollup";
-import { ensureArchiveCleanup, readArchiveCleanupJobs, readArchiveCleanupJob, writeArchiveCleanupJob, type ArchiveCleanupJob } from './archiveCleanup';
+import { ensureArchiveCleanup, readArchiveCleanupJobs, readArchiveCleanupJob, writeArchiveCleanupJob, deleteCompletedArchiveCleanupJobs, type ArchiveCleanupJob } from './archiveCleanup';
 import {
   migratePanelBuffers,
   unwrapStringWrappedPanelState,
@@ -3588,6 +3588,10 @@ export class DatabaseService {
 
   saveArchiveCleanupJob(job: ArchiveCleanupJob): void {
     writeArchiveCleanupJob(this.db, job);
+  }
+
+  deleteCompletedArchiveCleanupJobs(sessionId?: string): void {
+    deleteCompletedArchiveCleanupJobs(this.db, sessionId);
   }
 
   archiveSession(id: string, cleanup?: ArchiveCleanupJob): boolean {

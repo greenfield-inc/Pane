@@ -896,6 +896,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       if (channel === 'archive:get-progress') {
         return success(clone(archiveProgress));
       }
+      if (channel === 'archive:dismiss-completed') {
+        if (archiveProgress) {
+          const tasks = archiveProgress.tasks.filter(item => item.status !== 'completed' || (key !== undefined && item.sessionId !== key));
+          archiveProgress = { ...archiveProgress, tasks, totalCount: tasks.length };
+        }
+        return success(undefined);
+      }
       if (channel === 'archive:retry-cleanup' && mockOptions.archiveRetryError) {
         return Promise.resolve({ success: false, error: mockOptions.archiveRetryError });
       }

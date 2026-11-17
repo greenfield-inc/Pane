@@ -71,6 +71,7 @@ const DAEMON_SESSION_CHANNELS = [
   'sessions:dismiss-interrupted',
   'archive:get-progress',
   'archive:retry-cleanup',
+  'archive:dismiss-completed',
 ] as const;
 
 const ACTIVE_SESSION_HINT_CHANNEL = 'sessions:set-active-session';
@@ -1792,6 +1793,16 @@ export function registerSessionHandlers(
       return { success: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Cannot retry cleanup' };
+    }
+  });
+
+  commandRegistry.register('archive:dismiss-completed', async (sessionId?: string) => {
+    try {
+      if (!services.archiveCleanupManager) throw new Error('Durable archive cleanup is unavailable');
+      services.archiveCleanupManager.dismissCompleted(sessionId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Cannot clear completed archive tasks' };
     }
   });
 

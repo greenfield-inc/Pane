@@ -158,7 +158,9 @@ Preview components never enter the editable auto-save path, even on errors.
   Electron's `original-fs` and job-level busy retries. There are no detached
   deletion helpers or timed-out deletions left running. Failed jobs remain
   visible through ArchiveProgress; interrupted scripts require explicit skip
-  on retry. Create/remove and pool background mutations share FIFO repository
+  on retry. Completed rows can be dismissed one by one or cleared together
+  (`archive:dismiss-completed`); that deletes only finished job rows, never
+  failed or unfinished ones, and leaves the archived Pane and its branch alone. Create/remove and pool background mutations share FIFO repository
   admission with no waiter timeout; archive scripts and purge run outside it.
   Known process trees are captured before committing intent. Teardown preserves
   PTY retirement cleanup, escalates freshly matched process identities, and
