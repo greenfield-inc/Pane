@@ -21,7 +21,7 @@ let previousPaneDir: string | undefined;
 const gitEnv = () => ({ ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: root, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.invalid', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.invalid' });
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: gitEnv() }).toString().trim();
 
-/** Pane's panels, in memory. */
+/** Pane's panels, in memory, as PanelManager keeps them: a permanent tab refuses delete, and creating an existing ID returns it. */
 function memoryTabs(): ImporterTabs & { panels: Map<string, ToolPanel> } {
   const panels = new Map<string, ToolPanel>();
   return {
@@ -29,6 +29,8 @@ function memoryTabs(): ImporterTabs & { panels: Map<string, ToolPanel> } {
     getPanel: id => panels.get(id),
     getPanelsForSession: paneId => [...panels.values()].filter(panel => panel.sessionId === paneId),
     createPanel: async request => {
+      const existing = request.id ? panels.get(request.id) : undefined;
+      if (existing) return existing;
       const panel: ToolPanel = {
         id: request.id ?? `panel-${panels.size}`, sessionId: request.sessionId, type: request.type, title: request.title ?? '',
         state: { isActive: false, customState: request.initialState?.customState }, metadata: request.metadata ?? { createdAt: '', lastActiveAt: '', position: 0 },
@@ -36,11 +38,12 @@ function memoryTabs(): ImporterTabs & { panels: Map<string, ToolPanel> } {
       panels.set(panel.id, panel);
       return panel;
     },
-    deletePanel: async id => { panels.delete(id); },
+    deletePanel: async id => { if (!panels.get(id)?.metadata.permanent) panels.delete(id); },
     isTerminalInitialized: () => false,
     destroyTerminal: async () => undefined,
     clearPaused: async () => undefined,
     releaseChatMove: async () => undefined,
+    forgetPaneTabs: async paneId => { for (const panel of [...panels.values()]) if (panel.sessionId === paneId) panels.delete(panel.id); },
   };
 }
 
@@ -203,6 +206,22 @@ describe('MoveImporter', () => {
     expect(rows.get('p1')?.archived).toBe(true);
     expect(tabs.panels.get('t-old')?.state.customState).toEqual({ conversationId: 'c-1' });
     expect(fs.existsSync(path.join(root, 'worktrees', 'p1'))).toBe(false);
+  });
+
+  it('a move back gets the arriving Explorer and Diff, not the archived copy\'s permanent ones', async () => {
+    const { services, rows } = fakeServices(target);
+    const tabs = memoryTabs();
+    rows.set('p1', { id: 'p1', name: 'Pane p1', archived: true, worktree_path: path.join(root, 'worktrees', 'p1'), worktree_name: 'p1', project_id: 1 });
+    const permanent = { createdAt: '', lastActiveAt: '', position: 0, permanent: true };
+    await tabs.createPanel({ id: 'explorer-1', sessionId: 'p1', type: 'explorer', title: 'Explorer', initialState: { customState: { from: 'archive' } }, metadata: permanent });
+    const pane = member('p1');
+    pane.tabs = [{ id: 'explorer-1', type: 'explorer', title: 'Explorer', metadata: permanent, state: { from: 'arriving' }, working: false, interrupted: false, running: false }];
+    const importer = new MoveImporter(services, registry, path.join(root, 'moves'), tabs);
+    const moveId = newMoveId();
+    await stage(importer, manifest(moveId, [pane]), { 'panes/p1.bundle': bundle });
+    importer.build(moveId);
+    expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
+    expect(tabs.panels.get('explorer-1')?.state.customState).toEqual({ from: 'arriving' });
   });
 
   it('abort waits for a build in flight, and nothing it made survives (F-7)', async () => {

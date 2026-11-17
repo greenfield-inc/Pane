@@ -370,7 +370,9 @@ export class MoveCoordinator {
     const preflight = await this.check({ sessionId, target });
     if (!preflight.ready) {
       const block = preflight.checks.find(check => check.level === 'block');
-      throw new PaneError('ERR_MOVE_NOT_READY', `${target} isn't ready: ${block?.title ?? 'a check failed'}.`, 'Fix what the dialog lists, then move again.');
+      // Open approvals and waiting messages are this Session's, not the target's.
+      const here = block?.id === 'approvals' || block?.id.startsWith('queue:');
+      throw new PaneError('ERR_MOVE_NOT_READY', here ? `The Session can't move yet: ${block?.title}.` : `${target} isn't ready: ${block?.title ?? 'a check failed'}.`, here ? block?.detail ?? 'Check again.' : 'Fix what the dialog lists, then move again.');
     }
     const record = await this.manager().get({ sessionId });
     const moveId = randomUUID();

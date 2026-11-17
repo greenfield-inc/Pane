@@ -99,6 +99,8 @@ export interface ImporterTabs {
   destroyTerminal(panelId: string): Promise<void>;
   clearPaused(panelIds: string[]): Promise<void>;
   releaseChatMove(panelId: string): Promise<void>;
+  /** Drops every tab of a Pane that is going away, permanent ones (Explorer, Diff) included. */
+  forgetPaneTabs(paneId: string): Promise<void>;
 }
 
 const liveTabs: ImporterTabs = {
@@ -110,6 +112,7 @@ const liveTabs: ImporterTabs = {
   destroyTerminal: async panelId => { await terminalPanelManager.destroyTerminal(panelId); },
   clearPaused: async panelIds => { await terminalPanelManager.clearPaused(panelIds); },
   releaseChatMove: async panelId => { await getChatTabManager().releaseMove(panelId); },
+  forgetPaneTabs: paneId => panelManager.cleanupSessionPanels(paneId),
 };
 
 const POSIX = new Set(['darwin', 'linux']);
@@ -386,7 +389,7 @@ export class MoveImporter {
     await fs.promises.mkdir(parent, { recursive: true });
     const cloned = decodeBoundary(await this.registry.invoke('git:clone-repo', [fix.remote, parent]), boundary.object({ success: boundary.boolean, data: boundary.optional(boundary.object({ clonedPath: boundary.string })), error: boundary.optional(boundary.string) }));
     if (!cloned.success || !cloned.data) {
-      throw new PaneError('ERR_MOVE_CLONE_FAILED', `Cloning ${fix.remote} into ${parent} failed: ${cloned.error ?? 'git clone failed'}`, 'Clone it by hand, add it to Pane, then check again.');
+      throw new PaneError('ERR_MOVE_CLONE_FAILED', `Cloning ${fix.remote} into ${parent} failed: ${(cloned.error ?? 'git clone failed').replace(/\.+$/, '')}`, 'Clone it by hand, add it to Pane, then check again.');
     }
     const created = decodeBoundary(await this.registry.invoke('projects:create', [{ name: path.basename(cloned.data.clonedPath), path: cloned.data.clonedPath }]), boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) }));
     if (!created.success) {
@@ -718,7 +721,8 @@ export class MoveImporter {
 
   private async removePane(paneId: string): Promise<void> {
     const db = this.services.databaseService;
-    for (const panel of this.tabs.getPanelsForSession(paneId)) await this.tabs.deletePanel(panel.id).catch(() => undefined);
+    // deletePanel keeps permanent tabs; left cached, they would stand in for the arriving Pane's own.
+    await this.tabs.forgetPaneTabs(paneId).catch(error => console.warn(`[SessionMove] Pane ${paneId}'s tabs weren't cleared:`, error));
     if (this.services.sessionManager.getSession(paneId)) await this.services.sessionManager.archiveSession(paneId).catch(() => undefined);
     if (db.getSession(paneId) && !db.getSession(paneId)?.archived) db.archiveSession(paneId);
     db.deleteArchivedSessionPermanently(paneId);
