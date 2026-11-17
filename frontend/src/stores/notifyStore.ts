@@ -114,10 +114,12 @@ export function sendArchived(): void {
   window.removeEventListener('beforeunload', sendArchived);
   const held = useNotifyStore.getState().archived;
   if (!held) return;
-  for (const id of held.ids) closing.add(id);
+  // One answered or closed elsewhere during the hold has nothing left to close.
+  const waiting = held.ids.filter((id) => received?.items.some((item) => item.id === id && item.state === 'waiting'));
+  for (const id of waiting) closing.add(id);
   useNotifyStore.setState({ archived: null });
   // Back in the list once main has answered: closed, it isn't waiting; refused, it shows why and waits again.
-  for (const id of held.ids) {
+  for (const id of waiting) {
     void sendNotify({ type: 'close', id }).then(() => {
       closing.delete(id);
       publish(received);

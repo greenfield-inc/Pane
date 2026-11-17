@@ -64,12 +64,13 @@ describe('selectNotifyItems', () => {
 describe('Archive', () => {
   afterEach(() => vi.unstubAllGlobals());
 
+  let push: (snapshot: NotifySnapshot) => void = () => undefined;
   function connect(snapshot: NotifySnapshot) {
     const run = vi.fn(async () => undefined);
     vi.stubGlobal('window', {
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
-      electronAPI: { notify: { run, onSnapshot: () => () => undefined, getSnapshot: async () => snapshot } },
+      electronAPI: { notify: { run, onSnapshot: (listener: (next: NotifySnapshot) => void) => { push = listener; return () => undefined; }, getSnapshot: async () => snapshot } },
     });
     subscribeNotify();
     return run;
@@ -93,5 +94,14 @@ describe('Archive', () => {
     sendArchived();
     expect(run.mock.calls).toEqual([[{ type: 'close', id: 'run-1' }]]);
     expect(run).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'run-2' }));
+  });
+
+  it('sends no close for an item answered elsewhere while it was held', async () => {
+    const run = connect(withItems(item('asked')));
+    await vi.waitFor(() => expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(1));
+    archiveApprovals([item('asked')]);
+    push(withItems(item('asked', { state: 'answered' })));
+    sendArchived();
+    expect(run).not.toHaveBeenCalled();
   });
 });
