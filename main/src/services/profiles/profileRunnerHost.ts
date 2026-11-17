@@ -77,9 +77,13 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
   };
   /**
    * The baseline for a CLI Pane doesn't know: Pane can't tell when its input is ready, so it types
-   * the first message as one line, then Enter, once the tab's output goes quiet.
+   * the first message as one line, then Enter, once the command has started and its output goes quiet.
    */
-  const typeFirstMessage = async (panelId: string, message: string) => {
+  const typeFirstMessage = async (panelId: string, command: string, message: string) => {
+    // The shell echoes the command when it runs it; until then the shell itself would read the message.
+    const program = command.trim().split(/\s+/u)[0] ?? '';
+    await registry.invoke('runpane:panels:wait', [{ panelId, condition: 'text', contains: `${program} `, timeoutMs: 30_000 }]).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
     await registry.invoke('runpane:panels:wait', [{ panelId, condition: 'idle', timeoutMs: 20_000 }]).catch(() => undefined);
     await registry.invoke('runpane:panels:input', [{ panelId, input: `${message.replace(/\s*\n\s*/gu, ' ')}\r`, source: 'agent' }]);
   };
@@ -109,7 +113,7 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
     // Pane delivers the first message only to an agent it recognises; the baseline types it after.
     if (request.initialInput && tool.agentType) tool.initialInput = request.initialInput;
     const started = await openTab(request, tool);
-    if (request.initialInput && !tool.agentType) await typeFirstMessage(started.panelId, request.initialInput);
+    if (request.initialInput && !tool.agentType) await typeFirstMessage(started.panelId, request.command, request.initialInput);
     return started;
   };
   const postCard = (card: RunCard) => {
