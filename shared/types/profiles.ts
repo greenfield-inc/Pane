@@ -197,6 +197,8 @@ export interface ProfileRun {
   pending?: { from: string; took: string; to: string; by: 'agent' | 'command' | 'you'; summary?: string };
   history: ProfileRunHistoryEntry[];
   error?: string;
+  /** Something in a step's tab waits on the person, such as an agent's folder-trust prompt in a new worktree. Cleared on the next move. */
+  attention?: string;
   createdAt: string;
   updatedAt: string;
 }
