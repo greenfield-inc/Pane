@@ -106,7 +106,9 @@ test('the Session icon spins only for real turns, with no flicker (J1–J10, J12
     const s: Record<string, SessionRef> = {};
     for (const name of names) s[name] = await createSession(page, name);
     await expect.poll(async () => (await page.locator('button[data-testid^="orchestration-session-"]').count()), { timeout: 20_000 }).toBeGreaterThanOrEqual(names.length);
-    await expect.poll(() => runpane(pane, ['doctor', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
+    // The bundled runpane reaches this Pane and sees every Session. Not `runpane doctor`: its exit
+    // code also needs the latest release from api.github.com, which CI can't count on.
+    await expect.poll(() => runpane(pane, ['sessions', 'list', '--json']).then(out => decodeBoundary(JSON.parse(out), boundary.object({ sessions: boundary.array(boundary.json) })).sessions.length, () => 0), { timeout: 30_000 }).toBeGreaterThanOrEqual(names.length);
     // Every orchestrator starts and settles before the journeys, so starting never reads as work.
     for (const name of names) await say(page, s[name], 'hello');
     for (const name of names) await expect.poll(() => chatStatus(page, s[name].panelId), { timeout: 30_000 }).toBe('idle');
