@@ -14,6 +14,7 @@ import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpda
 import { activateManagedCli, runNpm, stageCliPackage, stageUpdateCode, type StagedCli } from './updatePackage';
 import { identifyPythonCli, stagePythonCli, installPythonCli } from './updatePython';
 import { stageApp, installStagedApp, type StagedApp } from './updateArtifacts';
+import { pruneReplacedUpdates } from './updateRetention';
 
 const preflightSchema = boundary.object({
   machine: boundary.nonEmptyString, paneDir: boundary.nonEmptyString,
@@ -304,9 +305,19 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
     return {};
   } });
   if (updateEnded(result)) {
-    // A new operation gets its own directory, so this journal and snapshot stay.
+    // A new operation gets its own directory; this journal and snapshot stay until a later update completes.
     if (updateLockReleasable(result)) for (const lock of [preflight.lockDirectory, ...preflight.additionalLockDirectories]) releaseUpdateLock(lock, id);
     try { removeUpdateSupervisor(id); } catch { /* terminal journal prevents another execution */ }
+  }
+  if (result.phase === 'complete') {
+    // A completed update replaces every earlier operation's snapshot and app copy.
+    try {
+      const pruned = pruneReplacedUpdates(preflight.paneDir);
+      for (const removed of pruned.removed) console.error(`Removed ${removed}: a newer update completed.`);
+      for (const failure of pruned.failed) console.error(`Could not remove ${failure.path} (${failure.error}); runpane machine cleanup --kind update-snapshot --yes retries it.`);
+    } catch (error) {
+      console.error(`Could not prune earlier updates: ${error instanceof Error ? error.message : String(error)}. runpane machine cleanup --kind update-snapshot --yes retries it.`);
+    }
   }
   return result.phase === 'complete' ? 0 : 1;
 }

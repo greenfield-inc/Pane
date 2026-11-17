@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { readUpdateJournal } from './updateOperation';
+import { boundary, decodeBoundary } from './boundaryDecoder';
+import { appBackupPath } from './updateArtifacts';
+import { readUpdateJournal, updateEnded, updateLockReleasable } from './updateOperation';
 
 /** One operation under `<pane-dir>/updates`, as the retention rules see it. */
 export interface UpdateRecord {
@@ -40,4 +42,57 @@ export function readUpdateRecords(paneDir: string): UpdateRecord[] {
 export function replacedUpdates(updates: readonly UpdateRecord[]): string[] {
   const newestComplete = Math.max(-Infinity, ...updates.filter(update => update.phase === 'complete').map(update => update.updatedAt));
   return updates.filter(update => update.updatedAt < newestComplete).map(update => update.id);
+}
+
+const stagedAppSchema = boundary.object({ app: boundary.nullable(boundary.object({ installPath: boundary.string, backupPath: boundary.string })) });
+
+/** The previous app copy an operation kept beside the installation, when its staged manifest names one Pane would have made. */
+function previousAppCopy(directory: string, id: string): string | null {
+  try {
+    const app = decodeBoundary(JSON.parse(fs.readFileSync(path.join(directory, 'staged.json'), 'utf8')), stagedAppSchema).app;
+    return app && app.backupPath === appBackupPath(app.installPath, id) ? app.backupPath : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface UpdatePrune {
+  removed: string[];
+  failed: Array<{ path: string; error: string }>;
+}
+
+/**
+ * Run by the helper once its update completes. Removes the folder (journal,
+ * staged downloads, snapshot) and the previous app copy of every earlier
+ * operation `replacedUpdates` names, so a failed update's snapshot does not
+ * stay forever. The completed update keeps its own copies for rollback. An
+ * operation that has not ended, or that may still have an installer child
+ * (`updateLockReleasable` false), is left for `runpane machine cleanup`.
+ */
+export function pruneReplacedUpdates(paneDir: string): UpdatePrune {
+  const result: UpdatePrune = { removed: [], failed: [] };
+  const remove = (target: string) => {
+    if (!fs.existsSync(target)) return;
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+      result.removed.push(target);
+    } catch (error) {
+      result.failed.push({ path: target, error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  for (const id of replacedUpdates(readUpdateRecords(paneDir))) {
+    const directory = path.join(paneDir, 'updates', id);
+    let journal;
+    try {
+      journal = readUpdateJournal(path.join(directory, 'status.json'));
+    } catch {
+      continue;
+    }
+    if (!updateEnded(journal) || !updateLockReleasable(journal)) continue;
+    const previous = previousAppCopy(directory, id);
+    // The app copy first: its path is read from this folder, so a retry still finds it.
+    if (previous) remove(previous);
+    if (!previous || !fs.existsSync(previous)) remove(directory);
+  }
+  return result;
 }

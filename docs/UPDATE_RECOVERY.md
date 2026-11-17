@@ -283,7 +283,28 @@ An operation releases its locks when it ends `complete` or `failed`, or ends
 `needs-attention` after its `install` step completed (for example, a failed
 health check or panel restoration). The next `runpane update` also reclaims a
 lock left by such an operation. It runs in a new operation directory, so the
-old journal, checkpoint and snapshot stay in place.
+old journal, checkpoint and snapshot stay in place while it runs.
+
+## Removing old snapshots
+
+A snapshot is a full copy of Pane's state and Electron profile, and each
+operation keeps its own. When an update completes, its helper removes the
+operation directory and the previous app copy (for example
+`/Applications/Pane.app.before-<id>`) of every earlier operation that has ended
+and released its locks, whatever its outcome: once a newer update installed
+and passed its health checks, an older snapshot can only restore older data
+over a database the new release has migrated. The completed update keeps its
+own snapshot and previous app copy, so the newest rollback copy always stays.
+An earlier operation that may still have an installer running stays too.
+
+Pane's storage scan removes the same copies. To see and remove them yourself:
+
+```sh
+runpane machine cleanup --kind update-snapshot --json
+runpane machine cleanup --kind update-snapshot --yes --json
+```
+
+See [Machine health](MACHINE_HEALTH.md#what-pane-may-delete).
 
 A `needs-attention` operation that stopped before or during `install` keeps
 its locks, because an installer child may still be running. A lock owned by an
