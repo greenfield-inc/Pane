@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveFindPanelId, type FindRouteInput } from './findRouter';
+import { innermostFirst, isFindRootShown, resolveFindPanelId, type FindRouteInput } from './findRouter';
 
 /** A stand-in DOM node: a root "contains" itself and anything listed. */
 function node(name: string, children: string[] = []) {
@@ -62,5 +62,62 @@ describe('resolveFindPanelId', () => {
 
   it('returns null when nothing is searchable', () => {
     expect(resolveFindPanelId(input({ targets: [], fallbackId: 'dashboard' }))).toBeNull();
+  });
+});
+
+/** A stand-in element: laid out at `rect`, inside `parent`, holding `children`. */
+interface FakeElement {
+  parentNode: FakeElement | null;
+  isConnected: boolean;
+  children: FakeElement[];
+  rect: { left: number; top: number; width: number; height: number };
+  getClientRects(): ArrayLike<unknown>;
+  getBoundingClientRect(): { left: number; top: number; width: number; height: number };
+  contains(other: FakeElement): boolean;
+}
+
+function element(rect = { left: 0, top: 0, width: 10, height: 10 }, parent: FakeElement | null = null): FakeElement {
+  const self: FakeElement = {
+    parentNode: parent,
+    isConnected: true,
+    children: [],
+    rect,
+    getClientRects: () => (self.isConnected && self.rect.width > 0 ? [self.rect] : []),
+    getBoundingClientRect: () => self.rect,
+    contains: (other) => other === self || self.children.some(child => child.contains(other)),
+  };
+  parent?.children.push(self);
+  return self;
+}
+
+describe('find roots in the page', () => {
+  it('treats a tab covered by the approval column as hidden, so Cmd+F never searches what is underneath', () => {
+    const page = element({ left: 0, top: 0, width: 1000, height: 800 });
+    const split = element({ left: 500, top: 0, width: 500, height: 800 }, page);
+    const column = element({ left: 500, top: 0, width: 500, height: 800 }, page);
+    const inner = element(undefined, column);
+    const hit = () => inner;
+    expect(isFindRootShown(split, hit)).toBe(false);
+    expect(isFindRootShown(column, hit)).toBe(true);
+  });
+
+  it('counts a root as shown when nothing can be hit-tested, and never one that is gone', () => {
+    const tab = element();
+    expect(isFindRootShown(tab, () => null)).toBe(true);
+    tab.isConnected = false;
+    expect(isFindRootShown(tab, () => null)).toBe(false);
+    expect(isFindRootShown(null, () => null)).toBe(false);
+  });
+
+  it('orders nested searchable roots innermost first (a chat shown inside an approval column)', () => {
+    const page = element();
+    const column = element(undefined, page);
+    const chat = element(undefined, element(undefined, column));
+    const ordered = innermostFirst([
+      { id: 'approval', root: column },
+      { id: 'chat', root: chat },
+      { id: 'gone', root: null },
+    ]);
+    expect(ordered.map(entry => entry.id)).toEqual(['chat', 'approval', 'gone']);
   });
 });

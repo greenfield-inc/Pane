@@ -15,6 +15,7 @@ export const CATEGORY_ORDER: ShortcutCategory[] = [
   'navigation',
   'session',
   'tabs',
+  'approvals',
   'view',
   'machines',
   'tools',
@@ -31,6 +32,7 @@ export const CATEGORY_LABELS = {
   tools: 'Add Tool',
   shortcuts: 'Shortcuts',
   debug: 'Debug',
+  approvals: 'Approvals',
 } satisfies Record<ShortcutCategory, string>;
 
 const MAC_SYMBOLS = new Map([
@@ -67,7 +69,19 @@ function formatStep(step: string, mac: boolean): string {
  * separated by a space ("⌘K ⌘S"). A trailing modifier-only string such as
  * `mod+alt` (the hints overlay prefix) formats as its symbols.
  */
-export function formatKeyDisplay(keys: string): string {
-  const mac = isMac();
+export function formatKeyDisplay(keys: string, mac: boolean = isMac()): string {
   return keys.trim().split(/\s+/).filter(Boolean).map(step => formatStep(step, mac)).join(' ');
+}
+
+/**
+ * Whether focus is in a file editor that can be typed into: there ⌘/ toggles
+ * a comment, so Pane leaves the key to the editor. A read-only editor
+ * (a preview or a diff) has no comment command, so Pane takes the key.
+ */
+export function isWritableCodeEditorFocused(active: Element | null = document.activeElement): boolean {
+  if (!active?.closest('.monaco-editor')) return false;
+  if (active instanceof HTMLTextAreaElement) {
+    return !active.readOnly && active.getAttribute('aria-autocomplete') !== 'none';
+  }
+  return active.closest('[aria-readonly="true"]') === null;
 }

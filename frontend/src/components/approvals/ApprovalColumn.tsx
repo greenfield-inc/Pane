@@ -11,12 +11,21 @@ import { AutopilotDocument, AutopilotWebPage } from '../autopilot/AutopilotDocum
 import { isLightTheme, useTheme } from '../../contexts/ThemeContext';
 import { sentenceStart } from '../../../../shared/approvalStatus';
 import { readSummaryPage, type SummaryRead } from './summaryPage';
+import { withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
 import { MachineDocument } from './MachineContext';
 import { linkedFileReadsHere } from './machineDoc';
 import { ItemCloseForm, NotifyCard } from '../notify/NotifyCard';
 import { relayReadOnlyLine } from './approvalGroups';
 import { relativeAge } from '../notify/notifyFormat';
+import { Tooltip } from '../ui/Tooltip';
+import { Kbd } from '../ui/Kbd';
+import { formatKeyDisplay } from '../../utils/hotkeyUtils';
+import { useHotkeyStore } from '../../stores/hotkeyStore';
+import { registerApprovalSend } from './approvalSend';
+import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { useNow } from '../notify/useNow';
+import { FindBar } from '../find/FindBar';
+import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
 import {
   askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
@@ -105,6 +114,8 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
     onSelect(pager[(index + direction + pager.length) % pager.length]);
   };
   const [rootRef, narrow] = useNarrow();
+  // ⌘F searches what the column shows; on the Approvals screen, the screen searches it with its list.
+  useSurfaceFind(approvalFindId(surface), rootRef, surface !== 'approvals');
 
   if (!item) {
     return (
@@ -132,6 +143,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
       />
       <TabBar tabs={tabs} active={tab?.key ?? 'qa'} focused={focused} onPick={(key) => setTab(surface, itemId, key)} />
       <div className="relative min-h-0 flex-1">
+        {surface !== 'approvals' && <FindBar panelId={approvalFindId(surface)} />}
         {(tab?.kind ?? 'qa') === 'qa' && (
           nested
             ? <NestedApproval item={nested} onBack={() => openNested(surface, itemId, undefined)} />
@@ -153,14 +165,14 @@ function resolveApproval(items: readonly NotifyItem[], ref: string): string | un
 }
 
 /**
- * ← → step the pager of the column that has focus, unless the person is typing or a page has it
- * (F-9): a covered Stack or another tiled Session's column never moves.
+ * ← → step the pager of the column that has focus, unless the person is typing, an option has
+ * focus, or a page has it (F-9): a covered Stack or another tiled Session's column never moves.
  */
 function pagerKey(event: React.KeyboardEvent, step: (direction: 1 | -1) => void): void {
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
   const target = event.target instanceof HTMLElement ? event.target : null;
-  if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName) || target.closest('[role="menu"], [role="tablist"], .xterm'))) return;
+  if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName) || target.closest('[role="menu"], [role="tablist"], [role="radiogroup"], .xterm'))) return;
   event.preventDefault();
   event.stopPropagation();
   step(event.key === 'ArrowLeft' ? -1 : 1);
@@ -177,7 +189,7 @@ function Chip({ chip, testId }: { chip: NonNullable<CardChip>; testId?: string }
   );
 }
 
-export { Chip as ApprovalChip };
+export { Chip as ApprovalChip, KeyTip as ApprovalKeyTip };
 
 function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, dots, chip, narrow = false }: {
   index: number; total: number; groupLabel: string; closeLabel?: string; onClose?: () => void; onStep: (direction: 1 | -1) => void;
@@ -186,9 +198,13 @@ function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, d
   const stepButton = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border-secondary text-text-secondary hover:bg-surface-hover disabled:opacity-40';
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border-primary px-3 text-[13px]" data-testid="approval-column-header">
-      <button type="button" className={stepButton} aria-label="Previous approval" disabled={total < 2} onClick={() => onStep(-1)}><ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" /></button>
+      <Tooltip content={<KeyTip label="Previous approval" keys="←" />} side="bottom">
+        <button type="button" className={stepButton} aria-label="Previous approval" disabled={total < 2} onClick={() => onStep(-1)} data-approval-step="previous"><ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" /></button>
+      </Tooltip>
       <span className="shrink-0 font-semibold tabular-nums text-text-primary" data-testid="approval-pager">{total > 0 ? `${index + 1} of ${total}` : '0 of 0'}</span>
-      <button type="button" className={stepButton} aria-label="Next approval" disabled={total < 2} onClick={() => onStep(1)}><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
+      <Tooltip content={<KeyTip label="Next approval" keys="→" />} side="bottom">
+        <button type="button" className={stepButton} aria-label="Next approval" disabled={total < 2} onClick={() => onStep(1)} data-approval-step="next"><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
+      </Tooltip>
       {!narrow && <span className="min-w-0 truncate text-text-tertiary">{groupLabel}</span>}
       <span className={cn('shrink-0 items-center gap-1', narrow ? 'hidden' : 'flex')} aria-hidden="true" data-testid="approval-dots">
         {dots.map((tone, at) => (
@@ -306,9 +322,25 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
   useGrowingBox(replyBox, text);
   const references = tabs.filter((candidate): candidate is Extract<CardTab, { kind: 'link' }> => candidate.kind === 'link');
   const tidied = item.asSent;
+  // ⌘↩ (the send-approval command) sends from anywhere in the approval: an option, the reply box.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const latestSend = useCommittedRef(send);
+  const sendable = !plain && !ended && waiting;
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || !sendable) return;
+    return registerApprovalSend(root, () => { void latestSend.current(); });
+  }, [sendable, latestSend]);
+  const sendKeys = useHotkeyStore((state) => state.hotkeys.get('send-approval')?.keys ?? '');
+  // Tab from the last question goes on to the reply box, past the links that repeat the tabs.
+  const toReplyBox = () => {
+    if (!replyBox.current) return false;
+    replyBox.current.focus();
+    return true;
+  };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div ref={rootRef} className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5" data-testid="approval-qa">
         <p className="text-[13px] text-text-tertiary">{[...askedBy(item), relativeAge(item.createdAt, now)].join(' · ')}</p>
         <h2 className="mt-1.5 text-[19px] font-semibold leading-snug text-text-primary" data-testid="approval-title">{item.title}</h2>
@@ -366,6 +398,8 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
                 picked={picks[at]}
                 disabled={!waiting}
                 onPick={(label) => setPicks((current) => { const next = [...current]; next[at] = current[at] === label ? '' : label; return next; })}
+                onChoose={(label) => setPicks((current) => { const next = [...current]; next[at] = label; return next; })}
+                onTabOut={at === questions.length - 1 ? toReplyBox : undefined}
                 showTitle={questions.length > 1 || question.title !== item.title}
               />
             ))}
@@ -443,7 +477,6 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
               ref={replyBox}
               value={text}
               onChange={(event) => setText(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send(); } }}
               rows={2}
               aria-label="Reply"
               placeholder="Reply: pick above, add a note, answer in your own words, or ask about it…"
@@ -462,10 +495,12 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
               {!item.agentPrompt && (
                 <button type="button" onClick={() => setClosing(true)} className="shrink-0 text-[12.5px] text-text-tertiary hover:text-text-primary" data-testid="approval-close-item">Close…</button>
               )}
-              <button type="button" disabled={sending || !canSend(item, picks, text) || item.unreachable} onClick={() => void send()}
-                className="inline-flex h-8 shrink-0 items-center rounded-lg bg-interactive px-4 text-[13.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50" data-testid="approval-send">
-                Send
-              </button>
+              <Tooltip content={<KeyTip label="Send" keys={sendKeys ? formatKeyDisplay(sendKeys) : ''} />} side="top">
+                <button type="button" disabled={sending || !canSend(item, picks, text) || item.unreachable} onClick={() => void send()}
+                  className="inline-flex h-8 shrink-0 items-center rounded-lg bg-interactive px-4 text-[13.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50" data-testid="approval-send">
+                  Send
+                </button>
+              </Tooltip>
             </div>
           )}
         </div>
@@ -493,13 +528,59 @@ function ReplyNotice({ item }: { item: NotifyItem }) {
   );
 }
 
-function QuestionBlock({ question, label, picked, disabled, onPick, showTitle }: { question: CardQuestion; label: string; picked?: string; disabled: boolean; onPick: (label: string) => void; showTitle: boolean }) {
+/** A tooltip's words and the key that does the same ("Send ⌘↩"). */
+function KeyTip({ label, keys }: { label: string; keys: string }) {
+  return (
+    <span className="inline-flex items-center gap-2" data-testid="approval-key-tip">
+      {label}
+      {keys && <Kbd size="xs">{keys}</Kbd>}
+    </span>
+  );
+}
+
+/**
+ * One question's options are a radio group (WAI-ARIA): one Tab stop, ↑↓ move and pick, Space picks
+ * the focused option. ← → stay put, so they never page away from a focused option. A click on the
+ * picked option still clears it.
+ */
+function radioGroupKey(event: React.KeyboardEvent<HTMLDivElement>, onChoose: (label: string) => void, onTabOut?: () => boolean): void {
+  if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  const options = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]:not(:disabled)'));
+  const at = options.findIndex((option) => option === document.activeElement);
+  if (at === -1) return;
+  if (event.key === 'Tab') {
+    if (!event.shiftKey && onTabOut?.()) event.preventDefault();
+    return;
+  }
+  if (event.shiftKey) return;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    event.stopPropagation();
+    const next = options[(at + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length];
+    next.focus();
+    onChoose(next.dataset.choice ?? '');
+    return;
+  }
+  if (event.key === ' ') {
+    // Picks, never clears: Space on the picked option leaves it picked.
+    event.preventDefault();
+    event.stopPropagation();
+    onChoose(options[at].dataset.choice ?? '');
+  }
+}
+
+function QuestionBlock({ question, label, picked, disabled, onPick, onChoose, onTabOut, showTitle }: {
+  question: CardQuestion; label: string; picked?: string; disabled: boolean; onPick: (label: string) => void;
+  onChoose: (label: string) => void; onTabOut?: () => boolean; showTitle: boolean;
+}) {
+  // Roving focus: the picked option is the group's one Tab stop, else the first.
+  const stop = question.choices.some((choice) => choice.label === picked) ? picked : question.choices[0]?.label;
   return (
     <section className="mt-4 rounded-xl border border-border-secondary p-4" data-testid="approval-question">
       <div className="text-[12px] font-medium uppercase tracking-wide text-text-tertiary">{label}</div>
       {showTitle && <p className="mt-1 text-[15px] font-semibold text-text-primary">{question.title}</p>}
       {question.why && <p className="mt-0.5 text-[13px] leading-relaxed text-text-secondary" data-testid="approval-question-why">{question.why}</p>}
-      <div className="mt-2 flex flex-col gap-2" role="radiogroup" aria-label={question.title}>
+      <div className="mt-2 flex flex-col gap-2" role="radiogroup" aria-label={question.title} onKeyDown={(event) => radioGroupKey(event, onChoose, onTabOut)}>
         {question.choices.map((choice) => {
           const selected = picked === choice.label;
           return (
@@ -509,9 +590,13 @@ function QuestionBlock({ question, label, picked, disabled, onPick, showTitle }:
               role="radio"
               aria-checked={selected}
               disabled={disabled}
+              tabIndex={choice.label === stop ? 0 : -1}
+              data-choice={choice.label}
+              // Space picks on key down (above); its key-up click would clear the pick again.
+              onKeyUp={(event) => { if (event.key === ' ') event.preventDefault(); }}
               onClick={() => onPick(choice.label)}
               className={cn(
-                'flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left hover:bg-surface-hover disabled:cursor-default disabled:hover:bg-transparent',
+                'flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:cursor-default disabled:hover:bg-transparent',
                 selected ? 'border-interactive bg-interactive/5' : 'border-border-secondary',
                 choice.mark === 'new' && 'border-l-[3px] border-l-status-success',
                 choice.mark === 'reworded' && 'border-l-[3px] border-l-status-info',
@@ -602,8 +687,9 @@ export function SummaryView({ item, page, onRetry }: { item: NotifyItem; page: S
           </div>
         )}
         {(page?.kind === 'page' || page?.kind === 'template') && (
-          // sandbox with no allowances: no scripts, no forms, no navigation; the page's own policy blocks the network.
-          <iframe title={`Summary: ${item.title}`} sandbox="" srcDoc={page.html} className="min-h-0 w-full flex-1 border-0 bg-surface-primary" data-testid="approval-summary-frame" />
+          // Sandboxed: no scripts, no forms, no navigation; the page's own policy blocks the network. Same origin (never
+          // with scripts) only so Pane's find can read and highlight its text.
+          <iframe title={`Summary: ${item.title}`} sandbox="allow-same-origin" srcDoc={withSummaryPolicy(page.html)} data-find-frame="" className="min-h-0 w-full flex-1 border-0 bg-surface-primary" data-testid="approval-summary-frame" />
         )}
       </div>
     </div>
