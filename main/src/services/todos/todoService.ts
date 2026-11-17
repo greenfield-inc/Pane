@@ -263,6 +263,16 @@ export class TodoService extends EventEmitter {
     return groups;
   }
 
+  /** Each to-do's attachments, own and from its sub-to-dos, as the list counts them. */
+  attachmentCounts(): Map<number, number> {
+    const own = this.store.attachmentCounts();
+    const counts = new Map(own);
+    for (const todo of this.store.list()) {
+      if (todo.parentNumber !== null) counts.set(todo.parentNumber, (counts.get(todo.parentNumber) ?? 0) + (own.get(todo.number) ?? 0));
+    }
+    return counts;
+  }
+
   private attachmentCount(todo: TodoRecord): number {
     return this.store.attachments(todo.number).length + this.store.children(todo.number).reduce((sum, child) => sum + this.store.attachments(child.number).length, 0);
   }
@@ -1130,39 +1140,57 @@ export class TodoService extends EventEmitter {
     }
     this.pendingWork.clear();
     const waiting = this.waitingByTodo();
-    const top = this.store.listOpen().filter(todo => todo.parentNumber === null);
-    for (const todo of top) {
+    const open = this.store.listOpen();
+    const children = this.childrenIndex(open);
+    let moving = false;
+    for (const todo of open) {
+      if (todo.parentNumber !== null) continue;
+      moving ||= MOVING_TODO_STATES.includes(todo.state);
       try {
-        await this.superviseOne(todo, waiting, now);
+        await this.superviseOne(todo, (children.get(todo.number) ?? []).filter(child => isOpenTodoState(child.state)), waiting, now);
       } catch (error) {
         this.host.log(`[Todos] supervisor failed on ${todo.ref}`, error instanceof Error ? error : String(error));
       }
     }
+    // "quiet 12m" moves on every minute.
+    if (moving) this.changed();
   }
 
-  private async superviseOne(todo: TodoRecord, waiting: Map<number, LinkedApproval[]>, now: number): Promise<void> {
+  private async superviseOne(todo: TodoRecord, children: readonly TodoRecord[], waiting: Map<number, LinkedApproval[]>, now: number): Promise<void> {
+    // Cheap checks first: most to-dos are skipped here without reading a tab.
+    if (!MOVING_TODO_STATES.includes(todo.state) || todo.loadHold !== null || todo.stuckCardId !== null || !todo.sessionId) return;
+    const waitingOnYou = (waiting.get(todo.number)?.length ?? 0) > 0 || children.some(child => (waiting.get(child.number)?.length ?? 0) > 0);
+    if (waitingOnYou) return;
     const orchestrator = this.orchestratorOf(todo);
-    if (!orchestrator || !todo.sessionId) return;
-    const children = this.store.children(todo.number).filter(child => isOpenTodoState(child.state));
-    const tabs = this.tabsOf(todo);
+    if (!orchestrator) return;
+    const tabs = [orchestrator, ...(todo.assignee ? [todo.assignee.panelId] : []), ...children.flatMap(child => (child.assignee ? [child.assignee.panelId] : []))];
+    if (tabs.some(tab => this.host.isMidTurn(tab))) return;
     const usage = this.host.usageLimitUntil(orchestrator);
     if (usage !== null && usage > now) {
       this.usageLimited.add(todo.number);
       return;
     }
-    if (this.usageLimited.delete(todo.number) && MOVING_TODO_STATES.includes(todo.state)) {
+    if (this.usageLimited.delete(todo.number)) {
       // At the reset, one reminder.
       this.enqueue({ panelId: orchestrator, text: reminderText(todo, Math.round((now - lastMovedAt(todo, null)) / MINUTE)), todoNumber: todo.number, resumeIfDown: true });
       this.store.update(todo.number, { lastProgressAt: now }, now);
       this.event(todo, 'Usage limit reset: Pane reminded the orchestrator');
       return;
     }
-    const action = decideSupervisorAction({
-      todo, now, waitingOnYou: (waiting.get(todo.number)?.length ?? 0) > 0 || children.some(child => (waiting.get(child.number)?.length ?? 0) > 0),
-      anyMidTurn: tabs.some(tab => this.host.isMidTurn(tab)), unsentText: await this.host.hasUnsentText(orchestrator), usageLimitUntil: usage, offline: false,
-      orchestratorDown: await this.host.isPanelDown(orchestrator), externalProgressAt: null, lastRestartAt: this.lastRestartAt.get(todo.number) ?? null,
-      machine: this.machineCounts(now), gateAllowsStart: this.gate.allowsStart(), hasAttachments: this.attachmentCount(todo) > 0,
-    });
+    const quietFor = now - lastMovedAt(todo, null);
+    const mayRemindToAttach = todo.state === 'in_progress' && todo.attachRemindedAt === null && todo.workMs >= SUPERVISOR.attachReminderWorkMs;
+    const inputs: SupervisorInputs = {
+      todo, now, waitingOnYou: false, anyMidTurn: false, unsentText: false, usageLimitUntil: usage, offline: false,
+      // A dead or hung tab is looked for only once it has been quiet for the hung window.
+      orchestratorDown: quietFor >= SUPERVISOR.hungMs ? await this.host.isPanelDown(orchestrator) : false,
+      externalProgressAt: null, lastRestartAt: this.lastRestartAt.get(todo.number) ?? null,
+      machine: this.machineCounts(now), gateAllowsStart: this.gate.allowsStart(), hasAttachments: mayRemindToAttach ? this.attachmentCount(todo) > 0 : true,
+    };
+    let action = decideSupervisorAction(inputs);
+    // Your unsent text is read only when Pane would type: it then waits.
+    if ((action.kind === 'remind' || action.kind === 'restart' || action.kind === 'attach_reminder') && await this.host.hasUnsentText(orchestrator)) {
+      action = decideSupervisorAction({ ...inputs, unsentText: true });
+    }
     const quietMinutes = Math.round((now - lastMovedAt(todo, null)) / MINUTE);
     const newEpisode = todo.stuckSince === null && action.kind !== 'none' && action.kind !== 'attach_reminder';
     const day = dayOf(now);

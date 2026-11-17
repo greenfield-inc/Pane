@@ -222,8 +222,9 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
   commandRegistry.register('runpane:todos:list', (value: PaneCommandValue): RunpaneTodoListResult => {
     const request = decodeBoundary(value ?? {}, boundary.object({ all: boundary.optional(boundary.boolean) }));
     const snapshot = service().snapshot();
+    const counts = service().attachmentCounts();
     const rows = request.all ? snapshot.rows : snapshot.rows.filter(row => row.status.status !== 'done' && row.status.status !== 'dropped');
-    return { ok: true, todos: rows.map(row => runpaneTodo(service(), row.todo.number)) };
+    return { ok: true, todos: rows.map(row => runpaneTodoOf(row, counts.get(row.todo.number) ?? 0)) };
   });
 
   commandRegistry.register('runpane:todos:assign', (value: PaneCommandValue): RunpaneTodoResult => {
