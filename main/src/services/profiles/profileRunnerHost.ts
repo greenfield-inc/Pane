@@ -75,12 +75,17 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
     if (!notify) throw new PaneError('PROFILE_APPROVALS_UNAVAILABLE', 'Approvals are not running in this Pane, so a profile run can\'t ask you anything.', 'Restart Pane, then launch the profile again.');
     return notify;
   };
-  const startTab = async (request: StepTabRequest) => {
-    const tool: RunpaneCommandToolSpec = { command: request.command, title: request.title };
-    if (request.agentType && isConfiguredAgent(request.agentType)) tool.agentType = request.agentType;
-    if (request.initialInput) tool.initialInput = request.initialInput;
-    // An agent waits until its input box is ready for the first message; a command just runs.
-    const waitReady = request.initialInput !== undefined;
+  /**
+   * The baseline for a CLI Pane doesn't know: Pane can't tell when its input is ready, so it types
+   * the first message as one line, then Enter, once the tab's output goes quiet.
+   */
+  const typeFirstMessage = async (panelId: string, message: string) => {
+    await registry.invoke('runpane:panels:wait', [{ panelId, condition: 'idle', timeoutMs: 20_000 }]).catch(() => undefined);
+    await registry.invoke('runpane:panels:input', [{ panelId, input: `${message.replace(/\s*\n\s*/gu, ' ')}\r`, source: 'agent' }]);
+  };
+  const openTab = async (request: StepTabRequest, tool: RunpaneCommandToolSpec): Promise<StartedTab> => {
+    // An agent Pane knows waits until its input box is ready for the first message; anything else just runs.
+    const waitReady = tool.initialInput !== undefined;
     if (request.newPane) {
       const result = decodeBoundary(await registry.invoke('runpane:panes:create', [{
         repo: { id: request.run.repoId }, panes: [{ name: request.newPane.name, tool }],
@@ -96,6 +101,15 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
     const created = decodeBoundary(await registry.invoke('runpane:panels:create', [{ paneId: request.run.paneId, tool, source: 'agent', noFocus: true, waitReady }]), createdPanel);
     const started: StartedTab = { paneId: created.paneId, panelId: created.panelId };
     if (created.readiness?.blocked) started.blocked = created.readiness.blocked.message;
+    return started;
+  };
+  const startTab = async (request: StepTabRequest): Promise<StartedTab> => {
+    const tool: RunpaneCommandToolSpec = { command: request.command, title: request.title };
+    if (request.agentType && isConfiguredAgent(request.agentType)) tool.agentType = request.agentType;
+    // Pane delivers the first message only to an agent it recognises; the baseline types it after.
+    if (request.initialInput && tool.agentType) tool.initialInput = request.initialInput;
+    const started = await openTab(request, tool);
+    if (request.initialInput && !tool.agentType) await typeFirstMessage(started.panelId, request.initialInput);
     return started;
   };
   const postCard = (card: RunCard) => {
