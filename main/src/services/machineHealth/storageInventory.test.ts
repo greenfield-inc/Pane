@@ -36,6 +36,7 @@ function deps(panes: InventoryPane[], overrides: Partial<InventoryDeps> = {}): I
     cleanOpenAt: () => null,
     archiveJobsInFlight: () => new Set(),
     readUpdates: async () => [],
+    appVersion: () => '2.5.0',
     listGitWorktrees: async () => [],
     ignoredDirs: async () => [],
     processCwds: async () => [],
@@ -124,8 +125,8 @@ describe('scanStorage', () => {
     file('pane/sessions.db', 500);
     const inventory = await scanStorage(deps([], {
       readUpdates: async () => [
-        { id: 'u-old', phase: 'needs-attention', updatedAt: NOW - 15 * DAY },
-        { id: 'u-new', phase: 'complete', updatedAt: NOW - 1 * DAY },
+        { id: 'u-old', phase: 'needs-attention', updatedAt: NOW - 15 * DAY, version: '2.5.0', fromVersion: '2.4.0', installed: true },
+        { id: 'u-new', phase: 'complete', updatedAt: NOW - 1 * DAY, version: '2.5.0', fromVersion: '2.5.0', installed: true },
       ],
       cleanOpenAt: () => NOW - DAY,
     }));
@@ -133,6 +134,21 @@ describe('scanStorage', () => {
       ['update-snapshot', 1, 'u-old', 9000],
       ['migration-backup', 1, 'sessions.db.pre-panel-buffers-1.bak', 1800],
       ['foreign-pane-data', 3, 'sessions.db.before-repair', 1300],
+    ]);
+  });
+
+  it('removes a failed update\'s copies once the running Pane is newer, with no completed update after it', async () => {
+    file('pane/updates/u-failed/snapshot/data/sessions.db', 7000);
+    file('Applications/Pane.app.before-u-failed/Contents/Info.plist', 300);
+    file('Applications/Pane.app/Contents/Info.plist', 300);
+    const inventory = await scanStorage(deps([], {
+      readUpdates: async () => [{ id: 'u-failed', phase: 'needs-attention', updatedAt: NOW - 15 * DAY, version: '2.4.0', fromVersion: '2.3.0', installed: true }],
+      installPath: () => path.join(root, 'Applications', 'Pane.app'),
+      appVersion: () => '2.5.0',
+    }));
+    expect(inventory.items.map(item => [item.kind, item.tier, path.basename(item.path), item.sizeBytes])).toEqual([
+      ['update-snapshot', 1, 'u-failed', 7000],
+      ['update-snapshot', 1, 'Pane.app.before-u-failed', 300],
     ]);
   });
 

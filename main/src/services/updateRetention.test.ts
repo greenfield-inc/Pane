@@ -4,25 +4,66 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { appBackupPath } from '../../../packages/runpane/src/updateArtifacts';
 import { writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
-import { pruneReplacedUpdates, replacedUpdates } from '../../../packages/runpane/src/updateRetention';
+import { pruneReplacedUpdates, readUpdateRecords, replacedUpdates, type UpdateRecord } from '../../../packages/runpane/src/updateRetention';
+
+const record = (id: string, phase: string, updatedAt: number, extra: Partial<UpdateRecord> = {}): UpdateRecord =>
+  ({ id, phase, updatedAt, version: '2.5.0', fromVersion: '2.4.0', installed: phase === 'complete', ...extra });
 
 describe('replacedUpdates', () => {
   it('removes every update older than the newest completed one, whatever its outcome', () => {
     const replaced = replacedUpdates([
-      { id: 'u1', phase: 'complete', updatedAt: Date.parse('2026-10-01') },
-      { id: 'u2', phase: 'needs-attention', updatedAt: Date.parse('2026-10-31') },
-      { id: 'u3', phase: 'complete', updatedAt: Date.parse('2026-11-10') },
-      { id: 'u4', phase: 'failed', updatedAt: Date.parse('2026-11-12') },
-      { id: 'u5', phase: 'install', updatedAt: Date.parse('2026-11-15') },
+      record('u1', 'complete', Date.parse('2026-10-01')),
+      record('u2', 'needs-attention', Date.parse('2026-10-31')),
+      record('u3', 'complete', Date.parse('2026-11-10')),
+      record('u4', 'failed', Date.parse('2026-11-12')),
+      record('u5', 'install', Date.parse('2026-11-15')),
     ]);
     expect(replaced).toEqual(['u1', 'u2']);
   });
 
   it('keeps everything until one update has completed', () => {
     expect(replacedUpdates([
-      { id: 'u1', phase: 'needs-attention', updatedAt: 1 },
-      { id: 'u2', phase: 'failed', updatedAt: 2 },
+      record('u1', 'needs-attention', 1),
+      record('u2', 'failed', 2),
     ])).toEqual([]);
+  });
+});
+
+describe('replacedUpdates with the running Pane version', () => {
+  // The built-in updater keeps no journal, so a failed runpane update was never followed by a completed one.
+  it('replaces an ended update the running Pane has moved past, with no completed update after it', () => {
+    const updates = [
+      record('installed-older', 'needs-attention', 1, { version: '2.5.0', installed: true }),
+      record('never-installed', 'needs-attention', 2, { version: '2.6.0', fromVersion: '2.5.0', installed: false }),
+      record('failed-staging', 'failed', 3, { version: 'latest', fromVersion: '2.5.0', installed: false }),
+    ];
+    expect(replacedUpdates(updates, '2.6.0')).toEqual(['installed-older', 'never-installed', 'failed-staging']);
+  });
+
+  it('keeps the update that installed the running Pane, one still running, and every one when the version is unknown', () => {
+    const updates = [
+      record('this-install', 'needs-attention', 1, { version: '2.6.0', fromVersion: '2.5.0', installed: true }),
+      record('in-flight', 'snapshot', 2, { version: '2.5.0', fromVersion: '2.4.0', installed: false }),
+      record('never-installed-same', 'needs-attention', 3, { version: '2.6.0', fromVersion: '2.6.0', installed: false }),
+      record('cli-only', 'failed', 4, { version: 'latest', fromVersion: null, installed: false }),
+    ];
+    expect(replacedUpdates(updates, '2.6.0')).toEqual([]);
+    expect(replacedUpdates([record('old', 'needs-attention', 1, { version: '2.0.0' })], 'development')).toEqual([]);
+  });
+});
+
+describe('readUpdateRecords', () => {
+  it('reads each operation\'s outcome, target and starting version', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-retention-'));
+    try {
+      const directory = path.join(root, 'updates', 'u1');
+      writeUpdateJson(path.join(directory, 'status.json'), { id: 'u1', host: 'mac', scope: 'both', version: '2.6.0', phase: 'needs-attention', completed: ['stage', 'checkpoint', 'stop'], updatedAt: '2026-11-01T00:00:00.000Z', appUpdated: false, cliUpdated: false, hostReachable: false, restored: [] });
+      writeUpdateJson(path.join(directory, 'preflight.json'), { host: { version: '2.5.0' } });
+      fs.mkdirSync(path.join(root, 'updates', 'stray'));
+      expect(readUpdateRecords(root)).toEqual([{ id: 'u1', phase: 'needs-attention', updatedAt: Date.parse('2026-11-01T00:00:00.000Z'), version: '2.6.0', fromVersion: '2.5.0', installed: false }]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

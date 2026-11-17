@@ -297,7 +297,11 @@ over a database the new release has migrated. The completed update keeps its
 own snapshot and previous app copy, so the newest rollback copy always stays.
 An earlier operation that may still have an installer running stays too.
 
-Pane's storage scan removes the same copies. To see and remove them yourself:
+Pane's storage scan removes the same copies. It also removes those of an ended
+operation that the running Pane has moved past: Pane is newer than the release
+the operation installed or, when it never installed, the release it started
+from. That covers a failed `runpane update` followed by the built-in updater,
+which keeps no journal. To see and remove them yourself:
 
 ```sh
 runpane machine cleanup --kind update-snapshot --json

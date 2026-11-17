@@ -508,6 +508,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       cleanOpenAt: () => Number(databaseService.getUserPreference(DB_CLEAN_OPEN_PREFERENCE)) || null,
       archiveJobsInFlight: () => new Set(archiveCleanupManager.getTasks().filter(task => task.status !== 'completed').map(task => task.sessionId)),
       readUpdates: async () => readUpdateRecords(getAppDirectory()),
+      appVersion: () => options.app?.getVersion() ?? '',
       listGitWorktrees,
       ignoredDirs: inventoryIgnoredDirs,
       processCwds,

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { appBackupPath } from './updateArtifacts';
 import { readUpdateJournal, updateEnded, updateLockReleasable } from './updateOperation';
+import { compareVersions } from './version';
 
 /** One operation under `<pane-dir>/updates`, as the retention rules see it. */
 export interface UpdateRecord {
@@ -10,6 +11,22 @@ export interface UpdateRecord {
   /** The journal's phase: `complete`, `needs-attention`, `failed`, or a step still running. */
   phase: string;
   updatedAt: number;
+  /** The release it installed or was asked for (`latest` until it resolved one). */
+  version: string;
+  /** The Pane version running when it started, or null for a CLI-only update. */
+  fromVersion: string | null;
+  /** Its install step finished. */
+  installed: boolean;
+}
+
+const fromVersionSchema = boundary.object({ host: boundary.nullable(boundary.object({ version: boundary.string })) });
+
+function readFromVersion(directory: string): string | null {
+  try {
+    return decodeBoundary(JSON.parse(fs.readFileSync(path.join(directory, 'preflight.json'), 'utf8')), fromVersionSchema).host?.version ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Updates recorded under `<paneDir>/updates`; a folder with no readable journal is left out, so it is never removed. */
@@ -25,7 +42,10 @@ export function readUpdateRecords(paneDir: string): UpdateRecord[] {
   for (const id of names) {
     try {
       const journal = readUpdateJournal(path.join(root, id, 'status.json'));
-      records.push({ id, phase: journal.phase, updatedAt: Date.parse(journal.updatedAt) });
+      records.push({
+        id, phase: journal.phase, updatedAt: Date.parse(journal.updatedAt), version: journal.version,
+        fromVersion: readFromVersion(path.join(root, id)), installed: journal.completed.includes('install'),
+      });
     } catch {
       // Not an update folder, or one still being written.
     }
@@ -33,15 +53,31 @@ export function readUpdateRecords(paneDir: string): UpdateRecord[] {
   return records;
 }
 
+const ENDED = new Set(['complete', 'needs-attention', 'failed']);
+
 /**
- * Update folders a newer completed update has replaced: every update last
- * written before the newest completed one, whatever its outcome. The newest
- * completed update and anything after it stay, so rollback and a running
- * update keep their copies.
+ * The running Pane is newer than anything this ended update left behind: the
+ * release it installed, or, when it never installed, the release it started
+ * from. Pane got there another way, such as the built-in updater, which keeps
+ * no journal and so never counts as a newer completed update.
  */
-export function replacedUpdates(updates: readonly UpdateRecord[]): string[] {
+function movedPast(update: UpdateRecord, runningVersion: string): boolean {
+  if (!ENDED.has(update.phase)) return false;
+  if (compareVersions(runningVersion, update.version) > 0) return true;
+  return !update.installed && update.fromVersion !== null && compareVersions(runningVersion, update.fromVersion) > 0;
+}
+
+/**
+ * Update folders a newer update has replaced: every update last written
+ * before the newest completed one, whatever its outcome, and, given the
+ * running Pane's version, every ended update it has moved past. The newest
+ * completed update and anything after it stay unless the running Pane is
+ * newer than what it installed, so rollback and a running update keep their
+ * copies.
+ */
+export function replacedUpdates(updates: readonly UpdateRecord[], runningVersion: string | null = null): string[] {
   const newestComplete = Math.max(-Infinity, ...updates.filter(update => update.phase === 'complete').map(update => update.updatedAt));
-  return updates.filter(update => update.updatedAt < newestComplete).map(update => update.id);
+  return updates.filter(update => update.updatedAt < newestComplete || (runningVersion !== null && movedPast(update, runningVersion))).map(update => update.id);
 }
 
 const stagedAppSchema = boundary.object({ app: boundary.nullable(boundary.object({ installPath: boundary.string, backupPath: boundary.string })) });
