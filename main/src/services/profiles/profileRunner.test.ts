@@ -200,8 +200,26 @@ describe('ProfileRunner', () => {
     const prompt = 'Quick safety check: Is this a project you created or one you trust?';
     const runner = new ProfileRunner({ ...ports, startTab: async (request) => ({ ...(await ports.startTab(request)), blocked: prompt }) });
     const run = await runner.launch(launchRequest());
-    expect(run.attention).toBe(`Step plan's tab is waiting at a prompt: "${prompt}". Open the tab and answer it; the step's first message is typed once the agent is ready.`);
+    expect(run.attention).toBe('Step plan\'s tab is waiting at the agent\'s folder-trust prompt in its new worktree. Open the tab and answer it, or trust the project folder in the agent once; the step starts when the agent is ready.');
     expect((await runner.reportOutcome('tab-1', 'plan ready')).attention).toBeUndefined();
+  });
+
+  it('takes a report that arrives while its step\'s tab is still starting', async () => {
+    const pane = new FakePane();
+    const ports = pane.ports();
+    let finishStart: () => void = () => undefined;
+    const runner = new ProfileRunner({ ...ports, startTab: async (request) => {
+      const started = await ports.startTab(request);
+      // The agent is already running and reports before Pane has finished waiting for it to be ready.
+      if (started.panelId === 'tab-1') await new Promise<void>((resolve) => { finishStart = resolve; });
+      return started;
+    } });
+    const launched = runner.launch(launchRequest());
+    await settle();
+    const reported = runner.reportOutcome('tab-1', 'plan ready');
+    finishStart();
+    await launched;
+    expect((await reported).step).toBe('approve');
   });
 
   it('refuses a profile that is not loaded', async () => {
