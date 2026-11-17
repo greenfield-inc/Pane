@@ -37,6 +37,8 @@ const dark = {
   deviceBezel: '#0c0c0d',
   deviceScreen: '#000000',
   autopilotText: '#c4b5fd',
+  // Home's All panes tile. Purple, clear of machine slot 0's violet in both themes (machineColors).
+  allPanes: '#c084fc',
 };
 
 type ColorTokens = { [Key in keyof typeof dark]: string };
@@ -69,6 +71,7 @@ const light: ColorTokens = {
   deviceBezel: '#0c0c0d',
   deviceScreen: '#000000',
   autopilotText: '#6d28d9',
+  allPanes: '#a855f7',
 };
 
 export const colors = { light, dark };

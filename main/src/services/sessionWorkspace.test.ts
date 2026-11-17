@@ -150,8 +150,8 @@ describe('Session workspace instructions', () => {
     const agents = (await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
     expect(agents).toContain('## Keep the Session tidy');
     expect(agents).toContain('Clean up as you go, without asking. In your next message, say in one line what you closed or archived.');
-    expect(agents).toContain('Keep one status document for this Session, in the Session folder, and update it in place.');
-    expect(agents).toContain('Open it beside the person when you first write it');
+    expect(agents).toContain('Keep one status document for this Session at `session/index.html` in the Session folder, and update it in place.');
+    expect(agents).toContain("Pane shows it in the Session's Overview tab, so never open it as a tab.");
     expect(agents).toContain('Open a page beside the person only when they need to look at it now');
     expect(agents).toContain('runpane panels close --panel <id> --yes --json');
     expect(agents).toContain('A tab\'s age is a signal to close it; having been viewed recently is not a reason to keep it.');
@@ -224,7 +224,7 @@ describe('Session workspace instructions', () => {
     expect(agents).toContain('runpane inbox ack <item> --decision <D-n>');
     expect(agents).toContain('correction: Q-n → <answer> (by you)');
     expect(agents).toContain('reply: Q-n → "<their words>" (picked: <picks>) (by you)');
-    expect(agents).toContain('run runpane notify --took <id|Q-n> answer and act on it');
+    expect(agents).toContain('Pane records it as the answer once its reader gets it. If it answers, act on it. If it\'s a question, run runpane notify --took <id|Q-n> question at once (it reopens the approval)');
     expect(agents).toContain('runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"');
     expect(agents).toContain('never post a second approval for it');
     expect(agents).toContain('## Asking the person in Pane');

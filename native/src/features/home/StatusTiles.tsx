@@ -6,10 +6,10 @@ import { Text } from '@/ui';
 import type { BoardTile } from './statusBoard';
 
 const TILES: ReadonlyArray<{ id: BoardTile; label: string; color: keyof ThemeColors }> = [
+  { id: 'all', label: 'All panes', color: 'allPanes' },
   { id: 'needs', label: 'Needs you', color: 'warning' },
   { id: 'working', label: 'Working', color: 'accent' },
   { id: 'ready', label: 'Ready', color: 'success' },
-  { id: 'all', label: 'All panes', color: 'neutral' },
 ];
 
 /** Four counts in a 2×2 grid. The selected tile wears its status color and filters the list below. */

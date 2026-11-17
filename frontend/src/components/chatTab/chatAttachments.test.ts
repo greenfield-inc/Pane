@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PendingAttachment } from '@assistant-ui/react';
-import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES } from './chatAttachments';
+import type { UploadProgress } from '../../../../shared/chunkedUpload';
+import { cancelChatCopies, ChatAttachmentAdapter, dragHasFiles, MAX_IMAGE_BYTES } from './chatAttachments';
 
 const file = (name: string, type: string, size = 10) => new File([new Uint8Array(size)], name, { type });
 const readDataUrl = async (input: File) => `data:${input.type || 'application/octet-stream'};base64,AAAA`;
@@ -20,18 +21,99 @@ describe('chat attachments (D-139)', () => {
   });
 
   it('copies any other file to the chat\'s machine first, then sends its path', async () => {
-    const saveFile = vi.fn(async ({ name }: { name: string }) => `/repo/.pane/files/${name}`);
-    const copying: number[] = [];
-    const adapter = new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl, onCopying: delta => copying.push(delta) });
+    const saveFile = vi.fn(async ({ name }: File, onProgress: (progress: UploadProgress) => void) => {
+      onProgress({ receivedBytes: 5, totalBytes: 10, retrying: false, lastProgressAt: 0, secondsLeft: 30 });
+      return `/repo/.pane/files/${name}`;
+    });
+    const progress: Array<number | null> = [];
+    const adapter = new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl, onProgress: (_id, update) => progress.push(update?.receivedBytes ?? null) });
     const states = await attach(adapter, file('notes.pdf', 'application/pdf'));
     expect(states.map(state => state.status.type)).toEqual(['running', 'requires-action']);
-    expect(saveFile).toHaveBeenCalledWith({ name: 'notes.pdf', dataUrl: 'data:application/pdf;base64,AAAA' });
+    expect(saveFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'notes.pdf' }), expect.any(Function), expect.any(AbortSignal));
     expect((await adapter.send(states[1])).content).toEqual([{ type: 'text', text: '/repo/.pane/files/notes.pdf' }]);
-    expect(copying).toEqual([1, -1]);
+    // Started, half way, then done: the composer waits until the last.
+    expect(progress).toEqual([0, 5, null]);
+  });
+
+  it('stops the copy when its chip is removed, which frees Send', async () => {
+    let signal: AbortSignal | undefined;
+    // A copy that would run until the host answers, which it doesn't.
+    const saveFile = vi.fn((_file: File, _onProgress: (progress: UploadProgress) => void, abort: AbortSignal) => {
+      signal = abort;
+      return new Promise<string>(() => undefined);
+    });
+    const progress: Array<number | null> = [];
+    const adapter = new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl, onProgress: (_id, update) => progress.push(update?.receivedBytes ?? null) });
+    const adding = adapter.add({ file: file('video.mov', 'video/quicktime') });
+    // SAFETY: add yields the pending chip first, before its copy starts.
+    const pending = (await adding.next()).value as PendingAttachment;
+    const rest = adding.next();
+    await vi.waitFor(() => expect(saveFile).toHaveBeenCalled());
+
+    await adapter.remove(pending);
+
+    expect(await rest).toEqual({ done: true, value: undefined });
+    expect(signal?.aborted).toBe(true);
+    expect(progress.at(-1)).toBeNull();
+  });
+
+  it('picks up a copy still running when the draft comes back, instead of copying again', async () => {
+    let finish: (path: string) => void = () => undefined;
+    const saveFile = vi.fn(() => new Promise<string>(resolve => { finish = resolve; }));
+    const video = file('video.mov', 'video/quicktime');
+    const left = new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl });
+    void attach(left, video).catch(() => undefined);
+    await vi.waitFor(() => expect(saveFile).toHaveBeenCalledTimes(1));
+
+    // The chat was left and opened again: its draft adds the same file to a new composer.
+    const back = attach(new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl }), video);
+    finish('/files/video.mov');
+
+    expect((await back).at(-1)).toMatchObject({ content: [{ type: 'text', text: '/files/video.mov' }] });
+    expect(saveFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives a draft back the path of a copy that finished while the chat was away, without copying again', async () => {
+    const saveFile = vi.fn(async ({ name }: File) => `/files/${name}`);
+    const video = file('video.mov', 'video/quicktime');
+    // The copy lands while the chat is away.
+    await attach(new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl }), video);
+
+    const back = await attach(new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl }), video);
+
+    expect(back.at(-1)).toMatchObject({ content: [{ type: 'text', text: '/files/video.mov' }] });
+    expect(saveFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('copies a file again after its copy failed', async () => {
+    const saveFile = vi.fn().mockRejectedValueOnce(new Error('the host is offline')).mockResolvedValue('/files/notes.txt');
+    const notes = file('notes.txt', 'text/plain');
+    await expect(attach(new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl }), notes)).rejects.toThrow('the host is offline');
+
+    const again = await attach(new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl }), notes);
+
+    expect(again.at(-1)).toMatchObject({ content: [{ type: 'text', text: '/files/notes.txt' }] });
+    expect(saveFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops the copies a chat tab started when the tab is closed', async () => {
+    const signals: AbortSignal[] = [];
+    const saveFile = vi.fn((_file: File, _onProgress: (progress: UploadProgress) => void, signal: AbortSignal) => {
+      signals.push(signal);
+      return new Promise<string>(() => undefined);
+    });
+    const closing = attach(new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl, panelId: 'chat-a' }), file('a.mov', 'video/quicktime'));
+    void attach(new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl, panelId: 'chat-b' }), file('b.mov', 'video/quicktime'));
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+
+    cancelChatCopies('chat-a');
+
+    expect(signals.map(signal => signal.aborted)).toEqual([true, false]);
+    expect(await closing).toHaveLength(1);
   });
 
   it('copies an image the agent cannot take as an image (too large, HEIC, or no image support)', async () => {
-    const saveFile = vi.fn(async ({ name }: { name: string }) => `/files/${name}`);
+    const saveFile = vi.fn(async ({ name }: File) => `/files/${name}`);
     for (const [options, input] of [
       [{ images: true }, file('big.png', 'image/png', MAX_IMAGE_BYTES + 1)],
       [{ images: true }, file('photo.heic', 'image/heic')],
@@ -46,8 +128,6 @@ describe('chat attachments (D-139)', () => {
     const imagesOnly = new ChatAttachmentAdapter({ images: true, readDataUrl });
     await expect(attach(imagesOnly, file('notes.pdf', 'application/pdf'))).rejects.toThrow('notes.pdf was not attached: this chat takes PNG, JPEG, WebP or GIF images here');
     await expect(attach(imagesOnly, file('big.png', 'image/png', MAX_IMAGE_BYTES + 1))).rejects.toThrow('larger than 5 MB');
-    const withFiles = new ChatAttachmentAdapter({ images: true, saveFile: async () => '/x', readDataUrl });
-    await expect(attach(withFiles, file('movie.mov', 'video/quicktime', MAX_FILE_BYTES + 1))).rejects.toThrow('movie.mov was not attached: it is larger than 10 MB');
     const failing = new ChatAttachmentAdapter({ images: false, saveFile: async () => { throw new Error('the host is offline'); }, readDataUrl });
     await expect(attach(failing, file('a.txt', 'text/plain'))).rejects.toThrow('a.txt was not attached: it could not be copied to the chat\'s machine (the host is offline).');
   });

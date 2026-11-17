@@ -40,7 +40,9 @@ const { shared, command } = vi.hoisted(() => {
     questions: [{ title: 'Turn it on?', why: 'Trains cost money while on.', choices: [{ label: 'Yes' }, { label: 'No', recommended: true }] }, { title: 'How many?', choices: [{ label: 'One train' }] }],
     reply: { id: 'r1', text: 'Why one?', at: 2_600, state: 'question', reader: { kind: 'asker', name: 'Doozy' } },
   };
-  const shared: NotifySharedState = { machine: 'Work Mac', epoch: 'e1', revision: 1, enabled: true, queue: ['q-secret', 'q-trains', 'q-both'], hidden: [], items: [secret, trains, both] };
+  // A loop's next run refreshed its own card: no question of the person's to quote.
+  const refreshed: NotifyItem = { ...trains, id: 'q-loop', title: '5 new deals', revision: { asked: '', whatChanged: ['Two more deals'], by: 'deal-watch', at: 3_000 } };
+  const shared: NotifySharedState = { machine: 'Work Mac', epoch: 'e1', revision: 1, enabled: true, queue: ['q-secret', 'q-trains', 'q-both', 'q-loop'], hidden: [], items: [secret, trains, both, refreshed] };
   return { shared, command: { isPending: false, isError: false, mutate: vi.fn() } };
 });
 vi.mock('./hooks', () => ({
@@ -84,6 +86,12 @@ describe('NotifySheet replies (P7)', () => {
     expect(text(byId(tree, 'notify-revision-asked')[0])).toBe('You asked: “Can it be undone?”');
     expect(byId(tree, 'notify-revision-line').map(text)).toEqual(['• Added an undo step']);
     expect(tree.some(element => element.props.children === 'Reworded, was “Yes”')).toBe(true);
+  });
+
+  it('shows an update that answers no question without "You asked"', () => {
+    const tree = elements(createElement(NotifySheet, { notifyId: 'q-loop' }));
+    expect(byId(tree, 'notify-revision-asked')).toEqual([]);
+    expect(byId(tree, 'notify-revision-line').map(text)).toEqual(['• Two more deals']);
   });
 
   it('keeps a tapped choice with nothing typed as today’s choice answer', () => {

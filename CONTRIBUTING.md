@@ -161,7 +161,8 @@ To test approvals' timers without waiting, start a dev build with
   editor and preview lifecycles, and the Session journeys
   (`orchestration-sessions.spec.ts`). A spec left out of that list never runs in
   CI, so add a new one there.
-- `pnpm test:chat-tabs` runs the chat tab journeys: it launches Electron from
+- `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey
+  (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API

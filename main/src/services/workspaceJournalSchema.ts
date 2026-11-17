@@ -1,5 +1,19 @@
 import { boundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import type { RunpaneWorkspaceEntry, RunpaneWorkspacePanelSummary } from '../../../shared/types/runpaneOrchestration';
+const reportChoiceSchema = boundary.object({
+  label: boundary.nonEmptyString,
+  detail: boundary.optional(boundary.string),
+  recommended: boundary.optional(boundary.boolean),
+});
+/** A blocked report's buttons (`--choices`, `--questions`), wherever a report is kept. */
+export const agentReportOptionFields = {
+  choices: boundary.optional(boundary.array(reportChoiceSchema)),
+  questions: boundary.optional(boundary.array(boundary.object({
+    title: boundary.string,
+    choices: boundary.array(reportChoiceSchema),
+    why: boundary.optional(boundary.string),
+  }))),
+};
 /** A `runpane report` as the journal and overviews carry it. */
 export const agentReportFields = {
   state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
@@ -9,6 +23,7 @@ export const agentReportFields = {
   summaryTruncated: boundary.optional(boundary.literal(true)),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  ...agentReportOptionFields,
   reportedAt: boundary.nonEmptyString,
 };
 const agentReportSchema = boundary.object(agentReportFields);

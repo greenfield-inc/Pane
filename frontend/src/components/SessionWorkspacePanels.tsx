@@ -1,3 +1,4 @@
+import { closeFindWithin } from './find/findController';
 import { createPortal } from 'react-dom';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
@@ -91,6 +92,8 @@ function escapeApprovalColumn(event: ReactKeyboardEvent): void {
   const target = event.target instanceof HTMLElement ? event.target : null;
   if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName))) return;
   event.preventDefault();
+  // An open find bar in the column closes first; the next Esc goes back to the chat.
+  if (closeFindWithin(event.currentTarget)) return;
   leaveApprovalColumn();
 }
 

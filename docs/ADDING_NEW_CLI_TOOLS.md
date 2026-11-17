@@ -294,7 +294,8 @@ identification do not establish composer readiness:
   never types the message into the shell or the wrapper.
 - `[TerminalPanelManager] Starting message …` and `[Runpane] Starting message …`
   log lines mark each write and its outcome, with the agent, detection source,
-  byte count, submit key and any `PANE_AGENT_SESSION_ID` the wrapper printed.
+  byte count, submit key and any session ID line the wrapper printed
+  (`AGENT_FARM_SESSION_ID` or `PANE_AGENT_SESSION_ID`).
   They never include the message text.
 
 `launchMode: 'wrapped'` means the command is launched exactly as given.

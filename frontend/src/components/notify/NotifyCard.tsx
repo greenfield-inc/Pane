@@ -191,7 +191,7 @@ function KeepsWaiting({ item }: { item: NotifyItem }) {
   );
 }
 
-/** ✕ hides the question; right-click or a long press offers a reminder instead. */
+/** ✕ dismisses the question without answering it (it stays in Approvals); right-click or a long press offers a reminder instead. */
 function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCardProps, 'item' | 'onCommand' | 'menuPlacement'>) {
   const [menuOpen, setMenuOpen] = useState(false);
   const pressTimer = useRef<number | null>(null);
@@ -208,8 +208,9 @@ function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCa
     <div ref={rootRef} className="relative ml-auto shrink-0">
       <button
         type="button"
-        aria-label="Close"
-        title="Close (right-click to answer later)"
+        aria-label="Dismiss"
+        title="Dismiss: it stays in Approvals (right-click to answer later)"
+        data-testid="notify-dismiss"
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover hover:text-text-primary"
         onPointerDown={() => {
           openedByPress.current = false;

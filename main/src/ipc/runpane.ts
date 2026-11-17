@@ -58,6 +58,8 @@ import {
   readPanelAgentReport,
 } from '../services/agentReport';
 import { workerCard } from '../services/notify/workerContext';
+import { checkNotifyOptions } from './notify';
+import { agentReportOptionFields } from '../services/workspaceJournalSchema';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand } from '../services/agents/opencodeLaunch';
 import { takesChosenSession } from '../services/agents/chosenSessionLaunch';
@@ -1969,9 +1971,11 @@ export function registerRunpaneHandlers(
       if (normalized.paneId && normalized.paneId !== panel.sessionId) {
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
+      // Its buttons take notify's own checks (count, distinct labels, choices or questions).
+      checkNotifyOptions(normalized.choices, normalized.questions);
       const report = normalizeAgentReport(normalized, new Date().toISOString());
       // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
-      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath, readStatusFile: report.summaryTruncated }).warnings : [];
+      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath, readStatusFile: report.summaryTruncated, choices: report.choices, questions: report.questions }).warnings : [];
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
       else await storePanelAgentReport(panel, report);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
@@ -5590,6 +5594,7 @@ const reportRequestSchema = boundary.object({
   summary: boundary.optional(boundary.string),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  ...agentReportOptionFields,
 });
 
 function parseReportRequest(value: PaneCommandValue): RunpaneReportRequest {
