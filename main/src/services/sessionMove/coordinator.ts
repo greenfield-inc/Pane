@@ -546,7 +546,7 @@ export class MoveCoordinator {
         } catch (error) {
           // Archiving would delete the only copy of those files: this Pane keeps its worktree, still paused.
           console.warn(`[SessionMove] Pane ${paneId}'s ignored files weren't set aside, so it wasn't archived:`, error);
-          kept.push(`Pane “${pane?.name ?? paneId}” stays here, paused, with its worktree: its ignored files couldn't be set aside (${reasonOf(error)}). Copy what you need from ${worktree}, then archive it.`);
+          kept.push(`Pane “${pane?.name ?? paneId}” stays here, paused, with its worktree: its ignored files couldn't be set aside (${reasonOf(error)}). ${error instanceof PaneError && error.next ? error.next : `Copy what you need from ${worktree}, then archive it.`}`);
           continue;
         }
       }

@@ -87,6 +87,8 @@ interface Job {
   aborting?: Promise<TargetStatus>;
   /** Start failed before any tab started; the source may ask again. */
   startFailed?: boolean;
+  /** Archived Panes a move back set aside, deleted for good only once the move commits. */
+  setAside: string[];
 }
 
 /** The tabs the importer creates, replaces and releases: Pane's own panel and terminal managers, or a test's. */
@@ -101,6 +103,8 @@ export interface ImporterTabs {
   releaseChatMove(panelId: string): Promise<void>;
   /** Drops every tab of a Pane that is going away, permanent ones (Explorer, Diff) included. */
   forgetPaneTabs(paneId: string): Promise<void>;
+  /** Drops a Pane's tabs from memory only; their saved rows stay. */
+  dropPaneTabsFromMemory(paneId: string): Promise<void>;
 }
 
 const liveTabs: ImporterTabs = {
@@ -113,6 +117,7 @@ const liveTabs: ImporterTabs = {
   clearPaused: async panelIds => { await terminalPanelManager.clearPaused(panelIds); },
   releaseChatMove: async panelId => { await getChatTabManager().releaseMove(panelId); },
   forgetPaneTabs: paneId => panelManager.cleanupSessionPanels(paneId),
+  dropPaneTabsFromMemory: paneId => panelManager.cleanupSessionPanelsInMemory(paneId),
 };
 
 const POSIX = new Set(['darwin', 'linux']);
@@ -403,7 +408,7 @@ export class MoveImporter {
   async write(parsed: WriteRequest): Promise<WriteResult> {
     this.refuseTeammate();
     if (!this.jobs.has(parsed.moveId)) {
-      this.jobs.set(parsed.moveId, { status: { moveId: parsed.moveId, stage: 'receiving', panesDone: 0, panesTotal: 0 }, lastWriteAt: Date.now(), cleanup: [], conversations: [], tabs: [] });
+      this.jobs.set(parsed.moveId, { status: { moveId: parsed.moveId, stage: 'receiving', panesDone: 0, panesTotal: 0 }, lastWriteAt: Date.now(), cleanup: [], conversations: [], tabs: [], setAside: [] });
     }
     const job = this.job(parsed.moveId);
     job.lastWriteAt = Date.now();
@@ -695,27 +700,19 @@ export class MoveImporter {
 
   /**
    * Moving back: the archived Pane an earlier move left here (what Restore here brings back) gives
-   * way to the arriving Pane of the same ID. A failed move recreates it, archived, with its tabs and
-   * layout; its old output log does not come back.
+   * way to the arriving Pane of the same ID. Nothing it saved is deleted until the move commits: its
+   * rows (tabs, layout, history, output, terminal buffers) wait under another id, hidden, and a
+   * failed move puts them back as they were.
    */
   private async setAsideArchivedPane(job: Job, paneId: string): Promise<void> {
     const db = this.services.databaseService;
-    const row = db.getSession(paneId);
-    if (!row) return;
-    const panels = this.tabs.getPanelsForSession(paneId);
-    const layout = db.getSessionPanelLayout(paneId);
-    await this.removePane(paneId);
-    job.cleanup.push({ label: `archived Pane ${row.name}`, undo: async () => {
-      const recreated = this.services.sessionManager.createSessionWithId(
-        row.id, row.name, row.worktree_path, row.initial_prompt ?? '', row.worktree_name,
-        row.permission_mode === 'approve' ? 'approve' : 'ignore',
-        row.project_id ?? undefined, false, row.folder_id ?? undefined,
-        row.tool_type === 'none' ? 'none' : undefined,
-        row.base_commit ?? undefined, row.base_branch ?? undefined, false,
-      );
-      for (const panel of panels) await this.putBackPanel(panel);
-      if (layout) db.setSessionPanelLayout(recreated.id, layout);
-      await this.services.sessionManager.archiveSession(recreated.id);
+    await this.tabs.dropPaneTabsFromMemory(paneId).catch(error => console.warn(`[SessionMove] Pane ${paneId}'s tabs weren't dropped from memory:`, error));
+    const aside = db.setArchivedSessionAside(paneId, `${paneId}.moving-${job.status.moveId}`);
+    if (!aside) return;
+    job.setAside.push(aside.asideId);
+    job.cleanup.push({ label: `archived Pane ${paneId}`, undo: async () => {
+      db.restoreSetAsideSession(aside);
+      job.setAside = job.setAside.filter(id => id !== aside.asideId);
     } });
   }
 
@@ -784,6 +781,13 @@ export class MoveImporter {
     const manager = this.services.orchestrationSessionManager!;
     // From here the move is committed: no undo, the previous copies kept for it go.
     job.cleanup = [];
+    for (const asideId of job.setAside.splice(0)) {
+      try {
+        this.services.databaseService.deleteArchivedSessionPermanently(asideId);
+      } catch (error) {
+        console.warn(`[SessionMove] The replaced archive ${asideId} wasn't deleted:`, error);
+      }
+    }
     for (const placed of job.conversations) await placed.commit().catch(error => console.warn('[SessionMove] Commit of a conversation failed:', error));
     await manager.setMoveMark(sessionId, undefined, `Moved here from ${manifest.source.machine}.`);
     const failedTabs: string[] = [];

@@ -511,7 +511,11 @@ repository (`refs/pane/move/<pane id>`), and the ignored files that stayed
 behind move into the repository's `.git/pane-moved/<pane id>/` first, so
 **Restore here** from the archived list brings back the Session and its Panes
 with their work and those files while the archive lasts. Restore only when the other machine no longer runs it. Moving the
-Session back later replaces that archived copy.
+Session back later replaces that archived copy, but only once the move back
+succeeds: until then its tabs, history and terminal output wait out of sight,
+and a failed move back leaves the archive as it was. If a Pane's ignored files
+can't be set aside, that Pane stays here, paused, with its worktree, and the
+summary says which files wait where.
 
 If anything fails before the other machine starts the tabs, it removes
 everything it set up, this machine restarts the tabs, and the dialog says what

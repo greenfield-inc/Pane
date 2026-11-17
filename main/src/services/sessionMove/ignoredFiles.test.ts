@@ -9,7 +9,8 @@ let dir: string;
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@example.invalid', ...args], { cwd, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: dir } }).toString().trim();
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-move-ignored-'));
+  // Real path: git reports the repository under /private on macOS.
+  dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pane-move-ignored-')));
   git(dir, 'init', '-q', 'repo');
   const repo = path.join(dir, 'repo');
   fs.writeFileSync(path.join(repo, '.gitignore'), '.env\nnode_modules/\n');
@@ -59,4 +60,68 @@ it('keeps everything in place when an entry can\'t be set aside, and keeps an ea
   expect(fs.readFileSync(path.join(wt, 'node_modules/pkg/index.js'), 'utf8')).toBe('x');
   expect(fs.readFileSync(path.join(kept, 'earlier'), 'utf8')).toBe('from the last move');
   expect(fs.existsSync(`${kept}.incoming`)).toBe(false);
+});
+
+it('keeps a file in staging, never deletes it, when it can\'t go back into the worktree either (F-2)', async () => {
+  const wt = path.join(dir, 'wt');
+  const kept = path.join(dir, 'repo/.git/pane-moved/pane-1');
+  const staging = `${kept}.incoming`;
+  fs.writeFileSync(path.join(wt, '.env'), 'SECRET=1\n');
+  fs.mkdirSync(path.join(wt, 'node_modules/pkg'), { recursive: true });
+  fs.writeFileSync(path.join(wt, 'node_modules/pkg/index.js'), 'x');
+  // node_modules can't be set aside, and then the worktree turns unwritable, so .env can't go back.
+  const rename = fs.promises.rename;
+  const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (from, to) => {
+    if (String(from).includes('node_modules') || String(from).startsWith(staging)) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+    return rename(from, to);
+  });
+  const cpSpy = vi.spyOn(fs.promises, 'cp').mockRejectedValue(Object.assign(new Error('ENOSPC: no space left'), { code: 'ENOSPC' }));
+  try {
+    const failure = keepIgnoredFiles(wt, 'pane-1', ['.env', 'node_modules/']);
+    await expect(failure).rejects.toMatchObject({ code: 'ERR_MOVE_IGNORED_STRANDED' });
+    await expect(failure).rejects.toThrow(staging);
+  } finally {
+    renameSpy.mockRestore();
+    cpSpy.mockRestore();
+  }
+  expect(fs.readFileSync(path.join(staging, '.env'), 'utf8')).toBe('SECRET=1\n');
+  // A later retire refuses rather than clearing the folder that holds the only copy.
+  await expect(keepIgnoredFiles(wt, 'pane-1', ['node_modules/'])).rejects.toMatchObject({ code: 'ERR_MOVE_IGNORED_STAGED' });
+  expect(fs.readFileSync(path.join(staging, '.env'), 'utf8')).toBe('SECRET=1\n');
+  expect(fs.existsSync(path.join(wt, 'node_modules/pkg/index.js'))).toBe(true);
+});
+
+it('keeps the earlier kept copy until the new one is in place (F-2)', async () => {
+  const wt = path.join(dir, 'wt');
+  const kept = path.join(dir, 'repo/.git/pane-moved/pane-1');
+  const staging = `${kept}.incoming`;
+  fs.mkdirSync(kept, { recursive: true });
+  fs.writeFileSync(path.join(kept, 'earlier'), 'from the last move');
+  fs.writeFileSync(path.join(wt, '.env'), 'SECRET=1\n');
+  const rename = fs.promises.rename;
+  const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (from, to) => {
+    if (String(from) === staging) throw Object.assign(new Error('EIO'), { code: 'EIO' });
+    return rename(from, to);
+  });
+  try {
+    await expect(keepIgnoredFiles(wt, 'pane-1', ['.env'])).rejects.toMatchObject({ code: 'ERR_MOVE_IGNORED_STRANDED' });
+  } finally {
+    renameSpy.mockRestore();
+  }
+  expect(fs.readFileSync(path.join(kept, 'earlier'), 'utf8')).toBe('from the last move');
+  expect(fs.readFileSync(path.join(staging, '.env'), 'utf8')).toBe('SECRET=1\n');
+  expect(fs.existsSync(`${kept}.previous`)).toBe(false);
+});
+
+it('replaces an earlier kept copy on success and leaves no staging behind', async () => {
+  const wt = path.join(dir, 'wt');
+  const kept = path.join(dir, 'repo/.git/pane-moved/pane-1');
+  fs.mkdirSync(kept, { recursive: true });
+  fs.writeFileSync(path.join(kept, 'earlier'), 'from the last move');
+  fs.writeFileSync(path.join(wt, '.env'), 'SECRET=2\n');
+  expect(await keepIgnoredFiles(wt, 'pane-1', ['.env'])).toEqual(['.env']);
+  expect(fs.readFileSync(path.join(kept, '.env'), 'utf8')).toBe('SECRET=2\n');
+  expect(fs.existsSync(path.join(kept, 'earlier'))).toBe(false);
+  expect(fs.existsSync(`${kept}.incoming`)).toBe(false);
+  expect(fs.existsSync(`${kept}.previous`)).toBe(false);
 });

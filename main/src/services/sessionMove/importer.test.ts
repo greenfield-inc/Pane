@@ -44,17 +44,27 @@ function memoryTabs(): ImporterTabs & { panels: Map<string, ToolPanel> } {
     clearPaused: async () => undefined,
     releaseChatMove: async () => undefined,
     forgetPaneTabs: async paneId => { for (const panel of [...panels.values()]) if (panel.sessionId === paneId) panels.delete(panel.id); },
+    // The map stands for the saved rows too, which the database sets aside (fakeServices).
+    dropPaneTabsFromMemory: async () => undefined,
   };
 }
 
 interface Row { id: string; name: string; archived: boolean; worktree_path: string; worktree_name: string; project_id: number }
 
-/** The services the importer calls: one project (the target repository), Panes as rows. */
-function fakeServices(repo: string, setupGate?: Promise<void>) {
+/** The services the importer calls: one project (the target repository), Panes as rows, tabs as `panels`. */
+function fakeServices(repo: string, setupGate?: Promise<void>, panels = new Map<string, ToolPanel>()) {
   const rows = new Map<string, Row>();
   const replaced: string[] = [];
   const setMoveMark = vi.fn(async () => undefined);
   const importArriving = vi.fn(async () => undefined);
+  const rekey = (from: string, to: string, panelIds: Record<string, string>) => {
+    const row = rows.get(from);
+    if (row) { rows.delete(from); rows.set(to, { ...row, id: to }); }
+    for (const [panelFrom, panelTo] of Object.entries(panelIds)) {
+      const panel = panels.get(panelFrom);
+      if (panel) { panels.delete(panelFrom); panels.set(panelTo, { ...panel, id: panelTo, sessionId: to }); }
+    }
+  };
   const fixture = {
     databaseService: {
       getAllProjects: () => [{ id: 1, name: 'r', path: repo, worktree_folder: null }],
@@ -64,6 +74,16 @@ function fakeServices(repo: string, setupGate?: Promise<void>) {
       setSessionPanelLayout: () => undefined,
       archiveSession: (id: string) => { const row = rows.get(id); if (row) row.archived = true; return !!row; },
       deleteArchivedSessionPermanently: (id: string) => { replaced.push(id); return rows.delete(id); },
+      // As DatabaseService does: the archived row and its tabs move under other ids, and back.
+      setArchivedSessionAside: (id: string, asideId: string) => {
+        const row = rows.get(id);
+        if (!row?.archived) return null;
+        const panelIds = Object.fromEntries([...panels.values()].filter(panel => panel.sessionId === id).map(panel => [panel.id, `${panel.id}.${asideId}`]));
+        rekey(id, asideId, panelIds);
+        return { id, asideId, panelIds, hidden: 0 };
+      },
+      restoreSetAsideSession: (aside: { id: string; asideId: string; panelIds: Record<string, string> }) =>
+        rekey(aside.asideId, aside.id, Object.fromEntries(Object.entries(aside.panelIds).map(([original, moved]) => [moved, original]))),
     },
     sessionManager: {
       getProjectContextByProjectId: () => ({ pathResolver: undefined }),
@@ -186,9 +206,9 @@ describe('MoveImporter', () => {
     expect(importArriving).not.toHaveBeenCalled();
   });
 
-  it('a failed move back puts back the archived Pane, its tabs and its snapshot ref (F-6)', async () => {
-    const { services, rows, replaced } = fakeServices(target);
+  it('a failed move back puts back the archived Pane, its tabs and its snapshot ref, and deletes nothing it saved (F-6)', async () => {
     const tabs = memoryTabs();
+    const { services, rows, replaced } = fakeServices(target, undefined, tabs.panels);
     // What the earlier move away left here: the snapshot ref for Restore, the archived Pane and its tab.
     const previous = git(target, 'rev-parse', 'HEAD');
     git(target, 'update-ref', 'refs/pane/move/p1', previous);
@@ -200,8 +220,9 @@ describe('MoveImporter', () => {
     await stage(importer, manifest(moveId, [member('p1'), member('p2')]), { 'panes/p1.bundle': bundle, 'panes/p2.bundle': 'not a bundle' });
     importer.build(moveId);
     expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('failed');
-    // The arriving p1 did replace the archived one before p2 failed.
-    expect(replaced).toContain('p1');
+    // The arriving p1 did replace the archived one before p2 failed; only the arriving copy was deleted.
+    expect(replaced).toEqual(['p1']);
+    expect([...rows.keys()]).toEqual(['p1']);
     expect(git(target, 'rev-parse', 'refs/pane/move/p1')).toBe(previous);
     expect(rows.get('p1')?.archived).toBe(true);
     expect(tabs.panels.get('t-old')?.state.customState).toEqual({ conversationId: 'c-1' });
@@ -209,8 +230,8 @@ describe('MoveImporter', () => {
   });
 
   it('a move back gets the arriving Explorer and Diff, not the archived copy\'s permanent ones', async () => {
-    const { services, rows } = fakeServices(target);
     const tabs = memoryTabs();
+    const { services, rows } = fakeServices(target, undefined, tabs.panels);
     rows.set('p1', { id: 'p1', name: 'Pane p1', archived: true, worktree_path: path.join(root, 'worktrees', 'p1'), worktree_name: 'p1', project_id: 1 });
     const permanent = { createdAt: '', lastActiveAt: '', position: 0, permanent: true };
     await tabs.createPanel({ id: 'explorer-1', sessionId: 'p1', type: 'explorer', title: 'Explorer', initialState: { customState: { from: 'archive' } }, metadata: permanent });
@@ -222,6 +243,27 @@ describe('MoveImporter', () => {
     importer.build(moveId);
     expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
     expect(tabs.panels.get('explorer-1')?.state.customState).toEqual({ from: 'arriving' });
+  });
+
+  it('a move back deletes the archive it replaced only once the move commits (F-6)', async () => {
+    const tabs = memoryTabs();
+    const { services, rows, replaced } = fakeServices(target, undefined, tabs.panels);
+    rows.set('p1', { id: 'p1', name: 'Pane p1', archived: true, worktree_path: path.join(root, 'worktrees', 'p1'), worktree_name: 'p1', project_id: 1 });
+    await tabs.createPanel({ id: 't-old', sessionId: 'p1', type: 'terminal', title: 'Old tab' });
+    const importer = new MoveImporter(services, registry, path.join(root, 'moves'), tabs);
+    const moveId = newMoveId();
+    await stage(importer, manifest(moveId, [member('p1')]), { 'panes/p1.bundle': bundle });
+    importer.build(moveId);
+    expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
+    // Built and waiting for the source to freeze: the archive still waits, set aside.
+    const aside = `p1.moving-${moveId}`;
+    expect(rows.get(aside)?.archived).toBe(true);
+    expect(tabs.panels.get(`t-old.${aside}`)).toBeDefined();
+    expect(replaced).toEqual([]);
+    importer.start(moveId);
+    expect((await waitStage(importer, moveId, ['started', 'failed'])).stage).toBe('started');
+    expect(replaced).toEqual([aside]);
+    expect(rows.get('p1')?.archived).toBe(false);
   });
 
   it('abort waits for a build in flight, and nothing it made survives (F-7)', async () => {
