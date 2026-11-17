@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { ChunkedUploadUnsupportedError, formatTimeLeft, uploadInChunks, UploadRefusedError, type UploadFile, type UploadProgress } from '@shared/chunkedUpload';
-import type { JsonValue } from '@shared/validation/boundaryDecoder';
+import {
+  ChunkedUploadUnsupportedError, formatTimeLeft, uploadInChunks, UploadRefusedError, uploadToHost, UPLOAD_NO_ROOM_MESSAGE,
+  type UploadFile, type UploadProgress,
+} from '../../../shared/chunkedUpload';
+import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
+import { PaneError } from '../../../shared/paneError';
+
+// The shared upload loop that the phone, desktop and the PWA all run.
 
 const text = 'hello wonderful world';
 const toBase64 = (value: string) => Buffer.from(value).toString('base64');
@@ -22,7 +28,7 @@ function memoryFile(content: string): UploadFile {
  * byte count. `failures` makes chosen calls fail like a dropped connection,
  * either before the host sees them or after it applied them (a lost reply).
  */
-function fakeHost(failures: Record<number, 'before' | 'after'> = {}, refuse?: string, onCall?: (channel: string, args: unknown[]) => void) {
+function fakeHost(failures: Record<number, 'before' | 'after'> = {}, refuse?: Error, onCall?: (channel: string, args: unknown[]) => void) {
   let received = '';
   let started = false;
   const calls: string[] = [];
@@ -33,10 +39,11 @@ function fakeHost(failures: Record<number, 'before' | 'after'> = {}, refuse?: st
     const reply = ((): JsonValue | undefined => {
       switch (channel) {
         case 'terminal:upload-start':
-          if (refuse) throw new Error(refuse);
+          if (refuse) throw refuse;
           started = true;
           return { receivedBytes: received.length };
         case 'terminal:upload-chunk': {
+          // SAFETY: the upload loop sends chunks as [uploadId, offset, base64].
           const [, offset, data] = args as [string, number, string];
           if (!started) throw new Error('Upload not found. Start it again.');
           if (offset === received.length) received += Buffer.from(data, 'base64').toString();
@@ -47,6 +54,8 @@ function fakeHost(failures: Record<number, 'before' | 'after'> = {}, refuse?: st
         case 'terminal:upload-cancel':
           received = '';
           return undefined;
+        case 'terminal:paste-file':
+          return { filePath: `/host/.pane/files/${String(args[2])}` };
         default:
           throw new Error(`unexpected ${channel}`);
       }
@@ -120,8 +129,20 @@ describe('uploadInChunks', () => {
     expect(progress.at(-1)?.retrying).toBe(false);
   });
 
-  it('stops at once when the host refuses the file', async () => {
-    const host = fakeHost({}, 'File too large (60 MB, max 50 MB)');
+  it('stops at once when the host has no room, by its error code', async () => {
+    const message = `${UPLOAD_NO_ROOM_MESSAGE}: note.txt needs 1.0 GB, 5.5 GB is free, and Pane keeps 5.0 GB free (Settings > Machine health). Nothing was saved.`;
+    // A phone or the PWA gets the code on the error; local desktop gets it in Electron's IPC text.
+    for (const refusal of [new PaneError('ERR_UPLOAD_NO_ROOM', message), new Error(`Error [ERR_UPLOAD_NO_ROOM]: ${message} Next: Free up space here, or send a smaller file.`)]) {
+      const host = fakeHost({}, refusal);
+
+      await expect(uploadInChunks({ invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', wait: noWait }))
+        .rejects.toBeInstanceOf(UploadRefusedError);
+      expect(host.calls).toEqual(['terminal:upload-start']);
+    }
+  });
+
+  it('stops at once when an older host refuses the file in words', async () => {
+    const host = fakeHost({}, new Error('File too large (60 MB, max 50 MB)'));
 
     await expect(uploadInChunks({ invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', wait: noWait }))
       .rejects.toThrow(new UploadRefusedError('File too large (60 MB, max 50 MB)'));
@@ -131,17 +152,38 @@ describe('uploadInChunks', () => {
   it('recognizes a refusal wrapped by the remote client', async () => {
     const wrapped = 'Delivery unknown: the remote action may have completed, but its result could not be confirmed. '
       + 'Check the current state before trying again. (Upload checksum mismatch)';
-    const host = fakeHost({}, wrapped);
+    const host = fakeHost({}, new Error(wrapped));
 
     await expect(uploadInChunks({ invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', wait: noWait }))
       .rejects.toThrow(new UploadRefusedError('Upload checksum mismatch'));
   });
 
   it('reports a host without chunked upload instead of retrying', async () => {
-    const host = fakeHost({}, 'No Pane daemon command registered for channel "terminal:upload-start"');
+    const host = fakeHost({}, new Error('No Pane daemon command registered for channel "terminal:upload-start"'));
 
     await expect(uploadInChunks({ invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', wait: noWait }))
       .rejects.toBeInstanceOf(ChunkedUploadUnsupportedError);
+    expect(host.calls).toEqual(['terminal:upload-start']);
+  });
+
+  it('sends a chat attachment to an older host in one request, from desktop connected to it', async () => {
+    // Desktop's remote client rewrites the host's unknown-command error (remotePaneClient.ts hostOutdatedError).
+    const outdated = new PaneError('ERR_HOST_OUTDATED', 'Old Mac runs an older Pane that does not have this command (terminal:upload-start). Nothing was changed.');
+    const pastes: unknown[][] = [];
+    const host = fakeHost({}, outdated, (channel, args) => { if (channel === 'terminal:paste-file') pastes.push(args); });
+
+    const path = await uploadToHost({ invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', keepName: true, wait: noWait });
+
+    expect(path).toBe('/host/.pane/files/note.txt');
+    expect(pastes).toEqual([['s1', `data:text/plain;base64,${toBase64(text)}`, 'note.txt', { keepName: true }]]);
+  });
+
+  it('refuses a file over 12 MB for an older host, saying to update it', async () => {
+    const host = fakeHost({}, new Error('No Pane daemon command registered for channel "terminal:upload-start"'));
+    const big = { ...memoryFile(text), name: 'movie.mov', size: 13 * 1024 * 1024 };
+
+    await expect(uploadToHost({ invoke: host.invoke, file: big, sessionId: 's1', uploadId: 'upload-1', wait: noWait }))
+      .rejects.toThrow(new UploadRefusedError('The Pane on that computer takes files up to 12 MB, and movie.mov is larger. Update Pane there to send files of any size.'));
     expect(host.calls).toEqual(['terminal:upload-start']);
   });
 
@@ -228,6 +270,20 @@ describe('uploadInChunks', () => {
     await expect(run).rejects.toThrow('Upload cancelled');
     expect(host.calls.at(-1)).toBe('terminal:upload-cancel');
     expect(host.calls).not.toContain('terminal:upload-commit');
+  });
+
+  it('tells the host to discard the upload when cancelled while reconnecting', async () => {
+    // The second chunk's connection drops; the person cancels during the wait before the retry.
+    const host = fakeHost({ 2: 'before' });
+    const controller = new AbortController();
+
+    const run = uploadInChunks({
+      invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', chunkBytes: 8, signal: controller.signal,
+      wait: async () => { controller.abort(); },
+    });
+
+    await expect(run).rejects.toThrow('Upload cancelled');
+    expect(host.calls.at(-1)).toBe('terminal:upload-cancel');
   });
 });
 

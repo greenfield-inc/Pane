@@ -2,6 +2,7 @@ import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 
 import type { UploadFile } from '@shared/chunkedUpload';
+import { bytesToBase64 } from '@shared/utils/base64';
 
 export type AttachSource = 'photos' | 'camera' | 'files';
 
@@ -54,7 +55,7 @@ function toPickedFile(uri: string, name: string, mimeType: string): PickedFile {
       const handle = file.open();
       try {
         handle.offset = offset;
-        return toBase64(handle.readBytes(length));
+        return bytesToBase64(handle.readBytes(length));
       } finally {
         handle.close();
       }
@@ -66,11 +67,3 @@ function defaultName(uri: string, type: ImagePicker.ImagePickerAsset['type']): s
   return uri.split('/').pop() || (type === 'video' ? 'video.mov' : 'photo.jpg');
 }
 
-/** Hermes has `btoa`, which takes a binary string; build it in slices to keep call arguments small. */
-function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-  return btoa(binary);
-}

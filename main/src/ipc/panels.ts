@@ -162,12 +162,20 @@ const uploadChunkSchema = boundary.object({
 });
 
 let chunkedUploads: ChunkedUploadStore | null = null;
+/** Besides on every new upload, partial files nobody finished (a closed app, a lost phone) are swept this often. */
+const UPLOAD_SWEEP_MS = 60 * 60 * 1000;
 /** Uploads leave Machine health's critical level of free space untouched, as set in Settings. */
 function uploadStore(configManager: AppServices['configManager']): ChunkedUploadStore {
-  chunkedUploads ??= new ChunkedUploadStore({
-    dir: getAppSubdirectory('uploads'),
-    reserveBytes: () => (configManager.getConfig().machineHealth?.diskCriticalGB ?? MACHINE_HEALTH_DEFAULTS.diskCriticalGB) * 1024 ** 3,
-  });
+  if (!chunkedUploads) {
+    const store = new ChunkedUploadStore({
+      dir: getAppSubdirectory('uploads'),
+      reserveBytes: () => (configManager.getConfig().machineHealth?.diskCriticalGB ?? MACHINE_HEALTH_DEFAULTS.diskCriticalGB) * 1024 ** 3,
+    });
+    const sweep = () => void store.sweep().catch(error => console.warn('[Uploads] Could not delete abandoned uploads:', error));
+    sweep();
+    setInterval(sweep, UPLOAD_SWEEP_MS).unref();
+    chunkedUploads = store;
+  }
   return chunkedUploads;
 }
 
@@ -1021,6 +1029,8 @@ export function registerPanelHandlers(
   // landPastedImage, anything else (or a chat attachment that keeps its name)
   // through landPastedFile. See ChunkedUploadStore for resume, retry and the
   // free-space rule.
+  // Created at start-up, so abandoned partial files are swept even if no upload ever starts.
+  uploadStore(services.configManager);
   commandRegistry.register('terminal:upload-start', (input: PaneCommandValue) =>
     uploadStore(services.configManager).start(decodeBoundary(input, uploadStartSchema)));
   commandRegistry.register('terminal:upload-chunk', (uploadId: PaneCommandValue, offset: PaneCommandValue, base64: PaneCommandValue) => {

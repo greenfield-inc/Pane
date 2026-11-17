@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { formatUploadBytes } from '../../../../shared/chunkedUpload';
+import { formatBytes } from '../../../../shared/utils/formatBytes';
 import type { HostUploadItem } from '../../hooks/useHostUploads';
 import { describeUpload } from '../../utils/hostUpload';
 
@@ -23,9 +23,10 @@ export function HostUploadList({ items, onCancel }: { items: readonly HostUpload
             <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-tertiary">
               <div className="h-full bg-interactive" style={{ width: `${Math.floor(fraction * 100)}%` }} />
             </div>
-            <div className="mt-1 flex justify-between gap-2 text-[11px] tabular-nums text-text-tertiary">
-              <span>{describeUpload(progress)}</span>
-              <span>{formatUploadBytes(progress.receivedBytes)} of {formatUploadBytes(progress.totalBytes)}</span>
+            {/* One line at a fixed width: the status truncates instead of wrapping as its numbers change. */}
+            <div className="mt-1 flex gap-2 text-[11px] tabular-nums text-text-tertiary">
+              <span className="min-w-0 flex-1 truncate">{describeUpload(progress)}</span>
+              <span className="flex-shrink-0">{formatBytes(progress.receivedBytes)} of {formatBytes(progress.totalBytes)}</span>
             </div>
           </div>
         );

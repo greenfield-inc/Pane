@@ -330,8 +330,8 @@ export class RemoteRuntimeAdapter {
   }
 
   /** Copies a file dropped or pasted into a chat to the Pane's machine in resumable chunks, as the terminal's upload does (D-139). */
-  saveFile(sessionId: string, file: File, onProgress: (progress: UploadProgress) => void): Promise<string> {
-    return uploadFileToHost({ invoke: (channel, args) => this.invoke(channel, args), file, sessionId, keepName: true, onProgress });
+  saveFile(sessionId: string, file: File, onProgress: (progress: UploadProgress) => void, signal: AbortSignal): Promise<string> {
+    return uploadFileToHost({ invoke: (channel, args) => this.invoke(channel, args), file, sessionId, keepName: true, onProgress, signal });
   }
 
   /** The branch's changes, read-only, as the phone's Diff tab reads them. */

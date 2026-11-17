@@ -51,7 +51,7 @@ export function RemoteChatTab({ adapter, panel, panels, connected, onOpenWorker,
     device,
   }), [device, diffPanelId, onOpenWorker, onSelectPanel, sessionId]);
   // Dropped and pasted files land in the Pane's folder on the host, as the terminal's do.
-  const saveFile = useMemo<SaveChatFile>(() => (file, onProgress) => adapter.saveFile(panel.sessionId, file, onProgress), [adapter, panel.sessionId]);
+  const saveFile = useMemo<SaveChatFile>(() => (file, onProgress, signal) => adapter.saveFile(panel.sessionId, file, onProgress, signal), [adapter, panel.sessionId]);
   return <ChatTabPanel key={panel.id} panelId={panel.id} client={adapter.chatTab} connected={connected}
     workers={workers} actions={actions} saveFile={saveFile} pr={pr}
     placeholder={sessionId ? 'Ask the Session anything' : undefined} />;

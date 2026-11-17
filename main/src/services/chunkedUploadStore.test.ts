@@ -89,8 +89,21 @@ describe('ChunkedUploadStore', () => {
 
   it('refuses a file that would leave less than the reserve free, saying how much space there is', async () => {
     freeBytes = 5.5 * GB;
-    await expect(store.start({ uploadId: ID, sessionId: 's1', fileName: 'big.mov', mimeType: 'video/quicktime', size: GB, md5: '' }))
-      .rejects.toThrow('File too large for the free space on this computer: big.mov needs 1 GB, 5.5 GB is free, and Pane keeps 5 GB free. Free up space here, or send a smaller file.');
+    await expect(store.start({ uploadId: ID, sessionId: 's1', fileName: 'big.mov', mimeType: 'video/quicktime', size: GB, md5: '' })).rejects.toMatchObject({
+      code: 'ERR_UPLOAD_NO_ROOM',
+      message: 'File too large for the free space on this computer: big.mov needs 1.0 GB, 5.5 GB is free, and Pane keeps 5.0 GB free (Settings > Machine health). Nothing was saved.',
+      next: 'Free up space here, or send a smaller file.',
+    });
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('stops an upload part-way when free space runs low, and deletes what arrived', async () => {
+    await startHello();
+    await store.append(ID, 0, b64('hello '));
+    // Another upload, or a build, used the space meanwhile: 5 bytes to come, 2 above the reserve.
+    freeBytes = 5 * GB + 2;
+
+    await expect(store.append(ID, 6, b64('world'))).rejects.toMatchObject({ code: 'ERR_UPLOAD_NO_ROOM' });
     expect(await readdir(dir)).toEqual([]);
   });
 

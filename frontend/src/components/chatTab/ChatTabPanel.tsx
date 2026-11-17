@@ -62,7 +62,7 @@ function Attachment() {
   return <AttachmentPrimitive.Root className="chat-attachment" data-kind={kind} aria-busy={copying}>
     {kind === 'image' ? <ImagePreview /> : <span className="chat-attachment-icon" aria-hidden>{copying ? <LoaderCircle className="chat-spin" /> : <FileText />}</span>}
     <span className="chat-attachment-name"><AttachmentPrimitive.Name /></span>
-    {copying && <span className="chat-attachment-status">{progress ? `Copying ${describeUpload(progress)}` : 'Copying…'}</span>}
+    {copying && <span className="chat-attachment-status" title={progress ? `Copying ${describeUpload(progress)}` : 'Copying'}>{progress ? describeUpload(progress, { short: true }) : '0%'}</span>}
     <AttachmentPrimitive.Remove aria-label="Remove attachment" title="Remove attachment"><X className="h-3 w-3" /></AttachmentPrimitive.Remove>
   </AttachmentPrimitive.Root>;
 }

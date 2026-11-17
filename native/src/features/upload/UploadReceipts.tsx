@@ -1,6 +1,7 @@
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 
-import { formatTimeLeft, formatUploadBytes } from '@shared/chunkedUpload';
+import { formatTimeLeft } from '@shared/chunkedUpload';
+import { formatBytes } from '@shared/utils/formatBytes';
 
 import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
@@ -31,7 +32,7 @@ function Receipt({ receipt, onCancel, onRetry }: { receipt: UploadReceipt; onCan
   const percent = receipt.totalBytes > 0 ? Math.floor((receipt.receivedBytes / receipt.totalBytes) * 100) : 0;
   const detail = {
     queued: 'waiting',
-    uploading: [`${percent}%`, `${formatUploadBytes(receipt.receivedBytes)} of ${formatUploadBytes(receipt.totalBytes)}`, formatTimeLeft(receipt.secondsLeft)]
+    uploading: [`${percent}%`, `${formatBytes(receipt.receivedBytes)} of ${formatBytes(receipt.totalBytes)}`, formatTimeLeft(receipt.secondsLeft)]
       .filter(Boolean).join(' · '),
     retrying: receipt.paused ? `Paused, retrying · ${percent}%` : `Reconnecting · ${percent}%`,
     failed: receipt.error ?? 'Upload failed',

@@ -55,10 +55,9 @@ import { createAtTerminalHandler } from '../../services/terminalInterceptor/hand
 import { InterceptorDropdown } from '../terminal/InterceptorDropdown';
 import { InterceptorToast } from '../terminal/InterceptorToast';
 import { HostUploadList } from '../terminal/HostUploadList';
-import { useHostUploads } from '../../hooks/useHostUploads';
+import { attachTerminalPaste, uploadToTerminal, useHostUploads } from '../../hooks/useHostUploads';
 import { usePanelStore } from '../../stores/panelStore';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
-import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import { onTerminalReflow } from '../../utils/terminalReflow';
@@ -289,8 +288,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const capabilitiesRef = useRef<LoadedTerminalCapabilities | null>(null);
   const isActiveRef = useRef(isActive);
   const pasteFilesRef = useRef<((files: File[]) => void) | null>(null);
-  const hostUploads = useHostUploads();
-  const uploadToHostRef = useRef(hostUploads.upload);
+  const hostUploads = useHostUploads(panel.id);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const isNearBottomRef = useRef(true); // Track if user is scrolled near the bottom
   const [showScrollDown, setShowScrollDown] = useState(false); // Show jump-to-bottom pill
@@ -1580,34 +1578,19 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             e.dataTransfer.dropEffect = 'copy';
           };
           // Save files on the terminal's host and paste each resolved path. Shared by
-          // drag-and-drop and the upload button's file picker.
+          // drag-and-drop, image paste and the upload button's file picker. The copies run
+          // in resumable chunks with progress over the terminal, and keep going while
+          // another Pane is shown: what lands meanwhile is pasted when this terminal is back.
           const pasteFiles = (files: File[]) => {
             if (!files.length || disposed || !terminal) return;
-            (async () => {
-              for (const file of files) {
-                if (disposed || !terminal) return;
-                try {
-                  // In resumable chunks, with progress over the terminal: any size the host has room for.
-                  const resolvedPath = await uploadToHostRef.current({
-                    invoke: (channel, args) => window.electronAPI.invoke(channel, ...args),
-                    file,
-                    sessionId: terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
-                  });
-
-                  if (resolvedPath && !disposed && terminal) {
-                    // See paste-handler comment above: paste the raw path, Claude's
-                    // parser detects image file paths and auto-attaches them.
-                    terminal.paste(`${resolvedPath}\n`);
-                  }
-                } catch (err) {
-                  console.error('[TerminalPanel] Failed to upload file:', err);
-                  if (!disposed && terminal) {
-                    terminal.paste(`[Upload failed] ${err instanceof Error ? ipcErrorMessage(err, 'Unknown error') : String(err)}\n`);
-                  }
-                }
-              }
-            })();
+            void uploadToTerminal(panel.id, files, {
+              invoke: (channel, args) => window.electronAPI.invoke(channel, ...args),
+              sessionId: terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
+            });
           };
+          const detachUploadPaste = attachTerminalPaste(panel.id, text => {
+            if (!disposed && terminal) terminal.paste(text);
+          });
           pasteFilesRef.current = pasteFiles;
           const handleDrop = (e: DragEvent) => {
             e.preventDefault();
@@ -1867,6 +1850,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             terminalElement?.removeEventListener('dragover', handleDragOver);
             terminalElement?.removeEventListener('drop', handleDrop);
             if (pasteFilesRef.current === pasteFiles) pasteFilesRef.current = null;
+            detachUploadPaste();
           };
         }
       } catch (error) {

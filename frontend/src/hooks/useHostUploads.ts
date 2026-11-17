@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import type { UploadProgress } from '../../../shared/chunkedUpload';
+import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { uploadFileToHost, type HostUploadOptions } from '../utils/hostUpload';
 
 /** A copy shows once it has run this long, so a small file never flashes a progress row. */
@@ -11,53 +12,114 @@ export interface HostUploadItem {
   progress: UploadProgress;
 }
 
-/**
- * Copies files to the Pane's machine and lists the copies still running, with
- * their progress, for a progress list to show. `upload` resolves to the
- * host's path, or null when the person cancelled it.
- */
-export function useHostUploads() {
-  const [items, setItems] = useState<HostUploadItem[]>([]);
-  const controllers = useRef(new Map<string, AbortController>());
+interface PanelUploads {
+  items: HostUploadItem[];
+  controllers: Map<string, AbortController>;
+  /** What finished while the terminal was away (a path, or why a copy failed), pasted when it is back. */
+  waiting: string[];
+  paste: ((text: string) => void) | null;
+}
 
-  const upload = useCallback(async (options: Omit<HostUploadOptions, 'signal' | 'onProgress'>): Promise<string | null> => {
+const NO_ITEMS: HostUploadItem[] = [];
+const panels = new Map<string, PanelUploads>();
+const listeners = new Set<() => void>();
+
+function panelUploads(panelId: string): PanelUploads {
+  let entry = panels.get(panelId);
+  if (!entry) {
+    entry = { items: [], controllers: new Map(), waiting: [], paste: null };
+    panels.set(panelId, entry);
+  }
+  return entry;
+}
+
+function setItems(panelId: string, update: (items: HostUploadItem[]) => HostUploadItem[]): void {
+  const entry = panels.get(panelId);
+  if (!entry) return;
+  entry.items = update(entry.items);
+  for (const listener of listeners) listener();
+}
+
+function deliver(panelId: string, text: string): void {
+  const entry = panels.get(panelId);
+  if (!entry) return;
+  if (entry.paste) entry.paste(text);
+  else entry.waiting.push(text);
+}
+
+/**
+ * Copies files to a terminal's machine one at a time and pastes each path into
+ * the terminal. The copies belong to the panel, not to the mounted terminal:
+ * switching Panes leaves them running, and what finishes meanwhile is pasted
+ * when the terminal mounts again (`attachTerminalPaste`). Only closing the
+ * panel stops them (`cancelPanelUploads`).
+ */
+export async function uploadToTerminal(panelId: string, files: readonly File[], options: Omit<HostUploadOptions, 'file' | 'signal' | 'onProgress'>): Promise<void> {
+  const entry = panelUploads(panelId);
+  for (const file of files) {
+    // The panel was closed during an earlier file: the rest are not sent.
+    if (panels.get(panelId) !== entry) return;
     const id = crypto.randomUUID();
     const controller = new AbortController();
-    controllers.current.set(id, controller);
-    let latest: UploadProgress = { receivedBytes: 0, totalBytes: options.file.size, retrying: false, lastProgressAt: Date.now(), secondsLeft: null };
+    entry.controllers.set(id, controller);
+    let latest: UploadProgress = { receivedBytes: 0, totalBytes: file.size, retrying: false, lastProgressAt: Date.now(), secondsLeft: null };
     let shown = false;
     const showTimer = setTimeout(() => {
       shown = true;
-      setItems(current => [...current, { id, name: options.file.name, progress: latest }]);
+      setItems(panelId, items => [...items, { id, name: file.name, progress: latest }]);
     }, SHOW_AFTER_MS);
     try {
-      return await uploadFileToHost({
+      const path = await uploadFileToHost({
         ...options,
+        file,
         signal: controller.signal,
         onProgress: progress => {
           latest = progress;
-          if (shown) setItems(current => current.map(item => (item.id === id ? { ...item, progress } : item)));
+          if (shown) setItems(panelId, items => items.map(item => (item.id === id ? { ...item, progress } : item)));
         },
       });
+      // Paste the raw path: Claude's parser detects image file paths and attaches them.
+      deliver(panelId, `${path}\n`);
     } catch (error) {
-      if (controller.signal.aborted) return null;
-      throw error;
+      if (!controller.signal.aborted) {
+        console.error('[TerminalPanel] Failed to upload file:', error);
+        deliver(panelId, `[Upload failed] ${ipcErrorMessage(error, 'Unknown error')}\n`);
+      }
     } finally {
       clearTimeout(showTimer);
-      controllers.current.delete(id);
-      setItems(current => current.filter(item => item.id !== id));
+      entry.controllers.delete(id);
+      setItems(panelId, items => items.filter(item => item.id !== id));
     }
-  }, []);
+  }
+}
 
-  const cancel = useCallback((id: string) => controllers.current.get(id)?.abort(), []);
+/** Pastes into the mounted terminal: first what finished while it was away, then each copy as it lands. Returns the detach. */
+export function attachTerminalPaste(panelId: string, paste: (text: string) => void): () => void {
+  const entry = panelUploads(panelId);
+  entry.paste = paste;
+  for (const text of entry.waiting.splice(0)) paste(text);
+  return () => {
+    if (entry.paste === paste) entry.paste = null;
+  };
+}
 
-  // Closing the tab stops its copies; the host deletes partial files after a day.
-  useEffect(() => {
-    const running = controllers.current;
-    return () => {
-      for (const controller of running.values()) controller.abort();
-    };
-  }, []);
+/** The panel was closed: stop its copies (the host deletes their partial files) and forget them. */
+export function cancelPanelUploads(panelId: string): void {
+  const entry = panels.get(panelId);
+  if (!entry) return;
+  for (const controller of entry.controllers.values()) controller.abort();
+  panels.delete(panelId);
+  for (const listener of listeners) listener();
+}
 
-  return { items, upload, cancel };
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/** The terminal's copies still running, with their progress, and a cancel for each. */
+export function useHostUploads(panelId: string) {
+  const items = useSyncExternalStore(subscribe, () => panels.get(panelId)?.items ?? NO_ITEMS);
+  const cancel = useCallback((id: string) => panels.get(panelId)?.controllers.get(id)?.abort(), [panelId]);
+  return { items, cancel };
 }

@@ -761,6 +761,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       ],
     };
 
+    const uploads = new Map<string, { fileName: string; received: number }>();
     const invoke = (channel: string, ...args: unknown[]) => {
       trackCall(channel, args);
       if (channel === 'terminal:ack') terminalAckedBytes += Number(args[1]);
@@ -776,6 +777,29 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       if (channel === 'terminal:set-preferred-shell') {
         configState.preferredShell = String(args[0]);
+        return Promise.resolve(undefined);
+      }
+      // The host's chunked upload (terminal and chat files): bytes are counted, and a commit lands the file under its name.
+      if (channel === 'terminal:upload-start') {
+        // SAFETY: the shared upload loop sends an UploadStart object.
+        const start = args[0] as { uploadId: string; fileName: string; size: number };
+        const upload = uploads.get(start.uploadId) ?? { fileName: start.fileName, received: 0 };
+        uploads.set(start.uploadId, upload);
+        return Promise.resolve({ receivedBytes: upload.received });
+      }
+      if (channel === 'terminal:upload-chunk') {
+        const upload = uploads.get(String(args[0]));
+        if (!upload) return Promise.reject(new Error('Upload not found. Start it again.'));
+        if (Number(args[1]) === upload.received) upload.received += atob(String(args[2])).length;
+        return Promise.resolve({ receivedBytes: upload.received });
+      }
+      if (channel === 'terminal:upload-commit') {
+        const upload = uploads.get(String(args[0]));
+        if (!upload) return Promise.reject(new Error('Upload not found. Start it again.'));
+        return Promise.resolve({ filePath: `/tmp/pane-uploads/${upload.fileName}` });
+      }
+      if (channel === 'terminal:upload-cancel') {
+        uploads.delete(String(args[0]));
         return Promise.resolve(undefined);
       }
       if (channel === 'app:show-context-menu') {

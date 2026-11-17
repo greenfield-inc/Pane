@@ -37,8 +37,8 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   const state = panel.state.customState as ChatPanelState | undefined;
   const workers = useSessionWorkers(DESKTOP_WORKERS, state?.orchestrationSessionId);
   // Dropped and pasted files land in the Pane's folder on its machine, local or remote, as the terminal's do.
-  const saveFile = useMemo<SaveChatFile>(() => (file, onProgress) => uploadFileToHost({
-    invoke: (channel, args) => window.electronAPI.invoke(channel, ...args), file, sessionId: panel.sessionId, keepName: true, onProgress,
+  const saveFile = useMemo<SaveChatFile>(() => (file, onProgress, signal) => uploadFileToHost({
+    invoke: (channel, args) => window.electronAPI.invoke(channel, ...args), file, sessionId: panel.sessionId, keepName: true, onProgress, signal,
   }), [panel.sessionId]);
   // Stable, so a re-render here does not re-render every turn of the chat.
   const cwd = state?.cwd;

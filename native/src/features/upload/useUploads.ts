@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { invokeChannel, useDaemon } from '@/daemon';
+import { useDaemon } from '@/daemon';
 
-import { ChunkedUploadUnsupportedError, uploadInChunks, UploadRefusedError } from '@shared/chunkedUpload';
+import { uploadToHost } from '@shared/chunkedUpload';
 import { pickFiles, type AttachSource, type PickedFile } from './pickFiles';
 
 /** After this long without the host confirming new bytes, the receipt reads "Paused, retrying". */
 const PAUSED_AFTER_MS = 5 * 60 * 1000;
 /** Done receipts stay up this long. */
 const DONE_VISIBLE_MS = 4000;
-/** Hosts without chunked upload take one request, capped at 16 MB of base64. */
-const SINGLE_REQUEST_MAX_BYTES = 12 * 1024 * 1024;
 
 type ReceiptState = 'queued' | 'uploading' | 'retrying' | 'failed' | 'done';
 
@@ -65,55 +63,37 @@ export function useUploads(sessionId: string, onUploaded: (path: string) => void
     const job: Job = found;
     update(id, { state: 'uploading', error: null, paused: false });
     try {
-      let path: string;
-      try {
-        path = await uploadInChunks({
-          invoke: (channel, args) => client.invoke(channel, args),
-          file: job.file,
-          sessionId,
-          uploadId: id,
-          signal: job.controller.signal,
-          wait: (ms, signal) => new Promise<void>(resolve => {
-            const timer = setTimeout(done, ms);
-            function done() {
-              clearTimeout(timer);
-              job.nudge = null;
-              resolve();
-            }
-            job.nudge = done;
-            signal?.addEventListener('abort', done, { once: true });
-          }),
-          onProgress: progress => update(id, {
-            receivedBytes: progress.receivedBytes,
-            secondsLeft: progress.secondsLeft,
-            state: progress.retrying ? 'retrying' : 'uploading',
-            paused: progress.retrying && Date.now() - progress.lastProgressAt >= PAUSED_AFTER_MS,
-          }),
-        });
-      } catch (error) {
-        if (!(error instanceof ChunkedUploadUnsupportedError)) throw error;
-        path = await uploadInOneRequest(job.file);
-      }
+      const path = await uploadToHost({
+        invoke: (channel, args) => client.invoke(channel, args),
+        file: job.file,
+        sessionId,
+        uploadId: id,
+        signal: job.controller.signal,
+        wait: (ms, signal) => new Promise<void>(resolve => {
+          const timer = setTimeout(done, ms);
+          function done() {
+            clearTimeout(timer);
+            job.nudge = null;
+            resolve();
+          }
+          job.nudge = done;
+          signal?.addEventListener('abort', done, { once: true });
+        }),
+        onProgress: progress => update(id, {
+          receivedBytes: progress.receivedBytes,
+          secondsLeft: progress.secondsLeft,
+          state: progress.retrying ? 'retrying' : 'uploading',
+          paused: progress.retrying && Date.now() - progress.lastProgressAt >= PAUSED_AFTER_MS,
+        }),
+      });
       update(id, { state: 'done', receivedBytes: job.file.size, paused: false });
       delivered.current(path);
       setTimeout(() => remove(id), DONE_VISIBLE_MS);
     } catch (error) {
       if (job.controller.signal.aborted) return;
-      const message = error instanceof UploadRefusedError || error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
       update(id, { state: 'failed', paused: false, error: message });
     }
-  };
-
-  /** Hosts from before chunked upload: the same single request desktop's upload button sends. */
-  const uploadInOneRequest = async (file: PickedFile): Promise<string> => {
-    if (file.size > SINGLE_REQUEST_MAX_BYTES) {
-      throw new Error('This host takes files up to 12 MB. Update Pane on the host to send larger files.');
-    }
-    const dataUrl = `data:${file.mimeType};base64,${await file.read(0, file.size)}`;
-    const result = file.isImage
-      ? await invokeChannel<{ filePath: string }>(client, 'terminal:paste-image', ['', sessionId, dataUrl, file.mimeType])
-      : await invokeChannel<{ filePath: string }>(client, 'terminal:paste-file', [sessionId, dataUrl, file.name]);
-    return result.filePath;
   };
 
   const enqueue = (id: string) => {
@@ -165,7 +145,7 @@ export function useUploads(sessionId: string, onUploaded: (path: string) => void
     enqueue(id);
   };
 
-  // Leaving the pane stops its uploads; the host deletes the partial files after a day.
+  // Leaving the pane stops its uploads, and the host deletes their partial files.
   useEffect(() => {
     const running = jobs.current;
     return () => {

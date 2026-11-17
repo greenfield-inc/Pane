@@ -1,4 +1,6 @@
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './validation/boundaryDecoder';
+import { PaneError } from './paneError';
+import { RemoteRequestError } from './remoteClient/remoteDaemonClient';
 
 /** The first chunk: about 27 s at 50 kbps once base64-encoded, well inside every timeout on the way. */
 const FIRST_CHUNK_BYTES = 128 * 1024;
@@ -74,8 +76,24 @@ export class ChunkedUploadUnsupportedError extends Error {
   override name = 'ChunkedUploadUnsupportedError';
 }
 
-/** Host replies that mean the file itself is the problem. Anything else is treated as a dropped connection. */
-const REFUSALS = /File too large|already used for a different file|checksum mismatch|Invalid upload/;
+/** The host has no room for the rest of the file: free space would drop below Machine health's critical level. */
+export const UPLOAD_NO_ROOM_CODE = 'ERR_UPLOAD_NO_ROOM';
+/** The host can't take the upload as sent (a reused id, a bad checksum, a chunk past the end); sending it again won't help. */
+export const UPLOAD_INVALID_CODE = 'ERR_UPLOAD_INVALID';
+/**
+ * How the host's no-room refusal starts. Phones from before the error codes stop on
+ * "File too large" (the old 50 MB refusal), so the wording keeps that prefix.
+ */
+export const UPLOAD_NO_ROOM_MESSAGE = 'File too large for the free space on this computer';
+/** Single-request uploads to hosts from before chunked upload: 16 MB per request, base64 included. */
+const SINGLE_REQUEST_MAX_BYTES = 12 * 1024 * 1024;
+
+const REFUSAL_CODES = new Set([UPLOAD_NO_ROOM_CODE, UPLOAD_INVALID_CODE]);
+/** Hosts from before the codes refuse with these words only. */
+const LEGACY_REFUSALS = /File too large|already used for a different file|checksum mismatch|Invalid upload/;
+/** A host without the chunk channels: its own registry's words, or desktop's rewrite of them (ERR_HOST_OUTDATED). */
+const UNSUPPORTED_CODES = new Set(['ERR_UNKNOWN_CHANNEL', 'ERR_HOST_OUTDATED']);
+const UNSUPPORTED_TEXT = /No Pane daemon command registered|does not have this command/;
 
 /**
  * Sends a file to the host in chunks and returns the path the host saved it
@@ -129,7 +147,7 @@ export async function uploadInChunks({
   try {
     let started = false;
     for (;;) {
-      throwIfCancelled(signal);
+      if (signal?.aborted) break;
       try {
         if (!started) {
           const request: JsonObject = { uploadId, sessionId, fileName: file.name, mimeType: file.mimeType, size: file.size, md5: file.md5 };
@@ -159,8 +177,9 @@ export async function uploadInChunks({
       } catch (error) {
         if (signal?.aborted) break;
         const message = error instanceof Error ? error.message : String(error);
-        if (message.includes('No Pane daemon command registered')) throw new ChunkedUploadUnsupportedError(message);
-        if (REFUSALS.test(message)) throw new UploadRefusedError(refusalText(message));
+        const code = error instanceof Error ? errorCode(error) : undefined;
+        if ((code && UNSUPPORTED_CODES.has(code)) || UNSUPPORTED_TEXT.test(message)) throw new ChunkedUploadUnsupportedError(message);
+        if ((code && REFUSAL_CODES.has(code)) || LEGACY_REFUSALS.test(message)) throw new UploadRefusedError(refusalText(message));
         // Ask the host where things stand, and start small again, before sending anything else.
         started = false;
         inFlightSince = null;
@@ -171,6 +190,7 @@ export async function uploadInChunks({
         failures += 1;
       }
     }
+    // Cancelled, whenever it happened (mid-chunk or while waiting to reconnect): the host drops its partial file.
     await invoke('terminal:upload-cancel', [uploadId]).catch(() => undefined);
     throw new Error('Upload cancelled');
   } finally {
@@ -209,22 +229,50 @@ function speedometer(now: () => number) {
   };
 }
 
-/** "about 3 min left", or null when the upload will be done in moments and a countdown would only flicker. */
-export function formatTimeLeft(secondsLeft: number | null): string | null {
+/**
+ * "about 3 min left" ("3 min" when `short`, for a chip), or null when the upload will be
+ * done in moments and a countdown would only flicker.
+ */
+export function formatTimeLeft(secondsLeft: number | null, { short = false }: { short?: boolean } = {}): string | null {
   if (secondsLeft === null || secondsLeft < 10) return null;
-  if (secondsLeft < 60) return 'less than a minute left';
+  if (secondsLeft < 60) return short ? '<1 min' : 'less than a minute left';
   const minutes = Math.round(secondsLeft / 60);
-  if (minutes < 60) return `about ${minutes} min left`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return `about ${hours} h${rest ? ` ${rest} min` : ''} left`;
+  const span = minutes < 60 ? `${minutes} min` : `${hours} h${rest ? ` ${rest} min` : ''}`;
+  return short ? span : `about ${span} left`;
 }
 
-/** "88.1 MB", "1.2 GB": the units a person reads off their disk. */
-export function formatUploadBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+/**
+ * Sends a file to the host and returns its path there: in resumable chunks, or as the
+ * one request a host from before chunked upload takes (up to 12 MB). Phone, desktop and
+ * PWA all upload through here.
+ */
+export async function uploadToHost(options: UploadOptions): Promise<string> {
+  try {
+    return await uploadInChunks(options);
+  } catch (error) {
+    if (!(error instanceof ChunkedUploadUnsupportedError)) throw error;
+    return uploadInOneRequest(options);
+  }
+}
+
+async function uploadInOneRequest({ invoke, file, sessionId, keepName }: UploadOptions): Promise<string> {
+  if (file.size > SINGLE_REQUEST_MAX_BYTES) {
+    throw new UploadRefusedError(`The Pane on that computer takes files up to 12 MB, and ${file.name} is larger. Update Pane there to send files of any size.`);
+  }
+  const dataUrl = `data:${file.mimeType};base64,${await file.read(0, file.size)}`;
+  const reply = file.mimeType.startsWith('image/') && !keepName
+    ? await invoke('terminal:paste-image', ['', sessionId, dataUrl, file.mimeType])
+    : await invoke('terminal:paste-file', keepName ? [sessionId, dataUrl, file.name, { keepName: true }] : [sessionId, dataUrl, file.name]);
+  return decodeBoundary(reply, committedSchema).filePath;
+}
+
+/** A host error's code: on the error itself (a remote client's), or in the `Error [CODE]:` text Electron IPC hands back. */
+function errorCode(error: Error): string | undefined {
+  if (error instanceof PaneError) return error.code;
+  if (error instanceof RemoteRequestError) return error.code ?? undefined;
+  return /\[(ERR_[A-Z0-9_]+)\]/.exec(error.message)?.[1];
 }
 
 function throwIfCancelled(signal?: AbortSignal): void {

@@ -29,10 +29,48 @@ describe('chat attachments (D-139)', () => {
     const adapter = new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl, onProgress: (_id, update) => progress.push(update?.receivedBytes ?? null) });
     const states = await attach(adapter, file('notes.pdf', 'application/pdf'));
     expect(states.map(state => state.status.type)).toEqual(['running', 'requires-action']);
-    expect(saveFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'notes.pdf' }), expect.any(Function));
+    expect(saveFile).toHaveBeenCalledWith(expect.objectContaining({ name: 'notes.pdf' }), expect.any(Function), expect.any(AbortSignal));
     expect((await adapter.send(states[1])).content).toEqual([{ type: 'text', text: '/repo/.pane/files/notes.pdf' }]);
     // Started, half way, then done: the composer waits until the last.
     expect(progress).toEqual([0, 5, null]);
+  });
+
+  it('stops the copy when its chip is removed, which frees Send', async () => {
+    let signal: AbortSignal | undefined;
+    // A copy that would run until the host answers, which it doesn't.
+    const saveFile = vi.fn((_file: File, _onProgress: (progress: UploadProgress) => void, abort: AbortSignal) => {
+      signal = abort;
+      return new Promise<string>(() => undefined);
+    });
+    const progress: Array<number | null> = [];
+    const adapter = new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl, onProgress: (_id, update) => progress.push(update?.receivedBytes ?? null) });
+    const adding = adapter.add({ file: file('video.mov', 'video/quicktime') });
+    // SAFETY: add yields the pending chip first, before its copy starts.
+    const pending = (await adding.next()).value as PendingAttachment;
+    const rest = adding.next();
+    await vi.waitFor(() => expect(saveFile).toHaveBeenCalled());
+
+    await adapter.remove(pending);
+
+    expect(await rest).toEqual({ done: true, value: undefined });
+    expect(signal?.aborted).toBe(true);
+    expect(progress.at(-1)).toBeNull();
+  });
+
+  it('picks up a copy still running when the draft comes back, instead of copying again', async () => {
+    let finish: (path: string) => void = () => undefined;
+    const saveFile = vi.fn(() => new Promise<string>(resolve => { finish = resolve; }));
+    const video = file('video.mov', 'video/quicktime');
+    const left = new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl });
+    void attach(left, video).catch(() => undefined);
+    await vi.waitFor(() => expect(saveFile).toHaveBeenCalledTimes(1));
+
+    // The chat was left and opened again: its draft adds the same file to a new composer.
+    const back = attach(new ChatAttachmentAdapter({ images: true, saveFile, readDataUrl }), video);
+    finish('/files/video.mov');
+
+    expect((await back).at(-1)).toMatchObject({ content: [{ type: 'text', text: '/files/video.mov' }] });
+    expect(saveFile).toHaveBeenCalledTimes(1);
   });
 
   it('copies an image the agent cannot take as an image (too large, HEIC, or no image support)', async () => {
