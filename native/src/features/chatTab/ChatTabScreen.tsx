@@ -9,6 +9,7 @@ import { chatTurns, waitingToolIds, type ChatWorkerLine } from '@shared/chatTabP
 import { rejectOption } from '@shared/chatTabPermissions';
 import type { ChatTabCommand, ChatTabSend } from '@shared/types/chatTab';
 
+import { useJourneyMark, useLiveMarks, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
 import { Text } from '@/ui';
 
@@ -59,6 +60,7 @@ export interface ChatTabScreenProps {
  */
 export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, onViewDiff, placeholder, blocks, userNotice, queuedLabel, settings: showSettings = true }: ChatTabScreenProps) {
   const theme = useTheme();
+  useScreenJourney('chat');
   const { chat, viewer, snapshot, connected } = useChatTab(panelId);
   const catalog = useChatAgents();
   const view = snapshot.view;
@@ -77,6 +79,9 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   }), [onViewDiff, onOpenWorker, onOpenDevice, blocks]);
   const agent = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
   const disabled = !connected || !view || view.status === 'stopped';
+  useJourneyMark('chat', 'messages', messages.length > 0);
+  useJourneyMark('chat', 'live', !disabled);
+  useLiveMarks('chat', !disabled);
   const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
   const pending = !!snapshot.pendingDelivery;
 

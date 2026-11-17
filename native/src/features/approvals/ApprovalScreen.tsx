@@ -23,6 +23,8 @@ import { sinceLabel } from '@/features/allMachines/allMachinesList';
 import { PanelTabs, type LeadingTab } from '@/features/terminal/PanelTabs';
 import { BottomGap, LeadingBodies, type LeadingTabs, TerminalScreen } from '@/features/terminal/TerminalScreen';
 import { StateScreen } from '@/features/tabs/StateScreen';
+import { perfMark } from '@/features/perf/perfMarks';
+import { useJourneyMark, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
 
@@ -50,6 +52,7 @@ export function openApproval(notifyId: string, list: ApprovalList = 'waiting') {
  * the one of Approvals' lists it steps through: Waiting, Stale or Answered.
  */
 export function ApprovalScreen({ notifyId, hintPaneId, list = 'waiting' }: { notifyId: string; hintPaneId?: string; list?: ApprovalList }) {
+  useScreenJourney('approval', notifyId);
   const shared = useNotifyShared();
   const sort = useApprovalSort(state => state.sort);
   const order = approvalListOrder(shared.data, list, Date.now(), sort);
@@ -116,6 +119,7 @@ export function ApprovalScreen({ notifyId, hintPaneId, list = 'waiting' }: { not
   // While the item is loading or gone, the alert's Pane stands in. A finished item's asker may be gone, so nothing mounts under it.
   const finished = item ? isResolved(item) : false;
   const workspace = item && !finished ? approvalWorkspace(item) : !item && (selection?.kind === 'gone' || shared.isError) ? approvalWorkspace(undefined, hintPaneId) : { kind: 'none' as const };
+  useJourneyMark('approval', `workspace=${workspace.kind}`, true, true);
   return <Workspace workspace={workspace} topBar={topBar} leading={leading} />;
 }
 
@@ -268,7 +272,7 @@ function ApprovalTopBar({ position, onNext }: { position: string | null; onNext?
 /** The approval tab's page, for the card or what stands in for it. */
 function TabFrame({ children, testID }: { children: ReactNode; testID: string }) {
   const theme = useTheme();
-  return <View testID={testID} style={[styles.fill, styles.cardContent, { backgroundColor: theme.colors.background }]}>{children}</View>;
+  return <View testID={testID} onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `card=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })} style={[styles.fill, styles.cardContent, { backgroundColor: theme.colors.background }]}>{children}</View>;
 }
 
 /**
@@ -344,7 +348,7 @@ function ApprovalCard({ item, shared, onNext, onOpenTab }: { item: NotifyItem; s
   }
 
   return (
-    <ScrollView testID="approval-card" style={[styles.fill, { backgroundColor: theme.colors.background }]} contentContainerStyle={styles.cardContent} keyboardShouldPersistTaps="handled">
+    <ScrollView testID="approval-card" onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `card=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })} style={[styles.fill, { backgroundColor: theme.colors.background }]} contentContainerStyle={styles.cardContent} keyboardShouldPersistTaps="handled">
       <View style={styles.metaRow}>
         <Icon ios="checkmark.circle" android="check_circle" size={15} color={finished ? theme.colors.textMuted : theme.colors.warning} />
         <Text variant="footnote" tone="secondary" numberOfLines={1} style={[styles.fill, styles.bold]}>{approvalKindLabel(item)}</Text>

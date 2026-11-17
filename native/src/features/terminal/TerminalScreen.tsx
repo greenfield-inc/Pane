@@ -24,6 +24,8 @@ import { isDemoProfile } from '../demo/demoHost';
 import { explainDemoLimit } from '../demo/explainDemoLimit';
 import { draftKey } from '../composer/composerDrafts';
 import { useComposerDraft } from '../composer/useComposerDraft';
+import { perfMark } from '../perf/perfMarks';
+import { useJourneyMark, useLiveMarks, useScreenJourney } from '../perf/usePerfMarks';
 import { Dimmed } from '../hosts/ConnectionStatus';
 import { useAffordances } from '../hosts/hostSettings';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
@@ -187,16 +189,20 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
       {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />}
-      <PanelTabs
-        panels={panels}
-        chatId={session?.panel.id}
-        selectedId={leadingTab?.id ?? panel?.id ?? null}
-        leading={leading?.tabs}
-        onSelectLeading={id => router.setParams({ panelId: id })}
-        onSelect={selectPanel}
-        onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
-        onClose={closePanel}
-      />
+      {/* An approval's layout is final once the tabs and the tab body stop moving (perf marks). */}
+      <View onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `tabs=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
+        <PanelTabs
+          panels={panels}
+          chatId={session?.panel.id}
+          selectedId={leadingTab?.id ?? panel?.id ?? null}
+          leading={leading?.tabs}
+          onSelectLeading={id => router.setParams({ panelId: id })}
+          onSelect={selectPanel}
+          onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
+          onClose={closePanel}
+        />
+      </View>
+      <View style={styles.fill} onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `body=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
       {leading ? <LeadingBodies leading={leading} selectedId={leadingTab?.id ?? null} /> : null}
       {leadingTab ? null : panel && view !== 'terminal' ? (
         <TabBody panel={panel} title={title} panels={panels} />
@@ -232,6 +238,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
           )}
         </View>
       )}
+      </View>
       {/* The box sits on the bottom safe area (HIG: controls stay out of it), or a hair above the keyboard. */}
       <BottomGap />
     </KeyboardAvoidingView>
@@ -301,6 +308,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   onOpenShortcuts: () => void;
 }) {
   const theme = useTheme();
+  useScreenJourney('terminal', panel.id);
   const { profile } = useDaemon();
   const { presence } = useConnectionPresence();
   const terminal = useTerminal(panel.id, panel.sessionId);
@@ -321,6 +329,9 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   // Input waits for a live terminal; until then its last screen stays up, dimmed.
   const disabled = terminal.status !== 'ready' || presence !== 'connected';
   const shown = terminal.status === 'ready' || terminal.hasContent;
+  useJourneyMark('terminal', 'content', terminal.hasContent);
+  useJourneyMark('terminal', 'live', !disabled);
+  useLiveMarks('terminal', !disabled);
 
   const sendKey = (data: string) => {
     terminal.scrollToBottom();

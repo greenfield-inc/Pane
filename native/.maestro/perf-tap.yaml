@@ -1,0 +1,5 @@
+# Taps the element with test id ID, for the perf journeys (scripts/perf/journeys.sh).
+appId: com.dcouple.pane.mobile
+---
+- tapOn:
+    id: ${ID}

@@ -11,6 +11,7 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { secureStore } from '@/auth/secureStore';
 import { demoConnection, isDemoProfile } from '@/features/demo/demoHost';
+import { perfFetch } from '@/features/perf/perfFetch';
 
 import { routedFetch } from './direct/directRoute';
 import { sameNetworkFetch } from './direct/sameNetwork';
@@ -37,7 +38,7 @@ export function getRuntimeId(): Promise<string> {
 export function createDaemonClient(profile: RemotePaneConnectionProfile): RemoteDaemonClient {
   // A relay computer's requests take its same-network address when one answers, else its direct
   // connection while that path is picked, else the relay.
-  const fetch = sameNetworkFetch(profile, routedFetch(profile, streamingFetch));
+  const fetch = perfFetch(sameNetworkFetch(profile, routedFetch(profile, streamingFetch)), profile.id);
   return new RemoteDaemonClient({
     profile,
     // The demo's sample computers answer in the app, whichever screen builds the client.
