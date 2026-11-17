@@ -8,10 +8,10 @@ function part(): Uint8Array {
 }
 
 /** A stream the test feeds by hand, so it stays open between chunks. */
-function feed(): { body: ReadableStream<Uint8Array>; push: (chunk: Uint8Array) => void; end: () => void } {
+function feed() {
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   const body = new ReadableStream<Uint8Array>({ start(opened) { controller = opened; } });
-  return { body, push: chunk => controller.enqueue(chunk), end: () => controller.close() };
+  return { body, push: (chunk: Uint8Array) => controller.enqueue(chunk), end: () => controller.close() };
 }
 
 /** Reads `count` chunks through the counter and answers how many bytes came out. */
