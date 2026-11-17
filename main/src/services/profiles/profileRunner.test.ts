@@ -1,4 +1,5 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { spawnSync } from 'child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -99,7 +100,7 @@ describe('ProfileRunner', () => {
     const runner = new ProfileRunner(pane.ports());
     await runner.launch({ ...launchRequest(), harness: { planner: 'aider' }, commands: { aider: 'node ./stub-agent.js' } });
     // Its shell exits with it, so a CLI that fails to start never leaves the first message to the shell.
-    expect(pane.tabs[0]).toMatchObject({ command: 'node ./stub-agent.js; exit $?' });
+    expect(pane.tabs[0]).toMatchObject({ command: "exec /bin/sh -c 'node ./stub-agent.js'" });
     expect(pane.tabs[0].agentType).toBeUndefined();
   });
 
@@ -147,7 +148,7 @@ describe('ProfileRunner', () => {
     pane.answer(pane.cards[0], 'approve');
     await settle();
     await runner.reportOutcome('tab-2', 'PR ready');
-    expect(pane.tabs[2]).toMatchObject({ title: 'CI + QA checks', command: 'gh pr checks --watch; exit $?' });
+    expect(pane.tabs[2]).toMatchObject({ title: 'CI + QA checks', command: "exec /bin/sh -c 'gh pr checks --watch'" });
     await runner.tabExited('tab-3', { code: 1 });
     expect(runner.list()[0]).toMatchObject({ step: 'build', wait: { panelId: 'tab-4' } });
   });
@@ -208,14 +209,14 @@ describe('ProfileRunner', () => {
     pane.answer(pane.cards[0], 'approve');
     await settle();
     await runner.reportOutcome('tab-2', 'PR ready');
-    await runner.tabExited('tab-3', { code: 130, interrupted: true });
+    await runner.tabExited('tab-3', { code: 130 });
     expect(runner.list()[0]).toMatchObject({ step: 'checks', wait: { kind: 'card', card: 'set-outcome' } });
     expect(pane.cards.at(-1)).toMatchObject({ title: 'Which outcome did checks have?' });
     const second = new FakePane();
     const quitting = new ProfileRunner(second.ports());
     await quitting.launch(launchRequest());
     quitting.prepareForQuit();
-    await quitting.tabExited('tab-1', { code: 130, interrupted: true });
+    await quitting.tabExited('tab-1', { code: 130 });
     expect(quitting.list()[0]).toMatchObject({ step: 'plan', wait: { kind: 'step', panelId: 'tab-1' } });
     expect(second.cards).toHaveLength(0);
   });
@@ -358,9 +359,16 @@ describe('ProfileRunner', () => {
 });
 
 describe('commandStepLine', () => {
-  it('keeps the command\'s exit code as the shell\'s own, in each shell', () => {
-    expect(commandStepLine('gh pr checks --watch', 'posix')).toBe('gh pr checks --watch; exit $?');
-    expect(commandStepLine('gh pr checks --watch', 'fish')).toBe('gh pr checks --watch; exit $status');
+  // Quotes of both kinds and its own exit code, as a profile's run: may hold.
+  const command = `printf '%s|' "it's" 'a "b"'; exit 3`;
+
+  it.each(['/bin/sh', '/bin/zsh', '/bin/bash'].filter((shell) => existsSync(shell)))('runs the whole command in %s and exits with its code', (shell) => {
+    const result = spawnSync(shell, ['-c', commandStepLine(command, 'posix')], { encoding: 'utf8' });
+    expect(result.stdout).toBe('it\'s|a "b"|');
+    expect(result.status).toBe(3);
+  });
+
+  it('keeps the exit code on Windows shells', () => {
     expect(commandStepLine('gh pr checks --watch', 'powershell')).toBe('gh pr checks --watch; if ($?) { exit 0 } else { exit 1 }');
     expect(commandStepLine('gh pr checks --watch', 'cmd')).toBe('gh pr checks --watch && exit 0 || exit 1');
   });

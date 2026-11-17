@@ -12,7 +12,7 @@ import {
   type ProfileStep,
 } from '../../../../shared/types/profiles';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
-import { LOOP_GO_AGAIN, LOOP_STOP, answerCard, enterStep, reportOutcome, setOutcome, startRun, stepExited, stepLost, type RunEffect, type RunTransition } from './flowMachine';
+import { LOOP_GO_AGAIN, LOOP_STOP, answerCard, enterStep, reportOutcome, setOutcome, startRun, stepExited, stepLost, type RunEffect, type RunTransition, type TabExit } from './flowMachine';
 
 /** How a step's shell keeps its command's exit code as its own, so the tab's exit carries it. */
 export type StepShell = 'posix' | 'fish' | 'powershell' | 'cmd';
@@ -99,13 +99,17 @@ export function profileRunsFolder(sessionFolder: string): string {
   return path.join(sessionFolder, RUNS_FOLDER);
 }
 
-/** A command step's line: the command, then an exit that keeps its exit code, so the tab's exit routes the step. */
+/**
+ * A command step's line: the tab's shell gives way to the command, so the tab exits with the
+ * command's own exit code, and Ctrl+C ends the tab instead of leaving a shell that never exits.
+ * POSIX shells and fish hand over to `/bin/sh -c`; Windows shells exit with the command's result.
+ */
 export function commandStepLine(command: string, shell: StepShell): string {
   switch (shell) {
     case 'powershell': return `${command}; if ($?) { exit 0 } else { exit 1 }`;
     case 'cmd': return `${command} && exit 0 || exit 1`;
-    case 'fish': return `${command}; exit $status`;
-    case 'posix': return `${command}; exit $?`;
+    case 'fish': return `exec /bin/sh -c '${command.replace(/[\\']/gu, (character) => `\\${character}`)}'`;
+    case 'posix': return `exec /bin/sh -c '${command.replace(/'/gu, `'\\''`)}'`;
   }
 }
 
@@ -236,11 +240,8 @@ export class ProfileRunner {
     });
   }
 
-  /**
-   * A tab exited: moves the run whose current step it is. `interrupted` is an exit the step didn't
-   * choose (a signal, Ctrl+C, its tab closed); a command then asks for its outcome instead.
-   */
-  async tabExited(panelId: string, exit: { code?: number; interrupted?: boolean }): Promise<void> {
+  /** A tab exited: moves the run whose current step it is (see stepExited for an interrupted command). */
+  async tabExited(panelId: string, exit: TabExit): Promise<void> {
     if (this.quitting) return;
     await this.serialized(async () => {
       if (this.quitting) return;

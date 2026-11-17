@@ -16,6 +16,7 @@ import { panelManager } from '../panelManager';
 import { sessionWorkspacePath } from '../sessionWorkspace';
 import type { WorkspaceJournal } from '../workspaceJournal';
 import { listProfiles } from './profileLibrary';
+import type { TabExit } from './flowMachine';
 import { ProfileRunner, profileRunsFolder, type CardOutcome, type RunCard, type StartedTab, type StepShell, type StepTabRequest } from './profileRunner';
 
 let runner: ProfileRunner | undefined;
@@ -79,8 +80,6 @@ function cardOutcome(result: NotifyResult): CardOutcome {
   return { closed: 'unavailable' in result ? result.unavailable : 'closed' };
 }
 
-/** Exit codes a shell gives a command killed by SIGHUP (its tab closed), SIGINT (Ctrl+C) or SIGTERM. */
-const INTERRUPTED_EXIT_CODES = new Set([129, 130, 143]);
 
 /**
  * Starts the profile runner on this Pane's services: step tabs through runpane's own
@@ -176,8 +175,9 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
     if (entry.kind !== 'panel.exited' || !entry.panelId) return;
     // node-pty reports signal 0 for a normal exit, which the journal writes as `signal:0`.
     const signal = /^signal:(.+)$/u.exec(entry.reason ?? '')?.[1];
-    const interrupted = (signal !== undefined && signal !== '0') || (entry.exitCode !== undefined && INTERRUPTED_EXIT_CODES.has(entry.exitCode));
-    void runner?.tabExited(entry.panelId, { code: entry.exitCode, interrupted }).catch((error) => log(`[Profiles] ${String(error)}`));
+    const exit: TabExit = { code: entry.exitCode };
+    if (signal !== undefined && signal !== '0') exit.signal = signal;
+    void runner?.tabExited(entry.panelId, exit).catch((error) => log(`[Profiles] ${String(error)}`));
   });
   void runner.resumeAll().catch((error) => log(`[Profiles] Could not resume profile runs: ${String(error)}`));
   return runner;
