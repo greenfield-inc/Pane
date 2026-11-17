@@ -483,6 +483,21 @@ export function clearShellPathCache(): void {
   console.log('[ShellPath] PATH cache cleared - will be rebuilt on next access');
 }
 
+// The extensions hostCommand can start: a .bat or .cmd through cmd.exe, a .com or .exe directly.
+// PATHEXT also lists .vbs, .js, .wsf and .msc, which need another host to run.
+const LAUNCHABLE_WINDOWS_EXTENSIONS = ['.com', '.exe', '.bat', '.cmd'];
+
+/**
+ * The file names to try for `executable` in each Windows PATH folder: the launchable PATHEXT
+ * extensions in PATHEXT's order, then the bare name.
+ */
+export function windowsExecutableNames(executable: string, pathext: string | undefined): string[] {
+  const extensions = [...new Set((pathext ?? '').split(';').map(ext => ext.trim().toLowerCase()))]
+    .filter(ext => LAUNCHABLE_WINDOWS_EXTENSIONS.includes(ext));
+  const tried = extensions.length > 0 ? extensions : LAUNCHABLE_WINDOWS_EXTENSIONS;
+  return [...tried.map(ext => `${executable}${ext}`), executable];
+}
+
 /**
  * Find an executable in the shell PATH
  */
@@ -495,10 +510,10 @@ export function findExecutableInPath(executable: string): string | null {
   
   console.log(`[ShellPath] Searching in ${paths.length} PATH directories`);
   
-  // On Windows, try PATHEXT's extensions before the bare name, as cmd.exe does: npm installs an
-  // extensionless sh script beside npm.cmd, and Node cannot start that script.
+  // On Windows, try the launchable PATHEXT extensions before the bare name, as cmd.exe does: npm
+  // installs an extensionless sh script beside npm.cmd, and Node cannot start that script.
   const executableNames = isWindows
-    ? [...(process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map(ext => `${executable}${ext.toLowerCase()}`), executable]
+    ? windowsExecutableNames(executable, process.env.PATHEXT)
     : [executable];
   
   let searchedPaths = 0;
