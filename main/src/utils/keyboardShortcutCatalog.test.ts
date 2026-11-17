@@ -46,7 +46,7 @@ describe('keyboard shortcut catalog', () => {
       expect(entry, id).toBeDefined();
       return entry ? [defaultChordFor(entry, 'mac'), defaultChordFor(entry, 'other')] : [];
     };
-    expect(keys('show-keyboard-shortcuts')).toEqual(['mod+/', 'mod+/']);
+    expect(keys('show-keyboard-shortcuts')).toEqual(['mod+/', 'mod+k mod+/']);
     expect(keys('toggle-approvals')).toEqual(['mod+shift+a', 'mod+shift+a']);
     expect(keys('open-session-approval')).toEqual(['mod+alt+a', 'mod+k mod+a']);
     expect(keys('send-approval')).toEqual(['mod+Enter', 'mod+Enter']);
@@ -94,7 +94,7 @@ describe('keyboard shortcut catalog', () => {
       .map(entry => entry.id);
     expect(notReleasedFromTerminal).toEqual(['send-approval', 'usage-share']);
     const notForwarded = KEYBOARD_SHORTCUT_CATALOG.filter(entry => !entry.forwardFromWebview).map(entry => entry.id).sort();
-    expect(notForwarded).toEqual(['find-in-tab', 'find-next', 'find-previous', 'send-approval', 'split-down', 'split-right', 'usage-download', 'usage-share']);
+    expect(notForwarded).toEqual(['find-in-tab', 'find-next', 'find-previous', 'send-approval', 'show-keyboard-shortcuts', 'split-down', 'split-right', 'usage-download', 'usage-share']);
     const releasedInTui = KEYBOARD_SHORTCUT_CATALOG
       .filter(entry => entry.releaseInTui)
       .map(entry => entry.id)

@@ -350,7 +350,7 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 | Shortcut | Action |
 |----------|--------|
 | `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command, and see or change its key |
-| `⌘/` / `Ctrl+/` | Show every key in a searchable sheet, your own keys marked (a writable file editor keeps `⌘/` for comments) |
+| `⌘/` / `Ctrl+K Ctrl+/` | Show every key in a searchable sheet, your own keys marked (a writable file editor keeps `⌘/` for comments, and browser pages keep it; `Ctrl+/` stays with terminal programs) |
 | `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Change keys (Settings → Shortcuts) |
 | `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` (or `k` `j`) move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
 | `Enter` | With a chat on screen and focus on no field or control, move into its message box |

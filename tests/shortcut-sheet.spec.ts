@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { installElectronApiMock } from './electronApiMock';
 
-// The keyboard shortcut sheet (⌘/, Ctrl+/ elsewhere): journeys 1–4 of the
+// The keyboard shortcut sheet (⌘/, Ctrl+K Ctrl+/ elsewhere): journeys 1–4 of the
 // keyboard-approvals plan, against the Vite renderer with the Electron mock.
 
 const MAC = process.platform === 'darwin';
@@ -13,14 +13,21 @@ async function open(page: Page, initialConfig: JsonObject = {}) {
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
 }
 
+/** ⌘/ on macOS; Windows and Linux leave Ctrl+/ to terminal programs and use Ctrl+K Ctrl+/. */
+async function pressSheetKey(page: Page) {
+  if (MAC) return page.keyboard.press('Meta+/');
+  await page.keyboard.press('Control+k');
+  await page.keyboard.press('Control+/');
+}
+
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
 const tab = (page: Page, name: string) => sheet(page).getByRole('tab', { name: new RegExp(`^${name}\\s*\\d+$`) });
 
-test('⌘/ opens the sheet on the last group viewed, and ⌘/ or Esc closes it back to where focus was', async ({ page }) => {
+test('the sheet key opens the sheet on the last group viewed, and the key or Esc closes it back to where focus was', async ({ page }) => {
   await open(page);
   const opener = page.getByRole('button', { name: 'Settings' }).first();
   await opener.focus();
-  await page.keyboard.press('ControlOrMeta+/');
+  await pressSheetKey(page);
   await expect(sheet(page)).toBeVisible();
   await expect(tab(page, 'Navigation')).toHaveAttribute('aria-selected', 'true');
   await expect(sheet(page).getByRole('textbox', { name: 'Search shortcuts' })).toBeFocused();
@@ -34,11 +41,11 @@ test('⌘/ opens the sheet on the last group viewed, and ⌘/ or Esc closes it b
   await expect(tabsRow).toContainText(MAC ? '⌘⌥]' : 'Ctrl+Alt+]');
   await expect(tabsRow.getByLabel('Changed by you')).toBeVisible();
 
-  await page.keyboard.press('ControlOrMeta+/');
+  await pressSheetKey(page);
   await expect(sheet(page)).toHaveCount(0);
   await expect(opener).toBeFocused();
 
-  await page.keyboard.press('ControlOrMeta+/');
+  await pressSheetKey(page);
   await expect(tab(page, 'Approvals')).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Escape');
   await expect(sheet(page)).toHaveCount(0);
@@ -46,7 +53,7 @@ test('⌘/ opens the sheet on the last group viewed, and ⌘/ or Esc closes it b
 
 test('search lists matches from every group with counts, finds keys by chord, and says when nothing matches', async ({ page }) => {
   await open(page);
-  await page.keyboard.press('ControlOrMeta+/');
+  await pressSheetKey(page);
   const search = sheet(page).getByRole('textbox', { name: 'Search shortcuts' });
 
   await search.fill('approv');
@@ -66,7 +73,7 @@ test('search lists matches from every group with counts, finds keys by chord, an
 
 test('↑↓ on the rail switch groups, and Change keys opens Settings › Shortcuts', async ({ page }) => {
   await open(page);
-  await page.keyboard.press('ControlOrMeta+/');
+  await pressSheetKey(page);
   await tab(page, 'Approvals').click();
   await page.keyboard.press('ArrowDown');
   await expect(tab(page, 'Panes and Sessions')).toHaveAttribute('aria-selected', 'true');
@@ -87,4 +94,19 @@ test('the palette and the sidebar menu open the sheet', async ({ page }) => {
   await expect(sheet(page)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(sheet(page)).toHaveCount(0);
+});
+
+test('on Windows and Linux, Ctrl+/ stays with the focused program and Ctrl+K Ctrl+/ opens the sheet', async ({ page }) => {
+  // The keymap follows navigator.platform, so pin Windows on every runner.
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'platform', { get: () => 'Win32' });
+  });
+  await open(page);
+  await page.keyboard.press('Control+/');
+  await expect(sheet(page)).toHaveCount(0);
+  await page.keyboard.press('Control+k');
+  await page.keyboard.press('Control+/');
+  await expect(sheet(page)).toBeVisible();
+  await sheet(page).getByRole('textbox', { name: 'Search shortcuts' }).fill('this sheet');
+  await expect(sheet(page).locator('[data-shortcut-id]').filter({ hasText: 'this sheet' })).toContainText('Ctrl+KCtrl+/');
 });

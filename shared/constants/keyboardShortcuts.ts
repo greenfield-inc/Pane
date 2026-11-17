@@ -140,8 +140,10 @@ const APP_ENTRIES: readonly ShortcutCatalogEntry[] = [
   entry({ id: 'find-previous', label: 'Find Previous', category: 'tabs', scope: 'app', defaultChord: 'mod+shift+g', forwardFromWebview: false }),
   entry({ id: 'switch-to-chat-pane', label: 'Switch to chat', category: 'tabs', scope: 'app', defaultChord: null }),
   entry({ id: 'switch-to-chat-session', label: 'Switch to chat (Session)', category: 'tabs', scope: 'app', defaultChord: null }),
-  // ⌘/ works while typing; a focused, writable file editor keeps it for comments.
-  nav({ id: 'show-keyboard-shortcuts', label: 'Show Keyboard Shortcuts', category: 'shortcuts', scope: 'app', defaultChord: 'mod+/' }),
+  // ⌘/ works while typing; a focused, writable file editor keeps it for comments, and browser
+  // pages keep it. Ctrl+/ is a terminal key (^_, undo in readline, Emacs and many full-screen
+  // programs), so Windows and Linux get a two-step key instead.
+  nav({ id: 'show-keyboard-shortcuts', label: 'Show Keyboard Shortcuts', category: 'shortcuts', scope: 'app', defaultChord: 'mod+/', defaultChordOther: 'mod+k mod+/', forwardFromWebview: false }),
   // In-app only: the system-wide answer-all key (notifyService.ts) is a separate setting.
   nav({ id: 'toggle-approvals', label: 'Open or Close Approvals', category: 'approvals', scope: 'app', defaultChord: 'mod+shift+a' }),
   // Ctrl+Alt+<letter> is AltGr on many layouts, so Windows and Linux get a two-step key.

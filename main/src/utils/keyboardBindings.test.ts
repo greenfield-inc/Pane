@@ -83,10 +83,19 @@ describe('keyboard bindings', () => {
     expect(sets.bound.has('mod+alt+5')).toBe(true);
     expect(sets.bound.has('mod+alt+9')).toBe(true);
     expect(sets.bound.has('mod+k')).toBe(false);
-    expect([...(sets.sequences.get('mod+k') ?? [])].sort()).toEqual(['mod+a', 'mod+m', 'mod+s']);
+    expect([...(sets.sequences.get('mod+k') ?? [])].sort()).toEqual(['mod+/', 'mod+a', 'mod+m', 'mod+s']);
     expect([...(sets.webviewSequences.get('mod+k') ?? [])].sort()).toEqual(['mod+a', 'mod+m', 'mod+s']);
     expect(sets.webviewForward.has('F6')).toBe(true);
     expect(sets.webviewForward.has('shift+ArrowUp')).toBe(false);
+  });
+
+  it('leaves Ctrl+/ to terminal programs off macOS, and ⌘/ to browser pages everywhere', () => {
+    const other = buildInterceptionSets({ keyPlatform: 'other', platform: 'linux' });
+    expect(other.bound.has('mod+/')).toBe(false);
+    expect(other.tuiReleasable.has('mod+/')).toBe(false);
+    const mac = buildInterceptionSets({ keyPlatform: 'mac' });
+    expect(mac.tuiReleasable.has('mod+/')).toBe(true);
+    expect(mac.webviewForward.has('mod+/')).toBe(false);
   });
 
   it('releases only navigation keys from full-screen programs on macOS, never Ctrl-letters', () => {

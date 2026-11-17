@@ -80,7 +80,7 @@ describe('buildShortcutSheet', () => {
   it('formats keys for Windows and Linux', () => {
     const groups = sheet({ platform: 'other' });
     expect(caps(groups, 'approvals', 'Open or close Approvals')).toEqual(['Ctrl+Shift+A']);
-    expect(caps(groups, 'help', 'Show keyboard shortcuts (this sheet)')).toEqual(['Ctrl+/']);
+    expect(caps(groups, 'help', 'Show keyboard shortcuts (this sheet)')).toEqual(['Ctrl+K', 'Ctrl+/']);
     expect(caps(groups, 'terminal', 'Clear (Ctrl+K then a key runs a two-step key)')).toEqual(['Ctrl+K']);
     expect(caps(groups, 'approvals', 'Answer all, from any app')).toEqual(['Ctrl+Shift+Space']);
   });
