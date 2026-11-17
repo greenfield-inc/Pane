@@ -77,7 +77,8 @@ async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         if !wait.is_zero() {
             tokio::time::sleep(wait).await;
         }
-        if w.write_all(&buf[..n]).await.is_err() {
+        // As in `client.rs`: TLS holds bytes back until a flush.
+        if w.write_all(&buf[..n]).await.is_err() || w.flush().await.is_err() {
             break;
         }
     }

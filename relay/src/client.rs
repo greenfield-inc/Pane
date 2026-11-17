@@ -123,7 +123,9 @@ impl Meter<'_> {
             if !wait.is_zero() {
                 tokio::time::sleep(wait).await;
             }
-            if w.write_all(&buf[..n]).await.is_err() {
+            // TLS can accept the bytes yet hold some back until a flush; without one the
+            // end of a request waits for the client's next bytes, or for it to give up.
+            if w.write_all(&buf[..n]).await.is_err() || w.flush().await.is_err() {
                 break;
             }
         }

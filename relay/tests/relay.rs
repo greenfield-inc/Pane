@@ -255,7 +255,8 @@ impl Agent {
                         upgrade(addr, &relay_cert, &format!("/v1/data/{conn}")).await;
                     assert!(head.starts_with("HTTP/1.1 101"), "{head}");
                     // End the client's TLS with this computer's own certificate and echo one line.
-                    // After `upload <n>` it reads the n bytes that follow and answers with the count.
+                    // After `upload <n>` it reads the n bytes that follow slowly, as a computer on a slow
+                    // link does, and answers with the count.
                     let tls = acceptor.accept(data).await.unwrap();
                     let sni = tls.get_ref().1.server_name().unwrap_or("").to_string();
                     let (r, mut w) = tokio::io::split(tls);
@@ -263,9 +264,14 @@ impl Agent {
                     let mut line = String::new();
                     r.read_line(&mut line).await.unwrap();
                     if let Some(n) = line.trim().strip_prefix("upload ") {
-                        let n = n.parse::<u64>().unwrap();
-                        let got = tokio::io::copy(&mut r.take(n), &mut tokio::io::sink()).await;
-                        line = format!("got {}\n", got.unwrap_or(0));
+                        let (want, mut got) = (n.parse::<usize>().unwrap(), 0);
+                        let mut buf = vec![0u8; 64 * 1024];
+                        while got < want {
+                            tokio::time::sleep(Duration::from_millis(4)).await;
+                            let take = buf.len().min(want - got);
+                            got += r.read(&mut buf[..take]).await.unwrap();
+                        }
+                        line = format!("got {got}\n");
                     }
                     w.write_all(format!("{sni} {line}").as_bytes())
                         .await
@@ -384,6 +390,27 @@ async fn client_tls_reaches_the_computer_end_to_end() {
         serde_json::from_str::<Value>(&body).unwrap(),
         json!({"ok": true, "region": "us", "computers": 1})
     );
+}
+
+#[tokio::test]
+async fn an_upload_reaches_a_computer_on_a_slow_link() {
+    let env = Env::start(&[]).await;
+    let agent = Agent::connect(&env, &fixed_key()).await;
+    let host = format!("{FIXED_ID}.{D}");
+    let body = vec![7u8; 32 * 1024 * 1024];
+    let mut s = tls_connect(env.addr(), &host, &agent.cert).await.unwrap();
+    s.write_all(format!("upload {}\n", body.len()).as_bytes())
+        .await
+        .unwrap();
+    s.write_all(&body).await.unwrap();
+    s.flush().await.unwrap();
+    // The client then only waits for the answer, so nothing it sends can push the relay along.
+    let mut out = String::new();
+    tokio::time::timeout(Duration::from_secs(30), s.read_to_string(&mut out))
+        .await
+        .expect("the computer got the whole upload in time")
+        .unwrap();
+    assert_eq!(out, format!("{host} got {}\n", body.len()));
 }
 
 #[tokio::test]

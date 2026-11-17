@@ -6,6 +6,8 @@ appId: com.dcouple.pane.mobile
 name: Answer a Notify question
 ---
 - runFlow: subflows/signed-in.yaml
+- tapOn:
+    id: home-tile-needs
 - extendedWaitUntil:
     visible:
       id: approvals-section
