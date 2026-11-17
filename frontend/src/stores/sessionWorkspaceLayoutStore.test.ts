@@ -59,8 +59,9 @@ function setActiveHost(useConfigStore: ConfigStore, hostId: string | null): void
   const remoteDaemon: AppConfig['remoteDaemon'] = {
     ...createDefaultRemoteDaemonConfig(),
     client: {
-      // The host only reads as active while it has a profile to point at.
-      profiles: HOSTS.map(id => ({ id, label: id, baseUrl: `https://${id}.example`, token: id, transport: 'http+sse' })),
+      // The host only reads as active while it is a saved computer.
+      computers: HOSTS.map(id => ({ id, label: id, routes: [{ id: `public:https://${id}.example`, kind: 'public', source: 'manual', baseUrl: `https://${id}.example`, token: id }] })),
+      profiles: [],
       activeProfileId: hostId,
       mode: hostId ? 'remote' : 'local',
     },

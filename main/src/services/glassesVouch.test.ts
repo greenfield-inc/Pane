@@ -1,3 +1,4 @@
+import { routeFromProfile } from '../../../shared/types/remoteComputers';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AppConfig } from '../types/config';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
@@ -224,7 +225,8 @@ describe('a paired computer vouching for its siblings', () => {
       id: `tailnet-${domain}-devbox`, label: 'devbox', baseUrl: 'https://devbox.tail1.ts.net:8443', token, transport: 'http+sse' as const, tailnetMachine: 'devbox', tailnetDomain: domain,
     });
     const remoteDaemon = createDefaultRemoteDaemonConfig();
-    remoteDaemon.client.profiles = [profile('other.ts.net', 'wrong-tailnet'), profile('tail1.ts.net', 'saved password')];
+    remoteDaemon.client.computers = [profile('other.ts.net', 'wrong-tailnet'), profile('tail1.ts.net', 'saved password')]
+      .map((saved) => ({ id: saved.id, label: saved.label, routes: [routeFromProfile(saved)] }));
     const { vouch, asked, probed } = await setup({ siblings: [devbox], config: { remoteDaemon } });
 
     expect((await vouch()).code).not.toBeNull();

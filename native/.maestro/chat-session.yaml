@@ -6,6 +6,10 @@ appId: com.dcouple.pane.mobile
 name: Session chat
 ---
 - runFlow: subflows/signed-in.yaml
+- runFlow:
+    file: subflows/home-open.yaml
+    env:
+      SECTION: sessions
 - tapOn:
     id: "session-row-.*${SESSION_ID}.*"
     index: 0

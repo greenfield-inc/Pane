@@ -143,6 +143,8 @@ appends a Download section with one link per installer on that tag, through
 `runpane.com/api/download?file=…&v=<tag>&source=gh-release`, so GitHub downloads
 are counted like the website's and still land on the exact file. A body that
 already has the section (`<!-- pane-download-links -->`) is left alone.
+Pane's update dialog shows only the notes above that marker, without HTML
+comments.
 
 ### Verify
 

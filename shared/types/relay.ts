@@ -1,3 +1,5 @@
+import type { ComputerRoutesReport } from './remoteComputers';
+
 /** Phone access through a relay (QR pairing), as Remote Access shows it. */
 export interface RelayStatus {
   enabled: boolean;
@@ -17,7 +19,10 @@ export interface RelayStatus {
   lastError: string | null;
 }
 
-/** A one-time QR: `https://<domain>/pair#s=<secret>&c=<id>&n=<name>`, good for 10 minutes and one scan. */
+/** How long a one-time link lasts, chosen when it is made. A QR code shown on screen lasts 10 minutes. */
+export type RelayLinkLifetime = '10m' | '1h' | '24h';
+
+/** A one-time link or QR: `https://<domain>/pair#s=<secret>&c=<id>&n=<name>`, good for one use until `expiresAt`. */
 export interface RelayPairingInfo {
   url: string;
   expiresAt: string;
@@ -55,6 +60,13 @@ export interface RelayComputerGrant {
   token: string;
 }
 
+/** A computer redeeming a link: who it is, its routes, and a token it made for the link's maker to call it. */
+export interface RelayComputerOffer {
+  computer: RelayComputer;
+  routes?: ComputerRoutesReport;
+  token: string;
+}
+
 /** `POST /pair/exchange` body. `phoneId` is the app's stable install id, so "Remove from all your computers" finds the phone everywhere. */
 export interface RelayExchangeRequest {
   secret: string;
@@ -62,6 +74,8 @@ export interface RelayExchangeRequest {
   phoneId?: string;
   /** Computer ids the app already has a token for. Linked computers among them hand out no new token, which would replace the app's. */
   known?: string[];
+  /** Set when a computer redeems the link: the maker saves it as a computer, not a phone. */
+  computer?: RelayComputerOffer;
 }
 
 /** `POST /pair/exchange` answer: the token, this computer, and tokens for every computer linked with it. */
@@ -71,6 +85,39 @@ export interface RelayExchangeResult {
   clientId: string;
   computer: RelayComputer;
   linked: RelayComputerGrant[];
+  /** To a computer only: the maker's own routes, so the redeemer saves every way to reach it. */
+  routes?: ComputerRoutesReport;
+}
+
+/** What a link would join, shown before it is redeemed (`relay:link-preview`). */
+export interface LinkPreview {
+  /** The computer whose link this is. */
+  maker: string;
+  /** The maker plus every computer already linked with it. */
+  makerGroup: string[];
+  /** This device's linked computers; empty when it has none. */
+  here: string[];
+  /** This computer doesn't reach the maker yet, so the person confirms before it can run agents here. */
+  needsConfirm: boolean;
+  expiresAt: string;
+}
+
+/** `relay:redeem-link` result: the computers this one is now linked with. */
+export interface LinkRedeemResult {
+  linked: string[];
+}
+
+/** `relay:paired`: a phone or computer used this computer's link or QR code. */
+export interface RelayPairedEvent {
+  kind: 'phone' | 'computer';
+  label: string;
+  /** Computers only: its id in `client.computers`, for "Not you? Unlink". */
+  computerId?: string;
+}
+
+/** `relay:link-opened`: a `pane://pair#…` link reached desktop Pane. */
+export interface RelayLinkOpenedEvent {
+  link: string;
 }
 
 /** Commands a paired phone (or linked computer) calls on a computer over `/invoke`. */
@@ -87,7 +134,7 @@ export const RELAY_CLIENT_COMMANDS = {
   saveLink: 'relay:client:save-link',
 } as const;
 
-/** How Remote Access › Devices lists a paired phone or linked computer. */
+/** How Remote Access lists a paired phone (Phones and glasses) or linked computer (Computers). */
 export interface RelayDevice {
   /** The client record id on this computer. */
   clientId: string;
@@ -109,4 +156,6 @@ export const RELAY_DEVICE_COMMANDS = {
   removePhoneEverywhere: 'relay:remove-phone-everywhere',
   /** `{computerId}` → `{removed: string[], notReached: string[]}` */
   unlinkComputerEverywhere: 'relay:unlink-computer-everywhere',
+  /** "Not you? Unlink" on the computer that made the link. `{computerId}` → `{removed, notReached}` (computer names). */
+  undoJoin: 'relay:undo-join',
 } as const;

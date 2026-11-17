@@ -1,7 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
 
-import { parseApprovalSort, type ApprovalSort } from './approvals';
+import { DEFAULT_APPROVAL_SORT, parseApprovalSort, type ApprovalSort } from './approvals';
 
 const SORT_KEY = 'approvals.sort';
 
@@ -9,7 +9,7 @@ function savedSort(): ApprovalSort {
   try {
     return parseApprovalSort(SecureStore.getItem(SORT_KEY));
   } catch {
-    return 'recent';
+    return DEFAULT_APPROVAL_SORT;
   }
 }
 

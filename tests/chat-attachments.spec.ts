@@ -57,14 +57,29 @@ test('a chip can be removed before sending, and send waits while a file is still
   await open(page, 'files=1&holdCopies=1');
   await drop(page, [{ name: 'diagram.png', type: 'image/png' }, { name: 'log.txt', type: 'text/plain' }]);
   const copying = chips(page).filter({ hasText: 'log.txt' });
-  await expect(copying).toContainText('Copying…');
+  await expect(copying).toHaveAttribute('aria-busy', 'true');
+  await expect(copying).toContainText('0%');
   await page.getByRole('textbox', { name: 'Message Claude' }).fill('hi');
   await expect(page.getByRole('button', { name: 'Send message' })).toBeDisabled();
   await page.evaluate(() => window.qaReleaseCopies?.());
-  await expect(copying).not.toContainText('Copying…');
+  await expect(copying).toHaveAttribute('aria-busy', 'false');
   await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled();
   await chips(page).filter({ hasText: 'diagram.png' }).getByRole('button', { name: 'Remove attachment' }).click();
   await expect(chips(page)).toHaveCount(1);
+});
+
+test('removing a chip while its file copies stops the copy and frees Send', async ({ page }) => {
+  await open(page, 'files=1&holdCopies=1');
+  await drop(page, [{ name: 'huge.mov', type: 'video/quicktime' }]);
+  await expect(chips(page).filter({ hasText: 'huge.mov' })).toHaveAttribute('aria-busy', 'true');
+  await page.getByRole('textbox', { name: 'Message Claude' }).fill('never mind');
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeDisabled();
+
+  await chips(page).getByRole('button', { name: 'Remove attachment' }).click();
+
+  await expect(chips(page)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
 test('a pasted image attaches as an image chip', async ({ page }) => {
@@ -97,12 +112,10 @@ test('text over 1 MiB is refused with the reason, and a paste up to 1 MiB goes i
 test('every refusal is shown and nothing is attached for it', async ({ page }) => {
   await open(page, 'files=1');
   await drop(page, [
-    { name: 'movie.mov', type: 'video/quicktime', size: 10 * 1024 * 1024 + 1 },
     { name: 'fail.txt', type: 'text/plain' },
     { name: 'ok.png', type: 'image/png' },
   ]);
   const alert = page.getByRole('alert');
-  await expect(alert).toContainText('movie.mov was not attached: it is larger than 10 MB');
   await expect(alert).toContainText("fail.txt was not attached: it could not be copied to the chat's machine (the host is offline).");
   await expect(chips(page)).toHaveCount(1);
   await expect(chips(page).first()).toContainText('ok.png');
@@ -115,4 +128,49 @@ test('without a way to copy files, a chat attaches images and says why it refuse
   await drop(page, [{ name: 'notes.pdf', type: 'application/pdf' }, { name: 'shot.png', type: 'image/png' }]);
   await expect(page.getByRole('alert')).toContainText('notes.pdf was not attached: this chat takes PNG, JPEG, WebP or GIF images here');
   await expect(chips(page)).toHaveCount(1);
+});
+
+test("a draft's attachments stay with it when you leave the chat and come back, and sending clears them", async ({ page }) => {
+  await open(page, 'files=1');
+  await drop(page, [{ name: 'one.png', type: 'image/png' }, { name: 'notes.pdf', type: 'application/pdf' }]);
+  const data = await transfer(page, [{ name: 'two.png', type: 'image/png' }]);
+  const box = page.getByRole('textbox', { name: 'Message Claude' });
+  await box.evaluate((input, clipboardData) => {
+    input.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  }, data);
+  await box.fill('Compare these');
+  await expect(chips(page)).toHaveText(['one.png', 'notes.pdf', 'two.png']);
+
+  await page.evaluate(() => window.qaSwitchAway());
+  await expect(box).toHaveValue('Compare these');
+  await expect(chips(page)).toHaveText(['one.png', 'notes.pdf', 'two.png']);
+  await expect(chips(page).locator('img')).toHaveCount(2);
+
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect.poll(() => page.evaluate(() => window.qaSent.length)).toBe(1);
+  const sent = await page.evaluate(() => window.qaSent[0]);
+  expect(sent.text).toBe('Compare these\n/repo/.pane/files/notes.pdf');
+  expect(sent.images).toEqual([{ mimeType: 'image/png', data: PNG }, { mimeType: 'image/png', data: PNG }]);
+  // The file was copied to the chat's machine once, before the switch.
+  expect(await page.evaluate(() => window.qaCopied)).toEqual(['notes.pdf']);
+
+  await page.evaluate(() => window.qaSwitchAway());
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
+  await expect(box).toHaveValue('');
+  await expect(chips(page)).toHaveCount(0);
+});
+
+test('leaving again while a file is still copying keeps every attachment of the draft', async ({ page }) => {
+  await open(page, 'files=1&holdCopies=1');
+  await drop(page, [{ name: 'log.txt', type: 'text/plain' }, { name: 'shot.png', type: 'image/png' }]);
+  await expect(chips(page).filter({ hasText: 'log.txt' })).toHaveAttribute('aria-busy', 'true');
+  // Coming back picks up log.txt's running copy; leave before it finishes, then come back.
+  await page.evaluate(() => window.qaSwitchAway());
+  await page.evaluate(() => window.qaSwitchAway());
+  // Both show while log.txt is still copying.
+  await expect(chips(page)).toHaveText(['log.txt0%', 'shot.png']);
+  await page.evaluate(() => window.qaReleaseCopies?.());
+  await expect(chips(page)).toHaveText(['log.txt', 'shot.png']);
+  // One copy, however often the draft came back.
+  expect(await page.evaluate(() => window.qaCopied)).toEqual(['log.txt']);
 });

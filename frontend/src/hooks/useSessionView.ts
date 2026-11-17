@@ -68,7 +68,6 @@ export const useSessionView = (
   const [hasConversationHistory, setHasConversationHistory] = useState(false);
 
   // Archive confirm dialog state (triggered by Ctrl+Shift+W)
-  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
 
   // Folder archive dialog state
   const [showFolderArchiveDialog, setShowFolderArchiveDialog] = useState(false);
@@ -1313,24 +1312,6 @@ export const useSessionView = (
     }
   };
 
-  const handleConfirmArchive = useCallback(async () => {
-    if (!activeSession) return;
-    const sessionId = activeSession.id;
-    useSessionStore.getState().addDeletingSessionId(sessionId);
-    try {
-      const response = await API.sessions.delete(sessionId);
-      if (!response.success) {
-        console.error('[handleConfirmArchive] Archive failed:', response.error);
-        useSessionStore.getState().removeDeletingSessionId(sessionId);
-        return;
-      }
-      await useSessionStore.getState().setActiveSession(null);
-    } catch (error) {
-      console.error('[handleConfirmArchive] Archive error:', error);
-      useSessionStore.getState().removeDeletingSessionId(sessionId);
-    }
-  }, [activeSession]);
-
   const handleArchiveSessionOnly = async () => {
     setShowFolderArchiveDialog(false);
     if (folderArchiveSessionId) {
@@ -1607,9 +1588,6 @@ export const useSessionView = (
     hasConversationHistory,
     compactedContext,
     // Archive confirm dialog (Ctrl+Shift+W)
-    showArchiveConfirm,
-    setShowArchiveConfirm,
-    handleConfirmArchive,
     // Folder archive dialog
     showFolderArchiveDialog,
     folderSessionCount,

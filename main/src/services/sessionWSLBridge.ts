@@ -2,6 +2,7 @@ import path from 'path';
 import { escapeForBash, RUNPANE_PATH_FLAGS, RUNPANE_WSL_PATH_FUNCTIONS, WSLPATH } from '../utils/wslUtils';
 import { sessionRuntimePath } from './sessionRuntime';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import { AGENT_FARM_HOST_ENV } from '../../../shared/types/customCommandResume';
 
 function quotePowerShell(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
@@ -91,6 +92,7 @@ export function sessionWSLRcFile(workspace: string, record: OrchestrationSession
     '[ ! -f "$HOME/.bashrc" ] || . "$HOME/.bashrc"',
     `export PATH=${escapeForBash(bin)}:"$PATH"`,
     `export PANE_RUNPANE_BIN=${escapeForBash(`${bin}/runpane`)}`,
+    `export ${AGENT_FARM_HOST_ENV.sessionHook}="$PANE_RUNPANE_BIN"`,
     '',
   ].join('\n');
 }

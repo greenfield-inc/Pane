@@ -35,6 +35,7 @@ import { MachineRowMark, machineMarkTitle } from './machines/MachineMark';
 import { useAllMachinesTree } from '../hooks/useAllMachinesTree';
 import { isAllMachinesOn, useAllMachinesStore } from '../stores/allMachinesStore';
 import { openOnMachine, runOnMachine } from '../utils/machineRowActions';
+import { confirmMachineArchive } from './archiveConfirm';
 import type { MachineRef } from '../utils/allMachinesTree';
 import {
   buildMachineSearchItems, buildSearchItems, matchedRanges, searchItems, SEARCH_FILTERS,
@@ -143,7 +144,7 @@ function machineActionsFor(item: SearchItem, machine: MachineRef): LauncherActio
           id: 'pin', label: item.pane.isFavorite ? 'Unpin' : 'Pin', icon: item.pane.isFavorite ? PinOff : Pin,
           run: () => void runOnMachine(machine.id, { type: 'pin', target, pinned: !item.pane.isFavorite }, 'Could not pin or unpin the Pane'),
         },
-        { id: 'archive', label: 'Archive', icon: Archive, run: () => void runOnMachine(machine.id, { type: 'archive', target }, 'Could not archive the Pane') },
+        { id: 'archive', label: 'Archive', icon: Archive, run: () => confirmMachineArchive({ kind: 'pane', pane: item.pane }, machine.name, () => runOnMachine(machine.id, { type: 'archive', target }, 'Could not archive the Pane')) },
       ];
     }
     case 'session': {
@@ -154,7 +155,7 @@ function machineActionsFor(item: SearchItem, machine: MachineRef): LauncherActio
           id: 'pin', label: item.session.isPinned ? 'Unpin' : 'Pin', icon: item.session.isPinned ? PinOff : Pin,
           run: () => void runOnMachine(machine.id, { type: 'pin', target, pinned: !item.session.isPinned }, 'Could not pin or unpin the Session'),
         },
-        { id: 'archive', label: 'Archive', icon: Archive, run: () => void runOnMachine(machine.id, { type: 'archive', target }, 'Could not archive the Session') },
+        { id: 'archive', label: 'Archive', icon: Archive, run: () => confirmMachineArchive({ kind: 'session', name: item.session.name }, machine.name, () => runOnMachine(machine.id, { type: 'archive', target }, 'Could not archive the Session')) },
       ];
     }
     case 'project':

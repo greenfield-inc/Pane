@@ -226,20 +226,20 @@ describe('Sidebar order', () => {
 });
 
 describe('the sort, remembered on this computer', () => {
-  it('reads each sort back, and Most recent from anything else', () => {
+  it('reads each sort back, and By Session when nothing valid is stored', () => {
     expect(parseApprovalsSort('session')).toBe('session');
     expect(parseApprovalsSort('project')).toBe('project');
     expect(parseApprovalsSort('recent')).toBe('recent');
     expect(parseApprovalsSort('sidebar')).toBe('sidebar');
-    expect(parseApprovalsSort('nonsense')).toBe('recent');
-    expect(parseApprovalsSort('toString')).toBe('recent');
-    expect(parseApprovalsSort(null)).toBe('recent');
+    expect(parseApprovalsSort('nonsense')).toBe('session');
+    expect(parseApprovalsSort('toString')).toBe('session');
+    expect(parseApprovalsSort(null)).toBe('session');
   });
 
-  it('reads a bad value, or a store that throws, as Most recent', () => {
+  it('reads a bad value, or a store that throws, as By Session', () => {
     expect(readApprovalsSort(() => 'project')).toBe('project');
-    expect(readApprovalsSort(() => '{"bad":1}')).toBe('recent');
-    expect(readApprovalsSort(() => { throw new Error('storage is blocked'); })).toBe('recent');
+    expect(readApprovalsSort(() => '{"bad":1}')).toBe('session');
+    expect(readApprovalsSort(() => { throw new Error('storage is blocked'); })).toBe('session');
   });
 
   it('saves the choice, and carries on when the store throws', () => {

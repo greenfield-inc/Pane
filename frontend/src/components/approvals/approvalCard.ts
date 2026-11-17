@@ -140,6 +140,18 @@ export function canSend(item: NotifyItem, picks: readonly string[], text: string
   if (item.state !== 'waiting') return false;
   // One reply at a time with its reader (F-2): while it reads the last one, only picks can go.
   if (text.trim() && !item.agentPrompt && !item.optionsOnly) return !replyBeingRead(item);
+  return picksAnswer(item, picks);
+}
+
+/**
+ * Whether words typed with no pick can go on their own, as an answer or a question (D-245): not on
+ * a permission prompt or an options-only question, and not while the asker reads the last reply.
+ */
+export function canReplyAlone(item: NotifyItem): boolean {
+  return item.state === 'waiting' && !item.agentPrompt && !item.optionsOnly && !replyBeingRead(item);
+}
+
+function picksAnswer(item: NotifyItem, picks: readonly string[]): boolean {
   const questions = questionsOf(item);
   return questions.length > 0 && picks.length >= questions.length && questions.every((_, index) => Boolean(picks[index]));
 }
@@ -198,20 +210,20 @@ export function firstToOpen(items: readonly NotifyItem[]): NotifyItem | undefine
   return ready[0] ?? items.find(item => !isBeingRead(item)) ?? items[0];
 }
 
-/** The picks a fresh card starts with: each question's recommended option, '' where none is. */
-export function recommendedPicks(item: NotifyItem): string[] {
-  if (item.agentPrompt) return [];
-  return questionsOf(item).map(question => question.choices.find(choice => choice.recommended)?.label ?? '');
-}
-
 /**
  * The approvals a chat's compact card pages through (P5, P6): waiting on the person, not the
  * chat's own bridged question (AskUserQuestion or a permission prompt from that same chat, which
  * the chat already shows as Claude's card), and not one an agent is reading a reply to, until it
  * comes back ready again.
  */
-export function dockApprovals(items: readonly NotifyItem[], chatPanelId?: string): NotifyItem[] {
-  return items.filter(item => !bridgedFrom(item, chatPanelId) && (!isBeingRead(item) || item.readyAgain !== undefined));
+export function dockApprovals(items: readonly NotifyItem[], chatPanelId?: string, dismissed: Readonly<Record<string, string>> = {}): NotifyItem[] {
+  return items.filter(item => !bridgedFrom(item, chatPanelId) && (!isBeingRead(item) || item.readyAgain !== undefined)
+    && dismissed[item.id] !== dockKey(item));
+}
+
+/** What a Dismiss in a chat's dock holds onto (Q-389): a new version, reply or ready-again brings the card back. */
+export function dockKey(item: Pick<NotifyItem, 'version' | 'reply' | 'readyAgain'>): string {
+  return `${item.version ?? 0}:${item.reply?.id ?? ''}:${item.readyAgain ?? ''}`;
 }
 
 /** A question the chat tab itself asked (its AskUserQuestion or permission prompt), copied to Approvals. */

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { installElectronApiMock } from './electronApiMock';
+import type { ComputerRoute, RemoteComputer } from '../shared/types/remoteComputers';
 
 type SettingsMock = {
   getConfig: () => JsonObject;
@@ -532,11 +533,13 @@ test.describe('Settings', () => {
     const content = page.getByTestId('settings-content');
 
     await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
+    await content.getByRole('tab', { name: 'Tailscale' }).click();
     await content.getByRole('button', { name: 'Advanced', exact: true }).click();
     await page.getByLabel('Connection Label', { exact: true }).fill('Discard this label');
     await page.getByRole('button', { name: 'Back to Remote Access' }).click();
     await page.getByRole('dialog', { name: 'Discard unsaved changes?' }).getByRole('button', { name: 'Discard Changes' }).click();
 
+    await expect(content.getByRole('tab', { name: 'Tailscale' })).toHaveAttribute('aria-selected', 'true');
     await content.getByRole('button', { name: 'Advanced', exact: true }).click();
     await expect(page.getByLabel('Connection Label', { exact: true })).toHaveValue('');
     await page.getByRole('button', { name: 'Back to Remote Access' }).click();
@@ -719,5 +722,112 @@ test.describe('Settings', () => {
     await apply.click();
     await expect(page.getByText('Deepgram accepted this key.')).toBeVisible();
   });
-});
 
+  test.describe('Remote Access', () => {
+    const route = (kind: ComputerRoute['kind'], address: string, extra: Partial<ComputerRoute> = {}): ComputerRoute => ({
+      id: `${kind}:${address}`, kind, source: 'found', baseUrl: address, token: 'synthetic', ...extra,
+    });
+    const buildBox: RemoteComputer = {
+      id: 'build-box', label: 'Build Box', os: 'Windows', linkedBy: "Sam's iPhone",
+      routes: [
+        route('lan', 'https://192.168.1.20:8443'),
+        route('tailscale', 'https://build-box.tail1234.ts.net:8443', { tailnetMachine: 'build-box', tailnetDomain: 'tail1234.ts.net' }),
+        route('relay', 'https://bb.runpane.net', { source: 'link', relay: { computerId: 'bb', fingerprint: 'f' } }),
+      ],
+    };
+    const travelLaptop: RemoteComputer = {
+      id: 'travel-laptop', label: 'Travel Laptop', os: 'Linux',
+      routes: [route('tailscale', 'https://travel-laptop.tail1234.ts.net:8443', { tailnetMachine: 'travel-laptop', tailnetDomain: 'tail1234.ts.net' })],
+    };
+
+    async function openRemoteAccess(page: Page, options: Parameters<typeof installElectronApiMock>[1] = {}) {
+      await bootSettings(page, { computers: [buildBox, travelLaptop], ...options });
+      await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
+      return page.getByTestId('settings-content');
+    }
+
+    test('groups computers, phones and Tailscale in tabs, one row per computer with its routes', async ({ page }) => {
+      const content = await openRemoteAccess(page);
+      await expect(content.getByRole('tab')).toHaveText(['Computers · 3', 'Phones and glasses · 0', 'Tailscale']);
+      await expect(content.getByRole('tab', { name: 'Computers · 3' })).toHaveAttribute('aria-selected', 'true');
+      await expect(content.getByTestId('machine-Build Box').getByRole('list', { name: 'Routes' }).getByRole('listitem'))
+        .toHaveText(['Same network', 'Tailscale', 'Pane relay']);
+
+      await content.getByTestId('machine-Build Box').getByRole('button', { name: 'Switch to Build Box' }).click();
+      await expect(content.getByTestId('machine-Build Box').getByLabel('Same network, in use')).toBeVisible();
+
+      await content.getByRole('tab', { name: /^Phones and glasses/ }).click();
+      await expect(content.getByRole('heading', { name: /^Devices/ })).toBeVisible();
+      await content.getByRole('tab', { name: 'Tailscale' }).click();
+      await expect(content.getByRole('heading', { name: /^Access/ })).toBeVisible();
+    });
+
+    test('an expanded row lists routes in order, reorders them, and adds a route through Add a device', async ({ page }) => {
+      const content = await openRemoteAccess(page);
+      const row = content.getByTestId('machine-Build Box');
+      await row.getByRole('button', { name: 'Build Box routes and details' }).click();
+      const routes = row.getByRole('list', { name: 'Build Box routes in order' }).getByRole('listitem');
+      await expect(routes).toHaveText([/^Same network/, /^Tailscale/, /^Pane relay/]);
+      await expect(row).toContainText("By Sam's iPhone, which paired with both computers");
+
+      await row.getByRole('button', { name: /^Move Same network/ }).press('ArrowDown');
+      await expect(routes).toHaveText([/^Tailscale/, /^Same network/, /^Pane relay/]);
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+      const calls = await page.evaluate(() => (window as typeof window & { __paneTestElectronMock: SettingsMock }).__paneTestElectronMock.getInvokeCalls('computers:reorder-routes'));
+      expect(calls.map((call) => call.args)).toEqual([[{
+        computerId: 'build-box',
+        routeIds: ['tailscale:https://build-box.tail1234.ts.net:8443', 'lan:https://192.168.1.20:8443', 'relay:https://bb.runpane.net'],
+      }]]);
+
+      await row.getByRole('button', { name: 'Add route' }).click();
+      await expect(page.getByRole('dialog', { name: 'Add a device' }).getByRole('tab', { name: 'Computer' })).toHaveAttribute('aria-selected', 'true');
+    });
+
+    test('with Tailscale signed out here, a computer reached only over Tailscale asks for a link', async ({ page }) => {
+      const content = await openRemoteAccess(page, { tailnetMachines: { ok: false, reason: 'Tailscale is signed out', fix: 'Open Tailscale and sign in.' } });
+      await expect(content.getByTestId('machine-Build Box').getByLabel('Tailscale, not available here')).toBeVisible();
+      await expect(content.getByTestId('machine-Build Box').getByRole('button', { name: 'Switch to Build Box' })).toBeVisible();
+      const travel = content.getByTestId('machine-Travel Laptop');
+      await expect(travel).toContainText('Linux · Only on Tailscale, which is signed out here');
+      await travel.getByRole('button', { name: 'Link Travel Laptop' }).click();
+      await expect(page.getByRole('dialog', { name: 'Add a device' }).getByRole('tab', { name: 'Computer' })).toHaveAttribute('aria-selected', 'true');
+    });
+
+    test('this computer\'s row saves its public URL and shows why one is refused', async ({ page }) => {
+      const content = await openRemoteAccess(page);
+      const here = content.getByTestId('machine-devbox');
+      await here.getByRole('button', { name: 'devbox routes and details' }).click();
+      const field = here.getByLabel('Public URL');
+      await field.fill('http://pane.example.com');
+      await here.getByRole('button', { name: 'Save' }).click();
+      await expect(here.getByRole('alert')).toContainText('is not an HTTPS address');
+
+      await field.fill('https://pane.example.com');
+      await here.getByRole('button', { name: 'Save' }).click();
+      await expect(here.getByRole('button', { name: 'Clear' })).toBeVisible();
+      await expect(field).toHaveValue('https://pane.example.com');
+      await expect(here).toContainText('Linked computers find it automatically.');
+    });
+
+    test('a link to a setting on another tab opens that tab and focuses the setting', async ({ page }) => {
+      const content = await openRemoteAccess(page);
+      await expect(content.getByRole('tab', { name: /^Computers/ })).toHaveAttribute('aria-selected', 'true');
+      const openSetting = (setting: string) => page.evaluate((detail) => {
+        window.dispatchEvent(new CustomEvent('pane:open-settings', { detail }));
+      }, { category: 'remote-access', setting });
+
+      await openSetting('remote-relay-address');
+      await expect(content.getByRole('tab', { name: /^Phones and glasses/ })).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#settings-remote-relay-address')).toBeFocused();
+
+      await openSetting('remote-visibility');
+      await expect(content.getByRole('tab', { name: 'Tailscale' })).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#settings-remote-visibility')).toBeFocused();
+
+      await content.getByRole('tab', { name: /^Computers/ }).click();
+      await openSetting('remote-add-code');
+      await expect(content.getByRole('tab', { name: 'Tailscale' })).toHaveAttribute('aria-selected', 'true');
+      await expect(content.getByRole('textbox', { name: 'Connection Code' })).toBeFocused();
+    });
+  });
+});

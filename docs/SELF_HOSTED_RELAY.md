@@ -86,7 +86,7 @@ You need:
    `curl https://relay.example.com/healthz` and
    `dig @203.0.113.10 relay.example.com A`.
 
-5. **Point Pane at it.** On each computer: **Settings › Remote Access › More ›
+5. **Point Pane at it.** On each computer: **Settings › Remote Access › Phones and glasses ›
    Relay address**, enter `relay.example.com` and press Enter. The computer
    reconnects through your relay, gets a certificate for
    `<id>.relay.example.com`, and new QR codes use your domain. Phones paired
@@ -111,9 +111,9 @@ volume.
 Every `pane-relay` flag also reads an environment variable, so any other
 setting goes in `.env` too, such as `PANE_RELAY_ACME_EMAIL` for a Let's
 Encrypt contact address. [relay/README.md](../relay/README.md#flags) lists
-them all, including the connection and byte limits and the blocklist. Limits
-count each client address, so a flood slows and refuses only the address it
-comes from. Many computers behind one shared address, such as an office
+them all, including the connection and traffic limits and the blocklist.
+Limits count each client address, so a flood slows only the address it comes
+from, and too many new connections from it are refused. Many computers behind one shared address, such as an office
 network, may need a higher `--limit-agent-conns-per-min` and
 `--limit-new-ids-per-hour`.
 

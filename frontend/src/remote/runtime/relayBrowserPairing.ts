@@ -3,7 +3,9 @@ import {
   RelayPairingError,
   type RelayConnectionProfile,
 } from '../../../../shared/remoteClient/relay';
+import { relayLinkJoin, type RelayLinkJoin } from '../../../../shared/remoteClient/relayLinkPreview';
 import type { RemoteFetch } from '../../../../shared/remoteClient/remoteDaemonClient';
+import type { RemotePaneConnectionProfile } from '../../../../shared/types/remoteDaemon';
 
 /** Where the browser app is opened from the relay landing's "Continue in browser": `/app/#pair=<secret>`. */
 export interface PairingPage {
@@ -28,10 +30,26 @@ export async function pairThisBrowser(
   secret: string,
   request: { fetch: RemoteFetch; label: string; phoneId: string },
 ): Promise<RelayConnectionProfile[]> {
-  // The page's host is `<id>.<domain>`. The computer's name arrives with the exchange.
+  return exchangeRelayPairing(request.fetch, servedBy(page), { secret, label: request.label, phoneId: request.phoneId });
+}
+
+/**
+ * Whether pairing would join this browser's saved computers with another group, which it confirms
+ * first; null when it pairs at once. Reading it doesn't spend the secret.
+ */
+export function browserPairingJoin(
+  page: PairingPage,
+  secret: string,
+  fetch: RemoteFetch,
+  saved: readonly RemotePaneConnectionProfile[],
+): Promise<RelayLinkJoin | null> {
+  return relayLinkJoin(fetch, { ...servedBy(page), secret }, saved);
+}
+
+/** The computer that served the page, whose host is `<id>.<domain>`. Its name arrives with the exchange. */
+function servedBy(page: PairingPage) {
   const [computerId = '', ...domain] = new URL(page.location.origin).host.split('.');
-  const scanned = { computerId, domain: domain.join('.'), name: 'your computer' };
-  return exchangeRelayPairing(request.fetch, scanned, { secret, label: request.label, phoneId: request.phoneId });
+  return { computerId, domain: domain.join('.'), name: 'your computer' };
 }
 
 /** The pairing error as one line for the connection screen. */

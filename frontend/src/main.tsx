@@ -1,3 +1,8 @@
+// Linked from the page head, so the launch outline (index.html) paints with the app's own styles,
+// the chat's message box included, before any of the app's code runs.
+import './index.css';
+import './components/agentChat/agentChat.css';
+import './components/chatTab/chatTab.css';
 import { loadReactScan } from './devtools/loadReactScan';
 
 async function bootstrapDesktop(): Promise<void> {
@@ -8,6 +13,8 @@ async function bootstrapDesktop(): Promise<void> {
 
 bootstrapDesktop().catch(error => {
   console.error('Failed to bootstrap the Pane desktop renderer.', error);
+  // Nothing will replace the launch outline (index.html), so it goes.
+  document.getElementById('pane-launch-outline')?.remove();
   window.electronAPI?.diagnostics?.rendererFatal({
     kind: 'error',
     message: error instanceof Error ? error.message : String(error),

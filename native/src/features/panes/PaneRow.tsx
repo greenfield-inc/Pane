@@ -18,13 +18,17 @@ export interface PaneRowProps {
   onTogglePinned: () => void;
   onArchive: () => void;
   onTogglePaused: () => void;
+  /** Muted text at the row's end, such as its repository under Pinned. */
+  detail?: string;
+  /** What the row sits on, so its swipe actions stay hidden: the page, or a card. */
+  background?: string;
 }
 
 /**
- * The PWA drawer's pane row, with the live agent status as a dot; a paused Pane is grayed out with
+ * A one-line pane row, 44 pt tall, with the live agent status as a dot; a paused Pane is grayed out with
  * a pause glyph in the dot's place. Swipe right pins; swipe left pauses or resumes, and archives.
  */
-export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogglePaused }: PaneRowProps) {
+export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogglePaused, detail, background }: PaneRowProps) {
   const theme = useTheme();
   const [pressed, setPressed] = useState(false);
   const paused = Boolean(pane.paused);
@@ -37,24 +41,25 @@ export function PaneRow({ pane, label, onOpen, onTogglePinned, onArchive, onTogg
       <Pressable
         testID={`pane-row-${pane.id}`}
         accessibilityRole="button"
-        accessibilityLabel={`${label}, ${status}`}
+        accessibilityLabel={[label, status, detail].filter(Boolean).join(', ')}
         {...swipeRowAccessibility(actions)}
         onPress={onOpen}
         onPressIn={() => setPressed(true)}
         onPressOut={() => setPressed(false)}
-        style={[styles.open, { backgroundColor: pressed ? theme.colors.selected : theme.colors.background }]}
+        style={[styles.open, { backgroundColor: pressed ? theme.colors.selected : background ?? theme.colors.background }]}
       >
         {paused ? <PausedBadge /> : <StatusBadge status={pane.status} />}
-        <Text variant="callout" numberOfLines={1} style={[styles.name, { color: pressed ? theme.colors.text : paused ? theme.colors.textMuted : theme.colors.textSecondary }]}>
+        <Text variant="rowValue" numberOfLines={1} style={[styles.name, { color: pressed ? theme.colors.text : paused ? theme.colors.textMuted : theme.colors.textSecondary }]}>
           {label}
         </Text>
+        {detail ? <Text variant="rowDetail" tone="muted" numberOfLines={1} style={styles.detail}>{detail}</Text> : null}
       </Pressable>
     </SwipeRow>
   );
 }
 
 const styles = StyleSheet.create({
-  // PWA row: rounded-md px-3 py-3 gap-2 around an h-8 line = 56.
-  open: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 12 },
+  open: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14 },
   name: { flex: 1 },
+  detail: { flexShrink: 1, maxWidth: '45%' },
 });

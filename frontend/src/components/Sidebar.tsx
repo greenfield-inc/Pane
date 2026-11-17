@@ -4,11 +4,13 @@ import { onOpenNewDialogRequest } from '../utils/openNewDialog';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
+import { confirmPaneArchive } from './archiveConfirm';
 import { ArchiveProgress } from './ArchiveProgress';
 import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, Keyboard, LayoutGrid, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Inbox, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
+import { ResourcesButton } from './machineHealth/ResourcesButton';
 import { Kbd } from './ui/Kbd';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { useHotkeyStore } from '../stores/hotkeyStore';
@@ -122,7 +124,6 @@ interface SidebarProps {
   onAboutClick: () => void;
   onSettingsClick: () => void;
   onRemoteSettingsClick: () => void;
-  onAddMachineClick: () => void;
   /** Opens Remote Access with this Tailscale machine's password field. */
   onMachinePasswordRequest: (machineName: string) => void;
   width: number;
@@ -155,7 +156,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onAddMachineClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onShortcutsClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
+export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onShortcutsClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   // Maximize spreads the sidebar over the main area; minimize collapses it to its rail (P4).
   const shellRef = useRef<HTMLDivElement>(null);
@@ -314,7 +315,8 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   // step through the machines in its order, skipping ones that cannot be
   // picked, and ⌃⌘0 goes between All machines and the machine it shows.
   const stepMachine = useCallback((delta: 1 | -1) => {
-    const pickable = machines.filter((machine) => machine.active || machine.action !== 'none');
+    // Next and previous skip a computer that is offline or can't be reached here; the switcher still offers it.
+    const pickable = machines.filter((machine) => machine.active || (machine.action !== 'none' && machine.presence !== 'dimmed'));
     if (pickable.length === 0) return;
     const current = allMachines ? -1 : pickable.findIndex((machine) => machine.active);
     const next = pickable[(current + delta + pickable.length) % pickable.length];
@@ -361,7 +363,6 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
       allMachines={{ selected: allMachines, machines: savedMachines, onSelect: () => setAllMachines(true) }}
       onNeedsPassword={(machine) => onMachinePasswordRequest(machine.name)}
       onOpenChange={(open) => { if (open) void refreshMachines(); }}
-      onAddMachine={onAddMachineClick}
       onOpenRemoteAccess={onRemoteSettingsClick}
     />
   );
@@ -473,23 +474,19 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
     navigateToSessions();
   }, [navigateToSessions, setActiveSession, setSidebarNavigationScope]);
 
+  // The rail icon a menu opened from, so focus returns to it when the archive confirm closes.
+  const compactMenuOpener = useRef<HTMLElement | null>(null);
   const openCompactSessionMenu = useCallback((event: React.MouseEvent, session: Session) => {
     event.preventDefault();
     event.stopPropagation();
+    compactMenuOpener.current = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     setCompactSessionMenu({ session, x: event.clientX, y: event.clientY });
   }, []);
 
-  const archiveCompactSession = useCallback(async () => {
+  const archiveCompactSession = useCallback(() => {
     if (!compactSessionMenu) return;
-    const { id } = compactSessionMenu.session;
     setCompactSessionMenu(null);
-    try {
-      const response = await API.sessions.delete(id);
-      if (!response.success) showActionError('Could not archive the Pane', response.error);
-    } catch (error) {
-      console.error('Failed to archive session:', error);
-      showActionError('Could not archive the Pane', error);
-    }
+    confirmPaneArchive(compactSessionMenu.session, { returnFocus: compactMenuOpener.current });
   }, [compactSessionMenu]);
 
   const toggleCompactSessionPinned = useCallback(async () => {
@@ -587,7 +584,8 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   // in the rail so reopening the sidebar is reachable where the sidebar lives.
   // The host pill keeps to the sidebar's width: the room right of the toggle,
   // capped at 180px, and only its icon once a name no longer fits.
-  const hostPillRoom = width - (titleBarControlsSlot?.offsetLeft ?? 0) - 44;
+  // Room for the collapse button and the Resources icon beside the pill.
+  const hostPillRoom = width - (titleBarControlsSlot?.offsetLeft ?? 0) - 76;
   const hostPillMaxWidth = Math.min(180, hostPillRoom);
   const showHostPillLabel = hostPillRoom >= 96;
   const headerControls = (
@@ -629,6 +627,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
         </button>,
         'bottom-left',
       )}
+      {!collapsed && <ResourcesButton className="ml-auto mr-1" />}
     </>
   );
 
@@ -927,6 +926,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
             <Tooltip content={remoteFooterTooltip} side="right" interactive delay={250}>
               {switcherVisible ? renderRemoteHostSwitcher(railRemoteButton, 'top-right') : railRemoteButton}
             </Tooltip>
+            <ResourcesButton rail className={COMPACT_RAIL_BUTTON} />
             <Tooltip content={hotkeyDisplay('open-settings') ? <Kbd>{hotkeyDisplay('open-settings')}</Kbd> : undefined} side="right">
               <button
                 type="button"
@@ -962,7 +962,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           menu={compactSessionMenu}
           onClose={() => setCompactSessionMenu(null)}
           onTogglePinned={() => void toggleCompactSessionPinned()}
-          onArchive={() => void archiveCompactSession()}
+          onArchive={archiveCompactSession}
         />
       </>
     );

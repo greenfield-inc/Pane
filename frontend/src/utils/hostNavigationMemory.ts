@@ -4,6 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { API } from './api';
 import { focusChatSoon } from '../services/regionFocus';
+import { dropLaunchOutline, whileLaunchOutline } from './launchOutline';
 import { loadChatTabRoute } from '../components/panels/chatTabRouteModule';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import type { HostNavigationMemory, LaunchChat, PaneNavigationView } from '../../../shared/types/hostNavigation';
@@ -202,17 +203,32 @@ export function prepareLaunchChat(): void {
 export async function restoreLaunchChat(): Promise<void> {
   prepareLaunchChat();
   const chat = await launchChat;
-  if (!chat) return;
   const sessions = useSessionStore.getState();
-  if (sessions.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;
-  if (!sessions.sessions.some(session => session.id === chat.paneId)) return;
+  if (!chat || sessions.activeSessionId || useNavigationStore.getState().activeView !== 'sessions'
+    || !sessions.sessions.some(session => session.id === chat.paneId)) {
+    dropLaunchOutline();
+    return;
+  }
   // The Pane opens once the chat's code is in, so the tab renders without a
   // loading fallback (and its 300 ms reveal throttle).
   await loadChatTabRoute().catch(() => undefined);
   const now = useSessionStore.getState();
-  if (now.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') return;
+  if (now.activeSessionId || useNavigationStore.getState().activeView !== 'sessions') {
+    dropLaunchOutline();
+    return;
+  }
   focusChatSoon(chat.panelId, { untilInput: true });
   await now.setActiveSession(chat.paneId);
+  // Anything that opens another Pane or view before the chat takes over (a key, a pane:// link) drops the outline.
+  const leftLaunchPane = () => useSessionStore.getState().activeSessionId !== chat.paneId || useNavigationStore.getState().activeView !== 'sessions';
+  if (leftLaunchPane()) {
+    dropLaunchOutline();
+    return;
+  }
+  const check = () => { if (leftLaunchPane()) dropLaunchOutline(); };
+  const unsubscribeSessions = useSessionStore.subscribe(check);
+  const unsubscribeNavigation = useNavigationStore.subscribe(check);
+  whileLaunchOutline(() => { unsubscribeSessions(); unsubscribeNavigation(); });
 }
 
 /**
@@ -303,6 +319,13 @@ export async function restoreHostNavigation(
     await setActiveSession(null);
     if (!ownsRuntime()) return;
     navigation.navigateToSsh();
+    return;
+  }
+
+  if (memory.view === 'resources') {
+    await setActiveSession(null);
+    if (!ownsRuntime()) return;
+    navigation.navigateToResources();
     return;
   }
 

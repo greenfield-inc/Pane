@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
+  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore, type Attachment as ComposerAttachment,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, messageTime, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
+import { chatTurns, messageTime, steeredMessageId, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -24,15 +24,18 @@ import { ChatSwitchBanner } from './ChatSwitchBanner';
 import { ConversationPicker } from './ConversationPicker';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, riskySetting, usePhoneWidth } from './ChatComposerControls';
 import { ChatStatusBar, type ChatStatusPullRequest } from './ChatStatusBar';
-import { sendNowKeys } from './chatKeys';
+import { sendNowEffect, sendNowKeys } from './chatKeys';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
-import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
+import { ChatAttachmentAdapter, dragHasFiles, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
+import { describeUpload } from '../../utils/hostUpload';
+import type { UploadProgress } from '../../../../shared/chunkedUpload';
 import { ChatCopyButton } from './ChatCopyButton';
 import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { usePageTextFind } from '../find/usePageTextFind';
+import { takeLaunchDraft } from '../../utils/launchOutline';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -49,14 +52,19 @@ function ImagePreview() {
   return url ? <img className="chat-attachment-preview" src={url} alt="" /> : <span className="chat-attachment-icon" aria-hidden><ImageIcon /></span>;
 }
 
-/** An attached image or file before sending; a file shows "Copying…" until it is on the chat's machine. */
+/** How each file's copy to the chat's machine is going, by attachment id. */
+const CopyProgressContext = createContext<ReadonlyMap<string, UploadProgress>>(new Map());
+
+/** An attached image or file before sending; a file shows its copy's progress until it is on the chat's machine. */
 function Attachment() {
   const kind = useAuiState(state => state.attachment.type);
+  const id = useAuiState(state => state.attachment.id);
   const copying = useAuiState(state => state.attachment.status.type === 'running');
+  const progress = useContext(CopyProgressContext).get(id);
   return <AttachmentPrimitive.Root className="chat-attachment" data-kind={kind} aria-busy={copying}>
     {kind === 'image' ? <ImagePreview /> : <span className="chat-attachment-icon" aria-hidden>{copying ? <LoaderCircle className="chat-spin" /> : <FileText />}</span>}
     <span className="chat-attachment-name"><AttachmentPrimitive.Name /></span>
-    {copying && <span className="chat-attachment-status">Copying…</span>}
+    {copying && <span className="chat-attachment-status" title={progress ? `Copying ${describeUpload(progress)}` : 'Copying'}>{progress ? describeUpload(progress, { short: true }) : '0%'}</span>}
     <AttachmentPrimitive.Remove aria-label="Remove attachment" title="Remove attachment"><X className="h-3 w-3" /></AttachmentPrimitive.Remove>
   </AttachmentPrimitive.Root>;
 }
@@ -175,11 +183,19 @@ export interface ChatTabPanelProps {
   working?: readonly WorkingAgent[];
 }
 
+/**
+ * The attachments of each chat's unsent draft, kept with its viewer as the draft text is: the
+ * composer is rebuilt when the tab or its Pane is shown again, and they go back into it then.
+ */
+const draftAttachments = new WeakMap<ChatTabViewer, readonly ComposerAttachment[]>();
+
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
 const PASTE_LIMIT = 1024 * 1024;
 
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
 const NO_ACTIONS: ChatTurnActions = {};
+/** How long after the handover an Enter pressed before the chat loaded may still send. */
+const LAUNCH_SEND_MS = 5_000;
 const NO_RENDERING: ChatRendering = {};
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
@@ -200,7 +216,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   /** The sent message's transcript ID: when the host's copy of it renders, the chat follows the live end once more. */
   const followSent = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!followSent.current || !messages.some(message => message.id === followSent.current)) return;
+    const sent = followSent.current;
+    if (!sent || !messages.some(message => message.id === `user:${sent}` || message.id === steeredMessageId(sent))) return;
     followSent.current = undefined;
     followLiveEnd.current?.();
   }, [messages]);
@@ -219,12 +236,19 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
-  const [copying, setCopying] = useState(0);
+  const [copies, setCopies] = useState<ReadonlyMap<string, UploadProgress>>(new Map());
+  const copying = copies.size;
   const canAttachImages = !!view?.canAttachImages;
   const attachments = useMemo(() => {
-    const options = { images: canAttachImages, saveFile, onCopying: (delta: 1 | -1) => setCopying(count => count + delta) };
+    const onProgress = (id: string, progress: UploadProgress | null) => setCopies(current => {
+      const next = new Map(current);
+      if (progress) next.set(id, progress);
+      else next.delete(id);
+      return next;
+    });
+    const options = { images: canAttachImages, saveFile, onProgress, panelId };
     return ChatAttachmentAdapter.available(options) ? new ChatAttachmentAdapter(options) : undefined;
-  }, [canAttachImages, saveFile]);
+  }, [canAttachImages, saveFile, panelId]);
   /** Why dropped, pasted or picked files were not attached; shown until dismissed or the next attempt. */
   const [attachProblems, setAttachProblems] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -277,6 +301,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     }
   };
 
+  const sendDisabled = disabled || !!snapshot.pendingDelivery || copying > 0;
   const runtime = useExternalStoreRuntime({
     messages, convertMessage: toAssistantMessage,
     // The host queues a message sent while the agent works, so the composer never locks
@@ -284,7 +309,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     isRunning: false,
     isLoading: !snapshot.transcript && view?.status !== 'stopped',
     // A file still copying to the chat's machine has no path yet to send.
-    isSendDisabled: disabled || !!snapshot.pendingDelivery || copying > 0,
+    isSendDisabled: sendDisabled,
     unstable_persistsHistory: true, unstable_enableToolInvocations: false,
     adapters: attachments ? { attachments } : undefined,
     onNew: async message => {
@@ -314,7 +339,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       const request: ChatTabSend = { operationId, text, images: imageParts };
       // Send now only means something while a turn runs; otherwise it is a plain send.
       if (now && working) request.now = true;
-      followSent.current = `user:${operationId}`;
+      followSent.current = operationId;
       if (!await deliver(request, true)) return;
       // Typing while an approval waits tells the agent what to do instead (round 2): once the message is in.
       await Promise.all(waitingPermissions.map(permission => {
@@ -323,7 +348,85 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       }));
     },
   });
-  useEffect(() => { runtime.thread.composer.setText(viewer.snapshot().draft); }, [runtime, viewer]);
+  /**
+   * The draft's attachments going back into this runtime's composer: once, though development
+   * mode runs the effect twice. `mounted` counts the effect runs still in place.
+   */
+  const restore = useRef<{ runtime: typeof runtime; done: boolean; mounted: number } | undefined>(undefined);
+  // A layout effect: its cleanup runs as the panel leaves, before assistant-ui disposes the
+  // composer (a microtask queued on unmount) and cancels the adds still waiting.
+  useLayoutEffect(() => {
+    const composer = runtime.thread.composer;
+    const save = () => draftAttachments.set(viewer, composer.getState().attachments);
+    if (restore.current?.runtime !== runtime) {
+      const restoring: NonNullable<typeof restore.current> = { runtime, done: false, mounted: 0 };
+      restore.current = restoring;
+      composer.setText(viewer.snapshot().draft);
+      const saved = draftAttachments.get(viewer) ?? [];
+      // In their order: a file already copied to the chat's machine comes back with its path; an
+      // image (or a file still copying) is added again from the file itself. One the chat now
+      // refuses says why through attachmentAddError, below.
+      void (async () => {
+        for (const { id, type, name, contentType, content, file } of saved) {
+          const restored = content ? { id, type, name, contentType, content } : file;
+          if (!restored) continue;
+          // On to the next once this one shows, without waiting for a file to copy again.
+          const count = composer.getState().attachments.length;
+          let stopWatching = () => {};
+          const shown = new Promise<void>(resolve => {
+            stopWatching = composer.subscribe(() => { if (composer.getState().attachments.length > count) resolve(); });
+          });
+          await Promise.race([composer.addAttachment(restored).catch(() => undefined), shown]);
+          stopWatching();
+        }
+        restoring.done = true;
+        // Left before every attachment was back: the saved list stays whole for next time.
+        if (restoring.mounted > 0) save();
+      })();
+    }
+    const run = restore.current;
+    run.mounted += 1;
+    // Sending empties the composer's attachments, and with them the saved ones.
+    const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
+    return () => { run.mounted -= 1; unsubscribe(); };
+  }, [runtime, viewer]);
+  // The launch outline's message box (index.html) hands over as this tab first paints: its text and
+  // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
+  // once (D-62) if the chat can send it soon after; an edit or a chat that stays unable drops it.
+  const launchSend = useRef<{ text: string; until: number } | null>(null);
+  /** Re-runs the launch send check: the handover can land after mount, once the box settles, and the send window closes. */
+  const [launchTick, setLaunchTick] = useState(0);
+  useLayoutEffect(() => {
+    const input = () => document.querySelector<HTMLTextAreaElement>(`textarea[data-chat-composer="${CSS.escape(panelId)}"]`);
+    return takeLaunchDraft(panelId, input, draft => {
+      viewer.setDraft(draft.text);
+      runtime.thread.composer.setText(draft.text);
+      if (draft.send) launchSend.current = { text: draft.text, until: Date.now() + LAUNCH_SEND_MS };
+      setLaunchTick(tick => tick + 1);
+      const box = input();
+      if (!box) return;
+      // Set here, not on React's next render, so the text and caret show in the same frame.
+      box.value = draft.text;
+      if (!draft.focused) return;
+      box.focus({ preventScroll: true });
+      box.setSelectionRange(draft.selectionStart, draft.selectionEnd);
+    });
+  }, [panelId, runtime, viewer]);
+  useEffect(() => {
+    const pending = launchSend.current;
+    if (!pending) return;
+    if (Date.now() > pending.until || runtime.thread.composer.getState().text !== pending.text) {
+      launchSend.current = null;
+      return;
+    }
+    if (sendDisabled) {
+      // Re-checked when the window closes, so a chat that never becomes able to send never sends.
+      const timer = setTimeout(() => setLaunchTick(tick => tick + 1), pending.until - Date.now() + 1);
+      return () => clearTimeout(timer);
+    }
+    launchSend.current = null;
+    void runtime.thread.composer.send();
+  }, [runtime, sendDisabled, launchTick]);
   // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
   // that failed while copying leaves no chip behind.
   useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {
@@ -372,6 +475,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     setBusy(true);
     try { await operation(); viewer.setError(undefined); } catch (error) { viewer.setError(ipcErrorMessage(error, 'Pane did not say why.')); } finally { setBusy(false); }
   };
+  /** The whole conversation, not only the window on screen. */
+  const copyConversation = async () => {
+    try {
+      return conversationMarkdown(chatTurns(await viewer.allMessages(), { running: working }), agentName);
+    } catch (error) {
+      viewer.setError(`Could not copy the conversation: ${ipcErrorMessage(error, 'Pane did not say why.')}`);
+      throw error;
+    }
+  };
   const configure = (id: string, value: string) => void act(() => client.configure(panelId, id, value));
   const answerPermission = (permission: AgentChatPermission, optionId: string) => void act(() => client.permission(panelId, permission.id, optionId));
   const clearConversation = () => {
@@ -405,7 +517,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     setCommandIndex(0);
   };
 
-  return <AssistantRuntimeProvider runtime={runtime}>
+  return <AssistantRuntimeProvider runtime={runtime}><CopyProgressContext.Provider value={copies}>
     <ThreadPrimitive.Root ref={findRootRef} className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} {...dragProps}>
       <FindBar panelId={panelId} />
       {dragging && <div className="chat-drop" aria-hidden>
@@ -413,7 +525,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           <Paperclip className="chat-drop-icon" />
           <p className="chat-drop-title">Drop to attach</p>
           <p className="chat-drop-detail">{saveFile
-            ? `Images up to ${megabytes(MAX_IMAGE_BYTES)}; other files up to ${megabytes(MAX_FILE_BYTES)} are copied to the chat's machine.`
+            ? `Images up to ${megabytes(MAX_IMAGE_BYTES)} go to the agent as images; other files, of any size, are copied to the chat's machine.`
             : `PNG, JPEG, WebP or GIF images up to ${megabytes(MAX_IMAGE_BYTES)}.`}</p>
         </div>
       </div>}
@@ -434,7 +546,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         {clearable && <button type="button" className="chat-copy chat-copy-all" disabled={disabled} title="Start a fresh conversation in this tab (/clear)" onClick={requestClear}>
           <Eraser className="h-3.5 w-3.5" aria-hidden /><span>Clear</span>
         </button>}
-        <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={() => conversationMarkdown(turns, agentName)} />
+        <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={copyConversation} />
       </div>}
       <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer && !paged}>
         <div className="chat-column">
@@ -470,12 +582,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           <button type="button" className="chat-button chat-button-outline" onClick={() => setConfirmClear(false)}>Cancel</button>
           <button type="button" className="chat-button chat-button-primary" disabled={disabled} onClick={clearConversation}>Clear</button>
         </dialog>}
-        <ChatQueue queue={view?.queue ?? []} working={working} disabled={disabled} label={rendering.queued}
+        <ChatQueue queue={view?.queue ?? []} working={working} steers={view?.sendNowSteers} disabled={disabled} label={rendering.queued}
           onRemove={operationId => void act(() => client.unqueue(panelId, operationId))}
           onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
           onEdit={editQueued} />
         {view && <ChatStatusBar context={view.context} tasks={view.tasks}
-          queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
+          queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} sendNowSteers={view.sendNowSteers} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         <ComposerPrimitive.Root className="chat-composer" data-pane-part="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
@@ -516,7 +628,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 requestClear();
                 return;
               }
-              // Cmd/Ctrl+Enter sends now: while a turn runs it interrupts it; otherwise it is a plain send.
+              // Cmd/Ctrl+Enter sends now (sendNowEffect) while a turn runs; otherwise it is a plain send.
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
                 event.preventDefault();
                 sendNowNext.current = true;
@@ -545,7 +657,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 : <ChatModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />}
               {working
                 ? <>
-                  <ComposerPrimitive.Send aria-label="Queue message" title={`Queue message: sends after this turn (Enter). Send now: ${sendNowKeys()}`} className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
+                  <ComposerPrimitive.Send aria-label="Queue message" title={`Queue message: sends after this turn (Enter). Send now (${sendNowKeys()}): ${sendNowEffect(view?.sendNowSteers)}`} className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
                   <button type="button" aria-label="Stop agent turn" title="Stop" className="chat-send" onClick={() => void act(() => client.cancel(panelId))}><Square className="h-3.5 w-3.5 fill-current" /></button>
                 </>
                 : <ComposerPrimitive.Send aria-label="Send message" title="Send message" className="chat-send"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>}
@@ -554,5 +666,5 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         </ComposerPrimitive.Root>
       </div>
     </ThreadPrimitive.Root>
-  </AssistantRuntimeProvider>;
+  </CopyProgressContext.Provider></AssistantRuntimeProvider>;
 }

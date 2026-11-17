@@ -1,4 +1,5 @@
 import { getChatTabManager } from '../services/chatTabs';
+import { computerTailnetName } from '../../../shared/types/remoteComputers';
 import { decodeChatPanelState } from '../services/chatTabs/state';
 import { createChatTab } from './chatTabs';
 import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, submitChatTab, waitForChatTab } from './runpaneChatTabs';
@@ -37,7 +38,7 @@ import type { ProjectEnvVar } from '../../../shared/types/projectEnvVars';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
-import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
+import { fastCheckWorkingDirectory, hasUntrackedWork, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
 import { queuedSetupMessage } from '../services/taskQueue';
 import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
@@ -57,6 +58,8 @@ import {
   readPanelAgentReport,
 } from '../services/agentReport';
 import { workerCard } from '../services/notify/workerContext';
+import { checkNotifyOptions } from './notify';
+import { agentReportOptionFields } from '../services/workspaceJournalSchema';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand } from '../services/agents/opencodeLaunch';
 import { takesChosenSession } from '../services/agents/chosenSessionLaunch';
@@ -340,6 +343,14 @@ const RUNPANE_CHANNELS = [
   'runpane:secrets:set',
   'runpane:secrets:delete',
   'runpane:secrets:resolve',
+  'runpane:devices:list',
+  'runpane:devices:open',
+  'runpane:devices:screenshot',
+  'runpane:devices:act',
+  'runpane:devices:run',
+  'runpane:devices:close',
+  'runpane:devices:usage',
+  'runpane:devices:free',
   'runpane:theme:read',
   'runpane:theme:set',
   'runpane:theme:reset',
@@ -1960,9 +1971,11 @@ export function registerRunpaneHandlers(
       if (normalized.paneId && normalized.paneId !== panel.sessionId) {
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
+      // Its buttons take notify's own checks (count, distinct labels, choices or questions).
+      checkNotifyOptions(normalized.choices, normalized.questions);
       const report = normalizeAgentReport(normalized, new Date().toISOString());
       // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
-      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath }).warnings : [];
+      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath, readStatusFile: report.summaryTruncated, choices: report.choices, questions: report.questions }).warnings : [];
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
       else await storePanelAgentReport(panel, report);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
@@ -5581,6 +5594,7 @@ const reportRequestSchema = boundary.object({
   summary: boundary.optional(boundary.string),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  ...agentReportOptionFields,
 });
 
 function parseReportRequest(value: PaneCommandValue): RunpaneReportRequest {
@@ -6016,15 +6030,8 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
     const commits = await computeUnpublishedCommits(services, pane, ctx);
     const workingDirectory = await fastCheckWorkingDirectory(pane.worktreePath, ctx.commandRunner.wslContext);
     const hasUncommittedChanges = workingDirectory.hasModified || workingDirectory.hasStaged || workingDirectory.hasConflicts;
-    let hasUntrackedFiles = workingDirectory.hasUntracked;
-    if (hasUntrackedFiles) {
-      // Agent setup is disposable; ordinary untracked work must still block archive.
-      const { stdout } = await ctx.commandRunner.execFile('git', [
-        'ls-files', '--others', '--exclude-standard', '-z',
-        '--exclude=/.codex/', '--exclude=/.claude/', '--exclude=/.agent-farm/',
-      ], pane.worktreePath, { silent: true, timeout: 10_000 });
-      hasUntrackedFiles = stdout.length > 0;
-    }
+    // Agent setup is disposable; ordinary untracked work must still block archive.
+    const hasUntrackedFiles = workingDirectory.hasUntracked && await hasUntrackedWork(pane.worktreePath, ctx.commandRunner);
     return { performed: true, hasUncommittedChanges, hasUntrackedFiles, ...commits };
   } catch {
     return { performed: false, reason: 'git-error' };
@@ -6327,7 +6334,7 @@ const PR_STATUS_TIMEOUT_MS = 20_000;
  * The Pane's PR state by its branch, after dropping cached PR results. A failed,
  * unavailable or slow lookup is `unknown`, which a `--merged` sweep skips.
  */
-async function findPrStatusForPane(services: AppServices, paneId: string): Promise<RunpanePaneArchivePrStatus> {
+export async function findPrStatusForPane(services: AppServices, paneId: string): Promise<RunpanePaneArchivePrStatus> {
   const gitStatus = services.gitStatusManager;
   try {
     const projectPath = services.sessionManager.getProjectForSession?.(paneId)?.path;
@@ -7310,9 +7317,9 @@ const remoteAssociationRequestSchema = boundary.object({
   panelIds: boundary.optional(boundary.array(boundary.nonEmptyString)),
 });
 
-/** The saved machine a name refers to: its Tailscale machine name, its label, or its profile id. */
+/** The saved computer a name refers to: its Tailscale machine name, its label, or its id. */
 function savedMachineProfile(config: AppConfig, name: string): { id: string; label: string } | undefined {
   const wanted = name.trim().toLowerCase().replace(/\..*$/, '');
-  return (config.remoteDaemon?.client.profiles ?? []).find(profile => [profile.tailnetMachine, profile.label, profile.id]
+  return (config.remoteDaemon?.client.computers ?? []).find(computer => [computerTailnetName(computer)?.machine, computer.label, computer.id]
     .some(value => value?.toLowerCase() === wanted || value?.toLowerCase() === name.trim().toLowerCase()));
 }

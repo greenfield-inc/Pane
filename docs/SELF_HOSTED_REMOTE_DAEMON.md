@@ -2,19 +2,19 @@
 
 This guide covers running Pane on your own workstation, Mac mini, Linux box, or VM and connecting to it from the local Pane desktop app or the Remote Pane browser app with a connection code.
 
-To pair a phone or another computer without Tailscale or a code, scan a QR code instead: see [Pair a phone with a QR code](QR_PAIRING.md).
+To pair a phone or another computer without Tailscale or a code, use a QR code or a one-time link instead: see [Add a device](QR_PAIRING.md). To reach a server you already reach over SSH, see [SSH route](#ssh-route).
 
 The intended flow is:
 
 1. Run one setup command on the remote machine.
 2. Copy the generated `pane-remote://...` connection code.
-3. Paste it into desktop Pane under `Settings > Remote Access`, or open `https://runpane.com/app/` and paste it there.
+3. Paste it into desktop Pane under `Settings > Remote Access > Tailscale > Paste a connection code`, or open `https://runpane.com/app/` and paste it there.
 
 Pane saves the profile and attempts to connect immediately. Local desktop mode is unchanged until a remote profile is imported and activated.
 
 ## Workspaces or pairing codes?
 
-To let machines on your tailnet reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, plus everyone on the tailnet when a machine's owner allows it, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from the sidebar's machine menu or Settings → Remote Access → Switch to. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices outside your tailnet. The remote daemon keeps port 443, and the two run side by side.
+To let machines on your tailnet reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, plus everyone on the tailnet when a machine's owner allows it, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from the sidebar's machine menu or Settings › Remote Access › Computers. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices outside your tailnet. The remote daemon keeps port 443, and the two run side by side.
 
 ## Guided quick start
 
@@ -30,7 +30,8 @@ use the new address. Codes created before the switch still point at the old
 tailnet, so create a new one. If Pane cannot confirm the forward, it shows the
 error and the `tailscale serve` command to run instead of creating a code.
 
-SSH and manual URL setups remain available through the explicit commands below.
+SSH and manual URL setups use the explicit commands below,
+and desktop Pane sets up an SSH host for you (see [SSH route](#ssh-route)).
 The no-argument and `setup` commands print help in non-interactive shells; they
 do not start a login prompt.
 
@@ -186,11 +187,37 @@ check [Troubleshooting](#troubleshooting).
 On your local desktop machine:
 
 1. Open Pane.
-2. Go to `Settings > Remote Access` and click `Add a machine` at the end of `Switch to`.
+2. Go to `Settings > Remote Access > Tailscale` and click `Paste a connection code`.
 3. Paste the full `pane-remote://...` code into `Connection Code`.
 4. Click `Connect`.
 
-If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and pick the saved host again from `Switch to` or the sidebar's machine menu.
+If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and pick the saved host again from `Settings > Remote Access > Computers` or the sidebar's machine menu.
+
+## SSH route
+
+Desktop Pane can reach a computer through your own SSH config, start Pane's headless host there, and keep the tunnel up.
+
+1. Open `Settings > Remote Access > Add a device` (or `Add a device…` in the sidebar's machine menu) and pick the `SSH` tab.
+2. Pick a host from `~/.ssh/config`, or type one under `Another host` (`user@host` works).
+3. Click `Connect`.
+
+Pane then:
+
+- connects with the system `ssh`, your config and your agent, and fails instead of asking for a password or host key. Your keys and passwords never leave this computer;
+- checks for Node.js 22 or later there;
+- runs `npx --yes runpane@latest install daemon --label "<this computer>" --prefer-tunnel ssh`, which installs Pane when it is missing and starts its headless host as a service;
+- forwards a local port to the host with `ssh -N -L` and saves the computer with an SSH route.
+
+The computer appears in `Settings > Remote Access > Computers` with an SSH pill. When the SSH connection drops, Pane reconnects it with backoff for up to 5 minutes, and again the next time it uses the route. Each step that fails says why and what to run: `ssh <host>` must connect in a terminal without prompts, and a host without Node.js needs it installed first.
+
+## Public URL
+
+A computer behind your own HTTPS reverse proxy can name that address as a route.
+
+1. On that computer, open `Settings > Remote Access > Computers` and expand its own row (marked `This computer`).
+2. Enter the address in `Public URL`, such as `https://pane.example.com`, and click `Save`. It must be HTTPS.
+
+The computer reports the address to every computer that connects to it, and they add a Public URL route ("found automatically"). Pane runs no tunnel service: the proxy and its certificate are yours. Point the proxy at Pane's host listener on loopback (port `42137` unless you changed it under `Settings > Remote Access > Tailscale > Advanced`), as in [Security Model](#security-model). Phone access turns that listener on.
 
 ## Use the Mobile / Browser App
 
@@ -252,7 +279,7 @@ A desktop connected to a remote host reaches every port listening on the host as
 
 Each connection the desktop accepts travels over the Pane connection as a WebSocket to `/ports/<port>` on the host, which connects to `localhost:<port>` there. The host accepts it only with the same sign-in as every other request, and only for a port in its current list. Listeners stay on loopback on both machines.
 
-Every client signed in to the host can reach these ports through that route: anyone holding a pairing code, and any Tailscale login that the Workspaces "Who can connect" setting allows. They reach every listening service, including databases that trust `localhost` and debugging ports such as a Node `--inspect` port, which runs code as you. Pane's own ports are forwarded too, and its remote API keeps its own sign-in. Forwarding can't be limited to some ports. If that is more access than you want, turn off the remote daemon listener in `Settings > Remote Access` and set "Who can connect" to Off.
+Every client signed in to the host can reach these ports through that route: anyone holding a pairing code, and any Tailscale login that the Workspaces "Who can connect" setting allows. They reach every listening service, including databases that trust `localhost` and debugging ports such as a Node `--inspect` port, which runs code as you. Pane's own ports are forwarded too, and its remote API keeps its own sign-in. Forwarding can't be limited to some ports. If that is more access than you want, turn off the remote daemon listener in `Settings > Remote Access > Tailscale > Advanced` and set "Who can connect" to Off.
 
 ## Security Model
 
@@ -295,7 +322,7 @@ Launch Pane on the host against that directory:
 PANE_DIR="$HOME/.pane_remote" pnpm dev
 ```
 
-In `Settings > Remote Access > Advanced Remote Host`:
+In `Settings > Remote Access > Tailscale > Advanced` (the `Advanced Remote Host` page):
 
 1. Enable `Enable remote daemon listener`.
 2. Keep `Listen Host` on `127.0.0.1`.
@@ -333,13 +360,13 @@ On Windows the endpoint is `pipe:<pipe name>`. This is the local control endpoin
 
 ### 5. Connect the Desktop Client
 
-Use `Add a machine` under `Switch to` for a generated code, or use `Save existing remote profile` under `More > Advanced > Pairing tools` with:
+Use `Paste a connection code` under `Settings > Remote Access > Tailscale` for a generated code, or use `Save existing remote profile` under `Tailscale > Advanced > Pairing tools` with:
 
 - label
 - base URL
 - bearer token
 
-Click `Save Remote Profile`, then pick the saved profile from `Switch to` or the sidebar's machine menu.
+Click `Save Remote Profile`, then pick the saved computer from `Settings > Remote Access > Computers` or the sidebar's machine menu.
 
 ## Validation
 
@@ -355,13 +382,16 @@ Recommended checks after connecting:
 
 ## When a connection fails
 
-When you connect to a host (Switch in Settings → Remote Access, Add a machine,
-the sidebar's machine menu, or Retry), the main area shows a checklist of
+When you connect to a host (a computer's row in Settings › Remote Access ›
+Computers, Paste a connection code, the sidebar's machine menu, or Retry), the
+main area shows a checklist of
 the connection's stages. The first stage that fails shows what went wrong and a
 fix. The same checklist appears when Pane gives up reconnecting after five
 minutes, and from **Retry now** on the "Reconnecting to <machine>…" banner. That
 banner appears once the connection has been down for 10 seconds; until then
-the workspace dims and the host dot pulses while Pane reconnects.
+the workspace dims and the host dot pulses while Pane reconnects. A computer
+with more than one route moves to the next route before the banner, so the
+banner means every route failed. See [Routes](QR_PAIRING.md#routes).
 
 The host's 5-second heartbeat decides whether a connection is alive: 12 seconds
 without one reconnects. One failed request fails only itself; three requests in
@@ -485,7 +515,7 @@ To the clipboard of the machine you are sitting at. In remote mode, dragging to 
 
 ## Current Limitations
 
-- No account-based multi-tenant auth. For a hosted relay that needs no Tailscale, see [Pair a phone with a QR code](QR_PAIRING.md)
+- No account-based multi-tenant auth. For a hosted relay that needs no Tailscale, see [Add a device](QR_PAIRING.md)
 - No direct non-loopback listener support
 - No full live remote end-to-end CI harness yet
 # Mobile push notifications

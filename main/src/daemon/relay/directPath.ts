@@ -75,6 +75,8 @@ export interface DirectPathOptions {
   fingerprint: string;
   label: string;
   log?(line: string): void;
+  /** The relay failed a probe the direct path passed: a stream open over the relay is likely dead too. */
+  onRelayFailed?(): void;
 }
 
 /**
@@ -159,6 +161,7 @@ export class DirectPath {
       this.choice = choosePath(this.choice, { relay, direct });
       const ms = (value: number | null) => (value === null ? 'failed' : `${Math.round(value)} ms`);
       if (this.choice.path !== before) this.options.log?.(`[direct] ${this.options.label}: new connections use the ${this.choice.path} path (relay ${ms(relay)}, direct ${ms(direct)})`);
+      if (before === 'relay' && this.choice.path === 'direct' && relay === null) this.options.onRelayFailed?.();
     } finally {
       this.probing = false;
     }

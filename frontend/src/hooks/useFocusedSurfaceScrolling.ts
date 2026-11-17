@@ -33,7 +33,11 @@ export function useFocusedSurfaceScrolling(activeSessionId: string | null): void
     focusedSurfaceScroll.setActiveSession(activeSessionId);
     let secondFrame: number | null = null;
     const firstFrame = window.requestAnimationFrame(() => {
-      secondFrame = window.requestAnimationFrame(() => focusedSurfaceScroll.restoreActiveSessionFocus());
+      secondFrame = window.requestAnimationFrame(() => {
+        // The launch outline's message box keeps the person's typing until the chat takes it (utils/launchOutline.ts).
+        if (document.activeElement?.closest('#pane-launch-outline')) return;
+        focusedSurfaceScroll.restoreActiveSessionFocus();
+      });
     });
     return () => {
       window.cancelAnimationFrame(firstFrame);

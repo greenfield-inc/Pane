@@ -1,58 +1,108 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ExternalLink, Info, Monitor, Plus, QrCode, RefreshCw, Server, Smartphone, Terminal, Trash2, X } from 'lucide-react';
+import { ChevronDown, ExternalLink, Monitor, Plus, RefreshCw, Server, Smartphone, Terminal, Trash2, X } from 'lucide-react';
 import { Button, IconButton } from '../../ui/Button';
 import { Input, Textarea } from '../../ui/Input';
-import { SettingRow, SettingsPage } from '../SettingRow';
+import { SettingRow } from '../SettingRow';
 import { settingDomId } from '../catalog';
 import { RemoteGroup } from '../RemoteGroup';
 import { CARD_ROW, CodelessAccessRows } from '../CodelessRemoteSettings';
 import { GlassesRows } from '../GlassesSettings';
-import { MachineMark } from '../../machines/MachineMark';
+import { ComputerRow } from '../computers/ComputerRow';
+import { PublicUrlField } from '../computers/PublicUrlField';
+import { useAddDeviceStore } from '../../addDevice/addDeviceStore';
 import { useMachines } from '../../../hooks/useMachines';
+import { useConfigStore } from '../../../stores/configStore';
 import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
 import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { Dropdown } from '../../ui/Dropdown';
-import { PairPhoneDialog } from '../../PairPhoneDialog';
+import { computerRelayId } from '../../../../../shared/types/remoteComputers';
 import { relayCarrier } from '../../../utils/relayCarrier';
 import type { RemoteDaemonClientRecord } from '../../../../../shared/types/remoteDaemon';
-import type { RemoteAccessSubviewId, SettingSaveState } from '../../../types/settings';
+import type { RemoteAccessSubviewId, SettingSaveState, SettingsSettingId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 
 /** Machines come and go, and a tailnet switch changes the whole list; refresh while it is on screen. */
 const MACHINE_REFRESH_MS = 30_000;
 
+type RemoteAccessTab = 'computers' | 'devices' | 'tailscale';
+
+/** The tab last shown, so coming back from Set Up Host or a computer's details returns to it. */
+let shownTab: RemoteAccessTab = 'computers';
+
+/** The tab that holds a setting a link can open; the header's settings show on every tab. */
+function tabHolding(setting: SettingsSettingId): RemoteAccessTab | undefined {
+  switch (setting) {
+    case 'remote-machines':
+    case 'remote-linked-computers':
+      return 'computers';
+    case 'remote-glasses':
+    case 'remote-relay-address':
+      return 'devices';
+    case 'remote-visibility':
+    case 'remote-address':
+    case 'remote-password':
+    case 'remote-pane':
+    case 'remote-add-code':
+      return 'tailscale';
+    default:
+      return undefined;
+  }
+}
+
 interface RemoteAccessSettingsProps {
   controller: RemoteAccessController;
   onOpenSubview: (subview: RemoteAccessSubviewId) => void;
   onOpenMachine: (machineId: string) => void;
-  /** Changes each time something asks for the "Add a machine" code box open. */
-  addCodeRequest?: number;
+  /** A setting a link asked for; the nonce changes per request. `remote-add-code` also opens the connection code box. */
+  settingRequest?: { setting: SettingsSettingId; nonce: number };
   /** Opens this Tailscale machine's password field; the nonce changes per request. */
   passwordRequest?: { machine: string; nonce: number };
 }
 
-export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine, addCodeRequest, passwordRequest }: RemoteAccessSettingsProps) {
+export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine, settingRequest, passwordRequest }: RemoteAccessSettingsProps) {
   const { connectionState } = controller;
   const { machines, tailnet, listError, refreshing, refresh, select, switchingId } = useMachines({
     connectionState,
     refreshMs: MACHINE_REFRESH_MS,
     wrapConnect: controller.showChecklist,
   });
+  const fetchConfig = useConfigStore((state) => state.fetchConfig);
+  const openAddDevice = useAddDeviceStore((state) => state.open);
+  const requestedTab = settingRequest && tabHolding(settingRequest.setting);
+  const [tab, setShownTab] = useState<RemoteAccessTab>(requestedTab ?? shownTab);
+  const setTab = (next: RemoteAccessTab) => {
+    shownTab = next;
+    setShownTab(next);
+  };
+  const addCodeRequest = settingRequest?.setting === 'remote-add-code' ? settingRequest.nonce : undefined;
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [selectError, setSelectError] = useState<string | null>(null);
   const [password, setPassword] = useState<{ id: string; value: string } | null>(null);
-  const [pairing, setPairing] = useState(false);
   // Kept here: an unlinked computer's row is gone after the reload, but its outcome may ask the person to finish elsewhere.
   const [unlinkOutcome, setUnlinkOutcome] = useState<string | null>(null);
   const handledPasswordRequest = useRef<number | null>(null);
+  const handledSettingRequest = useRef<number | null>(null);
 
   const local = machines[0];
-  const active = machines.find((machine) => machine.active) ?? local;
-  const others = machines.filter((machine) => machine !== active);
   const here = local.name === THIS_COMPUTER ? 'this computer' : local.name;
   const scope = `on ${here}`;
-  const linked = controller.config.host.clients.filter((client) => client.kind === 'computer');
+  const listedRelayIds = new Set(machines.flatMap((machine) => {
+    const relayId = machine.computer && computerRelayId(machine.computer);
+    return relayId ? [relayId] : [];
+  }));
+  // Computers linked with this one that this one does not list (it reaches them no other way).
+  const linkedOnly = controller.config.host.clients.filter((client) => client.kind === 'computer' && !(client.computerId && listedRelayIds.has(client.computerId)));
+  const devices = controller.config.host.clients.filter((client) => client.kind !== 'computer').length;
   const tailnetName = tailnet?.ok ? tailnet.tailnet : null;
+  const tailscaleSignedOut = tailnet?.ok === false;
+
+  // A link to a setting opens its tab; Settings then focuses it.
+  useEffect(() => {
+    if (!settingRequest || handledSettingRequest.current === settingRequest.nonce) return;
+    handledSettingRequest.current = settingRequest.nonce;
+    if (requestedTab) setTab(requestedTab);
+  }, [requestedTab, settingRequest]);
 
   // A machine routed here for its password opens its field once the listing shows it.
   useEffect(() => {
@@ -60,6 +110,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
     const machine = machines.find((entry) => entry.name === passwordRequest.machine && entry.action === 'password');
     if (!machine) return;
     handledPasswordRequest.current = passwordRequest.nonce;
+    setTab('computers');
     setPassword({ id: machine.id, value: '' });
   }, [machines, passwordRequest]);
 
@@ -74,152 +125,225 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
     else setSelectError(outcome.error);
   };
 
+  const reorder = async (computerId: string, routeIds: string[]): Promise<string | null> => {
+    try {
+      await window.electronAPI.invoke('computers:reorder-routes', { computerId, routeIds });
+      await fetchConfig();
+      return null;
+    } catch (cause) {
+      return `The order was not saved: ${ipcErrorMessage(cause, "Pane couldn't write its settings")}. Try again.`;
+    }
+  };
+
+  const unlink = (machine: MachineEntry) => {
+    const computer = machine.computer;
+    if (!computer) return;
+    const relayId = computerRelayId(computer);
+    setUnlinkOutcome(null);
+    if (!relayId) {
+      // Main switches to this computer first when it is the active one.
+      void controller.forgetComputer(computer.id).then(() => fetchConfig());
+      return;
+    }
+    void runEverywhere(controller, 'relay:unlink-computer-everywhere', { computerId: relayId }, `Unlinked ${computer.label}`, computer.label)
+      .then((line) => {
+        setUnlinkOutcome(line);
+        return fetchConfig();
+      });
+  };
+
+  const tabs: Array<{ id: RemoteAccessTab; label: string; count?: number }> = [
+    { id: 'computers', label: 'Computers', count: machines.length },
+    { id: 'devices', label: 'Phones and glasses', count: devices },
+    { id: 'tailscale', label: 'Tailscale' },
+  ];
+
   return (
-    <SettingsPage title="Remote Access" description="Use Pane from your phone and your other computers.">
-      {controller.loading && (
-        <p className="text-sm text-text-tertiary" aria-live="polite">Loading Remote Pane status...</p>
-      )}
-      {controller.error && (
-        <ErrorBanner message={controller.error}>
-          <Button type="button" variant="secondary" size="sm" onClick={() => void controller.reload()}>Retry</Button>
-        </ErrorBanner>
-      )}
-      {selectError && (
-        <ErrorBanner message={selectError}>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setSelectError(null)}>Dismiss</Button>
-        </ErrorBanner>
-      )}
+    <section className="mx-auto w-full max-w-3xl pb-8">
+      <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-xl font-semibold text-text-primary">Remote Access</h2>
+          <p className="mt-1.5 max-w-2xl text-sm text-text-tertiary">Reach your computers from each other and from your phone.</p>
+        </div>
+        <Button
+          id={settingDomId('remote-pair-phone')}
+          data-setting-id="remote-pair-phone"
+          type="button"
+          size="sm"
+          icon={<Plus className="h-4 w-4" />}
+          onClick={() => openAddDevice(tab === 'devices' ? 'phone' : 'computer')}
+        >
+          Add a device
+        </Button>
+      </header>
 
-      <ActiveMachineCard
-        machine={active}
-        local={local}
-        lastError={active.kind === 'local' ? null : connectionState.lastError}
-        connectedOverTailscale={active.kind === 'tailnet' && connectionState.status === 'connected'}
-        switching={switchingId !== null}
-        onSwitchBack={() => void pick(local)}
-        onPick={(withPassword) => void pick(active, withPassword)}
-        password={password?.id === active.id ? password.value : null}
-        onPasswordChange={(value) => setPassword({ id: active.id, value })}
-        onPasswordCancel={() => setPassword(null)}
-        busy={switchingId === active.id}
-        onDetails={() => onOpenMachine(active.id)}
-        controller={controller}
-      />
-
-      <RemoteGroup
-        title="Switch to"
-        aside={(
-          <div id={settingDomId('remote-machines')} data-setting-id="remote-machines" tabIndex={-1} className="flex items-center gap-1 text-xs text-text-tertiary outline-none">
-            <span>{tailnetName ? `On ${tailnetName}` : 'On Tailscale'}</span>
-            <IconButton
-              type="button"
-              size="sm"
-              variant="ghost"
-              aria-label="Refresh machines"
-              icon={<RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />}
-              disabled={refreshing}
-              onClick={() => void refresh()}
-            />
-          </div>
-        )}
-      >
-        {tailnet && !tailnet.ok && <p className={`text-sm text-text-secondary ${CARD_ROW}`}>{tailnet.reason}. {tailnet.fix}</p>}
-        {listError && <p className={`text-sm text-status-error ${CARD_ROW}`} role="alert">{listError}</p>}
-        {others.map((machine) => (
-          <MachineRow
-            key={machine.id}
-            machine={machine}
-            disabled={switchingId !== null}
-            busy={switchingId === machine.id}
-            password={password?.id === machine.id ? password.value : null}
-            onPasswordChange={(value) => setPassword({ id: machine.id, value })}
-            onPasswordCancel={() => setPassword(null)}
-            onPick={(withPassword) => void pick(machine, withPassword)}
-            onDetails={() => onOpenMachine(machine.id)}
-          />
-        ))}
-        {tailnet?.ok && others.length === 0 && (
-          <p className={`text-sm text-text-tertiary ${CARD_ROW}`}>Open Pane on another computer on your Tailscale login to see it here.</p>
-        )}
-        <AddMachine key={addCodeRequest} controller={controller} startAdding={addCodeRequest !== undefined} />
-      </RemoteGroup>
-
-      <RemoteGroup title="Access" scope={scope}>
-        <CodelessAccessRows tailnetName={tailnetName} />
-      </RemoteGroup>
-
-      <RemoteGroup
-        title="Devices"
-        scope={scope}
-        aside={(
-          <Button
-            id={settingDomId('remote-pair-phone')}
-            data-setting-id="remote-pair-phone"
+      <div role="tablist" aria-label="Remote Access" className="mb-5 flex gap-6 border-b border-border-secondary">
+        {tabs.map((entry) => (
+          <button
+            key={entry.id}
             type="button"
-            variant="secondary"
-            size="sm"
-            icon={<QrCode className="h-4 w-4" />}
-            onClick={() => setPairing(true)}
+            role="tab"
+            id={`remote-tab-${entry.id}`}
+            aria-selected={tab === entry.id}
+            aria-controls={`remote-panel-${entry.id}`}
+            onClick={() => setTab(entry.id)}
+            className={cn(
+              '-mb-px border-b-2 pb-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle',
+              tab === entry.id ? 'border-interactive text-text-primary' : 'border-transparent text-text-tertiary hover:text-text-secondary',
+            )}
           >
-            Pair a phone
-          </Button>
+            {entry.label}
+            {entry.count !== undefined && <span className="tabular-nums"> · {entry.count}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div role="tabpanel" id={`remote-panel-${tab}`} aria-labelledby={`remote-tab-${tab}`} className="space-y-8">
+        {controller.loading && (
+          <p className="text-sm text-text-tertiary" aria-live="polite">Loading Remote Pane status...</p>
         )}
-        footnote={`On the same Wi-Fi a device connects directly. Anywhere else, ${relayCarrier(controller.config.relay?.relayAddress)}. Glasses pair from the Pane phone app.`}
-      >
-        <PhoneRows controller={controller} here={here} />
-        <GlassesRows />
-      </RemoteGroup>
-      <PairPhoneDialog
-        isOpen={pairing}
-        onClose={() => {
-          setPairing(false);
-          void controller.reload();
-        }}
-      />
+        {controller.error && (
+          <ErrorBanner message={controller.error}>
+            <Button type="button" variant="secondary" size="sm" onClick={() => void controller.reload()}>Retry</Button>
+          </ErrorBanner>
+        )}
 
-      {(linked.length > 0 || unlinkOutcome) && (
-        <RemoteGroup
-          title="Your computers"
-          footnote="Linked computers share their phones: a phone paired with one reaches all of them."
-        >
-          <div id={settingDomId('remote-linked-computers')} data-setting-id="remote-linked-computers" tabIndex={-1} className="divide-y divide-border-secondary outline-none">
-            {linked.map((computer) => (
-              <LinkedComputerRow key={computer.id} computer={computer} controller={controller} onOutcome={setUnlinkOutcome} />
-            ))}
-            {unlinkOutcome && <p className={`text-xs text-text-secondary ${CARD_ROW}`} role="status">{unlinkOutcome}</p>}
-          </div>
-        </RemoteGroup>
-      )}
+        {tab === 'computers' && (
+          <>
+            {selectError && (
+              <ErrorBanner message={selectError}>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setSelectError(null)}>Dismiss</Button>
+              </ErrorBanner>
+            )}
+            <section className="space-y-2">
+              <div
+                id={settingDomId('remote-machines')}
+                data-setting-id="remote-machines"
+                tabIndex={-1}
+                className="divide-y divide-border-secondary overflow-hidden rounded-lg border border-border-secondary bg-surface-primary outline-none"
+              >
+                {machines.map((machine) => (
+                  <ComputerRow
+                    key={machine.id}
+                    machine={machine}
+                    expanded={expanded === machine.id}
+                    onToggle={() => setExpanded((current) => (current === machine.id ? null : machine.id))}
+                    disabled={switchingId !== null}
+                    busy={switchingId === machine.id}
+                    password={password?.id === machine.id ? password.value : null}
+                    onPasswordChange={(value) => setPassword({ id: machine.id, value })}
+                    onPasswordCancel={() => setPassword(null)}
+                    onPick={(withPassword) => void pick(machine, withPassword)}
+                    onLink={() => openAddDevice('computer', { computerId: machine.computer?.id })}
+                    onAddRoute={() => openAddDevice('computer', { computerId: machine.computer?.id })}
+                    onReorder={(routeIds) => (machine.computer ? reorder(machine.computer.id, routeIds) : Promise.resolve(null))}
+                    onUnlink={() => unlink(machine)}
+                    onDetails={() => onOpenMachine(machine.id)}
+                    localDetail={machine.kind === 'local'
+                      ? <PublicUrlField saved={controller.config.host.publicUrl ?? ''} onSaved={controller.reload} />
+                      : undefined}
+                    footer={machine.active && machine.kind !== 'local' && connectionState.lastError
+                      ? <ConnectionError message={connectionState.lastError} controller={controller} />
+                      : undefined}
+                  />
+                ))}
+                {unlinkOutcome && <p className={`text-xs text-text-secondary ${CARD_ROW}`} role="status">{unlinkOutcome}</p>}
+              </div>
+              <p className="px-0.5 text-xs text-text-tertiary">
+                {tailscaleSignedOut
+                  ? `Tailscale is signed out on ${here}. Computers with another route use it without closing your Panes.`
+                  : 'Pills show every way Pane can reach a computer; the dot marks the one in use. If it fails, Pane uses another without closing your Panes.'}
+              </p>
+            </section>
 
-      <RemoteGroup title="More">
-        <RelayAddressRow controller={controller} />
-        <SettingRow
-          settingId="remote-pane"
-          label="Use Tailscale instead"
-          description="Reach this computer over your tailnet without Pane's servers. Connection codes and manual hosts are here too."
-          align="start"
-          className={CARD_ROW}
-        >
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="secondary" size="sm" icon={<Server className="h-4 w-4" />} onClick={() => onOpenSubview('host-setup')}>
-              Set Up Host
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => onOpenSubview('advanced-host')}>
-              Advanced
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              icon={<ExternalLink className="h-4 w-4" />}
-              onClick={() => window.electronAPI.openExternal('https://runpane.com/docs/remote-daemon')}
+            {linkedOnly.length > 0 && (
+              <RemoteGroup
+                title="Also linked"
+                footnote="These computers can reach this one. Link them back to reach them from here."
+              >
+                <div id={settingDomId('remote-linked-computers')} data-setting-id="remote-linked-computers" tabIndex={-1} className="divide-y divide-border-secondary outline-none">
+                  {linkedOnly.map((computer) => (
+                    <LinkedComputerRow key={computer.id} computer={computer} controller={controller} onOutcome={setUnlinkOutcome} />
+                  ))}
+                </div>
+              </RemoteGroup>
+            )}
+          </>
+        )}
+
+        {tab === 'devices' && (
+          <>
+            <RemoteGroup
+              title="Devices"
+              scope={scope}
+              footnote={`On the same Wi-Fi a device connects directly. Anywhere else, ${relayCarrier(controller.config.relay?.relayAddress)}. Glasses pair from the Pane phone app.`}
             >
-              Docs
-            </Button>
-          </div>
-        </SettingRow>
-      </RemoteGroup>
-    </SettingsPage>
+              <PhoneRows controller={controller} here={here} />
+              <GlassesRows />
+            </RemoteGroup>
+            <RemoteGroup title="Pane relay">
+              <RelayAddressRow controller={controller} />
+            </RemoteGroup>
+          </>
+        )}
+
+        {tab === 'tailscale' && (
+          <>
+            <RemoteGroup
+              title="Access"
+              scope={scope}
+              aside={(
+                <div className="flex items-center gap-1 text-xs text-text-tertiary">
+                  <span>{tailnetName ? `On ${tailnetName}` : 'On Tailscale'}</span>
+                  <IconButton
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label="Refresh machines"
+                    icon={<RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />}
+                    disabled={refreshing}
+                    onClick={() => void refresh()}
+                  />
+                </div>
+              )}
+            >
+              {tailnet && !tailnet.ok && <p className={`text-sm text-text-secondary ${CARD_ROW}`}>{tailnet.reason}. {tailnet.fix}</p>}
+              {listError && <p className={`text-sm text-status-error ${CARD_ROW}`} role="alert">{listError}</p>}
+              <CodelessAccessRows tailnetName={tailnetName} />
+            </RemoteGroup>
+
+            <RemoteGroup title="Hosts and connection codes">
+              <SettingRow
+                settingId="remote-pane"
+                label="Set up a host"
+                description="Reach this computer over your tailnet or your own address without Pane's servers."
+                align="start"
+                className={CARD_ROW}
+              >
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="secondary" size="sm" icon={<Server className="h-4 w-4" />} onClick={() => onOpenSubview('host-setup')}>
+                    Set Up Host
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => onOpenSubview('advanced-host')}>
+                    Advanced
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    icon={<ExternalLink className="h-4 w-4" />}
+                    onClick={() => window.electronAPI.openExternal('https://runpane.com/docs/remote-daemon')}
+                  >
+                    Docs
+                  </Button>
+                </div>
+              </SettingRow>
+              <AddMachine key={addCodeRequest} controller={controller} startAdding={addCodeRequest !== undefined} />
+            </RemoteGroup>
+          </>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -232,158 +356,22 @@ function ErrorBanner({ message, children }: { message: string; children: ReactNo
   );
 }
 
-interface ActiveMachineCardProps {
-  machine: MachineEntry;
-  local: MachineEntry;
-  lastError: string | null;
-  connectedOverTailscale: boolean;
-  switching: boolean;
-  onSwitchBack: () => void;
-  /** Retries, or with a password, saves it and connects again. */
-  onPick: (password?: string) => void;
-  /** The password being typed, while this machine's password field is open. */
-  password: string | null;
-  onPasswordChange: (value: string) => void;
-  onPasswordCancel: () => void;
-  busy: boolean;
-  onDetails: () => void;
-  controller: RemoteAccessController;
-}
-
-/** The machine agents run on now, with the way back to this computer. */
-function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, switching, onSwitchBack, onPick, password, onPasswordChange, onPasswordCancel, busy, onDetails, controller }: ActiveMachineCardProps) {
-  const remote = machine.kind !== 'local';
-  const detail = [machine.subtitle, !remote && 'Agents run here', connectedOverTailscale && 'Connected over Tailscale'].filter(Boolean).join(' · ');
+/** The active computer's last error, with Tailscale's fixes when Tailscale caused it. */
+function ConnectionError({ message, controller }: { message: string; controller: RemoteAccessController }) {
   return (
-    <div className="rounded-lg border border-border-secondary bg-surface-primary p-4" data-testid="active-machine">
-      <div className="flex flex-wrap items-center gap-3">
-        <MachineMark letters={machine.letters} slot={machine.slot} presence={machine.presence} size="lg" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-base font-semibold text-text-primary">{machine.name}</p>
-          <p className="truncate text-xs text-text-tertiary">{detail}</p>
-        </div>
-        {machine.action === 'retry' && (
-          <Button type="button" variant="ghost" size="sm" disabled={switching} onClick={() => onPick()}>Retry</Button>
-        )}
-        {machine.action === 'password' && password === null && (
-          <Button type="button" variant="ghost" size="sm" disabled={switching} onClick={() => onPick()}>Enter password</Button>
-        )}
-        {remote && (
-          <Button type="button" variant="secondary" size="sm" disabled={switching} onClick={onSwitchBack}>
-            Switch back to {local.name === THIS_COMPUTER ? 'this computer' : local.name}
-          </Button>
-        )}
-        <IconButton type="button" size="sm" variant="ghost" aria-label={`${machine.name} details`} icon={<Info className="h-4 w-4" />} onClick={onDetails} />
-      </div>
-      {password !== null && (
-        <div className="mt-3 flex justify-end border-t border-border-secondary pt-3">
-          <PasswordForm name={machine.name} value={password} busy={busy} onChange={onPasswordChange} onSubmit={() => onPick(password)} onCancel={onPasswordCancel} />
-        </div>
-      )}
-      {lastError && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-secondary pt-3">
-          <p className="text-xs text-status-error">{lastError}</p>
-          {lastError.toLowerCase().includes('tailscale') && (
-            <div className="flex gap-2">
-              <Button type="button" variant="ghost" size="sm" icon={<Terminal className="h-4 w-4" />} onClick={() => controller.openSetupTerminal(true)}>Open Tailscale Setup</Button>
-              <Button type="button" variant="ghost" size="sm" icon={<ExternalLink className="h-4 w-4" />} onClick={() => window.electronAPI.openExternal('https://tailscale.com/download')}>Download Tailscale</Button>
-            </div>
-          )}
+    <div className={cn('flex flex-wrap items-center justify-between gap-2 border-t border-border-secondary', CARD_ROW)}>
+      <p className="text-xs text-status-error">{message}</p>
+      {message.toLowerCase().includes('tailscale') && (
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" size="sm" icon={<Terminal className="h-4 w-4" />} onClick={() => controller.openSetupTerminal(true)}>Open Tailscale Setup</Button>
+          <Button type="button" variant="ghost" size="sm" icon={<ExternalLink className="h-4 w-4" />} onClick={() => window.electronAPI.openExternal('https://tailscale.com/download')}>Download Tailscale</Button>
         </div>
       )}
     </div>
   );
 }
 
-interface MachineRowProps {
-  machine: MachineEntry;
-  disabled: boolean;
-  busy: boolean;
-  /** The password being typed, while this machine's password field is open. */
-  password: string | null;
-  onPasswordChange: (value: string) => void;
-  onPasswordCancel: () => void;
-  onPick: (password?: string) => void;
-  onDetails: () => void;
-}
-
-function MachineRow({ machine, disabled, busy, password, onPasswordChange, onPasswordCancel, onPick, onDetails }: MachineRowProps) {
-  const pickable = machine.action !== 'none';
-  return (
-    <div
-      className={cn('group flex flex-wrap items-center justify-between gap-3 hover:bg-surface-hover focus-within:bg-surface-hover', CARD_ROW)}
-      data-testid={`machine-${machine.name}`}
-    >
-      <div className={cn('flex min-w-0 flex-1 basis-48 items-center gap-3', machine.presence === 'dimmed' && 'text-text-tertiary')}>
-        <MachineMark letters={machine.letters} slot={machine.slot} presence={machine.presence} size="md" />
-        <div className="min-w-0">
-          <p className={cn('flex items-center gap-2 truncate text-sm font-medium', machine.presence === 'dimmed' ? 'text-text-tertiary' : 'text-text-primary')}>
-            <span className="truncate">{machine.name}</span>
-            {machine.kind === 'local' && machine.name !== THIS_COMPUTER && (
-              <span className="flex-none rounded bg-surface-secondary px-1.5 py-px text-[11px] font-medium text-text-secondary">This computer</span>
-            )}
-          </p>
-          <p className="truncate text-xs text-text-tertiary">{machine.subtitle}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-1">
-        {password !== null ? (
-          <PasswordForm name={machine.name} value={password} busy={busy} onChange={onPasswordChange} onSubmit={() => onPick(password)} onCancel={onPasswordCancel} />
-        ) : pickable && (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            loading={busy}
-            disabled={disabled}
-            aria-label={`Switch to ${machine.name}`}
-            className="opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-            onClick={() => onPick()}
-          >
-            Switch
-          </Button>
-        )}
-        <IconButton type="button" size="sm" variant="ghost" aria-label={`${machine.name} details`} icon={<Info className="h-4 w-4" />} onClick={onDetails} />
-      </div>
-    </div>
-  );
-}
-
-interface PasswordFormProps {
-  name: string;
-  value: string;
-  busy: boolean;
-  onChange: (value: string) => void;
-  onSubmit: () => void;
-  onCancel: () => void;
-}
-
-/** Asks for a machine's password, then connects with it. */
-function PasswordForm({ name, value, busy, onChange, onSubmit, onCancel }: PasswordFormProps) {
-  return (
-    <form
-      className="flex items-center gap-2"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit();
-      }}
-    >
-      <Input
-        type="password"
-        aria-label={`Password for ${name}`}
-        placeholder="Password"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        autoFocus
-        className="ph-no-capture"
-      />
-      <Button type="submit" size="sm" loading={busy} disabled={!value}>Connect</Button>
-      <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
-    </form>
-  );
-}
-
-/** The last Switch to row: how a new machine appears, and pasting a connection code. */
+/** Pasting a connection code from another computer's Set Up Host page. */
 function AddMachine({ controller, startAdding }: { controller: RemoteAccessController; startAdding: boolean }) {
   const [open, setOpen] = useState(startAdding);
   if (!open) {
@@ -396,7 +384,7 @@ function AddMachine({ controller, startAdding }: { controller: RemoteAccessContr
         <span className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-interactive/10" aria-hidden="true">
           <Plus className="h-4 w-4" />
         </span>
-        Add a machine
+        Paste a connection code
       </button>
     );
   }
@@ -409,9 +397,9 @@ function AddMachine({ controller, startAdding }: { controller: RemoteAccessContr
         void controller.importConnection().then((imported) => { if (imported) setOpen(false); }).catch(() => undefined);
       }}
     >
-      <p className="text-sm font-medium text-text-primary">Add a machine</p>
+      <p className="text-sm font-medium text-text-primary">Paste a connection code</p>
       <p className="text-xs text-text-tertiary">
-        Open Pane on a computer signed into your Tailscale login and it appears in this list. For any other machine, paste the connection code from its Set Up Host page.
+        Computers on your Tailscale login appear under Computers by themselves. For any other host, paste the code from its Set Up Host page.
       </p>
       <Textarea
         label="Connection Code"
@@ -465,7 +453,7 @@ async function runEverywhere(controller: RemoteAccessController, channel: string
 function PhoneRows({ controller, here }: { controller: RemoteAccessController; here: string }) {
   const [outcome, setOutcome] = useState<string | null>(null);
   const live = controller.hostState.connectedClients;
-  // Glasses are listed with their origins below; linked computers in Your computers.
+  // Glasses are listed with their origins below; linked computers under Computers.
   const records = controller.config.host.clients;
   const paired = records.filter((client) => client.kind === undefined);
   const recordIds = new Set(records.map((client) => client.id));
@@ -546,7 +534,7 @@ function PhoneRow({ title, detail, children }: { title: string; detail: string; 
   );
 }
 
-/** A computer linked with this one when a phone scanned both. */
+/** A computer linked with this one that this one does not list. */
 function LinkedComputerRow({ computer, controller, onOutcome }: { computer: RemoteDaemonClientRecord; controller: RemoteAccessController; onOutcome: (line: string | null) => void }) {
   const [busy, setBusy] = useState(false);
   const connected = controller.hostState.connectedClients.some((entry) => entry.clientId === computer.id);

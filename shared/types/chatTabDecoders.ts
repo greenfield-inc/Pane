@@ -60,6 +60,7 @@ const view: BoundarySchema<ChatTabView> = boundary.object({
   context: boundary.optional(boundary.object({ used: boundary.number, size: boundary.number })),
   tasks: boundary.optional(boundary.array(boundary.object({ id: boundary.string, kind: boundary.string, title: boundary.optional(boundary.string), startedAt: boundary.string, canStop: boundary.optional(boundary.literal(false)) }))),
   clearedAt: boundary.optional(boundary.string),
+  sendNowSteers: boundary.optional(boundary.literal(true)),
   banner: boundary.optional(banner),
 });
 const receipt: BoundarySchema<AgentChatReceipt> = boundary.object({

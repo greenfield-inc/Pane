@@ -40,7 +40,7 @@ export function SidebarSectionHeader({ item, first, onToggle }: {
  * then the name, pane count and the amber count of approvals waiting from it; a paused Session is
  * grayed out behind a pause glyph. Swipe right pins; swipe left pauses or resumes, and archives.
  */
-export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinned, onArchive, onTogglePaused }: {
+export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinned, onArchive, onTogglePaused, background }: {
   item: Extract<SidebarItem, { type: 'session' }>;
   /** Approvals waiting from this Session; none at zero. */
   waiting: number;
@@ -49,6 +49,8 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
   onTogglePinned: () => void;
   onArchive: () => void;
   onTogglePaused: () => void;
+  /** What the row sits on, so its swipe actions stay hidden: the page, or a card. */
+  background?: string;
 }) {
   const theme = useTheme();
   const [pressed, setPressed] = useState(false);
@@ -57,7 +59,7 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
   const actions = { pinned: Boolean(session.isPinned), onTogglePinned, onArchive, pause: { paused, onToggle: onTogglePaused } };
   return (
     <SwipeRow testIDPrefix="session" id={nestedKey} {...actions}>
-      <View style={[styles.row, { backgroundColor: pressed ? theme.colors.selected : theme.colors.background }]}>
+      <View style={[styles.row, { backgroundColor: pressed ? theme.colors.selected : background ?? theme.colors.background }]}>
         {paneCount > 0 ? (
           <IconButton
             testID={`session-nested-${nestedKey}`}
@@ -82,7 +84,7 @@ export function SessionRow({ item, waiting, onOpen, onToggleNested, onTogglePinn
           style={styles.open}
         >
           {paused ? <PausedBadge /> : null}
-          <Text variant="callout" numberOfLines={1} style={[styles.name, { color: pressed ? theme.colors.text : paused ? theme.colors.textMuted : theme.colors.textSecondary }]}>{label}</Text>
+          <Text variant="rowValue" numberOfLines={1} style={[styles.name, { color: pressed ? theme.colors.text : paused ? theme.colors.textMuted : theme.colors.textSecondary }]}>{label}</Text>
           {paneCount > 0 ? <Text variant="caption" tone="muted" style={styles.count}>{paneCount}</Text> : null}
           <WaitingCount testID={`session-waiting-${nestedKey}`} count={waiting} />
         </Pressable>
@@ -133,8 +135,8 @@ const styles = StyleSheet.create({
   sectionGap: { marginTop: 12 },
   sectionTitle: { flex: 1, fontSize: 13, lineHeight: 18, letterSpacing: 0.1 },
   sectionCount: { fontWeight: '500' },
-  // Matches PaneRow's footprint: py-3 around an h-8 button.
-  row: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 56, paddingLeft: 4, paddingRight: 12 },
+  // PaneRow's 44 pt footprint.
+  row: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, paddingLeft: 4, paddingRight: 12 },
   leadingIcon: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   open: { flex: 1, alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 8 },
   name: { flex: 1 },

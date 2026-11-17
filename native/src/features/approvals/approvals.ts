@@ -14,14 +14,17 @@ export const NO_PROJECT = 'No project';
 /** How Approvals lists: flat with the newest on top, or in groups. Remembered per device. */
 export type ApprovalSort = 'recent' | 'session' | 'project';
 
-export const APPROVAL_SORTS: ReadonlyArray<{ id: ApprovalSort; label: string }> = [
-  { id: 'recent', label: 'Most recent' },
-  { id: 'session', label: 'By Session' },
-  { id: 'project', label: 'By project' },
+export const APPROVAL_SORTS: ReadonlyArray<{ id: ApprovalSort; label: string; description: string }> = [
+  { id: 'recent', label: 'Most recent', description: 'Newest first, in one list' },
+  { id: 'session', label: 'By Session', description: 'One card per Session, its machine marked' },
+  { id: 'project', label: 'By project', description: 'One card per repository' },
 ];
 
+/** The sort until the person picks one. */
+export const DEFAULT_APPROVAL_SORT: ApprovalSort = 'session';
+
 export function parseApprovalSort(value: string | null): ApprovalSort {
-  return APPROVAL_SORTS.find(sort => sort.id === value)?.id ?? 'recent';
+  return APPROVAL_SORTS.find(sort => sort.id === value)?.id ?? DEFAULT_APPROVAL_SORT;
 }
 
 /** What Approvals groups: a Notify item or a permission request, on one machine. */
@@ -93,13 +96,13 @@ export function sessionKey(machineKey: string, sessionId: string): string {
 export interface WaitingCounts {
   /** What waits from each Session, by `sessionKey`; a Session with none isn't listed. */
   bySession: ReadonlyMap<string, number>;
-  /** Approvals' header: every Session's count plus what waits outside any Session. */
+  /** Every Session's count plus what waits outside any Session: the approvals the Needs you tile counts. */
   total: number;
 }
 
 /**
- * Home's amber counts (D-38): what waits on you from each Session row, and the total on the
- * Approvals header. Answers held for Undo don't count; fallback items count toward their Session.
+ * Home's amber counts (D-38): what waits on you from each Session row, and the approvals the
+ * Needs you tile counts. Answers held for Undo don't count; fallback items count toward their Session.
  */
 export function waitingCounts(entries: readonly ApprovalEntry[]): WaitingCounts {
   const bySession = new Map<string, number>();

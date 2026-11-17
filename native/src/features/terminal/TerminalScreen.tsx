@@ -16,6 +16,7 @@ import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
 import { BrowserTab } from '../browser/BrowserTab';
+import { DeviceTab } from '../device/DeviceTab';
 import { DiffEditorTab, DiffTab } from '../diff/DiffTab';
 import { ExplorerTab } from '../files/ExplorerTab';
 import { FileViewer } from '../files/FileViewer';
@@ -259,6 +260,8 @@ function TabBody({ panel, title, panels }: { panel: ToolPanel; title: string; pa
       return <DiffEditorTab key={panel.id} panel={panel} />;
     case 'logs':
       return <LogsTab key={panel.id} panel={panel} />;
+    case 'device':
+      return <DeviceTab key={panel.id} panel={panel} />;
     default:
       return <PlaceholderTab panel={panel} />;
   }

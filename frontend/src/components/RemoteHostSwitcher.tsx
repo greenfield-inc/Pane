@@ -1,10 +1,13 @@
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from 'react';
 import { Plus, Radio, Settings } from 'lucide-react';
-import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
+import { Dropdown, type DropdownItem, type DropdownProps } from './ui/Dropdown';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { MachineMarkEditor } from './machines/MachineMarkEditor';
+import { RoutePillView } from './settings/computers/RoutePills';
+import { useAddDeviceStore } from './addDevice/addDeviceStore';
 import { showActionError } from '../stores/errorStore';
-import type { MachineEntry } from '../utils/machineList';
+import { cn } from '../utils/cn';
+import type { HostingSummary, MachineEntry, RoutePill } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 
 interface RemoteHostSwitcherProps {
@@ -12,12 +15,11 @@ interface RemoteHostSwitcherProps {
   position: DropdownProps['position'];
   machines: MachineEntry[];
   switching: boolean;
-  hostingSummary: string | null;
+  hostingSummary: HostingSummary | null;
   onSelect: (machine: MachineEntry) => Promise<MachineSelectOutcome>;
   /** A machine that needs its password opens Remote Access with its password field. */
   onNeedsPassword: (machine: MachineEntry) => void;
   onOpenChange?: (open: boolean) => void;
-  onAddMachine: () => void;
   onOpenRemoteAccess: () => void;
   /** The first item: every saved machine's rows in one sidebar. */
   allMachines?: { selected: boolean; machines: MachineEntry[]; onSelect: () => void };
@@ -30,6 +32,80 @@ function unpickable(machine: MachineEntry): boolean {
   return machine.action === 'none' && !machine.active;
 }
 
+/** The route a saved machine is connected on now: the one pill its row shows. Reconnecting or offline, it has none. */
+function routeInUse(machine: MachineEntry): RoutePill | undefined {
+  if (machine.kind !== 'computer' || machine.presence !== 'solid') return undefined;
+  return machine.routes?.find((route) => route.inUse && !route.down);
+}
+
+/** Each round trip in ms by machine and route (`latencyKey`): absent until it answers, null when it did not. */
+type Latencies = Record<string, number | null>;
+
+/** A measurement belongs to one machine on one route: the pill it is shown beside. */
+function latencyKey(machineId: string, routeId: string): string {
+  return `${machineId} ${routeId}`;
+}
+
+/**
+ * Line two of a machine row. Connected: the route pill, its latency and the OS. Otherwise the
+ * subtitle says what it is ("Windows · Last seen 2 h ago"). The latency keeps one fixed box while
+ * "…" turns into a number, so the OS after it never moves.
+ */
+function MachineLine({ machine, latencies }: { machine: MachineEntry; latencies: Latencies }) {
+  const route = routeInUse(machine);
+  // One fixed height for both forms, so a row keeps its height when its machine connects or drops.
+  if (!route) return <span className="flex h-5 min-w-0 items-center"><span className="truncate">{machine.subtitle}</span></span>;
+  const latency = latencies[latencyKey(machine.id, route.id)];
+  // From one second up, seconds keep the text inside its box ("1.5 s", not "1510 ms").
+  const text = latency === undefined ? '…' : latency === null ? '—' : latency >= 1000 ? `${(latency / 1000).toFixed(1)} s` : `${latency} ms`;
+  const spoken = latency === undefined ? 'measuring latency' : latency === null ? 'no answer' : `latency ${text}`;
+  return (
+    <span className="flex h-5 min-w-0 items-center gap-1.5">
+      <RoutePillView route={route} />
+      <span className="w-11 flex-none whitespace-nowrap tabular-nums text-text-secondary" data-testid="machine-latency">
+        <span aria-hidden="true">{text}</span>
+        <span className="sr-only">{spoken}</span>
+      </span>
+      {machine.os && <span className="truncate">{machine.os}</span>}
+    </span>
+  );
+}
+
+/** A footer row: its icon centred in the same 28 px column as the machine marks, so every label lines up. */
+function MenuAction({ icon: Icon, label, detail, dot, onClick }: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  detail?: ReactNode;
+  dot?: 'live' | 'error';
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'group flex min-h-[2rem] w-full items-center gap-2 rounded px-2.5 py-1 text-left text-[13px]',
+        'text-text-secondary hover:bg-bg-hover hover:text-text-primary',
+        'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle',
+      )}
+    >
+      <span className="relative flex h-5 w-7 flex-none items-center justify-center">
+        <Icon className="h-3.5 w-3.5 stroke-[1.5] text-text-tertiary group-hover:text-text-secondary" />
+        {dot && (
+          <span
+            aria-hidden="true"
+            className={cn('absolute right-1 top-0 h-1.5 w-1.5 rounded-full ring-2 ring-surface-primary', dot === 'live' ? 'bg-status-success' : 'bg-status-error')}
+          />
+        )}
+      </span>
+      <span className="min-w-0 flex-1 truncate">
+        {label}
+        {detail && <span className="text-text-tertiary group-hover:text-text-secondary"> · {detail}</span>}
+      </span>
+    </button>
+  );
+}
+
 /** A digit typed into a field, or anywhere in a dialog such as a machine's mark editor, is not a machine pick. */
 function typingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -37,7 +113,7 @@ function typingTarget(target: EventTarget | null): boolean {
     || target.closest('[role="dialog"]') !== null;
 }
 
-/** Picks which machine runs agents: this computer, a saved host, or any machine on Tailscale. */
+/** Picks which computer runs agents: this computer, a saved computer with the route it is on and its latency, or any machine on Tailscale. */
 export function RemoteHostSwitcher({
   trigger,
   position,
@@ -47,7 +123,6 @@ export function RemoteHostSwitcher({
   onSelect,
   onNeedsPassword,
   onOpenChange,
-  onAddMachine,
   onOpenRemoteAccess,
   allMachines,
 }: RemoteHostSwitcherProps) {
@@ -58,10 +133,35 @@ export function RemoteHostSwitcher({
     else showActionError(`Could not switch to ${machine.name}`, outcome.error);
   };
 
+  const [open, setOpen] = useState(false);
+  // While the menu is open, each connected machine is measured once on the route its pill shows, including
+  // one that connects or changes route meanwhile. Nothing runs while it is closed, and closing forgets them.
+  const [latencies, setLatencies] = useState<Latencies>({});
+  const opening = useRef({ count: 0, asked: new Set<string>() });
+  const forgetLatencies = () => {
+    opening.current = { count: opening.current.count + 1, asked: new Set() };
+    setLatencies({});
+  };
+  useEffect(() => {
+    if (!open) return;
+    const { count, asked } = opening.current;
+    for (const machine of machines) {
+      const route = routeInUse(machine);
+      if (!route) continue;
+      const key = latencyKey(machine.id, route.id);
+      if (asked.has(key)) continue;
+      asked.add(key);
+      // An answer measured over another route than the pill's is not this pill's latency; one from an earlier opening is dropped.
+      const record = (latency: number | null) => { if (opening.current.count === count) setLatencies((before) => ({ ...before, [key]: latency })); };
+      window.electronAPI.machines.latency(machine.id).then((answer) => record(answer.routeId === route.id ? answer.ms : null), () => record(null));
+    }
+  }, [open, machines]);
+
   const items: DropdownItem[] = machines.map((machine) => ({
     id: machine.id,
-    label: <span className="font-medium">{machine.name}</span>,
-    description: machine.subtitle,
+    // The name has line one to itself; the route in use and its latency lead line two.
+    label: <span className="block truncate font-medium">{machine.name}</span>,
+    description: <MachineLine machine={machine} latencies={latencies} />,
     // A disabled row dims its mark and name, so the mark stays solid inside it.
     leading: <MachineMark letters={machine.letters} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
     // Its letters and colour can change on this computer, whether or not it can be picked now.
@@ -83,7 +183,6 @@ export function RemoteHostSwitcher({
 
   // While the switcher is open, 0 picks All machines and 1 to 9 the machines
   // in its order (P6), by choosing that row as a click would.
-  const [open, setOpen] = useState(false);
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -114,17 +213,17 @@ export function RemoteHostSwitcher({
       header="Agents run on"
       position={position}
       width="auto"
-      menuClassName="w-[300px]"
+      menuClassName="w-[400px] max-w-[calc(100vw-2rem)]"
       menuLabel="Agents run on"
-      onOpenChange={(next) => { setOpen(next); onOpenChange?.(next); }}
+      onOpenChange={(next) => { setOpen(next); forgetLatencies(); onOpenChange?.(next); }}
       itemClassName="py-1.5"
       footer={({ close }) => (
         <>
           {hostingSummary && (
-            <DropdownMenuItem icon={Radio} label={hostingSummary} onClick={() => { close(); onOpenRemoteAccess(); }} />
+            <MenuAction icon={Radio} label={hostingSummary.label} detail={hostingSummary.detail} dot={hostingSummary.state} onClick={() => { close(); onOpenRemoteAccess(); }} />
           )}
-          <DropdownMenuItem icon={Plus} label="Add a machine…" onClick={() => { close(); onAddMachine(); }} />
-          <DropdownMenuItem icon={Settings} label="Remote Access settings…" onClick={() => { close(); onOpenRemoteAccess(); }} />
+          <MenuAction icon={Plus} label="Add a device…" onClick={() => { close(); useAddDeviceStore.getState().open('computer'); }} />
+          <MenuAction icon={Settings} label="Remote Access settings…" onClick={() => { close(); onOpenRemoteAccess(); }} />
         </>
       )}
     />

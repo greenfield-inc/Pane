@@ -6,6 +6,10 @@
 appId: com.dcouple.pane.mobile
 ---
 - runFlow: subflows/signed-in.yaml
+- runFlow:
+    file: subflows/home-open.yaml
+    env:
+      SECTION: repositories
 - tapOn:
     id: "pane-row-.*"
     index: 0
@@ -159,7 +163,8 @@ appId: com.dcouple.pane.mobile
       platform: Android
     commands:
       - back
+# Back lands on the Repositories screen the pane was opened from.
 - extendedWaitUntil:
     visible:
-      id: panes-list
+      id: section-list-repositories
     timeout: 5000

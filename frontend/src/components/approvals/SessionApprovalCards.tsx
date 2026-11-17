@@ -6,8 +6,9 @@ import { cn } from '../../utils/cn';
 import { runNotify, selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { relativeAge } from '../notify/notifyFormat';
+import { Tooltip } from '../ui/Tooltip';
 import { useNow } from '../notify/useNow';
-import { dockApprovals, latestReplied, questionsOf, referenceCount, statusKey } from './approvalCard';
+import { dockApprovals, dockKey, latestReplied, questionsOf, referenceCount, statusKey } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 import { ApprovalKeyTip } from './ApprovalColumn';
 import { Tooltip } from '../ui/Tooltip';
@@ -23,7 +24,9 @@ import { formatKeyDisplay } from '../../utils/hotkeyUtils';
  */
 export function SessionApprovalCards({ sessionId, chatPanelId }: { sessionId: string; chatPanelId?: string }) {
   const waiting = useSessionApprovals(sessionId);
-  const pager = useMemo(() => dockApprovals(waiting, chatPanelId), [waiting, chatPanelId]);
+  const chat = chatPanelId ?? `session:${sessionId}`;
+  const dismissed = useApprovalColumnStore((state) => state.docked[chat]);
+  const pager = useMemo(() => dockApprovals(waiting, chatPanelId, dismissed), [waiting, chatPanelId, dismissed]);
   const openId = useApprovalColumnStore((state) => state.open[`session:${sessionId}`]?.itemId);
   const [shownId, setShownId] = useState<string | undefined>();
   // The open card leads; else the one last paged to, while it still waits; else the first.
@@ -43,13 +46,21 @@ export function SessionApprovalCards({ sessionId, chatPanelId }: { sessionId: st
     <div className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col gap-2 px-6 pb-2" data-testid="session-approval-cards">
       {status}
       <CompactCard item={item} index={index} total={pager.length} open={item.id === openId} onStep={step}
-        onOpen={(tab) => useApprovalColumnStore.getState().openApproval(`session:${sessionId}`, item.id, tab)} />
+        onOpen={(tab) => useApprovalColumnStore.getState().openApproval(`session:${sessionId}`, item.id, tab)}
+        onDismiss={() => {
+          // Same as Dismiss elsewhere: no answer, it leaves the strip and keeps waiting in Approvals.
+          // This chat leaves it out until it changes (a new version, reply or ready-again).
+          const columns = useApprovalColumnStore.getState();
+          if (item.state === 'waiting') runNotify({ type: 'dismiss', id: item.id });
+          columns.dismissDocked(chat, item.id, dockKey(item));
+          if (item.id === openId) columns.close(`session:${sessionId}`);
+        }} />
     </div>
   );
 }
 
-function CompactCard({ item, index, total, open, onStep, onOpen }: {
-  item: NotifyItem; index: number; total: number; open: boolean; onStep: (direction: 1 | -1) => void; onOpen: (tab?: string) => void;
+function CompactCard({ item, index, total, open, onStep, onOpen, onDismiss }: {
+  item: NotifyItem; index: number; total: number; open: boolean; onStep: (direction: 1 | -1) => void; onOpen: (tab?: string) => void; onDismiss: () => void;
 }) {
   const now = useNow();
   const count = questionsOf(item).length;
@@ -71,6 +82,13 @@ function CompactCard({ item, index, total, open, onStep, onOpen }: {
         {qn && <span className="shrink-0 font-semibold text-status-warning-on-tint">{qn}</span>}
         <span className="min-w-0 truncate">{[qn ? '' : 'Approval', who, count > 1 ? `${count} questions` : count === 1 ? '1 question' : '', relativeAge(item.createdAt, now)].filter(Boolean).join(' · ')}</span>
         {open && <span className="ml-auto shrink-0 rounded-md bg-surface-secondary px-1.5 py-px text-[11px] font-semibold text-text-secondary" data-testid="session-approval-card-open-label">Open</span>}
+        <Tooltip content="Dismiss: it stays in Approvals" side="top">
+          <button type="button" onClick={onDismiss} aria-label="Dismiss"
+            className={cn('-mr-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover hover:text-text-primary', !open && 'ml-auto')}
+            data-testid="session-approval-card-dismiss">
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </Tooltip>
       </div>
       <p className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-text-primary" data-testid="session-approval-card-title">{item.title}</p>
       {item.context && <p className="line-clamp-2 text-[13.5px] leading-snug text-text-secondary" data-testid="session-approval-card-subtitle">{item.context}</p>}

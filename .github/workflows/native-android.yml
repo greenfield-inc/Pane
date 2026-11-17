@@ -7,8 +7,9 @@ name: Native Android Build
 # The debug APK carries no JavaScript, so only native code can change it. A PR
 # or a push to main builds when the Expo Android fingerprint
 # (native/fingerprint.config.js) differs from the base (the PR's base, or the
-# commit before the push), or this workflow changed. A PR builds one ABI
-# (arm64-v8a) as a compile check; pushes build all four. The weekly run and
+# commit before the push), or this workflow changed, or there is no base or no
+# fingerprint to compare with. A PR builds one ABI (arm64-v8a) as a compile
+# check; pushes build all four. The weekly run and
 # manual runs always build all four, so the full build stays covered and the
 # Gradle cache stays warm.
 on:
@@ -35,6 +36,11 @@ jobs:
     timeout-minutes: 10
     outputs:
       build: ${{ steps.compare.outputs.build }}
+    # One base for both steps, so they can't disagree about whether there is
+    # one. A pull_request event's `before` can be all zeros, so a PR always
+    # compares with its base.
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
 
     steps:
     - name: Checkout code
@@ -46,15 +52,11 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Fingerprint the head and the base
-      if: github.event.before != '0000000000000000000000000000000000000000'
-      env:
-        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      if: env.BASE_SHA != '0000000000000000000000000000000000000000'
       run: scripts/ci-native-fingerprint.sh "$BASE_SHA" android
 
     - name: Compare
       id: compare
-      env:
-        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
       run: |
         set -euo pipefail
         if [ "$BASE_SHA" = 0000000000000000000000000000000000000000 ]; then
@@ -62,6 +64,9 @@ jobs:
           build=true
         elif ! git diff --quiet "$BASE_SHA" HEAD -- .github/workflows/native-android.yml scripts/ci-native-fingerprint.sh; then
           reason="This change touches the Android build workflow; building the APK."
+          build=true
+        elif [ ! -s "$RUNNER_TEMP/base-android" ] || [ ! -s "$RUNNER_TEMP/head-android" ]; then
+          reason="No Android fingerprint was written for the base or the head, so this change can't be shown to leave the APK alone; building the APK."
           build=true
         elif cmp -s "$RUNNER_TEMP/base-android" "$RUNNER_TEMP/head-android"; then
           reason="The Android fingerprint is unchanged ($(cat "$RUNNER_TEMP/head-android")), so this change cannot change the APK; skipping the build."

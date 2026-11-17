@@ -46,6 +46,8 @@ interface AgentConfigBase {
     fullAccessArgs: readonly string[];
     hotkey: string;
     reportsConversation?: boolean;
+    /** Set to one launch's config whose `pane` MCP server reads the tab's Pane endpoint from its environment (OpenCode). */
+    paneMcpConfigEnv?: string;
     paneMcpConfigFlag?: string;
     platforms?: readonly string[];
     /** Takes the starting message as an argument; otherwise Pane types it once the agent's input box is idle. */
@@ -56,6 +58,8 @@ interface AgentConfigBase {
   install: { url: string; command: string };
   /** Transcript folders, relative to the home the CLI runs with. */
   transcriptDirs?: readonly string[];
+  /** Per-session temp folders: `{tmp}` is /tmp on macOS and Linux, the OS temp folder on Windows; `{uid}` the user id. */
+  tempDirs?: readonly string[];
   onboarding?: boolean;
   onboardingPanelId?: string;
 }

@@ -33,6 +33,7 @@ const DAEMON_EVENT_PREFIXES = [
 const DAEMON_EVENT_EXACT_CHANNELS = new Set<string>([
   // Autopilot's snapshot, so the phone's Autopilot row and walk bar follow the desktop.
   'autopilot:changed',
+  'ssh:route-progress',
   'git-status-loading',
   // A member Pane's reports and exits, for a Session on another computer (`RemoteMemberEvents`).
   'workspace:entry',

@@ -3,7 +3,7 @@ import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLi
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
-import { useNotifyStore } from '../../stores/notifyStore';
+import { runNotify, useNotifyStore } from '../../stores/notifyStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
@@ -238,8 +238,10 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   // An item opened from elsewhere (a link, the strip) shows even when its group is collapsed.
   const staleOpen = staleExpanded || stale.some((item) => item.id === selectedId);
   const shown = [...list, ...(staleOpen ? stale : [])];
+  // Dismiss closes the column without answering; the first item doesn't take over until a row is picked.
+  const [dismissed, setDismissed] = useState(false);
   // The selection follows its item into its Undo hold; once it leaves the tab, the first item takes over.
-  const selected = shown.find((item) => item.id === selectedId) ?? (tab === 'waiting' ? shown[0] : undefined);
+  const selected = shown.find((item) => item.id === selectedId) ?? (tab === 'waiting' && !dismissed ? shown[0] : undefined);
   // That first item is then the selection, so a newer item arriving on top doesn't take over from it.
   const firstToPin = selected && selected.id !== selectedId ? selected.id : undefined;
   useEffect(() => {
@@ -376,7 +378,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   // The list stays compact rows; the selected approval opens in the column beside it (P4).
   const stopId = selected?.id ?? shown[0]?.id;
   const renderItem = (item: NotifyItem) => (
-    <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} tabbable={item.id === stopId} onSelect={(fromKeyboard) => { focusCard.current = fromKeyboard; selectApproval(item.id); }} />
+    <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} tabbable={item.id === stopId} onSelect={(fromKeyboard) => { focusCard.current = fromKeyboard; setDismissed(false); selectApproval(item.id); }} />
   );
   // ↑↓ move through the list and the approval follows; ↩ or → go into it (D-381).
   const listKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -561,6 +563,13 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             order={order}
             onSelect={selectApproval}
             groupLabel={tab === 'waiting' ? 'Approvals' : 'Done today'}
+            // Dismiss answers nothing: the item stays in the list (and leaves the floating strip).
+            closeLabel="Dismiss"
+            onClose={() => {
+              if (selected.state === 'waiting') runNotify({ type: 'dismiss', id: selected.id });
+              setDismissed(true);
+              selectApproval(null);
+            }}
             inChat={undefined}
             renderOrigin={() => origin}
           />

@@ -28,10 +28,29 @@ export function customResumeAgentType(config?: CustomCommandResume | null): 'cla
 }
 
 /**
- * Agent Farm's published contract for Pane: under PANE_PANEL_ID it prints
- * `PANE_AGENT_SESSION_ID=<launch id>` once, before the agent starts, and
+ * Agent Farm's published contract for a host (Pane included): when the host sets
+ * `AGENT_FARM_REPORT_SESSION_ID=1` it prints `AGENT_FARM_SESSION_ID=<launch id>` once, before the
+ * agent starts; an Agent Farm from before greenfield-inc/agent-farm#220 prints
+ * `PANE_AGENT_SESSION_ID=<launch id>` when `PANE_PANEL_ID` is set. Pane accepts both lines (D-403).
  * `agent-farm run <profile> --resume <id>` reopens that conversation.
  */
+/** What Pane sets in each terminal so Agent Farm reports to it under its host-neutral names (D-403). */
+export const AGENT_FARM_HOST_ENV = {
+  /** `1` asks Agent Farm to print its `AGENT_FARM_SESSION_ID=<id>` line. */
+  reportSessionId: 'AGENT_FARM_REPORT_SESSION_ID',
+  /** The executable Agent Farm's Claude SessionStart hook runs as `"$AGENT_FARM_SESSION_HOOK" session-start`. */
+  sessionHook: 'AGENT_FARM_SESSION_HOOK',
+} as const;
+
+/**
+ * A launcher's session ID line on a line of its own: `AGENT_FARM_SESSION_ID=<id>` (Agent Farm since
+ * #220) or `PANE_AGENT_SESSION_ID=<id>` (older Agent Farm, and any CLI configured as "CLI reports its ID").
+ * The ID is group 1. A fresh RegExp each call, since it is global and keeps lastIndex.
+ */
+export function reportedSessionIdLinePattern(): RegExp {
+  return /(?:^|[\r\n])(?:AGENT_FARM_SESSION_ID|PANE_AGENT_SESSION_ID)=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})(?=[\r\n])/g;
+}
+
 export const AGENT_FARM_RESUME: CustomCommandResume = {
   mode: 'reported',
   initialTemplate: '{command}',

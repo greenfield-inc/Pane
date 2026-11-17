@@ -1,3 +1,4 @@
+import { DevicePanel } from './device/DevicePanel';
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { PanelContainerProps } from '../../types/panelComponents';
 import { ErrorBoundary } from 'react-error-boundary';
@@ -131,6 +132,8 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
         return <SetupTasksPanel panelId={panel.id} sessionId={panel.sessionId} isActive={isActive} />;
       case 'browser':
         return <BrowserPanel panel={panel} isActive={isActive} />;
+      case 'device':
+        return <DevicePanel panel={panel} isActive={isActive} />;
       default:
         return (
           <div className="h-full w-full flex items-center justify-center p-8">

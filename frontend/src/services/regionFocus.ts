@@ -602,6 +602,8 @@ export function focusChatSoon(panelId?: string, { untilInput = false }: { untilI
     frame = 0;
     const active = document.activeElement;
     if (box?.isConnected && active === box) return;
+    // The launch outline's message box hands its focus to the chat itself (utils/launchOutline.ts).
+    if (active?.closest('#pane-launch-outline')) return;
     if (!isFree(active)) { cancel(); return; }
     box = target();
     box?.focus({ preventScroll: true });

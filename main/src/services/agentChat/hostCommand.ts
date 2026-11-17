@@ -2,6 +2,7 @@ import { PaneError } from '../../../../shared/paneError';
 import { quoteShellWord } from '../agents/shellWord';
 import { existsSync, readFileSync } from 'fs';
 import path from 'path';
+import { getShellPath } from '../../utils/shellPath';
 
 /**
  * Standard npm shims name their actual script. Resolve only the script the agent's
@@ -35,4 +36,16 @@ export function hostCommand(executable: string, args: string[], platform: NodeJS
     throw new PaneError('CHAT_COMMAND_UNREPRESENTABLE', 'The Windows command contains a value that cmd cannot pass literally. No process was started.', 'Use the provider executable directly or a path without cmd expansion characters.');
   }
   return { executable: 'cmd.exe', args: ['/d', '/s', '/c', `"${words.join(' ')}"`], windowsVerbatimArguments: true };
+}
+
+/**
+ * The environment for running a tool Pane found on the shell PATH, such as npm: the tool's own
+ * folder goes first, then the shell PATH, so its `#!/usr/bin/env node` finds the Node installed
+ * beside it, and its scripts find the person's tools, even when Pane was started from Finder with
+ * a bare PATH.
+ */
+export function besideItsNode(executable: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const key = Object.keys(env).find(name => name.toUpperCase() === 'PATH') ?? 'PATH';
+  const folders = new Set([path.dirname(executable), ...getShellPath().split(path.delimiter).filter(Boolean)]);
+  return { ...env, [key]: [...folders].join(path.delimiter) };
 }

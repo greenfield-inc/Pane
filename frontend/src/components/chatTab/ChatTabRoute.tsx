@@ -1,4 +1,8 @@
+import { usePanelStore } from '../../stores/panelStore';
+import { openPaneTarget } from '../terminal/openPaneLink';
+import { devicePhaseOf, devicesOpenedBy } from '../../../../shared/deviceMarker';
 import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
@@ -7,7 +11,8 @@ import { showActionError } from '../../stores/errorStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSessionWorkers } from './sessionWorkers';
 import { DESKTOP_WORKERS, openWorkerTab } from './desktopSessionWorkers';
-import { savedFilePath } from './chatAttachments';
+import type { SaveChatFile } from './chatAttachments';
+import { uploadFileToHost } from '../../utils/hostUpload';
 import type { ChatTurnActions } from './ChatTurns';
 import { SessionApprovalCards } from '../approvals/SessionApprovalCards';
 import ChatTabPanel from './ChatTabPanel';
@@ -32,15 +37,27 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   const state = panel.state.customState as ChatPanelState | undefined;
   const workers = useSessionWorkers(DESKTOP_WORKERS, state?.orchestrationSessionId);
   // Dropped and pasted files land in the Pane's folder on its machine, local or remote, as the terminal's do.
-  const saveFile = useMemo(() => async (file: { name: string; dataUrl: string }) =>
-    savedFilePath(await window.electronAPI.invoke('terminal:paste-file', panel.sessionId, file.dataUrl, file.name, { keepName: true })), [panel.sessionId]);
+  const saveFile = useMemo<SaveChatFile>(() => (file, onProgress, signal) => uploadFileToHost({
+    invoke: (channel, args) => window.electronAPI.invoke(channel, ...args), file, sessionId: panel.sessionId, keepName: true, onProgress, signal,
+  }), [panel.sessionId]);
   // Stable, so a re-render here does not re-render every turn of the chat.
   const cwd = state?.cwd;
+  // The Pane's device tabs, so device cards follow their device's state; other tabs' changes keep `actions` as it is.
+  const deviceTabs = usePanelStore(useShallow(store => (store.panels[panel.sessionId] ?? []).filter(tab => tab.type === 'device')));
   const actions = useMemo<ChatTurnActions>(() => ({
     onOpenWorker: (paneId: string, panelId?: string) => { void openWorkerTab(paneId, panelId); },
     onViewDiff: file => void openFileInEditor({ sessionId: panel.sessionId, filePath: worktreeRelative(file, cwd), pin: true, diff: { kind: 'scope', scope: { kind: 'session' } } })
       .catch(error => showActionError('Could not open the diff', error)),
-  }), [cwd, panel.sessionId]);
+    device: {
+      openedHere: devicesOpenedBy(deviceTabs, panel.id),
+      phase: panelId => devicePhaseOf(deviceTabs, panelId),
+      frame: async panelId => {
+        const response = await window.electronAPI.devices.frame(panelId);
+        return response.success ? response.data : undefined;
+      },
+      open: panelId => { void openPaneTarget({ paneId: panel.sessionId, panelId }); },
+    },
+  }), [cwd, panel.id, panel.sessionId, deviceTabs]);
   return <ChatTabPanel
     saveFile={saveFile}
     workers={workers}

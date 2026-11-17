@@ -109,6 +109,8 @@ const sheets = new WeakMap<Document, CSSStyleSheet>();
 
 /** Puts the Custom theme's colours and CSS into this document's one adopted sheet, after Pane's own styles; null empties it. */
 export function applyCustomThemeStyles(theme: CustomTheme | null, doc: Document = document): void {
+  // The colours index.html applied from the cache for the first frame give way to this sheet.
+  doc.getElementById('pane-launch-custom-theme')?.remove();
   let sheet = sheets.get(doc);
   if (!sheet) {
     if (!theme) return;

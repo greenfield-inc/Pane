@@ -80,6 +80,8 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     ['a final carriage return', 'Keep final CR\r'],
   ])('gives back %s byte for byte after on, on again and off', (_name, own) => {
     fs.writeFileSync(claudeFile, own);
+    // Saved a while ago: Pane waits on an empty file saved just now.
+    fs.utimesSync(claudeFile, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
     sync(true);
     const on = text(claudeFile);
     sync(true);
@@ -126,6 +128,33 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     expect(interleaved).toBe(true);
     expect(text(claudeFile).startsWith('# My rules\nNever deploy without asking me.\n')).toBe(true);
     expect(text(claudeFile)).toContain(BEGIN);
+  });
+
+  // greenfield-inc/Pane#1267: the file held only Pane's block afterwards, and was empty once Notify was off.
+  it('waits for a save in progress instead of writing over a file another program just emptied', () => {
+    fs.writeFileSync(claudeFile, '# My rules\n');
+    // Another program saves in place: it has truncated the file and not yet written.
+    const fd = fs.openSync(claudeFile, 'w');
+
+    expect(sync(true)[0]).toMatchObject({ state: 'skipped', reason: expect.stringContaining('saved just now') });
+    fs.writeSync(fd, '# My rules\nNever deploy without asking me.\n');
+    fs.closeSync(fd);
+    expect(text(claudeFile)).toBe('# My rules\nNever deploy without asking me.\n');
+
+    expect(sync(true)[0].state).toBe('written');
+    expect(text(claudeFile).startsWith('# My rules\nNever deploy without asking me.\n')).toBe(true);
+    expect(text(claudeFile)).toContain(BEGIN);
+    sync(false);
+    expect(text(claudeFile)).toBe('# My rules\nNever deploy without asking me.\n');
+  });
+
+  it('puts the block back when Notify is turned off and straight back on', () => {
+    expect(sync(true)[0].state).toBe('written');
+    sync(false);
+    expect(text(claudeFile)).toBe('');
+
+    expect(sync(true)[0].state).toBe('written');
+    expect(text(claudeFile).startsWith(BEGIN)).toBe(true);
   });
 
   it('leaves a file alone when Pane\'s markers don\'t pair up', () => {

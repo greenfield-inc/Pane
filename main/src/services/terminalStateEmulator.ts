@@ -1,6 +1,7 @@
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { Terminal } from '@xterm/headless';
+import { ProgramStatusRecords, type ProgramStatus } from './agentStatus/programStatus';
 
 const HEADLESS_SCROLLBACK_LINES = 2500;
 
@@ -66,6 +67,9 @@ export class TerminalStateEmulator {
   private currentProgress = '';
   private win32InputMode = false;
   private mouseEncoding: 1006 | 1016 | undefined;
+  private readonly programStatus = new ProgramStatusRecords();
+  /** Called when a program asks whether this terminal reads OSC 7501 (`OSC 7501 ; ? ST`). */
+  onProgramStatusQuery: (() => void) | undefined;
 
   constructor(cols: number, rows: number) {
     this.terminal = new Terminal({
@@ -99,6 +103,7 @@ export class TerminalStateEmulator {
     this.terminal.parser.registerEscHandler({ final: 'c' }, () => {
       this.win32InputMode = false;
       this.mouseEncoding = undefined;
+      this.programStatus.reset();
       return false;
     });
     this.terminal.parser.registerCsiHandler({ intermediates: '!', final: 'p' }, () => {
@@ -114,6 +119,17 @@ export class TerminalStateEmulator {
     this.terminal.parser.registerOscHandler(9, (data) => {
       this.currentProgress = data;
       return false; // allow other handlers to also process
+    });
+    // OSC 7501: programs report their own status (agentStatus/programStatus.ts).
+    this.terminal.parser.registerOscHandler(7501, (data) => {
+      if (data.trim() === '?') this.onProgramStatusQuery?.();
+      else this.programStatus.report(data);
+      return true;
+    });
+    // OSC 133 A: a new shell prompt began, so running programs have ended.
+    this.terminal.parser.registerOscHandler(133, (data) => {
+      if (data.startsWith('A')) this.programStatus.dropRunning();
+      return false;
     });
   }
 
@@ -251,6 +267,21 @@ export class TerminalStateEmulator {
   /** Latest OSC 9;4 progress payload (e.g. "4;0"), preserved after dispose. */
   getOscProgress(): string {
     return this.currentProgress;
+  }
+
+  /** The most urgent OSC 7501 record, preserved after dispose. */
+  getProgramStatus(): ProgramStatus | undefined {
+    return this.programStatus.current();
+  }
+
+  /**
+   * End OSC 7501 records the terminal saw outlive their program: `running`
+   * when the program exited (working, blocked and idle go), `finished` when
+   * the person came back to the terminal (done and error go).
+   */
+  dropProgramStatus(which: 'running' | 'finished'): void {
+    if (which === 'running') this.programStatus.dropRunning();
+    else this.programStatus.dropFinished();
   }
 
   clearScrollback(): void {

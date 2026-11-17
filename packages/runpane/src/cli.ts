@@ -13,8 +13,11 @@ import { runHandoff } from './handoff';
 import { runAsk, runModels } from './ask';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
+import { runLink } from './pairingLink';
 import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
+import { runDevicesAct, runDevicesClose, runDevicesFree, runDevicesList, runDevicesOpen, runDevicesRun, runDevicesScreenshot, runDevicesUsage } from './devices';
 import { runThemeRead, runThemeReset, runThemeSet } from './theme';
+import { runMachineCleanup, runMachineHealth } from './machine';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo } from './daemonClient';
@@ -101,8 +104,8 @@ import { runRelay } from './relay';
 import { handOffToManagedCli } from './managedCli';
 import { assertSupportedCliRuntime } from './nodeRuntime';
 import {
-  readMachines,
   readWorkspaceSummary,
+  requireTailnet,
   resolveMachine,
   runWorkspaceExec,
   runWorkspaceList,
@@ -169,6 +172,8 @@ const THIS_MACHINE_ONLY = new Set<string>([
   'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
   // These read or change this machine's own secret store; another machine runs its own.
   'secrets list', 'secrets set', 'secrets delete', 'secrets exec', 'secrets request',
+  // Device tools act for the calling tab's Pane; a machine without Xcode reaches its Mac itself.
+  'devices list', 'devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close', 'devices usage', 'devices free',
 ]);
 
 /** `runpane workspace <machine> <command...>`: the same command, answered by that machine's Pane. */
@@ -177,8 +182,7 @@ async function runOnMachine(machineQuery: string, command: string[]): Promise<nu
   if (THIS_MACHINE_ONLY.has(parsed.command)) {
     throw new Error(`runpane ${parsed.command} runs on this machine only. On ${machineQuery}, use: runpane workspace ${machineQuery} exec -- runpane ${command.join(' ')}`);
   }
-  const tailnet = await readMachines(parsed.paneDir);
-  if (!tailnet.ok) throw new Error(`runpane workspace needs Tailscale or a computer linked by QR pairing: ${tailnet.reason}. ${tailnet.fix}`);
+  const tailnet = await requireTailnet(parsed.paneDir);
   const machine = resolveMachine(machineQuery, [tailnet.self, ...tailnet.machines]);
   routeDaemonCallsTo(workspaceTarget(machine), machine.self);
   try {
@@ -267,6 +271,14 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'secrets delete': async (parsed) => runSecretsDelete(parsed),
   'secrets exec': async (parsed) => runSecretsExec(parsed),
   'secrets request': async (parsed) => runSecretsRequest(parsed),
+  'devices list': async (parsed) => runDevicesList(parsed),
+  'devices open': async (parsed) => runDevicesOpen(parsed),
+  'devices screenshot': async (parsed) => runDevicesScreenshot(parsed),
+  'devices act': async (parsed) => runDevicesAct(parsed),
+  'devices run': async (parsed) => runDevicesRun(parsed),
+  'devices close': async (parsed) => runDevicesClose(parsed),
+  'devices usage': async (parsed) => runDevicesUsage(parsed),
+  'devices free': async (parsed) => runDevicesFree(parsed),
   'theme read': async (parsed) => runThemeRead(parsed),
   'theme set': async (parsed) => runThemeSet(parsed),
   'theme reset': async (parsed) => runThemeReset(parsed),
@@ -313,6 +325,8 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'lock list': async (parsed, telemetryContext) => {
     return runLockList(parsed);
   },
+  'machine health': async (parsed) => runMachineHealth(parsed),
+  'machine cleanup': async (parsed) => runMachineCleanup(parsed),
   'loops list': async (parsed) => runLoopsList(parsed),
   'loops create': async (parsed) => runLoopsSave(parsed),
   'loops update': async (parsed) => runLoopsSave(parsed),
@@ -333,6 +347,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'ask': async (parsed) => runAsk(parsed),
   'models': async (parsed) => runModels(parsed),
   'relay': async (parsed) => runRelay(parsed.execCommand ?? []),
+  'link': async (parsed) => runLink(parsed),
   'pr watch': async parsed => runPrWatchCommand(parsed),
   'pr unwatch': async parsed => runPrWatchCommand(parsed),
   'pr list': async parsed => runPrWatchCommand(parsed),

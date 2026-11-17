@@ -24,7 +24,8 @@ function host(count: number) {
     get,
     history: async (_panelId, before, limit) => {
       const end = Math.max(0, Math.min(before, state.messages.length));
-      return structuredClone(state.messages.slice(Math.max(0, end - limit), end));
+      // The host returns at most 500 messages from one read.
+      return structuredClone(state.messages.slice(Math.max(0, end - Math.min(500, limit)), end));
     },
     onEvent: callback => { events.add(callback); return () => events.delete(callback); },
     onState: () => () => undefined,
@@ -189,5 +190,32 @@ describe('chat tab viewer streaming', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('chat tab viewer whole conversation', () => {
+  it('returns every message of a long chat, from the newest window or while scrolled back, without moving the window', async () => {
+    const fake = host(1234);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.subscribe(() => undefined);
+    await settle();
+    const everyId = Array.from({ length: 1234 }, (_, index) => `m${index}`);
+    const shown = ids(viewer);
+    expect((await viewer.allMessages()).map(entry => entry.id)).toEqual(everyId);
+    expect(ids(viewer)).toEqual(shown);
+
+    for (let page = 0; page < 8; page++) await viewer.loadEarlier();
+    expect(viewer.snapshot().hasNewer).toBe(true);
+    fake.append();
+    expect((await viewer.allMessages()).map(entry => entry.id)).toEqual([...everyId, 'm1234']);
+  });
+
+  it('rejects instead of returning part of the chat when a page fails', async () => {
+    const fake = host(1234);
+    const viewer = new ChatTabViewer(fake.client, 'p');
+    viewer.subscribe(() => undefined);
+    await settle();
+    fake.client.history = async () => { throw new Error('host went away'); };
+    await expect(viewer.allMessages()).rejects.toThrow('host went away');
   });
 });

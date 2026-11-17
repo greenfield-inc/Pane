@@ -91,7 +91,6 @@ describe('Pane Chat skill bundle', () => {
     expect(guide).toContain('`runpane inbox ack <item> --decision <D-n>`');
     expect(guide).toContain('`correction: Q-n → <answer> (by you)`');
     expect(guide).toContain('`reply: Q-n → "<their words>" (picked: <picks>) (by you)`');
-    expect(guide).toContain('`runpane notify --took <id|Q-n> answer`');
     expect(guide).toContain('`runpane notify --took <id|Q-n> question`');
     expect(guide).toContain('`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"`');
     expect(guide).toContain('Never post a second approval for it.');
@@ -125,7 +124,7 @@ describe('Pane Chat skill bundle', () => {
     const text = (await fs.readFile(path.join(bundleRoot, 'skills', 'pane-orchestration', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
     expect(text).not.toContain('## Clean up');
     expect(text).toContain('## Keep the Session tidy');
-    expect(text).toContain('Keep one status document for this Session, in the Session folder, and update it in place.');
+    expect(text).toContain('Keep one status document for this Session at `session/index.html` in the Session folder, and update it in place.');
     expect(text).toContain('Link plans, PRs, mock-ups, reports and other pages from it instead of opening each one.');
     expect(text).toContain('runpane panels close --panel <id> --yes --json');
     expect(text).toContain('runpane panes archive --pane <id> --dry-run --json');
@@ -180,7 +179,6 @@ describe('Pane Chat skill bundle', () => {
     expect(guide).not.toContain('D-66');
     // Autopilot reads the replies their asker can't, and updates instead of re-asking.
     expect(guide).toContain('**Read replies their asker can\'t.**');
-    expect(guide).toContain('`runpane notify --took <id|Q-n> answer --json`');
     expect(guide).toContain('`runpane notify --took <id|Q-n> question --json`');
     expect(guide).toContain('Never post a second approval for it.');
     expect(guide).not.toMatch(/never answers? an approval/i);

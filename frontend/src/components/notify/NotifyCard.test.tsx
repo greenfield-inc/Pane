@@ -21,6 +21,20 @@ function text(markup: string): string {
 }
 
 describe('NotifyCard', () => {
+  it('offers Dismiss on every floating and docked card, which hides it without answering', () => {
+    const cards: NotifyItem[] = [
+      { ...base, ui: 'approve', title: 'Apply migration 0042 to staging?' },
+      { ...base, ui: 'options', title: 'Which store?', choices: [{ label: 'Redis', recommended: true }, { label: 'Postgres' }] },
+      { ...base, ui: 'ask', title: 'What should the headline say?' },
+    ];
+    for (const item of cards) {
+      for (const form of ['strip', 'docked'] as const) {
+        expect(render(item, { form }), `${item.ui} ${form}`).toMatch(/<button[^>]*aria-label="Dismiss"[^>]*data-testid="notify-dismiss"/);
+      }
+    }
+    expect(render(cards[0], { view: 'expired' })).toContain('aria-label="Dismiss"');
+  });
+
   it("names the host machine on its question, and says an answer can't be sent while it is out of reach", () => {
     const visible = text(render({ ...base, ui: 'approve', title: 'Apply migration 0042 to staging?', machine: 'parsa-devbox', unreachable: true }));
     expect(visible).toContain('auth-refactor · Claude · parsa-devbox');
@@ -72,6 +86,17 @@ describe('NotifyCard', () => {
     expect(visible).toContain('Open in Pane');
   });
 
+  it('marks the recommended choice but never selects it for the person (D-385)', () => {
+    const item: NotifyItem = { ...base, id: 'q-pick', ui: 'options', title: 'Which store?', choices: [{ label: 'Postgres' }, { label: 'Redis', recommended: true }] };
+    const compact = render(item);
+    expect(compact).not.toContain('font-medium text-text-primary hover:bg-surface-tertiary');
+    expect(text(compact)).toContain('2 is recommended');
+    const docked = render(item, { form: 'docked' });
+    expect(docked).not.toContain('aria-pressed="true"');
+    expect(text(docked)).toContain('Recommended');
+    expect(docked.match(/<button[^>]*>Send<\/button>/)?.[0]).toContain('disabled');
+  });
+
   it('shows an approval as Deny and Approve with the detail behind a disclosure', () => {
     const visible = text(render({
       ...base,
@@ -95,7 +120,7 @@ describe('NotifyCard', () => {
 
   it('opens a pop-up card with details shown when the person last left them shown', () => {
     const choiceCard = text(render({ ...base, ui: 'options', title: 'Which store?', choices: [{ label: 'Postgres' }] }, { showDetails: true }));
-    expect(choiceCard).toContain('Click a choice, then Send');
+    expect(choiceCard).toContain('Click a choice or type a reply, then Send');
     expect(choiceCard).toContain('Hide details');
     const approval = text(render({ ...base, ui: 'approve', title: 'Deploy?', detail: 'fly deploy --app web' }, { showDetails: true }));
     expect(approval).toContain('fly deploy --app web');

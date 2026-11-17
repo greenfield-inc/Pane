@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, ArrowRight, RotateCw, Loader2, ChevronDown, Copy, Check, FileCode } from 'lucide-react';
+import { ArrowLeft, ArrowRight, RotateCw, Loader2, ChevronDown, Copy, Check, FileCode, ExternalLink } from 'lucide-react';
 import type { ToolPanel, BrowserPanelState } from '../../../../../shared/types/panels';
 import { cn } from '../../../utils/cn';
 import { panelApi } from '../../../services/panelApi';
@@ -389,6 +389,33 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     }, (error: Error) => console.error('[BrowserPanel] Failed to copy URL:', error));
   };
 
+  // The page the tab shows now, in host form: main maps a host port to where this computer reaches it.
+  const externalUrl = shownUrl || url;
+  const isLocalPage = hasFileProtocol(externalUrl);
+  // Why the button can't open this page, shown as its tooltip; null when it can.
+  const openExternalBlock = ((): string | null => {
+    if (!externalUrl) return 'Open a page first';
+    if (isLocalPage) {
+      if (isRemoteMode) return `This file is on ${ports?.host ?? 'the host'}, so your browser on this computer can't open it`;
+      const page = new URL(externalUrl);
+      // A file URL's host is another computer's share, except the hosts Windows serves local WSL files from.
+      if (page.host && !/^wsl(?:\.localhost|\$)$/i.test(page.hostname)) return `This file is on ${page.hostname}, not this computer`;
+      return /\.html?$/i.test(page.pathname) ? null : 'Only .html and .htm files open in your browser';
+    }
+    if (!/^https?:/i.test(externalUrl)) return 'Only http, https and .html pages open in your browser';
+    const external = targetOf(externalUrl);
+    if (external.kind === 'waiting') return 'Pane is still checking where this page runs';
+    if (external.kind === 'unreachable') return `Port ${external.port} on ${ports?.host ?? 'the host'} isn't forwarded to this computer`;
+    return null;
+  })();
+  const canOpenExternal = openExternalBlock === null;
+  const handleOpenExternal = () => {
+    const open = isLocalPage ? window.electronAPI.openLocalPage : window.electronAPI.openExternal;
+    void open(externalUrl).then(result => {
+      if (!result.success) setUrlError(result.error || 'Pane could not open this page in your browser');
+    });
+  };
+
   const handleViewSource = () => {
     if (!sourceFile) return;
     openFileInEditor({ sessionId: panel.sessionId, filePath: sourceFile, pin: true })
@@ -440,6 +467,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     const onDidStartLoading = () => setIsLoading(true);
     const onDidFailLoad = (event: Electron.DidFailLoadEvent) => {
       if (!event.isMainFrame || event.errorCode === -3) return;
+      // A failed load sends no did-navigate, but the tab now shows its address.
+      setShownUrl(toHostUrlRef.current(webview.getURL()));
       setIsLoading(false);
       setUrlError(`Unable to load this page: ${event.errorDescription}`);
     };
@@ -654,6 +683,18 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           title="Copy URL"
         >
           {copied ? <Check className="w-3.5 h-3.5 text-status-success" /> : <Copy className="w-3.5 h-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={handleOpenExternal}
+          disabled={!canOpenExternal}
+          className={cn(
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
+            !canOpenExternal && 'opacity-30 cursor-not-allowed'
+          )}
+          title={openExternalBlock ? `Can't open in your browser: ${openExternalBlock}` : 'Open in your browser'}
+        >
+          <ExternalLink className="w-3.5 h-3.5" />
         </button>
         {sourceFile && (
           <button
