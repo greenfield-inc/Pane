@@ -10,6 +10,8 @@ interface ArchiveHoldState {
   held: readonly HeldArchive[];
   /** Row keys the list and its counts leave out: held, or sent and not yet settled. */
   hidden: ReadonlySet<string>;
+  /** Why a row's close was refused, by row key, until the person dismisses it or archives the row again. */
+  failed: ReadonlyMap<string, string>;
 }
 
 const ARCHIVE_HOLD_MS = 5_000;
@@ -20,14 +22,14 @@ const ARCHIVE_HOLD_MS = 5_000;
  * shows its row again. State is replaced on every change, for `useSyncExternalStore`.
  */
 export function createArchiveHold(close: (id: string) => Promise<unknown>, delayMs = ARCHIVE_HOLD_MS) {
-  let state: ArchiveHoldState = { held: [], hidden: new Set() };
+  let state: ArchiveHoldState = { held: [], hidden: new Set(), failed: new Map() };
   let sending: readonly HeldArchive[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
 
-  const update = (held: readonly HeldArchive[], nextSending: readonly HeldArchive[]) => {
+  const update = (held: readonly HeldArchive[], nextSending: readonly HeldArchive[], failed = state.failed) => {
     sending = nextSending;
-    state = { held, hidden: new Set([...held, ...sending].map(entry => entry.key)) };
+    state = { held, hidden: new Set([...held, ...sending].map(entry => entry.key)), failed };
     listeners.forEach(listener => listener());
   };
   const stop = () => {
@@ -41,7 +43,10 @@ export function createArchiveHold(close: (id: string) => Promise<unknown>, delay
     update([], [...sending, ...batch]);
     for (const entry of batch) {
       // Settled once the next snapshot is read: gone when it closed, back when it failed.
-      void close(entry.id).catch(() => undefined).finally(() => update(state.held, sending.filter(sent => sent !== entry)));
+      void close(entry.id).then(
+        () => update(state.held, sending.filter(sent => sent !== entry)),
+        (error: unknown) => update(state.held, sending.filter(sent => sent !== entry), new Map(state.failed).set(entry.key, error instanceof Error ? error.message : String(error))),
+      );
     }
   };
 
@@ -53,12 +58,20 @@ export function createArchiveHold(close: (id: string) => Promise<unknown>, delay
     },
     archive: (entry: HeldArchive) => {
       stop();
-      update([...state.held, entry], sending);
+      const failed = new Map(state.failed);
+      failed.delete(entry.key);
+      update([...state.held, entry], sending, failed);
       timer = setTimeout(flush, delayMs);
     },
     undo: () => {
       stop();
       update([], sending);
+    },
+    /** The person read why a close was refused. */
+    dismiss: (key: string) => {
+      const failed = new Map(state.failed);
+      failed.delete(key);
+      update(state.held, sending, failed);
     },
     flush,
   };

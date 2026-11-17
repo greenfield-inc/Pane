@@ -29,7 +29,7 @@ export function useArchiveHold() {
     ...state,
     archive: hold.archive,
     undo: hold.undo,
-    error: command.isError ? command.error.message : null,
+    dismiss: hold.dismiss,
   };
 }
 

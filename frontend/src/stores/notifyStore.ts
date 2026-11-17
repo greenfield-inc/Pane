@@ -24,11 +24,14 @@ export const useNotifyStore = create<NotifyState>(() => ({ snapshot: null, archi
 
 /** What main last sent, before held archives are taken out. */
 let received: NotifySnapshot | null = null;
-/** Archived items whose close main hasn't answered yet: still out of the list. */
+/** Archived items whose close was sent: out of the list until a snapshot shows them closed, or the close is refused. */
 const closing = new Set<string>();
 
 function publish(snapshot: NotifySnapshot | null): void {
   received = snapshot;
+  for (const id of closing) {
+    if (!snapshot?.items.some((item) => item.id === id && item.state === 'waiting')) closing.delete(id);
+  }
   const held = new Set([...closing, ...useNotifyStore.getState().archived?.ids ?? []]);
   useNotifyStore.setState({ snapshot: snapshot && held.size > 0 ? { ...snapshot, items: snapshot.items.filter((item) => !held.has(item.id)) } : snapshot });
 }
@@ -90,13 +93,14 @@ export async function sendNotify(command: NotifyCommand): Promise<boolean> {
 
 /**
  * Archive: the close the approval's own Close sends, with no reason, held while its Undo toast
- * shows. Archiving again sends the earlier hold's closes first.
+ * shows. Archiving again joins the hold and starts its toast over, so Undo brings back every one (D-104).
  */
 export function archiveApprovals(items: readonly NotifyItem[]): void {
   if (items.length === 0) return;
-  sendArchived();
-  const message = items.length === 1 ? `Archived “${items[0].relay?.question ?? items[0].title}”` : `Archived ${items.length} approvals`;
-  useNotifyStore.setState({ archived: { ids: items.map((item) => item.id), message } });
+  const earlier = useNotifyStore.getState().archived?.ids ?? [];
+  const ids = [...earlier, ...items.map((item) => item.id).filter((id) => !earlier.includes(id))];
+  const message = ids.length === 1 ? `Archived “${items[0].relay?.question ?? items[0].title}”` : `Archived ${ids.length} approvals`;
+  useNotifyStore.setState({ archived: { ids, message } });
   publish(received);
   window.addEventListener('beforeunload', sendArchived);
 }
@@ -118,9 +122,10 @@ export function sendArchived(): void {
   const waiting = held.ids.filter((id) => received?.items.some((item) => item.id === id && item.state === 'waiting'));
   for (const id of waiting) closing.add(id);
   useNotifyStore.setState({ archived: null });
-  // Back in the list once main has answered: closed, it isn't waiting; refused, it shows why and waits again.
+  // A refused close shows why, and its row comes back at once.
   for (const id of waiting) {
-    void sendNotify({ type: 'close', id }).then(() => {
+    void sendNotify({ type: 'close', id }).then((accepted) => {
+      if (accepted) return;
       closing.delete(id);
       publish(received);
     });

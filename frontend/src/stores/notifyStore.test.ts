@@ -65,8 +65,8 @@ describe('Archive', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   let push: (snapshot: NotifySnapshot) => void = () => undefined;
-  function connect(snapshot: NotifySnapshot) {
-    const run = vi.fn(async () => undefined);
+  function connect(snapshot: NotifySnapshot, refuse = false) {
+    const run = vi.fn(async () => { if (refuse) throw new Error('offline'); });
     vi.stubGlobal('window', {
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
@@ -81,9 +81,12 @@ describe('Archive', () => {
     const run = connect(withItems(...loop));
     await vi.waitFor(() => expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(3));
 
-    archiveApprovals(loop.slice(0, 2));
+    // A second archive joins the first: one toast, and Undo brings back both (D-104).
+    archiveApprovals([loop[0]]);
+    archiveApprovals([loop[1]]);
     expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(1);
     expect(useNotifyStore.getState().archived?.message).toBe('Archived 2 approvals');
+    expect(run).not.toHaveBeenCalled();
 
     undoArchive();
     expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(3);
@@ -103,5 +106,27 @@ describe('Archive', () => {
     push(withItems(item('asked', { state: 'answered' })));
     sendArchived();
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('keeps a sent row out until a snapshot shows it closed, and brings it back when the close is refused', async () => {
+    connect(withItems(item('a'), item('b')));
+    await vi.waitFor(() => expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(2));
+    archiveApprovals([item('a')]);
+    sendArchived();
+    await Promise.resolve();
+    // Main answered before its snapshot: the row stays out instead of flashing back.
+    push(withItems(item('a'), item('b')));
+    expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(1);
+    push(withItems(item('a', { state: 'expired' }), item('b')));
+    push(withItems(item('a', { state: 'expired' }), item('b')));
+    expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(1);
+  });
+
+  it('brings a row back at once when its close is refused', async () => {
+    connect(withItems(item('a')), true);
+    await vi.waitFor(() => expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(1));
+    archiveApprovals([item('a')]);
+    sendArchived();
+    await vi.waitFor(() => expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(1));
   });
 });

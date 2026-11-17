@@ -46,12 +46,16 @@ describe('createArchiveHold', () => {
     expect(close.mock.calls).toEqual([['q1'], ['q2']]);
   });
 
-  it('shows the row again when its close fails', async () => {
-    const hold = createArchiveHold(() => Promise.reject(new Error('offline')));
+  it('shows the row again with why its close failed, until the person dismisses it', async () => {
+    const hold = createArchiveHold(() => Promise.reject(new Error('studio-mac is offline.')));
     hold.archive(deploy);
+    hold.archive(rename);
     hold.flush();
     await vi.runAllTimersAsync();
     expect(hold.snapshot().hidden.has(deploy.key)).toBe(false);
+    expect(hold.snapshot().failed.get(deploy.key)).toBe('studio-mac is offline.');
+    hold.dismiss(deploy.key);
+    expect([...hold.snapshot().failed.keys()]).toEqual([rename.key]);
   });
 });
 

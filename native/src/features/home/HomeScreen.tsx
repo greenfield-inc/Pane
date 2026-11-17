@@ -246,12 +246,14 @@ export function HomeScreen() {
                 {row.type === 'question' && row.item.state === 'waiting' ? (
                   <AgentPromptActions item={row.item} inset={33} machine={row.machineKey === profile.id ? null : machine?.profile ?? null} />
                 ) : null}
+                {archiving.failed.has(row.key) ? (
+                  <Notice testID={`approvals-archive-error-${row.key}`} danger message={`Not archived: ${archiving.failed.get(row.key)}`} action={{ title: 'Dismiss', onPress: () => archiving.dismiss(row.key) }} />
+                ) : null}
               </>
             );
           }}
         />
       ) : null}
-      {archiving.error ? <Notice testID="approvals-archive-error" danger message={archiving.error} /> : null}
       {inTerminal.length > 0 ? (
         <View testID="needs-terminal" style={styles.terminalGroup}>
           <Text variant="footnote" tone="secondary" style={styles.groupLabel} accessibilityRole="header">{`Waiting in the terminal · ${inTerminal.length}`}</Text>

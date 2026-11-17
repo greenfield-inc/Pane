@@ -124,6 +124,8 @@ interface TabMessage {
   reply?: string;
   /** The asking tab's Pane, which says which machine a Session member on another computer is on. */
   paneId?: string;
+  /** A close's line, `closed: <ref> <tail>`: closes waiting for the same tab with the same tail go as one line. */
+  closed?: { ref: string; tail: string };
 }
 
 /** Which item Autopilot's action left in place: for a rewrite, the new one. */
@@ -1163,7 +1165,8 @@ export class NotifyQueue extends EventEmitter {
     const heardOnCall = entry.waiter !== undefined || entry.resumeLoop;
     this.closeOpen(entry, { by, reason }, closedResult(`${who} closed this question${reason ? `: ${reason}` : ''}.`));
     if (!heardOnCall && entry.item.source.panelId) {
-      this.enqueueTabMessage(entry.item, `closed: ${askerRef(entry.item)} (by ${by === 'autopilot' ? 'Autopilot' : 'you'})${reason ? `: ${reason}` : ''}`, false);
+      const tail = `(by ${by === 'autopilot' ? 'Autopilot' : 'you'})${reason ? `: ${reason}` : ''}`;
+      this.enqueueTabMessage(entry.item, `closed: ${askerRef(entry.item)} ${tail}`, false, undefined, { ref: askerRef(entry.item), tail });
     }
   }
 
@@ -1251,7 +1254,7 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** Types `text` into the asker's tab, or `to.panelId` (a reply's reader). */
-  private enqueueTabMessage(item: NotifyItem, text: string, answer: boolean, to?: { panelId: string; reply?: string }): void {
+  private enqueueTabMessage(item: NotifyItem, text: string, answer: boolean, to?: { panelId: string; reply?: string }, closed?: TabMessage['closed']): void {
     const panelId = to?.panelId ?? item.source.panelId;
     if (!panelId || !this.env.typeIntoTab) return;
     // The same reply is never typed twice (D-258).
@@ -1260,6 +1263,7 @@ export class NotifyQueue extends EventEmitter {
     const message: TabMessage = { itemId: item.id, panelId, text: text.replace(/\p{Cc}+/gu, ' '), answer };
     if (!to && item.source.paneId) message.paneId = item.source.paneId;
     if (to?.reply) message.reply = to.reply;
+    if (closed) message.closed = closed;
     this.tabMessages.push(message);
     this.flushTabMessages();
   }
@@ -1272,11 +1276,14 @@ export class NotifyQueue extends EventEmitter {
       if (this.tabsTyping.has(message.panelId)) continue;
       this.tabsTyping.add(message.panelId);
       if (message.reply) this.repliesTyping.add(message.reply);
+      // Archive all on one asker's cards: their closes reach its tab as one line, so one turn.
+      const batch = message.closed ? this.tabMessages.filter(other => other.panelId === message.panelId && other.closed?.tail === message.closed?.tail) : [message];
+      const text = batch.length > 1 && message.closed ? `closed: ${batch.map(other => other.closed?.ref).join(', ')} ${message.closed.tail}` : message.text;
       let again = false;
-      void type(message.panelId, message.text, message.paneId).then((outcome) => {
+      void type(message.panelId, text, message.paneId).then((outcome) => {
         if (outcome === 'busy') return;
         again = true;
-        this.tabMessages = this.tabMessages.filter(other => other !== message);
+        this.tabMessages = this.tabMessages.filter(other => !batch.includes(other));
         const entry = this.entries.get(message.itemId);
         if (message.reply && entry) this.replyTyped(entry, message, outcome);
         if (message.answer && entry) {

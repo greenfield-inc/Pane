@@ -427,7 +427,9 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     const current = selected?.id;
     const hadFocus = listRef.current?.contains(document.activeElement) ?? false;
     let next = current;
-    selectedBeforeArchive.current = current && gone.has(current) ? current : undefined;
+    // Undo restores the whole hold, so it goes back to the row selected when the hold began.
+    if (!useNotifyStore.getState().archived) selectedBeforeArchive.current = undefined;
+    if (current && gone.has(current)) selectedBeforeArchive.current ??= current;
     if (current && gone.has(current)) {
       const index = order.indexOf(current);
       next = order.slice(index + 1).find((id) => !gone.has(id)) ?? order.slice(0, index).reverse().find((id) => !gone.has(id));
@@ -467,6 +469,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
       return;
     }
     if (ARCHIVE_KEYS.has(event.key)) {
+      // A held ⌫ archives one row, not every row it repeats onto.
+      if (event.repeat) { event.preventDefault(); return; }
       const item = shown.find((candidate) => candidate.id === id);
       if (!item || !archivable(item)) return;
       event.preventDefault();
