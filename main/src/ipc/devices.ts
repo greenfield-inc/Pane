@@ -13,6 +13,7 @@ import { defaultProbeEnvironment } from '../services/devices/deviceProbe';
 import { DeviceBusyError, DeviceService, type DeviceCaller, type DeviceChange } from '../services/devices/deviceService';
 import { findExecutableInPath } from '../utils/shellPath';
 import { DeviceInputSockets, inputMessages } from '../services/devices/deviceInput';
+import { StreamFrameRates, sizeStream, streamSize } from '../services/devices/deviceStream';
 import { refuseRetarget } from '../services/devices/deviceHelpers';
 import { MacUnavailableError, RemoteDevices } from '../services/devices/remoteDevices';
 import { registerMacDeviceHandler, remotePaneName } from './macDevices';
@@ -36,6 +37,7 @@ const inputSchema = boundary.union(
   boundary.object({ kind: boundary.literal('button'), button: boundary.enumeration('home', 'back') }),
 );
 const inputSockets = new DeviceInputSockets();
+const frameRates = new StreamFrameRates();
 
 /** How device tabs and results name this machine. */
 function localMachineLabel(): string {
@@ -476,20 +478,23 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     return true;
   }));
 
-  /** `pane-media://device/<panelId>`: the device's live MJPEG stream, proxied with the hub token. */
+  /**
+   * `pane-media://device/<panelId>?max=<px>`: the device's live MJPEG stream, proxied with the hub
+   * token. `max` sizes the stream to the tab (its longest side in device pixels), so the hub
+   * encodes no pixels the tab would throw away.
+   */
   registerMediaRoute('device', async (request, url) => {
     const { panel, state } = panelOf(url.pathname.slice(1));
-    if (!state.deviceId || state.phase !== 'live') return new Response(null, { status: 404 });
-    let upstream: Response;
-    if (state.machineId) {
-      // A linked Mac's hub, through the one-port tunnel; the token stays in main.
-      const { streamUrl, token } = await remoteDevices(services).stream(panel.sessionId);
-      upstream = await fetch(streamUrl, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });
-    } else {
-      upstream = await devices().openStream(state.deviceId, request.signal);
-    }
+    const deviceId = state.deviceId;
+    if (!deviceId || state.phase !== 'live') return new Response(null, { status: 404 });
+    // A linked Mac's hub is reached through the one-port tunnel; the token stays in main either way.
+    const info = state.machineId ? await remoteDevices(services).stream(panel.sessionId) : await devices().stream(deviceId);
+    const size = state.platform === 'ios' ? streamSize(url.searchParams.get('max')) : undefined;
+    // A stream the hub could not size still plays, at the device's native size.
+    if (size !== undefined) await sizeStream(info, size).catch((cause) => console.warn(`[devices] sizing the stream of ${deviceId} failed: ${reasonOf(cause)}`));
+    const upstream = await fetch(info.streamUrl, { signal: request.signal, headers: { Authorization: `Bearer ${info.token}` } });
     if (!upstream.ok || !upstream.body) return new Response(null, { status: 502 });
-    return new Response(upstream.body, { headers: { 'Content-Type': upstream.headers.get('content-type') ?? 'multipart/x-mixed-replace; boundary=frame', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+    return new Response(frameRates.count(panel.id, upstream.body), { headers: { 'Content-Type': upstream.headers.get('content-type') ?? 'multipart/x-mixed-replace; boundary=frame', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
   });
 
   /** One frame as a data URL: the chat card's thumbnail, and the frame view on phones and in the browser app. */
@@ -498,6 +503,12 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     if (!state.deviceId) throw new PaneError('ERR_DEVICE_NOT_OPEN', 'This tab has no device yet.', 'Wait for it to boot.');
     const frame = state.machineId ? await remoteDevices(services).frame(panel.sessionId) : await devices().latestFrame(state.deviceId);
     return imageDataUrl(frame);
+  }));
+
+  /** The frames per second the tab's stream delivers now, for its readout; null when it streams nothing through main. */
+  commandRegistry.register('devices:frame-rate', (panelId: PaneCommandValue) => respond(() => {
+    const { panel } = panelOf(panelId);
+    return frameRates.rate(panel.id) ?? null;
   }));
 
   commandRegistry.register('devices:visible', (panelId: PaneCommandValue, clientId: PaneCommandValue, visible: PaneCommandValue) => respond(async () => {

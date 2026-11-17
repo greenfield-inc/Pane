@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react';
 import { Camera, Check, Home, Info, Laptop, Loader2, Lock, MoreHorizontal, Power, RotateCcw, WifiOff, X } from 'lucide-react';
 import type { DevicePanelState, DeviceSettingsView } from '../../../../../shared/types/devices';
 import type { ToolPanel } from '../../../../../shared/types/panels';
@@ -37,6 +37,15 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
   const provided = useContext(DeviceClientContext);
   const client = useMemo(() => provided ?? desktopDeviceClient(remote), [provided, remote]);
   const lastFrame = useLastFrame(client, panel.id, state.deviceId, !live && state.phase !== 'booting' && state.phase !== 'installing');
+  // The screen's shape as its frames show it, so landscape, an iPad or a folded phone fit uncropped.
+  const [aspect, setAspect] = useState<number>(DEFAULT_ASPECT[state.platform]);
+  const onShape = useCallback((width: number, height: number) => {
+    if (width <= 0 || height <= 0) return;
+    const next = width / height;
+    setAspect(current => (Math.abs(current - next) / current < 0.01 ? current : next));
+  }, []);
+  const streaming = live && isActive && client.streamUrl !== undefined && state.platform === 'ios';
+  const frameRate = useFrameRate(client, panel.id, streaming);
 
   useEffect(() => {
     if (!state.deviceId) return;
@@ -92,10 +101,10 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
       )}
       <div className="flex min-h-0 flex-1 items-center justify-center gap-3 p-4">
         <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-center">
-          <PhoneFrame platform={state.platform} footer={<DeviceCaption state={state} />}>
-            {live && isActive ? <LiveScreen client={client} panelId={panel.id} platform={state.platform} /> : (
+          <PhoneFrame aspect={aspect} footer={<DeviceCaption state={state} frameRate={streaming ? frameRate : undefined} />}>
+            {live && isActive ? <LiveScreen client={client} panelId={panel.id} platform={state.platform} onShape={onShape} /> : (
               <div className="absolute inset-0 bg-device-screen">
-                {lastFrame && <img src={lastFrame} alt="" className="h-full w-full object-cover opacity-60" />}
+                {lastFrame && <img src={lastFrame} alt="" className="h-full w-full object-contain opacity-60" onLoad={(event) => onShape(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />}
               </div>
             )}
             <PhaseOverlay state={state} busy={busy} onBoot={() => run('boot', () => client.power(panel.id, 'boot'))} onTakeOver={() => run('take-over', () => client.takeOver(panel.id))} />
@@ -160,9 +169,16 @@ function RailButton({ label, disabled, onClick, children }: { label: string; dis
   );
 }
 
-function DeviceCaption({ state }: { state: DevicePanelState }) {
+function DeviceCaption({ state, frameRate }: { state: DevicePanelState; frameRate?: number | null }) {
   return (
-    <p className="mt-3 truncate text-xs text-text-tertiary" data-testid="device-caption">
+    <p className="mt-3 flex max-w-full items-center truncate text-xs text-text-tertiary" data-testid="device-caption">
+      {frameRate !== undefined && (
+        // A fixed box, so the caption never shifts as the number changes.
+        <span className="mr-3 inline-flex w-[52px] flex-shrink-0 items-center gap-1.5 tabular-nums" title="Frames per second the screen streams now. A still screen sends fewer." data-testid="device-frame-rate">
+          <span className={cn('h-1.5 w-1.5 rounded-full', frameRate ? 'bg-status-success' : 'bg-status-neutral')} />
+          {frameRate ?? '–'} fps
+        </span>
+      )}
       <span className="font-medium text-text-primary">{state.name}</span>
       {deviceCaption(state)}
     </p>
@@ -184,18 +200,46 @@ function useLastFrame(client: DeviceTabClient, panelId: string, deviceId: string
   return frame;
 }
 
+/** The stream's frame rate, read every second while `enabled`; null until known. */
+function useFrameRate(client: DeviceTabClient, panelId: string, enabled: boolean): number | null {
+  const [rate, setRate] = useState<number | null>(null);
+  useEffect(() => {
+    if (!enabled || !client.frameRate) {
+      setRate(null);
+      return;
+    }
+    const read = client.frameRate.bind(client);
+    let cancelled = false;
+    const tick = () => { void read(panelId).then((next) => { if (!cancelled) setRate(next); }, () => undefined); };
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [client, panelId, enabled]);
+  return rate;
+}
+
 /** Room under the phone for its caption. */
 const FOOTER_PX = 32;
 
-/** The phone: a bezel at the screen's aspect ratio, as large as its box allows, with its caption under it. */
-function PhoneFrame({ platform, children, dashed = false, footer }: { platform: DevicePanelState['platform']; children: ReactNode; dashed?: boolean; footer?: ReactNode }) {
+/** How long a reshape (rotate, fold, another device) stays masked while the bezel moves to its new shape. */
+const RESHAPE_MS = 220;
+
+/**
+ * The phone: a bezel at the screen's aspect ratio (width over height), as large as its box allows,
+ * with its caption under it. A change of shape eases the bezel to the new size behind a mask, so
+ * the screen never shows a raw resize.
+ */
+function PhoneFrame({ aspect, children, dashed = false, footer }: { aspect: number; children: ReactNode; dashed?: boolean; footer?: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const hasFooter = footer !== undefined;
   const [size, setSize] = useState<{ width: number; height: number }>();
+  const reshaping = useReshape(aspect);
   useEffect(() => {
     const element = box.current;
     if (!element) return;
-    const aspect = DEFAULT_ASPECT[platform];
     const fit = () => {
       const { width, height: boxHeight } = element.getBoundingClientRect();
       const height = Math.max(0, boxHeight - (hasFooter ? FOOTER_PX : 0));
@@ -206,17 +250,21 @@ function PhoneFrame({ platform, children, dashed = false, footer }: { platform: 
     const observer = new ResizeObserver(fit);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [platform, hasFooter]);
-  const radius = size ? Math.round(size.width * 0.14) : 0;
+  }, [aspect, hasFooter]);
+  const short = size ? Math.min(size.width, size.height) : 0;
+  const radius = Math.round(short * 0.14);
   return (
     <div ref={box} className="flex min-h-0 w-full flex-1 flex-col items-center justify-center">
       {size && (
         <>
         <div
-          className={cn('relative flex-shrink-0', dashed ? 'border-2 border-dashed border-border-secondary' : 'bg-device-bezel shadow-lg ring-1 ring-border-secondary')}
-          style={{ width: size.width, height: size.height, borderRadius: radius, padding: dashed ? 0 : Math.max(4, Math.round(size.width * 0.03)) }}
+          className={cn('relative flex-shrink-0', reshaping && 'transition-[width,height] duration-200 ease-out', dashed ? 'border-2 border-dashed border-border-secondary' : 'bg-device-bezel shadow-lg ring-1 ring-border-secondary')}
+          style={{ width: size.width, height: size.height, borderRadius: radius, padding: dashed ? 0 : Math.max(4, Math.round(short * 0.03)) }}
         >
-          <div className="relative h-full w-full overflow-hidden" style={{ borderRadius: dashed ? radius : Math.round(radius * 0.86) }}>{children}</div>
+          <div className="relative h-full w-full overflow-hidden" style={{ borderRadius: dashed ? radius : Math.round(radius * 0.86) }}>
+            {children}
+            <div aria-hidden className={cn('pointer-events-none absolute inset-0 bg-device-screen transition-opacity duration-200', reshaping ? 'opacity-100' : 'opacity-0')} data-testid="device-reshape-mask" />
+          </div>
         </div>
         {footer}
         </>
@@ -225,20 +273,74 @@ function PhoneFrame({ platform, children, dashed = false, footer }: { platform: 
   );
 }
 
+/** True for a moment after `aspect` changes, while the frame moves to its new shape. */
+function useReshape(aspect: number): boolean {
+  const shown = useRef(aspect);
+  const [reshaping, setReshaping] = useState(false);
+  useEffect(() => {
+    if (shown.current === aspect) return;
+    shown.current = aspect;
+    setReshaping(true);
+    const timer = window.setTimeout(() => setReshaping(false), RESHAPE_MS);
+    return () => window.clearTimeout(timer);
+  }, [aspect]);
+  return reshaping;
+}
+
+/** Stream sizes step by this many pixels, so resizing the tab reconnects the stream only now and then. */
+const STREAM_STEP_PX = 160;
+const STREAM_RESIZE_SETTLE_MS = 400;
+
 /**
  * The device's screen with touch. Locally it is the MJPEG stream main serves at
- * pane-media://device/<panelId>, so the hub token never reaches the renderer; on another computer
- * it is frames read over the connection, about twice a second. Pointer events become normalized
- * touches; moves are sent once a frame.
+ * pane-media://device/<panelId>, sized to this screen box, so the hub token never reaches the
+ * renderer; on another computer it is frames read over the connection, about twice a second.
+ * Pointer events become normalized touches on the drawn image; moves are sent once a frame.
  */
-function LiveScreen({ client, panelId, platform }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform'] }) {
-  // Simulators stream MJPEG; an emulator's screen comes as frames.
-  const stream = platform === 'ios' ? client.streamUrl(panelId) : undefined;
-  const polled = useDeviceFrames(client, panelId, stream ? undefined : FRAME_POLL_MS);
+function LiveScreen({ client, panelId, platform, onShape }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; onShape: (width: number, height: number) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const streamPx = useStreamPx(box);
+  // Simulators stream MJPEG where the client can; an emulator's screen comes as frames.
+  const streams = platform === 'ios' && client.streamUrl !== undefined;
+  const stream = streams && streamPx ? client.streamUrl?.(panelId, streamPx) : undefined;
+  const polled = useDeviceFrames(client, panelId, streams ? undefined : FRAME_POLL_MS);
   // A hidden window drops the stream, which closes its connection; the last polled frame stays.
   const pageVisible = usePageVisible();
   const src = stream ? (pageVisible ? stream : undefined) : polled;
-  return src ? <TouchScreen client={client} panelId={panelId} platform={platform} src={src} /> : <div className="absolute inset-0 bg-device-screen" />;
+  return (
+    <div ref={box} className="absolute inset-0 bg-device-screen">
+      {src && <TouchScreen client={client} panelId={panelId} platform={platform} src={src} onShape={onShape} />}
+    </div>
+  );
+}
+
+/**
+ * The longest side of `box` in device pixels, rounded up to a step, for sizing the stream. It
+ * follows a resize once it settles; undefined until measured.
+ */
+function useStreamPx(box: RefObject<HTMLDivElement | null>): number | undefined {
+  const [px, setPx] = useState<number>();
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    let timer: number | undefined;
+    const measure = () => {
+      const { width, height } = element.getBoundingClientRect();
+      const longest = Math.max(width, height) * window.devicePixelRatio;
+      return longest > 0 ? Math.ceil(longest / STREAM_STEP_PX) * STREAM_STEP_PX : undefined;
+    };
+    setPx(measure());
+    const observer = new ResizeObserver(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { const next = measure(); if (next) setPx(next); }, STREAM_RESIZE_SETTLE_MS);
+    });
+    observer.observe(element);
+    return () => {
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [box]);
+  return px;
 }
 
 /** Whether the window is visible (not minimized or behind another app's full screen). */
@@ -252,13 +354,29 @@ function usePageVisible(): boolean {
   return visible;
 }
 
-function TouchScreen({ client, panelId, platform, src }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; src: string }) {
+/** How often the stream's frame size is checked: an MJPEG image changes size without an event. */
+const SHAPE_CHECK_MS = 250;
+
+/** Where a pointer falls on the image as drawn (letterboxed, never cropped), from 0 to 1 on each axis. */
+function pointOnImage(image: HTMLImageElement, clientX: number, clientY: number): { x: number; y: number } {
+  const rect = image.getBoundingClientRect();
+  const natural = image.naturalWidth > 0 && image.naturalHeight > 0 ? image.naturalWidth / image.naturalHeight : rect.width / rect.height;
+  const width = Math.min(rect.width, rect.height * natural);
+  const height = width / natural;
+  const left = rect.left + (rect.width - width) / 2;
+  const top = rect.top + (rect.height - height) / 2;
+  return { x: (clientX - left) / width, y: (clientY - top) / height };
+}
+
+function TouchScreen({ client, panelId, platform, src, onShape }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; src: string; onShape: (width: number, height: number) => void }) {
+  const image = useRef<HTMLImageElement>(null);
   const down = useRef(false);
   const pendingMove = useRef<{ x: number; y: number }>(undefined);
-  const point = (event: ReactPointerEvent<HTMLImageElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return { x: (event.clientX - rect.left) / rect.width, y: (event.clientY - rect.top) / rect.height };
-  };
+  useEffect(() => {
+    const timer = window.setInterval(() => { const element = image.current; if (element) onShape(element.naturalWidth, element.naturalHeight); }, SHAPE_CHECK_MS);
+    return () => window.clearInterval(timer);
+  }, [onShape]);
+  const point = (event: ReactPointerEvent<HTMLImageElement>) => pointOnImage(event.currentTarget, event.clientX, event.clientY);
   const send = (phase: 'begin' | 'move' | 'end', at: { x: number; y: number }) => {
     void client.input(panelId, { kind: 'touch', phase, x: Math.min(1, Math.max(0, at.x)), y: Math.min(1, Math.max(0, at.y)) }).catch(() => undefined);
   };
@@ -270,11 +388,13 @@ function TouchScreen({ client, panelId, platform, src }: { client: DeviceTabClie
   };
   return (
     <img
+      ref={image}
       src={src}
       alt={`${platform === 'ios' ? 'iOS' : 'Android'} screen`}
       draggable={false}
       data-testid="device-screen"
-      className="absolute inset-0 h-full w-full touch-none select-none object-cover"
+      className="absolute inset-0 h-full w-full touch-none select-none object-contain"
+      onLoad={(event) => onShape(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
       onPointerDown={(event) => { down.current = true; event.currentTarget.setPointerCapture(event.pointerId); send('begin', point(event)); }}
       onPointerMove={(event) => {
         if (!down.current) return;
@@ -322,7 +442,7 @@ function NoMacView({ state, panelId, client }: { state: DevicePanelState; panelI
   const offline = state.phase === 'mac-offline';
   return (
     <div className="flex h-full flex-col bg-bg-primary p-6" data-testid="device-panel" data-phase={state.phase}>
-      <PhoneFrame platform="ios" dashed>
+      <PhoneFrame aspect={DEFAULT_ASPECT.ios} dashed>
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-[10%] text-center">
           <span className="flex h-6 w-6 items-center justify-center text-text-secondary">{offline ? <WifiOff className="h-5 w-5" /> : <Laptop className="h-5 w-5" />}</span>
           {offline ? (

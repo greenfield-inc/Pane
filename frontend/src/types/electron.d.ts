@@ -130,6 +130,7 @@ interface ElectronAPI {
   devices: {
     input: (panelId: string, input: DeviceInput) => Promise<IPCResponse<boolean>>;
     frame: (panelId: string) => Promise<IPCResponse<string>>;
+    frameRate: (panelId: string) => Promise<IPCResponse<number | null>>;
     visible: (panelId: string, clientId: string, visible: boolean) => Promise<IPCResponse<boolean>>;
     takeOver: (panelId: string) => Promise<IPCResponse<boolean>>;
     power: (panelId: string, action: 'boot' | 'restart' | 'shutdown') => Promise<IPCResponse<boolean>>;
