@@ -66,3 +66,16 @@ describe.skipIf(process.platform === 'win32')('toLocalPagePath', () => {
     expect(() => toLocalPagePath(input)).toThrow(PaneError);
   });
 });
+
+describe.runIf(process.platform === 'win32')('toLocalPagePath on Windows', () => {
+  it.each([
+    ['file:///C:/Users/me/status.html', 'C:\\Users\\me\\status.html'],
+    ['file://wsl.localhost/Ubuntu/home/me/status.html', '\\\\wsl.localhost\\Ubuntu\\home\\me\\status.html'],
+  ])('allows %s', (input, expected) => {
+    expect(toLocalPagePath(input)).toBe(expected);
+  });
+
+  it('refuses a page on a network share', () => {
+    expect(() => toLocalPagePath('file://server/share/page.html')).toThrow(PaneError);
+  });
+});

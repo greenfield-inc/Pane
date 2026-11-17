@@ -34,12 +34,16 @@ export function toExternalUrl(value: string): string {
 /** The page types a browser opens from disk. Any other file could be a program, so it is refused. */
 const LOCAL_PAGE_EXTENSIONS: ReadonlySet<string> = new Set(['.html', '.htm']);
 
-/** The path of a `file:` URL that names a local `.html` or `.htm` page; throws for anything else. */
+/** On Windows, a local WSL distro's files are served from these hosts (`\\wsl.localhost\Ubuntu\...`). */
+const WSL_FILE_HOST = /^wsl(?:\.localhost|\$)$/i;
+
+/** The path of a `file:` URL that names a `.html` or `.htm` page on this computer; throws for anything else. */
 export function toLocalPagePath(value: string): string {
   let path: string | null = null;
   try {
     const parsed = new URL(value);
-    if (parsed.protocol === 'file:' && !parsed.host) path = fileURLToPath(parsed);
+    const onThisComputer = !parsed.host || (process.platform === 'win32' && WSL_FILE_HOST.test(parsed.hostname));
+    if (parsed.protocol === 'file:' && onThisComputer) path = fileURLToPath(parsed);
   } catch {
     path = null;
   }
