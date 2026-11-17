@@ -8,6 +8,7 @@ import { boundary, decodeOptionalBoundary } from '@shared/validation/boundaryDec
 
 import { invokeChannel, useDaemon } from '@/daemon';
 import { addChatImage } from '@/features/chatTab/chatAddedImages';
+import { chatImageProblem } from '@/features/chatTab/chatComposer';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
@@ -114,15 +115,25 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
     // A full-resolution capture takes a few seconds on the computer; say so at once.
     setNotice('Taking a screenshot…');
     try {
-      const capture = await invokeChannel<DeviceCapture>(client, 'devices:capture', [panel.id]);
       if (agentTab?.kind === 'chat') {
+        const capture = await invokeChannel<DeviceCapture>(client, 'devices:capture', [panel.id]);
         const data = capture.dataUrl.slice(capture.dataUrl.indexOf(',') + 1);
-        addChatImage(agentTab.id, { key: `device-${Date.now()}`, uri: capture.dataUrl, mimeType: 'image/png', data });
+        // The same limit the chat puts on an image the person attaches.
+        const refused = chatImageProblem({ mimeType: 'image/png', size: Math.floor(data.length * 3 / 4) });
+        if (refused) {
+          setNotice(`The screenshot was not added. ${refused}`);
+          return;
+        }
+        // The name the attachment shows comes from the uri's last segment.
+        addChatImage(agentTab.id, { key: `device-${Date.now()}`, uri: `${state?.name ?? 'Device'} screenshot.png`, mimeType: 'image/png', data });
         setNotice('Added to chat');
       } else if (agentTab) {
+        // A terminal agent needs only the file's path on the computer, not the image's bytes.
+        const capture = await invokeChannel<DeviceCapture>(client, 'devices:capture', [panel.id, null, true]);
         await invokeChannel(client, 'devices:stage', [panel.id, agentTab.id, `${capture.path} `]);
         setNotice(`Typed at ${agentTab.agent}'s prompt`);
       } else {
+        await invokeChannel<DeviceCapture>(client, 'devices:capture', [panel.id, null, true]);
         setNotice('Screenshot saved on the computer');
       }
     } catch {
