@@ -722,7 +722,7 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
   const view: FirstRunStep | 'detecting' = env === null ? 'detecting' : gitMissing ? 'project' : step;
   const title = view === 'detecting' ? 'Welcome to Pane'
     : view === 'agent' ? 'Which agent do you use?'
-      : view === 'sessions' ? (bringIn === null ? 'Bring your sessions into Pane?' : `Bring your ${bringIn.length} ${bringIn.length === 1 ? 'session' : 'sessions'} into Pane?`)
+      : view === 'sessions' ? (bringIn === null ? 'Looking for your sessions…' : `Bring your ${bringIn.length} ${bringIn.length === 1 ? 'session' : 'sessions'} into Pane?`)
         : 'Open your project';
 
   if (view !== 'project') {
