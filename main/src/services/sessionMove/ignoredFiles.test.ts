@@ -125,3 +125,63 @@ it('replaces an earlier kept copy on success and leaves no staging behind', asyn
   expect(fs.existsSync(`${kept}.incoming`)).toBe(false);
   expect(fs.existsSync(`${kept}.previous`)).toBe(false);
 });
+
+it.skipIf(process.platform === 'win32')('keeps the whole copy in staging when the source is only partly removed after a copy across volumes (F-2)', async () => {
+  const wt = path.join(dir, 'wt');
+  const kept = path.join(dir, 'repo/.git/pane-moved/pane-1');
+  const staging = `${kept}.incoming`;
+  // A directory whose removal deletes `a-first.txt`, then fails on the read-only `locked/`.
+  fs.mkdirSync(path.join(wt, 'node_modules/locked'), { recursive: true });
+  fs.writeFileSync(path.join(wt, 'node_modules/a-first.txt'), 'only copy after a partial removal');
+  fs.writeFileSync(path.join(wt, 'node_modules/locked/inner.txt'), 'stays');
+  fs.chmodSync(path.join(wt, 'node_modules/locked'), 0o555);
+  // Only the cross-volume rename is faked; the copy and the removal are real.
+  const rename = fs.promises.rename;
+  const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (from, to) => {
+    if (String(from).startsWith(wt) || String(from).startsWith(staging)) throw Object.assign(new Error('EXDEV: cross-device link not permitted'), { code: 'EXDEV' });
+    return rename(from, to);
+  });
+  try {
+    const failure = keepIgnoredFiles(wt, 'pane-1', ['node_modules/']);
+    await expect(failure).rejects.toMatchObject({ code: 'ERR_MOVE_IGNORED_STRANDED' });
+    await expect(failure).rejects.toThrow(staging);
+  } finally {
+    renameSpy.mockRestore();
+  }
+  // Every byte survives somewhere: the staged copy is whole, and the worktree's remainder is untouched.
+  expect(fs.readFileSync(path.join(staging, 'node_modules/a-first.txt'), 'utf8')).toBe('only copy after a partial removal');
+  expect(fs.readFileSync(path.join(staging, 'node_modules/locked/inner.txt'), 'utf8')).toBe('stays');
+  expect(fs.readFileSync(path.join(wt, 'node_modules/locked/inner.txt'), 'utf8')).toBe('stays');
+  // A later retire refuses rather than clearing that folder.
+  await expect(keepIgnoredFiles(wt, 'pane-1', ['node_modules/'])).rejects.toMatchObject({ code: 'ERR_MOVE_IGNORED_STAGED' });
+  expect(fs.existsSync(path.join(staging, 'node_modules/a-first.txt'))).toBe(true);
+  for (const locked of [path.join(wt, 'node_modules/locked'), path.join(staging, 'node_modules/locked')]) if (fs.existsSync(locked)) fs.chmodSync(locked, 0o755);
+});
+
+it('removes the source only after a copy across volumes matches it', async () => {
+  const wt = path.join(dir, 'wt');
+  const kept = path.join(dir, 'repo/.git/pane-moved/pane-1');
+  fs.mkdirSync(path.join(wt, 'node_modules/pkg'), { recursive: true });
+  fs.writeFileSync(path.join(wt, 'node_modules/pkg/index.js'), 'x');
+  fs.writeFileSync(path.join(wt, '.env'), 'SECRET=1\n');
+  const rename = fs.promises.rename;
+  const renameSpy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (from, to) => {
+    if (String(from).startsWith(wt)) throw Object.assign(new Error('EXDEV'), { code: 'EXDEV' });
+    return rename(from, to);
+  });
+  // A copy that silently drops a file is caught by the check, and the source stays.
+  const cp = fs.promises.cp;
+  const cpSpy = vi.spyOn(fs.promises, 'cp').mockImplementation(async (from, to, options) => {
+    await cp(from, to, options);
+    if (String(from).endsWith('node_modules')) fs.rmSync(path.join(String(to), 'pkg/index.js'));
+  });
+  try {
+    await expect(keepIgnoredFiles(wt, 'pane-1', ['.env', 'node_modules/'])).rejects.toThrow(/didn't match/);
+  } finally {
+    renameSpy.mockRestore();
+    cpSpy.mockRestore();
+  }
+  expect(fs.readFileSync(path.join(wt, 'node_modules/pkg/index.js'), 'utf8')).toBe('x');
+  expect(fs.readFileSync(path.join(wt, '.env'), 'utf8')).toBe('SECRET=1\n');
+  expect(fs.existsSync(`${kept}.incoming`)).toBe(false);
+});
