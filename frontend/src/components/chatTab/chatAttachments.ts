@@ -1,26 +1,74 @@
 import type { AttachmentAdapter, CompleteAttachment, PendingAttachment } from '@assistant-ui/react';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
+import type { UploadProgress } from '../../../../shared/chunkedUpload';
+import { bytesToBase64 } from '../../../../shared/utils/base64';
 
 /** Image types an agent takes as image content (ACP image blocks). */
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-/** The largest image sent as image content. */
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 /**
- * The largest file copied to the chat's machine. A remote host takes requests up to
- * 16 MiB, and a file travels as a data URL (a third larger), so 10 MB fits everywhere.
+ * The largest image sent as image content: the provider's own rule. Anthropic's API refuses an
+ * image over 5 MB, and an image block goes to the model inline, so a larger image is copied to
+ * the chat's machine as a file instead, and the agent reads it from there.
  */
-export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-/** Copies a file to the chat's machine (as the terminal's upload does) and returns its path there. */
-export type SaveChatFile = (file: { name: string; dataUrl: string }) => Promise<string>;
+/** Copies a file of any size to the chat's machine (as the terminal's upload does) and returns its path there; `signal` stops it. */
+export type SaveChatFile = (file: File, onProgress: (progress: UploadProgress) => void, signal: AbortSignal) => Promise<string>;
 
-const savedFileSchema = boundary.object({ filePath: boundary.nonEmptyString });
+/** One file's copy to the chat's machine, which every chip showing that file watches. */
+interface FileCopy {
+  controller: AbortController;
+  done: Promise<string>;
+  latest: UploadProgress;
+  watchers: Set<(progress: UploadProgress) => void>;
+}
 
-/** The path `terminal:paste-file` reports for a copied file. */
-// oxlint-disable-next-line anti-slop/no-unknown-parameters -- decodes the host's reply at the IPC boundary.
-export function savedFilePath(reply: unknown): string {
-  return decodeBoundary(reply, savedFileSchema).filePath;
+/**
+ * Copies running or finished, by file. A chat's draft keeps its attachments when the chat is left,
+ * and re-adds the same File when it is back: that attachment watches the running copy, or gets the
+ * finished one's path at once, instead of copying again. A failed or stopped copy is forgotten.
+ */
+const fileCopies = new WeakMap<File, FileCopy>();
+/** Copies still running, by the chat tab that started them, so closing the tab stops them. */
+const panelCopies = new Map<string, Set<FileCopy>>();
+/** Which file each attachment still copying shows, so removing the chip can stop its copy. */
+const copyingFiles = new Map<string, File>();
+
+function startCopy(file: File, saveFile: SaveChatFile, watch: (progress: UploadProgress) => void, panelId?: string): FileCopy {
+  const controller = new AbortController();
+  const stopped = new Promise<never>((_resolve, reject) => {
+    controller.signal.addEventListener('abort', () => reject(new Error('Copy cancelled')), { once: true });
+  });
+  const copy: FileCopy = {
+    controller,
+    done: Promise.resolve(''),
+    latest: { receivedBytes: 0, totalBytes: file.size, retrying: false, lastProgressAt: Date.now(), secondsLeft: null },
+    watchers: new Set([watch]),
+  };
+  watch(copy.latest);
+  const saved = saveFile(file, progress => {
+    copy.latest = progress;
+    for (const watch of copy.watchers) watch(progress);
+  }, controller.signal);
+  const running = panelId === undefined ? undefined : panelCopies.get(panelId) ?? new Set<FileCopy>();
+  running?.add(copy);
+  if (panelId !== undefined && running) panelCopies.set(panelId, running);
+  // Removing the chip ends the wait at once, even while a chunk is still in flight.
+  copy.done = Promise.race([saved, stopped]);
+  copy.done.then(
+    () => undefined,
+    () => { if (fileCopies.get(file) === copy) fileCopies.delete(file); },
+  ).finally(() => {
+    running?.delete(copy);
+    if (panelId !== undefined && running?.size === 0) panelCopies.delete(panelId);
+  });
+  fileCopies.set(file, copy);
+  return copy;
+}
+
+/** The chat tab was closed: stop the copies it started (the host deletes what arrived). */
+export function cancelChatCopies(panelId: string): void {
+  for (const copy of panelCopies.get(panelId) ?? []) copy.controller.abort();
 }
 
 export interface ChatAttachmentOptions {
@@ -28,19 +76,18 @@ export interface ChatAttachmentOptions {
   images: boolean;
   /** Copies other files to the chat's machine; without it only images can be attached. */
   saveFile?: SaveChatFile;
-  /** Told when a file starts or finishes copying, so the composer can wait for it. */
-  onCopying?: (delta: 1 | -1) => void;
+  /** The chat tab adding files; closing it stops their copies (`cancelChatCopies`). */
+  panelId?: string;
+  /** Told how a file's copy is going, by attachment id, and null once it is done or failed, so the composer can show it and wait for it. */
+  onProgress?: (id: string, progress: UploadProgress | null) => void;
   readDataUrl?: (file: File) => Promise<string>;
 }
 
 const megabytes = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
 
-/** The file as a data URL, read in 32 KiB slices so a 10 MB file never builds one huge argument list. */
+/** An image as a data URL. */
 async function readDataUrl(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = '';
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  return `data:${file.type || 'application/octet-stream'};base64,${btoa(binary)}`;
+  return `data:${file.type || 'application/octet-stream'};base64,${bytesToBase64(new Uint8Array(await file.arrayBuffer()))}`;
 }
 
 /**
@@ -72,17 +119,27 @@ export class ChatAttachmentAdapter implements AttachmentAdapter {
       if (image) throw new Error(`${file.name} was not attached: it is larger than ${megabytes(MAX_IMAGE_BYTES)}, the most a chat sends as an image.`);
       throw new Error(`${file.name} was not attached: this chat takes PNG, JPEG, WebP or GIF images here, and can't copy other files.`);
     }
-    if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name} was not attached: it is larger than ${megabytes(MAX_FILE_BYTES)}, the most a chat copies to its machine.`);
     const pending: PendingAttachment = { id, type: 'file', name: file.name, contentType: file.type, file, status: { type: 'running', reason: 'uploading', progress: 0 } };
     yield pending;
-    this.options.onCopying?.(1);
+    const watch = (progress: UploadProgress) => this.options.onProgress?.(id, progress);
+    const known = fileCopies.get(file);
+    if (known) {
+      known.watchers.add(watch);
+      watch(known.latest);
+    }
+    const copy = known ?? startCopy(file, saveFile, watch, this.options.panelId);
+    copyingFiles.set(id, file);
     try {
-      const path = await saveFile({ name: file.name, dataUrl: await (this.options.readDataUrl ?? readDataUrl)(file) });
+      const path = await copy.done;
       yield { ...pending, content: [{ type: 'text', text: path }], status: { type: 'requires-action', reason: 'composer-send' } };
     } catch (error) {
+      // Removed while copying: the chip is gone, and so is the copy.
+      if (copy.controller.signal.aborted) return;
       throw new Error(`${file.name} was not attached: it could not be copied to the chat's machine (${ipcErrorMessage(error, 'Pane did not say why')}).`);
     } finally {
-      this.options.onCopying?.(-1);
+      copy.watchers.delete(watch);
+      copyingFiles.delete(id);
+      this.options.onProgress?.(id, null);
     }
   }
 
@@ -95,7 +152,11 @@ export class ChatAttachmentAdapter implements AttachmentAdapter {
     return { ...attachment, status: { type: 'complete' }, content: attachment.content ?? [] };
   }
 
-  async remove(): Promise<void> {}
+  /** A chip removed while its file copies stops the copy (the host deletes what arrived), which frees Send. */
+  async remove(attachment: PendingAttachment): Promise<void> {
+    const file = copyingFiles.get(attachment.id);
+    if (file) fileCopies.get(file)?.controller.abort();
+  }
 }
 
 /** Files carried by a drag, when the browser says so (it may hide them until the drop). */

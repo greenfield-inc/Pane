@@ -282,6 +282,8 @@ export class NotifyService {
         summaryPath: entry.report?.summaryPath,
         readStatusFile: entry.report?.summaryTruncated === true && !machine,
         statusLabel: `${entry.paneName} status`,
+        choices: entry.report?.choices,
+        questions: entry.report?.questions,
       });
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: machine ? `${entry.paneName} on ${machine}` : entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };

@@ -1,9 +1,13 @@
 import { createHash } from 'crypto';
-import { promises as fs } from 'fs';
+import { createReadStream, promises as fs } from 'fs';
 import path from 'path';
+import { MACHINE_HEALTH_DEFAULTS } from '../../../shared/types/machineHealth';
+import { UPLOAD_INVALID_CODE, UPLOAD_NO_ROOM_CODE, UPLOAD_NO_ROOM_MESSAGE } from '../../../shared/chunkedUpload';
+import { PaneError } from '../../../shared/paneError';
+import { formatBytes } from '../../../shared/utils/formatBytes';
+import { readDiskVolumes } from './machineHealth/diskSpace';
 
-/** Same cap as `terminal:paste-file` and desktop's upload button. */
-const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+const GB = 1024 ** 3;
 /** Partial uploads untouched this long are deleted. */
 const ABANDONED_UPLOAD_MS = 24 * 60 * 60 * 1000;
 
@@ -14,6 +18,8 @@ export interface UploadStart {
   mimeType: string;
   size: number;
   md5: string;
+  /** Lands under its own name, in a folder of its own (a chat attachment). */
+  keepName?: boolean;
 }
 
 export interface UploadRecord extends UploadStart {
@@ -32,30 +38,45 @@ const UPLOAD_ID = /^[A-Za-z0-9_-]{8,64}$/;
 export class ChunkedUploadStore {
   private readonly dir: string;
   private readonly now: () => number;
+  private readonly freeBytes: (dir: string) => Promise<number | null>;
+  private readonly reserveBytes: () => number;
   private readonly locks = new Map<string, Promise<unknown>>();
 
-  constructor({ dir, now = Date.now }: { dir: string; now?: () => number }) {
+  /**
+   * `freeBytes` reads the volume as Machine health does; `reserveBytes` is what
+   * an upload must leave free (Machine health's critical level by default).
+   */
+  constructor({ dir, now = Date.now, freeBytes = readFreeBytes, reserveBytes = () => MACHINE_HEALTH_DEFAULTS.diskCriticalGB * GB }: {
+    dir: string;
+    now?: () => number;
+    freeBytes?: (dir: string) => Promise<number | null>;
+    reserveBytes?: () => number;
+  }) {
     this.dir = dir;
     this.now = now;
+    this.freeBytes = freeBytes;
+    this.reserveBytes = reserveBytes;
   }
 
+  /** The only size rule: the rest of the file must fit in the host's free space minus the reserve. */
   async start(input: UploadStart): Promise<{ receivedBytes: number }> {
     assertUploadId(input.uploadId);
-    if (!Number.isSafeInteger(input.size) || input.size < 0) throw new Error('Invalid upload size');
-    if (input.size > MAX_UPLOAD_BYTES) {
-      throw new Error(`File too large (${formatMegabytes(input.size)} MB, max ${formatMegabytes(MAX_UPLOAD_BYTES)} MB)`);
-    }
+    if (!Number.isSafeInteger(input.size) || input.size < 0) throw invalid('Invalid upload size: the file size must be a whole number of bytes.');
     await fs.mkdir(this.dir, { recursive: true });
     await this.sweep();
     return this.exclusive(input.uploadId, async () => {
       const existing = await this.readRecord(input.uploadId);
       if (existing) {
         if (existing.size !== input.size || existing.md5 !== input.md5 || existing.sessionId !== input.sessionId) {
-          throw new Error('Upload ID already used for a different file');
+          throw invalid('Upload ID already used for a different file, so this upload was not resumed.');
         }
         await this.touch(input.uploadId);
-        return { receivedBytes: existing.committedPath ? existing.size : await this.receivedBytes(input.uploadId) };
+        if (existing.committedPath) return { receivedBytes: existing.size };
+        const received = await this.receivedBytes(input.uploadId);
+        await this.assertRoomFor(input.uploadId, input.fileName, input.size - received);
+        return { receivedBytes: received };
       }
+      await this.assertRoomFor(input.uploadId, input.fileName, input.size);
       const record: UploadRecord = {
         uploadId: input.uploadId,
         sessionId: input.sessionId,
@@ -64,6 +85,7 @@ export class ChunkedUploadStore {
         size: input.size,
         md5: input.md5.toLowerCase(),
       };
+      if (input.keepName) record.keepName = true;
       await fs.writeFile(this.partPath(input.uploadId), Buffer.alloc(0));
       await this.writeRecord(record);
       return { receivedBytes: 0 };
@@ -80,32 +102,40 @@ export class ChunkedUploadStore {
       if (offset + bytes.length <= received) return { receivedBytes: received };
       // A chunk past the end (an earlier one was lost) is dropped; the reply says where to resume.
       if (offset !== received) return { receivedBytes: received };
-      if (received + bytes.length > record.size) throw new Error('Chunk runs past the declared file size');
-      await fs.appendFile(this.partPath(uploadId), bytes);
+      if (received + bytes.length > record.size) throw invalid('Chunk runs past the declared file size, so it was not saved.');
+      // Every chunk, so uploads running side by side (or a disk filling up meanwhile) stop with the reserve still free.
+      await this.assertRoomFor(uploadId, record.fileName, record.size - received);
+      await fs.appendFile(this.partPath(uploadId), bytes).catch(async (error: NodeJS.ErrnoException) => {
+        // The disk filled up anyway: refuse with the numbers rather than retry forever.
+        if (error.code !== 'ENOSPC') throw error;
+        await this.remove(uploadId);
+        throw this.noRoom(record.fileName, record.size - received, await this.freeBytes(this.dir).catch(() => null) ?? 0);
+      });
       await this.touch(uploadId);
       return { receivedBytes: received + bytes.length };
     });
   }
 
   /**
-   * Checks the bytes, hands them to `save` (the same landing code as a
-   * single-request upload) and remembers the path, so committing twice
-   * returns the same file.
+   * Checks the bytes, hands the finished file's path to `save` (the same
+   * landing code as a single-request upload, which moves it into place) and
+   * remembers where it landed, so committing twice returns the same file.
+   * The file is read as a stream, so its size costs no memory.
    */
-  async commit(uploadId: string, save: (record: UploadRecord, bytes: Buffer) => Promise<string>): Promise<{ filePath: string }> {
+  async commit(uploadId: string, save: (record: UploadRecord, filePath: string) => Promise<string>): Promise<{ filePath: string }> {
     assertUploadId(uploadId);
     return this.exclusive(uploadId, async () => {
       const record = await this.requireRecord(uploadId);
       if (record.committedPath) return { filePath: record.committedPath };
-      const bytes = await fs.readFile(this.partPath(uploadId));
-      if (bytes.length !== record.size) {
-        throw new Error(`Upload incomplete: ${bytes.length} of ${record.size} bytes received`);
+      const received = await this.receivedBytes(uploadId);
+      if (received !== record.size) {
+        throw new Error(`Upload incomplete: ${received} of ${record.size} bytes received`);
       }
-      // Android can't always hash a content:// file; size and offsets still guard those uploads.
-      if (record.md5 && createHash('md5').update(bytes).digest('hex') !== record.md5) {
-        throw new Error('Upload checksum mismatch');
+      // Desktop and some Android files send no checksum; size and offsets still guard those uploads.
+      if (record.md5 && await md5Of(this.partPath(uploadId)) !== record.md5) {
+        throw invalid('Upload checksum mismatch: the file arrived different from the one sent, so it was not saved.');
       }
-      const filePath = await save(record, bytes);
+      const filePath = await save(record, this.partPath(uploadId));
       await fs.rm(this.partPath(uploadId), { force: true });
       await this.writeRecord({ ...record, committedPath: filePath });
       return { filePath };
@@ -131,6 +161,27 @@ export class ChunkedUploadStore {
   private async remove(uploadId: string): Promise<void> {
     await fs.rm(this.partPath(uploadId), { force: true });
     await fs.rm(this.recordPath(uploadId), { force: true });
+  }
+
+  /**
+   * Throws, naming the numbers, when `bytes` more would leave less than the reserve
+   * free, and deletes what arrived so far: a refused upload holds no space.
+   */
+  private async assertRoomFor(uploadId: string, fileName: string, bytes: number): Promise<void> {
+    // A volume Machine health can't read doesn't block the upload; a full disk still stops it (ENOSPC).
+    const free = await this.freeBytes(this.dir).catch(() => null);
+    if (free === null || free - this.reserveBytes() >= bytes) return;
+    await this.remove(uploadId);
+    throw this.noRoom(fileName, bytes, free);
+  }
+
+  private noRoom(fileName: string, bytes: number, free: number): PaneError {
+    return new PaneError(
+      UPLOAD_NO_ROOM_CODE,
+      `${UPLOAD_NO_ROOM_MESSAGE}: ${fileName} needs ${formatBytes(bytes)}, ${formatBytes(free)} is free, `
+        + `and Pane keeps ${formatBytes(this.reserveBytes())} free (Settings > Machine health). Nothing was saved.`,
+      'Free up space here, or send a smaller file.',
+    );
   }
 
   private async receivedBytes(uploadId: string): Promise<number> {
@@ -181,9 +232,23 @@ export class ChunkedUploadStore {
 }
 
 function assertUploadId(uploadId: string): void {
-  if (!UPLOAD_ID.test(uploadId)) throw new Error('Invalid upload ID');
+  if (!UPLOAD_ID.test(uploadId)) throw invalid('Invalid upload ID: it must be 8 to 64 letters, digits, - or _.');
 }
 
-function formatMegabytes(bytes: number): string {
-  return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '');
+/** The upload can't be taken as sent; the client stops instead of retrying. */
+function invalid(message: string): PaneError {
+  return new PaneError(UPLOAD_INVALID_CODE, message, 'Send the file again.');
 }
+
+/** Free space on the volume holding `dir`, read the way Machine health reads it; null when unreadable. */
+async function readFreeBytes(dir: string): Promise<number | null> {
+  const [volume] = await readDiskVolumes([{ path: dir, role: 'pane-data' }]);
+  return volume?.freeBytes ?? null;
+}
+
+async function md5Of(filePath: string): Promise<string> {
+  const hash = createHash('md5');
+  for await (const chunk of createReadStream(filePath)) hash.update(chunk);
+  return hash.digest('hex');
+}
+

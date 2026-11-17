@@ -33,6 +33,8 @@ export interface PortsTest {
   loadConfig(mode: 'local' | 'remote'): void;
   /** URLs handed to the OS browser, in order. */
   openedExternally: string[];
+  /** Local pages handed to the OS browser, in order. */
+  openedLocally: string[];
   /** The error the next `openExternal` call fails with; null succeeds. */
   openExternalError: string | null;
 }
@@ -59,6 +61,7 @@ const portsTest: PortsTest = {
     config: { remoteDaemon: { client: { mode } } } as AppConfig,
   }),
   openedExternally: [],
+  openedLocally: [],
   openExternalError: null,
 };
 
@@ -69,9 +72,16 @@ Object.assign(window, {
       portsTest.openedExternally.push(target);
       return portsTest.openExternalError === null ? { success: true } : { success: false, error: portsTest.openExternalError };
     },
-    invoke: (channel: string) => channel === 'ports:list'
-      ? portLists.request()
-      : Promise.resolve(undefined),
+    openLocalPage: async (fileUrl: string) => {
+      portsTest.openedLocally.push(fileUrl);
+      return { success: true };
+    },
+    invoke: (channel: string) => {
+      if (channel === 'ports:list') return portLists.request();
+      // This computer is the host, so a file page reads its own disk.
+      if (channel === 'browser-panel:prepare-file') return Promise.resolve({ partition: null });
+      return Promise.resolve(undefined);
+    },
     events: {
       onListeningPortsChanged: (callback: typeof emitPorts) => {
         emitPorts = callback;

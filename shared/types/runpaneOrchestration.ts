@@ -1,4 +1,5 @@
 import type { ProjectEnvVar } from './projectEnvVars';
+import type { NotifyChoice, NotifySubQuestion } from './notify';
 import type { PanelOpener, ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, TerminalExpectedReport, TerminalPausedMark, ToolPanelType } from './panels';
 import type { RunpaneAgent } from './generatedRunpaneContract';
 import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
@@ -1436,6 +1437,10 @@ export interface RunpaneReportRequest {
   summary?: string;
   summaryPath?: string;
   question?: string;
+  /** `--state blocked` only: the card's buttons, as notify takes them. */
+  choices?: NotifyChoice[];
+  /** `--state blocked` only, instead of choices: 2 to 4 questions, each with its own buttons. */
+  questions?: NotifySubQuestion[];
   /** To-dos (D-408): "T-14"; links a blocked question to that to-do. */
   todo?: string;
 }

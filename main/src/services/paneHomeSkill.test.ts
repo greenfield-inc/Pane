@@ -84,7 +84,10 @@ describe('Pane home skill', () => {
     const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
     expect(PANE_MANAGED_SKILL_MARKER).toBe('<!-- pane-managed-skill v4 -->');
     expect(skill).toContain("A worker in a Session** (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't");
-    expect(skill).toContain("doesn't call `notify`. Run `runpane report --state blocked --question \"<question>\"`");
+    expect(skill).toContain("doesn't call `notify`. Run `runpane report --state blocked --question '<question>'`");
+    expect(skill).toContain('Start the question with its Q-n when your orchestrator gave you one');
+    expect(skill).toContain('never double quotes or no quotes');
+    expect(skill).toContain('--tool-command "<launcher command>"');
     expect(skill).toContain('A Session orchestrator** (`PANE_ORCHESTRATION_SESSION_ID` is set) keeps each item that waits on the person posted once, as a background `runpane notify');
     expect(skill).toContain('Any other agent** calls `notify` as above.');
   });

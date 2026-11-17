@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from 'fs/promises';
+import { mkdtemp, readdir, readFile, rename, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,14 +9,19 @@ const HELLO_WORLD_MD5 = '5eb63bbbe01eeed093cb22bb8f5acdc3';
 
 const b64 = (text: string) => Buffer.from(text).toString('base64');
 const ID = 'upload-0001';
+const GB = 1024 ** 3;
 
 describe('ChunkedUploadStore', () => {
   let dir: string;
   let now: number;
   let store: ChunkedUploadStore;
+  let freeBytes: number | null;
   const saved: Array<{ record: UploadRecord; bytes: string }> = [];
-  const save = async (record: UploadRecord, bytes: Buffer) => {
-    saved.push({ record, bytes: bytes.toString() });
+  // Moves the finished file out, as the host's landing code does.
+  const save = async (record: UploadRecord, filePath: string) => {
+    const landed = path.join(dir, `landed-${saved.length}`);
+    await rename(filePath, landed);
+    saved.push({ record, bytes: await readFile(landed, 'utf8') });
     return `/host/files/${record.fileName}`;
   };
 
@@ -24,7 +29,8 @@ describe('ChunkedUploadStore', () => {
     dir = await mkdtemp(path.join(tmpdir(), 'pane-uploads-'));
     now = 1_000_000;
     saved.length = 0;
-    store = new ChunkedUploadStore({ dir, now: () => now });
+    freeBytes = 100 * GB;
+    store = new ChunkedUploadStore({ dir, now: () => now, freeBytes: async () => freeBytes, reserveBytes: () => 5 * GB });
   });
 
   afterEach(async () => {
@@ -75,9 +81,43 @@ describe('ChunkedUploadStore', () => {
     expect(await store.commit(ID, save)).toEqual({ filePath: '/host/files/hello.txt' });
   });
 
-  it('refuses files over 50 MB before any bytes move', async () => {
-    await expect(store.start({ uploadId: ID, sessionId: 's1', fileName: 'big.mov', mimeType: 'video/quicktime', size: 60 * 1024 * 1024, md5: 'x' }))
-      .rejects.toThrow('File too large (60 MB, max 50 MB)');
+  it('takes a file of any size the host has room for', async () => {
+    freeBytes = 7 * GB;
+    await expect(store.start({ uploadId: ID, sessionId: 's1', fileName: 'big.mov', mimeType: 'video/quicktime', size: GB, md5: '' }))
+      .resolves.toEqual({ receivedBytes: 0 });
+  });
+
+  it('refuses a file that would leave less than the reserve free, saying how much space there is', async () => {
+    freeBytes = 5.5 * GB;
+    await expect(store.start({ uploadId: ID, sessionId: 's1', fileName: 'big.mov', mimeType: 'video/quicktime', size: GB, md5: '' })).rejects.toMatchObject({
+      code: 'ERR_UPLOAD_NO_ROOM',
+      message: 'File too large for the free space on this computer: big.mov needs 1.0 GB, 5.5 GB is free, and Pane keeps 5.0 GB free (Settings > Machine health). Nothing was saved.',
+      next: 'Free up space here, or send a smaller file.',
+    });
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('stops an upload part-way when free space runs low, and deletes what arrived', async () => {
+    await startHello();
+    await store.append(ID, 0, b64('hello '));
+    // Another upload, or a build, used the space meanwhile: 5 bytes to come, 2 above the reserve.
+    freeBytes = 5 * GB + 2;
+
+    await expect(store.append(ID, 6, b64('world'))).rejects.toMatchObject({ code: 'ERR_UPLOAD_NO_ROOM' });
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('counts only the bytes still to come when an upload resumes', async () => {
+    await startHello();
+    await store.append(ID, 0, b64('hello '));
+    freeBytes = 5 * GB + 5;
+
+    expect(await startHello()).toEqual({ receivedBytes: 6 });
+  });
+
+  it('takes the file when the host cannot read its free space', async () => {
+    freeBytes = null;
+    expect(await startHello()).toEqual({ receivedBytes: 0 });
   });
 
   it('refuses to commit corrupted or incomplete bytes', async () => {

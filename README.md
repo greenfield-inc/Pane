@@ -139,7 +139,7 @@ Each of these is a small thing. Together they compound fast.
 | **Auto Secrets Copy** | Every pane automatically mirrors `.env` files and secrets from your root project so your worktree is runnable the moment it's created. | |
 | **Isolated Ports** | Each pane runs on its own port range automatically, so you can spin up five dev servers in parallel without a single conflict. | |
 | **Terminal Rendering Patches** | Claude Code's scroll-jump bug (long conversations snapping to top when you scroll up) is fixed here, even though it's still broken in Claude Code itself. | |
-| **Drag and Drop** | Drop any file up to 50MB into a terminal and it lands exactly where you need it. | |
+| **Drag and Drop** | Drop a file of any size into a terminal and it lands exactly where you need it, with progress while it copies. | |
 
 ---
 
@@ -355,7 +355,8 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 | Shortcut | Action |
 |----------|--------|
 | `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command, and see or change its key |
-| `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Keyboard Shortcuts |
+| `⌘/` / `Ctrl+K Ctrl+/` | Show every key in a searchable sheet, your own keys marked (a writable file editor keeps `⌘/` for comments, and browser pages keep it; `Ctrl+/` stays with terminal programs) |
+| `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Change keys (Settings → Shortcuts) |
 | `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` (or `k` `j`) move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
 | `Enter` | With a chat on screen and focus on no field or control, move into its message box |
 | `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel, approval column or sidebar in that direction; the focused split's active tab carries the accent underline |
@@ -366,12 +367,15 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 | `⌘⌥B` / `Ctrl+Alt+B` | Toggle right panel |
 | `` ⌃` `` / `` Ctrl+` `` | Toggle terminal |
 | `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab in the focused split, or in a Session's approval column while it has focus (`Esc` there goes back to the chat) |
-| `⌃⇧Space` | Approvals, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
+| `⌃⇧Space` | Approvals from any app, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
+| `⌘⇧A` / `Ctrl+Shift+A` | Open or close Approvals while Pane is in front; in its list `↑` `↓` move, `Enter` or `→` open, `Esc` goes back, and the tab keys switch Waiting / Done today |
+| `⌘⌥A` / `Ctrl+K Ctrl+A` | From a Session chat, open its approval; again (or `Esc`) goes back with your draft kept |
+| `↑` `↓` `Space` `Tab` `⌘↩` | In an approval: move and pick within a question, pick the focused option, next question (then the reply box), send from anywhere in it |
 | `⌘⌥O` / `Ctrl+Alt+O` | Machine switcher (then `0` for All machines, `1-9` for a machine) |
 | `⌃⌘]` `⌃⌘[` / `Ctrl+Alt+Shift+]` `[` | Next / previous machine |
 | `⌃⌘0` / `Ctrl+Alt+Shift+0` | All machines ⇄ the last machine |
 | `⌘K` / `Ctrl+K` | Clear the focused terminal |
-| `⌘F` / `Ctrl+F` | Find in the focused tab (terminal, browser, file preview, Logs) |
+| `⌘F` / `Ctrl+F` | Find in the focused tab (terminal, browser, file preview, Logs, a chat's loaded conversation), an approval and its Summary, or the Approvals screen |
 | `⌘G` / `Ctrl+G` | Find next |
 | `⌘⇧G` / `Ctrl+Shift+G` | Find previous |
 | `⌘N` / `Ctrl+N` | New pane |

@@ -44,7 +44,7 @@ export function KeymapNotice({ onOpenKeyboardShortcuts }: KeymapNoticeProps) {
             <li key={moved.label} className="flex items-center justify-between gap-2">
               <span>{moved.label}</span>
               <span className="flex items-center gap-1 whitespace-nowrap">
-                <span className="text-text-tertiary line-through">{moved.before.map(formatKeyDisplay).join(' ')}</span>
+                <span className="text-text-tertiary line-through">{moved.before.map(keys => formatKeyDisplay(keys)).join(' ')}</span>
                 <span aria-hidden="true">→</span>
                 <span className="sr-only">now</span>
                 {now.map((chord) => <Kbd key={chord} size="xs">{formatKeyDisplay(chord)}</Kbd>)}

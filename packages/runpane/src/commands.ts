@@ -305,7 +305,7 @@ const AUTOPILOT_ITEM_COMMANDS = new Set(['autopilot answer', 'autopilot close', 
 const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--relays', ['notify']],
   ['--about-session', ['notify']],
-  ['--questions', ['notify']],
+  ['--questions', ['notify', 'report']],
   ['--took', ['notify']],
   ['--took-as', ['notify']],
   ['--status', ['notify', 'update']],
@@ -668,6 +668,9 @@ function validateReportArgs(parsed: ParsedArgs): void {
   }
   if (parsed.reportState === 'blocked' && !parsed.question?.trim()) {
     throw new Error('runpane report --state blocked requires --question "<what you need answered>".');
+  }
+  if (parsed.reportState !== 'blocked' && (parsed.notifyChoices !== undefined || parsed.notifyQuestions !== undefined)) {
+    throw new Error('runpane report takes --choices and --questions only with --state blocked: they are the buttons on its question card.');
   }
 }
 

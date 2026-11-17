@@ -9,6 +9,7 @@ import { invokeDaemon, PaneDaemonClientError, routedOtherMachine } from './daemo
 import { confirmMutation } from './daemonActions';
 import { RunpaneError, describeFailure } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
+import { parseReportOptions, type NotifyChoice, type NotifySubQuestion } from './notify';
 import {
   CONVERSATION_ID_PATTERN,
   CONVERSATION_SOURCES,
@@ -749,6 +750,10 @@ export interface AgentReport {
   summaryTruncated?: true;
   summaryPath?: string;
   question?: string;
+  /** A blocked report's buttons (`--choices`). */
+  choices?: NotifyChoice[];
+  /** A blocked report's several questions (`--questions`). */
+  questions?: NotifySubQuestion[];
   reportedAt: string;
 }
 
@@ -1356,6 +1361,11 @@ const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.obj
     kind: boundary.enumeration('composer', 'editor'),
   }))),
 });
+const reportChoiceSchema = boundary.object({
+  label: boundary.nonEmptyString,
+  detail: boundary.optional(boundary.string),
+  recommended: boundary.optional(boundary.boolean),
+});
 const agentReportFields = {
   state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
   pr: boundary.optional(boundary.number),
@@ -1364,6 +1374,12 @@ const agentReportFields = {
   summaryTruncated: boundary.optional(boundary.literal(true)),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  choices: boundary.optional(boundary.array(reportChoiceSchema)),
+  questions: boundary.optional(boundary.array(boundary.object({
+    title: boundary.string,
+    choices: boundary.array(reportChoiceSchema),
+    why: boundary.optional(boundary.string),
+  }))),
   reportedAt: boundary.string,
 };
 const agentReportSchema: BoundarySchema<AgentReport> = boundary.object(agentReportFields);
@@ -3897,11 +3913,19 @@ async function runPanelsConversationHook(
   return 0;
 }
 
+/** The one argument Agent Farm's SessionStart hook passes to the host's `AGENT_FARM_SESSION_HOOK`. */
+const AGENT_FARM_SESSION_START = 'session-start';
+
 /**
- * `runpane panels conversation --hook` straight from argv, before anything else in the CLI runs (no
+ * `runpane panels conversation --hook` (or `runpane session-start`, its Agent Farm alias) straight from argv, before anything else in the CLI runs (no
  * managed-CLI handoff, no telemetry, no output). Returns null for any other command line.
  */
-export async function runConversationHookFromArgv(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<0 | null> {
+export async function runConversationHookFromArgv(rawArgv: string[], env: NodeJS.ProcessEnv = process.env): Promise<0 | null> {
+  // Agent Farm's host-neutral hook runs `"$AGENT_FARM_SESSION_HOOK" session-start`, and Pane points that at runpane (D-403).
+  // The WSL Session bridge appends `--pane-dir <dir>`, so the alias keeps its other arguments.
+  const argv = hookWords(rawArgv)[0] === AGENT_FARM_SESSION_START
+    ? ['panels', 'conversation', '--hook', ...rawArgv.filter((_arg, index) => index !== rawArgv.indexOf(AGENT_FARM_SESSION_START))]
+    : rawArgv;
   if (!isConversationHookArgv(argv)) return null;
   let paneDir: string | undefined;
   try {
@@ -3914,8 +3938,13 @@ export async function runConversationHookFromArgv(argv: string[], env: NodeJS.Pr
   return runPanelsConversationHook(env, process.stdin, paneDir);
 }
 
+/** The command words of an argv: everything but flags and the `--pane-dir` value. */
+function hookWords(argv: string[]): string[] {
+  return argv.filter((arg, index) => !arg.startsWith('-') && argv[index - 1] !== '--pane-dir');
+}
+
 function isConversationHookArgv(argv: string[]): boolean {
-  const words = argv.filter((arg, index) => !arg.startsWith('-') && argv[index - 1] !== '--pane-dir');
+  const words = hookWords(argv);
   return words[0] === 'panels' && words[1] === 'conversation' && argv.includes('--hook');
 }
 
@@ -3970,6 +3999,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
   const summaryPath = parsed.summaryFile !== undefined && parsed.summaryFile !== '-'
     ? path.resolve(parsed.summaryFile)
     : undefined;
+  const options = parseReportOptions(parsed.question ?? '', parsed.notifyChoices, parsed.notifyQuestions);
   const result = await invokeDaemon('runpane:report', [{
     ...identity,
     state: parsed.reportState,
@@ -3978,6 +4008,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
     summary: summaryText?.slice(0, MAX_SENT_SUMMARY_LENGTH),
     summaryPath,
     question: parsed.question,
+    ...options,
     todo: parsed.todo,
   }], reportResultSchema, {
     paneDir: parsed.paneDir,

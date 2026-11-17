@@ -86,7 +86,12 @@ Session go under "Not in a Session". Items Autopilot asks itself go under
 - **Workers in a Session don't call `notify`.** Approvals come from the
   Session's orchestrator, not from the agents in its Panes. A worker reports
   blocked to its orchestrator (`runpane report --state blocked --question
-  "<question>"`). That question is a card at once, with an answer box, and it
+  "<question>"`, with its options as `--choices` or `--questions` in the JSON
+  `runpane notify` takes, or with `--summary-file <status file>` whose
+  `needs_you` lists them). A question that ends with its options in brackets
+  ("(A / B)") and gives no buttons either way is refused
+  (`ERR_REPORT_PACKED_OPTIONS`) and nothing is shown; a question with no
+  options is an open question, answered in words. That question is a card at once, with an answer box, and it
   rings once the orchestrator relays it or after 10 minutes, so the orchestrator
   first settles what the plan already answers. Your answer goes straight to the
   worker's tab (`answer: Q-n → <answer> (by you)`), even with the orchestrator
@@ -247,7 +252,10 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   floating strip and no Notify row in the sidebar.
 - **The approval column**: one tabbed column for an approval, the same on
   every surface. Its header pages through what's waiting (‹ n of N ›, dots, ←
-  and → while it has focus) and ✕ closes it. Its tabs are **Decide** (the
+  and → while it has focus) and ✕ closes it. On the Approvals screen ✕ is
+  **Dismiss**: the column closes without answering, the item stays in the list
+  (and leaves the floating strip), and no other item opens until you pick a
+  row. Its tabs are **Decide** (the
   subtitle, each question with its why and options, recommended ones
   marked but none selected until you pick, the references and one reply box that grows up to half the
   column), **Summary** (one HTML page: the asker's own, an `.html` passed as a
@@ -263,14 +271,24 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   focus stop of its own: Focus Right (⌘⌥→) and F6 move into it from the chat,
   the tab keys (⌘⇧[ ⌘⇧], ⌘⇧1-9) walk its tabs while it has focus, Focus Left
   or Esc go back to the chat's message box, and its active tab carries the
-  accent only while it has focus, as a split's does. The right
+  accent only while it has focus, as a split's does. By keyboard, each
+  question is one Tab stop: ↑ ↓ move and pick, Space picks the focused
+  option, Tab goes to the next question and then the reply box, and ⌘↩ sends
+  from anywhere in the approval. ⌥⌘A (Ctrl+K Ctrl+A on Windows and Linux)
+  opens it from the chat and goes back again; ⇧⌘A opens or closes Approvals
+  while Pane is in front. ⌘F finds text in Decide, the Summary (the frame
+  shares Pane's origin so it can be searched, with scripts still off) and
+  each reference. ⌘/ lists every key. The right
   sidebar (Overview, Files, Changes) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A
   Session's orchestrator chat docks one compact card above its composer:
   who asks, the title and subtitle across the card, and a bottom row with ‹ n
   of m ›, the reference count, Summary and **Open**; its pager stays in step
-  with the column's. The chat's own AskUserQuestion isn't docked: the chat
+  with the column's. Its ✕ (**Dismiss**) takes the card out of that chat
+  without answering it (and closes the column if it was open there): it
+  keeps waiting in Approvals, and comes back to the chat only when it changes
+  (a new version, a reply or ready again). The chat's own AskUserQuestion isn't docked: the chat
   already shows Claude's card, and Approvals and the phone keep the copy.
   **Send** closes the column, and a status line in the chat names the agent
   reading the reply ("okta-sso-account is reading your reply to Q-42"), then
@@ -305,7 +323,7 @@ by accident. Keys work whatever Pane's keyboard-shortcuts setting says. On
 Approvals, **More** (or **Details**, when choices have notes) opens the card in
 place with every choice, its note and **Send**.
 
-✕ hides a question from the strip; it keeps waiting in Approvals.
+✕ (**Dismiss**) hides a question from the strip without answering it; it keeps waiting in Approvals.
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
 switch to Pane. The clock at the bottom right of a card snoozes it for 3, 5
 or 15 minutes: it leaves the strip, then comes back in its place in the

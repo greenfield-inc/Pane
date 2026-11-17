@@ -1193,6 +1193,59 @@ async function checkReportDeliveryLine() {
   }
 }
 
+/**
+ * A blocked report's options: `--choices` and `--questions` take notify's schema and checks, and
+ * are sent to the daemon as parsed JSON. A refusal sends nothing.
+ */
+async function checkReportStructuredOptions() {
+  const report = { state: 'blocked', question: 'Q-3: Id or number?', reportedAt: '2026-11-15T00:00:00.000Z' };
+  const result = { ok: true, paneId: 'pane-1', panelId: 'panel-1', report, sessionIds: [], liveWatchers: 0 };
+  const choices = [{ label: 'Invoice id', detail: 'Stable', recommended: true }, { label: 'Invoice number' }];
+  const questions = [
+    { title: 'Filename key?', choices: [{ label: 'Id', recommended: true }, { label: 'Number' }] },
+    { title: 'Zip them?', why: 'Large batches', choices: [{ label: 'Yes', recommended: true }, { label: 'No' }] },
+  ];
+  const blocked = ['report', '--state', 'blocked', '--question', 'Q-3: Id or number?', '--panel', 'panel-1'];
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-report-options-${runtime}-`));
+    try {
+      for (const [flag, value] of [['--choices', choices], ['--questions', questions]]) {
+        const frames = [];
+        const run = await withFakeDaemon(paneDir, () => ({ result }),
+          () => runCliOnce(runtime, [...blocked, flag, JSON.stringify(value), '--json'], paneDir),
+          (frame) => { if (frame.type === 'request' && frame.id === 1) frames.push(frame); });
+        assert.strictEqual(run.code, 0, `${runtime} report ${flag} exits 0. stderr=${run.stderr}`);
+        assert.deepStrictEqual(frames[0].args[0][flag.slice(2)], value, `${runtime} report sends ${flag} as parsed JSON`);
+      }
+      for (const [args, code, message] of [
+        [['--choices', 'not json'], 'ERR_NOTIFY_INVALID', 'choices must be a JSON array of choices, such as [{"label":"Ship it","recommended":true},{"label":"Wait"}]. Nothing was shown to the person.'],
+        [['--choices', '[]'], 'ERR_NOTIFY_INVALID', 'choices takes 1 to 9 choices; got 0. Nothing was shown to the person.'],
+        [['--questions', JSON.stringify(questions.slice(0, 1))], 'ERR_NOTIFY_INVALID', 'questions takes 2 to 4 questions; got 1. For one question, use choices. Nothing was shown to the person.'],
+        [['--choices', JSON.stringify(choices), '--questions', JSON.stringify(questions)], 'ERR_NOTIFY_INVALID', 'questions asks several questions in place of choices; give choices or questions, not both. Nothing was shown to the person.'],
+      ]) {
+        let sent = 0;
+        const run = await withFakeDaemon(paneDir, () => { sent += 1; return { result }; }, () => runCliOnce(runtime, [...blocked, ...args, '--json'], paneDir));
+        assert.strictEqual(run.code, 1, `${runtime} report ${args.join(' ')} exits 1. stdout=${run.stdout}`);
+        const { error } = JSON.parse(run.stdout);
+        assert.strictEqual(error.code, code, `${runtime} ${args.join(' ')}`);
+        assert.strictEqual(error.message, message, `${runtime} ${args.join(' ')}`);
+        assertIncludes(error.next, 'runpane report', `${runtime} ${args.join(' ')} says how to fix the report`);
+        assert.strictEqual(sent, 0, `${runtime} a refused report sends nothing`);
+      }
+      // The notify message is the same text, so the two commands can't drift apart.
+      const notify = await withFakeDaemon(paneDir, () => ({ result: { answer: 'x' } }),
+        () => runCliOnce(runtime, ['notify', '--ui', 'options', '--title', 'T', '--choices', 'not json', '--json'], paneDir));
+      assert.strictEqual(JSON.parse(notify.stdout).error.message, 'choices must be a JSON array of choices, such as [{"label":"Ship it","recommended":true},{"label":"Wait"}]. Nothing was shown to the person.', `${runtime} notify's message`);
+      const unblocked = await withFakeDaemon(paneDir, () => ({ result }),
+        () => runCliOnce(runtime, ['report', '--state', 'ready', '--choices', JSON.stringify(choices), '--panel', 'panel-1', '--json'], paneDir));
+      assert.strictEqual(unblocked.code, 1, `${runtime} --choices without --state blocked is refused. stdout=${unblocked.stdout}`);
+      assertIncludes(JSON.parse(unblocked.stdout).error.message, '--state blocked', `${runtime} names --state blocked`);
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+}
+
 /** Runs the CLI with its stdin held open until `holdMs` passes, and times the run. */
 function runCliHoldingStdin(runtime, args, paneDir, extraEnv, holdMs) {
   const command = runtime === 'npm' ? process.execPath : findPython();
@@ -1348,9 +1401,9 @@ print(json.dumps([
       assert.match(run.stderr, /Unknown channel/);
 
       // --hook: silent and exit 0 whatever happens.
-      const hook = async (label, { env = paneEnv, input, respond = () => ({ result }), daemon = true }) => {
+      const hook = async (label, { env = paneEnv, input, respond = () => ({ result }), daemon = true, argv = ['panels', 'conversation', '--hook'] }) => {
         requests = [];
-        const call = () => runCliOnce(runtime, ['panels', 'conversation', '--hook'], paneDir, 20_000, env, input);
+        const call = () => runCliOnce(runtime, argv, paneDir, 20_000, env, input);
         const hookRun = daemon ? await withFakeDaemon(paneDir, (frame) => { requests.push({ channel: frame.channel, request: frame.args[0] }); return respond(frame); }, call) : await call();
         assert.strictEqual(hookRun.code, 0, `${runtime} --hook ${label} exits 0`);
         assert.strictEqual(hookRun.stdout, '', `${runtime} --hook ${label} prints nothing on stdout`);
@@ -1359,6 +1412,16 @@ print(json.dumps([
       };
       assert.deepStrictEqual(await hook('reports', { input: hookInput({ session_id: result.conversationId, source: 'resume' }) }),
         [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' }]);
+      // Agent Farm's host-neutral hook (D-403): `"$AGENT_FARM_SESSION_HOOK" session-start`, with the same stdin.
+      assert.deepStrictEqual(await hook('as session-start', { argv: ['session-start'], input: hookInput({ session_id: result.conversationId, source: 'clear' }) }),
+        [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'clear' }]);
+      // The WSL Session bridge appends the instance flag to every call (sessionWSLBridge.ts).
+      assert.deepStrictEqual(await hook('as session-start from the WSL bridge', { argv: ['session-start', '--pane-dir', paneDir], input: hookInput({ session_id: result.conversationId, source: 'resume' }) }),
+        [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' }]);
+      assert.deepStrictEqual(await hook('as the old hook from the WSL bridge', { argv: ['panels', 'conversation', '--hook', '--pane-dir', paneDir], input: hookInput({ session_id: result.conversationId, source: 'resume' }) }),
+        [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' }]);
+      assert.deepStrictEqual(await hook('as session-start with an unknown flag', { argv: ['session-start', '--bogus'], input: hookInput({ session_id: 'abc' }) }), []);
+      assert.deepStrictEqual(await hook('as session-start outside Pane', { argv: ['session-start'], env: {}, input: hookInput({ session_id: 'abc' }) }), []);
       assert.deepStrictEqual(await hook('drops an unknown source', { env: { PANE_PANEL_ID: 'panel-1' }, input: hookInput({ session_id: 'abc', source: 'later' }) }),
         [{ panelId: 'panel-1', conversationId: 'abc' }]);
       assert.deepStrictEqual(await hook('outside Pane', { env: {}, input: hookInput({ session_id: 'abc', source: 'startup' }) }), []);
@@ -7272,6 +7335,7 @@ async function runChecks() {
   await checkPanelsCloseParity();
   await checkArchiveClosedAndCallerPanel();
   await checkReportDeliveryLine();
+  await checkReportStructuredOptions();
   await checkPanelsConversation();
   await checkNotifyParity();
   await checkAutopilotParity();

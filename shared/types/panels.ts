@@ -4,6 +4,7 @@ import type { DiffScope } from './gitDiff';
 import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { BoundaryCursor, BoundarySchema } from '../validation/boundaryDecoder';
 import type { ConfiguredAgentId } from '../agents';
+import type { NotifyChoice, NotifySubQuestion } from './notify';
 
 /**
  * Panel and session types for Pane.
@@ -56,6 +57,10 @@ export interface TerminalAgentReport {
   summaryPath?: string;
   /** What the worker needs answered; present when `state` is `blocked`. */
   question?: string;
+  /** A blocked report's buttons (`--choices`), as notify takes them. */
+  choices?: NotifyChoice[];
+  /** A blocked report's several questions (`--questions`), each with its own buttons. */
+  questions?: NotifySubQuestion[];
   /** To-dos (D-408): `--todo T-14`, the to-do the report (and its question) is about. */
   todo?: string;
   reportedAt: string;
