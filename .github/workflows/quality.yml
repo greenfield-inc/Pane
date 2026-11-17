@@ -566,14 +566,19 @@ jobs:
       contents: read
       actions: read
     steps:
-    - name: Checkout the gate
-      uses: actions/checkout@v7
-      with:
-        sparse-checkout: |
-          .github/workflows/quality.yml
-          scripts/ci-gate.mjs
-          scripts/ci-timings.mjs
-        sparse-checkout-cone-mode: false
+    # Three files at the run's exact commit, read in parallel: about 2 s
+    # faster than actions/checkout and its post step. Any failed read fails.
+    - name: Fetch the gate
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        pids=()
+        for file in .github/workflows/quality.yml scripts/ci-gate.mjs scripts/ci-timings.mjs; do
+          mkdir -p "$(dirname "$file")"
+          gh api -H 'Accept: application/vnd.github.raw' "repos/$GITHUB_REPOSITORY/contents/$file?ref=$GITHUB_SHA" > "$file" &
+          pids+=("$!")
+        done
+        for pid in "${pids[@]}"; do wait "$pid"; done
 
     - name: Decide
       env:
