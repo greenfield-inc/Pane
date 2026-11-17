@@ -63,7 +63,8 @@ import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../u
 import { onTerminalReflow } from '../../utils/terminalReflow';
 import { createMaskOwnership } from '../../utils/maskOwnership';
 import { markTerminalRevealed, wasTerminalRevealed } from '../../utils/revealedTerminals';
-import { noteTerminalCell, TerminalSkeleton } from './TerminalSkeleton';
+import { TerminalSkeleton } from './TerminalSkeleton';
+import { noteTerminalCell } from '../../utils/terminalCellSize';
 import { REVEAL_MS, useSkeletonHold } from '../ui/Skeleton';
 import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';

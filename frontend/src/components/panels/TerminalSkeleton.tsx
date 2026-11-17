@@ -2,8 +2,8 @@ import { useMemo } from 'react';
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../../shared/types/appearance';
 import { useConfigStore } from '../../stores/configStore';
 import { buildTerminalFontFamily, DEFAULT_TERMINAL_FONT_FAMILY } from '../../utils/terminalTheme';
-import type { Terminal } from '@xterm/xterm';
 import { wasTerminalRevealed } from '../../utils/revealedTerminals';
+import { measureTerminalCell } from '../../utils/terminalCellSize';
 import { Skeleton } from '../ui/Skeleton';
 
 /** Where xterm draws its first cell (index.css `.xterm` padding plus `.xterm-screen` margin). */
@@ -29,45 +29,6 @@ const TRANSCRIPT: readonly RowExtent[] = [
 /** Enough rows for a tall window; the surface clips the rest. */
 const TRANSCRIPT_SCREEN = [...TRANSCRIPT, ...TRANSCRIPT, ...TRANSCRIPT, ...TRANSCRIPT];
 
-interface CellSize { width: number; height: number }
-
-/** Cell sizes by xterm font (`${size}px ${family}`): taken from revealed terminals, else measured. */
-const cellSizes = new Map<string, CellSize>();
-
-/** Records a revealed terminal's real cell, so later skeletons for its font sit exactly on its rows. */
-export function noteTerminalCell(terminal: Terminal, screen: Element): void {
-  if (terminal.rows <= 0 || terminal.cols <= 0) return;
-  const box = screen.getBoundingClientRect();
-  if (box.width <= 0 || box.height <= 0) return;
-  cellSizes.set(`${terminal.options.fontSize}px ${terminal.options.fontFamily}`, { width: box.width / terminal.cols, height: box.height / terminal.rows });
-}
-
-/**
- * The cell xterm lays text out on for this font, measured the way xterm does:
- * the canvas font box, rounded to device pixels (height up, width down).
- */
-function measureCell(fontFamily: string, fontSize: number): CellSize {
-  const key = `${fontSize}px ${fontFamily}`;
-  const known = cellSizes.get(key);
-  if (known) return known;
-  const fallback = { width: fontSize * 0.6, height: Math.ceil(fontSize * 1.3) };
-  // Server rendering (tests) has no document to measure in.
-  const context = globalThis.document?.createElement('canvas').getContext('2d');
-  if (!context) return fallback;
-  context.font = key;
-  const metrics = context.measureText('W');
-  const ratio = window.devicePixelRatio || 1;
-  const height = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
-  const cell = height > 0 && metrics.width > 0
-    ? { width: Math.floor(metrics.width * ratio) / ratio, height: Math.ceil(height * ratio) / ratio }
-    : fallback;
-  // A font still loading measures as its fallback; only keep a real measure.
-  let loaded = true;
-  try { loaded = document.fonts?.check?.(key) !== false; } catch { loaded = false; }
-  if (loaded) cellSizes.set(key, cell);
-  return cell;
-}
-
 /**
  * The loading skeleton of a terminal: one bone per line of text, on xterm's
  * own cell grid. A terminal this window revealed before is cached content and
@@ -81,7 +42,7 @@ export function TerminalSkeleton({ panelId, chain }: {
 }) {
   const fontFamily = useConfigStore(state => state.config?.terminalFontFamily) || DEFAULT_TERMINAL_FONT_FAMILY;
   const fontSize = useConfigStore(state => state.config?.terminalFontSize) || DEFAULT_TERMINAL_FONT_SIZE;
-  const cell = useMemo(() => measureCell(buildTerminalFontFamily(fontFamily), fontSize), [fontFamily, fontSize]);
+  const cell = useMemo(() => measureTerminalCell(buildTerminalFontFamily(fontFamily), fontSize), [fontFamily, fontSize]);
   const boneHeight = Math.round(cell.height * BONE_HEIGHT_RATIO);
   if (panelId && wasTerminalRevealed(panelId)) return <div aria-hidden="true" className="absolute inset-0" />;
 
