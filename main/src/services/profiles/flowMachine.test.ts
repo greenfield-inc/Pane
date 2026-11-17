@@ -86,10 +86,14 @@ describe('flow machine: greenfield', () => {
     run = started(reportOutcome(run, profile, 'p', 'plan ready', undefined, NOW), 'c');
     run = started(answerCard(run, profile, 'c', 'approve', NOW), 'build');
     run = started(reportOutcome(run, profile, 'build', 'PR ready', undefined, NOW), 'checks');
-    const interrupted = must(stepExited(run, profile, 'checks', { code: 130, interrupted: true }, NOW));
+    const interrupted = must(stepExited(run, profile, 'checks', { code: 130 }, NOW));
     expect(interrupted.run).toMatchObject({ step: 'checks', wait: { kind: 'card', card: 'set-outcome' } });
     expect(interrupted.effect).toMatchObject({ kind: 'ask-outcome', step: { id: 'checks' } });
     expect(interrupted.run.history).toHaveLength(run.history.length);
+    // A closed tab: no exit code and no signal reaches Pane.
+    expect(must(stepExited(run, profile, 'checks', {}, NOW)).effect).toMatchObject({ kind: 'ask-outcome' });
+    expect(must(stepExited(run, profile, 'checks', { code: 1, signal: '1' }, NOW)).effect).toMatchObject({ kind: 'ask-outcome' });
+    expect(must(stepExited(run, profile, 'checks', { code: 1 }, NOW)).run.step).toBe('build');
   });
 
   it('pauses on the fourth red build and asks to go again or stop', () => {

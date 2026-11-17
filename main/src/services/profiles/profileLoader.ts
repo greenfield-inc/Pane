@@ -10,6 +10,8 @@ import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../../s
 const PROFILE_FILE_SUFFIX = '.profile.yaml';
 /** Far above any real profile (greenfield is ~8 KB); a larger file is refused unread. */
 const MAX_PROFILE_BYTES = 512 * 1024;
+/** Values a profile may expand to: each value written out takes a byte or more, so no file within MAX_PROFILE_BYTES without aliases reaches it. */
+const MAX_PROFILE_VALUES = MAX_PROFILE_BYTES;
 
 /** One profile file and where its `reads` files live. */
 export interface ProfileSource {
@@ -59,27 +61,26 @@ function readSource(source: ProfileSource): ParsedSource {
     return { source, name: fallbackName, errors: [{ code: 'PROFILE_UNREADABLE', message: `Pane couldn't read ${source.file}: ${reasonOf(error)}.`, fix: 'Check the file exists and Pane may read it.' }] };
   }
   let parsed: unknown;
-  // A list or map that closes twice was repeated by a YAML alias (*name). Copying such a file
-  // expands every alias, so nested ones grow exponentially; they are refused before that.
-  const collections = new Set<object>();
-  let aliased = false;
   try {
     // CORE_SCHEMA: plain YAML values only (no timestamps or custom tags), so the result is JSON.
-    parsed = yaml.load(text, {
-      schema: yaml.CORE_SCHEMA,
-      listener: (event, state) => {
-        if (event !== 'close' || !(state.result instanceof Object)) return;
-        if (collections.has(state.result)) aliased = true;
-        else collections.add(state.result);
-      },
-    });
+    parsed = yaml.load(text, { schema: yaml.CORE_SCHEMA });
   } catch (error) {
     // js-yaml's reason and line, without its multi-line snippet or the file's full path.
     const reason = error instanceof yaml.YAMLException ? `${error.reason}${error.mark ? ` at line ${error.mark.line + 1}` : ''}` : reasonOf(error);
     return { source, name: fallbackName, errors: [{ code: 'PROFILE_YAML', message: `${basename(source.file)} is not valid YAML: ${reason}.`, fix: 'Fix the YAML at the line named, then reload.' }] };
   }
-  if (aliased) {
-    return { source, name: fallbackName, errors: [{ code: 'PROFILE_YAML_ALIAS', message: `${basename(source.file)} repeats a list or map with a YAML alias (*name); Pane reads profiles without them.`, fix: 'Write the repeated part out in full where each alias is.' }] };
+  // js-yaml shares an aliased (*name) list or map, so copying the value expands every alias and
+  // nested ones grow exponentially. Count values as a copy would meet them, stopping at a budget
+  // no profile written out in full can reach within the size limit; plain aliases still load.
+  let budget = MAX_PROFILE_VALUES;
+  const pending: unknown[] = [parsed];
+  while (pending.length > 0 && budget > 0) {
+    const node = pending.pop();
+    budget -= 1;
+    if (node instanceof Object) pending.push(...Object.values(node));
+  }
+  if (pending.length > 0) {
+    return { source, name: fallbackName, errors: [{ code: 'PROFILE_YAML_ALIAS', message: `${basename(source.file)} expands, through YAML aliases (*name), to more values than a 512 KB profile can hold; Pane reads profiles without nested aliases.`, fix: 'Write the repeated part out in full where each alias is.' }] };
   }
   const raw = decodeOptionalBoundary(parsed, boundary.jsonObject);
   if (!raw) {
