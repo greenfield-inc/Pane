@@ -69,7 +69,11 @@ async function launchProfile(services: AppServices, input: ProfileLaunchInput): 
   if (!sessionId) {
     const manager = services.orchestrationSessionManager;
     if (!manager) throw new PaneError('PROFILE_SESSIONS_UNAVAILABLE', 'Sessions are not running in this Pane, so the run has nowhere to live.', 'Restart Pane, then launch again.');
-    const name = input.sessionName?.trim() || `${input.profile}: ${input.prompt}`.slice(0, 60);
+    const wanted = input.sessionName?.trim() || `${input.profile}: ${input.prompt}`.slice(0, 60).trim();
+    // Session names are unique: the same task launched again gets "<name> 2", as a handoff does.
+    const taken = new Set((await manager.list()).sessions.map((session) => session.name));
+    let name = wanted;
+    for (let number = 2; taken.has(name); number += 1) name = `${wanted} ${number}`;
     sessionId = (await manager.create({ name })).session.id;
   }
   const request = { profile: input.profile, repoId: input.repoId, sessionId, prompt: input.prompt, harness: input.harness ?? {}, commands: input.commands ?? {} };
