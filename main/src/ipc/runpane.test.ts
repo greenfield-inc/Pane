@@ -302,8 +302,8 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
 }
 
 /** A setup queue with a free slot: setup runs at once and is already done. */
-function idleSetupQueue(): Pick<TaskQueue, 'setupQueuePosition' | 'waitForSetup'> {
-  return { setupQueuePosition: vi.fn(() => undefined), waitForSetup: vi.fn(async () => {}) };
+function idleSetupQueue(): Pick<TaskQueue, 'setupQueuePosition' | 'waitForSetup' | 'waitForSetupWithin'> {
+  return { setupQueuePosition: vi.fn(() => undefined), waitForSetup: vi.fn(async () => {}), waitForSetupWithin: vi.fn(async () => 'finished' as const) };
 }
 
 const tempDirs: string[] = [];
@@ -5965,6 +5965,70 @@ describe('runpane IPC handlers', () => {
     await vi.waitFor(() => expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({ sessionId: session.id, type: 'terminal' })));
   });
 
+  it('returns the Pane when setup outlasts the create timeout and launches its agent with the prompt after setup', async () => {
+    vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+    let finishSetup: () => void = () => {};
+    const services = createServices({
+      // SAFETY: This queue double implements the create and setup-queue methods the create handler uses.
+      taskQueue: {
+        createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })),
+        setupQueuePosition: vi.fn(() => undefined),
+        waitForSetupWithin: vi.fn(async () => 'running' as const),
+        waitForSetup: vi.fn(() => new Promise<void>(resolve => { finishSetup = resolve; })),
+      } as never,
+    });
+
+    const result = await createRegistry(services).invoke('runpane:panes:create', [{
+      repo: { id: project.id },
+      timeoutMs: 5_000,
+      panes: [{ name: 'slow-install', tool: { command: 'codex', initialInput: 'Fix the bug' } }],
+    }]);
+
+    expect(result).toMatchObject({
+      ok: true,
+      items: [{
+        ok: true,
+        paneId: session.id,
+        nextCommand: `runpane panels list --pane ${session.id} --json`,
+        setupPending: { message: 'Setup is still running after the 5s create timeout. Its agent starts after setup.' },
+      }],
+    });
+    expect(result.items[0]).not.toHaveProperty('panelId');
+    expect(result.items[0]).not.toHaveProperty('error');
+    expect(panelManager.createPanel).not.toHaveBeenCalled();
+
+    finishSetup();
+
+    await vi.waitFor(() => expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({ sessionId: session.id, type: 'terminal' })));
+  });
+
+  it('starts no agent when setup that outlasted the create timeout then fails', async () => {
+    vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+    let failSetup: (error: Error) => void = () => {};
+    const services = createServices({
+      // SAFETY: This queue double implements the create and setup-queue methods the create handler uses.
+      taskQueue: {
+        createSessionAndWait: vi.fn(async () => ({ sessionId: session.id })),
+        setupQueuePosition: vi.fn(() => undefined),
+        waitForSetupWithin: vi.fn(async () => 'running' as const),
+        waitForSetup: vi.fn(() => new Promise<void>((_resolve, reject) => { failSetup = reject; })),
+      } as never,
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const result = await createRegistry(services).invoke('runpane:panes:create', [{
+      repo: { id: project.id },
+      panes: [{ name: 'broken-install', tool: { agent: 'codex' } }],
+    }]);
+    expect(result).toMatchObject({ ok: true, items: [{ ok: true, setupPending: expect.anything() }] });
+
+    failSetup(new Error('pnpm install failed'));
+
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('did not launch after setup'), expect.any(Error)));
+    expect(panelManager.createPanel).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
   it('reports the base a created Pane started from, with its stale-base notice', async () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
     const base = {
@@ -7872,6 +7936,31 @@ describe('runpane IPC handlers', () => {
       await expect(registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task B', expectReport: true }]))
         .rejects.toMatchObject({ code: 'ERR_RUNPANE_REPORT_OUTSTANDING', next: expect.stringContaining('--no-expect-report') });
       expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+    });
+
+    it('frees a tab whose agent exited to the shell for new work, journalling the report it owed', async () => {
+      stored = structuredClone(terminalPanel);
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      const workspaceJournal = new WorkspaceJournal();
+      const services = createServices({ workspaceJournal });
+      const registry = createRegistry(services);
+      const first = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task A', expectReport: true }]);
+      // The agent's launch failed or it crashed: its shell is back in the foreground, and no panel exit was journalled.
+      vi.mocked(terminalPanelManager.hasLaunchCommandExited).mockResolvedValue(true);
+
+      const second = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task B', expectReport: true }]);
+
+      expect(second.expectedReport).toEqual({ since: expect.any(String) });
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toEqual(second.expectedReport);
+      expect(workspaceJournal.readAfter(0, { kinds: ['agent.report.missing'] }).entries).toEqual([expect.objectContaining({
+        paneId: session.id,
+        panelId: terminalPanel.id,
+        reason: 'exited',
+        expectedSince: first.expectedReport?.since,
+      })]);
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, expect.stringContaining('Task B'));
+      // Expectations are saved under PANE_DIR, which the tests in this file share.
+      workspaceJournal.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
     });
 
     it('delivers a reply to a worker that owes a report and keeps waiting for that report', async () => {

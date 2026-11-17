@@ -176,6 +176,55 @@ describe('ExpectedReportTracker', () => {
     expect(() => tracker.arm('panel-1', '2026-10-15T11:00:00.000Z')).not.toThrow();
   });
 
+  it('frees a panel whose agent exited to the shell, journalling the report it owed', async () => {
+    const { tracker, missing } = setup({ text: 'error: unknown option --foo', source: 'screen' });
+    tracker.arm('panel-1', '2026-10-15T10:00:00.000Z');
+    // A live agent that owes a report still refuses new work.
+    expect(() => tracker.arm('panel-1', '2026-10-15T10:01:00.000Z')).toThrow(/owes a report/);
+
+    await tracker.releaseExited('panel-1', { paneId: 'pane-1', panelTitle: 'Codex', agentType: 'codex' });
+
+    expect(missing()).toEqual([expect.objectContaining({
+      kind: 'agent.report.missing',
+      paneId: 'pane-1',
+      panelId: 'panel-1',
+      panelTitle: 'Codex',
+      agentType: 'codex',
+      reason: 'exited',
+      expectedSince: '2026-10-15T10:00:00.000Z',
+      lastOutput: 'error: unknown option --foo',
+    })]);
+    expect(tracker.expectation('panel-1')).toBeUndefined();
+    expect(() => tracker.arm('panel-1', '2026-10-15T10:02:00.000Z')).not.toThrow();
+    tracker.dispose();
+  });
+
+  it('drops the reservation of a launch that never sent its work, without a missing report', async () => {
+    const { tracker, missing } = setup();
+    tracker.arm('panel-1', '2026-10-15T10:00:00.000Z', true);
+
+    await tracker.releaseExited('panel-1', { paneId: 'pane-1' });
+
+    expect(missing()).toEqual([]);
+    expect(() => tracker.arm('panel-1', '2026-10-15T10:02:00.000Z')).not.toThrow();
+    tracker.dispose();
+  });
+
+  it('frees an exited agent\'s panel even when its missing report cannot be journalled', async () => {
+    const log = vi.fn();
+    const journal = new WorkspaceJournal();
+    const tracker = new ExpectedReportTracker({ journal, lastReportAt: () => undefined, lastOutput: async () => undefined, log });
+    tracker.arm('panel-1', '2026-10-15T10:00:00.000Z');
+    vi.spyOn(journal, 'appendPaneEntry').mockImplementation(() => { throw new Error('disk full'); });
+
+    await tracker.releaseExited('panel-1', { paneId: 'pane-1' });
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('exited agent'), expect.objectContaining({ message: 'disk full' }));
+    expect(tracker.expectation('panel-1')).toBeUndefined();
+    tracker.dispose();
+    journal.dispose();
+  });
+
   it('stays quiet when the agent reported after the work was sent', async () => {
     const { expectations, reports, ready, missing, settle } = setup();
     expectations.set('panel-1', { since: '2026-10-15T10:00:00.000Z' });

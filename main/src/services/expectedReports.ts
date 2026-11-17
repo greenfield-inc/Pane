@@ -17,6 +17,10 @@ import type { TerminalExpectedReport } from '../../../shared/types/panels';
  * Codex background terminal) has not finished: the tracker waits, re-reading the screen every
  * `recheckMs` while the panel stays ready, and raises once nothing runs or the panel exits.
  *
+ * An agent tab runs its agent inside a shell, so an agent that exits back to that shell (a failed
+ * launch, a crash) ends no panel and journals no exit. `releaseExited` settles what it owed: Pane
+ * calls it when new work reaches a panel whose launch command has exited, so the tab can be reused.
+ *
  * Expectations live in their own file (`expected-reports.json`), written only here. Panel state is
  * rewritten from snapshots elsewhere, so a cleared expectation kept there could come back.
  */
@@ -36,6 +40,8 @@ const expectationsFileSchema = boundary.object({
 });
 const expectationSchema = boundary.object({ since: boundary.nonEmptyString, pending: boundary.optional(boundary.boolean) });
 type Expectation = TerminalExpectedReport & { pending?: boolean };
+/** The panel a missing report is journalled for, and why it is missing. */
+type MissingReportSource = Pick<RunpaneWorkspaceEntry, 'paneId' | 'panelTitle' | 'agentType'> & { reason: 'exited' | 'ready' };
 
 export interface PanelLastOutput {
   text: string;
@@ -125,6 +131,30 @@ export class ExpectedReportTracker {
     if (current === reservation && current.pending) this.clear(panelId);
   }
 
+  /**
+   * The agent that owed this panel's report exited back to the shell, so no report can come.
+   * Journals the missing report as an exit would, then frees the panel for new work. A reservation
+   * whose work was never sent is dropped without an entry. A missing report already being collected
+   * is left to finish.
+   */
+  async releaseExited(panelId: string, panel: Omit<MissingReportSource, 'reason'>): Promise<void> {
+    this.ensureLoaded();
+    const expected = this.expectations.get(panelId);
+    if (!expected || this.raising.has(panelId)) return;
+    this.stopWaiting(panelId);
+    if (expected.pending || this.fulfilled(panelId, expected)) { this.clear(panelId); return; }
+    this.raising.add(panelId);
+    try {
+      await this.raise({ ...panel, reason: 'exited' }, panelId, expected);
+    } catch (error) {
+      this.options.log?.('[ExpectedReports] Could not journal the missing report of an exited agent', error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      this.raising.delete(panelId);
+      // Its agent is gone either way: keeping the expectation would refuse every new piece of work.
+      if (this.expectations.get(panelId) === expected) this.clear(panelId);
+    }
+  }
+
   private observe(entry: RunpaneWorkspaceEntry): void {
     this.ensureLoaded();
     const panelId = entry.panelId;
@@ -156,7 +186,7 @@ export class ExpectedReportTracker {
     // One missing report per expectation: the next dispatch arms it again.
     if (this.fulfilled(panelId, expected)) { this.clear(panelId); return; }
     this.raising.add(panelId);
-    void this.raise(entry, panelId, expected)
+    void this.raise(missingReportSource(entry), panelId, expected)
       .catch(error => {
         this.options.log?.('[ExpectedReports] Could not journal a missing report', asError(error));
         if (!this.disposed && this.expectations.get(panelId) === expected) this.waitForBackground(panelId, entry);
@@ -164,7 +194,7 @@ export class ExpectedReportTracker {
       .finally(() => this.raising.delete(panelId));
   }
 
-  private async raise(entry: RunpaneWorkspaceEntry, panelId: string, expected: TerminalExpectedReport): Promise<void> {
+  private async raise(source: MissingReportSource, panelId: string, expected: TerminalExpectedReport): Promise<void> {
     const output = await this.options.lastOutput(panelId).catch(() => undefined);
     // A report that landed while the output was read wins.
     if (this.disposed || this.expectations.get(panelId) !== expected) return;
@@ -172,10 +202,10 @@ export class ExpectedReportTracker {
     const missing: Parameters<WorkspaceJournal['appendPaneEntry']>[1] = {
       kind: 'agent.report.missing',
       panelId,
-      panelTitle: entry.panelTitle,
-      agentType: entry.agentType,
+      panelTitle: source.panelTitle,
+      agentType: source.agentType,
       source: 'agent',
-      reason: entry.kind === 'panel.exited' ? 'exited' : 'ready',
+      reason: source.reason,
       expectedSince: expected.since,
     };
     const text = output?.text.trim();
@@ -183,7 +213,7 @@ export class ExpectedReportTracker {
       missing.lastOutput = boundOutput(text);
       missing.lastOutputSource = output.source;
     }
-    this.options.journal.appendPaneEntry(entry.paneId, missing);
+    this.options.journal.appendPaneEntry(source.paneId, missing);
     if (this.expectations.get(panelId) === expected) this.clear(panelId);
   }
 
@@ -266,6 +296,15 @@ export class ExpectedReportTracker {
       if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
     }
   }
+}
+
+function missingReportSource(entry: RunpaneWorkspaceEntry): MissingReportSource {
+  return {
+    paneId: entry.paneId,
+    panelTitle: entry.panelTitle,
+    agentType: entry.agentType,
+    reason: entry.kind === 'panel.exited' ? 'exited' : 'ready',
+  };
 }
 
 function asError(error: Error | string): Error {

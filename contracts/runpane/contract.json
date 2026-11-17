@@ -11742,6 +11742,18 @@
                     },
                     "additionalProperties": false
                   },
+                  "setupPending": {
+                    "type": "object",
+                    "required": [
+                      "message"
+                    ],
+                    "properties": {
+                      "message": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
                   "base": {
                     "type": "object",
                     "required": [
@@ -21709,6 +21721,7 @@
           "If readiness returns blocked, inspect blocked.suggestedCommand rather than guessing which prompt to answer.",
           "With --tool-command, --agent names the agent the command runs (a wrapper such as `agent-farm run`): Pane launches the command unchanged and treats the panel as that agent. Without --agent, Pane detects Claude Code, Codex and Cursor from the foreground process or the agent's screen, and --wait-ready waits for the detected agent's input box; a command that never shows a supported agent is not ready and nothing is typed into it.",
           "At most 2 Panes run setup at once (worktree file sync, dependency install, build script); more wait in line. A queued `panes create` returns the Pane id right away with `setupQueue` ({ position, message }) and no `panelId`; the agent starts when setup finishes. Find its panel later with `runpane panels list --pane <id> --json`.",
+          "Setup that outlasts the create timeout (`--timeout`, default 120s), such as a slow dependency install, does not fail the create or drop the agent: the Pane id comes back with `setupPending` ({ message }) and no `panelId`, and the agent starts with its prompt or initial input when setup finishes. If setup fails, no agent starts and the Pane shows the failure. Find its panel later with `runpane panels list --pane <id> --json`.",
           "A Pane with its own worktree starts at the remote's current tip of a remote-tracking base (the default `origin/main`, or one named with `--base`): Pane fetches that branch first, waiting at most about 10 seconds, and creates started together share the fetch. Each item's `base` reports `{ ref, commit, refresh }`, where `refresh` is `fetched`, `recent` (reused a fetch from the last 30 seconds), `skipped` (a local branch or commit base) or `failed`. A failed refresh never fails the create; the Pane starts from the local ref and `base.notice` says what happened and how to catch up.",
           "`panes create --branch <name>` fails with code `ERR_RUNPANE_BRANCH_HAS_PANE` when another Pane already has that branch checked out. The message names the Pane and gives the next step: `runpane panels create --pane <id> --tool-command \"<cmd>\" --source agent --no-focus`."
         ]
@@ -22561,7 +22574,8 @@
           "`--as-file-pointer` writes the text to a prompt file readable only by you, inside the Pane's git worktree at `.pane/prompts/` (hidden by the repository's `.git/info/exclude`, never committed) when it has one, otherwise under `<pane-dir>/prompts/<pane-id>/`, so an agent limited to its working directories reads it without a permission prompt, and sends the one line `Read and follow <path>`, with the path relative to the worktree (where the agent starts) when the file is inside it; the result's `promptFile` is always absolute. Prefer it for long prompts.",
           "`--attach <file>` (repeatable, with `--as-file-pointer`) copies each file into a folder beside the prompt file and sends `Read and follow <path> (attached: <copy>, ...)`; the result lists the copies in `attachments`.",
           "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing.",
-          "On a chat tab, submit sends an ACP prompt and returns sequenceName=acp, enter=none, operationId and acp-receipt delivery evidence; a prompt sent while the agent works is queued and sent next. Do not blindly resend after a lost response."
+          "On a chat tab, submit sends an ACP prompt and returns sequenceName=acp, enter=none, operationId and acp-receipt delivery evidence; a prompt sent while the agent works is queued and sent next. Do not blindly resend after a lost response.",
+          "Report-expected work is refused with `ERR_RUNPANE_REPORT_OUTSTANDING` while the panel's agent still owes a report. An agent that exited back to its tab's shell (a failed launch, a crash) cannot report, so a submit to that tab settles what it owed first: Pane journals its `agent.report.missing` (`reason: exited`, or nothing if its work was never sent) and delivers the new work."
         ]
       },
       "panels resume": {

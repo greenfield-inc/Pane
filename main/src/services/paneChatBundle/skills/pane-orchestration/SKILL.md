@@ -146,6 +146,7 @@ this order:
 | `initialInput.delivery.state` `in-composer` | the line is still in the input box | `runpane panels submit-composer --panel <id> --strategy auto --yes --json` once |
 | `initialInput.blocked.kind` `submission_unverified`, or state `unknown` | Pane could not prove delivery | don't resend: read `panels screen` once, then run `nextCommand` if it fits |
 | `setupQueue` and no `panelId` | the Pane waits behind other setups (at most 2 run at once) | find the panel later with `runpane panels list --pane <id> --json` |
+| `setupPending` and no `panelId` | setup (a slow dependency install, a build script) outlasted the create timeout; the agent and its brief start when it finishes | don't retry; find the panel later with `runpane panels list --pane <id> --json` |
 
 When the panel was blocked at a prompt, Pane holds the brief and sends it by
 itself once the prompt is answered and the input box is ready. Don't submit
