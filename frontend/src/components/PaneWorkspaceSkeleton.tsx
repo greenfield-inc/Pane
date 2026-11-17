@@ -9,7 +9,7 @@ const INSPECTOR_TABS = ['Details', 'Files', 'Changes'] as const;
  * it will open at: the tab bar, the active tab's terminal, the Terminal dock
  * and the inspector, or the swapped layout's terminal rail and bottom inspector.
  */
-export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidth, railWidth, bottomInspectorHeight, contentRef, centerRef, chain }: {
+export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidth, railWidth, bottomInspectorHeight, contentRef, centerRef, chain, stagePanelId }: {
   /** For screen readers: what is opening. */
   name: string;
   swapped: boolean;
@@ -26,10 +26,12 @@ export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidt
   centerRef: Ref<HTMLDivElement>;
   /** The Pane's id: every step of opening it shares one skeleton clock. */
   chain: string;
+  /** The tab the stage showed last time, whose last screen shapes the stage. */
+  stagePanelId?: string;
 }) {
   const stage = (
     <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]">
-      <TerminalSkeleton chain={chain} />
+      <TerminalSkeleton panelId={stagePanelId} chain={chain} />
     </div>
   );
   return (

@@ -661,10 +661,23 @@ body.understory {
   to { opacity: 1; }
 }
 
+/* A skeleton laid over painted content (a terminal's mask) fades out instead. */
+.skeleton-fade-out {
+  animation: pane-skeleton-fade-out 120ms ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes pane-skeleton-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 /* Animations pause in a background window (top of this file); a paused fade
    would hold the content invisible, so there it appears at once. */
 html.window-blurred .skeleton-reveal,
-html.window-hidden .skeleton-reveal {
+html.window-hidden .skeleton-reveal,
+html.window-blurred .skeleton-fade-out,
+html.window-hidden .skeleton-fade-out {
   animation: none !important;
 }
 
@@ -694,7 +707,8 @@ html.window-hidden .skeleton-reveal {
   }
 
   /* Content replacing a skeleton appears without a fade. */
-  .skeleton-reveal {
+  .skeleton-reveal,
+  .skeleton-fade-out {
     animation: none;
   }
 

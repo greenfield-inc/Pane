@@ -42,6 +42,7 @@ import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayout
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { usePanelStore } from '../stores/panelStore';
+import { configuredAgent } from '../../../shared/agents';
 import { useHotkey } from '../hooks/useHotkey';
 import { getPanelIcon } from './panels/panelIcon';
 import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from './InspectorTabs';
@@ -592,7 +593,7 @@ function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
     <div className="flex h-full min-h-0 flex-col">
       <SessionTileHeader name={name ?? 'Session'} chrome={chrome} />
       {isLoading ? (
-        <SessionWorkspaceSkeleton name={name ?? 'Session'} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]} chain={record?.internalSessionId} />
+        <SavedSessionSkeleton record={record} name={name ?? 'Session'} chromeInline={chrome.tiled || Boolean(chrome.inline)} />
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center">
           <div>
@@ -608,7 +609,16 @@ function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
 
 /** The agent tab's title, as the host names it, for a Session not open yet. */
 function agentTabTitle(record: OrchestrationSessionRecord | undefined): string {
-  return record ? `${record.name} · ${PANE_CHAT_AGENT_LABELS[record.agent]}` : 'Session';
+  return record ? `${record.name} · ${configuredAgent(record.agent).title}` : 'Session';
+}
+
+/** A Session's workspace skeleton, in the layout this window last showed it with. */
+function SavedSessionSkeleton({ record, name, chromeInline }: { record?: OrchestrationSessionRecord; name: string; chromeInline: boolean }) {
+  const internalId = record?.internalSessionId;
+  const layout = usePanelStore(state => (internalId ? state.layouts[internalId] : undefined));
+  const panels = usePanelStore(state => (internalId ? state.panels[internalId] : undefined));
+  return <SessionWorkspaceSkeleton name={name} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]}
+    chain={internalId} layout={layout} panels={panels} chromeInline={chromeInline} />;
 }
 
 /** Before the Sessions list arrives: the selected Session's workspace, if it is known yet. */
@@ -616,7 +626,7 @@ function OpeningSessionSkeleton() {
   const record = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId));
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
-      <SessionWorkspaceSkeleton name={record?.name ?? 'Sessions'} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]} chain={record?.internalSessionId} />
+      <SavedSessionSkeleton record={record} name={record?.name ?? 'Sessions'} chromeInline={false} />
     </div>
   );
 }

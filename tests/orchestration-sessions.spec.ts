@@ -4253,7 +4253,7 @@ test('A Session opens behind a skeleton of its workspace that appears only for a
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
 
   // Clicking Beta holds its record for 1.5 s; the frame right after the click shows the skeleton's surface with its bones still hidden.
   const atClick = await page.evaluate(async () => {
@@ -4275,6 +4275,6 @@ test('A Session opens behind a skeleton of its workspace that appears only for a
   await expect(skeleton.locator('[data-skeleton="visible"]')).toHaveCount(3);
   await expect(page.getByRole('status', { name: 'Opening Beta' })).toBeAttached();
   await expect(page.getByText('Opening Beta…')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Beta', exact: true })).toBeAttached({ timeout: 10_000 });
   await expect(skeleton).toHaveCount(0);
 });

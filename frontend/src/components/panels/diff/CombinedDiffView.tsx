@@ -191,6 +191,11 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
   const historyLabel = isMainRepo ? (historySource === 'local' ? 'Local commits' : mainBranch) : null;
   const headerLabel = historyLabel ? `${historyLabel} · ${label}` : label;
   const busy = loading || executionsLoading || isGitOperationRunning;
+  // The refresh icon turns for a refresh the person asked for, not for the panel's own loads (those show a skeleton).
+  const [refreshRequested, setRefreshRequested] = useState(false);
+  useEffect(() => {
+    if (!loading && !executionsLoading) setRefreshRequested(false);
+  }, [loading, executionsLoading]);
   const hasUncommitted = executions.some(execution => execution.id === 0 && execution.stats_files_changed > 0);
   const emptyMessage = isMainRepo && executions.length === 0
     ? historySource === 'remote'
@@ -228,8 +233,8 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
               <RotateCcw className="h-3.5 w-3.5" />
             </button>
           )}
-          <button type="button" onClick={refresh} disabled={busy} className="rounded p-1 hover:bg-surface-hover" title="Refresh">
-            <RefreshCw className={`h-3.5 w-3.5 text-text-tertiary ${busy ? 'animate-spin' : ''}`} />
+          <button type="button" onClick={() => { setRefreshRequested(true); refresh(); }} disabled={busy} className="rounded p-1 hover:bg-surface-hover" title="Refresh">
+            <RefreshCw className={`h-3.5 w-3.5 text-text-tertiary ${isGitOperationRunning || (refreshRequested && busy) ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>

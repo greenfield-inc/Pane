@@ -7,7 +7,7 @@ const SKELETON_DELAY_MS = 150;
 const SKELETON_MIN_VISIBLE_MS = 300;
 /** The bone breathe period (`pane-skeleton-breathe` in index.css). */
 const SKELETON_PERIOD_MS = 2000;
-/** How long content that replaces a skeleton carries `skeleton-reveal` (index.css fades it 120 ms). */
+/** How long a reveal lasts: content carries `skeleton-reveal`, or a skeleton over painted content `skeleton-fade-out` (index.css fades either 120 ms). */
 export const REVEAL_MS = 200;
 /** A skeleton that replaces another within this gap continues its timing. */
 const CHAIN_GAP_MS = 100;

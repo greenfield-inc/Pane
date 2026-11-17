@@ -14,8 +14,7 @@ import { PanelContainer } from './panels/PanelContainer';
 import { PanelTabStrip } from './panels/PanelTabStrip';
 import { SplitLayout } from './panels/SplitLayout';
 import { SessionAddToolMenu, type SessionToolSpec } from './SessionAddToolMenu';
-import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
-import { TerminalSkeleton } from './panels/TerminalSkeleton';
+import { SessionStageSkeleton, SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
 import { useOuterPanelResize } from '../hooks/useOuterPanelResize';
 import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
@@ -718,7 +717,8 @@ export function SessionWorkspacePanels({
 
   if (!loaded) {
     return <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
-      {!error ? <SessionWorkspaceSkeleton name="Session tools" tabTitle={agentPanel.title} agentPanelId={agentPanel.id} chain={sessionId} /> : <div className="p-6 text-text-secondary"><p role="alert">{error}</p>
+      {!error ? <SessionWorkspaceSkeleton name="Session tools" tabTitle={agentPanel.title} agentPanelId={agentPanel.id} chain={sessionId}
+        layout={layout} panels={panels} chromeInline={Boolean(chromeInline)} /> : <div className="p-6 text-text-secondary"><p role="alert">{error}</p>
         <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => { setError(null); setRetry(value => value + 1); }}>Retry</button>
       </div>}
     </div>;
@@ -741,8 +741,8 @@ export function SessionWorkspacePanels({
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden" inert={asideMaximized ? true : undefined}>
           <div ref={stageRef} data-focus-region="main" className="relative min-h-0 flex-1">
-            {stageUnderlay && primary?.activePanelId === agentPanelId && <div className="absolute inset-0 bg-[var(--color-terminal-bg)]">
-              <TerminalSkeleton panelId={agentPanelId} chain={sessionId} />
+            {stageUnderlay && (isSplit || primary?.activePanelId === agentPanelId) && <div className="absolute inset-0 flex">
+              <SessionStageSkeleton layout={layout} panels={panels} agentPanelId={agentPanelId} chain={sessionId} />
             </div>}
             {stageNotice}
             {approval && placement === 'over' && overlay && (

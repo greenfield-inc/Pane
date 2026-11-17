@@ -409,15 +409,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const revealed = revealedKey === loadKey;
   const firstLoad = useSkeletonHold(overlayActive && !revealed, panel.sessionId);
   const maskHeld = overlayActive || firstLoad.holding;
-  // The terminal fades in over a skeleton the person saw; a fast load just appears.
-  const [fadeIn, setFadeIn] = useState(false);
-  // A skeleton the person saw stays up until the mask lifts.
+  // A skeleton the person saw stays up until the mask lifts, then fades out
+  // over the painted terminal; a fast load just appears.
   const skeletonSeen = firstLoad.seen;
-  useEffect(() => {
-    if (!fadeIn) return;
-    const timer = setTimeout(() => setFadeIn(false), REVEAL_MS);
-    return () => clearTimeout(timer);
-  }, [fadeIn]);
+  const [maskFading, setMaskFading] = useState(false);
   // When the terminal became ready: a skeleton's hold counts toward the linger.
   const readyAt = useRef(0);
   useEffect(() => {
@@ -428,17 +423,24 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       setOverlayVisible(true);
       return;
     }
-    const lift = () => {
+    let fadeTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      setMaskFading(false);
       setOverlayVisible(false);
       setRevealedKey(loadKey);
-      if (skeletonSeen) setFadeIn(true);
       markPaneTerminalShown(panel.sessionId);
+    };
+    const lift = () => {
+      // Only a first load's skeleton fades; a refit's plain mask just lifts.
+      if (revealed || !skeletonSeen) { finish(); return; }
+      setMaskFading(true);
+      fadeTimer = setTimeout(finish, REVEAL_MS);
     };
     if (!revealed) {
       // A first load already waited for the terminal's paint before reporting
       // ready; two more frames cover the replay's last write.
       let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(lift); });
-      return () => cancelAnimationFrame(frame);
+      return () => { cancelAnimationFrame(frame); clearTimeout(fadeTimer); };
     }
     const linger = Math.max(0, readyAt.current + TERMINAL_OVERLAY_LINGER_MS - performance.now());
     const lingerTimer = setTimeout(lift, linger);
@@ -2128,7 +2130,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       {/* ph-no-capture keeps xterm out of session recordings: its WebGL canvas
           never replays, and replaying scrollback rewrites the scrollbar
           slider's style thousands of times, which the recorder would serialize. */}
-      <div ref={terminalRef} className={`ph-no-capture h-full w-full${fadeIn ? ' skeleton-reveal' : ''}`} data-terminal-font={terminalFontObservation} data-window-focused={windowFocused ? "true" : "false"} />
+      <div ref={terminalRef} className="ph-no-capture h-full w-full" data-terminal-font={terminalFontObservation} data-window-focused={windowFocused ? "true" : "false"} />
       {refreshError && <div role="status" className="absolute bottom-0 inset-x-0 z-30 bg-surface-secondary px-3 py-2 text-xs text-text-secondary">
         Terminal restoration needs attention: {refreshError}
         <button type="button" className="ml-3 text-text-primary" onClick={() => void handleManualRefresh()}>Retry snapshot</button>
@@ -2221,7 +2223,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
       {(overlayVisible || initError) && (
         // The terminal's own background, so lifting the mask changes nothing but the text.
-        <div className="absolute inset-0 z-10 bg-[var(--color-terminal-bg)]" data-testid="terminal-activation-mask" role={initError ? undefined : 'status'} aria-label={initError ? undefined : 'Loading terminal'}>
+        <div className={`absolute inset-0 z-10 bg-[var(--color-terminal-bg)]${maskFading ? ' skeleton-fade-out' : ''}`} data-testid="terminal-activation-mask" role={initError ? undefined : 'status'} aria-label={initError ? undefined : 'Loading terminal'}>
           {initError ? <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-text-secondary">
             <p role="alert">Terminal could not load: {initError}</p>
             <button type="button" className="rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => setInitAttempt(attempt => attempt + 1)}>Retry</button>
