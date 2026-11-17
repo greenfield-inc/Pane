@@ -88,6 +88,8 @@
       "ignoreUnresolved": ["/bin/sh", "/usr/bin/security"],
       "ignoreBinaries": [
         "plutil",
+        "fish",
+        "pwsh",
         "fc-list",
         "system_profiler",
         "xclip",

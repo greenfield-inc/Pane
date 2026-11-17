@@ -278,7 +278,7 @@ import {
   type WorkspaceIdleCandidate,
   type WorkspaceIdleSchedule,
 } from '../services/workspaceIdleTracker';
-import { agentConfig, agentLabel, agentTerminalCommand, configuredAgent, configuredAgentSchema, isAgentSessionId, isConfiguredAgent, typesStartingMessage } from '../../../shared/agents';
+import { agentConfig, agentLabel, agentResumeIdPattern, agentTerminalCommand, configuredAgent, configuredAgentSchema, isAgentResumeId, isConfiguredAgent, typesStartingMessage } from '../../../shared/agents';
 import { paneScratchUsage } from '../services/paneScratch';
 import { archiveRetentionDays } from '../services/archiveExpiry';
 
@@ -5143,9 +5143,9 @@ function parsePaneAdoptRequest(value: PaneCommandValue): RunpanePaneAdoptRequest
       const tool = parseRunpaneToolSpec(entry.tool, `Pane adopt item ${index}`);
       const resumeProvided = Object.prototype.hasOwnProperty.call(entry, 'resume');
       const resume = optionalString(entry.resume);
-      const resumeSession = 'agent' in tool && tool.agent ? agentConfig(tool.agent)?.terminal.session : undefined;
-      if (resumeProvided && resume === undefined && 'agent' in tool && tool.agent && resumeSession) {
-        throw new PaneError('ERR_RESUME_ID', `${configuredAgent(tool.agent).label} --resume must be a string matching ${resumeSession.idPattern}. Nothing was created.`, 'Pass the conversation id as text.');
+      const resumePattern = 'agent' in tool && tool.agent ? agentResumeIdPattern(tool.agent) : undefined;
+      if (resumeProvided && resume === undefined && 'agent' in tool && tool.agent && resumePattern) {
+        throw new PaneError('ERR_RESUME_ID', `${configuredAgent(tool.agent).label} --resume must be a string matching ${resumePattern}. Nothing was created.`, 'Pass the conversation id as text.');
       }
       const launch = optionalBoolean(entry.launch);
       if (tool.initialInput !== undefined && launch !== true) {
@@ -6686,7 +6686,8 @@ function parsePaneCreateItem(value: PaneCommandValue, index: number): RunpanePan
 function parseResumeId(value: PaneCommandValue | undefined, label: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   const resume = optionalString(value)?.trim();
-  if (!resume) throw new Error(`${label} resume must be a non-empty native session id`);
+  if (!resume) throw new PaneError('ERR_RESUME_ID', `${label} resume must be a non-empty native session id. Nothing was created.`, 'Pass the id the agent shows for the conversation, or leave out --resume to start a new one.');
+  // The agent's own id shape is checked once the tool is resolved (assertResumableTool).
   return resume;
 }
 
@@ -6696,13 +6697,15 @@ function assertResumableTool(tool: RunpaneResolvedTool, resume: string | undefin
   if (tool.launchMode === 'wrapped') {
     throw new Error('--resume needs a built-in agent command; a wrapper command resumes its own way.');
   }
-  const session = tool.agent ? agentConfig(tool.agent)?.terminal.session : undefined;
-  if (!tool.agent || !session) return;
+  const pattern = agentResumeIdPattern(tool.agent);
+  if (!tool.agent || !pattern) return;
   const label = configuredAgent(tool.agent).label;
-  if (!isAgentSessionId(tool.agent, resume)) {
-    throw new PaneError('ERR_RESUME_ID', `${label} --resume must be a session id matching ${session.idPattern}. Nothing was created.`, `Pass the id ${label} shows for the conversation, or leave out --resume to start a new one.`);
+  // The id goes onto the agent's launch command line, so only the shape the agent gives is let through.
+  if (!isAgentResumeId(tool.agent, resume)) {
+    throw new PaneError('ERR_RESUME_ID', `${label} --resume must be a session id matching ${pattern}. Nothing was created.`, `Pass the id ${label} shows for the conversation, or leave out --resume to start a new one.`);
   }
-  if (session.paneChoosesId && !takesChosenSession(tool.command, tool.agent)) {
+  const session = agentConfig(tool.agent)?.terminal.session;
+  if (session?.paneChoosesId && !takesChosenSession(tool.command, tool.agent)) {
     throw new PaneError('ERR_RESUME_COMMAND', `--resume needs a plain ${label} command; this one picks its own conversation, runs a subcommand or uses shell syntax. Nothing was created.`, `Use \`--agent ${tool.agent}\` without a custom command, or resume inside ${label} itself.`);
   }
 }

@@ -711,6 +711,11 @@
               "type": "string",
               "minLength": 1
             },
+            "resumeIdPattern": {
+              "description": "Regular expression a saved conversation id must match, for a CLI Pane resumes with its own built-in command rather than a `session` flag. With `session`, its idPattern applies instead.",
+              "type": "string",
+              "minLength": 1
+            },
             "session": {
               "description": "How the CLI opens a saved conversation from the command line.",
               "type": "object",

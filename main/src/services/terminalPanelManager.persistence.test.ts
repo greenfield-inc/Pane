@@ -1259,8 +1259,8 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
   });
 
   it.each([
-    { agentType: 'claude', initialCommand: 'claude --dangerously-skip-permissions', agentSessionId: '22222222-2222-4222-8222-222222222222', expected: 'claude --dangerously-skip-permissions --resume "22222222-2222-4222-8222-222222222222"' },
-    { agentType: 'codex', initialCommand: 'codex --yolo', agentSessionId: 'thread-1', expected: 'codex --yolo resume "thread-1"' },
+    { agentType: 'claude', initialCommand: 'claude --dangerously-skip-permissions', agentSessionId: '22222222-2222-4222-8222-222222222222', expected: 'claude --dangerously-skip-permissions --resume \'22222222-2222-4222-8222-222222222222\'' },
+    { agentType: 'codex', initialCommand: 'codex --yolo', agentSessionId: 'thread-1', expected: 'codex --yolo resume \'thread-1\'' },
     { agentType: 'cursor', initialCommand: 'cursor-agent --force --trust', agentSessionId: 'chat-1', expected: 'cursor-agent --force --trust --resume "chat-1"' },
   ] as const)('launches and stages an adopted $agentType conversation through the same resolver', async ({ expected, ...identity }) => {
     vi.useFakeTimers();
@@ -1464,7 +1464,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       const { handle } = await startTerminal(panel);
       handle.emit('$ ');
       await vi.advanceTimersByTimeAsync(500);
-      expect(handle.written).toContain('claude --dangerously-skip-permissions --resume "session\\$1"\r');
+      expect(handle.written).toContain('claude --dangerously-skip-permissions --resume \'session$1\'\r');
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();

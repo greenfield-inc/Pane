@@ -54,6 +54,8 @@ interface AgentConfigBase {
     promptArgument?: boolean;
     configDir?: string;
     session?: AgentSessionConfig;
+    /** The shape of a saved conversation id for a CLI Pane resumes with its own command, without a `session` flag. */
+    resumeIdPattern?: string;
   };
   install: { url: string; command: string };
   /** Transcript folders, relative to the home the CLI runs with. */
@@ -107,6 +109,21 @@ export function typesStartingMessage(id: string | null | undefined): boolean {
 export function isAgentSessionId(agent: string | null | undefined, id: string | null | undefined): id is string {
   const session = agent ? agentConfig(agent)?.terminal.session : undefined;
   return session !== undefined && id !== undefined && id !== null && new RegExp(session.idPattern, 'u').test(id);
+}
+
+/**
+ * The shape a saved conversation id must have before Pane resumes it: `terminal.session.idPattern`,
+ * else `terminal.resumeIdPattern`. Undefined for an agent whose config gives no shape.
+ */
+export function agentResumeIdPattern(agent: string | null | undefined): string | undefined {
+  const terminal = agent ? agentConfig(agent)?.terminal : undefined;
+  return terminal?.session?.idPattern ?? terminal?.resumeIdPattern;
+}
+
+/** Whether `id` has the shape the agent's config gives for a conversation id; false when it gives none. */
+export function isAgentResumeId(agent: string | null | undefined, id: string | null | undefined): id is string {
+  const pattern = agentResumeIdPattern(agent);
+  return pattern !== undefined && id !== undefined && id !== null && new RegExp(pattern, 'u').test(id);
 }
 
 /** First-class chat agents: those whose config says how chat starts. */

@@ -137,7 +137,8 @@ export const RUNPANE_CONTRACT = {
           "promptArgument": true,
           "configDir": ".claude",
           "reportsConversation": true,
-          "paneMcpConfigFlag": "--mcp-config"
+          "paneMcpConfigFlag": "--mcp-config",
+          "resumeIdPattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
         },
         "install": {
           "url": "https://code.claude.com/docs/en/setup",
@@ -225,7 +226,8 @@ export const RUNPANE_CONTRACT = {
           ],
           "hotkey": "mod+alt+4",
           "promptArgument": true,
-          "configDir": ".codex"
+          "configDir": ".codex",
+          "resumeIdPattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
         },
         "install": {
           "url": "https://developers.openai.com/codex/cli",
@@ -2893,7 +2895,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--resume",
         "value": "<agent-session-id>",
-        "description": "Agent session id to persist and resume in an adopted pane."
+        "description": "Agent session id to persist and resume in an adopted pane. It must have the agent's id shape (a UUID for Claude and Codex, ses_... for OpenCode), or nothing is created."
       },
       {
         "name": "--agent",
