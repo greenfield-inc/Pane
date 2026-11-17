@@ -25,7 +25,7 @@ entries and new Sessions open their orchestrator in a terminal. Open chat tabs k
 - **Remote PWA** and **phone**: *Add Tool* lists the host's installed chat
   agents and **Profile…** first when the host has chat tabs on.
 - **Profile…** on the desktop first lists Pane's profiles that are on
-  (docs/PROFILES.md); picking one opens its launch dialog. Profiles run in
+  ([PROFILES.md](PROFILES.md)); picking one opens its launch dialog. Profiles run in
   terminal tabs, so with chat tabs off the desktop + menu and empty Pane screen
   still offer **Profile…**, with this list alone. Below the list when chat tabs
   are on, and as all of it on the PWA and phone, it asks for an Agent Farm profile name and optional arguments, one
