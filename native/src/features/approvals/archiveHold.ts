@@ -5,14 +5,14 @@ export interface HeldArchive {
   title: string;
 }
 
-export interface ArchiveHoldState {
+interface ArchiveHoldState {
   /** Archived and still undoable, oldest first. */
   held: readonly HeldArchive[];
   /** Row keys the list and its counts leave out: held, or sent and not yet settled. */
   hidden: ReadonlySet<string>;
 }
 
-export const ARCHIVE_HOLD_MS = 5_000;
+const ARCHIVE_HOLD_MS = 5_000;
 
 /**
  * Holds swiped approvals on the phone for `delayMs` before closing them, so Undo can cancel. Another

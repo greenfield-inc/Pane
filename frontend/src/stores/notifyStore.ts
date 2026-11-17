@@ -14,7 +14,7 @@ interface NotifyState {
 }
 
 /** Approvals archived from the list: gone from every count, their close sent when the Undo toast ends. */
-export interface ArchiveHold {
+interface ArchiveHold {
   ids: string[];
   /** The archived item's title, or how many were archived. */
   message: string;
