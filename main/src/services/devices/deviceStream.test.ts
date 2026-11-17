@@ -8,8 +8,9 @@ function part(): Uint8Array {
 }
 
 async function drain(stream: ReadableStream<Uint8Array>): Promise<number> {
+  const reader = stream.getReader();
   let bytes = 0;
-  for await (const chunk of stream) bytes += chunk.length;
+  for (let read = await reader.read(); !read.done; read = await reader.read()) bytes += read.value.length;
   return bytes;
 }
 
