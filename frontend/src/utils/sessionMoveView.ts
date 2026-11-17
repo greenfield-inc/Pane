@@ -137,6 +137,9 @@ export function doneView(summary: SessionMoveSummary | undefined, target: string
   if (summary.leftBehind.length > 0) {
     lines.push({ level: 'warning', title: `Left behind: ${plural(summary.leftBehind.length, 'ignored file')}`, detail: `${summary.leftBehind.join(', ')}. Listed in the Session folder’s moved.json.` });
   }
+  if (summary.stayedHere?.length) {
+    lines.push({ level: 'warning', title: `${plural(summary.stayedHere.length, 'Pane')} stayed here, paused`, detail: summary.stayedHere.join(' ') });
+  }
   if (summary.missingEnv.length > 0) {
     lines.push({ level: 'warning', title: `${plural(summary.missingEnv.length, 'env var')} ${summary.missingEnv.length === 1 ? 'isn’t' : 'aren’t'} set on ${target}`, detail: `${summary.missingEnv.join(', ')}. Tabs that need them will see them missing.` });
   }

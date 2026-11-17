@@ -148,3 +148,12 @@ describe('shownProgress', () => {
     expect(shownProgress(working).phase).toBe('waiting');
   });
 });
+
+describe('doneView', () => {
+  it('lists a Pane that stayed here on its own line, apart from the ignored files left behind', () => {
+    const stayed = 'Pane “fix-login” stays here, paused, with its worktree: its ignored files couldn\'t be set aside (files are still in /r/.git/pane-moved/p.incoming). Move what you need back.';
+    const view = doneView({ panes: 2, tabs: 3, resumed: 3, failedTabs: [], approvals: 0, leftBehind: ['.env in fix-login'], missingEnv: [], stayedHere: [stayed] }, 'studio');
+    expect(view.lines).toContainEqual({ level: 'warning', title: '1 Pane stayed here, paused', detail: stayed });
+    expect(view.lines).toContainEqual(expect.objectContaining({ title: 'Left behind: 1 ignored file' }));
+  });
+});

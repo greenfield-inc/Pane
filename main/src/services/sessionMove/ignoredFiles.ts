@@ -40,7 +40,7 @@ export async function keepIgnoredFiles(worktreePath: string, paneId: string, ent
   const previous = `${kept}.previous`;
   for (const leftover of [staging, previous]) {
     if (fs.existsSync(leftover)) {
-      throw new PaneError('ERR_MOVE_IGNORED_STAGED', `files from an earlier attempt to set this Pane's ignored files aside are still in ${leftover}`, `Move what you need from ${leftover} back into ${worktreePath}, delete that folder, then archive the Pane.`);
+      throw new PaneError('ERR_MOVE_IGNORED_STAGED', `files from an earlier attempt to set this Pane's ignored files aside are still in ${leftover}`, `Move what you need from ${leftover} back into ${worktreePath} and delete that folder. Then copy any ignored files you still need out of the worktree before you archive the Pane, because archiving deletes the worktree.`);
     }
   }
   const moved: string[] = [];
@@ -62,7 +62,7 @@ export async function keepIgnoredFiles(worktreePath: string, paneId: string, ent
       await fs.promises.rm(staging, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     }
-    throw new PaneError('ERR_MOVE_IGNORED_STRANDED', `${reasonOf(error)}; ${stranded.join(', ')} couldn't go back into the worktree and ${stranded.length === 1 ? 'is' : 'are'} kept in ${staging}`, `Move ${stranded.join(', ')} from ${staging} back into ${worktreePath}, delete that folder, then archive the Pane.`);
+    throw new PaneError('ERR_MOVE_IGNORED_STRANDED', `${reasonOf(error)}; ${stranded.join(', ')} couldn't go back into the worktree and ${stranded.length === 1 ? 'is' : 'are'} kept in ${staging}`, `Move ${stranded.join(', ')} from ${staging} back into ${worktreePath} and delete that folder. Then copy any ignored files you still need out of the worktree before you archive the Pane, because archiving deletes the worktree.`);
   }
   if (!fs.existsSync(staging)) return moved;
   // Swap without a gap: the earlier kept copy is set aside, not deleted, until the new one is in place.
@@ -72,7 +72,7 @@ export async function keepIgnoredFiles(worktreePath: string, paneId: string, ent
     await fs.promises.rename(staging, kept);
   } catch (error) {
     if (hadKept) await fs.promises.rename(previous, kept).catch(() => undefined);
-    throw new PaneError('ERR_MOVE_IGNORED_STRANDED', `${reasonOf(error)}; ${moved.join(', ')} ${moved.length === 1 ? 'is' : 'are'} kept in ${staging}`, `Move ${moved.join(', ')} from ${staging} back into ${worktreePath}, delete that folder, then archive the Pane.`);
+    throw new PaneError('ERR_MOVE_IGNORED_STRANDED', `${reasonOf(error)}; ${moved.join(', ')} ${moved.length === 1 ? 'is' : 'are'} kept in ${staging}`, `Move ${moved.join(', ')} from ${staging} back into ${worktreePath} and delete that folder. Then copy any ignored files you still need out of the worktree before you archive the Pane, because archiving deletes the worktree.`);
   }
   if (hadKept) await fs.promises.rm(previous, { recursive: true, force: true }).catch(error => console.warn(`[SessionMove] The earlier kept ignored files in ${previous} weren't removed:`, error));
   return moved;

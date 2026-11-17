@@ -707,6 +707,8 @@ export class MoveImporter {
   private async setAsideArchivedPane(job: Job, paneId: string): Promise<void> {
     const db = this.services.databaseService;
     await this.tabs.dropPaneTabsFromMemory(paneId).catch(error => console.warn(`[SessionMove] Pane ${paneId}'s tabs weren't dropped from memory:`, error));
+    // Opening an archived Pane keeps it in memory, where it would block the arriving Pane's id.
+    this.services.sessionManager.forgetSession(paneId);
     const aside = db.setArchivedSessionAside(paneId, `${paneId}.moving-${job.status.moveId}`);
     if (!aside) return;
     job.setAside.push(aside.asideId);

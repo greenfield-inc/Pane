@@ -55,6 +55,8 @@ interface Row { id: string; name: string; archived: boolean; worktree_path: stri
 function fakeServices(repo: string, setupGate?: Promise<void>, panels = new Map<string, ToolPanel>()) {
   const rows = new Map<string, Row>();
   const replaced: string[] = [];
+  // Panes SessionManager holds in memory, as it does an archived Pane someone opened.
+  const active = new Set<string>();
   const setMoveMark = vi.fn(async () => undefined);
   const importArriving = vi.fn(async () => undefined);
   const rekey = (from: string, to: string, panelIds: Record<string, string>) => {
@@ -89,10 +91,11 @@ function fakeServices(repo: string, setupGate?: Promise<void>, panels = new Map<
       getProjectContextByProjectId: () => ({ pathResolver: undefined }),
       getSession: (id: string) => rows.get(id)?.archived === false ? rows.get(id) : undefined,
       createSessionWithId: (id: string, name: string, worktreePath: string, _prompt: string, worktreeName: string) => {
-        if (rows.has(id)) throw new Error(`Session with ID ${id} already exists`);
+        if (rows.has(id) || active.has(id)) throw new Error(`Session with ID ${id} already exists`);
         rows.set(id, { id, name, archived: false, worktree_path: worktreePath, worktree_name: worktreeName, project_id: 1 });
         return { id };
       },
+      forgetSession: (id: string) => { active.delete(id); },
       emitSessionCreated: () => undefined,
       updateSession: async () => undefined,
       archiveSession: async (id: string) => { const row = rows.get(id); if (row) row.archived = true; },
@@ -103,7 +106,7 @@ function fakeServices(repo: string, setupGate?: Promise<void>, panels = new Map<
   };
   // SAFETY: the fixture supplies the exact AppServices members the importer reads, with their call shapes.
   const services = fixture as AppServices;
-  return { services, rows, replaced, setMoveMark, importArriving };
+  return { services, rows, replaced, active, setMoveMark, importArriving };
 }
 
 let moveCount = 0;
@@ -247,8 +250,10 @@ describe('MoveImporter', () => {
 
   it('a move back deletes the archive it replaced only once the move commits (F-6)', async () => {
     const tabs = memoryTabs();
-    const { services, rows, replaced } = fakeServices(target, undefined, tabs.panels);
+    const { services, rows, replaced, active } = fakeServices(target, undefined, tabs.panels);
     rows.set('p1', { id: 'p1', name: 'Pane p1', archived: true, worktree_path: path.join(root, 'worktrees', 'p1'), worktree_name: 'p1', project_id: 1 });
+    // Someone looked at the archived Pane here since Pane started, so it is in memory too (QA R3-1).
+    active.add('p1');
     await tabs.createPanel({ id: 't-old', sessionId: 'p1', type: 'terminal', title: 'Old tab' });
     const importer = new MoveImporter(services, registry, path.join(root, 'moves'), tabs);
     const moveId = newMoveId();
