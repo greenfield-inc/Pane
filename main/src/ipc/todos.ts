@@ -59,7 +59,7 @@ const actionSchema = boundary.union(
   boundary.object({ kind: boundary.literal('archive'), number }),
   boundary.object({ kind: boundary.literal('reopen'), number }),
   boundary.object({ kind: boundary.literal('never-pause'), number, on: boundary.boolean }),
-  boundary.object({ kind: boundary.literal('comment'), number, body: boundary.string, toOrchestrator: boundary.optional(boundary.boolean) }),
+  boundary.object({ kind: boundary.literal('comment'), number, body: boundary.string, toOrchestrator: boundary.optional(boundary.boolean), replyTo: boundary.optional(boundary.number) }),
   boundary.object({ kind: boundary.literal('attach'), number, target: boundary.string, label: optionalString, attachmentKind }),
   boundary.object({ kind: boundary.literal('detach'), number, attachmentId: boundary.number }),
   boundary.object({ kind: boundary.literal('check'), number, index: boundary.number, met: boundary.boolean }),
@@ -84,7 +84,7 @@ async function runTodoAction(service: TodoService, action: TodoAction): Promise<
     case 'reopen': return { todo: await service.reopen(action.number, PERSON) };
     case 'never-pause': return { todo: service.setNeverPause(action.number, action.on, PERSON) };
     case 'comment':
-      await service.comment(action.number, action.body, PERSON, { toOrchestrator: action.toOrchestrator });
+      await service.comment(action.number, action.body, PERSON, { toOrchestrator: action.toOrchestrator, replyTo: action.replyTo });
       return { todo: service.require(action.number) };
     case 'attach':
       service.attach(action.number, { target: action.target, label: action.label, kind: action.attachmentKind }, PERSON);

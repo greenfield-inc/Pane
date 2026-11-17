@@ -129,6 +129,20 @@ function labelOf(target: string): string {
  * To-dos (D-408, D-409): the store's rules, statuses, delivery, the supervisor and the load gate on
  * one machine. Runs on the machine that hosts the Sessions; other machines read it.
  */
+export interface TodoCommentOptions {
+  toOrchestrator?: boolean;
+  escalate?: boolean;
+  chatRef?: { panelId: string; messageId?: string };
+  /** The activity row this answers (round 7): typed to that card's author. */
+  replyTo?: number;
+}
+
+interface ReplyTarget {
+  target: TodoDetail['chatTarget'];
+  /** The closed tab's name, when the reply fell back to the orchestrator. */
+  gone?: string;
+}
+
 export class TodoService extends EventEmitter {
   readonly gate: LoadGate;
   private readonly outbox: OutboxEntry[] = [];
@@ -631,13 +645,18 @@ export class TodoService extends EventEmitter {
    * From an agent, it is a short reply (at most 2,000 characters); from the requester's tab it is a
    * reply to the to-do's orchestrator; with `escalate`, the requester passes the question to you.
    */
-  async comment(number: number, body: string, actor: TodoActor, options: { toOrchestrator?: boolean; escalate?: boolean; chatRef?: { panelId: string; messageId?: string } } = {}): Promise<TodoActivity> {
+  async comment(number: number, body: string, actor: TodoActor, options: TodoCommentOptions = {}): Promise<TodoActivity> {
     const todo = this.require(number);
     const text = body.trim();
     if (!text) throw new PaneError('ERR_TODO_COMMENT_EMPTY', 'The message is empty. Nothing was sent.', `Pass the text: runpane todos comment ${todo.ref} "…".`);
     if (actor.kind === 'person') {
-      const target = this.chatTarget(todo, options.toOrchestrator);
-      const message = this.store.addActivity({ todoNumber: number, kind: 'message', authorKind: 'person', authorName: 'you', body: text, toTab: target.panelId ?? undefined, toName: target.panelId ? target.name : undefined, now: this.now() });
+      const reply = options.replyTo === undefined ? null : this.replyTarget(todo, options.replyTo);
+      const target = reply?.target ?? this.chatTarget(todo, options.toOrchestrator);
+      const message = this.store.addActivity({
+        todoNumber: number, kind: 'message', authorKind: 'person', authorName: 'you', body: text, toTab: target.panelId ?? undefined,
+        toName: target.panelId ? target.name : undefined, replyTo: options.replyTo, now: this.now(),
+      });
+      if (reply?.gone) this.event(todo, `${reply.gone}’s tab is closed; sent to the orchestrator`);
       if (target.panelId) this.enqueue({ panelId: target.panelId, text: personChatText(todo, text), todoNumber: number, activityId: message.id, resumeIfDown: true });
       this.progress(todo);
       this.changed();
@@ -660,7 +679,9 @@ export class TodoService extends EventEmitter {
     }
     const message = this.store.addActivity({
       todoNumber: number, kind: 'message', authorKind: fromRequester ? 'requester' : 'agent', authorName: fromRequester ? todo.requester.name : name,
-      authorTab: actor.panelId, body: text, chatRef: options.chatRef ?? (actor.panelId ? { panelId: actor.panelId } : undefined), now: this.now(),
+      authorTab: actor.panelId, body: text, chatRef: options.chatRef ?? (actor.panelId ? { panelId: actor.panelId } : undefined),
+      // The agent's answer threads under your newest reply to it, while that reply is unanswered.
+      replyTo: actor.panelId ? this.store.openReplyTo(number, actor.panelId) ?? undefined : undefined, now: this.now(),
     });
     // From any tab other than the to-do's own orchestrator, the reply reaches that orchestrator.
     if (orchestrator && actor.panelId !== orchestrator) {
@@ -669,6 +690,26 @@ export class TodoService extends EventEmitter {
     this.progress(todo);
     this.changed();
     return message;
+  }
+
+  /**
+   * Who a reply under activity row `replyTo` goes to: the agent that wrote the card, typed into its own tab; on your own
+   * card, whoever that card went to; on the requester's, the orchestrator. A closed tab falls back to the orchestrator.
+   * Only a tab in the to-do's own Session, or a sub-to-do's assignee, can receive one.
+   */
+  private replyTarget(todo: TodoRecord, replyTo: number): ReplyTarget {
+    const row = this.store.activityRow(replyTo);
+    const refuse = (why: string) => new PaneError('ERR_TODO_REPLY_TARGET', `That reply can’t be sent: ${why}. Nothing was sent.`, `Reply under a card on ${todo.ref}’s own page, or leave a comment instead.`);
+    if (!row || row.todoNumber !== todo.number) throw refuse(`the card it answers isn’t on ${todo.ref}`);
+    const orchestrator: ReplyTarget = { target: this.chatTarget(todo, true) };
+    const tab = row.authorKind === 'agent' ? row.authorTab : row.authorKind === 'person' ? row.toTab : undefined;
+    if (!tab) return row.authorKind === 'person' ? { target: this.chatTarget(todo) } : orchestrator;
+    const info = this.host.panel(tab);
+    if (!info) return { target: orchestrator.target, gone: row.authorKind === 'agent' ? row.authorName : row.toName ?? 'its agent' };
+    const owner = todo.parentNumber !== null ? this.store.get(todo.parentNumber) ?? todo : todo;
+    const inSession = owner.sessionId !== null && info.sessionId === owner.sessionId;
+    if (!inSession && tab !== todo.assignee?.panelId) throw refuse(`${info.name}’s tab isn’t in ${todo.ref}’s Session`);
+    return { target: { panelId: tab, name: row.authorKind === 'agent' ? row.authorName : row.toName ?? info.name, kind: tab === orchestrator.target.panelId ? 'orchestrator' : 'assignee' } };
   }
 
   /** The orchestrator asks: its requester first, or you when the requester is you or gone. */

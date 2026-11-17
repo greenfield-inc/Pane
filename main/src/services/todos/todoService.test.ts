@@ -212,6 +212,66 @@ describe('TodoService', () => {
       expect((await service.ask(theirs.number, 'OK?', { kind: 'agent', panelId: 's2-orch' })).routedTo).toBe('person');
     });
 
+    describe('replies (round 7)', () => {
+      const worker = () => host.panels.set('w1', { name: 'implementer', sessionId: 's1', orchestrator: false });
+
+      it('types a reply under an agent’s card into that agent’s tab, not the orchestrator’s, and threads its next message under the reply (R15)', async () => {
+        const todo = await service.create({ title: 'Replies' }, person);
+        worker();
+        const card = await service.comment(todo.number, 'Plan is ready', { kind: 'agent', panelId: 'w1' });
+        await service.flush();
+        const before = host.typedInto('s1-orch').length;
+        const reply = await service.comment(todo.number, 'use the blue one', person, { replyTo: card.id });
+        await service.flush();
+        expect(reply).toMatchObject({ replyTo: card.id, toTab: 'w1' });
+        expect(host.typedInto('w1').at(-1)).toContain('[From the person, via To-dos T-1] use the blue one');
+        expect(host.typedInto('s1-orch')).toHaveLength(before);
+        const answer = await service.comment(todo.number, 'Switched to blue', { kind: 'agent', panelId: 'w1' });
+        expect(answer.replyTo).toBe(reply.id);
+        // Only the first answer threads; the agent's later messages stand in its run.
+        expect((await service.comment(todo.number, 'Tests pass', { kind: 'agent', panelId: 'w1' })).replyTo).toBeUndefined();
+      });
+
+      it('sends a reply to the orchestrator, and says so, when the card’s tab is gone (R16)', async () => {
+        const todo = await service.create({ title: 'Gone' }, person);
+        worker();
+        const card = await service.comment(todo.number, 'Plan is ready', { kind: 'agent', panelId: 'w1' });
+        host.panels.delete('w1');
+        const reply = await service.comment(todo.number, 'thanks', person, { replyTo: card.id });
+        await service.flush();
+        expect(reply.toTab).toBe('s1-orch');
+        expect(host.typedInto('s1-orch').at(-1)).toContain('thanks');
+        expect(service.detail(todo.number).activity.at(-1)?.body).toBe('implementer’s tab is closed; sent to the orchestrator');
+      });
+
+      it('sends a reply on your own comment to whoever the comment went to (R17)', async () => {
+        const parent = await service.create({ title: 'P' }, person);
+        const sub = await service.create({ title: 'S', parentNumber: parent.number }, person);
+        worker();
+        service.assign(sub.number, 'w1', { kind: 'agent', panelId: 's1-orch' });
+        const mine = await service.comment(sub.number, 'hi worker', person);
+        const reply = await service.comment(sub.number, 'and one more thing', person, { replyTo: mine.id });
+        for (let i = 0; i < 4; i += 1) await service.flush();
+        expect(reply.toTab).toBe('w1');
+        expect(host.typedInto('w1').at(-1)).toContain('and one more thing');
+      });
+
+      it('refuses a reply to another to-do’s row or a tab outside the Session, and types nothing (R18)', async () => {
+        const one = await service.create({ title: 'One' }, person);
+        const two = await service.create({ title: 'Two' }, person);
+        const other = await service.comment(two.number, 'from two', { kind: 'agent', panelId: 's2-orch' });
+        await expect(service.comment(one.number, 'x', person, { replyTo: other.id })).rejects.toMatchObject({ code: 'ERR_TODO_REPLY_TARGET', next: expect.any(String) });
+        host.panels.set('stranger', { name: 'stranger', sessionId: 'elsewhere', orchestrator: false });
+        const card = await service.comment(one.number, 'hello', { kind: 'agent', panelId: 'stranger' });
+        await service.flush();
+        const typed = host.typedInto('stranger').length;
+        await expect(service.comment(one.number, 'x', person, { replyTo: card.id })).rejects.toMatchObject({ code: 'ERR_TODO_REPLY_TARGET' });
+        await service.flush();
+        expect(host.typedInto('stranger')).toHaveLength(typed);
+        expect(service.detail(one.number).activity.some(row => row.body === 'x')).toBe(false);
+      });
+    });
+
     it('sends the requester one line on review, done, drop and stuck', async () => {
       const tab = host.addRequester();
       const todo = await service.create({ title: 'Inv' }, { kind: 'agent', panelId: tab });

@@ -37,7 +37,7 @@ const attachmentRowSchema = boundary.object({
 const activityRowSchema = boundary.object({
   id: boundary.number, todo_id: boundary.number, kind: boundary.enumeration('message', 'event'),
   author_kind: boundary.enumeration('person', 'agent', 'requester', 'pane'), author: boundary.string, author_tab: str,
-  body: boundary.string, chat_ref: str, to_tab: str, to_name: str, delivered_at: num, created_at: boundary.number,
+  body: boundary.string, chat_ref: str, to_tab: str, to_name: str, delivered_at: num, reply_to: num, created_at: boundary.number,
 });
 
 const chatRefSchema = boundary.object({ panelId: boundary.string, messageId: boundary.optional(boundary.string) });
@@ -125,6 +125,7 @@ function toActivity(row: ReturnType<typeof activityRowSchema.decode>): TodoActiv
   if (row.to_tab) activity.toTab = row.to_tab;
   if (row.to_name) activity.toName = row.to_name;
   if (row.delivered_at !== null) activity.deliveredAt = row.delivered_at;
+  if (row.reply_to !== null) activity.replyTo = row.reply_to;
   return activity;
 }
 
@@ -204,6 +205,8 @@ export interface NewActivity {
   chatRef?: TodoActivity['chatRef'];
   toTab?: string;
   toName?: string;
+  /** The row this one answers (round 7). */
+  replyTo?: number;
   now: number;
 }
 
@@ -366,14 +369,27 @@ export class TodoStore {
   // ── Activity (the to-do's chat) ─────────────────────────────────────────
 
   addActivity(input: NewActivity): TodoActivity {
-    const result = this.db.prepare(`INSERT INTO todo_activity (todo_id, kind, author_kind, author, author_tab, body, chat_ref, to_tab, to_name, created_at)
-      VALUES (@todo_id, @kind, @author_kind, @author, @author_tab, @body, @chat_ref, @to_tab, @to_name, @created_at)`).run({
+    const result = this.db.prepare(`INSERT INTO todo_activity (todo_id, kind, author_kind, author, author_tab, body, chat_ref, to_tab, to_name, reply_to, created_at)
+      VALUES (@todo_id, @kind, @author_kind, @author, @author_tab, @body, @chat_ref, @to_tab, @to_name, @reply_to, @created_at)`).run({
       todo_id: input.todoNumber, kind: input.kind, author_kind: input.authorKind, author: input.authorName, author_tab: input.authorTab ?? null,
       body: input.body, chat_ref: input.chatRef ? JSON.stringify(input.chatRef) : null, to_tab: input.toTab ?? null, to_name: input.toName ?? null,
-      created_at: input.now,
+      reply_to: input.replyTo ?? null, created_at: input.now,
     });
     const row = decodeBoundary(this.db.prepare('SELECT * FROM todo_activity WHERE id = ?').get(Number(result.lastInsertRowid)), activityRowSchema);
     return toActivity(row);
+  }
+
+  activityRow(id: number): TodoActivity | null {
+    const row = this.db.prepare('SELECT * FROM todo_activity WHERE id = ?').get(id);
+    return row === undefined ? null : toActivity(decodeBoundary(row, activityRowSchema));
+  }
+
+  /** Your newest reply typed to `tab` on a to-do, while no message answers it yet: an agent's next message there threads under it. */
+  openReplyTo(todoNumber: number, tab: string): number | null {
+    const row = this.db.prepare(`SELECT id FROM todo_activity r WHERE r.todo_id = ? AND r.author_kind = 'person' AND r.to_tab = ? AND r.id = (
+      SELECT MAX(id) FROM todo_activity WHERE todo_id = r.todo_id AND author_kind = 'person' AND to_tab = r.to_tab)
+      AND r.reply_to IS NOT NULL AND NOT EXISTS (SELECT 1 FROM todo_activity a WHERE a.todo_id = r.todo_id AND a.reply_to = r.id)`).get(todoNumber, tab);
+    return row === undefined ? null : decodeBoundary(row, boundary.object({ id: boundary.number })).id;
   }
 
   activity(todoNumber: number, limit = 500): TodoActivity[] {

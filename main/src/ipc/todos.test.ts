@@ -21,11 +21,13 @@ describe('to-do channels', () => {
   let host: FakeHost;
   let registry: PaneCommandRegistry;
   let ipcMain: IpcStub;
+  let service: TodoService;
 
   beforeEach(() => {
     db = new Database(':memory:');
     host = new FakeHost();
     const todoService = new TodoService(new TodoStore(db), host, () => 1_000);
+    service = todoService;
     registry = new PaneCommandRegistry();
     ipcMain = ipcMainStub();
     // SAFETY: projectIdOf reads only a project's id and name.
@@ -61,5 +63,18 @@ describe('to-do channels', () => {
     expect(await registry.invoke('todos:act', [{ kind: 'done', number: 1 }])).toMatchObject({ success: true, data: { todo: { state: 'done' } } });
     expect(await registry.invoke('todos:snapshot', [])).toMatchObject({ success: true, data: { rows: [{ todo: { ref: 'T-1' }, status: { status: 'done' } }] } });
     expect(await registry.invoke('todos:act', [{ kind: 'bogus', number: 1 }])).toMatchObject({ success: false });
+  });
+
+  it('takes a reply from the app and refuses one aimed at another to-do’s row (R18)', async () => {
+    await registry.invoke('todos:create', [{ title: 'One' }]);
+    await registry.invoke('todos:create', [{ title: 'Two' }]);
+    await registry.invoke('runpane:todos:comment', [{ todo: 'T-2', body: 'from two', callerPanelId: 's2-orch' }]);
+    expect(await registry.invoke('todos:act', [{ kind: 'comment', number: 1, body: 'first' }])).toMatchObject({ success: true });
+    const activity = (todo: number) => service.detail(todo).activity;
+    const mine = activity(1).find(row => row.body === 'first')!;
+    expect(await registry.invoke('todos:act', [{ kind: 'comment', number: 1, body: 'a reply', replyTo: mine.id }])).toMatchObject({ success: true });
+    expect(activity(1).find(row => row.body === 'a reply')).toMatchObject({ replyTo: mine.id });
+    const theirs = activity(2).find(row => row.body === 'from two')!;
+    expect(await registry.invoke('todos:act', [{ kind: 'comment', number: 1, body: 'x', replyTo: theirs.id }])).toMatchObject({ success: false, error: expect.stringContaining('isn’t on T-1') });
   });
 });

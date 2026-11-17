@@ -79,6 +79,37 @@ describe('TodoStore', () => {
 });
 
 describe('to-dos migration', () => {
+  it('adds todo_activity.reply_to to a database from an earlier to-dos build, keeping its activity, and an old build can still write (R21)', () => {
+    const db = new Database(':memory:');
+    // todo_activity as earlier #1481 builds made it: no reply_to.
+    db.prepare(`CREATE TABLE todo_activity (id INTEGER PRIMARY KEY AUTOINCREMENT, todo_id INTEGER NOT NULL, kind TEXT NOT NULL, author_kind TEXT NOT NULL,
+      author TEXT NOT NULL, author_tab TEXT, body TEXT NOT NULL, chat_ref TEXT, to_tab TEXT, to_name TEXT, delivered_at INTEGER, created_at INTEGER NOT NULL)`).run();
+    db.prepare("INSERT INTO todo_activity (todo_id, kind, author_kind, author, body, created_at) VALUES (1, 'message', 'person', 'you', 'before the upgrade', 1)").run();
+    for (let run = 0; run < 2; run += 1) ensureTodosSchema(db);
+    // SAFETY: PRAGMA table_info rows always carry a name.
+    const columns = db.prepare('PRAGMA table_info(todo_activity)').all().map(column => (column as { name: string }).name);
+    expect(columns).toContain('reply_to');
+    // SAFETY: sqlite_master rows always carry a name.
+    const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'todo_activity'").all().map(row => (row as { name: string }).name);
+    expect(indexes).toContain('idx_todo_activity_reply');
+    const store = new TodoStore(db);
+    expect(store.activity(1).map(row => row.body)).toEqual(['before the upgrade']);
+    // An older build inserts with its own column list.
+    db.prepare("INSERT INTO todo_activity (todo_id, kind, author_kind, author, body, created_at) VALUES (1, 'message', 'agent', 'w', 'from an older build', 2)").run();
+    const reply = store.addActivity({ todoNumber: 1, kind: 'message', authorKind: 'person', authorName: 'you', body: 'a reply', replyTo: 2, now: 3 });
+    expect(store.activity(1).map(row => [row.body, row.replyTo])).toEqual([['before the upgrade', undefined], ['from an older build', undefined], ['a reply', 2]]);
+    expect(reply.replyTo).toBe(2);
+    db.close();
+  });
+
+  it('gives a fresh database the reply_to column', () => {
+    const db = new Database(':memory:');
+    ensureTodosSchema(db);
+    // SAFETY: PRAGMA table_info rows always carry a name.
+    expect(db.prepare('PRAGMA table_info(todo_activity)').all().map(column => (column as { name: string }).name)).toContain('reply_to');
+    db.close();
+  });
+
   it('adds the tables and approvals.todo_id to an existing database, keeping its approvals, and runs twice safely', () => {
     const db = new Database(':memory:');
     // A database from before to-dos: the approvals table without todo_id, holding a question.

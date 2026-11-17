@@ -87,6 +87,8 @@ export interface TodoActivity {
   toTab?: string;
   toName?: string;
   deliveredAt?: number;
+  /** The activity row this one answers (round 7): your reply under a card, or an agent's answer under your reply. */
+  replyTo?: number;
   createdAt: number;
 }
 
@@ -241,7 +243,8 @@ export type TodoAction =
   | { kind: 'archive'; number: number }
   | { kind: 'reopen'; number: number }
   | { kind: 'never-pause'; number: number; on: boolean }
-  | { kind: 'comment'; number: number; body: string; toOrchestrator?: boolean }
+  /** A comment, or with `replyTo` a reply under that card, typed to the card's author (round 7). */
+  | { kind: 'comment'; number: number; body: string; toOrchestrator?: boolean; replyTo?: number }
   | { kind: 'attach'; number: number; target: string; label?: string; attachmentKind?: TodoAttachmentKind }
   | { kind: 'detach'; number: number; attachmentId: number }
   | { kind: 'check'; number: number; index: number; met: boolean }

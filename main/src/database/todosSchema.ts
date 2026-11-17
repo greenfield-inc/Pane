@@ -74,6 +74,7 @@ const TODOS_SCHEMA_SQL = [
     to_tab TEXT,
     to_name TEXT,
     delivered_at INTEGER,
+    reply_to INTEGER,
     created_at INTEGER NOT NULL
   )`,
   'CREATE INDEX IF NOT EXISTS idx_todo_activity_todo ON todo_activity(todo_id, id)',
@@ -83,4 +84,9 @@ const TODOS_SCHEMA_SQL = [
 /** Creates the to-do tables. Guarded: safe on fresh and upgraded databases. approvals.todo_id is added by ensureApprovalsSchema. */
 export function ensureTodosSchema(db: Database.Database): void {
   for (const sql of TODOS_SCHEMA_SQL) db.prepare(sql).run();
+  // Round 7: the row a reply answers. Databases from earlier to-dos builds lack it; an older build ignores it.
+  // SAFETY: PRAGMA table_info rows always carry a name.
+  const columns = db.prepare('PRAGMA table_info(todo_activity)').all().map(column => (column as { name: string }).name);
+  if (!columns.includes('reply_to')) db.prepare('ALTER TABLE todo_activity ADD COLUMN reply_to INTEGER').run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_todo_activity_reply ON todo_activity(todo_id, reply_to)').run();
 }
