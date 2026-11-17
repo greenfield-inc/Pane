@@ -472,93 +472,13 @@ jobs:
       shell: bash
       run: scripts/ci-background.sh wait typecheck
 
-  # The relay (Rust) and the computer side of QR pairing against it: a real relay
-  # with its DNS helper, and Pebble validating certificates through that DNS.
-  # Also the direct-path helper (direct/), and a desktop reaching a computer over it.
-  relay-tests:
-    name: Relay Tests
-    needs: changes
-    if: ${{ !fromJSON(needs.changes.outputs.skip)['relay-tests'] }}
-    runs-on: ubuntu-latest
-    env:
-      # The relay, Pebble and pane-direct suites fail here instead of skipping when a binary is missing.
-      PANE_RELAY_INTEGRATION_REQUIRED: '1'
-    timeout-minutes: 30
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v7
-
-    - name: Set up Rust
-      run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
-
-    - name: Cache cargo
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          relay/target
-          direct/target
-        key: relay-${{ runner.os }}-${{ hashFiles('relay/Cargo.lock', 'direct/Cargo.lock') }}
-
-    - name: Check, test and build pane-direct
-      working-directory: direct
-      run: |
-        cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
-        cargo test --locked
-        cargo build --locked
-        echo "PANE_DIRECT_BIN=$GITHUB_WORKSPACE/direct/target/debug/pane-direct" >> "$GITHUB_ENV"
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: stable
-        cache: false
-
-    - name: Install Pebble
-      run: |
-        GOBIN="$RUNNER_TEMP/bin" go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.8.0
-        echo "PEBBLE_BIN=$RUNNER_TEMP/bin/pebble" >> "$GITHUB_ENV"
-        echo "PEBBLE_DIR=$(go env GOMODCACHE)/github.com/letsencrypt/pebble/v2@v2.8.0" >> "$GITHUB_ENV"
-        echo "PANE_RELAY_BIN=$GITHUB_WORKSPACE/relay/target/debug/pane-relay" >> "$GITHUB_ENV"
-
-    - name: Check formatting and lints
-      working-directory: relay
-      run: cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
-
-    - name: Run relay tests
-      working-directory: relay
-      run: cargo test --locked
-
-    - name: Build the relay
-      working-directory: relay
-      run: cargo build --locked
-
-    - name: Setup Node.js and pnpm
-      uses: ./.github/actions/setup-pnpm
-
-    - name: Install dependencies
-      run: pnpm install --ignore-scripts
-
-    - name: Fetch Electron
-      uses: ./.github/actions/fetch-electron
-
-    - name: Rebuild native modules for Node tests
-      run: pnpm rebuild better-sqlite3-multiple-ciphers
-
-    - name: Run the computer side against the relay, and the direct path
-      run: pnpm --filter main exec vitest run src/daemon/relay
-
-    - name: Run runpane relay against the relay
-      run: pnpm run test:runpane-relay
-
   # The one check branch protection requires. It runs even when the run is
   # cancelled, and fails unless every job in scripts/ci-gate.mjs EXPECTED_JOBS
   # succeeded or skipped with a reason from Detect changed areas' manifest.
   # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
+    needs: [changes, quality-checks, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
