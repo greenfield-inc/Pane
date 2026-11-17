@@ -1390,15 +1390,15 @@ async function checkProfiles() {
         texts[runtime].push(result.stdout);
       }
 
-      // Launch inside a Session orchestrator's Pane: its repo, Session and tab are the defaults.
+      // Launch inside a Session orchestrator's Pane: its repo and Session are the defaults.
       const inPane = await call(['profiles', 'launch', 'greenfield', '--prompt', 'Add dark mode', '--yes', '--json'],
         { PANE_SESSION_ID: 'pane-1', PANE_PANEL_ID: 'panel-9', PANE_ORCHESTRATION_SESSION_ID: 'sess-1' });
       assert.strictEqual(inPane.code, 0, `${runtime} launch exits 0. stderr=${inPane.stderr}`);
       assert.deepStrictEqual(JSON.parse(inPane.stdout), results['runpane:profiles:launch'], `${runtime} launch prints the run as Pane sent it`);
       assert.deepStrictEqual(inPane.frames, [
         { channel: 'runpane:panes:list', args: [{}] },
-        { channel: 'runpane:profiles:launch', args: [{ name: 'greenfield', prompt: 'Add dark mode', repo: { id: 7 }, session: 'sess-1', callerPanelId: 'panel-9' }] },
-      ], `${runtime} launch defaults to the caller's repo, Session and tab`);
+        { channel: 'runpane:profiles:launch', args: [{ name: 'greenfield', prompt: 'Add dark mode', repo: { id: 7 }, session: 'sess-1' }] },
+      ], `${runtime} launch defaults to the caller's repo and Session`);
       // Outside Pane: the active repo, and no Session (Pane makes one).
       const outside = await call(['profiles', 'launch', 'greenfield', '--prompt', 'Add dark mode', '--yes', '--json']);
       assert.deepStrictEqual(outside.frames, [

@@ -22,7 +22,6 @@ interface ProfileLaunchRequest {
   harness?: string;
   agentHarness?: Record<string, string>;
   commands?: Record<string, string>;
-  callerPanelId?: string;
 }
 
 /** What each profiles channel takes: nothing (list, runs), a name (show), or a launch. */
@@ -34,6 +33,7 @@ const stepSchema = boundary.object({
   id: boundary.string,
   kind: boundary.string,
   title: boundary.optional(boundary.string),
+  run: boundary.optional(boundary.string),
   agent: boundary.optional(boundary.string),
   outcomes: boundary.optional(boundary.array(edgeSchema)),
   choices: boundary.optional(boundary.array(edgeSchema)),
@@ -139,8 +139,6 @@ export async function runProfilesLaunch(parsed: ParsedArgs): Promise<number> {
   if (parsed.profileHarness?.trim()) request.harness = parsed.profileHarness.trim();
   if (parsed.agentHarness) request.agentHarness = parsed.agentHarness;
   if (parsed.profileCommands) request.commands = parsed.profileCommands;
-  const callerPanelId = process.env.PANE_PANEL_ID?.trim();
-  if (callerPanelId) request.callerPanelId = callerPanelId;
   const { raw, view } = await invokeProfiles(parsed, 'runpane:profiles:launch', request, launchViewSchema);
   if (parsed.json) printJson(raw);
   else console.log(describeLaunch(view.run));
@@ -205,7 +203,10 @@ function describeProfile(profile: LibraryProfileView): string[] {
       lines.push('', `Steps (start: ${body.flow.start}):`);
       for (const step of body.flow.steps) {
         const who = step.agent ? ` ${step.agent}` : '';
-        lines.push(`  ${step.id} (${step.kind}${who})${step.title ? `: ${step.title}` : ''}`);
+        // A command shows what it runs; its title only when that says something else.
+        const title = step.title && step.title !== step.run ? `: ${step.title}` : '';
+        lines.push(`  ${step.id} (${step.kind}${who})${title}`);
+        if (step.run) lines.push(`    run: ${step.run}`);
         for (const edge of [...(step.outcomes ?? []), ...(step.choices ?? [])]) lines.push(`    ${edge.name} → ${edge.to}`);
         if (step.next) lines.push(`    (answer) → ${step.next}`);
       }

@@ -1,5 +1,6 @@
 import type { IpcMain } from 'electron';
 import { readFileSync } from 'fs';
+import { CONFIGURED_AGENT_IDS, isConfiguredAgent } from '../../../shared/agents';
 import { reasonOf, PaneError } from '../../../shared/paneError';
 import type { OwnAgentFarmView, ProfileDetailView, ProfileLaunchInput, ProfileLibraryView, ProfileRun } from '../../../shared/types/profiles';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -70,6 +71,8 @@ async function ownAgentFarmView(): Promise<OwnAgentFarmView | null> {
 /** A run starts in the Session the launch names, or a new one, without starting that Session's own agent. */
 async function launchProfile(services: AppServices, input: ProfileLaunchInput): Promise<ProfileRun> {
   const runner = getProfileRunner();
+  const loaded = currentProfiles().find((candidate) => candidate.name === input.profile);
+  if (loaded && !loaded.enabled) throw new PaneError('PROFILE_NOT_LAUNCHABLE', `${input.profile} is off, so it can't launch.`, `Turn it on in Profiles (Add), then launch it again.`);
   let sessionId = input.sessionId;
   if (!sessionId) {
     const manager = services.orchestrationSessionManager;
@@ -93,7 +96,6 @@ const runpaneLaunchSchema = boundary.object({
   harness: boundary.optional(boundary.nonEmptyString),
   agentHarness: boundary.optional(boundary.record(boundary.nonEmptyString)),
   commands: boundary.optional(boundary.record(boundary.nonEmptyString)),
-  callerPanelId: boundary.optional(boundary.string),
 });
 
 /** `runpane profiles launch`: the repo by selector, the Session by id or name (new without one), and one CLI for every agent or per agent. */
@@ -112,6 +114,12 @@ async function runpaneLaunch(services: AppServices, value: PaneCommandValue): Pr
     const session = sessions.find((candidate) => candidate.id === request.session) ?? sessions.find((candidate) => candidate.name === request.session);
     if (!session) throw new PaneError('PROFILE_SESSION_NOT_FOUND', `No Session has the id or name "${request.session}".`, 'Run `runpane sessions list`, or leave --session out to start a new Session.');
     sessionId = session.id;
+  }
+  // A CLI Pane doesn't know runs only as the command given for it: a bare name would get the step's message typed into the shell.
+  for (const [flag, value] of [['--harness', request.harness], ...Object.entries(request.agentHarness ?? {}).map(([agent, cli]) => [`--agent-harness ${agent}`, cli])]) {
+    const cli = value?.split('/')[0];
+    if (!cli || isConfiguredAgent(cli) || request.commands?.[cli]) continue;
+    throw new PaneError('PROFILE_CLI_UNKNOWN', `Pane doesn't know the CLI "${cli}" (${flag}), and no --command says how to start it. Nothing was launched.`, `Use one of ${CONFIGURED_AGENT_IDS.join(', ')}, or add --command ${cli}="<the command that starts it>".`);
   }
   const harness: Record<string, string> = {};
   for (const agent of loaded.profile?.agents ?? []) if (request.harness) harness[agent.id] = request.harness;
@@ -154,7 +162,11 @@ export function registerProfileHandlers(ipcMain: IpcMain, services: AppServices,
   commandRegistry.bindChannels(ipcMain, PROFILE_CHANNELS);
 
   // runpane profiles list | show | launch | runs, and the pane MCP tools of the same names.
-  commandRegistry.register('runpane:profiles:list', async () => ({ ok: true, ...(await profileLibraryView()) }));
+  // The CLI also lists "Your Agent Farm" (the page loads it on its own, since it runs the person's agent-farm).
+  commandRegistry.register('runpane:profiles:list', async () => {
+    const own = await ownAgentFarmView();
+    return own ? { ok: true, ...profileLibraryView(), ownAgentFarm: own } : { ok: true, ...profileLibraryView() };
+  });
   commandRegistry.register('runpane:profiles:show', (value: PaneCommandValue) => {
     const { name } = decodeBoundary(value, boundary.object({ name: boundary.nonEmptyString }));
     const profile = currentProfiles().find((candidate) => candidate.name === name);

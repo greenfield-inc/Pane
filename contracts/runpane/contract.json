@@ -26905,7 +26905,7 @@
         ],
         "examples": [
           "runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes --json",
-          "runpane profiles launch greenfield --prompt \"Fix the flaky test\" --repo active --agent-harness planner=claude/opus --agent-harness builder=codex --yes --json"
+          "runpane profiles launch greenfield --prompt \"Fix the flaky test\" --repo active --agent-harness planner=claude/opus --agent-harness implementer=codex --yes --json"
         ],
         "jsonSchemas": [
           "profileLaunchRequest",
@@ -26914,6 +26914,7 @@
         "notes": [
           "A launch without --prompt fails with ERR_PROFILES_PROMPT_REQUIRED and starts nothing.",
           "Pane refuses a profile it cannot launch: PROFILE_NOT_FOUND (no such profile), PROFILE_TEAM_ONLY (a team with no workflow) or PROFILE_NOT_LAUNCHABLE (invalid, or off); the error's next says what to do.",
+          "A --harness or --agent-harness CLI that Pane doesn't know needs --command <cli>=<command that starts it>; without one the launch fails with PROFILE_CLI_UNKNOWN and starts nothing.",
           "Follow the run with `runpane profiles runs --json`; its steps are tabs in the run's Pane (`runpane agents status --pane <paneId>`)."
         ]
       },
@@ -28054,6 +28055,7 @@
       "To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).",
       "",
       "Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.",
+      "Profiles: a profile is a team of agents and a fixed workflow in one file. `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `\"$PANE_RUNPANE_BIN\" report --outcome \"<outcome>\"`, using one of the outcomes its first message lists.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",

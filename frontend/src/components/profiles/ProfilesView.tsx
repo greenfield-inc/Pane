@@ -228,7 +228,7 @@ export function ProfilesView() {
               {selected.origin === 'bundled' && selected.valid && (
                 <Button size="sm" variant="secondary" onClick={() => void toggle(selected)} data-testid="profile-toggle-enabled">{selected.enabled ? 'Turn off' : 'Add'}</Button>
               )}
-              <Button size="sm" disabled={!selected.launchable} title={selected.launchable ? undefined : selected.teamOnly ? 'Team only: this profile has no workflow to launch.' : 'Fix this profile\'s errors to launch it.'} onClick={() => setLaunching(true)} data-testid="profile-launch">Launch…</Button>
+              <Button size="sm" disabled={!selected.launchable || !selected.enabled} title={!selected.launchable ? (selected.teamOnly ? 'Team only: this profile has no workflow to launch.' : 'Fix this profile\'s errors to launch it.') : selected.enabled ? undefined : 'Add this profile to launch it.'} onClick={() => setLaunching(true)} data-testid="profile-launch">Launch…</Button>
             </header>
             {selected.title && <p className="text-sm text-text-secondary">{selected.title}</p>}
             {toggleError && <p className="text-xs text-status-error" role="alert">{toggleError}</p>}

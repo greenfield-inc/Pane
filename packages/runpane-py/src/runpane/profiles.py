@@ -80,9 +80,6 @@ def run_profiles_launch(parsed: Any) -> int:
         request["agentHarness"] = parsed.agent_harness
     if parsed.profile_commands:
         request["commands"] = parsed.profile_commands
-    caller_panel_id = (os.environ.get("PANE_PANEL_ID") or "").strip()
-    if caller_panel_id:
-        request["callerPanelId"] = caller_panel_id
     result = _invoke(parsed, "runpane:profiles:launch", request, "run")
     run = result["run"]
     if parsed.json:
@@ -162,8 +159,11 @@ def _describe_profile(profile: Dict[str, Any]) -> List[str]:
             lines.extend(["", f"Steps (start: {flow.get('start')}):"])
             for step in flow.get("steps") or []:
                 who = f" {step['agent']}" if step.get("agent") else ""
-                title = f": {step['title']}" if step.get("title") else ""
+                # A command shows what it runs; its title only when that says something else.
+                title = f": {step['title']}" if step.get("title") and step.get("title") != step.get("run") else ""
                 lines.append(f"  {step.get('id')} ({step.get('kind')}{who}){title}")
+                if step.get("run"):
+                    lines.append(f"    run: {step['run']}")
                 for edge in [*(step.get("outcomes") or []), *(step.get("choices") or [])]:
                     lines.append(f"    {edge.get('name')} → {edge.get('to')}")
                 if step.get("next"):
