@@ -21,6 +21,9 @@ jobs:
       runpane: ${{ steps.filter.outputs.runpane }}
       main: ${{ steps.filter.outputs.main }}
       relay: ${{ steps.filter.outputs.relay }}
+      # The jobs this run may skip, each with its reason (scripts/ci-gate.mjs).
+      # Skippable jobs read it in their `if:`, and CI result allows only these skips.
+      skip: ${{ steps.manifest.outputs.skip }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -62,6 +65,14 @@ jobs:
             - 'pnpm-lock.yaml'
             - 'pnpm-workspace.yaml'
             - '.github/workflows/quality.yml'
+
+    - name: Declare the jobs this run may skip
+      id: manifest
+      env:
+        CHANGED_RUNPANE: ${{ steps.filter.outputs.runpane }}
+        CHANGED_MAIN: ${{ steps.filter.outputs.main }}
+        CHANGED_RELAY: ${{ steps.filter.outputs.relay }}
+      run: node scripts/ci-gate.mjs manifest >> "$GITHUB_OUTPUT"
 
   quality-checks:
     name: Quality Checks
@@ -284,7 +295,7 @@ jobs:
   runpane-wrapper-tests:
     name: Runpane Wrapper (${{ matrix.os }}, Node ${{ matrix.node-version }}, Python ${{ matrix.python-version }})
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.runpane == 'true'
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['runpane-wrapper-tests'] }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -395,7 +406,7 @@ jobs:
   cross-os-main-tests:
     name: Main Process Tests (${{ matrix.os }}${{ matrix.shards > 1 && format(', {0}/{1}', matrix.shard, matrix.shards) || '' }})
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.main == 'true'
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['cross-os-main-tests'] }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -460,7 +471,7 @@ jobs:
   relay-tests:
     name: Relay Tests
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.relay == 'true'
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['relay-tests'] }}
     runs-on: ubuntu-latest
     env:
       # The relay, Pebble and pane-direct suites fail here instead of skipping when a binary is missing.
@@ -534,14 +545,44 @@ jobs:
     - name: Run runpane relay against the relay
       run: pnpm run test:runpane-relay
 
-  # The one check branch protection requires. Skipped jobs pass; failed or
-  # cancelled ones fail it.
+  # The one check branch protection requires. It runs even when the run is
+  # cancelled, and fails unless every job in scripts/ci-gate.mjs EXPECTED_JOBS
+  # succeeded or skipped with a reason from Detect changed areas' manifest.
+  # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, typecheck-lint, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
-    if: ${{ !cancelled() }}
+    needs: [changes, quality-checks, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
-    - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-      run: exit 1
+    - name: Checkout the gate
+      uses: actions/checkout@v7
+      with:
+        sparse-checkout: |
+          .github/workflows/quality.yml
+          scripts/ci-gate.mjs
+          scripts/ci-gate.test.mjs
+          scripts/ci-timings.mjs
+        sparse-checkout-cone-mode: false
+
+    - name: Test the gate
+      run: node --test scripts/ci-gate.test.mjs
+
+    - name: Decide
+      env:
+        NEEDS_JSON: ${{ toJSON(needs) }}
+      run: node scripts/ci-gate.mjs decide
+
+    # Each job's head SHA, runner and waiting/setup/running seconds, in the
+    # job summary and the log, for measuring CI speed (scripts/ci-timings.mjs).
+    - name: Record job timings
+      if: ${{ always() }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        node scripts/ci-timings.mjs --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/ci-run-timings.json" --summary "$GITHUB_STEP_SUMMARY"
+        cat "$RUNNER_TEMP/ci-run-timings.json"
