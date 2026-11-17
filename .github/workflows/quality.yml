@@ -167,6 +167,9 @@ jobs:
     name: Markdown Links
     runs-on: ubuntu-latest
     steps:
+    - name: THROWAWAY wait to be cancelled
+      run: sleep 240
+
     - name: Checkout code
       uses: actions/checkout@v7
 
