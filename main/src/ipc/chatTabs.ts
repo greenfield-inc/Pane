@@ -58,8 +58,8 @@ const agentFarmProfiles = new AgentFarmProfiles({
   bundled: async (args, cwd, env) => {
     const bundle = bundledAgentFarm();
     if (!bundle) return undefined;
-    // `run` writes its launch bundle to <worktree>/.agent-farm/generated; hide it from git like .pane/.
-    await worktreePaneFolder(cwd, '.agent-farm', candidate => new PaneError('CHAT_PROFILE_FOLDER_LINK', `${candidate} is a symbolic link, so Pane won't let Agent Farm write through it. Nothing was started.`, 'Remove the link, then start the profile again.'));
+    // `run` writes its launch bundle to <worktree>/.agent-farm/generated; hide that from git like .pane/ (workspace.yaml beside it is meant to be committed).
+    await worktreePaneFolder(cwd, '.agent-farm/generated', candidate => new PaneError('CHAT_PROFILE_FOLDER_LINK', `${candidate} is a symbolic link, so Pane won't let Agent Farm write through it. Nothing was started.`, 'Remove the link, then start the profile again.'));
     return bundledAgentFarmProcess(bundle, args, agentFarmConfigRoot(getAppDirectory()), env);
   },
   adapter: async agent => {
