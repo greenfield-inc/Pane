@@ -48,7 +48,9 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
   const state = decodeOptionalBoundary(panel.state.customState, panelStateSchema);
   const live = state?.phase === 'live';
   const [frame, setFrame] = useState<string>();
+  // The screen inside the bezel, for mapping taps; and the room the phone may fill.
   const [box, setBox] = useState<{ width: number; height: number }>();
+  const [stage, setStage] = useState<{ width: number; height: number }>();
   const [aspect, setAspect] = useState(ASPECT[state?.platform ?? 'ios']);
   const [controls, setControls] = useState<DeviceControls>();
   const [notice, setNotice] = useState<string>();
@@ -107,6 +109,8 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
     send({ kind: 'touch', phase: 'end', x, y });
   };
   const screenshotToChat = async () => {
+    // A full-resolution capture takes a few seconds on the computer; say so at once.
+    setNotice('Taking a screenshot…');
     try {
       const capture = await invokeChannel<DeviceCapture>(client, 'devices:capture', [panel.id]);
       if (agentTab?.kind === 'chat') {
@@ -148,14 +152,14 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
 
   return (
     <View testID="device-tab" style={[styles.fill, { backgroundColor: colors.background }]}>
+      <View style={styles.stage} onLayout={(event: LayoutChangeEvent) => setStage(event.nativeEvent.layout)}>
       <View
         testID="device-screen"
-        style={[styles.phone, { aspectRatio: aspect, borderColor: driver?.by === 'agent' ? colors.accent : colors.deviceBezel, backgroundColor: colors.deviceScreen }]}
-        onLayout={(event: LayoutChangeEvent) => setBox(event.nativeEvent.layout)}
+        style={[styles.phone, fitted(stage, aspect), { borderColor: driver?.by === 'agent' ? colors.accent : colors.deviceBezel, backgroundColor: colors.deviceScreen }]}
       >
         {live && frame
           ? (
-            <Pressable testID="device-screen-touch" style={StyleSheet.absoluteFill} onPress={tap} accessibilityLabel="Device screen">
+            <Pressable testID="device-screen-touch" style={StyleSheet.absoluteFill} onPress={tap} onLayout={(event: LayoutChangeEvent) => setBox(event.nativeEvent.layout)} accessibilityLabel="Device screen">
               <Image
                 source={{ uri: frame }}
                 style={StyleSheet.absoluteFill}
@@ -165,6 +169,7 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
             </Pressable>
           )
           : <View style={styles.offScreen}><Text variant="subhead" style={[styles.offText, { color: colors.onAccent }]}>{live ? 'Loading the screen…' : 'Not running. Open it from the agent or on the computer.'}</Text></View>}
+      </View>
       </View>
       <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.caption}>{notice ?? [state?.name ?? panel.title, state?.os, state?.machine].filter(Boolean).join(' · ')}</Text>
       {controls && driver && (
@@ -189,9 +194,16 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
   );
 }
 
+/** The largest phone of `aspect` (width over height) that fits `stage`; nothing until the stage is measured. */
+function fitted(stage: { width: number; height: number } | undefined, aspect: number) {
+  if (!stage || stage.width <= 0 || stage.height <= 0) return { width: 0, height: 0 };
+  return stage.width / stage.height > aspect ? { width: stage.height * aspect, height: stage.height } : { width: stage.width, height: stage.width / aspect };
+}
+
 const styles = StyleSheet.create({
   fill: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
-  phone: { maxHeight: '78%', maxWidth: '100%', borderRadius: 28, borderWidth: 6, overflow: 'hidden' },
+  stage: { flex: 1, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
+  phone: { borderRadius: 28, borderWidth: 6, overflow: 'hidden' },
   offScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
   offText: { textAlign: 'center' },
   caption: { marginTop: 10 },
