@@ -147,6 +147,7 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
     startTab,
     tabExists: (panelId) => panelManager.getPanel(panelId) !== undefined,
     postCard,
+    cardOpen: (approvalId) => queue().waitingItems().some((item) => item.id === approvalId),
     waitCard,
     log,
   });
