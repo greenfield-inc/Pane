@@ -18,21 +18,22 @@ agents:
   implementer:
     runs: claude/claude-opus-5-5
     effort: medium
-    reads: [standing-rules]
+    reads: [agents/raw-claude, standing-rules]
     skills: [prepare-pr, page, excalidraw-pr-diagrams, create-ticket, babysit-pr, tdd, codebase-design, handoff, smallest-test, investigate, quick-verify, pr-test-automation, ui-mockup, research-web, refactor, session-trace, architecture-diagram, swarm]
   reviewer:
     runs: codex/gpt-6.1-sol
     effort: max
+    reads: [agents/codex-pr-reviewer]
     skills: [principled-review, review, pr-test-automation]
   orchestrator:
     runs: claude/claude-opus-5-5
     effort: medium
-    reads: [standing-rules, coordination]
+    reads: [agents/orchestrator, standing-rules, coordination]
     skills: [orchestrate-sessions, page, session-trace, architecture-diagram, interview, research-and-product-design, pr-understanding-check, prepare-pr, excalidraw-pr-diagrams, cold-read]
   qa-lead:
     runs: claude/claude-opus-5-5
     effort: medium
-    reads: [standing-rules]
+    reads: [agents/qa-lead, standing-rules]
     skills: [pr-test-automation, investigate, tdd, quick-verify, babysit-pr, session-trace, ui-options, prepare-pr, page, excalidraw-pr-diagrams, cold-read]
 # END agents
 

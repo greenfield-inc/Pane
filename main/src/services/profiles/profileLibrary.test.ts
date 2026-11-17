@@ -37,7 +37,9 @@ describe('the bundled profiles', () => {
     const agents = listProfiles({ paneDir: paneDir() }).find((profile) => profile.name === 'greenfield')?.profile?.agents ?? [];
     expect(agents.map((agent) => agent.id)).toEqual(['planner', 'implementer', 'reviewer', 'orchestrator', 'qa-lead']);
     expect(agents.find((agent) => agent.id === 'planner')).toMatchObject({ effort: 'high', reads: ['standing-rules', 'planner-documents', 'planner-identity'] });
-    expect(agents.find((agent) => agent.id === 'reviewer')).toMatchObject({ model: 'gpt-6.1-sol', effort: 'max' });
+    // Each agent reads its Agent Farm role prompt (the definition's body), as Agent Farm gives it.
+    expect(agents.find((agent) => agent.id === 'reviewer')).toMatchObject({ model: 'gpt-6.1-sol', effort: 'max', reads: ['agents/codex-pr-reviewer'] });
+    expect(agents.find((agent) => agent.id === 'implementer')?.reads).toEqual(['agents/raw-claude', 'standing-rules']);
     expect(agents.find((agent) => agent.id === 'orchestrator')?.skills).toContain('orchestrate-sessions');
   });
 

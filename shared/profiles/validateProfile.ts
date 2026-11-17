@@ -37,6 +37,11 @@ const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$
 const RUNS_PATTERN = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\/(\S+))?$/u;
 const SAMPLE_REF_PATTERN = /^(.*\S)\s+#(\d+)$/u;
 const HEADER_TEXT_KEYS = ['title', 'description', 'source', 'extends'] as const;
+/** A `reads` id: a relative path inside the profile's folder, without `..`. */
+const READ_ID_PATTERN = /^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/u;
+const TOP_LEVEL_KEYS = ['format', 'name', 'version', ...HEADER_TEXT_KEYS, 'loop_limit', 'agents', 'flow', 'samples', 'runs'];
+const AGENT_KEYS = ['runs', 'effort', 'reads', 'skills'];
+const STEP_KEYS = { agent: ['agent', 'goal', 'outcomes', 'title'], run: ['run', 'outcomes', 'title'], ask: ['ask', 'choices', 'next', 'title'] } as const;
 
 /** The value as a set of keys, or undefined. */
 function asMap(value: Raw): JsonObject | undefined {
@@ -63,6 +68,15 @@ interface ProblemLocation {
   outcome?: string;
 }
 
+/** Flags each key of `raw` that Pane doesn't read, so a misspelt key isn't silently dropped. */
+function checkKeys(raw: JsonObject, allowed: readonly string[], where: string, problems: Problems, location: ProblemLocation = {}): void {
+  for (const key of Object.keys(raw)) {
+    if (!allowed.includes(key)) {
+      problems.add('UNKNOWN_KEY', `${where} has "${key}:", which Pane doesn't read.`, `Fix its spelling or remove it. ${where} takes: ${allowed.join(', ')}.`, location);
+    }
+  }
+}
+
 class Problems {
   readonly list: ProfileProblem[] = [];
   add(code: string, message: string, fix: string, where: ProblemLocation = {}): void {
@@ -85,6 +99,7 @@ export function validateProfile(file: JsonValue, context: ProfileValidationConte
     return { errors: problems.list };
   }
 
+  checkKeys(raw, TOP_LEVEL_KEYS, 'The profile', problems);
   if (raw.format !== PROFILE_FORMAT) {
     problems.add('PROFILE_FORMAT', `The file says format ${JSON.stringify(raw.format ?? null)}; Pane reads ${PROFILE_FORMAT}.`, `Set "format: ${PROFILE_FORMAT}".`);
   }
@@ -136,6 +151,7 @@ function readAgents(value: Raw, problems: Problems, context: ProfileValidationCo
       problems.add('AGENT_SHAPE', `Agent ${id} is not a set of keys.`, `Write it as "${id}: { runs: <cli>/<model> }".`);
       continue;
     }
+    checkKeys(fields, AGENT_KEYS, `Agent ${id}`, problems);
     const runs = text(fields.runs);
     const match = runs ? RUNS_PATTERN.exec(runs) : null;
     if (!runs || !match) {
@@ -146,6 +162,10 @@ function readAgents(value: Raw, problems: Problems, context: ProfileValidationCo
     if (!reads) problems.add('AGENT_READS', `Agent ${id}'s "reads:" is not a list of file ids.`, 'Write it as a list, for example [standing-rules].');
     if (!skills) problems.add('AGENT_SKILLS', `Agent ${id}'s "skills:" is not a list of skill names.`, 'Write it as a list, for example [review].');
     for (const read of reads ?? []) {
+      if (!READ_ID_PATTERN.test(read)) {
+        problems.add('READ_ID', `Agent ${id} reads "${read}", which is not a file id inside the profile's folder.`, 'Name the file by its path inside the folder, without ".." or a leading "/", for example standing-rules.');
+        continue;
+      }
       if (context.readExists && !context.readExists(read)) {
         problems.add('READ_MISSING', `Agent ${id} reads "${read}", but the profile's folder has no instructions/${read}.md or ${read}.md.`, `Add the file, or remove "${read}" from ${id}'s reads.`);
       }
@@ -198,6 +218,7 @@ function readStep(id: string, value: Raw, problems: Problems): ProfileStep | und
     problems.add('STEP_KIND', kinds.length === 0 ? `Step ${id} is not an agent step, a command or an ask.` : `Step ${id} mixes ${kinds.join(' and ')}.`, 'Give the step exactly one of "agent:", "run:" or "ask:".', { step: id });
     return undefined;
   }
+  checkKeys(raw, STEP_KEYS[kinds[0]], `Step ${id}`, problems, { step: id });
   const title = text(raw.title);
   if (kinds[0] === 'agent') {
     const agent = text(raw.agent) ?? '';

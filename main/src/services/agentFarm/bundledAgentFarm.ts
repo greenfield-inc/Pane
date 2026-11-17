@@ -90,6 +90,35 @@ function installedVersion(stdout: string): string | undefined {
   catch { return undefined; }
 }
 
+/**
+ * Agent Farm writes launch telemetry under ~/.local/state/agent-farm unless its config root's
+ * settings.json names another folder; Pane's copy keeps it in its own config root. Other
+ * settings in the file are kept.
+ */
+async function keepTelemetryInPaneDir(configRoot: string): Promise<void> {
+  const file = path.join(configRoot, 'settings.json');
+  const directory = path.join(configRoot, 'telemetry');
+  const text = await fs.readFile(file, 'utf8').catch(() => undefined);
+  const settings = (text === undefined ? undefined : decodeOptionalBoundary(JSON.parse(text), boundary.jsonObject)) ?? {};
+  const telemetry = decodeOptionalBoundary(settings.telemetry, boundary.jsonObject) ?? {};
+  if (telemetry.directory === directory) return;
+  await fs.mkdir(configRoot, { recursive: true });
+  await fs.writeFile(file, `${JSON.stringify({ ...settings, telemetry: { ...telemetry, directory } }, null, 2)}\n`);
+}
+
+/**
+ * Removes what an install that never finished (killed by the timeout, a crash or a quit) left
+ * behind: Agent Farm's install lock, which makes every later install refuse, and the bundled
+ * plugins' half-copied files. The config root is Pane's alone, so nothing else is installing.
+ */
+async function clearUnfinishedInstall(configRoot: string): Promise<void> {
+  await fs.rm(path.join(configRoot, '.plugins', 'install.lock'), { recursive: true, force: true });
+  for (const name of BUNDLED_AGENT_FARM_PLUGINS) {
+    await fs.rm(path.join(configRoot, 'plugins', name), { recursive: true, force: true });
+    await fs.rm(path.join(configRoot, '.plugins', `${name}.json`), { force: true });
+  }
+}
+
 export interface InstallBundledAgentFarmOptions {
   paneDir: string;
   bundle?: BundledAgentFarm;
@@ -113,6 +142,11 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
     log(`[AgentFarm] ${status.error}`);
     return status;
   }
+  try {
+    await keepTelemetryInPaneDir(configRoot);
+  } catch (error) {
+    log(`[AgentFarm] Pane couldn't point Agent Farm's telemetry at ${configRoot}: ${reasonOf(error)}.`);
+  }
   const manifestPath = path.join(configRoot, MANIFEST_FILE);
   let hash: string;
   try {
@@ -135,6 +169,7 @@ export async function installBundledAgentFarm(options: InstallBundledAgentFarmOp
   const plugins: Record<string, string> = {};
   try {
     await fs.mkdir(configRoot, { recursive: true });
+    await clearUnfinishedInstall(configRoot);
     for (const name of BUNDLED_AGENT_FARM_PLUGINS) {
       // No name installs the package's default plugin, greenfield.
       const args = name === 'greenfield' ? ['plugin', 'install'] : ['plugin', 'install', name];

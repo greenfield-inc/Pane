@@ -130,6 +130,8 @@ export interface LoadedProfile {
   title?: string;
   origin: ProfileOrigin;
   file: string;
+  /** The folders an agent's `reads` resolve in, first match wins: an overlay's own folder, then its base's. */
+  readsRoots: string[];
   valid: boolean;
   /** Valid and has a flow. */
   launchable: boolean;
