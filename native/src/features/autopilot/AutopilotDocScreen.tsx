@@ -8,6 +8,7 @@ import { decisionModel } from '@shared/autopilotDecision';
 import type { AutopilotDocument } from '@shared/types/autopilot';
 
 import { useDaemon, useInvokeQuery } from '@/daemon';
+import { StaticPage } from '@/features/approvals/StaticPage';
 import { browserPage } from '@/features/browser/browserPage';
 import { usePorts } from '@/features/browser/usePorts';
 import { ConnectionBar } from '@/features/hosts/ConnectionStatus';
@@ -69,7 +70,8 @@ export function AutopilotDocScreen({ notifyId, path, url, label }: { notifyId?: 
   );
 }
 
-function FileDoc({ path }: { path: string }) {
+/** A linked file read through the phone's connection: an html page drawn as a `StaticPage`, any other file as text. */
+export function FileDoc({ path }: { path: string }) {
   const { colors } = useTheme();
   const { profile } = useDaemon();
   const doc = useInvokeQuery<AutopilotDocument>('autopilot:read-doc', [path, { inline: true }], { retry: false });
@@ -80,7 +82,7 @@ function FileDoc({ path }: { path: string }) {
   if (read.kind === 'html') {
     // A computer from before the phone could read pages inline sends only its file URL.
     if (read.html === undefined) return <StateScreen testID="autopilot-doc-update" icon={{ ios: 'arrow.down.circle', android: 'system_update' }} title="Update Pane on the computer" message={`${profile.label}’s Pane is too old to send this page to the phone. Update it, or open the page in Pane there.`} />;
-    return <WebView testID="autopilot-doc-page" originWhitelist={['*']} source={{ html: read.html }} style={[styles.fill, { backgroundColor: colors.surface }]} />;
+    return <StaticPage testID="autopilot-doc-page" html={read.html} />;
   }
   return (
     <ScrollView testID="autopilot-doc-text" style={styles.fill} contentContainerStyle={styles.text}>
@@ -90,7 +92,7 @@ function FileDoc({ path }: { path: string }) {
 }
 
 /** A page: through the phone addresses the computer makes for its dev servers, or the address itself. */
-function UrlDoc({ url }: { url: string }) {
+export function UrlDoc({ url }: { url: string }) {
   const page = browserPage(url, usePorts(), 'autopilot');
   if (page.kind === 'web') return <WebView testID="autopilot-doc-page" source={{ uri: page.src }} style={styles.fill} />;
   if (page.kind === 'loading') return <View style={styles.center}><ActivityIndicator /></View>;

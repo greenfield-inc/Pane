@@ -44,7 +44,7 @@ import { useControllerShown } from './controllerPreference';
 import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
 import { followsHost, pickPanel, sessionWorkspacePanels, stripPanels, tabView } from './panels';
-import { PanelTabs } from './PanelTabs';
+import { PanelTabs, type LeadingTab } from './PanelTabs';
 import { PausedTerminal } from './PausedTerminal';
 import { TerminalInputBar } from './TerminalInputBar';
 import { TerminalTopBar } from './TerminalTopBar';
@@ -63,17 +63,14 @@ const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:
  * on top, then the open tab. A terminal shows xterm with the composer box
  * below; other tabs get a view for their type. With a `session`, it shows
  * that Session's workspace pane, its agent chat first. The approval screen
- * passes its own `topBar` and puts its card `above` the tabs.
+ * passes its own `topBar` and its own tabs (`leading`), which open first.
  */
-export function TerminalScreen({ paneId, session, topBar, above, initialPanelId }: {
+export function TerminalScreen({ paneId, session, topBar, leading }: {
   paneId: string;
   session?: OrchestrationSessionView;
-  /** The tab to open on until the person picks one (an approval's asking tab). */
-  initialPanelId?: string;
   /** Replaces the host bar. */
   topBar?: ReactNode;
-  /** Sits between the bar and the tabs. */
-  above?: ReactNode;
+  leading?: LeadingTabs;
 }) {
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
   const theme = useTheme();
@@ -124,21 +121,24 @@ export function TerminalScreen({ paneId, session, topBar, above, initialPanelId 
 
   const strip = stripPanels(panelList.data ?? []);
   const panels = session ? sessionWorkspacePanels(session, strip) : strip;
-  const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id, initialPanelId);
+  const leadingTab = leading?.tabs.find(tab => tab.id === (panelId ?? leading.tabs[0]?.id));
+  const panel = leadingTab ? null : pickPanel(panels, panelId ?? null, hostActive.data?.id);
   const view = panel ? tabView(panel) : null;
   const paused = panel ? pausedMarkOf(panel) : undefined;
   const followed = follow ? panels.find(candidate => candidate.id === follow) : undefined;
   useEffect(() => {
     if (!followed) return;
-    if (followsHost(followed)) router.setParams({ panelId: followed.id });
+    // Reading the screen's own tab (an approval), the phone stays put.
+    if (followsHost(followed) && !leadingTab) router.setParams({ panelId: followed.id });
     setFollow(null);
-  }, [followed]);
+  }, [followed, leadingTab]);
   // The tab on screen stays put until the person or a host announcement moves it,
   // so the host's active tab changing to one the phone doesn't follow never jumps it.
   const shownId = panel?.id;
+  const hasLeading = leading !== undefined;
   useEffect(() => {
-    if (!panelId && shownId) router.setParams({ panelId: shownId });
-  }, [panelId, shownId]);
+    if (!panelId && shownId && !hasLeading) router.setParams({ panelId: shownId });
+  }, [panelId, shownId, hasLeading]);
   const terminalActive = view === 'terminal' && !paused;
   const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
 
@@ -155,9 +155,10 @@ export function TerminalScreen({ paneId, session, topBar, above, initialPanelId 
   const resumeOnOpen = affordances.data?.resumePausedOnOpen === true;
   const openChecked = useRef(false);
   useEffect(() => {
-    if (openChecked.current || !panel || affordances.isPending) return;
+    if (openChecked.current || (!panel && !leadingTab) || affordances.isPending) return;
     openChecked.current = true;
-    if (resumeOnOpen && pausedMarkOf(panel)) resume(panel);
+    // Opening on the screen's own tab, only a picked tab resumes (selectPanel).
+    if (panel && resumeOnOpen && pausedMarkOf(panel)) resume(panel);
   });
 
   const selectPanel = (next: ToolPanel) => {
@@ -194,16 +195,19 @@ export function TerminalScreen({ paneId, session, topBar, above, initialPanelId 
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
       {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />}
-      {above}
       <PanelTabs
         panels={panels}
         chatId={session?.panel.id}
-        selectedId={panel?.id ?? null}
+        selectedId={leadingTab?.id ?? panel?.id ?? null}
+        leading={leading?.tabs}
+        onSelectLeading={id => router.setParams({ panelId: id })}
         onSelect={selectPanel}
         onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
         onClose={closePanel}
       />
-      {panel && view !== 'terminal' ? (
+      {leadingTab && leading ? (
+        <View key={leadingTab.id} style={styles.fill}>{leading.render(leadingTab.id)}</View>
+      ) : panel && view !== 'terminal' ? (
         <TabBody panel={panel} title={title} panels={panels} />
       ) : panel && paused ? (
         <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resumePanel.isPending} onResume={() => resume(panel)} />
@@ -241,6 +245,12 @@ export function TerminalScreen({ paneId, session, topBar, above, initialPanelId 
       <View style={{ height: keyboardVisible ? KEYBOARD_GAP : insets.bottom }} />
     </KeyboardAvoidingView>
   );
+}
+
+/** A screen's own tabs ahead of the Pane's, picked through the `panelId` route param like the rest; the first opens when none is picked. */
+export interface LeadingTabs {
+  tabs: readonly LeadingTab[];
+  render: (id: string) => ReactNode;
 }
 
 /** A tab that is not a terminal, drawn by its type. */

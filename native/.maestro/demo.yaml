@@ -8,8 +8,8 @@ name: Try the demo
     id: demo-badge
 - assertNotVisible: "Allow.*Notifications.*"
 
-# A waiting question: pick a choice on its approval screen; once the agent has it, the screen
-# steps to the next one and the question leaves home's Needs you.
+# A waiting question: open its Cover sheet, then pick a choice on its approval tab; once the agent
+# has it, the screen steps to the next one and the question leaves home's Needs you.
 - tapOn:
     id: home-tile-needs
 - tapOn: "add-dark-mode.*Which colors.*"
@@ -18,6 +18,17 @@ name: Try the demo
       id: approval-card
     timeout: 10000
 - assertVisible: "2 of 5"
+# Its Cover sheet opens as a tab beside the approval, drawn as its page; the Approval tab answers.
+- tapOn:
+    id: approval-link-0
+- extendedWaitUntil:
+    visible:
+      id: autopilot-doc-page
+    timeout: 10000
+- assertVisible:
+    id: "panel-tab-link:0"
+- tapOn:
+    id: panel-tab-approval
 - tapOn:
     id: notify-choice-0
 - assertVisible:

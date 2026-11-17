@@ -202,9 +202,10 @@ are no tabs on the phone.
   Answering goes back to the chat where you were.
 - **A document** opens full screen with nothing to answer, and "‹ Back to Q-14
   to answer" returns to the approval. HTML files are read through the phone's
-  connection (`autopilot:read-doc` with `{ inline: true }`); a page loads the
-  way page tabs do. Only files on the stack, in the run's folder, or linked
-  from a waiting item open.
+  connection (`autopilot:read-doc` with `{ inline: true }`) and show as their
+  page with JavaScript off and every navigation refused, as the Summary does;
+  a web address loads the way page tabs do. Only files on the stack, in the
+  run's folder, or linked from a waiting item open.
 - Phone builds without chat tabs (runtimes before 1.4) never show Autopilot:
   its owner Pane is hidden and they don't know its channels. Every 1.4 build
   gets this over the air. "Try a demo" has a sample Autopilot.
