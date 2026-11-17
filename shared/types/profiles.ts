@@ -138,3 +138,8 @@ export interface LoadedProfile {
   /** The merged, normalized profile; absent when the file could not be read as one. */
   profile?: Profile;
 }
+
+/** A profile in the library: loaded, plus whether it is on. Bundled profiles are on when named in config `profiles.enabled`; yours are always on. */
+export interface LibraryProfile extends LoadedProfile {
+  enabled: boolean;
+}

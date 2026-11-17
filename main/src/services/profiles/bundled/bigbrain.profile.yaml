@@ -1,0 +1,44 @@
+# bigbrain, team only: written by `node scripts/import-agent-farm-profiles.js` from Agent Farm's bigbrain plugin 0.1.0; don't edit by hand.
+# It has no flow yet, so Pane lists and shows it but does not launch it.
+format: pane-profile/1
+name: bigbrain
+version: 0.1.0
+title: bigbrain (team only)
+description: "The only interface to the person: start bigbrain workers, relay every question back, run each plan's control flow, and keep the workstream map. Never does project work."
+
+agents:
+  designer:
+    runs: claude/claude-opus-5-5
+    effort: high
+    reads: [standing-rules, contract, glossary]
+    skills: [design, verify-app, documents]
+  implementer:
+    runs: claude/claude-opus-5-5
+    effort: medium
+    reads: [standing-rules, contract, glossary]
+    skills: [implement-plan, tdd, codebase-design, quick-verify, investigate, prepare-pr, excalidraw-pr-diagrams, babysit-pr, documents]
+  investigator:
+    runs: claude/claude-opus-5-5
+    effort: high
+    reads: [standing-rules, contract, glossary]
+    skills: [investigate-issues, investigate, documents]
+  orchestrator:
+    runs: claude/claude-opus-5-5
+    effort: medium
+    reads: [standing-rules, contract, glossary]
+    skills: [orchestrate, session-trace, documents]
+  planner:
+    runs: claude/claude-opus-5-5
+    effort: high
+    reads: [standing-rules, contract, glossary, planner-identity, planner-documents]
+    skills: [explain, brief, options, spike, plan, interview, architecture-diagram, documents]
+  reviewer:
+    runs: codex/gpt-6.1-sol
+    effort: high
+    reads: [standing-rules, contract, glossary]
+    skills: [review, documents]
+  teacher:
+    runs: claude/claude-opus-5-5
+    effort: high
+    reads: [standing-rules, contract, glossary]
+    skills: [teach, documents]

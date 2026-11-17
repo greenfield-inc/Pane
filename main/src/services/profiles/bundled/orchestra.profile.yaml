@@ -1,0 +1,12 @@
+# orchestra, team only: written by `node scripts/import-agent-farm-profiles.js` from Agent Farm's orchestra plugin 0.1.8; don't edit by hand.
+# It has no flow yet, so Pane lists and shows it but does not launch it.
+format: pane-profile/1
+name: orchestra
+version: 0.1.8
+title: orchestra (team only)
+description: "The full Orchestra workflow: talk a task through, write the brief, then build, test, and review it into a pull request with little hand-holding."
+
+agents:
+  overseer:
+    runs: claude/claude-opus-5-5
+    skills: [codex, cold-read, create-brief, discussion, do, excalidraw-pr-diagrams, investigate, postmortem, postmortem-loop, prepare-pull-request, sentry-loop, arena, hillclimb, babysit-pr, tdd, codebase-design, session-trace]
