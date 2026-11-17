@@ -386,6 +386,23 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
 });
 
 describe('RemoteDaemonClient when the phone leaves and returns', () => {
+  it('answers a read sent while the first connection is being made, sending it once', async () => {
+    const host = createFakeHost();
+    let attempts = 0;
+    host.onInvoke(() => { attempts += 1; return Response.json({ ok: true, result: ['pane'] }); });
+    const client = createClient(host, 600_000);
+
+    // A screen reads as it mounts, before its provider connects the client.
+    let answer: unknown;
+    void client.invoke('sessions:get-all-with-projects').then(result => { answer = result; });
+    await client.connect();
+    await flush();
+
+    expect(answer).toEqual(['pane']);
+    expect(attempts).toBe(1);
+    client.disconnect();
+  });
+
   it('sends a read again when an attempt gets no answer for 15 s, as on a socket that died in the background', async () => {
     const host = createFakeHost();
     let attempts = 0;

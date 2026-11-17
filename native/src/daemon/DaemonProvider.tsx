@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type Query } from '@tanstack/react-query';
 import { createContext, use, useEffect, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
@@ -11,6 +11,7 @@ import { connectionMark, markNextFrame, startJourney } from '@/features/perf/per
 
 import { createDaemonClient, streamingFetch } from './createClient';
 import { startDirectRoute } from './direct/directRoute';
+import { readOnScreen } from './screenFocus';
 
 interface DaemonContextValue {
   client: RemoteDaemonClient;
@@ -53,8 +54,12 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
       // since the return (the focus refetch) is joined, a list answered since then is skipped, and
       // one list failing (a channel an older host lacks) fails only itself. Nothing here holds up
       // the connection: screens show what they have and update as the answers land.
+      // Lists only a screen out of view reads (Home under a Pane) wait until it is in view again,
+      // so the screen in view gets the connection first.
+      const missed = (query: Query) => query.state.dataUpdatedAt < since;
+      void queryClient.invalidateQueries({ queryKey: [profile.id], refetchType: 'none', predicate: query => missed(query) && !readOnScreen(query) });
       void queryClient.refetchQueries(
-        { queryKey: [profile.id], type: 'active', predicate: query => query.state.dataUpdatedAt < since },
+        { queryKey: [profile.id], type: 'active', predicate: query => missed(query) && readOnScreen(query) },
         { cancelRefetch: false },
       ).then(() => connectionMark('restored=workspace-lists', { repeat: true }));
       if (signal.aborted) return;

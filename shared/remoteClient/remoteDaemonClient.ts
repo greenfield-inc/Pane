@@ -444,7 +444,7 @@ export class RemoteDaemonClient {
     let lastError: Error | null = null;
     let dispatched = false;
     let lostInTransit = false;
-    const connection = this.abortController;
+    let connection = this.abortController;
     const stream = this.streamController;
     const signal = inputSignal ?? connection?.signal;
     const retryableRead = REMOTE_READ_CHANNELS.has(channel);
@@ -470,6 +470,8 @@ export class RemoteDaemonClient {
           attemptSignal = abortSignalAny([signal], this.schedule, READ_ATTEMPT_TIMEOUT_MS);
         }
         const context = await this.requestContext();
+        // A read sent before the first connection (a screen mounting) goes out on that connection.
+        connection ??= this.abortController;
         if (requestId !== undefined) context.requestId = requestId;
         const { headers, body } = this.transport.invokeRequest(context, channel, args);
         const request: RemoteFetchInit = { method: 'POST', headers, body };

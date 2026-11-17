@@ -5,7 +5,7 @@ import type { PanelAgentStatusEvent } from '@shared/types/agentStatus';
 import type { PanePermissionRequest, PanePermissionResponse } from '@shared/types/permissions';
 import type { RunpanePauseResult, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
 
-import { invokeChannel, useDaemon, useDaemonEvent, useDaemonQueryKey, useInvokeMutation, useInvokeQuery } from '@/daemon';
+import { invokeChannel, useDaemon, useDaemonEvent, useDaemonQueryKey, useInvokeMutation, useInvokeQuery, useScreenReads } from '@/daemon';
 
 import { agentStatusFromWorkspace, applyAgentStatusEvent, markSeen, type AgentStatusSnapshot } from './agentStatus';
 import { removePane, setPanePaused, toggleFavorite, type ProjectWithPanes } from './paneList';
@@ -49,7 +49,9 @@ export function useAgentStatuses() {
   const queryKey = useDaemonQueryKey(WORKSPACE);
   // Events that arrive while a snapshot is in flight may be newer than it.
   const eventsDuringFetch = useRef<PanelAgentStatusEvent[] | null>(null);
+  const screen = useScreenReads(queryKey);
   const statuses = useQuery<AgentStatusSnapshot>({
+    ...screen,
     queryKey,
     queryFn: async () => {
       eventsDuringFetch.current = [];
