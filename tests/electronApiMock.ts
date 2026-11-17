@@ -1834,7 +1834,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             const activeComputer = remoteDaemonConfig.client.computers.find(
               (computer) => computer.id === remoteDaemonConfig.client.activeProfileId
             );
-            const failure = activeComputer ? mockOptions.remoteConnectError ?? null : 'Missing remote profile';
+            const failure = activeComputer ? mockOptions.remoteConnectError ?? null : 'Missing saved connection';
             setRemoteConnectionState({
               mode: 'remote',
               status: failure ? 'error' : 'connected',

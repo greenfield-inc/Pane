@@ -105,7 +105,7 @@ const FIELD_LABELS = {
   defaultOrchestratorAgent: 'Pane Chat agent',
   defaultSessionCommand: 'Session command',
   defaultSessionResume: 'Session resume',
-  defaultSessionProfile: 'Session profile',
+  defaultSessionProfile: 'Session behavior',
   defaultSessionPinned: 'Pin new Sessions',
   defaultPermissionMode: 'Permission mode',
   defaultModel: 'Model',
