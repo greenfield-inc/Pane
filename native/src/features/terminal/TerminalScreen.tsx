@@ -75,7 +75,6 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const keyboardVisible = useKeyboardVisible();
   const { client, profile } = useDaemon();
   const { presence } = useConnectionPresence();
   const queryClient = useQueryClient();
@@ -234,7 +233,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
         </View>
       )}
       {/* The box sits on the bottom safe area (HIG: controls stay out of it), or a hair above the keyboard. */}
-      <View style={{ height: keyboardVisible ? KEYBOARD_GAP : insets.bottom }} />
+      <BottomGap />
     </KeyboardAvoidingView>
   );
 }
@@ -476,6 +475,13 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
       <CopySheet visible={showCopy} onClose={() => setShowCopy(false)} panelId={panel.id} screenText={terminal.screenText} />
     </>
   );
+}
+
+/** The space under a screen's last row: the bottom safe area, or a hair above the keyboard while it is up. */
+export function BottomGap() {
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
+  return <View style={{ height: keyboardVisible ? KEYBOARD_GAP : insets.bottom }} />;
 }
 
 function useKeyboardVisible(): boolean {

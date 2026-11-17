@@ -4,6 +4,7 @@ import { WebView } from 'react-native-webview';
 import type { DataDetectorTypes } from 'react-native-webview/lib/WebViewTypes';
 
 import type { AutopilotDocument } from '@shared/types/autopilot';
+import { withSummaryPolicy } from '@shared/utils/summaryPolicy';
 
 import { useDaemon, useInvokeQuery } from '@/daemon';
 import { browserPage } from '@/features/browser/browserPage';
@@ -12,7 +13,7 @@ import { StateScreen } from '@/features/tabs/StateScreen';
 import { monoFontFamily, useTheme } from '@/theme';
 import { Button, ErrorState, Text } from '@/ui';
 
-import { pageLoad, withNoNetwork } from './pages';
+import { pageLoad } from './pages';
 
 // An array: Android passes this prop to native as it is, and a bare string aborts the app. One
 // constant, since iOS warns when it changes between renders.
@@ -51,8 +52,8 @@ export function StaticPage({ html, testID }: { html: string; testID: string }) {
 
 /**
  * A linked file read through the phone's connection (`autopilot:read-doc`, as the desktop's
- * Approvals tabs read it): an html page drawn as a `StaticPage` that loads nothing from the
- * network, any other file as text.
+ * Approvals tabs read it): an html page drawn as a `StaticPage` under the Summary's content
+ * policy (nothing from the network, no form posts), any other file as text.
  */
 export function FileDoc({ path }: { path: string }) {
   const { colors } = useTheme();
@@ -66,7 +67,7 @@ export function FileDoc({ path }: { path: string }) {
   if (read.kind === 'html') {
     // A computer from before the phone could read pages inline sends only its file URL.
     if (read.html === undefined) return <StateScreen testID="autopilot-doc-update" icon={{ ios: 'arrow.down.circle', android: 'system_update' }} title="Update Pane on the computer" message={`${profile.label}’s Pane is too old to send this page to the phone. Update it, or open the page in Pane there.`} />;
-    return <StaticPage testID="autopilot-doc-page" html={withNoNetwork(read.html)} />;
+    return <StaticPage testID="autopilot-doc-page" html={withSummaryPolicy(read.html)} />;
   }
   return (
     <ScrollView testID="autopilot-doc-text" style={styles.fill} contentContainerStyle={styles.text}>

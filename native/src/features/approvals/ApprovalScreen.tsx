@@ -21,7 +21,7 @@ import { Notice } from '@/features/panes/PaneKit';
 import { useSessionView } from '@/features/sessions/hooks';
 import { sinceLabel } from '@/features/allMachines/allMachinesList';
 import { PanelTabs, type LeadingTab } from '@/features/terminal/PanelTabs';
-import { LeadingBodies, type LeadingTabs, TerminalScreen } from '@/features/terminal/TerminalScreen';
+import { BottomGap, LeadingBodies, type LeadingTabs, TerminalScreen } from '@/features/terminal/TerminalScreen';
 import { StateScreen } from '@/features/tabs/StateScreen';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
@@ -208,7 +208,6 @@ function SessionWorkspace({ sessionId, paneId, topBar, leading }: { sessionId: s
 /** The approval's own tabs with no Pane's after them: asked from outside Pane, finished, or its Session still loading. */
 function Bare({ topBar, leading }: { topBar: ReactNode; leading: LeadingTabs }) {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
   const tab = leading.tabs.find(candidate => candidate.id === panelId) ?? leading.tabs[0];
   return (
@@ -216,8 +215,7 @@ function Bare({ topBar, leading }: { topBar: ReactNode; leading: LeadingTabs }) 
       {topBar}
       <PanelTabs panels={[]} selectedId={tab?.id ?? null} leading={leading.tabs} onSelectLeading={id => router.setParams({ panelId: id })} />
       <LeadingBodies leading={leading} selectedId={tab?.id ?? null} />
-      {/* The home indicator's area stays clear, as under a Pane's tabs (padding here would be overridden by the keyboard's). */}
-      <View style={{ height: insets.bottom }} />
+      <BottomGap />
     </KeyboardAvoidingView>
   );
 }

@@ -9,16 +9,3 @@ export function pageLoad(url: string, isTopFrame: boolean): 'load' | 'open' | 'r
   return 'refuse';
 }
 
-const NO_NETWORK = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:">';
-
-/**
- * A linked file's html with a content policy that loads nothing from the network: inline styles,
- * and images and fonts as data URLs. The policy goes first in the head, or after the doctype.
- */
-export function withNoNetwork(html: string): string {
-  const head = /<head(\s[^>]*)?>/i.exec(html);
-  if (head) return html.slice(0, head.index + head[0].length) + NO_NETWORK + html.slice(head.index + head[0].length);
-  const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
-  if (doctype) return doctype[0] + NO_NETWORK + html.slice(doctype[0].length);
-  return NO_NETWORK + html;
-}
