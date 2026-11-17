@@ -1,4 +1,4 @@
-import { ExternalLink, Loader2 } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { Button } from './ui/Button';
 import { getCliBrandIcon } from './ui/brandIconRegistry';
 import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
@@ -7,7 +7,7 @@ import type { FirstRunAgent } from '../../../shared/types/onboarding';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { ImportSession } from '../../../shared/types/sessionImport';
 import { TOOL_NAMES } from './sessionImport/sessionImportCopy';
-import { cn } from '../utils/cn';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 
 /** Placeholders while Pane looks for the CLIs: one row per agent the first-run screen offers, so the list keeps its height. */
 const LOADING_ROWS: FirstRunAgent[] = CONFIGURED_AGENT_IDS.filter(id => configuredAgent(id).onboarding).map(id => ({ id, found: false }));
@@ -34,45 +34,51 @@ interface AgentStepProps {
 export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
   return (
     <div className="space-y-3">
-      <div role="group" aria-label="Agents" aria-busy={agents === null} className="min-h-[132px] space-y-1.5">
-        {(agents ?? LOADING_ROWS).map(agent => {
-          const preset = AGENT_LAUNCH_PRESETS.find(candidate => candidate.id === agent.id);
-          const title = preset?.title ?? agent.id;
-          if (agents === null) {
-            return (
-              <div key={agent.id} className="flex h-10 items-center rounded-lg border border-border-secondary bg-surface-secondary px-3">
-                <span className="h-2.5 w-[40%] animate-skeleton rounded bg-surface-tertiary" />
+      <SkeletonSwap loading={agents === null} skeleton={
+        <div role="group" aria-label="Agents" aria-busy="true" className="min-h-[132px]">
+          <Skeleton className="space-y-1.5">
+            {LOADING_ROWS.map(agent => (
+              <div key={agent.id} className="flex h-10 items-center gap-2.5 rounded-lg border border-border-secondary bg-surface-secondary px-3 text-sm font-medium leading-none">
+                <Bone className="h-4 w-4 flex-shrink-0" />
+                <TextBone text={AGENT_LAUNCH_PRESETS.find(candidate => candidate.id === agent.id)?.title ?? agent.id} />
+              </div>
+            ))}
+          </Skeleton>
+        </div>
+      }>
+        <div role="group" aria-label="Agents" className="min-h-[132px] space-y-1.5">
+          {agents?.map(agent => {
+            const preset = AGENT_LAUNCH_PRESETS.find(candidate => candidate.id === agent.id);
+            const title = preset?.title ?? agent.id;
+            return agent.found ? (
+              <button
+                key={agent.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => onPick(agent.id)}
+                className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-border-secondary bg-surface-secondary px-3 text-left text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:cursor-default disabled:opacity-50"
+              >
+                {getCliBrandIcon(preset?.iconKey ?? agent.id, 'h-4 w-4 flex-shrink-0')}
+                {title}
+              </button>
+            ) : (
+              <div key={agent.id} className="flex h-10 items-center gap-2.5 rounded-lg border border-border-secondary px-3 text-sm">
+                <span className="opacity-50">{getCliBrandIcon(preset?.iconKey ?? agent.id, 'h-4 w-4 flex-shrink-0')}</span>
+                <span className="font-medium text-text-tertiary">{title}</span>
+                <span className="text-text-tertiary">Not found on this computer</span>
+                <button
+                  type="button"
+                  onClick={() => window.electronAPI.openExternal(configuredAgent(agent.id).install.url)}
+                  className="ml-auto inline-flex items-center gap-1 text-xs text-interactive hover:underline"
+                >
+                  Install
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                </button>
               </div>
             );
-          }
-          return agent.found ? (
-            <button
-              key={agent.id}
-              type="button"
-              disabled={disabled}
-              onClick={() => onPick(agent.id)}
-              className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-border-secondary bg-surface-secondary px-3 text-left text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:cursor-default disabled:opacity-50"
-            >
-              {getCliBrandIcon(preset?.iconKey ?? agent.id, 'h-4 w-4 flex-shrink-0')}
-              {title}
-            </button>
-          ) : (
-            <div key={agent.id} className="flex h-10 items-center gap-2.5 rounded-lg border border-border-secondary px-3 text-sm">
-              <span className="opacity-50">{getCliBrandIcon(preset?.iconKey ?? agent.id, 'h-4 w-4 flex-shrink-0')}</span>
-              <span className="font-medium text-text-tertiary">{title}</span>
-              <span className="text-text-tertiary">Not found on this computer</span>
-              <button
-                type="button"
-                onClick={() => window.electronAPI.openExternal(configuredAgent(agent.id).install.url)}
-                className="ml-auto inline-flex items-center gap-1 text-xs text-interactive hover:underline"
-              >
-                Install
-                <ExternalLink className="h-3 w-3" aria-hidden="true" />
-              </button>
-            </div>
-          );
-        })}
-      </div>
+          })}
+        </div>
+      </SkeletonSwap>
       <p className="text-sm text-text-secondary">Pane runs it for you, with its permission prompts off. You can change it later in Settings.</p>
     </div>
   );
@@ -85,13 +91,20 @@ interface SessionsStepProps {
 
 /** Step 2's body: what was found and the promise that nothing moves or is deleted. */
 export function SessionsStepBody({ sessions }: SessionsStepProps) {
-  if (sessions === null) {
-    return <p className="min-h-[40px] text-sm text-text-secondary">Checking Claude Code, Codex and other agent tools on this computer.</p>;
-  }
   return (
-    <p className="min-h-[40px] text-sm text-text-secondary">
-      Found in {sourceNames(sessions)}: everything running or used in the last 7 days. Pane opens them in place and deletes nothing.
-    </p>
+    <SkeletonSwap loading={sessions === null} skeleton={
+      <div className="min-h-[40px]">
+        <LoadingStatus label="Checking Claude Code, Codex and other agent tools on this computer" />
+        <Skeleton>
+          <div className="flex h-5 items-center"><Bone className="h-3.5 w-[92%]" /></div>
+          <div className="flex h-5 items-center"><Bone className="h-3.5 w-[58%]" /></div>
+        </Skeleton>
+      </div>
+    }>
+      <p className="min-h-[40px] text-sm text-text-secondary">
+        Found in {sourceNames(sessions ?? [])}: everything running or used in the last 7 days. Pane opens them in place and deletes nothing.
+      </p>
+    </SkeletonSwap>
   );
 }
 
@@ -105,13 +118,13 @@ export function SessionsStepFooter({ sessions, busy, onYes, onNotNow }: Sessions
   return (
     <>
       <Button variant="ghost" disabled={busy} onClick={onNotNow}>Not now</Button>
-      {sessions === null ? (
-        <span role="status" aria-label="Looking for your sessions" className={cn(ANSWER_BOX, 'inline-flex items-center justify-center rounded-button border border-border-primary bg-surface-secondary')}>
-          <Loader2 className="h-4 w-4 animate-spin text-text-tertiary" aria-hidden="true" />
+      <SkeletonSwap loading={sessions === null} skeleton={
+        <span role="status" aria-label="Looking for your sessions" className={`${ANSWER_BOX} inline-flex`}>
+          <Skeleton className="h-full w-full"><Bone className="h-full w-full rounded-button" /></Skeleton>
         </span>
-      ) : (
+      }>
         <Button variant="primary" className={ANSWER_BOX} loading={busy} onClick={onYes}>Yes</Button>
-      )}
+      </SkeletonSwap>
     </>
   );
 }

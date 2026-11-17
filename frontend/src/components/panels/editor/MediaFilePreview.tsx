@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useConfigStore } from '../../../stores/configStore';
 import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { usePreviewUrl } from './usePreviewUrl';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from '../../ui/Skeleton';
 
 interface FileLocation {
   sessionId: string;
@@ -47,13 +48,23 @@ export function MediaFilePreview({ sessionId, filePath, kind, fileName }: FileLo
   const [resolution, setResolution] = useState('');
 
   if (error || loadError) return <FilePreviewNotice sessionId={sessionId} filePath={filePath} message={error || loadError || 'Cannot preview this file.'} />;
-  if (!url) return <div role="status" className="p-6 text-text-secondary">Loading media…</div>;
+  const skeleton = <>
+    <LoadingStatus label="Loading media…" />
+    <Skeleton className="h-full flex flex-col items-center justify-center gap-4 p-4 bg-surface-primary">
+      {kind === 'video' ? <Bone className="w-full min-h-0 flex-1" /> : <Bone className="h-[54px] w-full max-w-xl rounded-full" />}
+      <div className="flex flex-wrap items-center justify-center gap-4 text-sm leading-none">
+        <TextBone text={fileName} className="max-w-full truncate" />
+        <span className="flex items-center gap-2"><Bone className="h-3.5 w-3.5" /><TextBone text="Loop" /></span>
+      </div>
+    </Skeleton>
+  </>;
   const properties = {
-    src: url, controls: true, loop, preload: 'metadata',
+    src: url ?? undefined, controls: true, loop, preload: 'metadata',
     onError: () => setError("Can't preview this codec or media file. Try opening it with a system app."),
     'aria-label': fileName,
   };
   return (
+    <SkeletonSwap loading={!url} skeleton={skeleton}>
     <div data-find-empty="" className="h-full flex flex-col items-center justify-center gap-4 p-4 bg-surface-primary text-text-primary">
       {/* Local media has no supplied caption file. Do not fabricate empty tracks. */}
       {kind === 'video' ? (
@@ -68,5 +79,6 @@ export function MediaFilePreview({ sessionId, filePath, kind, fileName }: FileLo
         <label className="flex items-center gap-2"><input type="checkbox" checked={loop} onChange={event => setLoop(event.target.checked)} />Loop</label>
       </div>
     </div>
+    </SkeletonSwap>
   );
 }

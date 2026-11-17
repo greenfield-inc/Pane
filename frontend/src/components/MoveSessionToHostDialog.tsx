@@ -19,6 +19,7 @@ import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
+import { Bone, LoadingStatus, Skeleton, useSkeletonHold } from './ui/Skeleton';
 
 const NOT_RUNNING = /is not initialized/;
 /** How often the dialog asks the Session's host how the move is going. */
@@ -201,6 +202,8 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
   }, [isOpen, sessionId, machineId, hostKey, where]);
 
   const shown = mode === 'move' && targets ? wholeMoveTargets(targets, peers) : targets;
+  // The list waits for the machines, and in a move also for whether one is already running.
+  const machinesHold = useSkeletonHold(sessionHost.kind !== 'paired' && ((!targets && !error) || (mode === 'move' && !statusKnown)));
 
   // The first machine that can take the Session starts selected, in each mode.
   useEffect(() => {
@@ -290,9 +293,9 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
 
   const machineList = (whole: boolean) => shown && (
     <>
-      {!shown.ok && <p className="mt-3 text-sm text-text-secondary">{shown.reason}. {shown.fix}</p>}
+      {!shown.ok && <p className={cn('mt-3 text-sm text-text-secondary', machinesHold.reveal && 'skeleton-reveal')}>{shown.reason}. {shown.fix}</p>}
       {shown.ok && (
-        <fieldset className="mt-3 space-y-1.5" disabled={busy || fixing !== null}>
+        <fieldset className={cn('mt-3 space-y-1.5', machinesHold.reveal && 'skeleton-reveal')} disabled={busy || fixing !== null}>
           <legend className="sr-only">Destination machine</legend>
           {shown.noneReachable && (
             <p className="text-sm text-text-secondary">
@@ -345,7 +348,6 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
 
   const errorLine = error && <p role="alert" className="mt-3 text-sm text-status-error">{error}</p>;
   const pairedLine = sessionHost.kind === 'paired' && <p className="mt-3 text-sm text-text-secondary">{sessionHost.reason}</p>;
-  const looking = sessionHost.kind !== 'paired' && !targets && !error && <p className="mt-3 text-sm text-text-tertiary">Looking for your machines…</p>;
 
   let title = `Move “${name}”`;
   let body: ReactNode;
@@ -358,7 +360,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
         <p className="text-sm text-text-secondary">
           Pane asks this Session's agent to hand it off with <code>runpane handoff</code>. With the same agent, the new Session continues this Session's own conversation when you open it; otherwise it starts from the agent's note. This one stays here.
         </p>
-        {pairedLine}{looking}{machineList(false)}{errorLine}
+        {pairedLine}{machinesHold.holding ? <MachinesLoading /> : machineList(false)}{errorLine}
       </>
     );
     footer = (
@@ -467,8 +469,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
           {preflight && blocks.length > 0 ? needsFixLine(preflight.target, blocks.length) : moveIntro(preflight)}
         </p>
         {pairedLine}
-        {(looking || !statusKnown) && sessionHost.kind !== 'paired' && <p className="mt-3 text-sm text-text-tertiary">Looking for your machines…</p>}
-        {statusKnown && machineList(true)}
+        {machinesHold.holding ? <MachinesLoading /> : statusKnown && machineList(true)}
         {preflight && (
           <ul className="mt-3" aria-label={`Checks on ${preflight.target}`}>
             {[...blocks, ...preflight.checks.filter(check => check.level !== 'block')].map(check => (
@@ -522,5 +523,21 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
         <ModalFooter>{footer}</ModalFooter>
       </form>
     </Modal>
+  );
+}
+
+/** The destination list while it loads: two machine rows in the list's own row shape. */
+function MachinesLoading() {
+  return (
+    <>
+      <LoadingStatus label="Looking for your machines" />
+      <Skeleton className="mt-3 flex flex-col gap-1.5">
+        {[30, 42].map(width => (
+          <div key={width} className="flex items-center gap-2.5 rounded-md border border-border-primary px-2.5 py-1.5 text-sm">
+            <span className="flex h-5 flex-1 items-center"><Bone className="h-3.5" style={{ width: `${width}%` }} /></span>
+          </div>
+        ))}
+      </Skeleton>
+    </>
   );
 }

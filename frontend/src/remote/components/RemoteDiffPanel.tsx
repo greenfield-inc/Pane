@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, RotateCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, RotateCw } from 'lucide-react';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../components/ui/Skeleton';
 import type { ChangedFileSummary } from '../../../../shared/types/gitDiff';
 import { changeBadge, DiffError, parsePatch, versusLabel, type ChangeList } from '../../../../shared/gitDiffClient';
 import { cn } from '../../utils/cn';
@@ -76,26 +77,45 @@ export function RemoteDiffView({ changes, patches, open, onToggle, onRefresh }: 
   onToggle(file: ChangedFileSummary): void;
   onRefresh(): void;
 }) {
-  let body;
-  if (changes.status === 'loading') body = <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-text-muted" aria-label="Loading changes" /></div>;
-  else if (changes.status === 'error') {
-    body = (
+  const skeleton = (
+    <>
+      <LoadingStatus label="Loading changes" />
+      <Skeleton className="flex shrink-0 items-center gap-3 border-b border-border-primary px-4 py-2 text-sm">
+        <span className="flex h-5 items-center"><Bone className="h-3.5 w-14" /></span>
+        <Bone className="h-3.5 w-16" />
+        <Bone className="ml-auto h-3.5 w-20" />
+      </Skeleton>
+      <Skeleton className="min-h-0 flex-1">
+        {['w-3/5', 'w-2/5', 'w-1/2', 'w-1/3'].map((path, index) => (
+          <div key={index} className="flex min-h-11 items-center gap-2 border-b border-border-primary px-4">
+            <Bone className="h-3.5 w-3.5 shrink-0" />
+            <Bone className="h-5 w-5 shrink-0" />
+            <span className="min-w-0 flex-1"><Bone className={`h-3.5 ${path}`} /></span>
+            <Bone className="h-3.5 w-14" />
+          </div>
+        ))}
+      </Skeleton>
+    </>
+  );
+  let content = null;
+  if (changes.status === 'error') {
+    content = (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
         <p className="text-sm font-semibold text-text-primary">Couldn’t read this branch’s changes</p>
         <p className="text-sm text-text-secondary">{changes.message}</p>
         <button type="button" onClick={onRefresh} className="rounded-md border border-border-primary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover">Try again</button>
       </div>
     );
-  } else if (changes.value.files.length === 0) {
-    body = (
+  } else if (changes.status === 'ready' && changes.value.files.length === 0) {
+    content = (
       <div className="flex flex-1 flex-col items-center justify-center gap-1 p-6 text-center">
         <p className="text-sm font-semibold text-text-primary">No changes</p>
         <p className="text-sm text-text-secondary">This branch matches {versusLabel(changes.value.resolvedBase).replace(/^vs /, '') || 'its base'}.</p>
       </div>
     );
-  } else {
+  } else if (changes.status === 'ready') {
     const { stats, files, resolvedBase } = changes.value;
-    body = (
+    content = (
       <>
         <div className="flex shrink-0 items-center gap-3 border-b border-border-primary px-4 py-2 text-sm">
           <span className="font-semibold text-text-primary">{stats.filesChanged} {stats.filesChanged === 1 ? 'file' : 'files'}</span>
@@ -130,7 +150,7 @@ export function RemoteDiffView({ changes, patches, open, onToggle, onRefresh }: 
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-bg-primary" data-testid="remote-diff">
-      {body}
+      {changes.status === 'error' ? content : <SkeletonSwap loading={changes.status === 'loading'} skeleton={skeleton}>{content}</SkeletonSwap>}
       <div className="flex shrink-0 items-center gap-2 border-t border-border-primary px-4 py-1.5 text-xs text-text-muted">
         <span>Read-only here · commit and revert in desktop Pane</span>
         <button type="button" onClick={onRefresh} aria-label="Refresh changes" className="ml-auto flex h-7 w-7 items-center justify-center rounded-md hover:bg-surface-hover hover:text-text-primary">
@@ -142,10 +162,23 @@ export function RemoteDiffView({ changes, patches, open, onToggle, onRefresh }: 
 }
 
 function Patch({ load }: { load: Load<FilePatch> }) {
-  if (load.status === 'loading') return <div className="px-4 py-3"><Loader2 className="h-4 w-4 animate-spin text-text-muted" aria-label="Loading patch" /></div>;
   if (load.status === 'error') return <p className="px-4 py-3 text-sm text-text-secondary">{load.message}</p>;
-  if (load.value.status === 'no-longer-changed') return <p className="px-4 py-3 text-sm text-text-secondary">This file no longer has changes.</p>;
-  const rows = parsePatch(load.value.patch);
+  return <SkeletonSwap loading={load.status === 'loading'} skeleton={
+    <div className="pb-1">
+      <LoadingStatus label="Loading patch" />
+      {/* A hunk header, then patch lines at the patch's row height. */}
+      <Skeleton className="font-mono text-xs leading-5">
+        {['w-40', 'w-3/4', 'w-1/2', 'w-2/3', 'w-2/5'].map((width, index) => (
+          <div key={index} className={cn('flex h-5 items-center px-3', index === 0 && 'bg-surface-secondary')}><Bone className={`h-2.5 ${width}`} /></div>
+        ))}
+      </Skeleton>
+    </div>
+  }>{load.status === 'ready' && <PatchRows patch={load.value} />}</SkeletonSwap>;
+}
+
+function PatchRows({ patch }: { patch: FilePatch }) {
+  if (patch.status === 'no-longer-changed') return <p className="px-4 py-3 text-sm text-text-secondary">This file no longer has changes.</p>;
+  const rows = parsePatch(patch.patch);
   if (rows.length === 0) return <p className="px-4 py-3 text-sm text-text-secondary">No text changes (a binary file, or only its mode changed).</p>;
   const shown = rows.slice(0, PATCH_ROW_LIMIT);
   return (

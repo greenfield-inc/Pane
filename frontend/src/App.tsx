@@ -49,7 +49,7 @@ import { acceleratorFromKeys } from './components/notify/notifyFormat';
 import { openApprovals, toggleApprovals } from './components/approvals/approvalsNavigation';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
-import { forgetShownTerminal, forgetShownTerminalsInSession } from './utils/shownTerminals';
+import { forgetRevealedTerminal, forgetRevealedTerminalsInSession } from './utils/revealedTerminals';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
 import { onOpenFirstRunRequest } from './utils/openFirstRun';
@@ -265,11 +265,11 @@ function App() {
     const events = window.electronAPI?.events;
     const unsubscribePanel = events?.onPanelDeleted?.((data) => {
       usePanelStore.getState().forgetPanel(data.panelId);
-      forgetShownTerminal(data.panelId);
+      forgetRevealedTerminal(data.panelId);
     });
     const unsubscribeSession = events?.onSessionDeleted?.((session) => {
       usePanelStore.getState().forgetSession(session.id);
-      forgetShownTerminalsInSession(session.id);
+      forgetRevealedTerminalsInSession(session.id);
     });
     return () => {
       unsubscribePanel?.();

@@ -37,6 +37,7 @@ import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { usePageTextFind } from '../find/usePageTextFind';
 import { takeLaunchDraft } from '../../utils/launchOutline';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -192,6 +193,19 @@ const NO_ACTIONS: ChatTurnActions = {};
 /** How long after the handover an Enter pressed before the chat loaded may still send. */
 const LAUNCH_SEND_MS = 5_000;
 const NO_RENDERING: ChatRendering = {};
+
+/** Two turns shaped like ChatTurnView: the person's bubble, then the reply's lines. */
+function TurnsSkeleton() {
+  return <>
+    <LoadingStatus label="Loading conversation" />
+    <Skeleton className="flex flex-col">
+      {['w-56', 'w-40'].map((bubble, turn) => <div key={turn} className="chat-turn">
+        <Bone className={`self-end h-10 rounded-2xl ${bubble}`} />
+        <div className="flex flex-col gap-2"><Bone className="h-4 w-full" /><Bone className="h-4 w-11/12" /><Bone className="h-4 w-2/3" /></div>
+      </div>)}
+    </Skeleton>
+  </>;
+}
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
@@ -554,10 +568,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {view?.clearedAt && (snapshot.transcript?.start ?? 0) === 0 && <ClearedDivider at={view.clearedAt} />}
-          {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
-          <ChatBlocksContext.Provider value={rendering}>
-            {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
-          </ChatBlocksContext.Provider>
+          {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view) && <p role="status" className="chat-notice">Starting {agentName}…</p>}
+          <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting'} skeleton={<TurnsSkeleton />}>
+            <ChatBlocksContext.Provider value={rendering}>
+              {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
+            </ChatBlocksContext.Provider>
+          </SkeletonSwap>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
             {snapshot.loadingNewer ? 'Loading…' : 'Newer messages'}

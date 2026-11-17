@@ -5,6 +5,7 @@ import { Kbd } from '../ui/Kbd';
 import type { TerminalSuggestion, PasteMode } from '../../services/terminalInterceptor/types';
 import { AT_TERMINAL_LINE_COUNT_PRESETS as LINE_COUNT_PRESETS } from '../../types/settings';
 import { LiveRegion } from '../ui/LiveRegion';
+import { Bone, Skeleton, SkeletonSwap } from '../ui/Skeleton';
 
 interface InterceptorDropdownProps {
   visible: boolean;
@@ -104,6 +105,19 @@ export const InterceptorDropdown: React.FC<InterceptorDropdownProps> = ({
 
       {/* Terminal entries */}
       <div className="max-h-[220px] overflow-y-auto py-1">
+        <SkeletonSwap loading={terminals.length === 0} skeleton={
+          <Skeleton>
+            {['w-28', 'w-20'].map(title => (
+              <div key={title} className="px-3 py-1.5">
+                <div className="flex h-4 items-center"><Bone className={`h-3 ${title}`} /></div>
+                <div className="mt-0.5 opacity-70">
+                  <div className="flex h-[15px] items-center"><Bone className="h-2.5 w-4/5" /></div>
+                  <div className="flex h-[15px] items-center"><Bone className="h-2.5 w-3/5" /></div>
+                </div>
+              </div>
+            ))}
+          </Skeleton>
+        }>
         {terminals.map((terminal, index) => {
           const isSelected = index === selectedIndex;
           const isNoOutput =
@@ -133,9 +147,7 @@ export const InterceptorDropdown: React.FC<InterceptorDropdownProps> = ({
             </div>
           );
         })}
-        {terminals.length === 0 && (
-          <div className="px-3 py-2 text-[11px] text-text-tertiary italic">Loading...</div>
-        )}
+        </SkeletonSwap>
       </div>
 
       {/* Line count + mode controls */}

@@ -123,7 +123,7 @@ test('a machine shows "…" until its latency answers, and an offline machine is
   await page.getByRole('button', { name: /Switch machine$/ }).click();
   const row = page.getByRole('menuitemradio', { name: /Build Box/ });
   await expect(row.getByLabel('Pane relay, in use')).toBeVisible();
-  await expect(row.getByTestId('machine-latency')).toHaveText('…measuring latency');
+  await expect(row.getByTestId('machine-latency')).toHaveText('measuring latency');
   const studio = page.getByRole('menuitemradio', { name: /Studio Mac/ });
   await expect(studio).toContainText('macOS · Last seen');
   await expect(studio.getByLabel(/in use$/)).toHaveCount(0);
