@@ -49,7 +49,7 @@ export function RowDivider({ inset = 33 }: { inset?: number }) {
 }
 
 /** A question or permission request: its status dot, who asks, what, how long ago, and what's under it. */
-export function ApprovalRow({ title, detail, below, spoken = [], at, machine, stale = false, done = false, divided, onPress, testID }: {
+export function ApprovalRow({ title, detail, below, spoken = [], at, machine, stale = false, done = false, divided, onPress, onArchive, background, testID }: {
   title: string;
   detail: string;
   /** A question's subtitle and reply status. */
@@ -65,18 +65,23 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
   done?: boolean;
   divided: boolean;
   onPress: () => void;
+  /** Swipe left (or the screen reader's Archive) to archive it; `swipeId` names its swipe action. */
+  onArchive?: { swipeId: string; archive: () => void };
+  /** The card's colour, over the page's own so the swipe action stays hidden behind it. */
+  background?: string;
   testID: string;
 }) {
   const theme = useTheme();
   const time = sinceLabel(at, Date.now());
-  return (
+  const content = (
     <Pressable
       testID={testID}
       accessibilityRole="button"
       accessibilityLabel={[title, detail, ...spoken, time, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
+      {...(onArchive ? swipeRowAccessibility({ onArchive: onArchive.archive }) : {})}
       onPress={onPress}
-      style={({ pressed }) => [styles.approval, { opacity: stale ? STALE_OPACITY : 1 }, pressed && { backgroundColor: theme.colors.surfacePressed }]}
+      style={({ pressed }) => [styles.approval, { opacity: stale ? STALE_OPACITY : 1 }, onArchive && { backgroundColor: background }, pressed && { backgroundColor: theme.colors.surfacePressed }]}
     >
       {divided ? <RowDivider /> : null}
       <View style={styles.approvalDot}><StatusBadge status={done ? 'idle' : 'blocked'} /></View>
@@ -90,6 +95,12 @@ export function ApprovalRow({ title, detail, below, spoken = [], at, machine, st
         {below}
       </View>
     </Pressable>
+  );
+  if (!onArchive) return content;
+  return (
+    <SwipeRow testIDPrefix="approval" id={onArchive.swipeId} onArchive={onArchive.archive}>
+      <View style={{ backgroundColor: theme.colors.background }}>{content}</View>
+    </SwipeRow>
   );
 }
 

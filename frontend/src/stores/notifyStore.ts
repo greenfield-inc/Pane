@@ -8,15 +8,35 @@ import { showActionError } from './errorStore';
  * commands back.
  */
 interface NotifyState {
+  /** Main's latest snapshot, less the items archived and still held for Undo. */
   snapshot: NotifySnapshot | null;
+  archived: ArchiveHold | null;
 }
 
-export const useNotifyStore = create<NotifyState>(() => ({ snapshot: null }));
+/** Approvals archived from the list: gone from every count, their close sent when the Undo toast ends. */
+export interface ArchiveHold {
+  ids: string[];
+  /** The archived item's title, or how many were archived. */
+  message: string;
+}
+
+export const useNotifyStore = create<NotifyState>(() => ({ snapshot: null, archived: null }));
+
+/** What main last sent, before held archives are taken out. */
+let received: NotifySnapshot | null = null;
+/** Archived items whose close main hasn't answered yet: still out of the list. */
+const closing = new Set<string>();
+
+function publish(snapshot: NotifySnapshot | null): void {
+  received = snapshot;
+  const held = new Set([...closing, ...useNotifyStore.getState().archived?.ids ?? []]);
+  useNotifyStore.setState({ snapshot: snapshot && held.size > 0 ? { ...snapshot, items: snapshot.items.filter((item) => !held.has(item.id)) } : snapshot });
+}
 
 const NO_ITEMS: readonly NotifyItem[] = [];
 
 /** Every item, or one shared empty list before the first snapshot: a fresh `[]` per read would re-render forever. */
-export function selectNotifyItems(state: NotifyState): readonly NotifyItem[] {
+export function selectNotifyItems(state: Pick<NotifyState, 'snapshot'>): readonly NotifyItem[] {
   return state.snapshot?.items ?? NO_ITEMS;
 }
 
@@ -27,12 +47,12 @@ export function subscribeNotify(): () => void {
   let pushed = false;
   const unsubscribe = api.onSnapshot((snapshot) => {
     pushed = true;
-    useNotifyStore.setState({ snapshot });
+    publish(snapshot);
   });
   void api.getSnapshot()
     .then((snapshot) => {
       // A push that arrived first is newer than this read.
-      if (!pushed) useNotifyStore.setState({ snapshot });
+      if (!pushed) publish(snapshot);
     })
     .catch((error) => console.error('Failed to read the Notify queue:', error));
   return unsubscribe;
@@ -65,6 +85,43 @@ export async function sendNotify(command: NotifyCommand): Promise<boolean> {
     const title = failedTitle(command.type);
     if (title) showActionError(title, error);
     return false;
+  }
+}
+
+/**
+ * Archive: the close the approval's own Close sends, with no reason, held while its Undo toast
+ * shows. Archiving again sends the earlier hold's closes first.
+ */
+export function archiveApprovals(items: readonly NotifyItem[]): void {
+  if (items.length === 0) return;
+  sendArchived();
+  const message = items.length === 1 ? `Archived “${items[0].relay?.question ?? items[0].title}”` : `Archived ${items.length} approvals`;
+  useNotifyStore.setState({ archived: { ids: items.map((item) => item.id), message } });
+  publish(received);
+  window.addEventListener('beforeunload', sendArchived);
+}
+
+/** Undo: the held items wait again, and nothing was sent. */
+export function undoArchive(): void {
+  window.removeEventListener('beforeunload', sendArchived);
+  if (!useNotifyStore.getState().archived) return;
+  useNotifyStore.setState({ archived: null });
+  publish(received);
+}
+
+/** The Undo toast ended (or the screen closed): each held item's asker is told it was closed. */
+export function sendArchived(): void {
+  window.removeEventListener('beforeunload', sendArchived);
+  const held = useNotifyStore.getState().archived;
+  if (!held) return;
+  for (const id of held.ids) closing.add(id);
+  useNotifyStore.setState({ archived: null });
+  // Back in the list once main has answered: closed, it isn't waiting; refused, it shows why and waits again.
+  for (const id of held.ids) {
+    void sendNotify({ type: 'close', id }).then(() => {
+      closing.delete(id);
+      publish(received);
+    });
   }
 }
 

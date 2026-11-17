@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import { notifyFixture } from '../../../tests/fixtures/notifySnapshot';
-import { paneHasWaitingQuestion, selectNotifyItems, sessionWaitingCount, waitingCount, waitingElsewhere } from './notifyStore';
+import { archiveApprovals, paneHasWaitingQuestion, selectNotifyItems, sendArchived, sessionWaitingCount, subscribeNotify, undoArchive, useNotifyStore, waitingCount, waitingElsewhere } from './notifyStore';
 
 const launch = { id: 'session-launch', name: 'Launch', paneId: 'session-launch-pane' };
 
@@ -58,5 +58,40 @@ describe('selectNotifyItems', () => {
   it('returns the same empty list every time before the first snapshot, so a component reading it never loops (review F-3)', () => {
     expect(selectNotifyItems({ snapshot: null })).toBe(selectNotifyItems({ snapshot: null }));
     expect(selectNotifyItems({ snapshot: null })).toEqual([]);
+  });
+});
+
+describe('Archive', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function connect(snapshot: NotifySnapshot) {
+    const run = vi.fn(async () => undefined);
+    vi.stubGlobal('window', {
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      electronAPI: { notify: { run, onSnapshot: () => () => undefined, getSnapshot: async () => snapshot } },
+    });
+    subscribeNotify();
+    return run;
+  }
+
+  it('takes archived items out of every count at once, sends nothing until the Undo ends, then closes each with no reason', async () => {
+    const loop = [item('run-1'), item('run-2'), item('other', { source: { name: 'docs', agent: 'Cursor' } })];
+    const run = connect(withItems(...loop));
+    await vi.waitFor(() => expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(3));
+
+    archiveApprovals(loop.slice(0, 2));
+    expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(1);
+    expect(useNotifyStore.getState().archived?.message).toBe('Archived 2 approvals');
+
+    undoArchive();
+    expect(waitingCount(useNotifyStore.getState().snapshot)).toBe(3);
+
+    archiveApprovals([loop[0]]);
+    sendArchived();
+    // Sending again (the screen closing after the toast ended) sends nothing twice.
+    sendArchived();
+    expect(run.mock.calls).toEqual([[{ type: 'close', id: 'run-1' }]]);
+    expect(run).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'run-2' }));
   });
 });

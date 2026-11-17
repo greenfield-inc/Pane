@@ -4,10 +4,13 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { canClose } from '@shared/approvalReceipts';
+
 import { buildAllMachinesList, type RecentRow } from '@/features/allMachines/allMachinesList';
 import { AllMachinesNotes, allOffline, offlineAlert, openRecentRow, openWaitingRow, RecentRowView, waitingRowText } from '@/features/allMachines/AllMachinesRows';
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
 import { sessionKey, waitingCounts } from '@/features/approvals/approvals';
+import { ArchiveUndoBar, useArchiveHold } from '@/features/approvals/ArchiveUndo';
 import { approvalRowSpoken, ApprovalRowLines } from '@/features/approvals/ApprovalRowLines';
 import { AutopilotRow } from '@/features/autopilot/AutopilotRow';
 import { useAutopilot } from '@/features/autopilot/hooks';
@@ -73,8 +76,11 @@ export function HomeScreen() {
   const searching = query.trim().length > 0;
   // The archive is read for a search, or by its own screen; the All panes tile counts it only once cached.
   const archived = useArchivedProjects(!all && searching);
+  const archiving = useArchiveHold();
 
-  const board = buildAllMachinesList(feeds, '');
+  // Approvals swiped to Archive leave the list and its counts while held for Undo.
+  const listed = buildAllMachinesList(feeds, '');
+  const board = { ...listed, waiting: listed.waiting.filter(row => !archiving.hidden.has(row.key)) };
   const loading = all ? feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined && feed.error === undefined) : here.loading;
   const counts = loading ? undefined : boardCounts(board);
   const machineOf = (key: string) => chipMachines.find(machine => machine.key === key);
@@ -228,6 +234,12 @@ export function HomeScreen() {
                   done={list === 'agent' || !row.waiting}
                   divided={divided}
                   onPress={() => openWaitingRow(row, list, profile.id)}
+                  // The card's Close with no reason, for this machine's questions it can close.
+                  onArchive={row.type === 'question' && list === 'waiting' && row.machineKey === profile.id && !row.stale && canClose(row.item) ? {
+                    swipeId: row.item.id,
+                    archive: () => archiving.archive({ key: row.key, id: row.item.id, title: row.item.title }),
+                  } : undefined}
+                  background={needsTint}
                 />
                 {row.type === 'question' && row.item.state === 'waiting' ? (
                   <AgentPromptActions item={row.item} inset={33} machine={row.machineKey === profile.id ? null : machine?.profile ?? null} />
@@ -237,6 +249,7 @@ export function HomeScreen() {
           }}
         />
       ) : null}
+      {archiving.error ? <Notice testID="approvals-archive-error" danger message={archiving.error} /> : null}
       {inTerminal.length > 0 ? (
         <View testID="needs-terminal" style={styles.terminalGroup}>
           <Text variant="footnote" tone="secondary" style={styles.groupLabel} accessibilityRole="header">{`Waiting in the terminal · ${inTerminal.length}`}</Text>
@@ -397,6 +410,7 @@ export function HomeScreen() {
         </Dimmed>
       )}
       {all ? <HomeBottomBar query={query} onQuery={setQuery} /> : null}
+      <ArchiveUndoBar held={archiving.held} onUndo={archiving.undo} bottom={bottomBarHeight(insets.bottom) + 8} />
     </View>
   );
 }
