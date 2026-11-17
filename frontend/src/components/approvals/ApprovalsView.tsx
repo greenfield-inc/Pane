@@ -419,18 +419,26 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
 
   // The pager follows the list as grouped (J14).
   const order = approvalIdsInListOrder({ list, stale: staleOpen ? stale : [] });
-  // Archive, from a row, ⌫ or a group: the selection moves to the next row still listed, else the one before.
-  const archive = (targets: NotifyItem[], fromKeyboard = false) => {
+  // Archive, from a row, ⌫ or a group: the selection moves to the next row still listed, else the one before,
+  // and the key focus follows it when it was in the list. Undo selects the archived row again.
+  const selectedBeforeArchive = useRef<string | undefined>(undefined);
+  const archive = (targets: NotifyItem[]) => {
     const gone = new Set(targets.map((item) => item.id));
     const current = selected?.id;
+    const hadFocus = listRef.current?.contains(document.activeElement) ?? false;
     let next = current;
+    selectedBeforeArchive.current = current && gone.has(current) ? current : undefined;
     if (current && gone.has(current)) {
       const index = order.indexOf(current);
       next = order.slice(index + 1).find((id) => !gone.has(id)) ?? order.slice(0, index).reverse().find((id) => !gone.has(id));
       selectApproval(next ?? null);
     }
     archiveApprovals(targets);
-    if (fromKeyboard && next) whenShown(() => listRef.current?.querySelector<HTMLElement>(`[data-testid="approvals-row"][data-item-id="${CSS.escape(next)}"]`) ?? null, (row) => row.focus());
+    if (hadFocus && next) whenShown(() => listRef.current?.querySelector<HTMLElement>(`[data-testid="approvals-row"][data-item-id="${CSS.escape(next)}"]`) ?? null, (row) => row.focus());
+  };
+  const undo = () => {
+    undoArchive();
+    if (selectedBeforeArchive.current) selectApproval(selectedBeforeArchive.current);
   };
   // The Undo toast belongs to this screen: leaving it sends what it held.
   const archived = useNotifyStore((state) => state.archived);
@@ -462,7 +470,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
       const item = shown.find((candidate) => candidate.id === id);
       if (!item || !archivable(item)) return;
       event.preventDefault();
-      archive([item], true);
+      archive([item]);
       return;
     }
     if (event.key === 'Enter' || event.key === 'ArrowRight') {
@@ -575,6 +583,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         {/* The browser's own scroll anchoring would add to the compensation above. */}
         <div className="relative flex min-h-0 flex-1 flex-col">
         {rowsAbove > 0 && <RowsAbove count={rowsAbove} onTop={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />}
+        {/* Over the list it is about, clear of the approval's own buttons. */}
+        {archived && <UndoToast key={archived.ids.join()} message={archived.message} onUndo={undo} onDismiss={sendArchived} durationMs={5000} className="absolute bottom-3 max-w-[calc(100%-1rem)]" />}
         <div ref={listRef} onScroll={countAbove} onKeyDown={listKey} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [overflow-anchor:none]">
           {shown.length === 0 && stale.length === 0 && offline.length === 0 && (
             <p className="px-3 pt-6 text-[13px] text-text-tertiary" data-testid="notify-empty">
@@ -647,7 +657,6 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             renderOrigin={() => origin}
           />
         )}
-        {archived && <UndoToast key={archived.ids.join()} message={archived.message} onUndo={undoArchive} onDismiss={sendArchived} durationMs={5000} />}
         {!selected && (
           <div className="m-auto flex flex-col items-center gap-2 text-[13px] text-text-tertiary">
             <Inbox className="h-5 w-5" aria-hidden="true" />

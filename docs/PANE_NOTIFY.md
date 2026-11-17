@@ -236,9 +236,9 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   focus to it) and click the archive button where its age sits, press ⌫ on
   the focused row, or choose **Archive all** on a group's header. Nothing
   asks first: the items leave the list and every count at once, a toast
-  offers **Undo** for 5 seconds, and when it ends each asker is told
-  `closed: Q-n (by you)`, as by the column's **Close…** with no reason. The
-  selection moves to the next row. On the phone, swipe a Needs you row left
+  offers **Undo** for 5 seconds (it brings the items and the selection back),
+  and when it ends each asker is told the person closed it, as by the
+  column's **Close…** with no reason. The selection moves to the next row. On the phone, swipe a Needs you row left
   to **Archive**, with the same Undo. Permission prompts, relayed questions
   and items on an unreachable machine have no archive. Under Most
   recent, once a typed reply is with an agent, Waiting splits into **Waiting
