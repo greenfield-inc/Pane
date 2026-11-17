@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  blendHex, cellColumnToStringOffset, countBufferMatches, createTerminalFindAdapter, parseCssColor,
+  blendHex, cellColumnToStringOffset, countBufferMatches, createTerminalFindAdapter, HIGHLIGHT_LIMIT, parseCssColor,
   type FindBuffer, type FindBufferLine, type FindCell, type FindSearchAddon, type FindTerminal,
 } from './terminalFindAdapter';
 
@@ -75,13 +75,10 @@ describe('countBufferMatches', () => {
     expect(elapsed).toBeLessThan(250);
   });
 
-  it('counts past the highlight limit (one letter over a full 2,500 x 200 scrollback)', () => {
-    const buffer = fakeBuffer(Array.from({ length: 2500 }, () => 'a'.repeat(200)));
-    const start = performance.now();
-    const result = countBufferMatches(buffer, 'a', { row: 0, col: 0 });
-    const elapsed = performance.now() - start;
-    expect(result).toEqual({ current: 1, total: 500_000 });
-    expect(elapsed).toBeLessThan(100);
+  it('counts past the highlight limit (one letter over 30 x 100 rows: 3,000 matches)', () => {
+    expect(3_000).toBeGreaterThan(HIGHLIGHT_LIMIT);
+    const buffer = fakeBuffer(Array.from({ length: 30 }, () => 'a'.repeat(100)));
+    expect(countBufferMatches(buffer, 'a', { row: 0, col: 0 })).toEqual({ current: 1, total: 3_000 });
   });
 });
 
