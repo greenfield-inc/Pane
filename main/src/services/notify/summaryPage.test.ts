@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { NOTIFY_SUMMARY_CSP, type NotifyItem } from '../../../../shared/types/notify';
 import { summaryPage } from './summaryPage';
+import { withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
 import { summaryFiles } from './notifyService';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-summary-'));
@@ -59,7 +60,18 @@ describe("an approval's Summary page", () => {
       .toBe(`<!doctype html>${policy}<!-- <head> --><html><head><script>alert(1)</script></head><body>x</body></html>`);
     expect(served('<script>var s = "<head>";</script><p>no head</p>')).toBe(`<!doctype html>${policy}<script>var s = "<head>";</script><p>no head</p>`);
     expect(served('<html data-x="<head>"><script>alert(1)</script></html>')).toBe(`<!doctype html>${policy}<html data-x="<head>"><script>alert(1)</script></html>`);
-    expect(served('\uFEFF  <!DOCTYPE html>\n<html><head></head></html>')).toBe(`  <!DOCTYPE html>${policy}\n<html><head></head></html>`);
+    expect(served('\uFEFF  <!DOCTYPE html>\n<html><head></head></html>')).toBe(`<!doctype html>${policy}\n<html><head></head></html>`);
+    expect(served('\uFEFF<p>x</p>')).toBe(`<!doctype html>${policy}<p>x</p>`);
+    // Characters JavaScript trims but HTML reads as text: the policy still comes first.
+    for (const lead of ['\u00A0', '\u3000', '\u2028', '\u000B', '<!-- x -->', 'x']) {
+      expect(served(`${lead}<!doctype html><html><head></head></html>`))
+        .toBe(`<!doctype html>${policy}${lead}<!doctype html><html><head></head></html>`);
+    }
+  });
+
+  it('applies the policy once, however often it runs', () => {
+    const once = withSummaryPolicy('\uFEFF <!doctype html><p>x</p>');
+    expect(withSummaryPolicy(once)).toBe(once);
   });
 
   it("falls back to the template, saying so, when the asker's page is gone", () => {

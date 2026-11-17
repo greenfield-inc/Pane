@@ -1,17 +1,16 @@
 import { NOTIFY_SUMMARY_CSP } from '../types/notify';
 
-const POLICY_META = `<meta http-equiv="Content-Security-Policy" content="${NOTIFY_SUMMARY_CSP}">`;
+const PREFIX = `<!doctype html><meta http-equiv="Content-Security-Policy" content="${NOTIFY_SUMMARY_CSP}">`;
 
 /**
- * An approval's Summary page with NOTIFY_SUMMARY_CSP ahead of all its content, so the policy holds
- * before anything in the page loads. Only a leading doctype stays in front: the parser then opens
- * the real head for the policy itself, and a `<head>` hidden in a comment, a script or an attribute
- * can't capture it. Applying it twice changes nothing.
+ * An approval's Summary page with NOTIFY_SUMMARY_CSP as the very first thing in it, so the policy
+ * holds before anything in the page loads. Pane's own doctype and the policy always come first,
+ * whatever the page starts with: the parser then opens the real head for the policy itself, so no
+ * leading character, comment, or `<head>` hidden in a script or an attribute can move it. The
+ * page's own leading doctype is dropped (a later one is ignored by the parser). Applying it twice
+ * changes nothing.
  */
 export function withSummaryPolicy(html: string): string {
-  const page = html.replace(/^﻿/u, '');
-  const doctype = /^\s*<!doctype[^>]*>/iu.exec(page)?.[0];
-  if (doctype && page.startsWith(POLICY_META, doctype.length)) return page;
-  if (doctype) return `${doctype}${POLICY_META}${page.slice(doctype.length)}`;
-  return `<!doctype html>${POLICY_META}${page}`;
+  if (html.startsWith(PREFIX)) return html;
+  return `${PREFIX}${html.replace(/^\uFEFF?(?:[\t\n\f\r ]*<!doctype[^>]*>)?/iu, '')}`;
 }
