@@ -1,7 +1,7 @@
 import { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import { revealInFileManager } from '../utils/revealInFileManager';
-import { openExternalUrl } from '../utils/openExternalUrl';
+import { openExternalUrl, openLocalPage } from '../utils/openExternalUrl';
 import { showContextMenu } from '../services/nativeMenus';
 import { contextMenuEntriesSchema } from '../../../shared/types/contextMenu';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
@@ -128,6 +128,21 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
       console.error('Failed to open external URL:', error);
       if (error instanceof PaneError) return { success: false, error: paneErrorText(error) };
       return { success: false, error: error instanceof Error ? error.message : 'Failed to open URL' };
+    }
+  });
+
+  // A browser tab's local page: the file is on this computer only when this desktop runs its own Pane.
+  ipcMain.handle('openLocalPage', async (_event, fileUrl: string) => {
+    try {
+      if (remotePaneClientController.getConnectionState().mode === 'remote') {
+        throw new PaneError('ERR_LOCAL_PAGE_ON_HOST', 'Pane did not open this file in your browser: it is on the host, not this computer. Nothing was opened.', 'Open the page on the host, or serve it over http and open its port from the Ports menu.');
+      }
+      await openLocalPage(fileUrl);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to open local page:', error);
+      if (error instanceof PaneError) return { success: false, error: paneErrorText(error) };
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to open the file' };
     }
   });
 

@@ -131,6 +131,8 @@ export type ElectronApiMockOptions = {
   hostConnectedClients?: RemoteDaemonConnectedClient[];
   /** setup:choose-import fails with this PaneError text instead of previewing. */
   setupImportError?: string;
+  /** Each chat tab's conversation, by panel id (plain text turns). Absent: no messages. */
+  chatMessages?: Record<string, Array<{ id: string; role: 'user' | 'assistant'; text: string }>>;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
   notifySnapshot?: NotifySnapshot;
   /** window.electronAPI.paneSecrets: the saved secrets and this host's store. Absent: none saved, in the keychain. */
@@ -1012,9 +1014,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     } : undefined;
     // window.electronAPI.chatTab, served when a fixture panel is a chat tab: an idle Claude chat with no messages.
     const chatTabApi = mockPanels.some((panel) => panel.type === 'chat') ? (() => {
+      const messagesOf = (panelId: string) => (mockOptions.chatMessages?.[panelId] ?? [])
+        .map(({ id, role, text }) => ({ id, role, parts: [{ type: 'text', text }] }));
       const view = (panelId: string) => ({
-        panelId, agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [], messageCount: 0,
-        transcript: { panelId, generation: 1, revision: 0, start: 0, messages: [] },
+        panelId, agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [], messageCount: messagesOf(panelId).length,
+        transcript: { panelId, generation: 1, revision: 0, start: 0, messages: messagesOf(panelId) },
       });
       const done = () => Promise.resolve();
       return {
@@ -1106,6 +1110,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return Promise.resolve({ success: false, error: 'No browser is available.' });
         }
         // Matches preload's Promise<IPCResponse> contract; callers await this result.
+        return success();
+      },
+      openLocalPage: (fileUrl: string) => {
+        openedExternalUrls.push(fileUrl);
         return success();
       },
       feedback: namespace({
