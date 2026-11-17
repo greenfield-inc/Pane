@@ -5,6 +5,11 @@ const MIN_STREAM_PX = 320;
 const MAX_STREAM_PX = 4096;
 const SETTINGS_TIMEOUT_MS = 2_000;
 
+/** A path on the hub that streams `info` (local, or a linked Mac's through its tunnel), such as `/vendor/serve-sim/logs`. */
+export function hubUrl(info: DeviceStreamInfo, pathname: string): string {
+  return new URL(pathname, info.streamUrl).toString();
+}
+
 /** A requested stream size as the hub accepts it, or undefined when the request names none. */
 export function streamSize(value: string | null): number | undefined {
   const px = Number(value);

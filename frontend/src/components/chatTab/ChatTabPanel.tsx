@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore, type Attachment as ComposerAttachment,
+  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
@@ -30,6 +30,7 @@ import { ChatAttachmentAdapter, dragHasFiles, MAX_IMAGE_BYTES, type SaveChatFile
 import { describeUpload } from '../../utils/hostUpload';
 import type { UploadProgress } from '../../../../shared/chunkedUpload';
 import { ChatCopyButton } from './ChatCopyButton';
+import { draftAttachments, shownComposers } from './chatDrafts';
 import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
@@ -182,12 +183,6 @@ export interface ChatTabPanelProps {
    */
   working?: readonly WorkingAgent[];
 }
-
-/**
- * The attachments of each chat's unsent draft, kept with its viewer as the draft text is: the
- * composer is rebuilt when the tab or its Pane is shown again, and they go back into it then.
- */
-const draftAttachments = new WeakMap<ChatTabViewer, readonly ComposerAttachment[]>();
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
 const PASTE_LIMIT = 1024 * 1024;
@@ -386,9 +381,14 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     }
     const run = restore.current;
     run.mounted += 1;
+    shownComposers.set(viewer, composer);
     // Sending empties the composer's attachments, and with them the saved ones.
     const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
-    return () => { run.mounted -= 1; unsubscribe(); };
+    return () => {
+      run.mounted -= 1;
+      unsubscribe();
+      if (shownComposers.get(viewer) === composer) shownComposers.delete(viewer);
+    };
   }, [runtime, viewer]);
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text

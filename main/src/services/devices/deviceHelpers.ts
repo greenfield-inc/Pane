@@ -6,6 +6,7 @@ import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { besideItsNode, hostCommand } from '../agentChat/hostCommand';
 import { addDeviceHubPort, removeDeviceHubPort } from './deviceHubPorts';
+import type { EmulatorRequest } from './deviceService';
 
 const execFileAsync = promisify(execFile);
 
@@ -113,7 +114,7 @@ type HubDeviceAction =
   | { platform: 'ios' | 'android'; name: string; runtime: string; deviceType: string };
 
 /** A body for serve-emu's REST routes: a selected serial, a tap or swipe, a key, or nothing. */
-type EmulatorBody = { serial: string } | { x: number; y: number } | { x1: number; y1: number; x2: number; y2: number } | { key: 'home' | 'back' } | Record<string, never>;
+type EmulatorBody = { serial: string } | EmulatorRequest;
 
 /** The running device hub: loopback only, token required. The token never leaves this module's callers. */
 export interface RunningHub {

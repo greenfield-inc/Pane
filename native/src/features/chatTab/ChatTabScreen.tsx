@@ -23,6 +23,7 @@ import { ChatRowView, type ChatRowActions } from './ChatTabRows';
 import { chatRows } from './chatRows';
 import { chatImageAdapter, chatImageAttachment, chatSendFromComposer, chatThreadMessage, composedText, restorableAttachments } from './chatThread';
 import { pickChatImages } from './pickChatImages';
+import { onChatImageAdded, takeChatImages } from './chatAddedImages';
 import { useChatAgents, useChatTab } from './useChatTab';
 
 function newOperationId(): string {
@@ -137,6 +138,12 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   });
   // The draft lives with the host's viewer (it survives leaving the tab); the composer starts from it.
   useEffect(() => { runtime.thread.composer.setText(viewer.snapshot().draft); }, [runtime, viewer]);
+  // Images the device tab's Screenshot to chat added go into the composer, unsent.
+  useEffect(() => {
+    const take = () => { for (const image of takeChatImages(panelId)) void runtime.thread.composer.addAttachment(chatImageAttachment(image)).catch(() => undefined); };
+    take();
+    return onChatImageAdded(take);
+  }, [runtime, panelId]);
 
   const pickCommand = (command: ChatTabCommand) => {
     const text = `/${command.name} `;
