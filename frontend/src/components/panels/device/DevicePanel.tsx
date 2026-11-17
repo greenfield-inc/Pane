@@ -88,6 +88,11 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const logs = useDeviceLogs(client, panel.id, logsOpen && live);
   const recorder = useRecording(client, panel.id);
   const [recordingNote, setRecordingNote] = useState<string>();
+  useEffect(() => {
+    if (!recordingNote) return;
+    const timer = window.setTimeout(() => setRecordingNote(undefined), 10_000);
+    return () => window.clearTimeout(timer);
+  }, [recordingNote]);
 
   useEffect(() => {
     if (!state.deviceId) return;
@@ -384,23 +389,27 @@ function RailButton({ label, shortcut, disabled, selected = false, accent = fals
 
 /** The line under the phone. `compact` (a narrow tab showing who drives) leaves the name to the tab's title. */
 function DeviceCaption({ state, frameRate, recording, compact = false, children }: { state: DevicePanelState; frameRate?: number | null; recording?: number; compact?: boolean; children?: ReactNode }) {
+  if (compact) return <div className="mt-2 flex h-6 w-full min-w-0 items-center justify-center text-xs text-text-tertiary" data-testid="device-caption">{children}</div>;
   return (
-    <div className="mt-2 flex h-6 max-w-full items-center whitespace-nowrap text-xs text-text-tertiary" data-testid="device-caption">
+    // Three columns, so the name stays centred under the phone as the readouts and the chip come and go.
+    <div className="mt-2 grid h-6 w-full grid-cols-[1fr_minmax(0,auto)_1fr] items-center gap-3 whitespace-nowrap text-xs text-text-tertiary" data-testid="device-caption">
+      <span className="flex min-w-0 justify-end">
       {recording !== undefined && (
-        <span className="mr-3 inline-flex w-[56px] flex-shrink-0 items-center gap-1.5 tabular-nums text-status-error" data-testid="device-recording">
+        <span className="ml-3 inline-flex w-[56px] flex-shrink-0 items-center gap-1.5 tabular-nums text-status-error" data-testid="device-recording">
           <span className="h-1.5 w-1.5 rounded-full bg-status-error" />
           {clock(recording)}
         </span>
       )}
       {frameRate !== undefined && (
         // A fixed box, so the caption never shifts as the number changes.
-        <span className="mr-3 inline-flex w-[52px] flex-shrink-0 items-center gap-1.5 tabular-nums" title="Frames per second the screen streams now. A still screen sends fewer." data-testid="device-frame-rate">
+        <span className="ml-3 inline-flex w-[52px] flex-shrink-0 items-center gap-1.5 tabular-nums" title="Frames per second the screen streams now. A still screen sends fewer." data-testid="device-frame-rate">
           <span className={cn('h-1.5 w-1.5 rounded-full', frameRate ? 'bg-status-success' : 'bg-status-neutral')} />
           {frameRate ?? '–'} fps
         </span>
       )}
-      {!compact && <span className="min-w-0 truncate"><span className="font-medium text-text-primary">{state.name}</span>{deviceCaption(state)}</span>}
-      {children}
+      </span>
+      <span className="min-w-0 truncate"><span className="font-medium text-text-primary">{state.name}</span>{deviceCaption(state)}</span>
+      <span className="flex min-w-0 justify-start">{children}</span>
     </div>
   );
 }

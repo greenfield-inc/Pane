@@ -12,7 +12,7 @@ export function CaptureCard({ notice, onCopy, onSave, onMarkUp, onClose }: { not
   const action = 'flex items-center gap-1 rounded border border-border-primary px-2 py-0.5 text-xs text-text-primary hover:bg-surface-hover';
   return (
     <div
-      className="absolute bottom-4 right-4 z-20 flex items-center gap-3 rounded-lg border border-border-primary bg-surface-primary p-2 pr-3 shadow-lg"
+      className="absolute bottom-14 right-4 z-20 flex items-center gap-3 rounded-lg border border-border-primary bg-surface-primary p-2 pr-3 shadow-lg"
       data-testid="device-capture-card"
       {...dismiss}
     >
@@ -40,7 +40,7 @@ export function DriverChip({ driver, agentName, onTakeOver, onHandBack }: { driv
   const label = person ? (driver.agentWaiting ? `You're driving · ${driver.agentWaiting} is waiting` : "You're driving") : `${driver.agent} is driving`;
   return (
     <span
-      className={cn('ml-3 inline-flex min-w-0 first:ml-0 items-center gap-2 rounded-full border px-2.5 py-0.5', person ? 'border-border-primary text-text-primary' : 'border-interactive text-text-primary')}
+      className={cn('inline-flex min-w-0 items-center gap-2 rounded-full border px-2.5 py-0.5', person ? 'border-border-primary text-text-primary' : 'border-interactive text-text-primary')}
       data-testid="device-driver"
     >
       <ShipWheel className="h-3.5 w-3.5" />

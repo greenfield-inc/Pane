@@ -715,7 +715,9 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
       return null;
     }
     const stopped = await act(['record', 'stop', '--json']);
-    const file = /"(?:path|outPath|output)"\s*:\s*"([^"]+\.mp4)"/.exec(stopped.output)?.[1] ?? /(\S+\.mp4)/.exec(stopped.output)?.[1];
+    // The path is a JSON string in agent-device's --json output: decode its escapes (Windows backslashes).
+    const quoted = /"(?:path|outPath|output)"\s*:\s*("(?:[^"\\]|\\.)+\.mp4")/.exec(stopped.output)?.[1];
+    const file = quoted ? decodeOptionalBoundary(JSON.parse(quoted), boundary.string) : /(\S+\.mp4)/.exec(stopped.output)?.[1];
     if (stopped.exitCode !== 0 || !file) throw new PaneError('ERR_DEVICE_RECORD', `The recording did not save: ${lastLine(stopped.output)}.`, 'Try recording again.');
     const recording: DeviceRecording = { path: file };
     if (state.machineId) recording.machine = state.machine;

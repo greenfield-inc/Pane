@@ -114,7 +114,7 @@ export function DeviceLogs({ lines, problem, canSendToChat, onToChat, onClose }:
   const empty = problem ?? (lines.length === 0 ? 'Waiting for the app to log…' : visible.length === 0 ? 'No lines match' : undefined);
 
   return (
-    <div className="flex flex-col border-t border-border-primary bg-bg-primary" data-testid="device-logs" onKeyDown={onKeyDown}>
+    <div className="flex h-full flex-col border-t border-border-primary bg-bg-primary" data-testid="device-logs" onKeyDown={onKeyDown}>
       <div className="flex flex-shrink-0 items-center gap-2 border-b border-border-primary bg-surface-primary px-2 py-1 text-xs">
         <span className="flex flex-shrink-0 items-center gap-1.5 font-medium text-text-primary">
           <FileText className="h-3.5 w-3.5" />

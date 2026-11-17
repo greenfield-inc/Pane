@@ -74,7 +74,11 @@ const client: DeviceTabClient = {
   stage: async (_panel, agentPanelId, text) => { window.qaStaged.push(`${agentPanelId}:${text}`); },
   attachToChat: async (chatPanelId, file) => { window.qaAttached.push(`${chatPanelId}:${file.name}`); },
   record: async (_panel, action) => (action === 'start' ? null : { path: '/tmp/pane/devices/recordings/pane-1.mp4' }),
-  logs: async (_panel, since) => ({ lines: since > 0 ? [] : LOG_LINES, next: LOG_LINES.length }),
+  // ?logs=many sends 400 lines, as a chatty app does.
+  logs: async (_panel, since) => {
+    const lines = params.get('logs') === 'many' ? Array.from({ length: 400 }, (_, index) => ({ ...LOG_LINES[index % 3], seq: index + 1 })) : LOG_LINES;
+    return { lines: since > 0 ? [] : lines, next: lines.length };
+  },
   driver: async (_panel, who) => { window.qaPower.push(`driver:${who}`); },
   input: async (_panel, input) => { window.qaInputs.push(input); },
   visible: async () => undefined,

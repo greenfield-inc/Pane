@@ -146,6 +146,20 @@ test('Logs shows the app log, filters it, and sends the matching lines to chat',
   await expect.poll(() => page.evaluate(() => window.qaAttached)).toEqual([expect.stringMatching(/^chat:.*log.*\.txt$/)]);
 });
 
+test('a long log scrolls inside its drawer and leaves the phone in place', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, 'view=pane&logs=many');
+  const screenTop = (await page.getByTestId('device-screen').boundingBox())?.y ?? -1;
+  await page.getByRole('button', { name: 'Logs' }).click();
+  await expect(page.getByTestId('device-logs')).toContainText('400 lines');
+  const logs = await page.getByTestId('device-logs').boundingBox();
+  const screen = await page.getByTestId('device-screen').boundingBox();
+  if (!logs || !screen) throw new Error('No logs or screen');
+  expect(logs.y + logs.height).toBeLessThanOrEqual(900);
+  expect(screen.y).toBeGreaterThanOrEqual(0);
+  expect(screenTop).toBeGreaterThanOrEqual(0);
+});
+
 test('while the agent drives, the chip names it and Take over hands the device to the person', async ({ page }) => {
   await open(page, 'view=pane&driver=agent');
   await expect(page.getByTestId('device-driver')).toContainText('is driving');
