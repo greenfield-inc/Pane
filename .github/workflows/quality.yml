@@ -154,6 +154,13 @@ jobs:
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait lint
 
+    # CI result's gate and its contract with this file (expected jobs, needs,
+    # skip manifest). Here rather than in CI result, which runs it every time
+    # at the end of the critical path.
+    - name: Test the CI result gate
+      if: ${{ !cancelled() }}
+      run: node --test scripts/ci-gate.test.mjs
+
   # Offline check of relative links and #anchors in every tracked markdown file.
   # External URLs are not fetched, so the check never flakes on the network.
   markdown-links:
@@ -565,12 +572,8 @@ jobs:
         sparse-checkout: |
           .github/workflows/quality.yml
           scripts/ci-gate.mjs
-          scripts/ci-gate.test.mjs
           scripts/ci-timings.mjs
         sparse-checkout-cone-mode: false
-
-    - name: Test the gate
-      run: node --test scripts/ci-gate.test.mjs
 
     - name: Decide
       env:
