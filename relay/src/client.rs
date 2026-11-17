@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
-use tokio_util::sync::CancellationToken;
 
 const DATA_DEADLINE: Duration = Duration::from_secs(10);
 const SLOW_CONN_DELAY: Duration = Duration::from_secs(1);
@@ -25,10 +24,10 @@ pub async fn run(
     if state.is_blocked(&id) {
         return;
     }
-    // Limits charge the client's source, so a flood slows and refuses only its sender. Charged
+    // Limits count the client's source, so a flood slows and refuses only its sender. Counted
     // before the computer is looked up: a Pane retrying a computer that is gone counts too.
     let source = source(peer.ip());
-    let level = state.charge_client(&id, &source, 0, 1);
+    let level = state.charge_client(&id, &source);
     let Some(agent) = state.agent(&id) else {
         tracing::debug!(id, peer = %peer.ip(), "client for a computer that is not connected");
         return;
@@ -68,7 +67,6 @@ pub async fn run(
     let down = AtomicU64::new(0);
     let last = AtomicU64::new(0);
     let idle = Duration::from_secs(state.cfg.idle_timeout_secs);
-    let over = CancellationToken::new();
     let (cr, cw) = client.into_split();
     let (dr, dw) = tokio::io::split(data);
     let meter = Meter {
@@ -77,14 +75,12 @@ pub async fn run(
         source: &source,
         last: &last,
         started,
-        over: &over,
     };
     let reason = tokio::select! {
         _ = async {
             tokio::join!(meter.copy(cr, dw, &up), meter.copy(dr, cw, &down))
         } => "closed",
         _ = watch_idle(&last, started, idle) => "idle",
-        _ = over.cancelled() => "over the limit",
         _ = agent.cut.cancelled() => "cut off",
     };
     tracing::info!(
@@ -98,15 +94,13 @@ pub async fn run(
     );
 }
 
-/// Counts one client connection's bytes against its limits.
+/// Paces one client connection's bytes to its address's rates.
 struct Meter<'a> {
     state: &'a State,
     id: &'a str,
     source: &'a str,
     last: &'a AtomicU64,
     started: Instant,
-    /// Cancelled when the connection goes past twice a limit; it then closes.
-    over: &'a CancellationToken,
 }
 
 impl Meter<'_> {
@@ -125,13 +119,9 @@ impl Meter<'_> {
             let elapsed = self.started.elapsed().as_millis() as u64;
             self.last.store(elapsed, Ordering::Relaxed);
             count.fetch_add(n as u64, Ordering::Relaxed);
-            match self.state.charge_client(self.id, self.source, n as u64, 0) {
-                Level::Over => {
-                    self.over.cancel();
-                    break;
-                }
-                Level::Slow => tokio::time::sleep(self.state.slow_delay(n as u64)).await,
-                Level::Ok => {}
+            let wait = self.state.pace_client(self.id, self.source, n as u64);
+            if !wait.is_zero() {
+                tokio::time::sleep(wait).await;
             }
             // TLS can accept the bytes yet hold some back until a flush; without one the
             // end of a request waits for the client's next bytes, or for it to give up.

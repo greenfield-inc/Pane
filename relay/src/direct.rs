@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio_util::sync::CancellationToken;
 
 /// The iroh relay's websocket path and its latency probe.
 pub const PATHS: [&str; 2] = ["/relay", "/ping"];
@@ -38,7 +37,7 @@ pub async fn proxy(state: Arc<State>, client: BoxStream, head: Vec<u8>, peer: Ip
         return;
     };
     let key = source(peer);
-    match state.charge(Charge::Direct(&key), 0, 1) {
+    match state.charge(Charge::Direct(&key), 1) {
         Level::Over => return,
         Level::Slow => tokio::time::sleep(SLOW_CONN_DELAY).await,
         Level::Ok => {}
@@ -49,17 +48,15 @@ pub async fn proxy(state: Arc<State>, client: BoxStream, head: Vec<u8>, peer: Ip
     if server.write_all(&head).await.is_err() {
         return;
     }
-    let over = CancellationToken::new();
     let (cr, cw) = tokio::io::split(client);
     let (sr, sw) = server.into_split();
     tokio::select! {
         _ = async {
             tokio::join!(
-                copy(&state, &key, cr, sw, &over),
-                copy(&state, &key, sr, cw, &over),
+                copy(&state, &key, cr, sw),
+                copy(&state, &key, sr, cw),
             )
         } => {}
-        _ = over.cancelled() => tracing::info!(%peer, "direct relay client cut off: over the limit"),
         _ = state.shutdown.cancelled() => {}
     }
 }
@@ -69,7 +66,6 @@ async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     key: &str,
     mut r: R,
     mut w: W,
-    over: &CancellationToken,
 ) {
     let mut buf = vec![0u8; 16 * 1024];
     loop {
@@ -77,13 +73,9 @@ async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             Ok(0) | Err(_) => break,
             Ok(n) => n,
         };
-        match state.charge(Charge::Direct(key), n as u64, 0) {
-            Level::Over => {
-                over.cancel();
-                return;
-            }
-            Level::Slow => tokio::time::sleep(state.slow_delay(n as u64)).await,
-            Level::Ok => {}
+        let wait = state.pace_direct(key, n as u64);
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
         }
         // As in `client.rs`: TLS holds bytes back until a flush.
         if w.write_all(&buf[..n]).await.is_err() || w.flush().await.is_err() {

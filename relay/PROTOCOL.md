@@ -296,17 +296,25 @@ limited.
 ## Limits
 
 Limits count each client by its address: an IPv4 address, or the /64 that
-holds an IPv6 address. A client over a limit is slowed, and past twice the
-limit its new connections are refused and its open ones closed. The
-computer and its other clients carry on.
+holds an IPv6 address. The computer and its other clients carry on whatever
+one client does.
 
-- Per computer and client address: 50 MB and 100 new client connections a
-  minute (`--limit-bytes-per-min`, `--limit-conns-per-min`).
-- Per client address across all computers: 200 MB and 400 new connections a
-  minute (`--limit-ip-bytes-per-min`, `--limit-ip-conns-per-min`). Connections
-  for a computer that is not connected count too.
-- Per client address on the iroh relay: 50 MB and 100 new connections a
-  minute (the per-computer flags).
+Traffic is a sustained rate, both directions together. A client over a rate
+is slowed to it and never cut off: each address has a token bucket that
+refills at the rate and holds one second of it, so a short burst goes at
+line speed. New connections are counted a minute: past the limit each new
+connection waits a second, and past twice it new connections are refused.
+Open connections stay open.
+
+- Per computer and client address: 500 Mbit/s and 100 new client connections
+  a minute (`--limit-mbit-per-sec`, `--limit-conns-per-min`).
+- Per client address across all computers and the iroh relay: 1,000 Mbit/s
+  and 400 new connections a minute (`--limit-ip-mbit-per-sec`,
+  `--limit-ip-conns-per-min`), half of what a small relay VM sends, so one
+  address cannot fill a relay. Connections for a computer that is not
+  connected count too.
+- Per client address on the iroh relay: 500 Mbit/s and 100 new connections a
+  minute (the per-computer flags), inside the address's rate above.
 - Per computer, its own control connection: past 1,200 frames a minute the
   relay closes it with `over-limit` and refuses it until the minute ends.
 - Per computer address, control connections: 60 a minute

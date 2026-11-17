@@ -319,6 +319,32 @@ impl Agent {
     }
 }
 
+impl Agent {
+    /// A client sends `bytes` bytes to `sni` through the relay at `addr`. Returns the
+    /// computer's answer and how long the upload took.
+    async fn upload(
+        &self,
+        addr: SocketAddr,
+        sni: &str,
+        bytes: u64,
+    ) -> std::io::Result<(String, Duration)> {
+        let started = std::time::Instant::now();
+        let mut s = tls_connect(addr, sni, &self.cert).await?;
+        s.write_all(format!("upload {bytes}\n").as_bytes()).await?;
+        let chunk = vec![7u8; 256 * 1024];
+        let mut left = bytes;
+        while left > 0 {
+            let n = left.min(chunk.len() as u64) as usize;
+            s.write_all(&chunk[..n]).await?;
+            left -= n as u64;
+        }
+        s.flush().await?;
+        let mut out = String::new();
+        s.read_to_string(&mut out).await?;
+        Ok((out, started.elapsed()))
+    }
+}
+
 async fn send(w: &mut WriteHalf<TlsStream<TcpStream>>, v: &Value) {
     w.write_all(format!("{v}\n").as_bytes()).await.unwrap();
     w.flush().await.unwrap();
@@ -1369,6 +1395,51 @@ async fn connections_for_a_computer_that_is_not_here_count_against_their_address
     }
     assert!(timed(&agent, env.addr(), &host).await.is_err());
     assert!(timed(&agent, env.addr_v6(), &host).await.unwrap() < SLOWED);
+}
+
+#[tokio::test]
+async fn an_upload_past_the_rate_is_slowed_and_never_closed() {
+    // 8 Mbit/s is 1 MB a second, with one second's worth to start.
+    let env = Env::start(&["--listen", "[::]:0", "--limit-mbit-per-sec", "8"]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let host = format!("{}.{D}", agent.id);
+
+    let big = agent.upload(env.addr(), &host, 4_000_000);
+    // Another address, while the first is held to its rate, goes at full speed.
+    let other = async {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        agent.upload(env.addr_v6(), &host, 800_000).await
+    };
+    let (big, other) = tokio::join!(big, other);
+    let (answer, took) = big.unwrap();
+    assert_eq!(answer, format!("{host} got 4000000\n"));
+    // 3 MB past the first second's worth, at 1 MB a second.
+    assert!(took >= Duration::from_millis(2_700), "{took:?}");
+    let (answer, took) = other.unwrap();
+    assert_eq!(answer, format!("{host} got 800000\n"));
+    assert!(took < Duration::from_millis(500), "{took:?}");
+    still_connected(&mut agent).await;
+}
+
+#[tokio::test]
+async fn one_address_has_a_rate_across_all_computers() {
+    let env = Env::start(&["--limit-ip-mbit-per-sec", "8"]).await;
+    let a = Agent::connect(&env, &SigningKey::generate()).await;
+    let b = Agent::connect(&env, &SigningKey::generate()).await;
+    let (host_a, host_b) = (format!("{}.{D}", a.id), format!("{}.{D}", b.id));
+
+    let started = std::time::Instant::now();
+    let (to_a, to_b) = tokio::join!(
+        a.upload(env.addr(), &host_a, 2_000_000),
+        b.upload(env.addr(), &host_b, 2_000_000),
+    );
+    assert_eq!(to_a.unwrap().0, format!("{host_a} got 2000000\n"));
+    assert_eq!(to_b.unwrap().0, format!("{host_b} got 2000000\n"));
+    assert!(
+        started.elapsed() >= Duration::from_millis(2_700),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]
