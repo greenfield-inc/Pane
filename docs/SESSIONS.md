@@ -176,7 +176,7 @@ Choose a session ID source and provide first-launch and resume templates:
   Sessions refuse custom command resume.
 - **Pane allocates an ID:** for other CLIs that accept a caller-provided ID.
 - **CLI reports its ID:** the CLI or wrapper prints a standalone newline-terminated
-  `PANE_AGENT_SESSION_ID=your-session-id` line. IDs may contain letters, digits,
+  `PANE_AGENT_SESSION_ID=your-session-id` line (or `AGENT_FARM_SESSION_ID=…`). IDs may contain letters, digits,
   periods, underscores, colons, and hyphens (up to 256 characters).
 
 `{command}` expands to the saved command; `{sessionId}` expands to the quoted ID.
@@ -197,21 +197,36 @@ automatically; use an explicit resume command if you know their ID.
 ### Agent Farm
 
 Agent Farm is the one launcher Pane recognizes by name, because Agent Farm
-publishes this contract for Pane: when `PANE_PANEL_ID` is set it prints
-`PANE_AGENT_SESSION_ID=<launch id>` once, before the agent starts, and documents
-`{command} --resume <id>` as the way to reopen that conversation. Pane keeps the
-first ID line of each launch and ignores later ones, which can only be agent
-output. Every other wrapper still needs an explicit config.
+publishes this contract for a host: when the host sets
+`AGENT_FARM_REPORT_SESSION_ID=1` it prints `AGENT_FARM_SESSION_ID=<launch id>`
+once, on its own line, before the agent starts, and documents
+`{command} --resume <id>` as the way to reopen that conversation. Pane sets
+`AGENT_FARM_REPORT_SESSION_ID=1` in every terminal. An Agent Farm from before
+greenfield-inc/agent-farm#220 prints `PANE_AGENT_SESSION_ID=<launch id>`
+instead (it keys on `PANE_PANEL_ID`, which Pane also sets), and Pane accepts
+either line (D-403). Pane keeps the first ID line of each launch and ignores
+later ones, which can only be agent output. Every other wrapper still needs an
+explicit config.
 
 The launch ID is only where the conversation started: `/clear` and `/resume`
 move Claude to another one. Agent Farm's compiled Claude plugin therefore also
-carries a `SessionStart` hook that runs `runpane panels conversation --hook` on
-start, `/resume`, `/clear` and compact (D-269). Pane saves the reported
-conversation on the tab, ahead of the launch ID, so a restart resumes the
-conversation the tab was last on and Switch to chat opens it. The hook does
-nothing outside Pane and prints nothing. With an older Agent Farm there is no
-report, and Switch to chat opens the folder's most recent conversation instead
+carries a `SessionStart` hook that tells the host on start, `/resume`, `/clear`
+and compact (D-269). Since #220 it runs `"$AGENT_FARM_SESSION_HOOK" session-start`
+with Claude's hook JSON on stdin; Pane sets `AGENT_FARM_SESSION_HOOK` to its
+runpane shim (the same path as `PANE_RUNPANE_BIN`, exported by the rcfile in WSL),
+and `runpane session-start` is an alias of `runpane panels conversation --hook`.
+An older Agent Farm runs `"$PANE_RUNPANE_BIN" panels conversation --hook`
+directly. Either way Pane saves the reported conversation on the tab, ahead of
+the launch ID, so a restart resumes the conversation the tab was last on and
+Switch to chat opens it. The hook does nothing outside Pane and prints nothing.
+With an Agent Farm too old for the hook there is no report, and Switch to chat
+opens the folder's most recent conversation instead
 (see [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
+
+| Agent Farm | ID line Pane reads | Hook Agent Farm runs |
+| --- | --- | --- |
+| before #220 | `PANE_AGENT_SESSION_ID=<id>` | `"$PANE_RUNPANE_BIN" panels conversation --hook` |
+| #220 and later | `AGENT_FARM_SESSION_ID=<id>` | `"$AGENT_FARM_SESSION_HOOK" session-start` |
 
 A command counts when it is a single `agent-farm run <profile>` or
 `agent-farm agent <profile>`, optionally preceded by `VAR=value` assignments,
@@ -223,13 +238,13 @@ it. The editor says so under the unticked checkbox. An explicit config always
 wins: tick **Enable custom command resume** and set your own templates.
 
 A panel created before this rule usually has no saved ID. On its next relaunch Pane
-makes one attempt to read the last `PANE_AGENT_SESSION_ID=` line from the
-panel's saved terminal buffer. Agent Farm older than 0.2.20 prints no ID, so
+makes one attempt to read the last `AGENT_FARM_SESSION_ID=` or
+`PANE_AGENT_SESSION_ID=` line from the panel's saved terminal buffer. Agent Farm older than 0.2.20 prints no ID, so
 those panels relaunch fresh, as before.
 
 To reopen an older conversation by hand, run
 `agent-farm run <profile> --resume <id>`. The ID is the launch ID (the
-`PANE_AGENT_SESSION_ID` value), shown as `resumeId` in
+`AGENT_FARM_SESSION_ID` or `PANE_AGENT_SESSION_ID` value), shown as `resumeId` in
 `runpane panels list --json`. Agent Farm keeps launch records in
 `~/.local/state/agent-farm/launches/` for 90 days.
 
@@ -677,8 +692,9 @@ section (`main/src/services/sessionTidyRules.ts`, used by the Session folder's
 `pane-orchestration` skill carries the same rules). The orchestrator cleans up
 as it goes without asking, and says in one line what it closed or archived:
 
-- It keeps one status document in the Session folder, updated in place, and
-  links plans, PRs, mock-ups and reports from it. It opens a page beside the
+- It keeps one status document at `session/index.html` in the Session folder,
+  updated in place, which the Session's Overview tab shows (it never opens it
+  as a tab), and links plans, PRs, mock-ups and reports from it. It opens a page beside the
   person only when they need to look at it now, and closes it once that's
   done.
 - It closes tabs it opened once they no longer matter, with
@@ -712,7 +728,7 @@ replaced one with your own (it has no Pane marker). It:
    covered, agents still working and open work-list items. It posts this as
    an info notification and writes it in the conversation; it doesn't ask or
    wait.
-3. Stops its watchers, closes every tab it opened (the status document too),
+3. Stops its watchers, closes every tab it opened,
    archives every Pane whose dry run is clean (parked ones too; their PRs stay
    open), keeps unsafe Panes, and marks the other open work-list items
    dropped. A worker still working keeps its Pane; once it finishes, its Pane

@@ -124,7 +124,7 @@ describe('Pane Chat skill bundle', () => {
     const text = (await fs.readFile(path.join(bundleRoot, 'skills', 'pane-orchestration', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
     expect(text).not.toContain('## Clean up');
     expect(text).toContain('## Keep the Session tidy');
-    expect(text).toContain('Keep one status document for this Session, in the Session folder, and update it in place.');
+    expect(text).toContain('Keep one status document for this Session at `session/index.html` in the Session folder, and update it in place.');
     expect(text).toContain('Link plans, PRs, mock-ups, reports and other pages from it instead of opening each one.');
     expect(text).toContain('runpane panels close --panel <id> --yes --json');
     expect(text).toContain('runpane panes archive --pane <id> --dry-run --json');
