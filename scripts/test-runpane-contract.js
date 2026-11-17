@@ -5216,7 +5216,7 @@ import runpane.todos as todos
 from runpane.cli import COMMAND_HANDLERS, parse_args
 from runpane.daemon_client import PaneDaemonClientError
 
-data = json.loads(sys.stdin.read())
+data = json.loads(sys.stdin.buffer.read().decode("utf-8"))
 scripted = data["scripted"]
 calls = []
 def fake_invoke(channel, args=None, **kwargs):
