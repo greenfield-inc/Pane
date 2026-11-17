@@ -23,6 +23,8 @@ const FOLDS: { posture: DevicePosture; label: string; ios: IconProps['ios']; and
   { posture: 'half', label: 'Half open', ios: 'book', android: 'menu_book' },
   { posture: 'open', label: 'Open', ios: 'rectangle.split.2x1', android: 'splitscreen' },
 ];
+/** Each tab's last screen shape, so a tab shown again starts at it instead of a portrait placeholder. */
+const lastAspect = new Map<string, number>();
 const panelStateSchema = boundary.object({
   platform: boundary.enumeration('ios', 'android'),
   name: boundary.string,
@@ -51,7 +53,7 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
   // The screen inside the bezel, for mapping taps; and the room the phone may fill.
   const [box, setBox] = useState<{ width: number; height: number }>();
   const [stage, setStage] = useState<{ width: number; height: number }>();
-  const [aspect, setAspect] = useState(ASPECT[state?.platform ?? 'ios']);
+  const [aspect, setAspect] = useState(() => lastAspect.get(panel.id) ?? ASPECT[state?.platform ?? 'ios']);
   const [controls, setControls] = useState<DeviceControls>();
   const [notice, setNotice] = useState<string>();
   const agentTab = agentTabOf(panels, state?.openedBy);
@@ -164,7 +166,7 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
                 source={{ uri: frame }}
                 style={StyleSheet.absoluteFill}
                 resizeMode="contain"
-                onLoad={(event) => { const { width, height } = event.nativeEvent.source; if (width > 0 && height > 0) setAspect(width / height); }}
+                onLoad={(event) => { const { width, height } = event.nativeEvent.source; if (width > 0 && height > 0) { lastAspect.set(panel.id, width / height); setAspect(width / height); } }}
               />
             </Pressable>
           )
@@ -172,6 +174,8 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
       </View>
       </View>
       <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.caption}>{notice ?? [state?.name ?? panel.title, state?.os, state?.machine].filter(Boolean).join(' · ')}</Text>
+      {/* The chip's row keeps its height when no one drives, so the phone stays put as calls come and go. */}
+      <View style={styles.chipRow}>
       {controls && driver && (
         <View testID="device-driver" style={[styles.chip, { borderColor: driver.by === 'agent' ? colors.accent : colors.border }]}>
           <Text variant="footnote" numberOfLines={1}>{driver.by === 'person' ? (driver.agentWaiting ? `You're driving · ${driver.agentWaiting} is waiting` : "You're driving") : `${driver.agent} is driving`}</Text>
@@ -180,6 +184,7 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
           </Pressable>
         </View>
       )}
+      </View>
       <View testID="device-bar" style={[styles.bar, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         {button('Home', 'house', 'home', () => send({ kind: 'button', button: 'home' }))}
         {controls && (
@@ -207,7 +212,8 @@ const styles = StyleSheet.create({
   offScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
   offText: { textAlign: 'center' },
   caption: { marginTop: 10 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, borderWidth: 1 },
+  chipRow: { height: 36, justifyContent: 'center' },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, borderWidth: 1 },
   bar: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10, padding: 4, borderRadius: 999, borderWidth: 1 },
   barButton: { padding: 8, borderRadius: 999 },
 });
