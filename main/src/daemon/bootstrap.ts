@@ -565,7 +565,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   // To-dos (D-409): the service answers reads everywhere; only the instance that does housekeeping
   // runs the supervisor, the load gate and launch resume, so one data folder has one supervisor.
-  const todoService = new TodoService(new TodoStore(databaseService.getDb()), createTodoHost(services, commandRegistry));
+  // Test-only (D-409 validation): PANE_TODOS_TIME_SCALE=60 runs the supervisor's and gate's minutes as seconds. Ignored when packaged.
+  const todoTimeScale = options.app?.isPackaged !== false ? 1 : Math.max(1, Number(process.env.PANE_TODOS_TIME_SCALE) || 1);
+  const todoClockStart = Date.now();
+  const todoClock = todoTimeScale === 1 ? Date.now : () => todoClockStart + (Date.now() - todoClockStart) * todoTimeScale;
+  const todoService = new TodoService(new TodoStore(databaseService.getDb()), createTodoHost(services, commandRegistry), todoClock);
   services.todoService = todoService;
   daemonServices.todoService = todoService;
   let todosChangedTimer: ReturnType<typeof setTimeout> | undefined;
