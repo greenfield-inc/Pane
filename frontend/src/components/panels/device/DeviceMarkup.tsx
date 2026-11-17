@@ -7,8 +7,8 @@ export interface DeviceMarkupProps {
   image: string;
   /** Whether this Pane has an agent tab to send to; hides "Send to chat" when false. */
   canSendToChat: boolean;
-  /** The drawing flattened onto the screenshot, as a PNG, and what to do with it. */
-  onDone: (png: Blob, action: 'chat' | 'copy') => void;
+  /** The drawing flattened onto the screenshot, as a PNG data URL, and what to do with it. */
+  onDone: (png: string, action: 'chat' | 'copy') => void;
   onCancel: () => void;
 }
 
@@ -122,7 +122,8 @@ export function DeviceMarkup({ image, canSendToChat, onDone, onCancel }: DeviceM
     if (!ctx) return;
     ctx.drawImage(img, 0, 0, natural.width, natural.height);
     drawStrokes(ctx, strokes, 1, strokeWidth, color);
-    canvas.toBlob(blob => { if (blob) onDone(blob, action); }, 'image/png');
+    // toDataURL, not toBlob: Chromium encodes a toBlob PNG in idle time, which on a busy page can take seconds.
+    onDone(canvas.toDataURL('image/png'), action);
   }, [natural, strokes, strokeWidth, color, onDone]);
 
   // Keys while Mark up has focus (it takes focus when it opens): Escape cancels, ⌘Z / Ctrl+Z
