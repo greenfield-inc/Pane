@@ -15,7 +15,7 @@ const DESCRIPTION_CLAMP_PX = 150;
  */
 const DESCRIPTION_MARKDOWN = cn(
   COMPACT_MARKDOWN,
-  '[&_img]:!my-1.5 [&_img]:block [&_img]:max-h-[140px] [&_img]:!max-w-[min(100%,260px)] [&_img]:cursor-zoom-in [&_img]:rounded-lg [&_img]:border [&_img]:border-border-secondary [&_img]:object-cover',
+  '!text-[13.5px] [&_img]:!my-1.5 [&_img]:block [&_img]:max-h-[140px] [&_img]:!max-w-[min(100%,260px)] [&_img]:cursor-zoom-in [&_img]:rounded-lg [&_img]:border [&_img]:border-border-secondary [&_img]:object-cover',
 );
 
 export interface TodoCardProps {
@@ -24,17 +24,22 @@ export interface TodoCardProps {
   onOpenImage: (src: string, label: string) => void;
 }
 
+/** The sub-to-dos section's element id, which the chip row's 1/2 scrolls to. */
+export function todoSubTodosAnchor(number: number): string {
+  return `todo-${number}-sub-todos`;
+}
+
 /** The card under the title: description, DONE WHEN and SUB-TO-DOS with + Add. */
 export function TodoCard({ detail, onOpenTodo, onOpenImage }: TodoCardProps) {
   const { todo } = detail;
   const act = useTodosStore((state) => state.act);
   const isSub = todo.parentNumber !== null;
   return (
-    <div className="my-3 rounded-xl border border-border-primary bg-surface-primary px-3.5 py-3" data-testid="todo-card">
+    <div className="mb-2 mt-3.5" data-testid="todo-card">
       {todo.summary.trim() ? <Description markdown={todo.summary} onOpenImage={onOpenImage} /> : <p className="text-[13px] text-text-tertiary">No description.</p>}
       {todo.doneWhen.length > 0 && (
         <>
-          <SectionLabel>Done when</SectionLabel>
+          <SectionLabel>Done when · {todo.doneWhen.filter((item) => item.met).length} of {todo.doneWhen.length}</SectionLabel>
           <div className="flex flex-col gap-0.5" data-testid="todo-done-when">
             {todo.doneWhen.map((item, index) => (
               <button
@@ -88,9 +93,12 @@ function SubTodos({ detail, onOpenTodo, canAdd }: { detail: TodoDetail; onOpenTo
       setTitle('');
     }
   };
+  const done = detail.subTodos.filter((row) => row.status.status === 'done').length;
   return (
-    <>
-      <SectionLabel action={canAdd && !adding ? <SectionAction label="Add" onClick={() => setAdding(true)} testId="todo-add-sub" /> : undefined}>Sub-to-dos</SectionLabel>
+    <section id={todoSubTodosAnchor(detail.todo.number)} aria-label="Sub-to-dos" className="scroll-mt-4" data-testid="todo-sub-todos">
+      <SectionLabel action={canAdd && !adding ? <SectionAction label="Add" onClick={() => setAdding(true)} testId="todo-add-sub" /> : undefined}>
+        Sub-to-dos{detail.subTodos.length > 0 ? ` · ${done} of ${detail.subTodos.length}` : ''}
+      </SectionLabel>
       {detail.subTodos.length > 0 ? <SubTodoRows rows={detail.subTodos} onOpen={onOpenTodo} /> : !adding && <p className="text-[12.5px] text-text-tertiary">None yet.</p>}
       {adding && (
         <div className="mt-1 flex items-center gap-2 rounded-lg border border-border-interactive px-2 py-1" data-testid="todo-add-sub-row">
@@ -109,7 +117,7 @@ function SubTodos({ detail, onOpenTodo, canAdd }: { detail: TodoDetail; onOpenTo
           <button type="button" onClick={() => void submit()} disabled={!title.trim() || busy} className="h-7 rounded-md bg-interactive px-2.5 text-[12.5px] font-medium text-text-on-interactive disabled:opacity-50">Add</button>
         </div>
       )}
-    </>
+    </section>
   );
 }
 

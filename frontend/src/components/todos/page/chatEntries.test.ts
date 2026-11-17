@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../../shared/types/notify';
-import type { TodoActivity } from '../../../../../shared/types/todos';
-import { approvalCardView, deliveryLine, isWebTarget, mergeTodoChat, todoEventIcon } from './chatEntries';
-
-function activity(id: number, createdAt: number, body = 'note'): TodoActivity {
-  return { id, todoNumber: 16, kind: 'event', authorKind: 'pane', authorName: 'Pane', body, createdAt };
-}
+import { approvalCardView, isWebTarget, todoEventIcon } from './chatEntries';
 
 function approval(id: string, createdAt: number, overrides: Partial<NotifyItem> = {}): NotifyItem {
   return {
@@ -14,23 +9,6 @@ function approval(id: string, createdAt: number, overrides: Partial<NotifyItem> 
     ...overrides,
   };
 }
-
-describe('mergeTodoChat', () => {
-  it('places approval cards among the activity by when they were asked', () => {
-    const entries = mergeTodoChat([activity(1, 10), activity(2, 30)], ['q11'], [approval('q11', 20)]);
-    expect(entries.map((entry) => (entry.kind === 'activity' ? entry.activity.id : entry.item.id))).toEqual([1, 'q11', 2]);
-  });
-
-  it('leaves out approvals the snapshot no longer has, and repeats none', () => {
-    const entries = mergeTodoChat([activity(1, 10)], ['gone', 'q11', 'q11'], [approval('q11', 5)]);
-    expect(entries.map((entry) => entry.kind)).toEqual(['approval', 'activity']);
-  });
-
-  it('keeps activity ahead of a card asked at the same moment', () => {
-    const entries = mergeTodoChat([activity(1, 10)], ['q11'], [approval('q11', 10)]);
-    expect(entries[0].kind).toBe('activity');
-  });
-});
 
 describe('approvalCardView', () => {
   it('reads a waiting approval with its Q-n split from the question', () => {
@@ -57,16 +35,12 @@ describe('todoEventIcon', () => {
     expect(todoEventIcon('Start held: devbox is busy')).toBe('queued');
     expect(todoEventIcon('Stopped by you')).toBe('stopped');
     expect(todoEventIcon('Quiet 30 min: Pane restarted the orchestrator')).toBe('alert');
+    expect(todoEventIcon('planner attached plan: Plan')).toBe('attached');
     expect(todoEventIcon('Renamed')).toBe('note');
   });
 });
 
-describe('deliveryLine and isWebTarget', () => {
-  it('says delivered only once the agent has it', () => {
-    expect(deliveryLine({ deliveredAt: 5, toName: 'orchestrator' })).toBe('Delivered to orchestrator');
-    expect(deliveryLine({})).toBe('waiting for the agent to finish its turn');
-  });
-
+describe('isWebTarget', () => {
   it('tells a URL from a file path', () => {
     expect(isWebTarget('https://github.com/x/y/pull/1')).toBe(true);
     expect(isWebTarget('/Users/me/plan.html')).toBe(false);

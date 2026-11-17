@@ -1,34 +1,9 @@
 import type { NotifyItem } from '../../../../../shared/types/notify';
-import type { TodoActivity } from '../../../../../shared/types/todos';
 import { leadingQn } from '../../../../../shared/autopilotDecision';
-
-/** One entry of a to-do's chat, in time order: an activity row, or a card for one of its approvals. */
-export type TodoChatEntry =
-  | { kind: 'activity'; at: number; activity: TodoActivity }
-  | { kind: 'approval'; at: number; item: NotifyItem };
-
-/**
- * The chat as the page shows it: the to-do's activity with a card for each linked approval, placed
- * by when it was asked. An approval no longer in the Notify snapshot has nothing to show and is left
- * out. Entries at the same time keep activity first, then the order they came in.
- */
-export function mergeTodoChat(activity: readonly TodoActivity[], approvalIds: readonly string[], items: readonly NotifyItem[]): TodoChatEntry[] {
-  const byId = new Map(items.map((item) => [item.id, item]));
-  const seen = new Set<string>();
-  const entries: TodoChatEntry[] = activity.map((row) => ({ kind: 'activity', at: row.createdAt, activity: row }));
-  for (const id of approvalIds) {
-    const item = byId.get(id);
-    if (!item || seen.has(id)) continue;
-    seen.add(id);
-    entries.push({ kind: 'approval', at: item.createdAt, item });
-  }
-  // Array.prototype.sort is stable, so equal times keep activity (pushed first) ahead of cards.
-  return entries.sort((a, b) => a.at - b.at);
-}
 
 type ApprovalCardState = 'waiting' | 'answered' | 'closed';
 
-/** What an approval card in the chat says: "Q-10 · answered · D-14", its question, and the answer. */
+/** What an approval card in the thread says: "Q-10 · answered · D-14", its question, and the answer. */
 export interface ApprovalCardView {
   qn?: string;
   question: string;
@@ -57,7 +32,7 @@ export function approvalCardView(item: NotifyItem): ApprovalCardView {
 }
 
 /** The small icon an event row carries, read from its words (Pane writes events as plain lines). */
-export type TodoEventIcon = 'done' | 'queued' | 'created' | 'stopped' | 'started' | 'waiting' | 'alert' | 'note';
+export type TodoEventIcon = 'done' | 'queued' | 'created' | 'stopped' | 'started' | 'waiting' | 'alert' | 'attached' | 'note';
 
 export function todoEventIcon(body: string): TodoEventIcon {
   const text = body.toLowerCase();
@@ -65,16 +40,11 @@ export function todoEventIcon(body: string): TodoEventIcon {
   if (/\b(asks?|asked|waits? on you|question)\b/u.test(text)) return 'waiting';
   if (/\b(held|queued|load)\b/u.test(text)) return 'queued';
   if (/\b(stopped|paused|dropped)\b/u.test(text)) return 'stopped';
+  if (/\b(attached|detached)\b/u.test(text)) return 'attached';
   if (/\b(done|passed|answered|approved|accepted|merged)\b/u.test(text)) return 'done';
   if (/\b(created|added)\b/u.test(text)) return 'created';
   if (/\b(started|resumed|assigned|pushed|working)\b/u.test(text)) return 'started';
   return 'note';
-}
-
-/** How a message the person sent reads under it: delivered, or why not yet. */
-export function deliveryLine(activity: Pick<TodoActivity, 'deliveredAt' | 'toName'>): string {
-  if (activity.deliveredAt !== undefined) return activity.toName ? `Delivered to ${activity.toName}` : 'Delivered';
-  return 'waiting for the agent to finish its turn';
 }
 
 /** A URL attachment opens as a page; anything else is a file on a machine. */

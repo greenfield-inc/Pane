@@ -1,21 +1,29 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
-import { ChevronLeft, ChevronRight, MoreHorizontal, Play, Square } from 'lucide-react';
-import type { TodoAction, TodoDetail, TodoShownStatus } from '../../../../../shared/types/todos';
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Columns2, MoreHorizontal, PanelRight, Play, Square } from 'lucide-react';
+import type { TodoAction, TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
+import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
+import { normalizeKeyboardShortcutOverrides, resolveEffectiveChord } from '../../../../../shared/utils/keyboardBindings';
 import { useTodoDetail, useTodosStore } from '../../../stores/todosStore';
 import { todoApprovalSurface, useApprovalColumnStore } from '../../../stores/approvalColumnStore';
-import { Dropdown, type DropdownItem } from '../../ui/Dropdown';
-import { cn } from '../../../utils/cn';
-import { TodoStatusPill } from '../TodoStatusIcon';
-import { isTypingTarget } from '../todosNavigation';
-import { TodoCard } from './TodoCard';
-import { TodoChatTimeline, TodoComposer } from './TodoChat';
-import { TodoRail } from './TodoRail';
-import { TodoSplit } from './TodoSplit';
-import { openTodoSession } from './todoNavigation';
 import { useOrchestrationSessionStore } from '../../../stores/orchestrationSessionStore';
+import { areKeyboardShortcutsEnabled, useConfigStore } from '../../../stores/configStore';
+import { chordForEvent, rendererKeyPlatform } from '../../../stores/hotkeyStore';
+import { useOuterPanelResize } from '../../../hooks/useOuterPanelResize';
+import { OUTER_PANEL_CONFIGS } from '../../../utils/outerPanelSizing';
+import { formatKeyDisplay } from '../../../utils/hotkeyUtils';
 import { openOnMachine } from '../../../utils/machineRowActions';
-import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
-import { CLOSED_SPLIT, todoSplitReducer, type TodoSplitAction, type TodoSplitItem } from './splitTabs';
+import { cn } from '../../../utils/cn';
+import { Dropdown, type DropdownItem } from '../../ui/Dropdown';
+import { OuterResizeSeparator } from '../../ui/OuterResizeSeparator';
+import { isTypingTarget } from '../todosNavigation';
+import { TodoCard, todoSubTodosAnchor } from './TodoCard';
+import { TodoChatTimeline, TodoComposer } from './TodoChat';
+import { TodoChips } from './TodoChips';
+import { TodoDetailsSidebar, type TodoDetailsTab } from './TodoDetailsSidebar';
+import { TodoSplit, splitTabLabel, type TodoApprovalOpen } from './TodoSplit';
+import { openTodoSession } from './todoNavigation';
+import { initialSplit, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem } from './splitTabs';
+import { pruneSplitMemory, readSplitHidden, todoSplitKey, writeSplitHidden } from './todoSplitMemory';
 
 export interface TodoPageProps {
   number: number;
@@ -26,9 +34,10 @@ export interface TodoPageProps {
 }
 
 /**
- * One to-do's page (round 6, D-407): the breadcrumb and actions, the title and status line, the
- * card, the to-do's chat with its composer, and the details rail, which a split of approvals,
- * attachments and images replaces while any is open. Each to-do opens fresh: no split carried over.
+ * One to-do's page (round 7, D-418 to D-420): the header with the split and details toggles, the
+ * title and its chips, the card, the thread with its composer; the split with the plan and the
+ * other attachments beside it; and the details sidebar on the right edge, closed until asked for.
+ * Each to-do opens fresh: details closed, the split as remembered for that to-do.
  */
 export function TodoPage(props: TodoPageProps) {
   return <TodoPageView key={props.number} {...props} />;
@@ -36,56 +45,256 @@ export function TodoPage(props: TodoPageProps) {
 
 function TodoPageView({ number, onBack, onOpenTodo }: TodoPageProps) {
   const detail = useTodoDetail(number);
-  const [split, dispatch] = useReducer(todoSplitReducer, CLOSED_SPLIT);
-  const [notice, setNotice] = useState<string | null>(null);
-  const open = useCallback((item: TodoSplitItem) => dispatch({ type: 'open', item }), []);
-  const parentNumber = detail?.todo.parentNumber ?? null;
-  const back = useCallback(() => (parentNumber !== null ? onOpenTodo(parentNumber) : onBack()), [parentNumber, onOpenTodo, onBack]);
-  useEscape(split.items.length > 0, dispatch, back);
-  // The split's approval column is this page's alone: leaving the page forgets it.
+  const ref = useRef<HTMLDivElement>(null);
+  const [areaPx, setAreaPx] = useState<number | null>(null);
+  // Measured before paint, so a narrow window's first frame already has the split hidden.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    setAreaPx(element.clientWidth);
+    const observer = new ResizeObserver(([entry]) => setAreaPx(entry.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  // The approval column is this page's alone: leaving the page forgets it.
   useEffect(() => () => useApprovalColumnStore.getState().close(todoApprovalSurface(number)), [number]);
-
-  if (!detail) {
-    return (
-      <div className="flex h-full min-h-0 flex-1 flex-col bg-bg-primary" data-testid="todo-page" data-todo={number}>
-        <PageHeader number={number} detail={null} onBack={onBack} onOpenTodo={onOpenTodo} onNotice={setNotice} />
-        <p className="m-auto text-[13px] text-text-tertiary" role="status">Opening T-{number}…</p>
-      </div>
-    );
-  }
-
-  const active = split.items[split.active];
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-bg-primary" data-testid="todo-page" data-todo={number}>
-      <PageHeader number={number} detail={detail} onBack={onBack} onOpenTodo={onOpenTodo} onNotice={setNotice} />
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-3 pt-5" data-testid="todo-page-scroll">
-            <div className="mx-auto max-w-[760px]">
-              <h1 className="mb-1.5 mt-2 text-[21px] font-semibold leading-[1.3] text-text-primary" data-testid="todo-page-title">{detail.todo.title}</h1>
-              <StatusLine detail={detail} onAnswer={(id) => open({ kind: 'approval', id })} />
-              {notice && <p className="mt-2 text-[12.5px] text-text-secondary" role="status" data-testid="todo-page-notice">{notice}</p>}
-              <TodoCard detail={detail} onOpenTodo={onOpenTodo} onOpenImage={(src, label) => open({ kind: 'image', src, label })} />
-              <TodoChatTimeline detail={detail} openApprovalId={active?.kind === 'approval' ? active.id : undefined} onOpenApproval={(id) => open({ kind: 'approval', id })} />
-            </div>
-          </div>
-          <TodoComposer key={detail.chatTarget.panelId ?? 'orchestrator'} detail={detail} />
-        </div>
-        <aside className={cn('flex min-h-0 shrink-0 flex-col border-l border-border-primary', split.items.length > 0 ? 'w-[470px] bg-bg-primary' : 'w-[360px] bg-bg-secondary')} data-testid="todo-page-side">
-          {split.items.length > 0
-            ? <TodoSplit detail={detail} split={split} dispatch={dispatch} />
-            : <TodoRail detail={detail} onOpenAttachment={(attachment) => open({ kind: 'attachment', attachment })} onOpenTodo={onOpenTodo} />}
-        </aside>
-      </div>
+    <div ref={ref} className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-primary" data-testid="todo-page" data-todo={number}>
+      {detail && areaPx !== null
+        ? <TodoPageLoaded detail={detail} areaPx={areaPx} onBack={onBack} onOpenTodo={onOpenTodo} />
+        : (
+          <>
+            <PageHeader number={number} detail={null} onBack={onBack} onOpenTodo={onOpenTodo} onNotice={() => undefined} />
+            <p className="m-auto text-[13px] text-text-tertiary" role="status">Opening T-{number}…</p>
+          </>
+        )}
     </div>
   );
 }
 
+/** The split's hidden state for this visit: remembered per to-do, except in a narrow window. */
+function useSplitMemory(detail: TodoDetail, areaPx: number) {
+  const key = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, detail.todo.number);
+  // A visit that opened under 1,000 px starts hidden, and showing the split lasts for that visit only.
+  const [narrowVisit] = useState(() => areaPx < NARROW_TODO_AREA_PX);
+  const [hiddenAtOpen] = useState(() => startsHidden(safeRead(key), areaPx));
+  const remember = useCallback((hidden: boolean) => {
+    if (narrowVisit) return;
+    try {
+      writeSplitHidden(window.localStorage, key, hidden);
+    } catch {
+      // Storage blocked: the split simply isn't remembered.
+    }
+  }, [key, narrowVisit]);
+  // Closed to-dos on this machine leave the memory.
+  const rows = useTodosStore((state) => state.snapshot?.rows);
+  useEffect(() => {
+    if (!rows) return;
+    const open = new Set(rows.filter((row) => row.status.status !== 'done' && row.status.status !== 'dropped').map((row) => todoSplitKey(LOCAL_MACHINE_ID, row.todo.number)));
+    try {
+      pruneSplitMemory(window.localStorage, (stored) => !stored.startsWith(`${LOCAL_MACHINE_ID}:`) || open.has(stored));
+    } catch {
+      // Storage blocked: nothing to prune.
+    }
+  }, [rows]);
+  return { hiddenAtOpen, remember };
+}
+
+function safeRead(key: string): boolean {
+  try {
+    return readSplitHidden(window.localStorage, key);
+  } catch {
+    return false;
+  }
+}
+
+function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDetail; areaPx: number; onBack: () => void; onOpenTodo: (number: number) => void }) {
+  const number = detail.todo.number;
+  const { hiddenAtOpen, remember } = useSplitMemory(detail, areaPx);
+  const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => initialSplit(detail.attachments, hiddenAtOpen));
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsTab, setDetailsTab] = useState<TodoDetailsTab>('details');
+  const [approval, setApproval] = useState<TodoApprovalOpen | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+
+  useEffect(() => { dispatch({ type: 'sync', groups: detail.attachments }); }, [detail.attachments]);
+  // Focus starts on the title, so Tab walks the page from the top.
+  useEffect(() => { titleRef.current?.focus({ preventScroll: true }); }, []);
+  // The split's hidden state is remembered as it changes (never for the state it opened with).
+  const rememberedHidden = useRef(split.hidden);
+  useEffect(() => {
+    if (rememberedHidden.current === split.hidden) return;
+    rememberedHidden.current = split.hidden;
+    remember(split.hidden);
+  }, [split.hidden, remember]);
+
+  const hasTabs = split.items.length > 0;
+  const splitShown = (hasTabs && !split.hidden) || approval !== null;
+  const toggleSplit = useCallback(() => dispatch({ type: 'toggle-hidden' }), []);
+  const splitChord = useSplitShortcut(hasTabs, toggleSplit);
+
+  const active = split.items[split.active];
+  const activeLabel = active ? splitTabLabel(active, split.items) : null;
+  const openApproval = useCallback((id: string) => {
+    if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) returnFocus.current = document.activeElement;
+    dispatch({ type: 'set-hidden', hidden: false });
+    setApproval({ id, returnTab: activeLabel ?? detail.todo.ref });
+  }, [activeLabel, detail.todo.ref]);
+  const closeApproval = useCallback(() => {
+    setApproval(null);
+    const target = returnFocus.current;
+    returnFocus.current = null;
+    if (target?.isConnected) requestAnimationFrame(() => target.focus());
+  }, []);
+  const openItem = useCallback((item: TodoSplitItem) => {
+    setApproval(null);
+    dispatch({ type: 'open', item });
+  }, []);
+  const openAttachment = useCallback((attachment: TodoAttachment) => {
+    const tab = split.items.find((item) => item.kind === 'attachment' && item.attachment.id === attachment.id);
+    openItem(tab ?? { kind: 'attachment', attachment });
+  }, [split.items, openItem]);
+  const openAttachmentById = useCallback((attachmentId: number) => {
+    const attachment = detail.attachments.flatMap((group) => group.attachments).find((candidate) => candidate.id === attachmentId);
+    if (attachment) openAttachment(attachment);
+  }, [detail.attachments, openAttachment]);
+  const attached = useCallback((target: string) => dispatch({ type: 'reveal', target }), []);
+  const openPr = useCallback(() => {
+    const tab = split.items.find((item) => item.kind === 'attachment' && item.attachment.kind === 'pr');
+    if (tab) openItem(tab);
+    else if (detail.pr?.url) void window.electronAPI.openExternal(detail.pr.url);
+  }, [split.items, openItem, detail.pr?.url]);
+  const scrollToSubTodos = useCallback(() => {
+    const section = document.getElementById(todoSubTodosAnchor(number));
+    section?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    section?.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+  }, [number]);
+
+  const parentNumber = detail.todo.parentNumber;
+  const back = useCallback(() => (parentNumber !== null ? onOpenTodo(parentNumber) : onBack()), [parentNumber, onOpenTodo, onBack]);
+  useEscape(approval !== null, closeApproval, back);
+
+  // Widths: the details sidebar out of the whole area; the split out of what is left.
+  const details = useOuterPanelResize({ config: OUTER_PANEL_CONFIGS.todoDetails, containerPx: areaPx, enabled: detailsOpen });
+  const splitContainer = Math.max(0, areaPx - (detailsOpen ? details.renderedPx : 0));
+  const splitResize = useOuterPanelResize({ config: OUTER_PANEL_CONFIGS.todoSplit, containerPx: splitContainer, enabled: splitShown });
+  // Too narrow for the split's floor beside the thread: it still shows, at most half of what is left.
+  const splitPx = splitResize.bodyActive ? splitResize.renderedPx : Math.min(320, Math.floor(splitContainer / 2));
+  const lead = split.items[0] ? splitTabLabel(split.items[0], split.items) : null;
+
+  return (
+    <>
+      <PageHeader
+        number={number}
+        detail={detail}
+        onBack={onBack}
+        onOpenTodo={onOpenTodo}
+        onNotice={setNotice}
+        split={{ shown: splitShown, enabled: hasTabs, chord: splitChord, onToggle: toggleSplit }}
+        details={{ open: detailsOpen, onToggle: () => setDetailsOpen((open) => !open) }}
+      />
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col" data-testid="todo-page-main">
+          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-7 pb-3 pt-5" data-testid="todo-page-scroll">
+            <div className="mx-auto max-w-[760px]">
+              <h1 ref={titleRef} tabIndex={-1} className="mb-2 mt-1 text-[21px] font-semibold leading-[1.3] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-border-focus" data-testid="todo-page-title">{detail.todo.title}</h1>
+              <TodoChips
+                detail={detail}
+                splitCount={split.items.length}
+                splitLead={lead}
+                splitHidden={!splitShown}
+                onOpenApproval={openApproval}
+                onOpenPr={openPr}
+                onScrollToSubTodos={scrollToSubTodos}
+                onOpenDetails={() => setDetailsOpen(true)}
+                onShowSplit={() => dispatch({ type: 'set-hidden', hidden: false })}
+                onAttached={attached}
+              />
+              {notice && <p className="mt-2 text-[12.5px] text-text-secondary" role="status" data-testid="todo-page-notice">{notice}</p>}
+              <TodoCard detail={detail} onOpenTodo={onOpenTodo} onOpenImage={(src, label) => openItem({ kind: 'image', src, label })} />
+              <TodoChatTimeline
+                detail={detail}
+                openApprovalId={approval?.id}
+                onOpenApproval={openApproval}
+                onOpenAttachment={openAttachmentById}
+              />
+            </div>
+          </div>
+          <TodoComposer key={detail.chatTarget.panelId ?? 'orchestrator'} detail={detail} />
+        </div>
+        {splitShown && (
+          <div className="relative flex min-h-0 shrink-0 border-l border-border-primary bg-bg-primary" style={{ width: splitPx }} data-testid="todo-page-split">
+            {splitResize.separatorVisible && (
+              <OuterResizeSeparator label="Resize the split" orientation="vertical" value={splitResize.effectivePx}
+                minimum={splitResize.floor} maximum={splitResize.cap} {...splitResize.separatorHandlers} />
+            )}
+            <TodoSplit
+              detail={detail}
+              split={split}
+              dispatch={dispatch}
+              approval={approval}
+              onOpenApproval={openApproval}
+              onCloseApproval={closeApproval}
+              onAttached={attached}
+            />
+          </div>
+        )}
+        {detailsOpen && (
+          <aside className="relative flex min-h-0 shrink-0 flex-col border-l border-border-primary bg-bg-secondary" style={{ width: details.renderedPx }} aria-label="To-do details" data-focus-region="right-panel" data-testid="todo-page-details">
+            {details.separatorVisible && (
+              <OuterResizeSeparator label="Resize to-do details" orientation="vertical" value={details.effectivePx}
+                minimum={details.floor} maximum={details.cap} {...details.separatorHandlers} />
+            )}
+            <TodoDetailsSidebar
+              detail={detail}
+              tab={detailsTab}
+              onTab={setDetailsTab}
+              openAttachmentId={splitShown && active?.kind === 'attachment' ? active.attachment.id : undefined}
+              onOpenAttachment={openAttachment}
+              onOpenTodo={onOpenTodo}
+              onAttached={attached}
+              onClose={() => setDetailsOpen(false)}
+            />
+          </aside>
+        )}
+      </div>
+    </>
+  );
+}
+
 /**
- * Esc closes the split's open tab first, then goes back. It leaves alone a key someone else took
- * (a menu, a dialog, a field's own Esc) and typing in a field.
+ * ⌘\ (Ctrl+\ elsewhere) shows or hides the split. It is the Split Right entry's chord, read from
+ * the catalog with the person's rebinding, so one binding serves both: a to-do page has nothing to
+ * split, so here the chord is this page's. Caught before the global hotkeys so Split Right doesn't
+ * also run on the Session underneath. Returns the chord's label for the button's tooltip.
  */
-function useEscape(splitOpen: boolean, dispatch: (action: TodoSplitAction) => void, back: () => void): void {
+function useSplitShortcut(enabled: boolean, toggle: () => void): string | null {
+  const config = useConfigStore((state) => state.config);
+  const chord = resolveEffectiveChord('split-right', normalizeKeyboardShortcutOverrides(config?.keyboardShortcutOverrides).overrides, rendererKeyPlatform());
+  const active = enabled && areKeyboardShortcutsEnabled(config) && chord !== null;
+  useEffect(() => {
+    if (!active || !chord) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || chordForEvent(event) !== chord) return;
+      if (event.target instanceof HTMLElement && event.target.closest('[aria-modal="true"]')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggle();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [active, chord, toggle]);
+  return chord ? formatKeyDisplay(chord) : null;
+}
+
+/**
+ * Esc closes the approval over the split first, then goes back. It leaves alone a key someone else
+ * took (a menu, a dialog, a field's own Esc) and typing in a field.
+ */
+function useEscape(approvalOpen: boolean, closeApproval: () => void, back: () => void): void {
   useEffect(() => {
     // A menu or dialog closes on this same Esc, before it reaches the window: note whether one was
     // open as the key went down, so its Esc never also leaves the page.
@@ -97,7 +306,7 @@ function useEscape(splitOpen: boolean, dispatch: (action: TodoSplitAction) => vo
       if (event.key !== 'Escape' || overlayOpen || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
       if (isTypingTarget(event.target) || (event.target instanceof HTMLElement && event.target.tagName === 'WEBVIEW')) return;
       event.preventDefault();
-      if (splitOpen) dispatch({ type: 'close-active' });
+      if (approvalOpen) closeApproval();
       else back();
     };
     document.addEventListener('keydown', onCapture, true);
@@ -106,43 +315,14 @@ function useEscape(splitOpen: boolean, dispatch: (action: TodoSplitAction) => vo
       document.removeEventListener('keydown', onCapture, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [splitOpen, dispatch, back]);
-}
-
-/** The pill's tint for the statuses that carry one; the rest stay plain. */
-const PILL_TINT = {
-  waiting: 'border-status-warning/55 bg-status-warning/10',
-  working: 'border-status-info/40',
-  queued: 'bg-surface-tertiary',
-  idle: '',
-  done: '',
-  dropped: '',
-} as const satisfies Record<TodoShownStatus, string>;
-
-/** The status pill, the words after it, and on Waiting on you the question with Answer. */
-function StatusLine({ detail, onAnswer }: { detail: TodoDetail; onAnswer: (approvalId: string) => void }) {
-  const { status } = detail;
-  const waiting = status.status === 'waiting';
-  const reason = waiting && status.waitingQuestion
-    ? [status.waitingQn, status.waitingQuestion].filter(Boolean).join(' · ')
-    : status.status === 'working' ? '' : status.reason;
-  const waitingId = status.waitingApprovalId;
-  return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="todo-status-line">
-      <TodoStatusPill status={status.status} className={cn('h-[26px] rounded-[7px] px-[9px] text-[12.5px] font-medium', PILL_TINT[status.status])} />
-      {reason && <span className={cn('text-[12.5px]', status.alert ? 'text-status-error' : 'text-text-secondary')} data-testid="todo-status-reason">{reason}</span>}
-      {waiting && waitingId && (
-        <button type="button" onClick={() => onAnswer(waitingId)} className="inline-flex h-7 items-center gap-0.5 rounded-[7px] bg-interactive px-2.5 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover" data-testid="todo-answer">
-          Answer{status.waitingQn ? ` ${status.waitingQn}` : ''} <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      )}
-    </div>
-  );
+  }, [approvalOpen, closeApproval, back]);
 }
 
 const BUTTON = 'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[7px] border px-2.5 text-[12.5px]';
 const PLAIN_BUTTON = cn(BUTTON, 'border-border-primary bg-surface-primary text-text-primary hover:border-border-hover');
 const PRIMARY_BUTTON = cn(BUTTON, 'border-transparent bg-interactive font-medium text-text-on-interactive hover:bg-interactive-hover');
+/** The split and details toggles: drawn alike, in one fixed 32 px box each. */
+const TOGGLE = 'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover disabled:opacity-40 disabled:hover:bg-transparent';
 
 /** The page's one state action: Start anyway, Start, Resume or Stop; none once it is closed. */
 interface StateAction {
@@ -177,10 +357,34 @@ function moreMenu(detail: TodoDetail, run: (action: TodoAction) => Promise<void>
   return items;
 }
 
-/** "‹ To-dos   <Session> › T-12", or on a sub-to-do "‹ T-12   <Session> › T-12 › T-14"; then the actions. */
-function PageHeader({ number, detail, onBack, onOpenTodo, onNotice }: {
-  number: number; detail: TodoDetail | null; onBack: () => void; onOpenTodo: (number: number) => void; onNotice: (line: string | null) => void;
-}) {
+interface SplitToggle {
+  shown: boolean;
+  /** False while there is nothing to show. */
+  enabled: boolean;
+  chord: string | null;
+  onToggle: () => void;
+}
+
+interface DetailsToggle {
+  open: boolean;
+  onToggle: () => void;
+}
+
+interface PageHeaderProps {
+  number: number;
+  detail: TodoDetail | null;
+  onBack: () => void;
+  onOpenTodo: (number: number) => void;
+  onNotice: (line: string | null) => void;
+  split?: SplitToggle;
+  details?: DetailsToggle;
+}
+
+/**
+ * "‹ To-dos   <Session> › T-12", or on a sub-to-do "‹ T-12   <Session> › T-12 › T-14"; then the
+ * actions, and the split and details toggles at the right edge.
+ */
+function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, split, details }: PageHeaderProps) {
   const act = useTodosStore((state) => state.act);
   const run = async (action: TodoAction) => {
     const result = await act(action);
@@ -196,8 +400,9 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice }: {
   const closed = detail ? detail.status.status === 'done' || detail.status.status === 'dropped' : false;
   const primary = detail ? stateAction(detail) : null;
   const menu = detail ? moreMenu(detail, run) : [];
+  const splitWords = split?.shown ? 'Hide split' : 'Show split';
   return (
-    <div className="flex h-[46px] shrink-0 items-center gap-2 border-b border-border-primary px-4" data-testid="todo-page-header">
+    <div className="flex h-[46px] shrink-0 items-center gap-2 border-b border-border-primary pl-4 pr-3" data-testid="todo-page-header">
       <button type="button" onClick={parent ? () => onOpenTodo(parent.todo.number) : onBack} title="Back (Esc)" className="inline-flex h-7 shrink-0 items-center gap-0.5 rounded-[7px] px-1.5 text-[12.5px] text-text-secondary hover:bg-surface-hover hover:text-text-primary" data-testid="todo-page-back">
         <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />
         {parent ? parent.todo.ref : 'To-dos'}
@@ -233,6 +438,23 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice }: {
           width="lg"
           menuLabel={`${detail.todo.ref} actions`}
         />
+      )}
+      {split && details && (
+        <>
+          <span className="mx-0.5 h-[18px] w-px shrink-0 bg-border-primary" aria-hidden="true" />
+          <button type="button" className={cn(TOGGLE, split.shown && 'bg-surface-hover text-text-primary')} disabled={!split.enabled}
+            aria-label={splitWords}
+            title={split.chord ? `${splitWords} (${split.chord})` : splitWords}
+            aria-pressed={split.shown}
+            onClick={split.onToggle}
+            data-testid="todo-split-toggle"><Columns2 className="h-4 w-4" aria-hidden="true" /></button>
+          <button type="button" className={cn(TOGGLE, details.open && 'bg-surface-hover text-text-primary')}
+            aria-label={details.open ? 'Hide details' : 'Show details'}
+            title={details.open ? 'Hide details' : 'Show details'}
+            aria-expanded={details.open}
+            onClick={details.onToggle}
+            data-testid="todo-details-toggle"><PanelRight className="h-4 w-4" aria-hidden="true" /></button>
+        </>
       )}
     </div>
   );
