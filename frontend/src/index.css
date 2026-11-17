@@ -634,8 +634,9 @@ body.understory {
    --------------------------------------------------------------------------- */
 
 /* Skeletons (components/ui/Skeleton.tsx): bones stay hidden for the first
-   150 ms of a load, then breathe in one shared phase. Each bone runs the
-   stepped opacity breathe (about 4 frames a second, paused with the window). */
+   150 ms of a load, then breathe in one shared phase. The breathe steps
+   opacity 5 times each way over 2 s, so the compositor paints about 4 frames
+   a second instead of one per display refresh; it pauses with the window. */
 [data-skeleton='waiting'] .skeleton-bone {
   visibility: hidden;
 }
@@ -688,7 +689,6 @@ html.window-hidden .skeleton-reveal {
   }
 
   /* A loading skeleton's shape already says "loading", so its breathe stops. */
-  .animate-skeleton,
   [data-skeleton='visible'] .skeleton-bone {
     animation: none;
   }

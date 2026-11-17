@@ -1965,7 +1965,7 @@ export const SessionView = memo(() => {
         <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => {
           if (selectionError) void useSessionStore.getState().setActiveSession(selectedPaneId);
           else { setPanelLoad(null); setPanelRetry(value => value + 1); }
-        }}>Retry</button></div> : <PaneWorkspaceSkeleton name={activeSession?.name ?? 'Pane'} swapped={layoutSwapped && !immersiveMode}
+        }}>Retry</button></div> : <PaneWorkspaceSkeleton name={activeSession?.name ?? selectedPaneId} swapped={layoutSwapped && !immersiveMode}
           dockHeight={immersiveMode ? 0 : isTerminalCollapsed ? 32 : terminalResize.renderedPx || terminalResize.effectivePx}
           inspectorWidth={detailVisible && !immersiveMode ? detailResize.renderedPx || detailResize.effectivePx : 0}
           railWidth={rightTerminalResize.renderedPx || rightTerminalResize.effectivePx}
