@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PaneError } from '@shared/paneError';
@@ -44,7 +44,7 @@ import { useControllerShown } from './controllerPreference';
 import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
 import { followsHost, pickPanel, sessionWorkspacePanels, stripPanels, tabView } from './panels';
-import { PanelTabs, type LeadingTab } from './PanelTabs';
+import { offerClose, PanelTabs, type LeadingTab } from './PanelTabs';
 import { PausedTerminal } from './PausedTerminal';
 import { TerminalInputBar } from './TerminalInputBar';
 import { TerminalTopBar } from './TerminalTopBar';
@@ -178,14 +178,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
         { text: 'Close', style: 'destructive', onPress: close },
       ])
       : close;
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { title: tab.title, options: ['Close', 'Cancel'], destructiveButtonIndex: 0, cancelButtonIndex: 1 },
-        index => { if (index === 0) confirm(); },
-      );
-    } else {
-      Alert.alert(tab.title, undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Close', style: 'destructive', onPress: confirm }]);
-    }
+    offerClose(tab.title, confirm);
   };
 
   return (

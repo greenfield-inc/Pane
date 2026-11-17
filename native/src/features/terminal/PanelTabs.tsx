@@ -2,7 +2,7 @@ import { pausedMarkOf, type ToolPanel, type ToolPanelType } from '@shared/types/
 import * as Haptics from 'expo-haptics';
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActionSheetIOS, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
@@ -27,6 +27,18 @@ export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidS
 };
 const CHAT = { ios: 'bubble.left', android: 'chat_bubble', label: 'chat' } as const;
 
+/** A long press's menu for tab `title`: Close or Cancel. */
+export function offerClose(title: string, close: () => void) {
+  if (Platform.OS === 'ios') {
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title, options: ['Close', 'Cancel'], destructiveButtonIndex: 0, cancelButtonIndex: 1 },
+      index => { if (index === 0) close(); },
+    );
+  } else {
+    Alert.alert(title, undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Close', style: 'destructive', onPress: close }]);
+  }
+}
+
 /** A tab the screen draws itself, ahead of the Pane's tabs (an approval and what it links). */
 export interface LeadingTab {
   id: string;
@@ -34,7 +46,7 @@ export interface LeadingTab {
   icon: { ios: SFSymbol; android: AndroidSymbol };
   /** The word VoiceOver reads after its title. */
   label: string;
-  /** Absent for a tab that can't be closed. */
+  /** Closes it, after the long press's menu. Absent for a tab that can't be closed. */
   onClose?: () => void;
 }
 
@@ -93,7 +105,7 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
         accessibilityRole="tablist"
         testID="terminal-panel-tabs"
       >
-        {leading.map(tab => (
+        {leading.map(({ onClose: close, ...tab }) => (
           <StripTab
             key={tab.id}
             id={tab.id}
@@ -103,7 +115,7 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
             selected={tab.id === selectedId}
             onLayout={onTabLayout}
             onSelect={() => onSelectLeading?.(tab.id)}
-            onClose={tab.onClose}
+            onClose={close ? () => offerClose(tab.title, close) : undefined}
           />
         ))}
         {panels.map(panel => {
