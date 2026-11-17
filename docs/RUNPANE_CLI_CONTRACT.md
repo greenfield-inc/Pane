@@ -177,6 +177,8 @@ runpane pr list [--pane <id>] [--json] [--pane-dir <path>]
 
 `runpane install client` downloads the selected Pane desktop artifact and installs, opens, or launches it for the current platform.
 
+On macOS the client default is a `dmg`, which only opens in Finder: Pane is installed once a person drags it into Applications. `runpane install` cannot tell when that happens, so it exits 1 with code `ERR_RUNPANE_INSTALL_UNFINISHED`, a message saying the install was not done (`launched-installer`) and `/Applications/Pane.app` is unchanged, and a `next` step. A remote or headless Mac (for example through `runpane workspace <mac> exec`) should use `--format zip`, which installs into `~/Applications` without help.
+
 `runpane install daemon` downloads or installs Pane, resolves a stable Pane executable path, and spawns `<pane executable> --remote-setup <forwarded remote setup args>`.
 
 The wrapper must stream Pane stdout/stderr without reformatting because `pane --remote-setup` prints the one-time `pane-remote://...` connection code.

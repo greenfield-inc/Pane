@@ -8108,6 +8108,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane` with no arguments and `runpane setup` open an interactive wizard when stdin and stdout are TTYs. The remote-host wizard asks only for a name, then runs interactive Tailscale setup with automatic port selection; explicit install daemon flags remain available for SSH and manual URLs. In non-interactive shells or CI, both forms must print help, common commands, and agent discovery hints, then exit successfully instead of waiting for input.",
       "`runpane install` is an alias for `runpane install client`.",
       "`runpane install client` downloads the selected Pane desktop artifact and installs, opens, or launches it for the current platform.",
+      "On macOS the client default is a `dmg`, which only opens in Finder: Pane is installed once a person drags it into Applications. `runpane install` cannot tell when that happens, so it exits 1 with code `ERR_RUNPANE_INSTALL_UNFINISHED`, a message saying the install was not done (`launched-installer`) and `/Applications/Pane.app` is unchanged, and a `next` step. A remote or headless Mac (for example through `runpane workspace <mac> exec`) should use `--format zip`, which installs into `~/Applications` without help.",
       "`runpane install daemon` downloads or installs Pane, resolves a stable Pane executable path, and spawns `<pane executable> --remote-setup <forwarded remote setup args>`.",
       "The wrapper must stream Pane stdout/stderr without reformatting because `pane --remote-setup` prints the one-time `pane-remote://...` connection code.",
       "`runpane update` defaults to both app and active supported CLI, with independent supervision, staging, durable status, and explicit restoration outcomes. Prerequisites, status fields/exit codes, draft handling and manual recovery are documented in [Update recovery](UPDATE_RECOVERY.md).",
@@ -20560,7 +20561,8 @@ export const RUNPANE_CONTRACT = {
           "runpane install daemon --label \"My Server\""
         ],
         "notes": [
-          "Package install itself is inert; work begins only when runpane is executed."
+          "Package install itself is inert; work begins only when runpane is executed.",
+          "On macOS a `dmg` (the client default) only opens in Finder for a person to drag Pane into Applications, so install exits 1 with code `ERR_RUNPANE_INSTALL_UNFINISHED` and a `next` step instead of reporting Pane installed. For a remote or headless Mac use `--format zip`, which installs into ~/Applications without help."
         ]
       },
       "update": {
