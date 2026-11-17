@@ -32,6 +32,7 @@ import path from 'path';
 import type { PtyHostSpawnOpts } from '../ptyHost/types';
 import { isPackagedOnDefaultDirectory } from '../utils/appDirectory';
 import { RUNPANE_PATH_FLAGS, RUNPANE_WSL_PATH_FUNCTIONS, WSLPATH } from '../utils/wslUtils';
+import { AGENT_FARM_HOST_ENV } from '../../../shared/types/customCommandResume';
 
 /** Environment handed to a terminal spawn. */
 type SpawnEnv = PtyHostSpawnOpts['env'];
@@ -355,6 +356,7 @@ function wslBashRcFile(binDir: string): string {
     '# An empty dir would put the current folder on PATH.',
     'if [ -n "$_pane_runpane_dir" ]; then',
     'export PANE_RUNPANE_BIN="$_pane_runpane_dir/runpane"',
+    `export ${AGENT_FARM_HOST_ENV.sessionHook}="$PANE_RUNPANE_BIN"`,
     ...bashPathLines('"$_pane_runpane_dir"'),
     'fi',
     '',
@@ -483,6 +485,8 @@ export function withRunpaneOnPath(
     ...env,
     PATH: prependPath(env.PATH, state.binDir, delimiter),
     PANE_RUNPANE_BIN: state.shimPath,
+    // Agent Farm's Claude SessionStart hook runs `"$AGENT_FARM_SESSION_HOOK" session-start` (D-403).
+    [AGENT_FARM_HOST_ENV.sessionHook]: state.shimPath,
   };
   if (platform === 'win32') return { args: shell.args, env: nextEnv };
 

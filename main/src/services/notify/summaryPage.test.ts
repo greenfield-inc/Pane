@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { NOTIFY_SUMMARY_CSP, type NotifyItem } from '../../../../shared/types/notify';
 import { summaryPage } from './summaryPage';
+import { withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
 import { summaryFiles } from './notifyService';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-summary-'));
@@ -44,6 +45,33 @@ describe("an approval's Summary page", () => {
     expect(page).toMatchObject({ kind: 'page', path: file });
     const html = page.kind === 'page' ? page.html : '';
     expect(html.indexOf('Content-Security-Policy')).toBeLessThan(html.indexOf('<script>'));
+  });
+
+  it('puts the policy ahead of all page content, however the page hides its head', () => {
+    const policy = `<meta http-equiv="Content-Security-Policy" content="${NOTIFY_SUMMARY_CSP}">`;
+    const served = (source: string) => {
+      const file = path.join(dir, 'hostile.html');
+      fs.writeFileSync(file, source);
+      const page = summaryPage({ ...q80, summaryPage: file });
+      return page.kind === 'page' ? page.html : '';
+    };
+    // A commented-out head used to capture the policy, leaving the real head without it.
+    expect(served('<!doctype html><!-- <head> --><html><head><script>alert(1)</script></head><body>x</body></html>'))
+      .toBe(`<!doctype html>${policy}<!-- <head> --><html><head><script>alert(1)</script></head><body>x</body></html>`);
+    expect(served('<script>var s = "<head>";</script><p>no head</p>')).toBe(`<!doctype html>${policy}<script>var s = "<head>";</script><p>no head</p>`);
+    expect(served('<html data-x="<head>"><script>alert(1)</script></html>')).toBe(`<!doctype html>${policy}<html data-x="<head>"><script>alert(1)</script></html>`);
+    expect(served('\uFEFF  <!DOCTYPE html>\n<html><head></head></html>')).toBe(`<!doctype html>${policy}\n<html><head></head></html>`);
+    expect(served('\uFEFF<p>x</p>')).toBe(`<!doctype html>${policy}<p>x</p>`);
+    // Characters JavaScript trims but HTML reads as text: the policy still comes first.
+    for (const lead of ['\u00A0', '\u3000', '\u2028', '\u000B', '<!-- x -->', 'x']) {
+      expect(served(`${lead}<!doctype html><html><head></head></html>`))
+        .toBe(`<!doctype html>${policy}${lead}<!doctype html><html><head></head></html>`);
+    }
+  });
+
+  it('applies the policy once, however often it runs', () => {
+    const once = withSummaryPolicy('\uFEFF <!doctype html><p>x</p>');
+    expect(withSummaryPolicy(once)).toBe(once);
   });
 
   it("falls back to the template, saying so, when the asker's page is gone", () => {

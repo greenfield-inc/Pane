@@ -48,7 +48,7 @@ const panels = ['Bottom Terminal', 'Tab Terminal'].map((title, index) => ({
 }));
 const terminalStates = Object.fromEntries(panels.map((panel) => [panel.id, { scrollbackBuffer: 'ready\r\n' }]));
 
-const REFERENCE_ROW_COUNT = 7;
+const REFERENCE_ROW_COUNT = 16;
 const SNIPPET = { id: 'snip', label: 'Lint snippet', key: 'l', text: 'pnpm lint', enabled: true };
 const CUSTOM = { name: 'Deploy', command: 'pnpm deploy' };
 
@@ -314,11 +314,13 @@ test('Help and the Add Tool menu show the effective chord after a remap and afte
   await page.getByRole('button', { name: 'View all Pane keyboard shortcuts' }).click();
   const help = page.getByRole('dialog', { name: 'Keyboard Shortcuts' });
   await expect(help).toBeVisible();
+  await help.getByRole('textbox', { name: 'Search shortcuts' }).fill('codex');
   const helpCodex = help.locator('[data-shortcut-id="add-tool-terminal-codex"]');
   await expect(helpCodex).toContainText('Add Codex');
   await expect(helpCodex).toContainText('Ctrl+Alt+4');
   await expect(helpCodex).not.toContainText('Y');
-  await expect(help.getByText('Send Input / Continue Conversation')).toBeVisible();
+  await help.getByRole('textbox', { name: 'Search shortcuts' }).fill('send now');
+  await expect(help.getByText('Send now, interrupting the agent')).toBeVisible();
 });
 
 

@@ -350,7 +350,7 @@ export function RevisionLines({ item }: { item: NotifyItem }) {
   return (
     <View testID="notify-revision" style={[styles.block, styles.revision, { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
       <Text variant="caption" tone="muted">{`v${note.version} · What changed · ${note.by}`}</Text>
-      <Text testID="notify-revision-asked" variant="footnote" tone="secondary" selectable>{`You asked: “${note.asked}”`}</Text>
+      {note.asked ? <Text testID="notify-revision-asked" variant="footnote" tone="secondary" selectable>{`You asked: “${note.asked}”`}</Text> : null}
       {note.whatChanged.map((line, index) => (
         <Text key={`${index}:${line}`} testID="notify-revision-line" variant="footnote" selectable>{`• ${line}`}</Text>
       ))}

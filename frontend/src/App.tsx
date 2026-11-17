@@ -21,7 +21,9 @@ import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
 import { PaneChatIntroOffer } from './components/PaneChatIntroOffer';
 import Welcome from './components/Welcome';
-import Help from './components/Help';
+import Help, { KeyboardShortcutSheet } from './components/Help';
+import { useCommittedRef } from './hooks/useCommittedRef';
+import { isWritableCodeEditorFocused } from './utils/hotkeyUtils';
 import OnboardingDialog, {
   ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE,
   ONBOARDING_REPO_SETUP_PREFERENCE,
@@ -89,6 +91,7 @@ import type { ResumableSession } from '../../shared/types/panels';
 import { useLoopsRefresh } from './stores/loopsStore';
 import { LoopDrawer } from './components/loops/LoopDrawer';
 import { useFindHotkeys } from './components/find/findRouter';
+import { useApprovalHotkeys } from './hooks/useApprovalHotkeys';
 import type { Project } from './types/project';
 import type { SettingsCategoryId, SettingsOpenRequest, SettingsTarget } from './types/settings';
 import type {
@@ -135,6 +138,7 @@ function App() {
   const [isResumeDialogOpen, setIsResumeDialogOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isKeyboardShortcutsOpen, setIsKeyboardShortcutsOpen] = useState(false);
+  const keyboardShortcutsOpenRef = useCommittedRef(isKeyboardShortcutsOpen);
   const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [showCreateSessionDialog, setShowCreateSessionDialog] = useState(false);
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
@@ -294,6 +298,9 @@ function App() {
   // Cmd/Ctrl+F, Cmd/Ctrl+G and Shift+Cmd/Ctrl+G find in the focused tab.
   useFindHotkeys();
 
+  // ⇧⌘A, ⌥⌘A, next and previous approval, Group by, and ⌘↩ in an approval (D-381).
+  useApprovalHotkeys();
+
   useHotkey({
     id: 'open-command-palette',
     label: 'Open Search',
@@ -320,6 +327,18 @@ function App() {
 
   // ⌘0, ⌘⌥+arrows, F6 and the sidebar's arrow keys (P3).
   useRegionNavigation();
+
+  // ⌘/ opens and closes the shortcut sheet from anywhere, typing included;
+  // a focused, writable file editor keeps it for toggling comments.
+  useHotkey({
+    id: 'show-keyboard-shortcuts',
+    label: 'Show Keyboard Shortcuts',
+    category: 'shortcuts',
+    allowInModal: true,
+    // Inside another dialog (the palette, a confirm) the key does nothing; inside the sheet it closes it.
+    enabled: () => !isWritableCodeEditorFocused() && (keyboardShortcutsOpenRef.current || !document.activeElement?.closest('[aria-modal="true"]')),
+    action: () => setIsKeyboardShortcutsOpen(open => !open),
+  });
 
   useHotkey({
     id: 'open-shortcut-settings',
@@ -1046,6 +1065,7 @@ function App() {
             onToggleCollapse={handleToggleSidebar}
             titleBarControlsSlot={titleBarControlsSlot}
             onHelpClick={() => setIsHelpOpen(true)}
+            onShortcutsClick={() => setIsKeyboardShortcutsOpen(true)}
             onDocsClick={() => setIsDocsOpen(true)}
             onFeedbackClick={() => setIsFeedbackOpen(true)}
             onDiscordClick={() => {
@@ -1136,13 +1156,13 @@ function App() {
         <Help
           isOpen={isHelpOpen}
           onClose={() => setIsHelpOpen(false)}
-          onOpenKeyboardShortcuts={() => { setIsHelpOpen(false); openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' }); }}
+          onShowKeyboardShortcuts={() => { setIsHelpOpen(false); setIsKeyboardShortcutsOpen(true); }}
         />
-        <Help
+        <KeyboardShortcutSheet
           isOpen={isKeyboardShortcutsOpen}
           onClose={() => setIsKeyboardShortcutsOpen(false)}
           onOpenKeyboardShortcuts={() => { setIsKeyboardShortcutsOpen(false); openSettings({ category: 'shortcuts', setting: 'keyboard-shortcut-map' }); }}
-          shortcutsOnly
+          onOpenAnswerAllSetting={() => { setIsKeyboardShortcutsOpen(false); openSettings({ category: 'notify', setting: 'notify-shortcut' }); }}
         />
         <DocsDialog isOpen={isDocsOpen} onClose={() => setIsDocsOpen(false)} />
         <ShortcutHintsOverlay isVisible={shortcutHintsVisible} shortcuts={terminalShortcuts} />

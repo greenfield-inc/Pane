@@ -418,6 +418,22 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     archiveRun: sessionId => archiveLoopRun(commandRegistry, sessionId),
     projectExists: projectId => Boolean(databaseService.getProject(projectId)),
     prepareSession: (target, loop) => prepareLoopSession(commandRegistry, target, loop),
+    ask: async (card, signal) => {
+      const queue = services.notifyService?.queue;
+      if (!queue) return null;
+      const record = card.sessionId ? orchestrationSessionManager.approvalSessionRecord(card.sessionId) : undefined;
+      const session = card.sessionId && record ? { id: card.sessionId, name: record.name, paneId: record.paneId } : undefined;
+      const result = await queue.ask({
+        // Only a pick acts; a note typed beside it never turns the answer into a reply Pane can't act on.
+        question: { ui: 'options', title: card.title, context: card.context, optionsOnly: true, choices: card.choices.map((label, index) => ({ label, recommended: index === 0 })) },
+        source: { name: 'Loops', agent: 'Pane', ...(session && { session }) },
+      }, signal);
+      if ('answer' in result) return card.choices.includes(result.answer) ? result.answer : result.answers?.[0] ?? null;
+      return 'reply' in result ? result.picks?.[0] ?? null : null;
+    },
+    archiveSession: async sessionId => {
+      await commandRegistry.invoke('runpane:sessions:update', [{ selector: { sessionId }, input: { archived: true, source: 'user' } }]);
+    },
     onChange: () => getPaneEventSink().send('loops:changed'),
     logger,
   });
@@ -715,6 +731,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   gitStatusManager.startPolling();
   sessionPrMonitor.start();
+  // A Session archived anywhere pauses the loops that send to it, so no run brings it back.
+  orchestrationSessionManager.on('archived', (sessionId: string) => { loopManager.pauseForArchivedSession(sessionId); });
   loopManager.start();
   autoPauser.sync();
   /** True only when the OS confirms the folder is not there; any other failure cannot tell. */

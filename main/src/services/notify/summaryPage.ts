@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { NOTIFY_SUMMARY_CSP, type NotifyItem, type NotifyLink, type NotifySubQuestion, type NotifySummaryPage } from '../../../../shared/types/notify';
+import { type NotifyItem, type NotifyLink, type NotifySubQuestion, type NotifySummaryPage } from '../../../../shared/types/notify';
+import { withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 
 /**
@@ -27,14 +28,6 @@ const statusSchema = boundary.object({
 
 function escape(text: string): string {
   return text.replace(/[&<>"']/gu, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
-}
-
-/** The policy as the page's first element, so it holds before anything else in it loads. */
-function withPolicy(html: string): string {
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${NOTIFY_SUMMARY_CSP}">`;
-  const head = /<head(\s[^>]*)?>/iu.exec(html);
-  if (head) return `${html.slice(0, head.index + head[0].length)}${meta}${html.slice(head.index + head[0].length)}`;
-  return `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
 }
 
 /** The worker's step and checks, from its status file, when it can be read. */
@@ -97,7 +90,7 @@ function summaryTemplate(item: NotifyItem, theme: SummaryTheme = 'light'): strin
   const stands = whereItStands(item.statusFile);
   const references = item.links?.length ? `<h2>References</h2><ul>${item.links.map(referenceLine).join('')}</ul>` : '';
   const source = item.statusFile ? 'the approval’s fields and the worker’s status file' : 'the approval’s fields';
-  return withPolicy(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(item.title)}</title><style>
+  return withSummaryPolicy(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(item.title)}</title><style>
 :root{${PALETTE[theme]};color-scheme:${theme}}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
 main{max-width:760px;margin:0 auto;padding:24px 20px 40px}
@@ -130,7 +123,7 @@ function askerPage(file: string): NotifySummaryPage {
   }
   if (!stat.isFile()) return { kind: 'missing', path: file, message: `${file} is not a file, so Pane can't show it as the Summary.` };
   if (stat.size > PAGE_LIMIT_BYTES) return { kind: 'missing', path: file, message: `${path.basename(file)} is larger than 4 MiB, too large to show here. Open it from References instead.` };
-  return { kind: 'page', path: file, html: withPolicy(fs.readFileSync(file, 'utf8')) };
+  return { kind: 'page', path: file, html: withSummaryPolicy(fs.readFileSync(file, 'utf8')) };
 }
 
 /** The approval's Summary: the asker's page when it sent one, else Pane's template. */

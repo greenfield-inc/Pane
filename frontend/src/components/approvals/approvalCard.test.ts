@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals } from './approvalCard';
+import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals } from './approvalCard';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -69,6 +69,17 @@ describe('the approval card', () => {
     expect(dockApprovals([{ ...q20, id: 'a' }, reading, ready, own, posted], 'chat-1').map(item => item.id)).toEqual(['a', 'c', 'e']);
     expect(bridgedFrom(own, 'chat-1')).toBe(true);
     expect(bridgedFrom(own, 'other-chat')).toBe(false);
+  });
+
+  it('Dismiss leaves a card out of the chat\'s dock until the item changes (Q-389)', () => {
+    const a = { ...q20, id: 'a' };
+    const b = { ...q20, id: 'b' };
+    const dismissed = { a: dockKey(a) };
+    expect(dockApprovals([a, b], 'chat-1', dismissed).map(item => item.id)).toEqual(['b']);
+    // A new version, a reply or a ready-again brings it back.
+    expect(dockApprovals([{ ...a, version: 2 }, b], 'chat-1', dismissed).map(item => item.id)).toEqual(['a', 'b']);
+    expect(dockApprovals([{ ...a, readyAgain: 9 }, b], 'chat-1', dismissed).map(item => item.id)).toEqual(['a', 'b']);
+    expect(dockApprovals([{ ...a, reply: { id: 'r9', text: 'x', at: 1, state: 'unread' as const } }, b], 'chat-1', dismissed).map(item => item.id)).toEqual(['a', 'b']);
   });
 
   it('P7: the status line follows the reply sent last in the Session, until it is dismissed', () => {

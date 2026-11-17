@@ -20,6 +20,8 @@ interface LoopsState {
   loops: Loop[];
   /** Each run Pane's loop and run, so a Pane can tell it is a loop run. */
   runsBySessionId: ReadonlyMap<string, LoopRunRef>;
+  /** Each Session loop by the Session it sends to, so the sidebar keeps that Session under Loops. */
+  loopsBySessionTarget: ReadonlyMap<string, Loop>;
   /** The loop the Loops page shows; the first loop when unset or gone. */
   selectedLoopId: string | null;
   drawer: LoopDrawerState;
@@ -51,6 +53,7 @@ function indexRuns(loops: Loop[]): Map<string, LoopRunRef> {
 export const useLoopsStore = create<LoopsState>((set, get) => ({
   loops: [],
   runsBySessionId: new Map(),
+  loopsBySessionTarget: new Map(),
   selectedLoopId: null,
   drawer: null,
 
@@ -59,7 +62,11 @@ export const useLoopsStore = create<LoopsState>((set, get) => ({
     const response = await API.loops.list().catch(() => null);
     // A slower answer never overwrites a newer one.
     if (generation !== refreshGeneration || !response?.success || !response.data) return;
-    set({ loops: response.data, runsBySessionId: indexRuns(response.data) });
+    set({
+      loops: response.data,
+      runsBySessionId: indexRuns(response.data),
+      loopsBySessionTarget: new Map(response.data.flatMap(loop => loop.orchestrationSessionId ? [[loop.orchestrationSessionId, loop]] : [])),
+    });
   },
 
   save: async (input) => {

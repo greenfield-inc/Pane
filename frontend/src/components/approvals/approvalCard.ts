@@ -216,8 +216,14 @@ export function firstToOpen(items: readonly NotifyItem[]): NotifyItem | undefine
  * the chat already shows as Claude's card), and not one an agent is reading a reply to, until it
  * comes back ready again.
  */
-export function dockApprovals(items: readonly NotifyItem[], chatPanelId?: string): NotifyItem[] {
-  return items.filter(item => !bridgedFrom(item, chatPanelId) && (!isBeingRead(item) || item.readyAgain !== undefined));
+export function dockApprovals(items: readonly NotifyItem[], chatPanelId?: string, dismissed: Readonly<Record<string, string>> = {}): NotifyItem[] {
+  return items.filter(item => !bridgedFrom(item, chatPanelId) && (!isBeingRead(item) || item.readyAgain !== undefined)
+    && dismissed[item.id] !== dockKey(item));
+}
+
+/** What a Dismiss in a chat's dock holds onto (Q-389): a new version, reply or ready-again brings the card back. */
+export function dockKey(item: Pick<NotifyItem, 'version' | 'reply' | 'readyAgain'>): string {
+  return `${item.version ?? 0}:${item.reply?.id ?? ''}:${item.readyAgain ?? ''}`;
 }
 
 /** A question the chat tab itself asked (its AskUserQuestion or permission prompt), copied to Approvals. */

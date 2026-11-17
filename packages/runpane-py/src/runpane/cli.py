@@ -173,7 +173,7 @@ AUTOPILOT_ITEM_COMMANDS = {"autopilot answer", "autopilot close", "autopilot rew
 FLAG_OWNERS = {
     "--relays": ("notify",),
     "--about-session": ("notify",),
-    "--questions": ("notify",),
+    "--questions": ("notify", "report"),
     "--took": ("notify",),
     "--took-as": ("notify",),
     "--status": ("notify", "update"),
@@ -415,13 +415,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
 
+def hook_words(argv: List[str]) -> List[str]:
+    """The command words of an argv: everything but flags and the `--pane-dir` value."""
+    return [arg for index, arg in enumerate(argv) if not arg.startswith("-") and (index == 0 or argv[index - 1] != "--pane-dir")]
+
+
 def is_conversation_hook_argv(argv: List[str]) -> bool:
-    words = [arg for index, arg in enumerate(argv) if not arg.startswith("-") and (index == 0 or argv[index - 1] != "--pane-dir")]
-    return words[:2] == ["panels", "conversation"] and "--hook" in argv
+    return hook_words(argv)[:2] == ["panels", "conversation"] and "--hook" in argv
 
 
 def run_conversation_hook_from_argv(argv: List[str], env: Optional[Dict[str, str]] = None) -> Optional[int]:
-    """`runpane panels conversation --hook` straight from argv, before telemetry or any output. None for any other command line."""
+    """`runpane panels conversation --hook` (or `runpane session-start`, its Agent Farm alias, D-403) straight from argv,
+    before telemetry or any output. None for any other command line."""
+    # The WSL Session bridge appends `--pane-dir <dir>`, so the alias keeps its other arguments.
+    if hook_words(argv)[:1] == ["session-start"]:
+        rest = list(argv)
+        rest.remove("session-start")
+        argv = ["panels", "conversation", "--hook"] + rest
     if not is_conversation_hook_argv(argv):
         return None
     try:
@@ -787,6 +797,8 @@ def validate_report_args(parsed: ParsedArgs) -> None:
         raise ValueError("runpane report accepts either --summary or --summary-file, not both.")
     if parsed.report_state == "blocked" and not (parsed.question or "").strip():
         raise ValueError('runpane report --state blocked requires --question "<what you need answered>".')
+    if parsed.report_state != "blocked" and (parsed.notify_choices is not None or parsed.notify_questions is not None):
+        raise ValueError("runpane report takes --choices and --questions only with --state blocked: they are the buttons on its question card.")
 
 
 def validate_conversation_args(parsed: ParsedArgs) -> None:
