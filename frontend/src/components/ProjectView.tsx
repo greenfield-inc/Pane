@@ -6,6 +6,7 @@ import type { Session } from '../types/session';
 import { PanelTabBar } from './panels/PanelTabBar';
 import { TabStripSkeleton } from './panels/TabStripSkeleton';
 import { TerminalSkeleton } from './panels/TerminalSkeleton';
+import { useSkeletonHold } from './ui/Skeleton';
 import { PanelContainer } from './panels/PanelContainer';
 import { usePanelStore } from '../stores/panelStore';
 import { panelApi } from '../services/panelApi';
@@ -56,7 +57,10 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   }>({ projectId, worktreePath: null, branch: null });
   const [sessionLoadingState, setSessionLoadingState] = useState({ projectId, isLoading: true });
   const sessionRequestGeneration = useRef(0);
-  const isLoadingSession = sessionLoadingState.projectId !== projectId || sessionLoadingState.isLoading;
+  const loadingSession = sessionLoadingState.projectId !== projectId || sessionLoadingState.isLoading;
+  // The skeleton waits 150 ms, stays 300 ms once shown, then the session fades in.
+  const sessionHold = useSkeletonHold(loadingSession);
+  const isLoadingSession = sessionHold.holding;
   const activeMainRepoSession = mainRepoSession?.projectId === projectId ? mainRepoSession : null;
   const activeWorktreePath = activeMainRepoSession?.worktreePath ?? null;
   const detectedBranch = branchState.projectId === projectId
@@ -508,7 +512,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                   <TerminalSkeleton />
                 </div>
               ) : workingPanels.length > 0 && currentActivePanel ? (
-                workingPanels.map(panel => {
+                <div className="contents" data-skeleton-reveal={sessionHold.reveal ? '' : undefined}>{workingPanels.map(panel => {
                   const isActive = panel.id === currentActivePanel.id;
                   return (
                     <div
@@ -526,7 +530,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                       />
                     </div>
                   );
-                })
+                })}</div>
               ) : (
                 <div className="flex h-full items-center justify-center">
                   <button

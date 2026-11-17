@@ -14,7 +14,7 @@ import { PanelTabStrip } from './panels/PanelTabStrip';
 import { SplitLayout } from './panels/SplitLayout';
 import { TabStripSkeleton } from './panels/TabStripSkeleton';
 import { TerminalSkeleton } from './panels/TerminalSkeleton';
-import { LoadingStatus } from './ui/Skeleton';
+import { LoadingStatus, useSkeletonHold } from './ui/Skeleton';
 
 const EMPTY_PANELS: ToolPanel[] = [];
 const GROUP_ID = 'ssh-hosts';
@@ -127,7 +127,9 @@ function SshViewForHost() {
     }).catch(() => setError('Could not close the tab. Please try again.'));
   }, []);
 
-  if (!loaded) {
+  // The skeleton waits 150 ms, stays 300 ms once shown, then the view fades in.
+  const hold = useSkeletonHold(!loaded && !error);
+  if (!loaded || hold.holding) {
     return <div className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
       {error ? <LoadFailure message={`${error} Retry, and if it keeps failing, check the connection to the machine this window controls.`} onRetry={() => setLoadAttempt(value => value + 1)} />
         : <>
@@ -144,7 +146,7 @@ function SshViewForHost() {
     useSshHostsStore.setState({ error: null });
   };
   return (
-    <div data-testid="ssh-view" className="ph-no-capture flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
+    <div data-testid="ssh-view" className={`ph-no-capture ${hold.reveal ? 'skeleton-reveal ' : ''}flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary`}>
       {hasTabs && <div className="flex min-h-9 items-center border-b border-border-primary bg-bg-chrome px-2">
         <PanelTabStrip panels={tabs} activePanelId={activePanelId} idNamespace="top" alwaysShowClose
           onPanelSelect={selectPanel} onPanelClose={closePanel} />

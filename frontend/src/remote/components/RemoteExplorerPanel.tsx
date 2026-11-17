@@ -5,6 +5,7 @@ import { filePreviewKind, type FilePreviewKind } from '../../../../shared/utils/
 import { cn } from '../../utils/cn';
 import type { RemoteFileEntry, RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import { isNativeMobile, openNativeExternalUrl } from '../runtime/nativeMobile';
+import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from '../../components/ui/Skeleton';
 import { phoneMediaUrl } from '../../../../shared/utils/phonePage';
 
 interface RemoteExplorerPanelProps {
@@ -109,7 +110,19 @@ export function RemoteExplorerPanel({ adapter, panelId, sessionId, ports, onErro
 
   const renderFolder = (path: string, depth: number) => {
     const entries = folders[path];
-    if (!entries) return <p className="py-2 text-xs text-text-tertiary" style={{ paddingLeft: rowIndent(depth) }}>Loading…</p>;
+    return <SkeletonSwap key={path} loading={!entries} skeleton={<>
+      <LoadingStatus label="Loading the folder" />
+      <Skeleton>
+        {[45, 30, 55].map(width => (
+          <div key={width} className="flex h-10 items-center gap-2 pr-3" style={{ paddingLeft: rowIndent(depth) }}>
+            <span className="h-4 w-4 flex-shrink-0" /><Bone className="h-4 w-4" /><Bone className="h-3.5" style={{ width: `${width}%` }} />
+          </div>
+        ))}
+      </Skeleton>
+    </>}>{renderEntries(entries ?? [], depth)}</SkeletonSwap>;
+  };
+
+  const renderEntries = (entries: NonNullable<typeof folders[string]>, depth: number) => {
     if (entries.length === 0) return <p className="py-2 text-xs text-text-tertiary" style={{ paddingLeft: rowIndent(depth) }}>Empty folder</p>;
     return entries.map(entry => {
       const isOpen = entry.isDirectory && expanded.has(entry.path);
@@ -254,9 +267,13 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
         </div>
       )}
 
-      {text.kind === 'loading' && <Notice message="Loading…" />}
       {text.kind === 'notice' && <Notice message={text.message} />}
-      {text.kind === 'text' && (
+      {text.kind !== 'notice' && <SkeletonSwap loading={text.kind === 'loading'} skeleton={<>
+        <LoadingStatus label={`Opening ${file.path}`} />
+        <Skeleton className="flex flex-1 flex-col gap-2 bg-bg-primary p-3">
+          {[70, 85, 40, 60, 90, 55].map((width, row) => <Bone key={row} className="h-3.5" style={{ width: `${width}%` }} />)}
+        </Skeleton>
+      </>}>{text.kind === 'text' && (
         <textarea
           aria-label={file.path}
           value={text.draft}
@@ -271,7 +288,7 @@ function TextFileView({ adapter, sessionId, file, onBack, onError }: {
           // 16px keeps iOS from zooming the page when the text area takes focus.
           className="min-h-0 w-full flex-1 resize-none border-0 bg-bg-primary p-3 font-mono text-base leading-snug text-text-primary focus:outline-none"
         />
-      )}
+      )}</SkeletonSwap>}
     </div>
   );
 }

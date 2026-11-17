@@ -91,7 +91,7 @@ import { useRegionActions } from '../hooks/useRegionNavigation';
 import { announceTerminalReflow } from '../utils/terminalReflow';
 import { focusActiveTabSoon } from '../services/regionFocus';
 import { useLoopsStore } from '../stores/loopsStore';
-import { LoadingStatus } from './ui/Skeleton';
+import { LoadingStatus, useSkeletonHold } from './ui/Skeleton';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
   return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
@@ -1895,6 +1895,8 @@ export const SessionView = memo(() => {
 
   // The tab the Pane's stage showed last; a revisited terminal there makes the Pane's skeleton quiet.
   const stagePanelId = usePanelStore(state => (selectedPaneId ? state.activePanels[selectedPaneId] : undefined));
+  // The project view's skeleton waits 150 ms, stays 300 ms once shown, then the view fades in.
+  const projectHold = useSkeletonHold(activeView === 'project' && Boolean(activeProjectId) && (isProjectLoading || !projectData));
 
   // Live grid of every agent pane — spans all projects.
   if (activeView === 'mission-control' && missionControlEnabled) {
@@ -1903,7 +1905,7 @@ export const SessionView = memo(() => {
 
   // Show project view if navigation is set to project
   if (activeView === 'project' && activeProjectId) {
-    if (isProjectLoading || !projectData) {
+    if (isProjectLoading || !projectData || projectHold.holding) {
       // ProjectView's own shape: its tab bar over the primary checkout's terminal.
       return (
         <div className="flex flex-1 flex-col overflow-hidden bg-bg-primary">
@@ -1915,7 +1917,7 @@ export const SessionView = memo(() => {
     }
 
     return (
-      <>
+      <div className="contents" data-skeleton-reveal={projectHold.reveal ? '' : undefined}>
         <ProjectView
           projectId={activeProjectId}
           projectName={projectData.name || 'Project'}
@@ -1937,7 +1939,7 @@ export const SessionView = memo(() => {
           }}
           onDelete={() => setShowProjectSettings(false)}
         />
-      </>
+      </div>
     );
   }
 
