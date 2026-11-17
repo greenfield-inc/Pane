@@ -77,21 +77,21 @@ Sessions receive independent internal owners while keeping their names, folders,
 panel IDs, saved histories, and settings. Interrupted ownership moves resume on
 startup; no transcript or workspace files are deleted by this migration.
 
-## Launch configuration and profile
+## Launch configuration and behavior
 
 Sessions use the same built-in launch presets and saved custom commands as
 ordinary project/worktree panels, including custom arguments. The application
 default seeds new Sessions. Creating a Session remembers its launch command and
 arguments for the next creation; cancelling, or a create Pane refuses, leaves that default unchanged.
 Selecting the agent default clears the remembered custom command. Each Session saves its own launch configuration
-and behavior profile. Changing defaults does not overwrite existing Sessions.
+and behavior. Changing defaults does not overwrite existing Sessions.
 Launch changes take effect on the next explicit restart.
 Use **Edit behavior…** during creation or in Session settings to open the
-separate profile editor. **Back** discards the draft; **Save behavior** applies it
+separate behavior editor. **Back** discards the draft; **Save behavior** applies it
 to the form, which is persisted when you create the Session or save settings.
 
-The command, behavior profile, and saved task context have separate purposes.
-A command selects how the agent runs; a profile describes how it should behave;
+The command, Session behavior, and saved task context have separate purposes.
+A command selects how the agent runs; the behavior describes how it should act;
 saved goals, decisions, and next actions help it respond to later user input.
 Custom commands (including Agent Farm wrappers) retain their arguments. Pane
 only adds native flags through compatible built-in adapters, an explicit custom
@@ -172,7 +172,7 @@ Choose a session ID source and provide first-launch and resume templates:
 - **Claude:** Pane allocates a UUID and resumes it only when its transcript exists.
 - **Codex / Cursor:** Pane captures the native resume ID from terminal output.
   OpenCode does the same without this setting (see
-  [Launch configuration and profile](#launch-configuration-and-profile)); OpenCode
+  [Launch configuration and behavior](#launch-configuration-and-behavior)); OpenCode
   Sessions refuse custom command resume.
 - **Pane allocates an ID:** for other CLIs that accept a caller-provided ID.
 - **CLI reports its ID:** the CLI or wrapper prints a standalone newline-terminated

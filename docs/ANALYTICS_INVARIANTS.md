@@ -235,7 +235,7 @@ The sanitizer drops any other value.
 | `remote_pane_host_setup_failed` | `main/src/ipc/remoteDaemon.ts`, `main/src/daemon/remoteTransportController.ts` | Host setup or transport failed |
 | `remote_pane_setup_terminal_opened` | `main/src/ipc/remoteDaemon.ts` | Setup command opened in terminal |
 | `remote_pane_connection_code_created` | `main/src/ipc/remoteDaemon.ts` | Host code created |
-| `remote_pane_connection_pair_created` | `main/src/ipc/remoteDaemon.ts` | Advanced paired profile created |
+| `remote_pane_connection_pair_created` | `main/src/ipc/remoteDaemon.ts` | Advanced paired connection created |
 | `remote_pane_connection_code_imported` | `main/src/ipc/remoteDaemon.ts` | Client imported code |
 | `remote_pane_connection_code_import_failed` | `main/src/ipc/remoteDaemon.ts` | Client import failed |
 | `remote_pane_client_connect_started` | `main/src/daemon/client/remotePaneClient.ts` | Desktop client connection started |
