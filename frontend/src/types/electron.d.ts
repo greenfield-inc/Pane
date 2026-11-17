@@ -1,5 +1,5 @@
 /// <reference types="electron" />
-import type { DeviceInput, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
+import type { DeviceCapture, DeviceControls, DeviceInput, DeviceLogPage, DeviceRecording, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
 import type { PreferencesApi } from '../../../shared/types/preferences';
 import type { VoiceKeyCheck } from '../../../shared/voice/voiceKeys';
 // Type definitions for Electron preload API
@@ -130,6 +130,14 @@ interface ElectronAPI {
   devices: {
     input: (panelId: string, input: DeviceInput) => Promise<IPCResponse<boolean>>;
     frame: (panelId: string) => Promise<IPCResponse<string>>;
+    frameRate: (panelId: string) => Promise<IPCResponse<number | null>>;
+    controls: (panelId: string) => Promise<IPCResponse<DeviceControls>>;
+    capture: (panelId: string, image?: string) => Promise<IPCResponse<DeviceCapture>>;
+    stage: (panelId: string, agentPanelId: string, text: string) => Promise<IPCResponse<boolean>>;
+    record: (panelId: string, action: 'start' | 'stop') => Promise<IPCResponse<DeviceRecording | null>>;
+    recording: (panelId: string) => Promise<IPCResponse<number | null>>;
+    logs: (panelId: string, since: number) => Promise<IPCResponse<DeviceLogPage>>;
+    driver: (panelId: string, who: 'person' | 'agent') => Promise<IPCResponse<boolean>>;
     visible: (panelId: string, clientId: string, visible: boolean) => Promise<IPCResponse<boolean>>;
     takeOver: (panelId: string) => Promise<IPCResponse<boolean>>;
     power: (panelId: string, action: 'boot' | 'restart' | 'shutdown') => Promise<IPCResponse<boolean>>;

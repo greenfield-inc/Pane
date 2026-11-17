@@ -6,7 +6,7 @@ import { RECLAIM_KINDS, MACHINE_HEALTH_APPS_CHANNEL, MACHINE_HEALTH_STOP_APP_CHA
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import { bracketedPaste, normalizePromptNewlines, stripTrailingNewlines } from '../services/agents/promptDelivery';
+import { stagedPromptText } from '../services/agents/promptDelivery';
 import { PaneError } from '../../../shared/paneError';
 import { logsManager } from '../services/panels/logPanel/logsManager';
 import { canRestartProcess } from '../services/machineHealth/memoryRelief';
@@ -210,8 +210,7 @@ export function registerResourceMonitorHandlers(
         const screen = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:screen', [{ panelId }]), boundary.object({ composer: boundary.object({ hasUndeliveredText: boundary.boolean }) }));
         if (screen?.composer.hasUndeliveredText !== false) return;
         // As runpane stages composer text: newlines stay text inside one bracketed paste, never Enter.
-        const text = stripTrailingNewlines(normalizePromptNewlines(request));
-        terminalPanelManager.writeToTerminal(panelId, terminalPanelManager.isBracketedPasteEnabled(panelId) ? bracketedPaste(text) : text.replace(/\n+/gu, ' '));
+        terminalPanelManager.writeToTerminal(panelId, stagedPromptText(request, terminalPanelManager.isBracketedPasteEnabled(panelId)));
       })().catch(error => console.warn('[MachineHealth] Ask an agent: the late agent did not get the request:', error));
       return false;
     };

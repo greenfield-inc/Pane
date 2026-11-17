@@ -875,7 +875,7 @@ export const RUNPANE_CONTRACT = {
     {
       "name": "devices act",
       "mcpName": "device_act",
-      "summary": "Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.",
+      "summary": "Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs, orientation landscape-left, fold half-open, record start|stop. Waits while the person has taken over the device in its tab, up to 4 minutes, then fails with ERR_DEVICE_PERSON_DRIVING.",
       "usage": [
         "runpane devices act [--platform <ios|android>] [--json] [--pane-dir <path>] -- <command>"
       ],
@@ -26884,7 +26884,7 @@ export const RUNPANE_CONTRACT = {
       },
       "devices act": {
         "name": "devices act",
-        "summary": "Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.",
+        "summary": "Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs, orientation landscape-left, fold half-open, record start|stop. Waits while the person has taken over the device in its tab, up to 4 minutes, then fails with ERR_DEVICE_PERSON_DRIVING.",
         "details": "Passes the command to agent-device, pinned to the device this Pane holds. Start with `open <app id>`, then `snapshot -i` for @refs, then `press @eN --settle`. agent-device's own help: `help workflow`. Flags that pick another device, session or daemon (--session, --device, --udid, --serial, --platform) are refused.",
         "requiresPaneDaemon": true,
         "mutates": true,

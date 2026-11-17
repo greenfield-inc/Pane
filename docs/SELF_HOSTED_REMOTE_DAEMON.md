@@ -10,7 +10,7 @@ The intended flow is:
 2. Copy the generated `pane-remote://...` connection code.
 3. Paste it into desktop Pane under `Settings > Remote Access > Tailscale > Paste a connection code`, or open `https://runpane.com/app/` and paste it there.
 
-Pane saves the profile and attempts to connect immediately. Local desktop mode is unchanged until a remote profile is imported and activated.
+Pane saves the connection and attempts to connect immediately. Local desktop mode is unchanged until a saved connection is imported and activated.
 
 ## Workspaces or pairing codes?
 
@@ -340,9 +340,9 @@ From `Pairing tools` on the same page:
 
 1. Enter a label such as `Office Mac mini`.
 2. Enter the base URL the client will use after tunneling, for example `http://127.0.0.1:42137`.
-3. Click `Create Paired Profile`.
+3. Click `Pair a device`.
 
-Pane adds a host-side allowed client record, adds a matching local profile, and shows the generated bearer token once.
+Pane adds a host-side allowed client record, adds a matching saved connection, and shows the generated bearer token once.
 
 ### 4. Start the Headless Daemon
 
@@ -360,13 +360,13 @@ On Windows the endpoint is `pipe:<pipe name>`. This is the local control endpoin
 
 ### 5. Connect the Desktop Client
 
-Use `Paste a connection code` under `Settings > Remote Access > Tailscale` for a generated code, or use `Save existing remote profile` under `Tailscale > Advanced > Pairing tools` with:
+Use `Paste a connection code` under `Settings > Remote Access > Tailscale` for a generated code, or use `Save existing connection` under `Tailscale > Advanced > Pairing tools` with:
 
-- label
+- connection name
 - base URL
 - bearer token
 
-Click `Save Remote Profile`, then pick the saved computer from `Settings > Remote Access > Computers` or the sidebar's machine menu.
+Click `Save connection`, then pick the saved computer from `Settings > Remote Access > Computers` or the sidebar's machine menu.
 
 ## Validation
 
@@ -460,7 +460,7 @@ Check:
 
 - the daemon uses the same `PANE_DIR` that setup wrote
 - the tunnel/proxy forwards to the same loopback port as the host config
-- the client profile base URL matches the client-side tunnel endpoint
+- the saved connection's base URL matches the client-side tunnel endpoint
 - the `pane-remote://...` code was not truncated
 
 ### A remote action could not be confirmed

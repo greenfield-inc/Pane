@@ -240,18 +240,18 @@ function AdvancedHost({ controller }: { controller: RemoteAccessController }) {
           <div className="w-full space-y-3 sm:w-[460px]">
             <Input label="Connection Label" value={controller.pairLabel} onChange={(event) => controller.setPairLabel(event.target.value)} placeholder="Office Mac mini" fullWidth />
             <Input label="Remote Base URL" value={controller.pairBaseUrl} onChange={(event) => controller.setPairBaseUrl(event.target.value)} placeholder="http://127.0.0.1:42137" error={controller.pairBaseUrl && !controller.validation.pair ? 'Enter a label and valid HTTP(S) URL' : undefined} fullWidth />
-            <div className="flex justify-end"><Button type="button" size="sm" icon={<Plus className="h-4 w-4" />} disabled={!controller.validation.pair} onClick={controller.createPair}>Create Paired Profile</Button></div>
+            <div className="flex justify-end"><Button type="button" size="sm" icon={<Plus className="h-4 w-4" />} disabled={!controller.validation.pair} onClick={controller.createPair}>Pair a device</Button></div>
             {controller.createdToken && (
               <SecretField label="Latest generated remote token" value={controller.createdToken} readOnly />
             )}
           </div>
         </SettingRow>
-        <SettingRow settingId="remote-existing-profile" label="Save existing remote profile" description="Save a token from another host." align="start">
+        <SettingRow settingId="remote-existing-profile" label="Save existing connection" description="Save a token from another host." align="start">
           <div className="w-full space-y-3 sm:w-[460px]">
-            <Input label="Existing Profile Label" value={controller.profileLabel} onChange={(event) => controller.setProfileLabel(event.target.value)} placeholder="Office Mac mini tunnel" fullWidth />
+            <Input label="Connection name" value={controller.profileLabel} onChange={(event) => controller.setProfileLabel(event.target.value)} placeholder="Office Mac mini tunnel" fullWidth />
             <Input label="Existing Remote Base URL" value={controller.profileBaseUrl} onChange={(event) => controller.setProfileBaseUrl(event.target.value)} placeholder="http://127.0.0.1:42137" fullWidth />
             <SecretField label="Existing Remote Token" value={controller.profileToken} onChange={controller.setProfileToken} onRemove={() => controller.setProfileToken('')} />
-            <div className="flex justify-end"><Button type="button" size="sm" disabled={!controller.validation.profile} onClick={controller.saveProfile}>Save Remote Profile</Button></div>
+            <div className="flex justify-end"><Button type="button" size="sm" disabled={!controller.validation.profile} onClick={controller.saveProfile}>Save connection</Button></div>
           </div>
         </SettingRow>
       </SettingsSection>
