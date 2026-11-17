@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Workflow } from 'lucide-react';
-import type { LibraryProfile, ProfileDetailView, ProfileLibraryView, ProfileRun } from '../../../../shared/types/profiles';
+import type { LibraryProfile, OwnAgentFarmView, Profile, ProfileDetailView, ProfileLibraryView, ProfileRun } from '../../../../shared/types/profiles';
 import { agentLabel } from '../../../../shared/agents';
 import { API } from '../../utils/api';
 import { cn } from '../../utils/cn';
@@ -70,8 +70,11 @@ function TeamTab({ profile }: { profile: LibraryProfile }) {
   );
 }
 
-function RunRow({ run, onChanged }: { run: ProfileRun; onChanged: () => void }) {
+function RunRow({ run, profile, onChanged }: { run: ProfileRun; profile?: Profile; onChanged: () => void }) {
   const [outcome, setOutcome] = useState('');
+  // "Set outcome…" is for an agent step that can't report: its declared outcomes only.
+  const step = profile?.flow?.steps.find((candidate) => candidate.id === run.step);
+  const outcomes = step?.kind === 'agent' ? step.outcomes.map((edge) => edge.name) : [];
   const [error, setError] = useState<string | null>(null);
   const live = run.state !== 'ended' && run.state !== 'failed';
   const act = async (work: () => Promise<{ success: boolean; error?: string }>) => {
@@ -86,10 +89,13 @@ function RunRow({ run, onChanged }: { run: ProfileRun; onChanged: () => void }) 
         <span className="font-medium text-text-primary">{run.profile}</span>
         <span className="text-text-secondary">{run.state} at {run.step}</span>
         <span className="min-w-0 flex-1 truncate text-text-tertiary">{run.prompt}</span>
-        {live && run.state === 'running' && (
+        {live && run.state === 'running' && outcomes.length > 0 && (
           <>
-            <input className="w-32 rounded border border-border-primary bg-surface-primary px-1.5 py-0.5 text-xs text-text-primary" placeholder="outcome" aria-label={`Set outcome for ${run.step}`} value={outcome} onChange={(event) => setOutcome(event.target.value)} />
-            <Button size="sm" variant="secondary" disabled={!outcome.trim()} onClick={() => void act(() => API.profiles.setOutcome(run.id, outcome.trim()))}>Set outcome…</Button>
+            <select className="rounded border border-border-primary bg-surface-primary px-1.5 py-0.5 text-xs text-text-primary" aria-label={`Set outcome for ${run.step}`} value={outcome} onChange={(event) => setOutcome(event.target.value)}>
+              <option value="">Outcome…</option>
+              {outcomes.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <Button size="sm" variant="secondary" disabled={!outcome} onClick={() => void act(() => API.profiles.setOutcome(run.id, outcome))}>Set outcome</Button>
           </>
         )}
         {live && <Button size="sm" variant="secondary" onClick={() => void act(() => API.profiles.stop(run.id))}>Stop</Button>}
@@ -109,6 +115,8 @@ export function ProfilesView() {
   const [tab, setTab] = useState<ViewerTab>('flow');
   const [launching, setLaunching] = useState(false);
   const [runs, setRuns] = useState<ProfileRun[]>([]);
+  const [own, setOwn] = useState<OwnAgentFarmView | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     const [list, runList] = await Promise.all([API.profiles.list().catch(() => null), API.profiles.runs().catch(() => null)]);
@@ -117,6 +125,14 @@ export function ProfilesView() {
     if (runList?.success && runList.data) setRuns(runList.data);
   }, []);
   useEffect(() => { void reload(); }, [reload]);
+  // Runs move and the bundled Agent Farm finishes setting up while the page is open.
+  useEffect(() => window.electronAPI?.events?.onProfilesChanged?.(() => { void reload(); }), [reload]);
+  // The person's own agent-farm is run to list its profiles (slow), so it loads on its own, once.
+  useEffect(() => {
+    let cancelled = false;
+    void API.profiles.ownAgentFarm().then((response) => { if (!cancelled && response.success) setOwn(response.data ?? null); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   const profiles = useMemo(() => library?.profiles ?? [], [library]);
   // Opens on the first profile that is on and launchable (greenfield on a fresh install).
@@ -141,8 +157,12 @@ export function ProfilesView() {
   }, [selected]);
 
   const toggle = async (profile: LibraryProfile) => {
-    const response = await API.profiles.setEnabled(profile.name, !profile.enabled);
+    // It stays open when it moves between sections.
+    setSelectedName(profile.name);
+    setToggleError(null);
+    const response = await API.profiles.setEnabled(profile.name, !profile.enabled).catch((cause: unknown) => ({ success: false, error: cause instanceof Error ? cause.message : String(cause), data: undefined }));
     if (response.success && response.data) setLibrary(response.data);
+    else setToggleError(response.error ?? `Pane couldn't turn ${profile.name} ${profile.enabled ? 'off' : 'on'}.`);
   };
 
   const sections: Array<[string, LibraryProfile[]]> = [
@@ -169,13 +189,13 @@ export function ProfilesView() {
             </Section>
           ))}
           {/* Your own Agent Farm shows only when it lists something, or why it couldn't. */}
-          {library?.ownAgentFarm && (library.ownAgentFarm.profiles.length > 0 || library.ownAgentFarm.error) && (
+          {own && (own.profiles.length > 0 || own.error) && (
             <Section title="Your Agent Farm">
-              {library.ownAgentFarm.error && <p className="px-3 text-xs text-status-error">{library.ownAgentFarm.error}</p>}
-              {library.ownAgentFarm.profiles.map((own) => (
-                <div key={own.name} className="flex flex-col px-3 py-1.5" data-testid="own-agent-farm-profile">
-                  <span className="truncate text-[13px] text-text-primary">{own.name}</span>
-                  <span className="truncate text-[11px] text-text-tertiary">{own.source}{own.harness ? ` · ${agentLabel(own.harness)}` : ''} · runs through your agent-farm (+ menu › Profile…)</span>
+              {own.error && <p className="px-3 text-xs text-status-error">{own.error}</p>}
+              {own.profiles.map((entry) => (
+                <div key={entry.name} className="flex flex-col px-3 py-1.5" data-testid="own-agent-farm-profile">
+                  <span className="truncate text-[13px] text-text-primary">{entry.name}</span>
+                  <span className="truncate text-[11px] text-text-tertiary">{entry.source}{entry.harness ? ` · ${agentLabel(entry.harness)}` : ''} · runs through your agent-farm (+ menu › Profile…)</span>
                 </div>
               ))}
             </Section>
@@ -211,6 +231,7 @@ export function ProfilesView() {
               <Button size="sm" disabled={!selected.launchable} title={selected.launchable ? undefined : selected.teamOnly ? 'Team only: this profile has no workflow to launch.' : 'Fix this profile\'s errors to launch it.'} onClick={() => setLaunching(true)} data-testid="profile-launch">Launch…</Button>
             </header>
             {selected.title && <p className="text-sm text-text-secondary">{selected.title}</p>}
+            {toggleError && <p className="text-xs text-status-error" role="alert">{toggleError}</p>}
             {selected.errors.length > 0 && (
               <ul className="flex flex-col gap-1 rounded-lg border border-status-error p-3" data-testid="profile-errors">
                 {selected.errors.map((problem, index) => (
@@ -218,14 +239,14 @@ export function ProfilesView() {
                 ))}
               </ul>
             )}
-            {tab === 'flow' && selected.profile && <ProfileFlow profile={selected.profile} />}
+            {tab === 'flow' && selected.profile && <ProfileFlow key={selected.name} profile={selected.profile} />}
             {tab === 'team' && <TeamTab profile={selected} />}
             {tab === 'yaml' && <pre className="overflow-x-auto rounded-lg border border-border-primary bg-surface-secondary p-3 font-mono text-xs text-text-primary" data-testid="profile-yaml">{detail?.profile.name === selected.name ? detail.yaml : 'Loading…'}</pre>}
             {runs.length > 0 && (
               <section className="flex flex-col gap-1">
                 <h3 className="text-sm font-medium text-text-primary">Runs</h3>
                 <div className="divide-y divide-border-primary rounded-lg border border-border-primary">
-                  {runs.map((run) => <RunRow key={run.id} run={run} onChanged={() => void reload()} />)}
+                  {runs.map((run) => <RunRow key={run.id} run={run} profile={profiles.find((candidate) => candidate.name === run.profile)?.profile} onChanged={() => void reload()} />)}
                 </div>
               </section>
             )}

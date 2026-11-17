@@ -47,7 +47,10 @@ interface NodeSize {
 function nodeSize(step: ProfileStep): NodeSize {
   switch (step.kind) {
     case 'agent': return { width: Math.max(150, Math.min(200, 24 + Math.max(step.title.length * 8, step.goal.length * 6))), height: 50 };
-    case 'command': return { width: Math.max(110, Math.min(220, 24 + step.title.length * MONO_CHAR_WIDTH)), height: 34 };
+    // A titled command draws its command under the title.
+    case 'command': return step.title === step.run
+      ? { width: Math.max(110, Math.min(220, 24 + step.title.length * MONO_CHAR_WIDTH)), height: 34 }
+      : { width: Math.max(150, Math.min(240, 24 + Math.max(step.title.length * CHAR_WIDTH, step.run.length * 6.8))), height: 50 };
     case 'ask': return { width: Math.max(160, Math.min(220, 48 + step.title.length * CHAR_WIDTH)), height: 50 };
   }
 }

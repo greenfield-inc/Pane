@@ -620,6 +620,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Profiles: the library, launches and runs (docs/PROFILES.md)
   profiles: {
     list: (): Promise<IPCResponse> => invokeIpc('profiles:list'),
+    ownAgentFarm: (): Promise<IPCResponse> => invokeIpc('profiles:own-agent-farm'),
     get: (name: string): Promise<IPCResponse> => invokeIpc('profiles:get', name),
     setEnabled: (name: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('profiles:set-enabled', name, enabled),
     launch: (input: ProfileLaunchInput): Promise<IPCResponse> => invokeIpc('profiles:launch', input),
@@ -1047,6 +1048,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = () => callback();
       ipcRenderer.on('remote:settings-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('remote:settings-changed', wrappedCallback);
+    },
+    onProfilesChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('profiles:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('profiles:changed', wrappedCallback);
     },
     onLoopsChanged: (callback: () => void) => {
       const wrappedCallback = () => callback();

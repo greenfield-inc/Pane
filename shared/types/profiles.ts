@@ -218,8 +218,12 @@ export interface ProfileLibraryView {
   profiles: LibraryProfile[];
   /** The Agent Farm bundled in Pane: set up, setting up, or why not. */
   agentFarm?: { state: 'missing' | 'installing' | 'ready' | 'failed'; version?: string; error?: string };
-  /** The person's own agent-farm on PATH, listed through it; absent when none is installed. */
-  ownAgentFarm?: { profiles: OwnAgentFarmProfileView[]; error?: string };
+}
+
+/** The person's own agent-farm on PATH ("Your Agent Farm"), listed through it; its own call, since running it is slow. */
+export interface OwnAgentFarmView {
+  profiles: OwnAgentFarmProfileView[];
+  error?: string;
 }
 
 /** One profile with its file's text, for the YAML tab. */

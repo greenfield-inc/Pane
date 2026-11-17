@@ -78,6 +78,8 @@ export interface ProfileRunnerPorts {
   /** Closes a card the run no longer waits on, with what happened instead. */
   closeCard(approvalId: string, summary: string): void;
   log(message: string): void;
+  /** A run was saved: the Profiles page reads the runs again. */
+  changed?(): void;
 }
 
 export interface ProfileLaunchRequest {
@@ -319,6 +321,7 @@ export class ProfileRunner {
     fs.writeFileSync(temporary, `${JSON.stringify(run, null, 2)}\n`);
     fs.renameSync(temporary, file);
     this.runs.set(run.id, run);
+    this.ports.changed?.();
   }
 
   /** Closes the card `before` waited on when `after` no longer waits on it (the run moved another way). */

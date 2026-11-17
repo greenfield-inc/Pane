@@ -5,12 +5,12 @@ import { PaneError } from '../../../../shared/paneError';
 import type { NotifyQuestion, NotifyResult, NotifySource } from '../../../../shared/types/notify';
 import type { LibraryProfile, Profile, ProfileRun } from '../../../../shared/types/profiles';
 import type { RunpaneCommandToolSpec } from '../../../../shared/types/runpaneOrchestration';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import type { AppServices } from '../../ipc/types';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { ShellDetector } from '../../utils/shellDetector';
-import { getRuntimeConfigManager } from '../../core/runtime';
+import { getPaneEventSink, getRuntimeConfigManager } from '../../core/runtime';
 import { agentFarmConfigRoot, bundledAgentFarm } from '../agentFarm/bundledAgentFarm';
 import { panelManager } from '../panelManager';
 import { sessionWorkspacePath } from '../sessionWorkspace';
@@ -35,7 +35,9 @@ export function getProfileRunner(): ProfileRunner {
 
 /** The library as config sets it now: bundled profiles on or off, and the person's own. */
 export function currentProfiles(): LibraryProfile[] {
-  return listProfiles({ paneDir: getAppDirectory(), enabled: getRuntimeConfigManager().getConfig().profiles?.enabled });
+  // config.json is hand-editable: anything but a list of names reads as unset (greenfield on).
+  const enabled = decodeOptionalBoundary(getRuntimeConfigManager().getConfig().profiles?.enabled, boundary.array(boundary.string));
+  return listProfiles({ paneDir: getAppDirectory(), enabled });
 }
 
 /** `blocked` is Pane's own prompt detection (`detectPanelBlocker`), as `panels wait` reports it. */
@@ -169,6 +171,7 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
     postCard,
     cardOpen: (approvalId) => queue().waitingItems().some((item) => item.id === approvalId),
     waitCard,
+    changed: () => getPaneEventSink().send('profiles:changed'),
     closeCard: (approvalId, summary) => services.notifyService?.queue.settle(approvalId, summary),
     log,
   });

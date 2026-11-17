@@ -13,6 +13,8 @@ interface AgentFarmProfileDialogProps {
   onCreate: (launch: ChatTabProfileLaunch) => Promise<void>;
   /** Desktop: opens Launch for one of Pane's profiles. Without it the dialog lists none (the phone launches later). */
   onLaunchProfile?: (profile: LibraryProfile) => void;
+  /** Offers an Agent Farm profile by name, as a chat tab; off when chat tabs are. Default on. */
+  byName?: boolean;
 }
 
 /**
@@ -21,7 +23,7 @@ interface AgentFarmProfileDialogProps {
  * tab, as `runpane panels create --agent-farm <profile> --arg key=value` does. That name is typed:
  * `agent-farm profiles list` prints no machine-readable list.
  */
-export function AgentFarmProfileDialog({ onClose, onCreate, onLaunchProfile }: AgentFarmProfileDialogProps) {
+export function AgentFarmProfileDialog({ onClose, onCreate, onLaunchProfile, byName = true }: AgentFarmProfileDialogProps) {
   const [paneProfiles, setPaneProfiles] = useState<LibraryProfile[]>([]);
   useEffect(() => {
     if (!onLaunchProfile) return;
@@ -56,7 +58,7 @@ export function AgentFarmProfileDialog({ onClose, onCreate, onLaunchProfile }: A
   return (
     <Modal isOpen onClose={onClose} size="sm" ariaLabel="Profile" initialFocusRef={profileRef} showCloseButton={false}>
       <form onSubmit={event => void submit(event)} className="flex min-h-0 flex-col">
-        <ModalHeader title="Profile" description="Launch one of Pane's profiles, or open an Agent Farm profile as a chat tab on this Pane's machine." onClose={onClose} />
+        <ModalHeader title="Profile" description={byName ? 'Launch one of Pane\'s profiles, or open an Agent Farm profile as a chat tab on this Pane\'s machine.' : 'Launch one of Pane\'s profiles. Turn on chat tabs to open an Agent Farm profile by name.'} onClose={onClose} />
         <ModalBody className="space-y-4">
           {paneProfiles.length > 0 && (
             <div className="flex flex-col gap-1" data-testid="profile-picker-list">
@@ -67,20 +69,22 @@ export function AgentFarmProfileDialog({ onClose, onCreate, onLaunchProfile }: A
                   {paneProfile.title && <span className="text-xs text-text-secondary">{paneProfile.title}</span>}
                 </button>
               ))}
-              <p className="pt-2 text-xs text-text-secondary">Or an Agent Farm profile, by name</p>
+              {byName && <p className="pt-2 text-xs text-text-secondary">Or an Agent Farm profile, by name</p>}
             </div>
           )}
+          {byName && (<>
           <Input ref={profileRef} label="Profile" fullWidth value={profile} placeholder="greenfield/implementer" autoComplete="off" spellCheck={false}
             onChange={event => setProfile(event.target.value)} error={problem?.field === 'profile' ? problem.error : undefined}
             helperText="A name from agent-farm profiles list." />
           <Textarea label="Arguments (optional)" fullWidth rows={3} value={args} placeholder="ticket=PANE-12" spellCheck={false}
             onChange={event => setArgs(event.target.value)} error={problem?.field === 'args' ? problem.error : undefined}
             helperText="One key=value per line, passed as --arg." className="font-mono text-sm" />
+          </>)}
           {problem?.field === 'host' && <p role="alert" className="text-sm text-status-error">{problem.error}</p>}
         </ModalBody>
         <ModalFooter>
           <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={busy}>{busy ? 'Opening…' : 'Open chat'}</Button>
+          {byName && <Button type="submit" disabled={busy}>{busy ? 'Opening…' : 'Open chat'}</Button>}
         </ModalFooter>
       </form>
     </Modal>
