@@ -46,4 +46,3 @@ jobs:
           name: pane-windows-arm64-validation
           path: dist-electron/*-Windows-arm64.exe
           if-no-files-found: error
-# P03 throwaway: second push 30 s after the first (reverted)
