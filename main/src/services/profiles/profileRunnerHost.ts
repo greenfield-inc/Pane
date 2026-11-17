@@ -177,7 +177,9 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
   });
   journal.subscribe((entry) => {
     if (entry.kind !== 'panel.exited' || !entry.panelId) return;
-    const interrupted = entry.reason?.startsWith('signal:') === true || (entry.exitCode !== undefined && INTERRUPTED_EXIT_CODES.has(entry.exitCode));
+    // node-pty reports signal 0 for a normal exit, which the journal writes as `signal:0`.
+    const signal = /^signal:(.+)$/u.exec(entry.reason ?? '')?.[1];
+    const interrupted = (signal !== undefined && signal !== '0') || (entry.exitCode !== undefined && INTERRUPTED_EXIT_CODES.has(entry.exitCode));
     void runner?.tabExited(entry.panelId, { code: entry.exitCode, interrupted }).catch((error) => log(`[Profiles] ${String(error)}`));
   });
   void runner.resumeAll().catch((error) => log(`[Profiles] Could not resume profile runs: ${String(error)}`));
