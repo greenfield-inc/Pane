@@ -421,7 +421,10 @@ def is_conversation_hook_argv(argv: List[str]) -> bool:
 
 
 def run_conversation_hook_from_argv(argv: List[str], env: Optional[Dict[str, str]] = None) -> Optional[int]:
-    """`runpane panels conversation --hook` straight from argv, before telemetry or any output. None for any other command line."""
+    """`runpane panels conversation --hook` (or `runpane session-start`, its Agent Farm alias, D-403) straight from argv,
+    before telemetry or any output. None for any other command line."""
+    if argv == ["session-start"]:
+        return run_panels_conversation_hook(env)
     if not is_conversation_hook_argv(argv):
         return None
     try:

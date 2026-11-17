@@ -3909,11 +3909,16 @@ async function runPanelsConversationHook(
   return 0;
 }
 
+/** The one argument Agent Farm's SessionStart hook passes to the host's `AGENT_FARM_SESSION_HOOK`. */
+const AGENT_FARM_SESSION_START = 'session-start';
+
 /**
- * `runpane panels conversation --hook` straight from argv, before anything else in the CLI runs (no
+ * `runpane panels conversation --hook` (or `runpane session-start`, its Agent Farm alias) straight from argv, before anything else in the CLI runs (no
  * managed-CLI handoff, no telemetry, no output). Returns null for any other command line.
  */
 export async function runConversationHookFromArgv(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<0 | null> {
+  // Agent Farm's host-neutral hook runs `"$AGENT_FARM_SESSION_HOOK" session-start`, and Pane points that at runpane (D-403).
+  if (argv.length === 1 && argv[0] === AGENT_FARM_SESSION_START) return runPanelsConversationHook(env, process.stdin);
   if (!isConversationHookArgv(argv)) return null;
   let paneDir: string | undefined;
   try {

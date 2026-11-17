@@ -471,7 +471,8 @@ runpane panels resume --session <S> --wait-ready --yes --json        # every sto
 The `--session` and `--all-stopped` forms skip paused tabs.
 
 Resume relaunches the same panel with the agent's own conversation. A wrapper
-that prints `PANE_AGENT_SESSION_ID=<id>` (Agent Farm does) resumes with
+that prints `AGENT_FARM_SESSION_ID=<id>` or `PANE_AGENT_SESSION_ID=<id>`
+(Agent Farm does) resumes with
 `<command> --resume <id>`. The bulk form also relaunches finished workers, so
 resume single panels when only some should continue. Then tell each resumed
 worker where it was, for example: "You were interrupted. Re-read your status

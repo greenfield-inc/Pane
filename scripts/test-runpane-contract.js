@@ -1401,9 +1401,9 @@ print(json.dumps([
       assert.match(run.stderr, /Unknown channel/);
 
       // --hook: silent and exit 0 whatever happens.
-      const hook = async (label, { env = paneEnv, input, respond = () => ({ result }), daemon = true }) => {
+      const hook = async (label, { env = paneEnv, input, respond = () => ({ result }), daemon = true, argv = ['panels', 'conversation', '--hook'] }) => {
         requests = [];
-        const call = () => runCliOnce(runtime, ['panels', 'conversation', '--hook'], paneDir, 20_000, env, input);
+        const call = () => runCliOnce(runtime, argv, paneDir, 20_000, env, input);
         const hookRun = daemon ? await withFakeDaemon(paneDir, (frame) => { requests.push({ channel: frame.channel, request: frame.args[0] }); return respond(frame); }, call) : await call();
         assert.strictEqual(hookRun.code, 0, `${runtime} --hook ${label} exits 0`);
         assert.strictEqual(hookRun.stdout, '', `${runtime} --hook ${label} prints nothing on stdout`);
@@ -1412,6 +1412,10 @@ print(json.dumps([
       };
       assert.deepStrictEqual(await hook('reports', { input: hookInput({ session_id: result.conversationId, source: 'resume' }) }),
         [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' }]);
+      // Agent Farm's host-neutral hook (D-403): `"$AGENT_FARM_SESSION_HOOK" session-start`, with the same stdin.
+      assert.deepStrictEqual(await hook('as session-start', { argv: ['session-start'], input: hookInput({ session_id: result.conversationId, source: 'clear' }) }),
+        [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'clear' }]);
+      assert.deepStrictEqual(await hook('as session-start outside Pane', { argv: ['session-start'], env: {}, input: hookInput({ session_id: 'abc' }) }), []);
       assert.deepStrictEqual(await hook('drops an unknown source', { env: { PANE_PANEL_ID: 'panel-1' }, input: hookInput({ session_id: 'abc', source: 'later' }) }),
         [{ panelId: 'panel-1', conversationId: 'abc' }]);
       assert.deepStrictEqual(await hook('outside Pane', { env: {}, input: hookInput({ session_id: 'abc', source: 'startup' }) }), []);
