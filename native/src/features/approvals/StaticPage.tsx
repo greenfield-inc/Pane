@@ -24,7 +24,8 @@ export function StaticPage({ html, testID }: { html: string; testID: string }) {
       setSupportMultipleWindows={false}
       allowFileAccess={false}
       allowsLinkPreview={false}
-      dataDetectorTypes="none"
+      // An array: Android passes this prop to native as it is, and a bare string aborts the app.
+      dataDetectorTypes={['none']}
       cacheEnabled={false}
       style={[styles.fill, { backgroundColor: colors.surface }]}
     />
