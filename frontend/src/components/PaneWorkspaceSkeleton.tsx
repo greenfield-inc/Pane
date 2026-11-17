@@ -9,7 +9,7 @@ const INSPECTOR_TABS = ['Details', 'Files', 'Changes'] as const;
  * it will open at: the tab bar, the active tab's terminal, the Terminal dock
  * and the inspector, or the swapped layout's terminal rail and bottom inspector.
  */
-export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidth, railWidth, bottomInspectorHeight, contentRef, centerRef }: {
+export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidth, railWidth, bottomInspectorHeight, contentRef, centerRef, chain }: {
   /** For screen readers: what is opening. */
   name: string;
   swapped: boolean;
@@ -24,16 +24,18 @@ export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidt
   /** SessionView's measured boxes, which size the dock and inspector as they will open. */
   contentRef: Ref<HTMLDivElement>;
   centerRef: Ref<HTMLDivElement>;
+  /** The Pane's id: every step of opening it shares one skeleton clock. */
+  chain: string;
 }) {
   const stage = (
     <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]">
-      <TerminalSkeleton />
+      <TerminalSkeleton chain={chain} />
     </div>
   );
   return (
     <div data-testid="pane-workspace-skeleton" className="flex flex-1 flex-col overflow-hidden bg-bg-primary">
       <LoadingStatus label={`Opening ${name}`} />
-      <Skeleton className="flex min-h-[39px] flex-shrink-0 items-center border-b border-border-primary bg-bg-chrome pr-2">
+      <Skeleton chain={chain} className="flex min-h-[39px] flex-shrink-0 items-center border-b border-border-primary bg-bg-chrome pr-2">
         <div className="inline-flex h-[38px] min-w-[8rem] items-center gap-2 px-3 text-sm leading-none">
           <span className="inline-flex h-3 w-3 items-center justify-center"><Bone className="h-2 w-2 rounded-full" /></span>
           <Bone className="h-4 w-4" />
@@ -45,25 +47,25 @@ export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidt
         <div ref={centerRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
           {stage}
           {swapped
-            ? bottomInspectorHeight > 0 && <InspectorSkeleton className="border-t" style={{ height: bottomInspectorHeight }} />
-            : dockHeight > 0 && <DockSkeleton height={dockHeight} />}
+            ? bottomInspectorHeight > 0 && <InspectorSkeleton chain={chain} className="border-t" style={{ height: bottomInspectorHeight }} />
+            : dockHeight > 0 && <DockSkeleton height={dockHeight} chain={chain} />}
         </div>
         {swapped
           ? railWidth > 0 && (
             <div className="flex flex-shrink-0 flex-col border-l border-border-primary" style={{ width: railWidth }}>
-              <TerminalHeaderSkeleton />
-              <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]"><TerminalSkeleton /></div>
+              <TerminalHeaderSkeleton chain={chain} />
+              <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]"><TerminalSkeleton chain={chain} /></div>
             </div>
           )
-          : inspectorWidth > 0 && <InspectorSkeleton className="border-l" style={{ width: inspectorWidth }} />}
+          : inspectorWidth > 0 && <InspectorSkeleton chain={chain} className="border-l" style={{ width: inspectorWidth }} />}
       </div>
     </div>
   );
 }
 
-function TerminalHeaderSkeleton() {
+function TerminalHeaderSkeleton({ chain }: { chain: string }) {
   return (
-    <Skeleton className="flex h-8 flex-shrink-0 items-center gap-2 border-b border-border-primary bg-surface-primary px-3 text-[11px] font-medium uppercase leading-none tracking-wider">
+    <Skeleton chain={chain} className="flex h-8 flex-shrink-0 items-center gap-2 border-b border-border-primary bg-surface-primary px-3 text-[11px] font-medium uppercase leading-none tracking-wider">
       <Bone className="h-3.5 w-3.5" />
       <Bone className="h-3.5 w-3.5" />
       <TextBone text="Terminal" />
@@ -71,24 +73,24 @@ function TerminalHeaderSkeleton() {
   );
 }
 
-function DockSkeleton({ height }: { height: number }) {
+function DockSkeleton({ height, chain }: { height: number; chain: string }) {
   return (
     <div className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height }}>
-      <TerminalHeaderSkeleton />
-      {height > 32 && <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]"><TerminalSkeleton /></div>}
+      <TerminalHeaderSkeleton chain={chain} />
+      {height > 32 && <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]"><TerminalSkeleton chain={chain} /></div>}
     </div>
   );
 }
 
-function InspectorSkeleton({ className, style }: { className: string; style: CSSProperties }) {
+function InspectorSkeleton({ className, style, chain }: { className: string; style: CSSProperties; chain: string }) {
   return (
     <div className={`flex flex-shrink-0 flex-col border-border-primary bg-surface-primary ${className}`} style={style}>
-      <Skeleton className="flex h-8 flex-shrink-0 items-stretch border-b border-border-primary bg-surface-secondary px-1 text-[12px] font-medium leading-none">
+      <Skeleton chain={chain} className="flex h-8 flex-shrink-0 items-stretch border-b border-border-primary bg-surface-secondary px-1 text-[12px] font-medium leading-none">
         {INSPECTOR_TABS.map(tab => (
           <span key={tab} className="flex flex-1 items-center justify-center"><TextBone text={tab} /></span>
         ))}
       </Skeleton>
-      <Skeleton className="flex flex-col">
+      <Skeleton chain={chain} className="flex flex-col">
         <div className="flex h-10 items-center gap-2 border-b border-border-primary px-3">
           <Bone className="h-3.5 w-3.5" />
           <Bone className="h-3.5 w-28" />

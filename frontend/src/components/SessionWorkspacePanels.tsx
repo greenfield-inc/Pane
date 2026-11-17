@@ -718,7 +718,7 @@ export function SessionWorkspacePanels({
 
   if (!loaded) {
     return <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
-      {!error ? <SessionWorkspaceSkeleton name={agentPanel.title} tabTitle={agentPanel.title} agentPanelId={agentPanel.id} /> : <div className="p-6 text-text-secondary"><p role="alert">{error}</p>
+      {!error ? <SessionWorkspaceSkeleton name={agentPanel.title} tabTitle={agentPanel.title} agentPanelId={agentPanel.id} chain={sessionId} /> : <div className="p-6 text-text-secondary"><p role="alert">{error}</p>
         <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => { setError(null); setRetry(value => value + 1); }}>Retry</button>
       </div>}
     </div>;
@@ -742,7 +742,7 @@ export function SessionWorkspacePanels({
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden" inert={asideMaximized ? true : undefined}>
           <div ref={stageRef} data-focus-region="main" className="relative min-h-0 flex-1">
             {stageUnderlay && primary?.activePanelId === agentPanelId && <div className="absolute inset-0 bg-[var(--color-terminal-bg)]">
-              <TerminalSkeleton panelId={agentPanelId} />
+              <TerminalSkeleton panelId={agentPanelId} chain={sessionId} />
             </div>}
             {stageNotice}
             {approval && placement === 'over' && overlay && (

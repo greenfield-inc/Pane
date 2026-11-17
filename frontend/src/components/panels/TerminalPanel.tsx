@@ -407,7 +407,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const loadKey = `${panel.id}:${initAttempt}`;
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const revealed = revealedKey === loadKey;
-  const firstLoad = useSkeletonHold(overlayActive && !revealed);
+  const firstLoad = useSkeletonHold(overlayActive && !revealed, panel.sessionId);
   const maskHeld = overlayActive || firstLoad.holding;
   // The terminal fades in over a skeleton the person saw; a fast load just appears.
   const [fadeIn, setFadeIn] = useState(false);
@@ -2229,7 +2229,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           {initError ? <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-text-secondary">
             <p role="alert">Terminal could not load: {initError}</p>
             <button type="button" className="rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => setInitAttempt(attempt => attempt + 1)}>Retry</button>
-          </div> : !revealed && (firstLoad.holding || skeletonSeen) && <TerminalSkeleton panelId={panel.id} />}
+          </div> : !revealed && (firstLoad.holding || skeletonSeen) && <TerminalSkeleton panelId={panel.id} chain={panel.sessionId} />}
         </div>
       )}
 

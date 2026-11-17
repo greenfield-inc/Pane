@@ -12,20 +12,34 @@ export const REVEAL_MS = 200;
 /** A skeleton that replaces another within this gap continues its timing. */
 const CHAIN_GAP_MS = 100;
 
-/**
- * One clock for every skeleton on screen. A loading chain (a Session's record,
- * then its layout, then its terminal) swaps one skeleton for the next; they
- * share the clock, so the delay never restarts and the breathe never jumps.
- */
-const clock = { start: 0, mounted: 0, lastEnd: Number.NEGATIVE_INFINITY };
+/** The chain a skeleton belongs to when its caller names none. */
+const APP_CHAIN = 'app';
 
-function chainStart(now: number): number {
+/**
+ * One clock per loading chain. Opening a Session or Pane swaps one skeleton for
+ * the next (its record, its layout, its terminal); skeletons of one chain, named
+ * by the Pane or Session id, share a clock, so the delay never restarts. A
+ * skeleton elsewhere on screen never shortens another chain's delay.
+ */
+const clocks = new Map<string, { start: number; mounted: number; lastEnd: number }>();
+
+function clockOf(chain: string) {
+  let clock = clocks.get(chain);
+  if (!clock) {
+    clock = { start: 0, mounted: 0, lastEnd: Number.NEGATIVE_INFINITY };
+    clocks.set(chain, clock);
+  }
+  return clock;
+}
+
+function chainStart(chain: string, now: number): number {
+  const clock = clockOf(chain);
   return clock.mounted > 0 || now - clock.lastEnd <= CHAIN_GAP_MS ? clock.start : now;
 }
 
-/** When a skeleton starting now becomes visible (ms, performance clock). */
-function visibleAt(now: number): number {
-  return chainStart(now) + SKELETON_DELAY_MS;
+/** When a skeleton of this chain starting now becomes visible (ms, performance clock). */
+function visibleAt(chain: string, now: number): number {
+  return chainStart(chain, now) + SKELETON_DELAY_MS;
 }
 
 /**
@@ -34,16 +48,19 @@ function visibleAt(now: number): number {
  * after SKELETON_DELAY_MS and breathe in one shared phase (index.css). Bones
  * only: no text, no spinner.
  */
-export function Skeleton({ className, style, children, testId }: {
+export function Skeleton({ className, style, children, testId, chain = APP_CHAIN }: {
   className?: string;
   style?: React.CSSProperties;
   children: React.ReactNode;
   testId?: string;
+  /** The Pane or Session this skeleton opens, so the steps of one opening share a clock. */
+  chain?: string;
 }) {
-  const [shownAt] = useState(() => visibleAt(performance.now()));
+  const [shownAt] = useState(() => visibleAt(chain, performance.now()));
   const [visible, setVisible] = useState(() => performance.now() >= shownAt);
 
   useLayoutEffect(() => {
+    const clock = clockOf(chain);
     const now = performance.now();
     if (clock.mounted === 0 && now - clock.lastEnd > CHAIN_GAP_MS) clock.start = shownAt - SKELETON_DELAY_MS;
     clock.mounted += 1;
@@ -51,7 +68,7 @@ export function Skeleton({ className, style, children, testId }: {
       clock.mounted -= 1;
       clock.lastEnd = performance.now();
     };
-  }, [shownAt]);
+  }, [chain, shownAt]);
 
   useLayoutEffect(() => {
     if (visible) return;
@@ -90,15 +107,15 @@ export function TextBone({ text, className }: { text: string; className?: string
  * released at once. `reveal` is true for REVEAL_MS after a visible skeleton
  * is replaced: give the content `skeleton-reveal` then, for a cross-fade.
  */
-export function useSkeletonHold(loading: boolean): { holding: boolean; reveal: boolean } {
+export function useSkeletonHold(loading: boolean, chain = APP_CHAIN): { holding: boolean; reveal: boolean } {
   const [state, setState] = useState<{ since: number | null; held: boolean; reveal: boolean }>(
-    () => ({ since: loading ? visibleAt(performance.now()) : null, held: false, reveal: false }),
+    () => ({ since: loading ? visibleAt(chain, performance.now()) : null, held: false, reveal: false }),
   );
 
   useLayoutEffect(() => {
     const now = performance.now();
     if (loading) {
-      setState(current => (current.since !== null && !current.held ? current : { since: visibleAt(now), held: false, reveal: false }));
+      setState(current => (current.since !== null && !current.held ? current : { since: visibleAt(chain, now), held: false, reveal: false }));
       return;
     }
     setState(current => {
@@ -106,7 +123,7 @@ export function useSkeletonHold(loading: boolean): { holding: boolean; reveal: b
       if (now < current.since) return { since: null, held: false, reveal: false };
       return { ...current, held: true };
     });
-  }, [loading]);
+  }, [loading, chain]);
 
   useLayoutEffect(() => {
     if (loading || !state.held || state.since === null) return;

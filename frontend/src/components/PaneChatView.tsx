@@ -592,7 +592,7 @@ function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
     <div className="flex h-full min-h-0 flex-col">
       <SessionTileHeader name={name ?? 'Session'} chrome={chrome} />
       {isLoading ? (
-        <SessionWorkspaceSkeleton name={name ?? 'Session'} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]} />
+        <SessionWorkspaceSkeleton name={name ?? 'Session'} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]} chain={record?.internalSessionId} />
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center">
           <div>
@@ -616,7 +616,7 @@ function OpeningSessionSkeleton() {
   const record = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId));
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
-      <SessionWorkspaceSkeleton name={record?.name ?? 'Sessions'} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]} />
+      <SessionWorkspaceSkeleton name={record?.name ?? 'Sessions'} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]} chain={record?.internalSessionId} />
     </div>
   );
 }

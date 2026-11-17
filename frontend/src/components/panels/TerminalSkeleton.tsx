@@ -58,7 +58,11 @@ function measureCell(fontFamily: string, fontSize: number): CellSize {
  * The loading skeleton of a terminal: one bone per line of text, on xterm's
  * own cell grid. A terminal shown before draws the screen it left.
  */
-export function TerminalSkeleton({ panelId }: { panelId?: string }) {
+export function TerminalSkeleton({ panelId, chain }: {
+  panelId?: string;
+  /** The Pane or Session being opened (Skeleton's `chain`). */
+  chain?: string;
+}) {
   const fontFamily = useConfigStore(state => state.config?.terminalFontFamily) || DEFAULT_TERMINAL_FONT_FAMILY;
   const fontSize = useConfigStore(state => state.config?.terminalFontSize) || DEFAULT_TERMINAL_FONT_SIZE;
   const cell = useMemo(() => measureCell(buildTerminalFontFamily(fontFamily), fontSize), [fontFamily, fontSize]);
@@ -66,7 +70,7 @@ export function TerminalSkeleton({ panelId }: { panelId?: string }) {
   const boneHeight = Math.round(cell.height * BONE_HEIGHT_RATIO);
 
   return (
-    <Skeleton testId="terminal-skeleton" className="absolute inset-0"
+    <Skeleton testId="terminal-skeleton" chain={chain} className="absolute inset-0"
       style={{ paddingLeft: SCREEN_LEFT_PX, paddingTop: SCREEN_TOP_PX }}>
       {rows.map(([start, end], row) => (
         <div key={row} className="relative" style={{ height: cell.height }}>

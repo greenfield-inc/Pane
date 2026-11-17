@@ -4243,3 +4243,38 @@ test('F-8: opened cold from the sidebar count, the approval waits for the saved 
   await expect(page.getByTestId('session-approval-overlay')).toBeVisible();
   await expect(page.getByTestId('session-approval-split')).toHaveCount(0);
 });
+
+test('A Session opens behind a skeleton of its workspace that appears only for a slow open', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installSessionsFixture(page, [
+    sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
+    sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
+  ]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+  await page.getByTestId('orchestration-session-alpha').click();
+  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+
+  // Clicking Beta holds its record for 1.5 s; the frame right after the click shows the skeleton's surface with its bones still hidden.
+  const atClick = await page.evaluate(async () => {
+    // SAFETY: installSessionsFixture adds this control before the app loads.
+    const mockWindow = window as typeof window & { __paneTestElectronMock: { setOrchestrationGetDelay: (delayMs: number) => void } };
+    mockWindow.__paneTestElectronMock.setOrchestrationGetDelay(1500);
+    document.querySelector<HTMLElement>('[data-testid="orchestration-session-beta"]')?.click();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const skeleton = document.querySelector('[data-testid="session-workspace-skeleton"]');
+    return {
+      skeleton: Boolean(skeleton),
+      waiting: skeleton?.querySelectorAll('[data-skeleton="waiting"]').length ?? 0,
+      visible: skeleton?.querySelectorAll('[data-skeleton="visible"]').length ?? 0,
+    };
+  });
+  expect(atClick).toEqual({ skeleton: true, waiting: 3, visible: 0 });
+
+  const skeleton = page.getByTestId('session-workspace-skeleton');
+  await expect(skeleton.locator('[data-skeleton="visible"]')).toHaveCount(3);
+  await expect(page.getByRole('status', { name: 'Opening Beta' })).toBeAttached();
+  await expect(page.getByText('Opening Beta…')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(skeleton).toHaveCount(0);
+});

@@ -198,7 +198,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
       resetKeys={[panel.id]} // Only reset when panel changes
     >
       <Suspense fallback={panel.type === 'terminal'
-        ? <div className="relative h-full w-full bg-[var(--color-terminal-bg)]"><TerminalSkeleton panelId={panel.id} /></div>
+        ? <div className="relative h-full w-full bg-[var(--color-terminal-bg)]"><TerminalSkeleton panelId={panel.id} chain={panel.sessionId} /></div>
         : <PanelLoadingFallback panelType={panel.type} />}>
         {panelComponent}
       </Suspense>
