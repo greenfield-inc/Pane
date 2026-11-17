@@ -37,6 +37,7 @@ import {
   mergeAllGroups,
   placePanelInSplit,
   showPanelInSplit,
+  placeLeadingSideTab,
 } from './panelLayout';
 
 // ---------------------------------------------------------------------------
@@ -414,6 +415,37 @@ describe('placePanelInSplit', () => {
 
   it('fills an empty layout without leaving an empty group', () => {
     expect(placePanelInSplit(group('g1', []), 'page')).toMatchObject({ type: 'group', panelIds: ['page'] });
+  });
+});
+
+describe('placeLeadingSideTab', () => {
+  it('opens a split to the right of a lone conversation, with the tab shown', () => {
+    const root = requireSplit(placeLeadingSideTab(group('g1', ['agent']), 'overview'));
+    expect(root.direction).toBe('row');
+    expect(allGroups(root).map(g => [g.panelIds, g.activePanelId])).toEqual([[['agent'], 'agent'], [['overview'], 'overview']]);
+  });
+
+  it('goes first in the right split, keeping the tab already selected there', () => {
+    const root = placeLeadingSideTab(split('s1', 'row', [group('g1', ['agent']), group('g2', ['plan', 'report'], 'report')]), 'overview');
+    expect(findGroup(root, 'g1')?.panelIds).toEqual(['agent']);
+    expect(findGroup(root, 'g2')).toMatchObject({ panelIds: ['overview', 'plan', 'report'], activePanelId: 'report' });
+  });
+
+  it('goes into the top group of a right split that is itself split', () => {
+    const root = placeLeadingSideTab(split('s1', 'row', [group('g1', ['agent']), split('s2', 'column', [group('g2', ['plan']), group('g3', ['notes'])])]), 'overview');
+    expect(findGroup(root, 'g2')?.panelIds).toEqual(['overview', 'plan']);
+    expect(findGroup(root, 'g3')?.panelIds).toEqual(['notes']);
+  });
+
+  it('opens a right split beside the conversation when the layout is only split top and bottom', () => {
+    const root = placeLeadingSideTab(split('s1', 'column', [group('g1', ['agent']), group('g2', ['plan'])]), 'overview');
+    expect(findGroupContainingPanel(root, 'overview')?.panelIds).toEqual(['overview']);
+    expect(findGroup(root, 'g2')?.panelIds).toEqual(['plan']);
+  });
+
+  it('leaves the tab where the person put it', () => {
+    const root = group('g1', ['agent', 'overview']);
+    expect(placeLeadingSideTab(root, 'overview')).toBe(root);
   });
 });
 

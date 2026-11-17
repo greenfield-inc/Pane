@@ -227,6 +227,24 @@ export function placePanelInSplit(root: PanelLayoutNode, panelId: string, activa
 }
 
 /**
+ * Put a tab first in the right split (the top group of the last column of a side-by-side
+ * root), keeping the tab selected there; with no right split, open one beside the primary
+ * group showing it. A tab already in the layout stays where the person put it.
+ */
+export function placeLeadingSideTab(root: PanelLayoutNode, panelId: string): PanelLayoutNode {
+  if (allPanelIds(root).includes(panelId)) return root;
+  const right = root.type === 'split' && root.direction === 'row' ? root.children.at(-1) : undefined;
+  const side = right ? allGroups(right)[0] : undefined;
+  if (!side) return splitGroup(root, primaryGroup(root).id, panelId, 'row', true);
+  const insert = (node: PanelLayoutNode): PanelLayoutNode => {
+    if (node.type !== 'group') return { ...node, children: node.children.map(insert) };
+    if (node.id !== side.id) return node;
+    return { ...node, panelIds: [panelId, ...node.panelIds], activePanelId: node.activePanelId ?? panelId };
+  };
+  return insert(root);
+}
+
+/**
  * Show a panel beside the primary group for an agent's split request. Unlike
  * placePanelInSplit, a tab already in the primary group moves out to the side
  * group (shown there), unless it is that group's only tab. A tab already in a

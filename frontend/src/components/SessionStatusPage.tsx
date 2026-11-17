@@ -8,7 +8,7 @@ function samePage(a: string, b: string): boolean {
 
 /**
  * The status page in the Overview tab. pane:// links work because it loads as a local file
- * (main routes them); any other link opens beside chat, so the sidebar keeps the page.
+ * (main routes them); any other link opens as a browser tab beside chat, so the Overview keeps the page.
  * Its first load stays behind a mask; the page's own 60-second reloads repaint in place.
  */
 export function SessionStatusPage({ url, folderSessionId }: { url: string; folderSessionId: string }) {
