@@ -24,7 +24,8 @@ import type {
 import type { Project } from '../../types/project';
 import type { SessionWorkerSource } from '../../components/chatTab/sessionWorkers';
 import { watchHostSessionChanges } from './hostSessionChanges';
-import { savedFilePath } from '../../components/chatTab/chatAttachments';
+import { uploadFileToHost } from '../../utils/hostUpload';
+import type { UploadProgress } from '../../../../shared/chunkedUpload';
 import type { CreateSessionRequest, Session } from '../../types/session';
 import type { HostTerminalSnapshot } from '../../../../shared/remoteClient/terminalSnapshot';
 import { RemoteDaemonBrowserClient, type RemoteBrowserConnectionState } from './remoteDaemonBrowserClient';
@@ -328,9 +329,9 @@ export class RemoteRuntimeAdapter {
     return (await this.invokeFileCommand<{ files: RemoteFileEntry[] }>('file:list', [{ sessionId, path }])).files;
   }
 
-  /** Copies a file dropped or pasted into a chat to the Pane's machine, as the terminal's upload does (D-139). */
-  async saveFile(sessionId: string, file: { name: string; dataUrl: string }): Promise<string> {
-    return savedFilePath(await this.invoke('terminal:paste-file', [sessionId, file.dataUrl, file.name, { keepName: true }]));
+  /** Copies a file dropped or pasted into a chat to the Pane's machine in resumable chunks, as the terminal's upload does (D-139). */
+  saveFile(sessionId: string, file: File, onProgress: (progress: UploadProgress) => void): Promise<string> {
+    return uploadFileToHost({ invoke: (channel, args) => this.invoke(channel, args), file, sessionId, keepName: true, onProgress });
   }
 
   /** The branch's changes, read-only, as the phone's Diff tab reads them. */

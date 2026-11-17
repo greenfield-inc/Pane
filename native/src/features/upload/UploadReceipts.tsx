@@ -1,5 +1,7 @@
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 
+import { formatTimeLeft, formatUploadBytes } from '@shared/chunkedUpload';
+
 import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
@@ -29,7 +31,8 @@ function Receipt({ receipt, onCancel, onRetry }: { receipt: UploadReceipt; onCan
   const percent = receipt.totalBytes > 0 ? Math.floor((receipt.receivedBytes / receipt.totalBytes) * 100) : 0;
   const detail = {
     queued: 'waiting',
-    uploading: `uploading ${percent}% · ${formatBytes(receipt.receivedBytes)} of ${formatBytes(receipt.totalBytes)}`,
+    uploading: [`${percent}%`, `${formatUploadBytes(receipt.receivedBytes)} of ${formatUploadBytes(receipt.totalBytes)}`, formatTimeLeft(receipt.secondsLeft)]
+      .filter(Boolean).join(' · '),
     retrying: receipt.paused ? `Paused, retrying · ${percent}%` : `Reconnecting · ${percent}%`,
     failed: receipt.error ?? 'Upload failed',
     done: `on ${profile.label}`,
@@ -57,7 +60,7 @@ function Receipt({ receipt, onCancel, onRetry }: { receipt: UploadReceipt; onCan
         {receipt.state === 'done' ? (
           <Text variant="footnote" tone="muted">Path inserted at the cursor</Text>
         ) : (
-          <Text variant="footnote" tone={receipt.state === 'failed' ? 'danger' : 'muted'} numberOfLines={2}>{detail}</Text>
+          <Text variant="footnote" tone={receipt.state === 'failed' ? 'danger' : 'muted'} numberOfLines={receipt.state === 'failed' ? 2 : 1}>{detail}</Text>
         )}
         {receipt.state === 'uploading' || receipt.state === 'retrying' ? (
           <View style={[styles.track, { backgroundColor: colors.surfacePressed }]}>
@@ -93,11 +96,6 @@ function Receipt({ receipt, onCancel, onRetry }: { receipt: UploadReceipt; onCan
       )}
     </View>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 const styles = StyleSheet.create({

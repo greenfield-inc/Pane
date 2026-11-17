@@ -138,7 +138,7 @@ Each of these is a small thing. Together they compound fast.
 | **Auto Secrets Copy** | Every pane automatically mirrors `.env` files and secrets from your root project so your worktree is runnable the moment it's created. | |
 | **Isolated Ports** | Each pane runs on its own port range automatically, so you can spin up five dev servers in parallel without a single conflict. | |
 | **Terminal Rendering Patches** | Claude Code's scroll-jump bug (long conversations snapping to top when you scroll up) is fixed here, even though it's still broken in Claude Code itself. | |
-| **Drag and Drop** | Drop any file up to 50MB into a terminal and it lands exactly where you need it. | |
+| **Drag and Drop** | Drop a file of any size into a terminal and it lands exactly where you need it, with progress while it copies. | |
 
 ---
 

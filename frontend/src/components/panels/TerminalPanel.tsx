@@ -54,6 +54,8 @@ import { TerminalInterceptor } from '../../services/terminalInterceptor/Terminal
 import { createAtTerminalHandler } from '../../services/terminalInterceptor/handlers/atTerminalHandler';
 import { InterceptorDropdown } from '../terminal/InterceptorDropdown';
 import { InterceptorToast } from '../terminal/InterceptorToast';
+import { HostUploadList } from '../terminal/HostUploadList';
+import { useHostUploads } from '../../hooks/useHostUploads';
 import { usePanelStore } from '../../stores/panelStore';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
@@ -158,7 +160,6 @@ const terminalPasteImageResultSchema = boundary.object({
   filePath: boundary.string,
   imageNumber: boundary.number,
 });
-const terminalPasteFileResultSchema = boundary.object({ filePath: boundary.string });
 
 const TERMINAL_VISIBILITY_VIEWER_ID = getTerminalVisibilityViewerId();
 
@@ -288,6 +289,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const capabilitiesRef = useRef<LoadedTerminalCapabilities | null>(null);
   const isActiveRef = useRef(isActive);
   const pasteFilesRef = useRef<((files: File[]) => void) | null>(null);
+  const hostUploads = useHostUploads();
+  const uploadToHostRef = useRef(hostUploads.upload);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const isNearBottomRef = useRef(true); // Track if user is scrolled near the bottom
   const [showScrollDown, setShowScrollDown] = useState(false); // Show jump-to-bottom pill
@@ -1512,37 +1515,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
                   const file = items[i].getAsFile();
                   if (!file) return;
 
-                  if (file.size > 50 * 1024 * 1024) {
-                    const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-                    if (terminal && !disposed) {
-                      terminal.paste(`[Image paste failed] File too large (${sizeMB} MB), max 50 MB\n`);
-                    }
-                    return;
-                  }
-
-                  const reader = new FileReader();
-                  reader.onload = async (ev) => {
-                    if (disposed || !terminal) return;
-                    // SAFETY: readAsDataURL completes with a string result before onload fires.
-                    const dataUrl = ev.target?.result as string;
-                    if (!dataUrl) return;
-
-                    try {
-                      const result = decodeOptionalBoundary(await window.electronAPI.invoke(
-                        'terminal:paste-image',
-                        panel.id,
-                        terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
-                        dataUrl,
-                        file.type
-                      ), terminalPasteImageResultSchema);
-                      if (result?.filePath && !disposed && terminal) {
-                        terminal.paste(`${result.filePath}\n`);
-                      }
-                    } catch (err) {
-                      console.error('[TerminalPanel] Failed to paste image:', err);
-                    }
-                  };
-                  reader.readAsDataURL(file);
+                  // Same chunked copy as a dropped file: no size limit beyond the host's free space.
+                  pasteFilesRef.current?.([file]);
                   return;
                 }
               }
@@ -1611,45 +1585,14 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             if (!files.length || disposed || !terminal) return;
             (async () => {
               for (const file of files) {
-                if (file.size > 50 * 1024 * 1024) {
-                  const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-                  if (!disposed && terminal) {
-                    terminal.paste(`[Upload failed] File too large (${sizeMB} MB), max 50 MB\n`);
-                  }
-                  continue;
-                }
-                const dataUrl = await new Promise<string | null>((resolve) => {
-                  const reader = new FileReader();
-                  reader.onload = (ev) => {
-                    // SAFETY: readAsDataURL completes with a string result before onload fires.
-                    resolve(ev.target?.result as string ?? null);
-                  };
-                  reader.onerror = () => resolve(null);
-                  reader.readAsDataURL(file);
-                });
-                if (!dataUrl || disposed || !terminal) continue;
+                if (disposed || !terminal) return;
                 try {
-                  const isImage = file.type.startsWith('image/');
-                  let resolvedPath: string | null = null;
-
-                  if (isImage) {
-                    const result = decodeOptionalBoundary(await window.electronAPI.invoke(
-                      'terminal:paste-image',
-                      panel.id,
-                      terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
-                      dataUrl,
-                      file.type
-                    ), terminalPasteImageResultSchema);
-                    resolvedPath = result?.filePath ?? null;
-                  } else {
-                    const result = decodeOptionalBoundary(await window.electronAPI.invoke(
-                      'terminal:paste-file',
-                      terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
-                      dataUrl,
-                      file.name
-                    ), terminalPasteFileResultSchema);
-                    resolvedPath = result?.filePath ?? null;
-                  }
+                  // In resumable chunks, with progress over the terminal: any size the host has room for.
+                  const resolvedPath = await uploadToHostRef.current({
+                    invoke: (channel, args) => window.electronAPI.invoke(channel, ...args),
+                    file,
+                    sessionId: terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
+                  });
 
                   if (resolvedPath && !disposed && terminal) {
                     // See paste-handler comment above: paste the raw path, Claude's
@@ -2366,6 +2309,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           position={getDropdownPosition()}
         />
       )}
+      <HostUploadList items={hostUploads.items} onCancel={hostUploads.cancel} />
       {toastMessage && (
         <InterceptorToast
           visible={!!toastMessage}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { invokeChannel, useDaemon } from '@/daemon';
 
-import { ChunkedUploadUnsupportedError, uploadInChunks, UploadRefusedError } from './chunkedUpload';
+import { ChunkedUploadUnsupportedError, uploadInChunks, UploadRefusedError } from '@shared/chunkedUpload';
 import { pickFiles, type AttachSource, type PickedFile } from './pickFiles';
 
 /** After this long without the host confirming new bytes, the receipt reads "Paused, retrying". */
@@ -21,6 +21,8 @@ export interface UploadReceipt {
   isImage: boolean;
   totalBytes: number;
   receivedBytes: number;
+  /** Seconds until done at the recent speed, when known. */
+  secondsLeft: number | null;
   state: ReceiptState;
   /** Retrying for more than five minutes without progress. */
   paused: boolean;
@@ -83,6 +85,7 @@ export function useUploads(sessionId: string, onUploaded: (path: string) => void
           }),
           onProgress: progress => update(id, {
             receivedBytes: progress.receivedBytes,
+            secondsLeft: progress.secondsLeft,
             state: progress.retrying ? 'retrying' : 'uploading',
             paused: progress.retrying && Date.now() - progress.lastProgressAt >= PAUSED_AFTER_MS,
           }),
@@ -136,6 +139,7 @@ export function useUploads(sessionId: string, onUploaded: (path: string) => void
         isImage: file.isImage,
         totalBytes: file.size,
         receivedBytes: 0,
+        secondsLeft: null,
         state: 'queued',
         paused: false,
         error: null,

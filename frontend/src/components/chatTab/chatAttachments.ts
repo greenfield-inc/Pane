@@ -1,41 +1,32 @@
 import type { AttachmentAdapter, CompleteAttachment, PendingAttachment } from '@assistant-ui/react';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
+import type { UploadProgress } from '../../../../shared/chunkedUpload';
 
 /** Image types an agent takes as image content (ACP image blocks). */
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-/** The largest image sent as image content. */
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 /**
- * The largest file copied to the chat's machine. A remote host takes requests up to
- * 16 MiB, and a file travels as a data URL (a third larger), so 10 MB fits everywhere.
+ * The largest image sent as image content: the provider's own rule. Anthropic's API refuses an
+ * image over 5 MB, and an image block goes to the model inline, so a larger image is copied to
+ * the chat's machine as a file instead, and the agent reads it from there.
  */
-export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-/** Copies a file to the chat's machine (as the terminal's upload does) and returns its path there. */
-export type SaveChatFile = (file: { name: string; dataUrl: string }) => Promise<string>;
-
-const savedFileSchema = boundary.object({ filePath: boundary.nonEmptyString });
-
-/** The path `terminal:paste-file` reports for a copied file. */
-// oxlint-disable-next-line anti-slop/no-unknown-parameters -- decodes the host's reply at the IPC boundary.
-export function savedFilePath(reply: unknown): string {
-  return decodeBoundary(reply, savedFileSchema).filePath;
-}
+/** Copies a file of any size to the chat's machine (as the terminal's upload does) and returns its path there. */
+export type SaveChatFile = (file: File, onProgress: (progress: UploadProgress) => void) => Promise<string>;
 
 export interface ChatAttachmentOptions {
   /** The agent takes images as image content. */
   images: boolean;
   /** Copies other files to the chat's machine; without it only images can be attached. */
   saveFile?: SaveChatFile;
-  /** Told when a file starts or finishes copying, so the composer can wait for it. */
-  onCopying?: (delta: 1 | -1) => void;
+  /** Told how a file's copy is going, by attachment id, and null once it is done or failed, so the composer can show it and wait for it. */
+  onProgress?: (id: string, progress: UploadProgress | null) => void;
   readDataUrl?: (file: File) => Promise<string>;
 }
 
 const megabytes = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
 
-/** The file as a data URL, read in 32 KiB slices so a 10 MB file never builds one huge argument list. */
+/** An image as a data URL, read in 32 KiB slices so it never builds one huge argument list. */
 async function readDataUrl(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = '';
@@ -72,17 +63,16 @@ export class ChatAttachmentAdapter implements AttachmentAdapter {
       if (image) throw new Error(`${file.name} was not attached: it is larger than ${megabytes(MAX_IMAGE_BYTES)}, the most a chat sends as an image.`);
       throw new Error(`${file.name} was not attached: this chat takes PNG, JPEG, WebP or GIF images here, and can't copy other files.`);
     }
-    if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name} was not attached: it is larger than ${megabytes(MAX_FILE_BYTES)}, the most a chat copies to its machine.`);
     const pending: PendingAttachment = { id, type: 'file', name: file.name, contentType: file.type, file, status: { type: 'running', reason: 'uploading', progress: 0 } };
     yield pending;
-    this.options.onCopying?.(1);
+    this.options.onProgress?.(id, { receivedBytes: 0, totalBytes: file.size, retrying: false, lastProgressAt: Date.now(), secondsLeft: null });
     try {
-      const path = await saveFile({ name: file.name, dataUrl: await (this.options.readDataUrl ?? readDataUrl)(file) });
+      const path = await saveFile(file, progress => this.options.onProgress?.(id, progress));
       yield { ...pending, content: [{ type: 'text', text: path }], status: { type: 'requires-action', reason: 'composer-send' } };
     } catch (error) {
       throw new Error(`${file.name} was not attached: it could not be copied to the chat's machine (${ipcErrorMessage(error, 'Pane did not say why')}).`);
     } finally {
-      this.options.onCopying?.(-1);
+      this.options.onProgress?.(id, null);
     }
   }
 

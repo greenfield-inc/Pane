@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { ChunkedUploadUnsupportedError, uploadInChunks, UploadRefusedError, type UploadFile, type UploadProgress } from './chunkedUpload';
+import { ChunkedUploadUnsupportedError, formatTimeLeft, uploadInChunks, UploadRefusedError, type UploadFile, type UploadProgress } from '@shared/chunkedUpload';
+import type { JsonValue } from '@shared/validation/boundaryDecoder';
 
 const text = 'hello wonderful world';
 const toBase64 = (value: string) => Buffer.from(value).toString('base64');
@@ -21,14 +22,15 @@ function memoryFile(content: string): UploadFile {
  * byte count. `failures` makes chosen calls fail like a dropped connection,
  * either before the host sees them or after it applied them (a lost reply).
  */
-function fakeHost(failures: Record<number, 'before' | 'after'> = {}, refuse?: string) {
+function fakeHost(failures: Record<number, 'before' | 'after'> = {}, refuse?: string, onCall?: (channel: string, args: unknown[]) => void) {
   let received = '';
   let started = false;
   const calls: string[] = [];
   const invoke = async (channel: string, args: unknown[]) => {
     const index = calls.push(channel) - 1;
+    onCall?.(channel, args);
     if (failures[index] === 'before') throw new Error('Network request failed');
-    const reply = (() => {
+    const reply = ((): JsonValue | undefined => {
       switch (channel) {
         case 'terminal:upload-start':
           if (refuse) throw new Error(refuse);
@@ -56,15 +58,29 @@ function fakeHost(failures: Record<number, 'before' | 'after'> = {}, refuse?: st
 }
 
 const noWait = async () => undefined;
+/** A clock where each chunk takes `msPerChunk(bytes)`: the host's link speed. */
+function slowLink(msPerChunk: (bytes: number) => number) {
+  let time = 0;
+  const sizes: number[] = [];
+  const onCall = (channel: string, args: unknown[]) => {
+    if (channel !== 'terminal:upload-chunk') return;
+    const bytes = Buffer.from(String(args[2]), 'base64').length;
+    sizes.push(bytes);
+    time += msPerChunk(bytes);
+  };
+  return { now: () => time, onCall, sizes };
+}
 
 describe('uploadInChunks', () => {
   it('sends the file in chunks and returns the host path', async () => {
-    const host = fakeHost();
     const progress: UploadProgress[] = [];
 
+    // Each chunk takes 1.5 s, close to the 2 s aim, so chunks keep their size.
+    const link = slowLink(() => 1500);
+    const host = fakeHost({}, undefined, link.onCall);
     const path = await uploadInChunks({
       invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1',
-      chunkBytes: 8, wait: noWait, onProgress: update => progress.push(update),
+      chunkBytes: 8, wait: noWait, now: link.now, onProgress: update => progress.push(update),
     });
 
     expect(path).toBe('/host/.pane/files/21-bytes.txt');
@@ -91,7 +107,7 @@ describe('uploadInChunks', () => {
     const progress: UploadProgress[] = [];
 
     await uploadInChunks({
-      invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', chunkBytes: 8,
+      invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', chunkBytes: 8, now: slowLink(() => 1500).now,
       wait: async ms => { waits.push(ms); },
       onProgress: update => progress.push(update),
     });
@@ -129,13 +145,74 @@ describe('uploadInChunks', () => {
     expect(host.calls).toEqual(['terminal:upload-start']);
   });
 
-  it('refuses a file over 50 MB before contacting the host', async () => {
-    const host = fakeHost();
-    const big = { ...memoryFile(text), size: 60 * 1024 * 1024 };
+  it('grows chunks on a fast link and shrinks them on a slow one', async () => {
+    const content = 'x'.repeat(1000);
+    // 50 ms per chunk until 300 bytes are in, then 10 s per chunk.
+    let sent = 0;
+    const link = slowLink(bytes => { sent += bytes; return sent <= 300 ? 50 : 10_000; });
+    const host = fakeHost({}, undefined, link.onCall);
 
-    await expect(uploadInChunks({ invoke: host.invoke, file: big, sessionId: 's1', uploadId: 'upload-1', wait: noWait }))
-      .rejects.toThrow('File too large (60 MB, max 50 MB)');
-    expect(host.calls).toEqual([]);
+    await uploadInChunks({ invoke: host.invoke, file: memoryFile(content), sessionId: 's1', uploadId: 'upload-1', chunkBytes: 20, now: link.now, wait: noWait });
+
+    expect(host.received()).toBe(content);
+    expect(link.sizes.slice(0, 5)).toEqual([20, 40, 80, 160, 320]);
+    // Halved after each slow chunk, never below 64 KiB: the slow tail sends the rest at once.
+    expect(link.sizes.slice(5)).toEqual([380]);
+  });
+
+  it('estimates the time left from the recent speed', async () => {
+    const content = 'x'.repeat(100);
+    // 10 bytes a second.
+    const link = slowLink(bytes => bytes * 100);
+    const host = fakeHost({}, undefined, link.onCall);
+    const progress: UploadProgress[] = [];
+
+    await uploadInChunks({
+      invoke: host.invoke, file: memoryFile(content), sessionId: 's1', uploadId: 'upload-1', chunkBytes: 10, now: link.now, wait: noWait,
+      onProgress: update => progress.push(update),
+    });
+
+    const at30 = progress.find(update => update.receivedBytes === 30);
+    expect(at30?.secondsLeft).toBe(7);
+    expect(progress[0]?.secondsLeft).toBeNull();
+  });
+
+  it('asks the host to keep the file name when told to', async () => {
+    const starts: unknown[] = [];
+    const host = fakeHost({}, undefined, (channel, args) => { if (channel === 'terminal:upload-start') starts.push(args[0]); });
+
+    await uploadInChunks({ invoke: host.invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', keepName: true, wait: noWait });
+
+    expect(starts).toEqual([expect.objectContaining({ fileName: 'note.txt', keepName: true })]);
+  });
+
+  it('shows a hanging request as reconnecting, then carries on when it answers', async () => {
+    vi.useFakeTimers();
+    try {
+      const host = fakeHost();
+      let release: () => void = () => undefined;
+      let chunks = 0;
+      // The second chunk hangs, as a request does when the link drops without the client noticing.
+      const invoke = async (channel: string, args: unknown[]) => {
+        if (channel === 'terminal:upload-chunk' && ++chunks === 2) await new Promise<void>(resolve => { release = resolve; });
+        return host.invoke(channel, args);
+      };
+      const progress: UploadProgress[] = [];
+      const run = uploadInChunks({ invoke, file: memoryFile(text), sessionId: 's1', uploadId: 'upload-1', chunkBytes: 8, wait: noWait, onProgress: update => progress.push(update) });
+
+      // The first chunk took no time, so 10 s without an answer is a stall.
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(progress.at(-1)?.retrying).toBe(false);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(progress.at(-1)).toMatchObject({ retrying: true, secondsLeft: null, receivedBytes: 8 });
+
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await run).toBe('/host/.pane/files/21-bytes.txt');
+      expect(progress.at(-1)?.retrying).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('tells the host to discard the upload when cancelled', async () => {
@@ -151,5 +228,15 @@ describe('uploadInChunks', () => {
     await expect(run).rejects.toThrow('Upload cancelled');
     expect(host.calls.at(-1)).toBe('terminal:upload-cancel');
     expect(host.calls).not.toContain('terminal:upload-commit');
+  });
+});
+
+describe('formatTimeLeft', () => {
+  it('says nothing for an upload about to finish, then minutes, then hours', () => {
+    expect(formatTimeLeft(null)).toBeNull();
+    expect(formatTimeLeft(4)).toBeNull();
+    expect(formatTimeLeft(45)).toBe('less than a minute left');
+    expect(formatTimeLeft(190)).toBe('about 3 min left');
+    expect(formatTimeLeft(4800)).toBe('about 1 h 20 min left');
   });
 });

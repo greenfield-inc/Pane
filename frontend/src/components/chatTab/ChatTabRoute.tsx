@@ -11,7 +11,8 @@ import { showActionError } from '../../stores/errorStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useSessionWorkers } from './sessionWorkers';
 import { DESKTOP_WORKERS, openWorkerTab } from './desktopSessionWorkers';
-import { savedFilePath } from './chatAttachments';
+import type { SaveChatFile } from './chatAttachments';
+import { uploadFileToHost } from '../../utils/hostUpload';
 import type { ChatTurnActions } from './ChatTurns';
 import { SessionApprovalCards } from '../approvals/SessionApprovalCards';
 import ChatTabPanel from './ChatTabPanel';
@@ -36,8 +37,9 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   const state = panel.state.customState as ChatPanelState | undefined;
   const workers = useSessionWorkers(DESKTOP_WORKERS, state?.orchestrationSessionId);
   // Dropped and pasted files land in the Pane's folder on its machine, local or remote, as the terminal's do.
-  const saveFile = useMemo(() => async (file: { name: string; dataUrl: string }) =>
-    savedFilePath(await window.electronAPI.invoke('terminal:paste-file', panel.sessionId, file.dataUrl, file.name, { keepName: true })), [panel.sessionId]);
+  const saveFile = useMemo<SaveChatFile>(() => (file, onProgress) => uploadFileToHost({
+    invoke: (channel, args) => window.electronAPI.invoke(channel, ...args), file, sessionId: panel.sessionId, keepName: true, onProgress,
+  }), [panel.sessionId]);
   // Stable, so a re-render here does not re-render every turn of the chat.
   const cwd = state?.cwd;
   // The Pane's device tabs, so device cards follow their device's state; other tabs' changes keep `actions` as it is.
