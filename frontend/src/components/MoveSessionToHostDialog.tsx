@@ -42,8 +42,9 @@ function hostOf(machineId: string | null, config: Pick<RemoteDaemonConfig, 'clie
   return machineId === null ? sessionHostFor(config) : sessionHostForMachine(config, machineId);
 }
 
+/** The error's message without its closing period, for a sentence that goes on or adds its own. */
 function messageOf(cause: unknown, fallback: string): string {
-  return cause instanceof Error && cause.message ? cause.message : fallback;
+  return (cause instanceof Error && cause.message ? cause.message : fallback).replace(/\.+$/, '');
 }
 
 /**
@@ -193,7 +194,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
         }
         setTargets(moveTargets({ machines: machines.data, sessionHost: host, thisComputer }));
       } catch (cause) {
-        if (!cancelled) setError(messageOf(cause, 'Could not list your machines.'));
+        if (!cancelled) setError(`${messageOf(cause, 'Could not list your machines')}.`);
       }
     })();
     return () => { cancelled = true; };
@@ -510,7 +511,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
         setBusy(true); setError(null);
         void submitToAgent(moving, session.panelIds[session.agent], moveToHostPrompt(session.agent, destination.name))
           .then(() => { onClose(); onMoved(session.id); })
-          .catch(failure => setError(messageOf(failure, 'Could not send the handoff request.')))
+          .catch(failure => setError(`${messageOf(failure, 'Could not send the handoff request')}.`))
           .finally(() => setBusy(false));
       }}>
         <ModalHeader title={title} />
