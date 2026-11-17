@@ -1689,7 +1689,7 @@ def install_or_update(parsed: ParsedArgs, telemetry_context: Optional[WrapperTel
             context["failure_category"] = categorize_failure(error)
             raise
 
-    print(f"Pane {installed.install_kind}: {installed.executable_path}")
+    print(f"Pane {'found' if installed.install_kind == 'existing' else 'installed'}: {installed.executable_path}")
     return 0
 
 
