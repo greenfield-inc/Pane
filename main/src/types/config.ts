@@ -59,6 +59,8 @@ export interface AnalyticsIdentity {
 type HtmlFileOpenMode = 'preview' | 'source';
 
 export interface AppConfig {
+  /** Profiles (docs/PROFILES.md): the bundled profiles that are on, by name. Absent: greenfield only. */
+  profiles?: { enabled?: string[] };
   // Chat tabs (Claude and Codex over ACP, no terminal). On for a fresh install; see ConfigManager.
   chatTabsEnabled?: boolean;
   /** Settings > Devices (docs/DEVICES.md). */
