@@ -114,22 +114,24 @@ export interface SkeletonHold {
   holding: boolean;
   /** Give the content `skeleton-reveal` now. */
   reveal: boolean;
+  /** This load showed its skeleton; stays true until the next load starts. */
+  seen: boolean;
 }
 
 export function useSkeletonHold(loading: boolean, chain = APP_CHAIN): SkeletonHold {
-  const [state, setState] = useState<{ since: number | null; held: boolean; reveal: boolean }>(
-    () => ({ since: loading ? visibleAt(chain, performance.now()) : null, held: false, reveal: false }),
+  const [state, setState] = useState<{ since: number | null; held: boolean; reveal: boolean; seen: boolean }>(
+    () => ({ since: loading ? visibleAt(chain, performance.now()) : null, held: false, reveal: false, seen: false }),
   );
 
   useLayoutEffect(() => {
     const now = performance.now();
     if (loading) {
-      setState(current => (current.since !== null && !current.held ? current : { since: visibleAt(chain, now), held: false, reveal: false }));
+      setState(current => (current.since !== null && !current.held ? current : { since: visibleAt(chain, now), held: false, reveal: false, seen: false }));
       return;
     }
     setState(current => {
       if (current.since === null) return current.reveal ? { ...current, reveal: false } : current;
-      if (now < current.since) return { since: null, held: false, reveal: false };
+      if (now < current.since) return { since: null, held: false, reveal: false, seen: false };
       return { ...current, held: true };
     });
   }, [loading, chain]);
@@ -137,7 +139,7 @@ export function useSkeletonHold(loading: boolean, chain = APP_CHAIN): SkeletonHo
   useLayoutEffect(() => {
     if (loading || !state.held || state.since === null) return;
     const remaining = state.since + SKELETON_MIN_VISIBLE_MS - performance.now();
-    const release = () => setState({ since: null, held: false, reveal: true });
+    const release = () => setState({ since: null, held: false, reveal: true, seen: true });
     if (remaining <= 0) { release(); return; }
     const timer = setTimeout(release, remaining);
     return () => clearTimeout(timer);
@@ -150,7 +152,7 @@ export function useSkeletonHold(loading: boolean, chain = APP_CHAIN): SkeletonHo
     return () => clearTimeout(timer);
   }, [state.reveal]);
 
-  return { holding: loading || state.held, reveal: state.reveal };
+  return { holding: loading || state.held, reveal: state.reveal, seen: state.seen };
 }
 
 /** What a skeleton stands for, said to screen readers only: skeletons show no text. */

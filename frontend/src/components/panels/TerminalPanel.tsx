@@ -411,12 +411,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const maskHeld = overlayActive || firstLoad.holding;
   // The terminal fades in over a skeleton the person saw; a fast load just appears.
   const [fadeIn, setFadeIn] = useState(false);
-  // Latched for this load: the skeleton stays up until the mask lifts.
-  const [skeletonSeenKey, setSkeletonSeenKey] = useState<string | null>(null);
-  useEffect(() => {
-    if (firstLoad.reveal) setSkeletonSeenKey(loadKey);
-  }, [firstLoad.reveal, loadKey]);
-  const skeletonSeen = firstLoad.reveal || skeletonSeenKey === loadKey;
+  // A skeleton the person saw stays up until the mask lifts.
+  const skeletonSeen = firstLoad.seen;
   useEffect(() => {
     if (!fadeIn) return;
     const timer = setTimeout(() => setFadeIn(false), REVEAL_MS);
