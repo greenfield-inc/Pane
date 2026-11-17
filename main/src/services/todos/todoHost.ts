@@ -68,6 +68,8 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
         openingPrompt: atLaunch ? `${PANE_ONE_TIME_PROMPT_OPENING}, to start a to-do. ${input.openingPrompt}` : undefined,
       });
       if (view.panel.type === 'terminal') await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
+      // A hidden Session's chat tab starts only when something resumes it (as Loops do); its opening prompt then goes in.
+      else await commandRegistry.invoke('runpane:panels:resume', [{ panelId: view.panel.id, waitReady: true }]);
       return { sessionId: view.session.id, orchestratorPanelId: view.panel.id, prompted: atLaunch };
     },
 

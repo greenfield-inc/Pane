@@ -64,7 +64,7 @@ async function answer(page: Page, id: string, choice: string): Promise<void> {
 
 /** Everything the chat tab's agent was sent, as the scripted agent echoes it. */
 async function transcript(page: Page, panelId: string): Promise<string> {
-  return page.evaluate(async id => JSON.stringify(await window.electronAPI.chatTab.get(id, 0)), panelId);
+  return page.evaluate(async id => JSON.stringify(await window.electronAPI.chatTab.get(id, 500)), panelId);
 }
 
 async function statusOf(page: Page, number: number): Promise<string> {
@@ -82,7 +82,7 @@ interface Running {
 /** A to-do's own Session's orchestrator, as runpane's caller: its hidden owner Pane and tab. */
 async function ownCaller(page: Page, number: number): Promise<{ paneId: string; panelId: string }> {
   const todo = await detail(page, number);
-  const paneId = await page.evaluate(async id => (await window.electronAPI.orchestrationSessions.get({ sessionId: id })).data?.internalSessionId ?? '', todo.todo.sessionId ?? '');
+  const paneId = await page.evaluate(async id => (await window.electronAPI.orchestrationSessions.get({ sessionId: id })).data?.session.internalSessionId ?? '', todo.todo.sessionId ?? '');
   return { paneId, panelId: todo.orchestrator?.panelId ?? '' };
 }
 
@@ -178,9 +178,8 @@ test('an orchestrator creates a to-do: own hidden Session, requester asked first
     await expect.poll(() => transcript(page, orchestrator), { timeout: 30_000 }).toContain('Accepted. Do the post-acceptance work');
     expect((await json<{ todo: RunpaneTodo }>(pane, ['todos', 'done', 'T-1'], t1Ref)).todo.state).toBe('done');
     // The requester heard about the review and the done, and nothing else.
-    const requester = await transcript(page, sessionA.panelId);
-    expect(requester).toContain('which you requested, asks the person for review');
-    expect(requester).toContain('which you requested, is done');
+    await expect.poll(() => transcript(page, sessionA.panelId), { timeout: 30_000 }).toContain('which you requested, is done');
+    expect(await transcript(page, sessionA.panelId)).toContain('which you requested, asks the person for review');
 
     // J47: archive the done to-do's Session (no Panes here): the Session is archived.
     const archived = await json<{ sessionArchived: boolean }>(pane, ['todos', 'archive', 'T-1'], t1Ref);
