@@ -8,6 +8,12 @@ const { spawn } = require('node:child_process');
 
 const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const windows = process.platform === 'win32';
+// The test polls until this file exists, then parses it, so it must appear complete:
+// written beside it, then renamed into place.
+function writeReady(body) {
+  fs.writeFileSync(`${config.ready}.tmp`, body);
+  fs.renameSync(`${config.ready}.tmp`, config.ready);
+}
 const repo = { id: 7, name: 'receiver', path: config.repoPath, active: true, sessionCount: 0 };
 const ready = { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 1, state: { initialized: true } };
 let receiverResume;
@@ -123,5 +129,5 @@ process.on('uncaughtException', (error) => {
 `);
   process.exit(1);
 });
-server.listen(0, '127.0.0.1', () => fs.writeFileSync(config.ready, JSON.stringify({ port: server.address().port })));
+server.listen(0, '127.0.0.1', () => writeReady(JSON.stringify({ port: server.address().port })));
 process.on('SIGTERM', () => server.close(() => process.exit()));
