@@ -2404,6 +2404,30 @@ test('a Session link lands on its Overview, from another Session and when alread
   await expect(sideStrip.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
 
+test('keyboard focus arriving in the Overview makes its split the one tab actions apply to', async ({ page }) => {
+  const sessionId = '__orchestration_session_focusproofterminal__';
+  const chatId = '__orchestration_panel_focusproof_claude';
+  const now = new Date(0).toISOString();
+  const workPage = { id: 'work-page', sessionId, type: 'browser', title: 'work.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+    { type: 'group', id: 'chat-group', panelIds: [chatId, 'work-page'], activePanelId: 'work-page' },
+    { type: 'group', id: 'overview-group', panelIds: [`session-overview:${sessionId}`], activePanelId: `session-overview:${sessionId}` },
+  ] }, focusedGroupId: 'chat-group' };
+  await installSessionsFixture(page, [sessionFixture('focusproof', 'Focus proof', 'Review proof', '', now)], [], { initialPanels: [workPage], initialLayout: savedLayout, rememberPaneLayouts: true });
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByTestId('orchestration-session-focusproof').click();
+  await expect(page.locator('.panel-group-tab-bar')).toHaveCount(2);
+  await page.getByRole('tab', { name: 'work.html', exact: true }).click();
+  // F6 moves keyboard focus into the Overview's own controls, past its group's DOM.
+  await page.keyboard.press('F6');
+  await expect(page.getByRole('button', { name: 'Refresh Session overview', exact: true })).toBeFocused();
+  await expect(page.locator('[data-panel-group-id="overview-group"]')).toHaveAttribute('data-group-focused', 'true');
+  // Close tab now applies to the Overview's split, where there is nothing to close.
+  await page.keyboard.press('ControlOrMeta+w');
+  await expect(page.getByRole('tab', { name: 'work.html', exact: true })).toHaveCount(1);
+});
+
 test('agent-opened pages open as tabs in a split beside the Session conversation', async ({ page }, testInfo) => {
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())]);
   await page.addInitScript(() => {

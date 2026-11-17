@@ -718,7 +718,8 @@ export function SessionWorkspacePanels({
   return (
     <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
       {trailingSlot && createPortal(titleBarActions, trailingSlot)}
-      {overviewHost && createPortal(<div data-testid="session-overview" className="h-full" onMouseDownCapture={focusOverviewGroup}>{overviewContent}</div>, overviewHost)}
+      {/* Portal events reach this component, not the group's PanelGroupView, so the Overview syncs its own group's focus. */}
+      {overviewHost && createPortal(<div data-testid="session-overview" className="h-full" onMouseDownCapture={focusOverviewGroup} onFocusCapture={focusOverviewGroup}>{overviewContent}</div>, overviewHost)}
       {(!isSplit || !trailingSlot) && <div className="flex min-h-9 items-center border-b border-border-primary bg-bg-chrome">
         <div className="flex min-w-0 flex-1 items-center overflow-hidden px-2">
           {!isSplit && tabStrip}

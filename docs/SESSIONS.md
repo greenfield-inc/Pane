@@ -2,8 +2,8 @@
 
 Sessions are named, ongoing Pane Chats where work intent lives. Each Session
 opens one chat, and its sidebar row can expand to show associated Panes. The
-optional overview keeps the Session name, associated Panes, and recent
-activity together while the chat remains the focused work surface. A tab
+**Overview** tab beside the chat keeps the Session name, associated Panes, and
+recent activity together while the chat remains the focused work surface. A tab
 shares its parent Pane's worktree.
 
 In the sidebar, `+` opens an agent picker, an optional Session name field, and
@@ -12,7 +12,7 @@ Pane remembers the chosen agent as the default for future Sessions while
 existing Sessions keep their own agent. A blank name starts as `New chat` or
 `New chat 2`, and the Session agent renames it once, in 3 to 5 words, when it
 replies to your first task. A name you type or set later is kept. Each new Session opens as one Pane
-Chat and can be renamed later from the optional read-only overview. Expand a Session to see
+Chat and can be renamed later from its Overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
 With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new
