@@ -108,5 +108,23 @@ describe('Agent Farm profiles in chat tabs', () => {
     await expect(profiles.print('old/agent-farm', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', next: expect.stringContaining('Update Agent Farm') });
     const absent = new AgentFarmProfiles({ executable: () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await expect(absent.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED' });
+    const unbundled = new AgentFarmProfiles({ executable: () => undefined, bundled: async () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    await expect(unbundled.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('reinstall Pane') });
+  });
+
+  it('runs the bundled Agent Farm when none is on PATH, and the person\'s own when one is', async () => {
+    const directory = scratch();
+    const bundledCalls: string[][] = [];
+    const bundled = async (args: string[], _cwd: string, env: Record<string, string>) => {
+      bundledCalls.push(args);
+      return { executable: process.execPath, args: [FAKE, ...args], env };
+    };
+    const withoutOwn = new AgentFarmProfiles({ executable: () => undefined, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const printed = await withoutOwn.print('greenfield/implementer:opus', {}, 'claude', directory, inherited());
+    expect(printed.harness).toBe('claude');
+    expect(bundledCalls).toEqual([['run', 'greenfield/implementer:opus', '--print-acp', '--acp-adapter', '/adapter.js']]);
+    const withOwn = new AgentFarmProfiles({ executable: () => fakeCli(directory), bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    await withOwn.print('greenfield/implementer:opus', {}, 'claude', directory, inherited());
+    expect(bundledCalls).toHaveLength(1);
   });
 });

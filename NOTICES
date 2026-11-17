@@ -2132,6 +2132,16 @@ Version: 0.11.0
 Author: Nate Moore
 Homepage: https://github.com/bombshell-dev/clack/tree/main/packages/prompts#readme
 
+Package: @clack/core
+Version: 1.6.0
+Author: Nate Moore
+Homepage: https://github.com/bombshell-dev/clack/tree/main/packages/core#readme
+
+Package: @clack/prompts
+Version: 1.9.0
+Author: Nate Moore
+Homepage: https://github.com/bombshell-dev/clack/tree/main/packages/prompts#readme
+
 MIT License
 
 Copyright (c) Nate Moore
@@ -12120,6 +12130,19 @@ Version: 2.0.6
 Author: Ramesh Nair <ram@hiddentao.com> (http://www.hiddentao.com/)
 Repository: https://github.com/hiddentao/fast-levenshtein.git
 
+Package: fast-string-truncated-width
+Version: 3.0.3
+Repository: github:fabiospampinato/fast-string-truncated-width
+
+Package: fast-string-width
+Version: 3.0.2
+Repository: github:fabiospampinato/fast-string-width
+
+Package: fast-wrap-ansi
+Version: 0.2.2
+Author: James Garbutt (https://github.com/43081j)
+Homepage: https://github.com/43081j/fast-wrap-ansi#readme
+
 (MIT License)
 
 Copyright (c) 2013 [Ramesh Nair](http://www.hiddentao.com/)
@@ -17838,6 +17861,11 @@ Repository: terkelg/prompts
 
 Package: sisteransi
 Version: 1.0.5
+Author: Terkel Gjervig
+Repository: https://github.com/terkelg/sisteransi
+
+Package: sisteransi
+Version: 2.0.0
 Author: Terkel Gjervig
 Repository: https://github.com/terkelg/sisteransi
 
@@ -25969,6 +25997,11 @@ Version: 2.9.0
 Author: Eemeli Aro <eemeli@gmail.com>
 Homepage: https://eemeli.org/yaml/
 
+Package: yaml
+Version: 2.9.1
+Author: Eemeli Aro <eemeli@gmail.com>
+Homepage: https://eemeli.org/yaml/
+
 Copyright Eemeli Aro <eemeli@gmail.com>
 
 Permission to use, copy, modify, and/or distribute this software for any purpose
@@ -30744,6 +30777,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Package: smol-toml
 Version: 1.7.1
+Author: Cynthia Rey <cynthia@cynthia.dev>
+Repository: github:squirrelchat/smol-toml
+
+Package: smol-toml
+Version: 1.8.0
 Author: Cynthia Rey <cynthia@cynthia.dev>
 Repository: github:squirrelchat/smol-toml
 

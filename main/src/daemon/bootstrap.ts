@@ -29,6 +29,7 @@ import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
+import { installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import { PaneChatManager } from '../services/paneChatManager';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
@@ -317,6 +318,9 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
   });
   await skillCacheManager.syncHomeSkill(configManager.getConfig(), databaseService.getAllProjects());
+  // Bundled profiles: set up greenfield and the other bundled plugins in Pane's own Agent Farm
+  // config root, without delaying startup. It never touches the person's own Agent Farm.
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) });
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();

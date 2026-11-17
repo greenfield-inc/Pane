@@ -8,6 +8,7 @@ import type { ChatAgentEnv, ChatProfileResolver } from './launch';
 import type { ResolvedLaunch } from './manager';
 import { hostCommand, type HostCommand } from '../agentChat/hostCommand';
 import { agentConfig } from '../../../../shared/agents';
+import type { AgentFarmProcess } from '../agentFarm/bundledAgentFarm';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,8 +31,13 @@ const printedLaunch = boundary.object({
 export interface PrintedAcpLaunch { harness: ChatAgent; launch: ResolvedLaunch }
 
 export interface AgentFarmOptions {
-  /** The agent-farm CLI; undefined when it is not installed on this machine. */
+  /** The person's own agent-farm CLI; undefined when none is on PATH. */
   executable: () => string | undefined;
+  /**
+   * Without one: the Agent Farm bundled in Pane, run against Pane's own config root, as a process
+   * for `args` in `cwd`; undefined when this build lacks it.
+   */
+  bundled?: (args: string[], cwd: string, env: ChatAgentEnv) => Promise<AgentFarmProcess | undefined>;
   /** The bundled adapter's entry for a harness. */
   adapter: (agent: ChatAgent) => Promise<string>;
   /** Checks the CLI a printed launch will run, in that launch's folder and environment (#1236). */
@@ -69,14 +75,16 @@ export class AgentFarmProfiles implements ChatProfileResolver {
 
   /** Prints a profile's launch. `agent` picks the adapter to pass; the printed harness is the truth. */
   async print(profile: string, args: Record<string, string>, agent: ChatAgent, cwd: string, env: ChatAgentEnv): Promise<PrintedAcpLaunch> {
-    const cli = this.options.executable();
-    if (!cli) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', 'Agent Farm is not installed on this machine, so the profile cannot start.', 'Install the agent-farm CLI, then press Retry.');
     const adapter = await this.options.adapter(agent);
     const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`])];
+    // The person's own agent-farm when one is on PATH; otherwise the copy bundled in Pane.
+    const cli = this.options.executable();
+    const bundled = cli ? undefined : await this.options.bundled?.(argv, cwd, env);
+    if (!cli && !bundled) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', 'Agent Farm is not installed on this machine, and this Pane build lacks its bundled copy, so the profile cannot start.', 'Install the agent-farm CLI, or reinstall Pane from runpane.com, then press Retry.');
     let stdout: string;
     try {
-      const command = agentFarmCommand(cli, argv);
-      ({ stdout } = await execFileAsync(command.executable, command.args, { cwd, env, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true, windowsVerbatimArguments: command.windowsVerbatimArguments }));
+      const command = cli ? agentFarmCommand(cli, argv) : { executable: bundled?.executable ?? '', args: bundled?.args ?? [] };
+      ({ stdout } = await execFileAsync(command.executable, command.args, { cwd, env: bundled?.env ?? env, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true, windowsVerbatimArguments: command.windowsVerbatimArguments }));
     } catch (error) {
       if (error instanceof PaneError) throw error;
       const stderr = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1);

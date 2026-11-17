@@ -512,6 +512,26 @@ The profile's model, effort, instructions with LAUNCH CONTEXT, skills,
 subagents, MCP servers and telemetry come with it. The contract is Agent Farm's
 CONFIGURATION.md, *ACP sessions*.
 
+Which `agent-farm` runs: the person's own when one is on PATH, with their own
+config root, exactly as before. Without one, Pane runs the Agent Farm it ships
+(`@greenfieldco/agent-farm`, pinned in `package.json` and `main/package.json`)
+with its Electron as Node and `--config-root <PANE_DIR>/agent-farm`, so a
+profile works on a fresh install. At each start
+(`main/src/services/agentFarm/bundledAgentFarm.ts`, called from
+`main/src/daemon/bootstrap.ts` without waiting) Pane installs the plugins that
+package carries (greenfield, orchestra, bigbrain and machine-security) into
+that folder, when the package's version or plugin files differ from what
+`<PANE_DIR>/agent-farm/pane-manifest.json` records; an unchanged bundle installs
+nothing and the log says so. A failed install is logged and never blocks
+startup. Pane never writes to the person's `~/.config/agent-farm`. With the
+bundled copy, `run` writes its launch bundle to `<worktree>/.agent-farm/`, which
+Pane hides from git through `info/exclude` as it does `.pane/`, and Agent Farm
+keeps its own small caches under `~/.local/state/agent-farm` and
+`~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
+`scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
+`app.asar`, carries no native binaries, and answers `--version` under Electron
+as Node.
+
 ## Older clients
 
 Phone apps released before chat tabs would crash on a tab kind they don't know,
