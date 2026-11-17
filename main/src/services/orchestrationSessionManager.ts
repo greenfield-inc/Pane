@@ -835,9 +835,9 @@ export class OrchestrationSessionManager extends EventEmitter {
   todoSessionOfPanel(panelId: string, paneId: string | undefined): TodoPanelSession | undefined {
     const sessions = this.store.read().sessions;
     const own = sessions.find(session => Object.values(session.panelIds).includes(panelId) || (paneId !== undefined && session.internalSessionId === paneId));
-    if (own) return { sessionId: own.id, sessionName: own.name, orchestrator: Object.values(own.panelIds).includes(panelId), agent: own.agent };
+    if (own) return { sessionId: own.id, sessionName: own.name, orchestrator: Object.values(own.panelIds).includes(panelId), ownPane: true, agent: own.agent };
     const member = paneId === undefined ? undefined : sessions.find(session => session.associations.some(association => association.paneId === paneId));
-    return member ? { sessionId: member.id, sessionName: member.name, orchestrator: false, agent: member.agent } : undefined;
+    return member ? { sessionId: member.id, sessionName: member.name, orchestrator: false, ownPane: false, agent: member.agent } : undefined;
   }
 
   approvalSessionsById(): Map<string, NotifySession> {
@@ -1896,5 +1896,7 @@ export interface TodoPanelSession {
   sessionId: string;
   sessionName: string;
   orchestrator: boolean;
+  /** The tab is in the Session's own Pane, whose name is the Session's: the tab's own title names it. */
+  ownPane: boolean;
   agent: PaneChatAgent;
 }

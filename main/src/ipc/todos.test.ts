@@ -47,7 +47,7 @@ describe('to-do channels', () => {
     expect(created).toMatchObject({ ok: true, todo: { ref: 'T-1', state: 'in_progress', requester: 'Billing rewrite orchestrator', attachmentCount: 1 } });
     await registry.invoke('runpane:todos:create', [{ title: 'Sub', parent: 'T-1', callerPanelId: 's1-orch' }]);
     const shown = await registry.invoke('runpane:todos:show', [{ todo: 'T-1' }]);
-    expect(shown).toMatchObject({ ok: true, attachments: [{ target: '/plans/plan.html', from: null, kind: 'doc' }], subTodos: [{ ref: 'T-2', parent: 'T-1' }] });
+    expect(shown).toMatchObject({ ok: true, attachments: [{ target: '/plans/plan.html', from: null, kind: 'plan' }], subTodos: [{ ref: 'T-2', parent: 'T-1' }] });
   });
 
   it('refuses an agent marking an unaccepted to-do done, with what, why and next', async () => {

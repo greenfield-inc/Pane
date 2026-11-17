@@ -115,6 +115,8 @@ function attachmentKindOf(target: string, kind?: string): TodoAttachmentKind {
   if (/\/pull\/\d+/.test(target)) return 'pr';
   if (/\.(png|jpe?g|gif|webp|svg)$/i.test(target)) return 'image';
   if (/^https?:\/\//.test(target)) return 'link';
+  // plan.md, plan.html, plan-v2.md: agents often attach their plan without --kind; it opens as the Plan tab.
+  if (/(^|\/)plan([-_.][^/]*)?$/i.test(target)) return 'plan';
   return 'doc';
 }
 

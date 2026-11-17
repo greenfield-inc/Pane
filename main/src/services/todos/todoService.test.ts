@@ -77,6 +77,12 @@ describe('TodoService', () => {
       expect(db.prepare('SELECT COUNT(*) AS n FROM todo_attachments').get()).toEqual({ n: 2 });
     });
 
+    it('reads a file named like a plan as the plan when no kind is given, so it opens as the Plan tab', async () => {
+      const todo = await service.create({ title: 'Kinds', startNow: false }, person);
+      const kinds = ['/b/plan.md', '/b/Plan-v2.html', '/b/notes.md', '/b/explain.html'].map(target => service.attach(todo.number, { target }, person).kind);
+      expect(kinds).toEqual(['plan', 'plan', 'doc', 'doc']);
+    });
+
     it('refuses review with no attachments unless the agent says why, and the card shows the reason', async () => {
       const todo = await service.create({ title: 'Docs' }, person);
       await expect(service.review(todo.number, {}, { kind: 'agent' })).rejects.toMatchObject({ code: 'ERR_TODO_REVIEW_NO_ATTACHMENTS' });

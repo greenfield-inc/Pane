@@ -46,7 +46,7 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
     const membership = services.orchestrationSessionManager?.todoSessionOfPanel(panelId, panel.sessionId);
     const pane = services.sessionManager.getSession(panel.sessionId);
     return {
-      name: membership?.orchestrator ? 'orchestrator' : pane?.name ?? panel.title,
+      name: membership?.orchestrator ? 'orchestrator' : membership?.ownPane ? panel.title : pane?.name ?? panel.title,
       sessionId: membership?.sessionId ?? null,
       sessionName: membership?.sessionName,
       orchestrator: membership?.orchestrator ?? false,
