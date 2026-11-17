@@ -174,6 +174,7 @@ FLAG_OWNERS = {
     "--relays": ("notify",),
     "--about-session": ("notify",),
     "--questions": ("notify", "report"),
+    "--outcome": ("report",),
     "--took": ("notify",),
     "--took-as": ("notify",),
     "--status": ("notify", "update"),
@@ -319,6 +320,8 @@ class ParsedArgs:
     summary: Optional[str] = None
     summary_file: Optional[str] = None
     question: Optional[str] = None
+    # report --outcome: which of a profile step's declared outcomes happened (trimmed); implies --state done.
+    report_outcome: Optional[str] = None
     # panels conversation: --conversation, --source (what started it), and --hook.
     conversation_id: Optional[str] = None
     conversation_source: Optional[str] = None
@@ -791,6 +794,8 @@ def validate_until_event_args(parsed: ParsedArgs) -> None:
 
 
 def validate_report_args(parsed: ParsedArgs) -> None:
+    if parsed.report_outcome is not None:
+        validate_report_outcome(parsed, parsed.report_outcome)
     if not parsed.report_state:
         raise ValueError(f"runpane report requires --state <{'|'.join(REPORT_STATES)}>.")
     if parsed.summary is not None and parsed.summary_file is not None:
@@ -799,6 +804,23 @@ def validate_report_args(parsed: ParsedArgs) -> None:
         raise ValueError('runpane report --state blocked requires --question "<what you need answered>".')
     if parsed.report_state != "blocked" and (parsed.notify_choices is not None or parsed.notify_questions is not None):
         raise ValueError("runpane report takes --choices and --questions only with --state blocked: they are the buttons on its question card.")
+
+
+def validate_report_outcome(parsed: ParsedArgs, outcome: str) -> None:
+    """`--outcome` ends a profile step, so it is a done report: it implies `--state done` and takes no question."""
+    if parsed.report_state is not None and parsed.report_state != "done":
+        raise RunpaneError(
+            "ERR_REPORT_OUTCOME_STATE",
+            f"runpane report --outcome ends the step as done, so it cannot be sent with --state {parsed.report_state}. Nothing was reported.",
+            f'Run `runpane report --outcome "{outcome}"` without --state, or drop --outcome to report {parsed.report_state}.',
+        )
+    if parsed.question is not None:
+        raise RunpaneError(
+            "ERR_REPORT_OUTCOME_QUESTION",
+            "runpane report --outcome ends the step, and a --question would block it instead. Nothing was reported.",
+            'To ask something, run `runpane report --state blocked --question "<text>"`; once it is answered, run `runpane report --outcome <name>`.',
+        )
+    parsed.report_state = "done"
 
 
 def validate_conversation_args(parsed: ParsedArgs) -> None:
@@ -1436,6 +1458,16 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--question":
         parsed.question = value
+        return
+    if flag == "--outcome":
+        outcome = value.strip()
+        if not outcome:
+            raise RunpaneError(
+                "ERR_RUNPANE_INVALID_ARGUMENT",
+                "--outcome needs the name of one of the step's declared outcomes; it was empty. Nothing was reported.",
+                'Run `runpane report --outcome "<name>"` with an outcome the step declares, such as "plan ready".',
+            )
+        parsed.report_outcome = outcome
         return
     if flag == "--conversation":
         if not CONVERSATION_ID_PATTERN.fullmatch(value):

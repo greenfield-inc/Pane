@@ -17,6 +17,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
+import { getProfileRunner } from '../services/profiles/profileRunnerHost';
 import { paneInactiveSince, parseSessionTimestampMs } from '../services/paneInactivity';
 import { chatPanelIdsOf, chatTabsNotPausedNote, panesWithStoppedRunScripts, pausePanes, restartRunScripts, terminalPanelIdsOf } from '../services/panePause';
 import { isOrchestrationInternalSessionId, resolveSessionRetention } from '../../../shared/types/orchestrationSession';
@@ -1974,6 +1975,11 @@ export function registerRunpaneHandlers(
       // Its buttons take notify's own checks (count, distinct labels, choices or questions).
       checkNotifyOptions(normalized.choices, normalized.questions);
       const report = normalizeAgentReport(normalized, new Date().toISOString());
+      // A profile step's outcome moves its run first: an undeclared one is refused and nothing is recorded.
+      if (normalized.outcome !== undefined) {
+        if (normalized.state !== 'done' || normalized.question !== undefined) throw new PaneError('ERR_REPORT_OUTCOME_STATE', 'An outcome ends a profile step, so it goes with --state done and no --question. Nothing was recorded.', `Run runpane report --outcome "${normalized.outcome.trim()}" alone, or report the question with --state blocked.`);
+        await getProfileRunner().reportOutcome(panel.id, normalized.outcome.trim(), report.summary);
+      }
       // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
       const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath, readStatusFile: report.summaryTruncated, choices: report.choices, questions: report.questions }).warnings : [];
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
@@ -5594,6 +5600,7 @@ const reportRequestSchema = boundary.object({
   summary: boundary.optional(boundary.string),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  outcome: boundary.optional(boundary.nonEmptyString),
   ...agentReportOptionFields,
 });
 

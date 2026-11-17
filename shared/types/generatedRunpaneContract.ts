@@ -2135,7 +2135,7 @@ export const RUNPANE_CONTRACT = {
       "name": "report",
       "summary": "Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.",
       "usage": [
-        "runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]"
+        "runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -3157,6 +3157,11 @@ export const RUNPANE_CONTRACT = {
         "description": "What a blocked worker needs answered; required with --state blocked."
       },
       {
+        "name": "--outcome",
+        "value": "<name>",
+        "description": "Which of a profile step's declared outcomes happened, for runpane report; implies --state done."
+      },
+      {
         "name": "--conversation",
         "value": "<id>",
         "description": "The conversation (agent session) id a panel's agent is on, for runpane panels conversation."
@@ -3674,7 +3679,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
+        "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
         "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
@@ -4934,7 +4939,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "report": [
         "Usage:",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
+        "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
         "",
         "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
         "agent.report watch event and reads it in `agents status` and `sessions overview`.",
@@ -4947,8 +4952,12 @@ export const RUNPANE_CONTRACT = {
         "ends with options in brackets, such as \"(A (recommended) / B)\", and has neither is refused:",
         "nothing is shown. A question with no options is an open question, answered in words.",
         "",
+        "--outcome <name> ends a profile step with one of its declared outcomes (implies --state done).",
+        "Pane refuses an outcome the step does not declare and lists the ones it does.",
+        "",
         "Options:",
         "  --state <state>                ready, blocked, failed, or done",
+        "  --outcome <name>               A profile step's declared outcome; implies --state done, no --question",
         "  --pr <number>                  Pull request number",
         "  --head <sha>                   Head commit, 7-40 hex characters",
         "  --summary <text>               Summary text; up to 16,000 characters are kept",
@@ -4964,6 +4973,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "Examples:",
         "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md",
+        "  runpane report --outcome \"plan ready\" --summary-file status.json",
         "  runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"recommended\":true},{\"label\":\"Invoice number\"}]'"
       ],
       "notify": [
@@ -5930,7 +5940,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
+        "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
         "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
@@ -7139,7 +7149,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "report": [
         "Usage:",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
+        "  runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
         "",
         "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
         "agent.report watch event and reads it in `agents status` and `sessions overview`.",
@@ -7152,8 +7162,12 @@ export const RUNPANE_CONTRACT = {
         "ends with options in brackets, such as \"(A (recommended) / B)\", and has neither is refused:",
         "nothing is shown. A question with no options is an open question, answered in words.",
         "",
+        "--outcome <name> ends a profile step with one of its declared outcomes (implies --state done).",
+        "Pane refuses an outcome the step does not declare and lists the ones it does.",
+        "",
         "Options:",
         "  --state <state>                ready, blocked, failed, or done",
+        "  --outcome <name>               A profile step's declared outcome; implies --state done, no --question",
         "  --pr <number>                  Pull request number",
         "  --head <sha>                   Head commit, 7-40 hex characters",
         "  --summary <text>               Summary text; up to 16,000 characters are kept",
@@ -7169,6 +7183,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "Examples:",
         "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md",
+        "  runpane report --outcome \"plan ready\" --summary-file status.json",
         "  runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"recommended\":true},{\"label\":\"Invoice number\"}]'"
       ],
       "notify": [
@@ -8157,6 +8172,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered, with its buttons as `--choices` or `--questions` in notify's JSON), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
+      "`runpane report --outcome <name>` ends one step of a Pane profile workflow: it names which of the step's declared outcomes happened (`runpane report --outcome \"plan ready\" --summary-file status.json`) and sends `state: done` with `outcome`. `--state` is then optional and may only be `done` (otherwise `ERR_REPORT_OUTCOME_STATE`), and `--question` is refused (`ERR_REPORT_OUTCOME_QUESTION`): an outcome ends the step, a question would block it. Pane checks the outcome against the step the panel runs and refuses an undeclared one with an error that lists the allowed outcomes.",
       "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
       "Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.",
       "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. A send with --no-expect-report is a reply (an answer, or an addition to the current work): it is delivered while a report is outstanding and leaves that expectation in place. Then watch for the original result.",
@@ -8863,6 +8879,13 @@ export const RUNPANE_CONTRACT = {
         "--summary-file=/tmp/report.md",
         "--pane-dir",
         "/tmp/pane"
+      ],
+      [
+        "report",
+        "--outcome",
+        " plan ready ",
+        "--summary-file",
+        "status.json"
       ],
       [
         "panels",
@@ -24444,7 +24467,13 @@ export const RUNPANE_CONTRACT = {
             "name": "--state",
             "value": "<ready|blocked|failed|done>",
             "required": true,
-            "description": "ready: work is ready for review; done: finished with nothing to review; blocked: needs an answer; failed: could not finish."
+            "description": "ready: work is ready for review; done: finished with nothing to review; blocked: needs an answer; failed: could not finish. Optional with --outcome, which implies done."
+          },
+          {
+            "name": "--outcome",
+            "value": "<name>",
+            "required": false,
+            "description": "Ends a profile step with one of its declared outcomes (implies --state done). Refused with --question, or with --state other than done (ERR_REPORT_OUTCOME_STATE)."
           },
           {
             "name": "--pr",
@@ -24514,6 +24543,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "examples": [
           "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
+          "runpane report --outcome \"plan ready\" --summary-file status.json",
           "runpane report --state blocked --question \"Should the migration drop the old column?\"",
           "runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"detail\":\"Ids are stable\",\"recommended\":true},{\"label\":\"Invoice number\"}]' --summary 'Invoice PDFs'"
         ],
@@ -24526,7 +24556,8 @@ export const RUNPANE_CONTRACT = {
           "agent.report is in the default kinds of `runpane watch --follow` and `--until-event`, and arrives from any panel, a shell tab included. REPORT lines skip the --min-interval batch.",
           "The output says who received it: \"Delivered to N waiting watcher(s).\" counts watches waiting at that moment (liveWatchers in JSON). With no Session and nobody waiting it adds that the report is stored on the panel (runpane agents status --panel <id>) and that a named-cursor watch (runpane watch --as <name> --kinds agent.report) still receives it when it next waits. Zero is not a failure; the exit code is 0 either way.",
           "With --state blocked and --question, the person sees an answerable card at once; it rings once the orchestrator relays it or after 10 minutes. The answer reaches this tab as `answer: Q-n → <answer> (by you)`. `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)` lines are the person's word too.",
-          "A blocked report's buttons come from --choices or --questions first, then from the `needs_you` block of the status file passed as --summary-file. Invalid --choices or --questions JSON fails with ERR_NOTIFY_INVALID, as notify does. A --question that ends with an option list in brackets (\"(A / B)\" or \"(A (recommended) / B)\") and has no options from either source is refused with ERR_REPORT_PACKED_OPTIONS and nothing is shown; a question with no option list is accepted as an open question."
+          "A blocked report's buttons come from --choices or --questions first, then from the `needs_you` block of the status file passed as --summary-file. Invalid --choices or --questions JSON fails with ERR_NOTIFY_INVALID, as notify does. A --question that ends with an option list in brackets (\"(A / B)\" or \"(A (recommended) / B)\") and has no options from either source is refused with ERR_REPORT_PACKED_OPTIONS and nothing is shown; a question with no option list is accepted as an open question.",
+          "`--outcome <name>` ends one step of a Pane profile workflow by naming which of the step's declared outcomes happened, such as `runpane report --outcome \"plan ready\" --summary-file status.json`. It sends `state: done` with `outcome`; --state is optional and may only be done (else ERR_REPORT_OUTCOME_STATE), and --question is refused (ERR_REPORT_OUTCOME_QUESTION). Pane checks the outcome against the step the panel runs and refuses one the step does not declare, listing the allowed outcomes."
         ]
       },
       "sessions list": {

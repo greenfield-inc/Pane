@@ -221,7 +221,9 @@ total deadline (exit 124); under follow it bounds each daemon request.
 
 REPORT remains the completion signal: workers use `runpane report --state
 ready|blocked|failed|done --summary-file <path>`, adding a PR/head and a question
-when blocked. READY alone is activity evidence. Read the full report with
+when blocked. A step of a Pane profile workflow ends with `runpane report
+--outcome "<name>"`, one of the step's declared outcomes (it implies
+`--state done`). READY alone is activity evidence. Read the full report with
 `runpane agents status --panel <id> --json`. Resume stopped workers in the same
 panel with `runpane panels resume --panel <id> --wait-ready --yes --json`.
 

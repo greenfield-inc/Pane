@@ -4004,6 +4004,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
     summary: summaryText?.slice(0, MAX_SENT_SUMMARY_LENGTH),
     summaryPath,
     question: parsed.question,
+    outcome: parsed.reportOutcome,
     ...options,
   }], reportResultSchema, {
     paneDir: parsed.paneDir,

@@ -1246,6 +1246,63 @@ async function checkReportStructuredOptions() {
   }
 }
 
+/**
+ * `report --outcome` ends a profile step: it sends state done with the trimmed outcome, takes
+ * --state only as done, and refuses --question. A refusal sends nothing.
+ */
+async function checkReportOutcome() {
+  const report = { state: 'done', reportedAt: '2026-11-16T00:00:00.000Z' };
+  const result = { ok: true, paneId: 'pane-1', panelId: 'panel-1', report, sessionIds: [], liveWatchers: 0 };
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-report-outcome-${runtime}-`));
+    try {
+      for (const args of [['--outcome', ' plan ready '], ['--outcome', 'plan ready', '--state', 'done'], ['--state=done', '--outcome=plan ready']]) {
+        const frames = [];
+        const run = await withFakeDaemon(paneDir, () => ({ result }),
+          () => runCliOnce(runtime, ['report', ...args, '--panel', 'panel-1', '--json'], paneDir),
+          (frame) => { if (frame.type === 'request' && frame.id === 1) frames.push(frame); });
+        assert.strictEqual(run.code, 0, `${runtime} report ${args.join(' ')} exits 0. stderr=${run.stderr} stdout=${run.stdout}`);
+        assert.strictEqual(frames[0].args[0].state, 'done', `${runtime} report ${args.join(' ')} sends state done`);
+        assert.strictEqual(frames[0].args[0].outcome, 'plan ready', `${runtime} report ${args.join(' ')} sends the trimmed outcome`);
+      }
+      const plain = [];
+      await withFakeDaemon(paneDir, () => ({ result }),
+        () => runCliOnce(runtime, ['report', '--state', 'done', '--panel', 'panel-1', '--json'], paneDir),
+        (frame) => { if (frame.type === 'request' && frame.id === 1) plain.push(frame); });
+      assert.ok(!('outcome' in plain[0].args[0]), `${runtime} report without --outcome sends no outcome`);
+      for (const [args, code] of [
+        [['--outcome', 'plan ready', '--state', 'blocked', '--question', 'q'], 'ERR_REPORT_OUTCOME_STATE'],
+        [['--outcome', 'plan ready', '--state', 'ready'], 'ERR_REPORT_OUTCOME_STATE'],
+        [['--outcome', 'plan ready', '--question', 'Which plan?'], 'ERR_REPORT_OUTCOME_QUESTION'],
+        [['--outcome', '   '], 'ERR_RUNPANE_INVALID_ARGUMENT'],
+      ]) {
+        let sent = 0;
+        const run = await withFakeDaemon(paneDir, () => { sent += 1; return { result }; },
+          () => runCliOnce(runtime, ['report', ...args, '--panel', 'panel-1', '--json'], paneDir));
+        assert.strictEqual(run.code, 1, `${runtime} report ${args.join(' ')} exits 1. stdout=${run.stdout}`);
+        const { error } = JSON.parse(run.stdout);
+        assert.strictEqual(error.code, code, `${runtime} report ${args.join(' ')}`);
+        assertIncludes(error.message, '--outcome', `${runtime} report ${args.join(' ')} names --outcome`);
+        assertIncludes(error.next, 'runpane report', `${runtime} report ${args.join(' ')} says how to fix the report`);
+        assert.strictEqual(sent, 0, `${runtime} a refused --outcome report sends nothing`);
+      }
+      const elsewhere = await withFakeDaemon(paneDir, () => ({ result }),
+        () => runCliOnce(runtime, ['notify', '--ui', 'info', '--title', 'T', '--outcome', 'x', '--json'], paneDir));
+      assert.strictEqual(elsewhere.code, 1, `${runtime} --outcome on another command is refused. stdout=${elsewhere.stdout}`);
+      // A daemon refusal (an outcome the step does not declare) prints its message and next step.
+      const refusal = { code: 'ERR_PROFILE_OUTCOME_UNKNOWN', message: 'Step plan has no outcome "shipped". Allowed: plan ready, plan blocked.', next: 'Run `runpane report --outcome "plan ready"`.' };
+      const refused = await withFakeDaemon(paneDir, () => ({ error: refusal }),
+        () => runCliOnce(runtime, ['report', '--outcome', 'shipped', '--panel', 'panel-1', '--json'], paneDir));
+      assert.notStrictEqual(refused.code, 0, `${runtime} a daemon refusal fails the report`);
+      const shown = JSON.parse(refused.stdout).error;
+      assert.strictEqual(shown.message, refusal.message, `${runtime} prints the daemon's message`);
+      assert.strictEqual(shown.next, refusal.next, `${runtime} prints the daemon's next step`);
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+}
+
 /** Runs the CLI with its stdin held open until `holdMs` passes, and times the run. */
 function runCliHoldingStdin(runtime, args, paneDir, extraEnv, holdMs) {
   const command = runtime === 'npm' ? process.execPath : findPython();
@@ -7090,6 +7147,7 @@ async function runChecks() {
   await checkArchiveClosedAndCallerPanel();
   await checkReportDeliveryLine();
   await checkReportStructuredOptions();
+  await checkReportOutcome();
   await checkPanelsConversation();
   await checkNotifyParity();
   await checkAutopilotParity();

@@ -30,6 +30,7 @@ import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
 import { installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
+import { startProfileRunner } from '../services/profiles/profileRunnerHost';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import { PaneChatManager } from '../services/paneChatManager';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
@@ -723,6 +724,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
+  // Profiles: Pane runs each launched profile's workflow from its file, and resumes saved runs.
+  startProfileRunner(services, commandRegistry, workspaceJournal, message => logger.info(message));
   // A member Pane's reports and exits go to every connected computer: one whose Session holds this
   // Pane records them (`RemoteMemberEvents`). Entries recorded from another machine are not sent on.
   workspaceJournal.subscribe(entry => {

@@ -159,6 +159,8 @@ export interface ParsedArgs {
   summary?: string;
   summaryFile?: string;
   question?: string;
+  /** report `--outcome`: which of a profile step's declared outcomes happened (trimmed); implies `--state done`. */
+  reportOutcome?: string;
   /** panels conversation `--conversation`: the conversation (agent session) id the panel is on. */
   conversationId?: string;
   /** panels conversation `--source`: what started that conversation. */
@@ -285,6 +287,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--relays', ['notify']],
   ['--about-session', ['notify']],
   ['--questions', ['notify', 'report']],
+  ['--outcome', ['report']],
   ['--took', ['notify']],
   ['--took-as', ['notify']],
   ['--status', ['notify', 'update']],
@@ -601,6 +604,7 @@ export function splitWorkspacePassThrough(argv: string[]): { machine: string; co
 }
 
 function validateReportArgs(parsed: ParsedArgs): void {
+  if (parsed.reportOutcome !== undefined) validateReportOutcome(parsed, parsed.reportOutcome);
   if (!parsed.reportState) {
     throw new Error(`runpane report requires --state <${REPORT_STATES.join('|')}>.`);
   }
@@ -613,6 +617,25 @@ function validateReportArgs(parsed: ParsedArgs): void {
   if (parsed.reportState !== 'blocked' && (parsed.notifyChoices !== undefined || parsed.notifyQuestions !== undefined)) {
     throw new Error('runpane report takes --choices and --questions only with --state blocked: they are the buttons on its question card.');
   }
+}
+
+/** `--outcome` ends a profile step, so it is a done report: it implies `--state done` and takes no question. */
+function validateReportOutcome(parsed: ParsedArgs, outcome: string): void {
+  if (parsed.reportState !== undefined && parsed.reportState !== 'done') {
+    throw new RunpaneError(
+      'ERR_REPORT_OUTCOME_STATE',
+      `runpane report --outcome ends the step as done, so it cannot be sent with --state ${parsed.reportState}. Nothing was reported.`,
+      `Run \`runpane report --outcome "${outcome}"\` without --state, or drop --outcome to report ${parsed.reportState}.`,
+    );
+  }
+  if (parsed.question !== undefined) {
+    throw new RunpaneError(
+      'ERR_REPORT_OUTCOME_QUESTION',
+      'runpane report --outcome ends the step, and a --question would block it instead. Nothing was reported.',
+      'To ask something, run `runpane report --state blocked --question "<text>"`; once it is answered, run `runpane report --outcome <name>`.',
+    );
+  }
+  parsed.reportState = 'done';
 }
 
 function validateConversationArgs(parsed: ParsedArgs): void {
@@ -1421,6 +1444,18 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--question') {
     parsed.question = value;
+    return;
+  }
+  if (flag === '--outcome') {
+    const outcome = value.trim();
+    if (!outcome) {
+      throw new RunpaneError(
+        'ERR_RUNPANE_INVALID_ARGUMENT',
+        '--outcome needs the name of one of the step\'s declared outcomes; it was empty. Nothing was reported.',
+        'Run `runpane report --outcome "<name>"` with an outcome the step declares, such as "plan ready".',
+      );
+    }
+    parsed.reportOutcome = outcome;
     return;
   }
   if (flag === '--conversation') {

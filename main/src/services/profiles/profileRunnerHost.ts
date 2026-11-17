@@ -1,0 +1,133 @@
+import { existsSync, readdirSync } from 'fs';
+import path from 'path';
+import { isConfiguredAgent } from '../../../../shared/agents';
+import { PaneError } from '../../../../shared/paneError';
+import type { NotifyQuestion, NotifyResult, NotifySource } from '../../../../shared/types/notify';
+import type { LibraryProfile, Profile } from '../../../../shared/types/profiles';
+import type { RunpaneCommandToolSpec } from '../../../../shared/types/runpaneOrchestration';
+import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
+import type { AppServices } from '../../ipc/types';
+import { getAppDirectory } from '../../utils/appDirectory';
+import { ShellDetector } from '../../utils/shellDetector';
+import { getRuntimeConfigManager } from '../../core/runtime';
+import { agentFarmConfigRoot } from '../agentFarm/bundledAgentFarm';
+import { panelManager } from '../panelManager';
+import { sessionWorkspacePath } from '../sessionWorkspace';
+import type { WorkspaceJournal } from '../workspaceJournal';
+import { listProfiles } from './profileLibrary';
+import { ProfileRunner, profileRunsFolder, type RunCard, type StepShell, type StepTabRequest } from './profileRunner';
+
+let runner: ProfileRunner | undefined;
+
+/** The profile runner this Pane started, for IPC and runpane. */
+export function getProfileRunner(): ProfileRunner {
+  if (!runner) throw new PaneError('PROFILE_RUNNER_NOT_READY', 'Pane has not started its profile runner yet.', 'Wait for Pane to finish starting, then try again.');
+  return runner;
+}
+
+/** The library as config sets it now: bundled profiles on or off, and the person's own. */
+function currentProfiles(): LibraryProfile[] {
+  return listProfiles({ paneDir: getAppDirectory(), enabled: getRuntimeConfigManager().getConfig().profiles?.enabled });
+}
+
+const createdPane = boundary.object({ items: boundary.array(boundary.object({ ok: boundary.boolean, paneId: boundary.optional(boundary.string), panelId: boundary.optional(boundary.string), error: boundary.optional(boundary.object({ message: boundary.string })) })) });
+const createdPanel = boundary.object({ paneId: boundary.string, panelId: boundary.string });
+
+function stepShell(): StepShell {
+  const name = ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell()).name.toLowerCase();
+  if (name.includes('powershell') || name.includes('pwsh')) return 'powershell';
+  if (name === 'cmd' || name === 'cmd.exe') return 'cmd';
+  if (name.includes('fish')) return 'fish';
+  return 'posix';
+}
+
+/** A `reads` file as the agent opens it: the installed plugin copy for a bundled profile (app.asar is unreadable to agents), else beside the profile file. */
+function readPath(profile: Profile, id: string): string | undefined {
+  const loaded = currentProfiles().find((candidate) => candidate.name === profile.name);
+  const roots = [path.join(agentFarmConfigRoot(getAppDirectory()), 'plugins', profile.name)];
+  if (loaded) roots.push(path.dirname(loaded.file));
+  for (const root of roots) {
+    for (const file of [path.join(root, 'instructions', `${id}.md`), path.join(root, `${id}.md`)]) {
+      if (existsSync(file)) return file;
+    }
+  }
+  return undefined;
+}
+
+function answerOf(result: NotifyResult): string | undefined {
+  if ('answer' in result) return result.answer;
+  if ('reply' in result) return result.reply;
+  return undefined;
+}
+
+/**
+ * Starts the profile runner on this Pane's services: step tabs through runpane's own
+ * `panes create` and `panels create`, cards through Approvals, tab exits from the workspace
+ * journal. Resumes saved runs without waiting.
+ */
+export function startProfileRunner(services: AppServices, registry: PaneCommandRegistry, journal: WorkspaceJournal, log: (message: string) => void): ProfileRunner {
+  const pendingCards = new Map<string, Promise<NotifyResult>>();
+  const queue = () => {
+    const notify = services.notifyService?.queue;
+    if (!notify) throw new PaneError('PROFILE_APPROVALS_UNAVAILABLE', 'Approvals are not running in this Pane, so a profile run can\'t ask you anything.', 'Restart Pane, then launch the profile again.');
+    return notify;
+  };
+  const startTab = async (request: StepTabRequest) => {
+    const tool: RunpaneCommandToolSpec = { command: request.command, title: request.title };
+    if (request.agentType && isConfiguredAgent(request.agentType)) tool.agentType = request.agentType;
+    if (request.initialInput) tool.initialInput = request.initialInput;
+    // An agent waits until its input box is ready for the first message; a command just runs.
+    const waitReady = request.initialInput !== undefined;
+    if (request.newPane) {
+      const result = decodeBoundary(await registry.invoke('runpane:panes:create', [{
+        repo: { id: request.run.repoId }, panes: [{ name: request.newPane.name, tool }],
+        associateSession: request.run.sessionId, source: 'agent', noFocus: true, waitReady,
+      }]), createdPane);
+      const item = result.items[0];
+      if (!item?.paneId || !item.panelId) throw new PaneError('PROFILE_STEP_START_FAILED', `Pane couldn't open the run's first Pane: ${item?.error?.message ?? 'no Pane was created'}`, 'Check the repository in Pane, then launch the profile again.');
+      return { paneId: item.paneId, panelId: item.panelId };
+    }
+    if (!request.run.paneId) throw new PaneError('PROFILE_STEP_START_FAILED', 'The run has no Pane for its next step.', 'Launch the profile again.');
+    return decodeBoundary(await registry.invoke('runpane:panels:create', [{ paneId: request.run.paneId, tool, source: 'agent', noFocus: true, waitReady }]), createdPanel);
+  };
+  const postCard = (card: RunCard) => {
+    const question: NotifyQuestion = { ui: card.ui, title: card.title, context: card.context };
+    if (card.choices) question.choices = card.choices;
+    const source: NotifySource = { name: `${card.run.profile} run`, agent: 'Pane profile' };
+    if (card.run.paneId) source.paneId = card.run.paneId;
+    pendingCards.set(card.id, queue().ask({ question, source, id: card.id }));
+  };
+  const waitCard = async (approvalId: string): Promise<string | undefined> => {
+    let result = await (pendingCards.get(approvalId) ?? queue().ask({ resume: approvalId, source: { name: 'Pane profile', agent: 'Pane profile' } }));
+    pendingCards.delete(approvalId);
+    while ('waiting' in result) result = await queue().ask({ resume: approvalId, source: { name: 'Pane profile', agent: 'Pane profile' } });
+    if ('unavailable' in result) log(`[Profiles] Approval ${approvalId} is unavailable: ${result.unavailable}`);
+    return answerOf(result);
+  };
+  runner = new ProfileRunner({
+    now: () => new Date().toISOString(),
+    profile: (name) => {
+      const loaded = currentProfiles().find((candidate) => candidate.name === name);
+      return loaded?.launchable ? loaded.profile : undefined;
+    },
+    readPath,
+    runsFolder: (sessionId) => profileRunsFolder(sessionWorkspacePath(sessionId)),
+    allRunsFolders: () => {
+      const sessions = path.join(getAppDirectory(), 'sessions');
+      try { return readdirSync(sessions).map((entry) => profileRunsFolder(path.join(sessions, entry))).filter((folder) => existsSync(folder)); }
+      catch { return []; }
+    },
+    shell: stepShell,
+    startTab,
+    tabExists: (panelId) => panelManager.getPanel(panelId) !== undefined,
+    postCard,
+    waitCard,
+    log,
+  });
+  journal.subscribe((entry) => {
+    if (entry.kind === 'panel.exited' && entry.panelId) void runner?.tabExited(entry.panelId, entry.exitCode).catch((error) => log(`[Profiles] ${String(error)}`));
+  });
+  void runner.resumeAll().catch((error) => log(`[Profiles] Could not resume profile runs: ${String(error)}`));
+  return runner;
+}
