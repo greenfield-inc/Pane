@@ -24,6 +24,7 @@ class FakePane {
   readonly tabs: StepTabRequest[] = [];
   readonly cards: RunCard[] = [];
   readonly closedTabs = new Set<string>();
+  readonly closedCards = new Set<string>();
   private readonly answers = new Map<string, (answer: string | undefined) => void>();
   private tabCount = 0;
 
@@ -46,6 +47,7 @@ class FakePane {
       },
       tabExists: (panelId) => !this.closedTabs.has(panelId) && Number(panelId.slice(4)) <= this.tabCount,
       postCard: (card) => { this.cards.push(card); },
+      cardOpen: (id) => !this.closedCards.has(id),
       waitCard: (id) => new Promise((resolve) => { this.answers.set(id, resolve); }),
       log: () => undefined,
     };
@@ -165,6 +167,21 @@ describe('ProfileRunner', () => {
     pane.answer(pane.cards[0], 'approve');
     await settle();
     expect(restarted.list()[0].step).toBe('build');
+  });
+
+  it('posts the card again when it closed while Pane was down, and takes the new card\'s answer', async () => {
+    const pane = new FakePane();
+    const first = new ProfileRunner(pane.ports());
+    await first.launch(launchRequest());
+    await first.reportOutcome('tab-1', 'plan ready');
+    pane.closedCards.add(pane.cards[0].id);
+    const restarted = new ProfileRunner(pane.ports());
+    await restarted.resumeAll();
+    expect(pane.cards.map((card) => card.title)).toEqual(['Approve the plan?', 'Approve the plan?']);
+    expect(pane.tabs).toHaveLength(1);
+    pane.answer(pane.cards[1], 'approve');
+    await settle();
+    expect(restarted.list()[0]).toMatchObject({ step: 'build', wait: { panelId: 'tab-2' } });
   });
 
   it('asks for the outcome when the step\'s tab is gone after a restart', async () => {
