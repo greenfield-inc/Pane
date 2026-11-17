@@ -504,7 +504,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     const warnings = [...admitNotifyCard(parsed), ...loopInfoWarning(parsed)];
     const result = await notify.ask(parsed, paneCommandSignal());
     // A card that wasn't shown (a worker's, sent back to its orchestrator) has nothing to warn about.
-    return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
+    // The queue's own warnings (an --update that quoted an unread reply, say) stay with them.
+    return warnings.length && !('unavailable' in result) ? { ...result, warnings: [...result.warnings ?? [], ...warnings] } : result;
   });
 
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
