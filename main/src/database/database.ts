@@ -234,6 +234,9 @@ export interface PanelBufferMigrationOutcome {
 /** The ui_state key holding where this host puts new Panes (`top` or `bottom`). */
 const NEW_PANE_PLACEMENT_KEY = 'panes.newPanePlacement';
 
+/** An archived Pane's rows, set aside under other ids while a move back replaces it. */
+export interface SetAsideSession { id: string; asideId: string; panelIds: Record<string, string>; hidden: number }
+
 export class DatabaseService {
   private db: Database.Database;
   private readonly dbPath: string;
@@ -3665,6 +3668,53 @@ export class DatabaseService {
         .run(id);
       return result.changes > 0;
     });
+  }
+
+  /**
+   * Moving a Session back (sessionMove/importer.ts): an archived Pane gives way to an arriving Pane
+   * with the same id. Nothing it owns is deleted yet: its row, tabs and every row keyed by its
+   * `session_id` or tab `panel_id` (history, outputs, terminal buffers) move under `aside` ids,
+   * hidden. `restoreSetAsideSession` puts them back unchanged; once the move commits,
+   * `deleteArchivedSessionPermanently(aside.id)` removes them.
+   */
+  setArchivedSessionAside(id: string, asideId: string): SetAsideSession | null {
+    return this.transaction(() => {
+      // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+      const row = this.db.prepare("SELECT is_hidden FROM sessions WHERE id = ? AND archived = 1").get(id) as { is_hidden: number | null } | undefined;
+      if (!row) return null;
+      // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+      const panels = this.db.prepare("SELECT id FROM tool_panels WHERE session_id = ?").all(id) as Array<{ id: string }>;
+      const panelIds = Object.fromEntries(panels.map(panel => [panel.id, `${panel.id}.${asideId}`]));
+      this.rekeySession(id, asideId, panelIds, 1);
+      return { id, asideId, panelIds, hidden: row.is_hidden ?? 0 };
+    });
+  }
+
+  /** Undoes `setArchivedSessionAside`, once the arriving Pane with the same id is gone. */
+  restoreSetAsideSession(aside: SetAsideSession): void {
+    this.transaction(() => {
+      this.rekeySession(aside.asideId, aside.id, Object.fromEntries(Object.entries(aside.panelIds).map(([original, moved]) => [moved, original])), aside.hidden);
+    });
+  }
+
+  private rekeySession(from: string, to: string, panelIds: Record<string, string>, hidden: number): void {
+    this.db.pragma("defer_foreign_keys = ON");
+    // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+    const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE 'CREATE VIRTUAL%'").all() as Array<{ name: string }>;
+    for (const { name } of tables) {
+      // SAFETY: PRAGMA table_info returns one row per column with its name.
+      const columns = new Set((this.db.prepare(`PRAGMA table_info("${name}")`).all() as Array<{ name: string }>).map(column => column.name));
+      if (columns.has("session_id")) this.db.prepare(`UPDATE "${name}" SET session_id = ? WHERE session_id = ?`).run(to, from);
+      if (columns.has("panel_id")) {
+        const update = this.db.prepare(`UPDATE "${name}" SET panel_id = ? WHERE panel_id = ?`);
+        for (const [panelFrom, panelTo] of Object.entries(panelIds)) update.run(panelTo, panelFrom);
+      }
+    }
+    const panel = this.db.prepare("UPDATE tool_panels SET id = ? WHERE id = ?");
+    for (const [panelFrom, panelTo] of Object.entries(panelIds)) panel.run(panelTo, panelFrom);
+    this.db.prepare("UPDATE sessions SET id = ?, is_hidden = ? WHERE id = ?").run(to, hidden, from);
+    const active = this.db.prepare("UPDATE sessions SET active_panel_id = ? WHERE id = ? AND active_panel_id = ?");
+    for (const [panelFrom, panelTo] of Object.entries(panelIds)) active.run(panelTo, to, panelFrom);
   }
 
   deleteArchivedSessionsPermanently(): number {

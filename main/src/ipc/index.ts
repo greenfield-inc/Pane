@@ -41,6 +41,7 @@ import { registerSshRouteHandlers } from './sshRoutes';
 import { ensureSshRoute } from '../daemon/sshRoute';
 import { registerUsageHandlers } from './usage';
 import { registerSessionImportHandlers } from './sessionImport';
+import { registerSessionMoveHandlers } from './sessionMove';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
 import { registerSetupHandlers } from './setup';
@@ -176,6 +177,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerAutopilotHandlers(services, commandRegistry, notify);
   registerUsageHandlers(ipcMain, commandRegistry);
   registerSessionImportHandlers(ipcMain, services, commandRegistry);
+  registerSessionMoveHandlers(ipcMain, services, commandRegistry);
   if (services.loopManager) registerLoopHandlers(ipcMain, services.loopManager, commandRegistry);
   registerTodoHandlers(ipcMain, services, commandRegistry);
   registerMissionControlHandlers(ipcMain, services, commandRegistry);

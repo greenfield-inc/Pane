@@ -1,3 +1,4 @@
+import type { JsonObject } from '../validation/boundaryDecoder';
 import type { TodoAction, TodoCreateInput } from './todos';
 import type { NotifyRemoteCommand } from './notify';
 import type { OrchestrationSessionCreateInput } from './orchestrationSession';
@@ -113,6 +114,8 @@ export type MachineCommand =
   | { type: 'switch-to-chat'; sessionId: string; panelIds: string[] }
   /** Sends `input` to an agent tab as the person's message (`runpane panels submit`); Move to machine… uses it. */
   | { type: 'submit-to-agent'; panelId: string; input: string }
+  /** The Move dialog's calls on the machine the Session lives on (`SESSION_MOVE_CHANNELS`). */
+  | { type: 'move-session'; channel: string; request: JsonObject }
   /** Machine health on that machine, through its own engine and protections. */
   | { type: 'machine-health'; action: MachineHealthAction; request: object }
   /** To-dos (D-409): the person's action on that machine's to-do (Stop, Resume, Start anyway…), or a new to-do there. */

@@ -3389,7 +3389,7 @@ test('Move to machine… sits between Rename and Archive in the Session menu, by
   await page.screenshot({ path: 'tmp/verify/session-move-host/01b-menu-rail.png' });
 });
 
-test('Move to machine… lists only machines that can take the Session and asks its agent to hand off', async ({ page }) => {
+test('Move to machine… lists only machines that can take the Session, and Hand off with a note asks its agent', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const session = { ...sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z'), agent: 'codex' as const };
   await installSessionsFixture(page, [session], [], {
@@ -3408,6 +3408,11 @@ test('Move to machine… lists only machines that can take the Session and asks 
 
   const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog.getByRole('radio')).toHaveCount(4);
+  // A whole-Session move never goes to a teammate's machine; a note handoff can.
+  await expect(dialog.getByRole('radio', { name: 'sams-laptop' })).toBeDisabled();
+  await expect(dialog.getByTestId('move-session-target-sams-laptop')).toContainText('a teammate’s machine: hand off with a note instead');
+  await dialog.getByRole('button', { name: 'Hand off with a note…' }).click();
+  await expect(dialog.getByRole('radio')).toHaveCount(4);
   await expect(dialog.getByRole('radio', { name: 'tylers-mac-mini', exact: true })).toBeEnabled();
   await expect(dialog.getByRole('radio', { name: 'tylers-mac-mini-1' })).toBeDisabled();
   await expect(dialog.getByTestId('move-session-target-tylers-mac-mini-1')).toContainText('Offline');
@@ -3421,7 +3426,7 @@ test('Move to machine… lists only machines that can take the Session and asks 
   await page.screenshot({ path: 'tmp/verify/session-move-host/02-dialog.png' });
 
   await dialog.getByRole('radio', { name: 'tylers-mac-mini', exact: true }).check({ force: true });
-  await dialog.getByRole('button', { name: 'Move Session' }).click();
+  await dialog.getByRole('button', { name: 'Ask the agent to hand off' }).click();
   await expect(dialog).toHaveCount(0);
   expect(await submissions()).toEqual([{
     panelId: '__orchestration_panel_alpha_codex',
@@ -3459,7 +3464,7 @@ test('Move to machine… with nothing reachable says why, names the fix, and sen
   const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog).toContainText('No other machine can take this Session right now. Open Pane on the machine you want');
   await page.screenshot({ path: 'tmp/verify/session-move-host/03-nothing-reachable.png' });
-  await expect(dialog.getByRole('button', { name: 'Move Session' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Move', exact: true })).toBeDisabled();
   expect(await submissions()).toEqual([]);
 });
 
@@ -3488,7 +3493,7 @@ test('Move to machine… with Tailscale signed out passes on the reason and the 
   await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
   const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
   await expect(dialog).toContainText('Tailscale is signed out. Sign in to Tailscale, then try again.');
-  await expect(dialog.getByRole('button', { name: 'Move Session' })).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Move', exact: true })).toBeDisabled();
 });
 
 /** How the first create fails: before anything is saved, or after main saved the Session but couldn't open it. */

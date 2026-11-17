@@ -4,9 +4,12 @@ import type { TerminalPausedMark } from './panels';
 /** A pause mark as terminal and chat tabs save it. */
 export const pausedMarkSchema: BoundarySchema<TerminalPausedMark> = boundary.object({
   at: boundary.nonEmptyString,
-  by: boundary.enumeration('manual', 'auto'),
+  by: boundary.enumeration('manual', 'auto', 'move'),
   idleHours: boundary.optional(boundary.number),
   runScript: boundary.optional(boundary.boolean),
+  machine: boundary.optional(boundary.string),
+  arriving: boundary.optional(boundary.boolean),
+  interrupted: boundary.optional(boundary.boolean),
 });
 
 /** Auto-pause pauses Panes nobody has used for this many hours, by default. */

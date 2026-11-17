@@ -8,13 +8,27 @@ import { formatDistanceToNow } from './timestampUtils';
 /** What Pause and Resume act on: one tab, a Pane (its terminal tabs), or a Session (the terminal tabs of its chat and Panes). */
 export type PauseTarget = { kind: 'panel' | 'pane' | 'session'; id: string };
 
-/** "Paused 2 days ago". */
+/** "Paused 2 days ago", or for a tab its Session's move stopped, "Moving to studio-b" / "Arriving from studio-b". */
 export function pausedLabel(mark: TerminalPausedMark): string {
+  if (mark.by === 'move') {
+    const machine = mark.machine || 'another machine';
+    return mark.arriving ? `Arriving from ${machine}` : `Moving to ${machine}`;
+  }
   return `Paused ${formatDistanceToNow(mark.at)}`;
+}
+
+/** Only the move starts a tab it stopped again, so it offers no Resume. */
+export function pauseOffersResume(mark: TerminalPausedMark): boolean {
+  return mark.by !== 'move';
 }
 
 /** Why an auto-pause happened, with the threshold that applied; nothing for a manual pause. */
 export function pausedReason(mark: TerminalPausedMark): string | null {
+  if (mark.by === 'move') {
+    return mark.arriving
+      ? 'This tab starts once the Session has finished arriving.'
+      : 'Stopped for the Session\u2019s move; it takes no messages until the move is done.';
+  }
   return mark.by === 'auto' ? `Auto-paused after ${mark.idleHours ?? DEFAULT_AUTO_PAUSE_HOURS} h idle` : null;
 }
 

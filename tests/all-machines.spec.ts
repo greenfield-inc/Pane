@@ -391,7 +391,7 @@ for (const scheme of ['light', 'dark'] as const) {
 }
 
 for (const scheme of ['light', 'dark'] as const) {
-  test(`Move to machine… on a Session asks its agent on its own machine to hand it off (${scheme})`, async ({ page }, testInfo) => {
+  test(`Move to machine… Hand off with a note asks a Session's agent on its own machine to hand it off (${scheme})`, async ({ page }, testInfo) => {
     await openAllMachines(page, scheme);
     await sessionRows(page).filter({ hasText: 'Backup rotation' }).click({ button: 'right' });
     const item = page.getByRole('menuitem', { name: 'Move to machine…' });
@@ -402,7 +402,10 @@ for (const scheme of ['light', 'dark'] as const) {
 
     // build-box runs the Session, so it is left out; this computer is a target because the Session lives elsewhere.
     const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
-    await expect(dialog).toContainText('Move Backup rotation to another machine');
+    await expect(dialog).toContainText('Move “Backup rotation”');
+    // A whole-Session move runs on build-box too; the note handoff keeps asking its agent.
+    await dialog.getByRole('button', { name: 'Hand off with a note…' }).click();
+    await expect(dialog).toContainText('Hand off “Backup rotation” with a note');
     await expect(dialog.getByRole('radio')).toHaveCount(3);
     await expect(dialog.getByRole('radio', { name: 'studio-mac' })).toBeEnabled();
     await expect(dialog.getByRole('radio', { name: 'parsa-devbox' })).toBeEnabled();
@@ -410,7 +413,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await expect(dialog.getByRole('radio', { name: 'build-box' })).toHaveCount(0);
     await dialog.getByRole('radio', { name: 'parsa-devbox' }).check({ force: true });
     await page.screenshot({ path: testInfo.outputPath(`all-machines-session-move-dialog-${scheme}.png`) });
-    await dialog.getByRole('button', { name: 'Move Session' }).click();
+    await dialog.getByRole('button', { name: 'Ask the agent to hand off' }).click();
     await expect(dialog).toHaveCount(0);
 
     const runs = await (await mock(page)).evaluate(api => api.getMachineRuns());

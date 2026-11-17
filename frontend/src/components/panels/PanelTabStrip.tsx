@@ -350,7 +350,10 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         const isDragged = panel.id === draggedPanelId;
         const isCompactTab = panel.type === 'diff' || panel.type === 'explorer' || panel.type === 'browser';
         const isPreviewTab = editorPanelState(panel)?.isPreview === true;
-        const isPaused = pausedMarkOf(panel) !== undefined;
+        const pausedMark = pausedMarkOf(panel);
+        const isPaused = pausedMark !== undefined;
+        // A tab its Session's move stopped starts again only through the move.
+        const movePaused = pausedMark?.by === 'move';
         const shortcutHint = shortcutHints[index];
         const tabId = getPanelTabId(idNamespace, panel.id);
         const tabPanelId = getPanelTabPanelId(idNamespace, panel.id);
@@ -396,7 +399,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         const menuItems: DropdownItem[] = isDisabled ? [] : [
           ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),
           ...switchToChatMenuItems(panel, chatTabsEnabled, chatAgents, () => setSwitchingPanel(panel)),
-          ...(panel.type === 'terminal' ? [isPaused
+          ...(panel.type === 'terminal' && !movePaused ? [isPaused
             ? { id: 'resume', label: 'Resume tab', icon: FilledPlay, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, false) }
             : { id: 'pause', label: 'Pause tab', icon: Pause, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, true) }] : []),
           ...(!isPermanent ? [{ id: 'close', label: 'Close tab', icon: X, separatorBefore: true, onClick: () => closePanel(panel) }] : []),
