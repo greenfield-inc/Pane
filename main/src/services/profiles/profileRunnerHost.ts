@@ -3,7 +3,7 @@ import path from 'path';
 import { isConfiguredAgent } from '../../../../shared/agents';
 import { PaneError } from '../../../../shared/paneError';
 import type { NotifyQuestion, NotifyResult, NotifySource } from '../../../../shared/types/notify';
-import type { LibraryProfile, Profile } from '../../../../shared/types/profiles';
+import type { LibraryProfile, Profile, ProfileRun } from '../../../../shared/types/profiles';
 import type { RunpaneCommandToolSpec } from '../../../../shared/types/runpaneOrchestration';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
@@ -11,14 +11,21 @@ import type { AppServices } from '../../ipc/types';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { ShellDetector } from '../../utils/shellDetector';
 import { getRuntimeConfigManager } from '../../core/runtime';
-import { agentFarmConfigRoot } from '../agentFarm/bundledAgentFarm';
+import { agentFarmConfigRoot, bundledAgentFarm } from '../agentFarm/bundledAgentFarm';
 import { panelManager } from '../panelManager';
 import { sessionWorkspacePath } from '../sessionWorkspace';
 import type { WorkspaceJournal } from '../workspaceJournal';
 import { listProfiles } from './profileLibrary';
-import { ProfileRunner, profileRunsFolder, type RunCard, type StartedTab, type StepShell, type StepTabRequest } from './profileRunner';
+import { ProfileRunner, profileRunsFolder, type CardOutcome, type RunCard, type StartedTab, type StepShell, type StepTabRequest } from './profileRunner';
 
 let runner: ProfileRunner | undefined;
+let quitting = false;
+
+/** Pane is quitting: tabs it stops don't finish their steps, and cards it ends aren't closed by you. */
+export function prepareProfileRunnerForQuit(): void {
+  quitting = true;
+  runner?.prepareForQuit();
+}
 
 /** The profile runner this Pane started, for IPC and runpane. */
 export function getProfileRunner(): ProfileRunner {
@@ -36,7 +43,9 @@ const readinessSchema = boundary.optional(boundary.object({ blocked: boundary.op
 const createdPane = boundary.object({ items: boundary.array(boundary.object({ ok: boundary.boolean, paneId: boundary.optional(boundary.string), panelId: boundary.optional(boundary.string), error: boundary.optional(boundary.object({ message: boundary.string })), readiness: readinessSchema })) });
 const createdPanel = boundary.object({ paneId: boundary.string, panelId: boundary.string, readiness: readinessSchema });
 
-function stepShell(): StepShell {
+function stepShell(services: AppServices, run: ProfileRun): StepShell {
+  // A WSL repository's tabs run its distribution's bash, whatever Windows' own shell is.
+  if (services.databaseService.getProject(run.repoId)?.wsl_enabled) return 'posix';
   const name = ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell()).name.toLowerCase();
   if (name.includes('powershell') || name.includes('pwsh')) return 'powershell';
   if (name === 'cmd' || name === 'cmd.exe') return 'cmd';
@@ -44,11 +53,17 @@ function stepShell(): StepShell {
   return 'posix';
 }
 
-/** A `reads` file as the agent opens it: the installed plugin copy for a bundled profile (app.asar is unreadable to agents), else beside the profile file. */
+/**
+ * A `reads` file as the agent opens it, from the folders the loader resolved it in (an overlay's
+ * own, then its base's). A bundled plugin's folder is read from its installed copy in Pane's
+ * Agent Farm config root, because app.asar is unreadable to agents.
+ */
 function readPath(profile: Profile, id: string): string | undefined {
   const loaded = currentProfiles().find((candidate) => candidate.name === profile.name);
-  const roots = [path.join(agentFarmConfigRoot(getAppDirectory()), 'plugins', profile.name)];
-  if (loaded) roots.push(path.dirname(loaded.file));
+  const bundle = bundledAgentFarm();
+  const bundledPlugins = bundle ? path.join(bundle.root, 'plugins') : undefined;
+  const installedPlugins = path.join(agentFarmConfigRoot(getAppDirectory()), 'plugins');
+  const roots = (loaded?.readsRoots ?? []).map((root) => (bundledPlugins && path.dirname(root) === bundledPlugins ? path.join(installedPlugins, path.basename(root)) : root));
   for (const root of roots) {
     for (const file of [path.join(root, 'instructions', `${id}.md`), path.join(root, `${id}.md`)]) {
       if (existsSync(file)) return file;
@@ -57,11 +72,15 @@ function readPath(profile: Profile, id: string): string | undefined {
   return undefined;
 }
 
-function answerOf(result: NotifyResult): string | undefined {
-  if ('answer' in result) return result.answer;
-  if ('reply' in result) return result.reply;
-  return undefined;
+function cardOutcome(result: NotifyResult): CardOutcome {
+  if ('answer' in result) return { answer: result.answer };
+  if ('reply' in result) return { answer: result.reply };
+  if (quitting) return { quitting: true };
+  return { closed: 'unavailable' in result ? result.unavailable : 'closed' };
 }
+
+/** Exit codes a shell gives a command killed by SIGHUP (its tab closed), SIGINT (Ctrl+C) or SIGTERM. */
+const INTERRUPTED_EXIT_CODES = new Set([129, 130, 143]);
 
 /**
  * Starts the profile runner on this Pane's services: step tabs through runpane's own
@@ -118,17 +137,18 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
   };
   const postCard = (card: RunCard) => {
     const question: NotifyQuestion = { ui: card.ui, title: card.title, context: card.context };
-    if (card.choices) question.choices = card.choices;
+    // A card with buttons takes only its own choices: a typed reply could never move the run.
+    if (card.choices) Object.assign(question, { choices: card.choices, optionsOnly: true });
     const source: NotifySource = { name: `${card.run.profile} run`, agent: 'Pane profile' };
     if (card.run.paneId) source.paneId = card.run.paneId;
     pendingCards.set(card.id, queue().ask({ question, source, id: card.id }));
   };
-  const waitCard = async (approvalId: string): Promise<string | undefined> => {
+  const waitCard = async (approvalId: string): Promise<CardOutcome> => {
     let result = await (pendingCards.get(approvalId) ?? queue().ask({ resume: approvalId, source: { name: 'Pane profile', agent: 'Pane profile' } }));
     pendingCards.delete(approvalId);
     while ('waiting' in result) result = await queue().ask({ resume: approvalId, source: { name: 'Pane profile', agent: 'Pane profile' } });
     if ('unavailable' in result) log(`[Profiles] Approval ${approvalId} is unavailable: ${result.unavailable}`);
-    return answerOf(result);
+    return cardOutcome(result);
   };
   runner = new ProfileRunner({
     now: () => new Date().toISOString(),
@@ -143,16 +163,19 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
       try { return readdirSync(sessions).map((entry) => profileRunsFolder(path.join(sessions, entry))).filter((folder) => existsSync(folder)); }
       catch { return []; }
     },
-    shell: stepShell,
+    shell: (run) => stepShell(services, run),
     startTab,
     tabExists: (panelId) => panelManager.getPanel(panelId) !== undefined,
     postCard,
     cardOpen: (approvalId) => queue().waitingItems().some((item) => item.id === approvalId),
     waitCard,
+    closeCard: (approvalId, summary) => services.notifyService?.queue.settle(approvalId, summary),
     log,
   });
   journal.subscribe((entry) => {
-    if (entry.kind === 'panel.exited' && entry.panelId) void runner?.tabExited(entry.panelId, entry.exitCode).catch((error) => log(`[Profiles] ${String(error)}`));
+    if (entry.kind !== 'panel.exited' || !entry.panelId) return;
+    const interrupted = entry.reason?.startsWith('signal:') === true || (entry.exitCode !== undefined && INTERRUPTED_EXIT_CODES.has(entry.exitCode));
+    void runner?.tabExited(entry.panelId, { code: entry.exitCode, interrupted }).catch((error) => log(`[Profiles] ${String(error)}`));
   });
   void runner.resumeAll().catch((error) => log(`[Profiles] Could not resume profile runs: ${String(error)}`));
   return runner;

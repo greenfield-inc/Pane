@@ -49,6 +49,12 @@ export interface RunCard {
   choices?: NotifyChoice[];
 }
 
+/** How a card ended: answered; closed without an answer (by the person, or Approvals couldn't show it); or Pane is quitting. */
+export type CardOutcome = { answer: string } | { closed: string } | { quitting: true };
+
+/** How many times in a row a run asks again after its card closed unanswered, before it waits for you instead. */
+const ASK_AGAIN_LIMIT = 2;
+
 export interface ProfileRunnerPorts {
   now(): string;
   /** The profile a run follows, as the library loads it now (valid and launchable), or undefined. */
@@ -59,15 +65,18 @@ export interface ProfileRunnerPorts {
   runsFolder(sessionId: string): string;
   /** Every Session's runs folder, read at start to resume runs. */
   allRunsFolders(): string[];
-  shell(): StepShell;
+  /** The shell a run's step tabs open in (a WSL repository's tabs run bash). */
+  shell(run: ProfileRun): StepShell;
   startTab(request: StepTabRequest): Promise<StartedTab>;
   /** Whether a tab still exists. */
   tabExists(panelId: string): boolean;
   postCard(card: RunCard): void;
   /** Whether a card still waits in Approvals (one that closed while Pane was down does not). */
   cardOpen(approvalId: string): boolean;
-  /** The answer to a card; undefined when it was closed without one. Waits across restarts by id. */
-  waitCard(approvalId: string): Promise<string | undefined>;
+  /** How a card ended. Waits across restarts by id. */
+  waitCard(approvalId: string): Promise<CardOutcome>;
+  /** Closes a card the run no longer waits on, with what happened instead. */
+  closeCard(approvalId: string, summary: string): void;
   log(message: string): void;
 }
 
@@ -150,6 +159,10 @@ export class ProfileRunner {
   private readonly runs = new Map<string, ProfileRun>();
   /** Card ids this process already waits on, so a card is never waited on twice. */
   private readonly waiting = new Set<string>();
+  /** Run id → cards in a row that closed unanswered at the run's current step. */
+  private readonly unanswered = new Map<string, number>();
+  /** Set once Pane starts quitting: tabs exiting then were stopped by the quit, not finished. */
+  private quitting = false;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(private readonly ports: ProfileRunnerPorts) {}
@@ -167,8 +180,14 @@ export class ProfileRunner {
     }
     for (const run of this.runs.values()) {
       if (run.state === 'ended' || run.state === 'failed') continue;
-      await this.serialized(() => this.resume(run.id));
+      // One run that can't resume (its step was removed from the profile) leaves the others going.
+      await this.serialized(() => this.resume(run.id)).catch((error) => this.ports.log(`[Profiles] Run ${run.id} of ${run.profile} could not resume: ${reasonOf(error)}`));
     }
+  }
+
+  /** Pane is quitting: the tabs it stops are not steps finishing, so no exit moves a run from here on. */
+  prepareForQuit(): void {
+    this.quitting = true;
   }
 
   list(): ProfileRun[] {
@@ -217,13 +236,18 @@ export class ProfileRunner {
     });
   }
 
-  /** A tab exited: moves the run whose current step it is. */
-  async tabExited(panelId: string, exitCode: number | undefined): Promise<void> {
+  /**
+   * A tab exited: moves the run whose current step it is. `interrupted` is an exit the step didn't
+   * choose (a signal, Ctrl+C, its tab closed); a command then asks for its outcome instead.
+   */
+  async tabExited(panelId: string, exit: { code?: number; interrupted?: boolean }): Promise<void> {
+    if (this.quitting) return;
     await this.serialized(async () => {
+      if (this.quitting) return;
       const run = this.runOnTab(panelId);
       if (!run) return;
       const profile = this.profileOf(run);
-      const transition = stepExited(run, profile, panelId, exitCode, this.ports.now());
+      const transition = stepExited(run, profile, panelId, exit, this.ports.now());
       if (transition) await this.apply(run.id, profile, transition);
     });
   }
@@ -247,6 +271,7 @@ export class ProfileRunner {
       delete stopped.pending;
       delete stopped.attention;
       this.save(stopped);
+      this.closeLeftCard(run, stopped, 'The run was stopped.');
       return stopped;
     });
   }
@@ -296,12 +321,22 @@ export class ProfileRunner {
     this.runs.set(run.id, run);
   }
 
+  /** Closes the card `before` waited on when `after` no longer waits on it (the run moved another way). */
+  private closeLeftCard(before: ProfileRun, after: ProfileRun, summary: string): void {
+    if (before.wait.kind !== 'card' || !before.wait.approvalId) return;
+    if (after.wait.kind === 'card' && after.wait.approvalId === before.wait.approvalId) return;
+    this.ports.closeCard(before.wait.approvalId, summary);
+  }
+
   /** Saves the move first, then does its one effect, then saves what the effect made (a tab or a card). */
   private async apply(runId: string, profile: Profile, transition: RunTransition): Promise<void> {
     // A move leaves the old step's prompt behind, so what waited on the person there no longer does.
     let run: ProfileRun = { ...transition.run };
     delete run.attention;
+    const before = this.runs.get(runId);
+    if (before && (before.step !== run.step || before.state !== run.state)) this.unanswered.delete(runId);
     this.save(run);
+    if (before) this.closeLeftCard(before, run, `Answered another way: the run is at ${run.step} (${run.state}).`);
     try {
       run = await this.perform(run, profile, transition.effect);
     } catch (error) {
@@ -357,22 +392,43 @@ export class ProfileRunner {
     return next;
   }
 
-  /** Waits for a card's answer in the background, then moves the run. */
+  /**
+   * Waits for a card's answer in the background, then moves the run. A card that closes without an
+   * answer, or with one the step doesn't offer, is asked again, so the run never waits on a card
+   * that is gone; after ASK_AGAIN_LIMIT in a row the run waits with a note instead, and the next
+   * start of Pane asks again.
+   */
   private listen(runId: string, approvalId: string, profileName: string): void {
     if (this.waiting.has(approvalId)) return;
     this.waiting.add(approvalId);
-    void this.ports.waitCard(approvalId).then(async (answer) => {
+    void this.ports.waitCard(approvalId).then(async (outcome) => {
       this.waiting.delete(approvalId);
-      if (answer === undefined) {
-        this.ports.log(`[Profiles] The approval for ${profileName} run ${runId} closed without an answer; the run waits.`);
-        return;
-      }
+      if ('quitting' in outcome) return;
       // In the queue: an answer that lands while its card's move is still being saved waits for it.
       await this.serialized(async () => {
         const run = this.runs.get(runId);
         if (!run || run.wait.kind !== 'card' || run.wait.approvalId !== approvalId) return;
         const profile = this.profileOf(run);
-        await this.apply(runId, profile, answerCard(run, profile, approvalId, answer, this.ports.now()));
+        let why: string;
+        if ('answer' in outcome) {
+          try {
+            await this.apply(runId, profile, answerCard(run, profile, approvalId, outcome.answer, this.ports.now()));
+            return;
+          } catch (error) {
+            why = `its answer "${outcome.answer}" was not one it offers (${reasonOf(error)})`;
+          }
+        } else {
+          why = `it closed without an answer (${outcome.closed})`;
+        }
+        const times = (this.unanswered.get(runId) ?? 0) + 1;
+        this.unanswered.set(runId, times);
+        if (times > ASK_AGAIN_LIMIT) {
+          this.ports.log(`[Profiles] ${profileName} run ${runId}: its card at ${run.step} ${why}; the run waits.`);
+          this.save({ ...run, attention: `The question at ${run.step} closed ${ASK_AGAIN_LIMIT + 1} times without an answer, so the run waits. Restart Pane to be asked again, or stop the run.`, updatedAt: this.ports.now() });
+          return;
+        }
+        this.ports.log(`[Profiles] ${profileName} run ${runId}: its card at ${run.step} ${why}; asking again.`);
+        await this.apply(runId, profile, { run, effect: this.unfinishedEffect(run, profile) });
       });
     }).catch((error) => {
       this.waiting.delete(approvalId);
@@ -416,7 +472,7 @@ export class ProfileRunner {
     if (!run.paneId) request.newPane = { name: `${profile.name} ${run.prompt}`.slice(0, 60).trim() };
     if (step.kind === 'command') {
       request.title = step.title;
-      request.command = commandStepLine(step.run, this.ports.shell());
+      request.command = commandStepLine(step.run, this.ports.shell(run));
       return request;
     }
     const chosen = chosenRuns(run, profile, step.agent);
@@ -427,8 +483,9 @@ export class ProfileRunner {
       request.command = [agentTerminalCommand(chosen.cli), ...agentModelArgs(chosen.cli, chosen.model, chosen.effort)].join(' ');
       request.agentType = chosen.cli;
     } else {
-      // Baseline: a CLI Pane doesn't know runs as the command the launch gave for it, in a plain terminal.
-      request.command = run.commands[chosen.cli] ?? chosen.cli;
+      // Baseline: a CLI Pane doesn't know runs as the command the launch gave for it, in a plain
+      // terminal whose shell exits with it, so its first message can never reach the shell instead.
+      request.command = commandStepLine(run.commands[chosen.cli] ?? chosen.cli, this.ports.shell(run));
     }
     return request;
   }

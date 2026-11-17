@@ -1,10 +1,10 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Profile } from '../../../../shared/types/profiles';
 import { loadProfiles } from './profileLoader';
-import { ProfileRunner, commandStepLine, profileRunsFolder, type ProfileRunnerPorts, type RunCard, type StepTabRequest } from './profileRunner';
+import { ProfileRunner, commandStepLine, profileRunsFolder, type CardOutcome, type ProfileRunnerPorts, type RunCard, type StepTabRequest } from './profileRunner';
 
 const FIXTURES = path.join(__dirname, '../../../../shared/profiles/fixtures');
 const temporary: string[] = [];
@@ -25,7 +25,9 @@ class FakePane {
   readonly cards: RunCard[] = [];
   readonly closedTabs = new Set<string>();
   readonly closedCards = new Set<string>();
-  private readonly answers = new Map<string, (answer: string | undefined) => void>();
+  /** Cards the runner closed itself, with what it said. */
+  readonly settledCards = new Map<string, string>();
+  private readonly answers = new Map<string, (outcome: CardOutcome) => void>();
   private tabCount = 0;
 
   constructor(private readonly profile: Profile = greenfield()) {
@@ -40,6 +42,7 @@ class FakePane {
       runsFolder: () => profileRunsFolder(this.sessionFolder),
       allRunsFolders: () => [profileRunsFolder(this.sessionFolder)],
       shell: () => 'posix',
+      closeCard: (id, summary) => { this.settledCards.set(id, summary); },
       startTab: async (request) => {
         this.tabs.push(request);
         this.tabCount += 1;
@@ -53,8 +56,12 @@ class FakePane {
     };
   }
 
-  answer(card: RunCard, text: string | undefined): void {
-    this.answers.get(card.id)?.(text);
+  answer(card: RunCard, text: string): void {
+    this.answers.get(card.id)?.({ answer: text });
+  }
+
+  close(card: RunCard): void {
+    this.answers.get(card.id)?.({ closed: 'Closed by you.' });
   }
 
   runFile(): string {
@@ -91,7 +98,8 @@ describe('ProfileRunner', () => {
     const pane = new FakePane();
     const runner = new ProfileRunner(pane.ports());
     await runner.launch({ ...launchRequest(), harness: { planner: 'aider' }, commands: { aider: 'node ./stub-agent.js' } });
-    expect(pane.tabs[0]).toMatchObject({ command: 'node ./stub-agent.js' });
+    // Its shell exits with it, so a CLI that fails to start never leaves the first message to the shell.
+    expect(pane.tabs[0]).toMatchObject({ command: 'node ./stub-agent.js; exit $?' });
     expect(pane.tabs[0].agentType).toBeUndefined();
   });
 
@@ -140,8 +148,76 @@ describe('ProfileRunner', () => {
     await settle();
     await runner.reportOutcome('tab-2', 'PR ready');
     expect(pane.tabs[2]).toMatchObject({ title: 'CI + QA checks', command: 'gh pr checks --watch; exit $?' });
-    await runner.tabExited('tab-3', 1);
+    await runner.tabExited('tab-3', { code: 1 });
     expect(runner.list()[0]).toMatchObject({ step: 'build', wait: { panelId: 'tab-4' } });
+  });
+
+  it('asks again when a card closes unanswered or gets an answer it doesn\'t offer, so the run never strands', async () => {
+    const pane = new FakePane();
+    const runner = new ProfileRunner(pane.ports());
+    await runner.launch(launchRequest());
+    await runner.reportOutcome('tab-1', 'plan ready');
+    pane.close(pane.cards[0]);
+    await settle();
+    pane.answer(pane.cards[1], 'looks good to me');
+    await settle();
+    expect(pane.cards.map((card) => card.title)).toEqual(['Approve the plan?', 'Approve the plan?', 'Approve the plan?']);
+    expect(runner.list()[0]).toMatchObject({ step: 'approve', wait: { kind: 'card', approvalId: pane.cards[2].id } });
+    pane.answer(pane.cards[2], 'approve');
+    await settle();
+    expect(runner.list()[0]).toMatchObject({ step: 'build', wait: { panelId: 'tab-2' } });
+  });
+
+  it('waits with a note once its card has closed unanswered three times in a row', async () => {
+    const pane = new FakePane();
+    const runner = new ProfileRunner(pane.ports());
+    await runner.launch(launchRequest());
+    await runner.reportOutcome('tab-1', 'plan ready');
+    for (let index = 0; index < 3; index += 1) {
+      pane.close(pane.cards[index]);
+      await settle();
+    }
+    expect(pane.cards).toHaveLength(3);
+    expect(runner.list()[0]).toMatchObject({ step: 'approve', attention: expect.stringContaining('closed 3 times without an answer') });
+  });
+
+  it('never stops a run on a loop card answer other than its two choices', async () => {
+    const pane = new FakePane();
+    const runner = new ProfileRunner(pane.ports());
+    await runner.launch(launchRequest());
+    await runner.reportOutcome('tab-1', 'plan ready');
+    pane.answer(pane.cards[0], 'approve');
+    await settle();
+    for (let tab = 2; runner.list()[0].state !== 'paused'; tab += 2) {
+      await runner.reportOutcome(`tab-${tab}`, 'PR ready');
+      await runner.tabExited(`tab-${tab + 1}`, { code: 1 });
+    }
+    const loopCard = pane.cards.at(-1);
+    if (!loopCard) throw new Error('no loop card');
+    pane.answer(loopCard, 'hmm, not sure');
+    await settle();
+    expect(runner.list()[0]).toMatchObject({ state: 'paused' });
+    expect(pane.cards.at(-1)?.title).toBe('This loop ran 3 times: go again, or stop?');
+  });
+
+  it('asks which outcome a command had when it was interrupted, and ignores tabs Pane\'s quit stops', async () => {
+    const pane = new FakePane();
+    const runner = new ProfileRunner(pane.ports());
+    await runner.launch(launchRequest());
+    await runner.reportOutcome('tab-1', 'plan ready');
+    pane.answer(pane.cards[0], 'approve');
+    await settle();
+    await runner.reportOutcome('tab-2', 'PR ready');
+    await runner.tabExited('tab-3', { code: 130, interrupted: true });
+    expect(runner.list()[0]).toMatchObject({ step: 'checks', wait: { kind: 'card', card: 'set-outcome' } });
+    expect(pane.cards.at(-1)).toMatchObject({ title: 'Which outcome did checks have?' });
+    const second = new FakePane();
+    const quitting = new ProfileRunner(second.ports());
+    await quitting.launch(launchRequest());
+    quitting.prepareForQuit();
+    await quitting.tabExited('tab-1', { code: 130, interrupted: true });
+    expect(quitting.list()[0]).toMatchObject({ step: 'plan', wait: { kind: 'step', panelId: 'tab-1' } });
+    expect(second.cards).toHaveLength(0);
   });
 
   it('picks up after a restart: the same step, nothing started twice, and its later report still moves the run', async () => {
@@ -202,6 +278,27 @@ describe('ProfileRunner', () => {
     const run = await runner.launch(launchRequest());
     expect((await runner.setOutcome(run.id, 'plan ready')).step).toBe('approve');
     expect(await runner.stop(run.id)).toMatchObject({ state: 'ended', error: 'Stopped by you.' });
+    // The card it waited on leaves Approvals with it.
+    expect(pane.settledCards.get(pane.cards[0].id)).toBe('The run was stopped.');
+  });
+
+  it('resumes every other run when one can\'t resume', async () => {
+    const pane = new FakePane();
+    const first = new ProfileRunner(pane.ports());
+    const broken = await first.launch(launchRequest());
+    await first.reportOutcome('tab-1', 'plan ready');
+    const healthy = await first.launch(launchRequest());
+    await first.reportOutcome('tab-2', 'plan ready');
+    // The first run's step is gone from the profile, and both cards closed while Pane was down.
+    const file = path.join(profileRunsFolder(pane.sessionFolder), `${broken.id}.json`);
+    writeFileSync(file, readFileSync(file, 'utf8').replace('"step": "approve"', '"step": "removed-step"'));
+    for (const card of pane.cards) pane.closedCards.add(card.id);
+    const restarted = new ProfileRunner(pane.ports());
+    await restarted.resumeAll();
+    expect(pane.cards).toHaveLength(3);
+    pane.answer(pane.cards[2], 'approve');
+    await settle();
+    expect(restarted.get(healthy.id)?.step).toBe('build');
   });
 
   it('marks the run failed, with the reason, when a step\'s tab can\'t start', async () => {
