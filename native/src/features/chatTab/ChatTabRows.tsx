@@ -3,6 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useMarkdown } from 'react-native-marked';
 
+import { deviceMarkerOf } from '@shared/deviceMarker';
 import type { PlanEntry, StepGroup, WorkerNote } from '@shared/chatTabPresentation';
 import { describeChatContent } from '@shared/agentChatPresentation';
 import { imageOf, planEntryKeys } from '@shared/chatTabPresentation';
@@ -18,6 +19,8 @@ export interface ChatRowActions {
   /** Opens the phone's Diff view; a diff never renders in the thread by itself. */
   onViewDiff?: (path: string) => void;
   onOpenWorker?: (paneId: string) => void;
+  /** Opens a device tab, from a device_open step's Open. */
+  onOpenDevice?: (panelId: string) => void;
   /** Draws a `block` row (a fenced block in a language the screen registered). */
   renderBlock?: (language: string, content: string) => ReactNode;
 }
@@ -101,6 +104,15 @@ function StepLine({ group, actions }: { group: StepGroup; actions: ChatRowAction
   const label = group.kind === 'run' && single ? single.command ?? group.label : group.label;
   const output = single?.output;
   const icon = STEP_ICONS[group.kind];
+  const device = single?.status === 'completed' ? deviceMarkerOf(output) : undefined;
+  if (device) {
+    return <View testID="chat-step-device" style={styles.stepLine}>
+      <View style={styles.stepIcon}><Icon ios="iphone" android="smartphone" size={15} color={theme.chat.mutedForeground} /></View>
+      <Text variant="subhead" style={[styles.verb, { color: theme.chat.foreground }]}>Opened</Text>
+      <Text variant="subhead" numberOfLines={1} style={[styles.stepLabel, { color: theme.chat.mutedForeground }]}>{[device.name, device.os, device.machine].filter(Boolean).join(' · ')}</Text>
+      {actions.onOpenDevice && <Pressable testID="chat-open-device" accessibilityRole="button" onPress={() => actions.onOpenDevice!(device.panelId)} hitSlop={10}><Text variant="footnote" style={{ color: theme.colors.accentText }}>Open</Text></Pressable>}
+    </View>;
+  }
   return <View testID={`chat-step-${group.kind}`}>
     <Pressable accessibilityRole="button" accessibilityLabel={`${VERBS[group.kind][running ? 0 : 1]} ${label}`} accessibilityState={{ expanded: open }} disabled={!output && group.steps.length < 2} onPress={() => setOpen(!open)} style={styles.stepLine}>
       <View style={styles.stepIcon}><Icon ios={failed ? 'xmark.circle' : icon.ios} android={failed ? 'cancel' : icon.android} size={15} color={failed ? theme.colors.danger : theme.chat.mutedForeground} /></View>

@@ -13,6 +13,7 @@ import { RecentWrites } from './recentWrites';
 import { PairingExchange } from './relay/pairingExchange';
 import { GlassesAccess } from './glassesAccess';
 import { RelayLinks } from './relay/relayLinks';
+import { ComputerLinking } from './relay/computerLinking';
 import { registerRelayCommands } from './relay/relayCommands';
 import { RelayPreviews } from './relay/relayPreviews';
 import { RelayService } from './relay/relayService';
@@ -540,7 +541,7 @@ describe('PaneRemoteHttpApiServer', () => {
     const config = createEnabledRemoteConfig();
     const exchange = new PairingExchange({ addClient: async (record) => { config.host.clients.push(record); } });
     const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config), {
-      pairing: { exchange: (request) => exchange.exchange(request), clientAddress: () => null },
+      pairing: { exchange: (request) => exchange.exchange(request), preview: async () => ({ ok: false, status: 404, code: 'ERR_UNUSED', message: 'Not used here.' }), clientAddress: () => null },
     });
     activeServers.push(server);
     await server.start();
@@ -560,6 +561,34 @@ describe('PaneRemoteHttpApiServer', () => {
     config.host.clients = config.host.clients.filter((client) => client.id !== teammate.clientId);
     await expect(teammate.sessions()).resolves.toMatchObject({ statusCode: 403, body: { error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID' } } });
     await expect(owner.sessions()).resolves.toMatchObject({ statusCode: 200 });
+  });
+
+  it('previews a one-time code without spending it, and locks out a source that guesses', async () => {
+    const config = createEnabledRemoteConfig();
+    const exchange = new PairingExchange({ addClient: async (record) => { config.host.clients.push(record); } });
+    const server = new PaneRemoteHttpApiServer(new PaneCommandRegistry(), createConfigManagerStub(config), {
+      pairing: {
+        exchange: (request) => exchange.exchange(request),
+        preview: async ({ secret, source }) => {
+          const checked = exchange.check(secret, source);
+          return checked.ok ? { ok: true, group: [{ id: 'studiostudiostud', name: 'Studio Mac' }], expiresAt: checked.expiresAt } : checked;
+        },
+        clientAddress: () => null,
+      },
+    });
+    activeServers.push(server);
+    await server.start();
+    const { secret, expiresAt } = exchange.createSecret('1h');
+
+    await expect(requestJson(server, 'POST', '/pair/preview', { secret }))
+      .resolves.toEqual({ statusCode: 200, body: { ok: true, group: [{ id: 'studiostudiostud', name: 'Studio Mac' }], expiresAt } });
+    await expect(requestJson(server, 'POST', '/pair/exchange', { secret, label: 'Ana’s iPhone' })).resolves.toMatchObject({ statusCode: 200 });
+    await expect(requestJson(server, 'POST', '/pair/preview', { secret }))
+      .resolves.toMatchObject({ statusCode: 410, body: { error: { code: 'ERR_PAIRING_CODE_USED' } } });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) await requestJson(server, 'POST', '/pair/preview', { secret: `guess-${attempt}` });
+    await expect(requestJson(server, 'POST', '/pair/preview', { secret: exchange.createSecret().secret }))
+      .resolves.toMatchObject({ statusCode: 429, body: { error: { code: 'ERR_PAIRING_LOCKED' } } });
   });
 
   it('accepts browser invoke auth metadata from a simple request body', async () => {
@@ -1107,13 +1136,18 @@ describe('QR-paired phones and linked computers', () => {
       kind: 'computer',
       computerId: STUDIO.id,
     }];
-    remote.client.profiles = (options.linked ?? [STUDIO]).map((peer) => ({
+    remote.client.computers = (options.linked ?? [STUDIO]).map((peer) => ({
       id: `relay-${peer.id}`,
       label: peer.name,
-      baseUrl: peer.address,
-      token: `token-for-${peer.id}`,
-      transport: 'http+sse',
-      relay: { computerId: peer.id, fingerprint: peer.fingerprint, linkedBy: 'Ana’s iPhone' },
+      linkedBy: 'Ana’s iPhone',
+      routes: [{
+        id: `relay:${peer.address}`,
+        kind: 'relay',
+        source: 'link',
+        baseUrl: peer.address,
+        token: `token-for-${peer.id}`,
+        relay: { computerId: peer.id, fingerprint: peer.fingerprint },
+      }],
     }));
     let config: Pick<AppConfig, 'remoteDaemon'> = { remoteDaemon: remote };
     const store = {
@@ -1148,18 +1182,20 @@ describe('QR-paired phones and linked computers', () => {
       displayName: () => 'Travel Laptop',
       addClient: async () => {},
     });
-    registerRelayCommands(registry, relay, previews, links, store);
+    const linking = new ComputerLinking({ links, self: () => LAPTOP, routesReport: () => undefined, post: async () => ({ status: 503, json: null }), call });
+    registerRelayCommands(registry, relay, previews, links, linking, store);
     await server.start();
     const invoke = (token: string, channel: string, ...args: JsonValue[]) => requestJson(server, 'POST', '/invoke', { channel, args }, token);
     const mint = async (token: string, peer = ROGUE) => {
       const { body } = await invoke(token, 'relay:client:mint-link', { peer });
       return decodeBoundary(body, boundary.object({ result: boundary.object({ token: boundary.nonEmptyString }) })).result.token;
     };
-    return { server, registry, invoke, mint, call };
+    return { server, registry, invoke, mint, call, addClient: (record: RemoteDaemonClientRecord) => links.addClient(record) };
   }
 
   it.each([
     ['relay:client:grant-phone', { label: 'Rogue phone', phoneId: 'pane-native-rogue' }],
+    ['relay:client:grant-computer', { peer: ROGUE }],
     ['relay:client:remove-phone', { phoneId: 'pane-native-ana' }],
     ['relay:client:forget-computer', { computerId: STUDIO.id }],
   ])('refuses %s from a paired phone, and changes nothing', async (channel, request) => {
@@ -1172,13 +1208,34 @@ describe('QR-paired phones and linked computers', () => {
   });
 
   it.each([
-    ['relay:client:mint-link', { peer: ROGUE }],
-    ['relay:client:save-link', { peer: ROGUE, token: 'stolen' }],
-  ])('refuses %s from a linked computer, since only a phone that scanned both may link them', async (channel, request) => {
+    ['relay:client:mint-link', { peer: ROGUE }, 'ERR_RELAY_PHONE_ONLY'],
+    ['relay:client:save-link', { peer: ROGUE, token: 'stolen' }, 'ERR_RELAY_PHONE_ONLY'],
+    ['relay:client:grant-computer', { peer: ROGUE }, 'ERR_RELAY_COMPUTER_ONLY'],
+    ['relay:client:forget-computer', { computerId: STUDIO.id }, 'ERR_RELAY_COMPUTER_ONLY'],
+  ])('refuses %s from paired glasses, and changes nothing', async (channel, request, code) => {
     const computer = await startComputer();
+    await computer.addClient({ id: 'glasses-ana', label: 'Ana’s glasses', createdAt: '2026-11-14T00:00:00.000Z', tokenHash: hashRemoteDaemonToken('glasses-token'), kind: 'glasses' });
 
-    await expect(computer.invoke('studio-token', channel, request))
-      .resolves.toMatchObject({ body: { ok: false, error: { code: 'ERR_RELAY_PHONE_ONLY' } } });
+    await expect(computer.registry.invokeRemote(channel, [request, { clientId: 'glasses-ana' }])).rejects.toMatchObject({ code });
+    await expect(computer.registry.invoke('relay:linked-computers', [])).resolves.toEqual([expect.objectContaining({ name: 'Studio Mac' })]);
+    await expect(computer.invoke('studio-token', 'runpane:machine:info')).resolves.toMatchObject({ statusCode: 200 });
+  });
+
+  it('lets a linked computer link computers, and "Not you? Unlink" on it revokes the links it made', async () => {
+    const computer = await startComputer();
+    const minted = await computer.mint('studio-token', BUILD_BOX);
+    await expect(computer.invoke('studio-token', 'relay:client:save-link', { peer: BUILD_BOX, token: 'token-for-build-box' })).resolves.toMatchObject({ statusCode: 200 });
+    await expect(computer.invoke(minted, 'runpane:machine:info')).resolves.toMatchObject({ statusCode: 200 });
+    await expect(computer.registry.invoke('relay:linked-computers', [])).resolves.toEqual([
+      expect.objectContaining({ name: 'Studio Mac' }),
+      expect.objectContaining({ id: BUILD_BOX.id, name: 'Build Box', token: 'token-for-build-box' }),
+    ]);
+
+    await computer.registry.invoke(RELAY_DEVICE_COMMANDS.undoJoin, [{ computerId: STUDIO.id }]);
+
+    await expect(computer.invoke(minted, 'runpane:machine:info'))
+      .resolves.toMatchObject({ statusCode: 403, body: { error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID' } } });
+    await expect(computer.registry.invoke('relay:linked-computers', [])).resolves.toEqual([]);
   });
 
   it.each([
@@ -1427,6 +1484,29 @@ describe('workspace identity mode', () => {
     return headers;
   };
   const passwordIs = (expected: string) => (secret: string) => (secret === expected ? 'valid' as const : 'invalid' as const);
+
+  it('takes a linked computer\'s or phone\'s token from any login (D-51), and only the linked computer runs machine commands', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', () => ({ hostname: 'devbox' }));
+    registry.register('sessions:get-all', () => []);
+    const config = createDefaultRemoteDaemonConfig();
+    config.host.clients = [
+      { id: 'mac', label: 'Mac', createdAt: '2026-11-15T00:00:00Z', tokenHash: hashRemoteDaemonToken('mac-link'), kind: 'computer', computerId: 'macmacmacmacmac0' },
+      { id: 'phone', label: 'iPhone', createdAt: '2026-11-15T00:00:00Z', tokenHash: hashRemoteDaemonToken('phone-token') },
+    ];
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config), {
+      workspace: { listenPort: 0, pathSecret: 'serve-secret', access: () => ownerOnly() },
+    });
+    activeServers.push(server);
+    await server.start();
+
+    // Under "Only me", a teammate login with no token is refused; the same login carrying a link's token is let in.
+    expect((await requestJson(server, 'POST', invokePath, invoke, undefined, as(teammate, 'mac-link'))).body).toEqual({ ok: true, result: { hostname: 'devbox' } });
+    expect((await requestJson(server, 'POST', invokePath, { channel: 'sessions:get-all', args: [] }, undefined, as(teammate, 'phone-token'))).statusCode).toBe(200);
+    const phoneMachine = await requestJson(server, 'POST', invokePath, invoke, undefined, as(owner, 'phone-token'));
+    expect(phoneMachine.statusCode).toBe(403);
+    expect(phoneMachine.body).toMatchObject({ error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } });
+  });
 
   it('under "Only me", refuses a different Tailscale login on the same tailnet', async () => {
     const server = await startWorkspaceServer(() => ownerOnly());

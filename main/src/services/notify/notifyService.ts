@@ -8,7 +8,6 @@ import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
 import {
   DEFAULT_NOTIFY_SETTINGS,
-  NOTIFY_LINKS_MAX,
   type NotifyCaller,
   type NotifyAgentAction,
   type NotifyCommand,
@@ -70,6 +69,8 @@ export interface NotifyServiceDependencies {
   wslDistros?: () => string[];
   /** The Session a Pane (and tab) works in; Approvals files each item under it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
+  /** Both Panes run for the same loop: a later run may --update or --took an earlier run's card. */
+  sameLoop?: (callerPaneId: string, askerPaneId: string) => boolean;
   /** The project a Pane belongs to. */
   projectOf?: (paneId: string) => string | undefined;
   /** Every open Session by id, read once per fallback refresh. */
@@ -158,7 +159,8 @@ export class NotifyService {
       machineId: deps.configManager.getConfig().machineId,
       secrets: deps.secrets,
       sessionOf: deps.sessionOf,
-      savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.profiles ?? []).map(profile => profile.id),
+      sameLoop: deps.sameLoop,
+      savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.computers ?? []).map(computer => computer.id),
       projectOf: deps.projectOf,
       store: deps.store,
       askerGone: (item) => this.askerGone(item),
@@ -251,15 +253,21 @@ export class NotifyService {
       const once = `${entry.panelId}:${entry.at}`;
       if (carded.has(once)) continue;
       carded.add(once);
+      // Carded already: its status file isn't read again on every inbox change.
+      if (this.queue.holdsWorkerQuestion(entry.id)) continue;
+      // A worker on another machine names it: the card says where to go to see its tab.
+      const machine = this.deps.memberMachine?.(entry.paneId);
       const session = this.deps.sessionRecord?.(entry.sessionId);
       // The status file's needs_you, never its JSON: the question's why, its options and files.
       // Tidied when the question is an old paragraph (P8); a report recorded before the check stays as sent.
-      const card = workerCard(entry.report?.summary, question, { quietly: true, summaryPath: entry.report?.summaryPath });
-      // D-81: the worker's status file, which its report named, opens beside the card.
-      const statusLink = entry.report?.summaryPath ? [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] : [];
-      const links = [...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== entry.report?.summaryPath)].slice(0, NOTIFY_LINKS_MAX);
-      // A worker on another machine names it: the card says where to go to see its tab.
-      const machine = this.deps.memberMachine?.(entry.paneId);
+      // D-81: the worker's status file, which its report named, opens beside the card. Only this
+      // machine's own file is read: another machine's path names a file over there.
+      const card = workerCard(entry.report?.summary, question, {
+        quietly: true,
+        summaryPath: entry.report?.summaryPath,
+        readStatusFile: entry.report?.summaryTruncated === true && !machine,
+        statusLabel: `${entry.paneName} status`,
+      });
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: machine ? `${entry.paneName} on ${machine}` : entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
       this.queue.addWorkerQuestion({
@@ -269,7 +277,7 @@ export class NotifyService {
         at,
         // The Session it was filed in, even after the worker has moved or the Session closed.
         connected: { kind: 'session', id: entry.sessionId, name: session?.name ?? 'Closed Session', paneId: session?.paneId ?? '' },
-        links: links.length ? links : undefined,
+        links: card.links,
         context: card.context,
         choices: card.choices,
         questions: card.questions,
@@ -281,7 +289,9 @@ export class NotifyService {
 
   private workerQuestionEnded({ id, how, decision }: SessionInboxEnded): void {
     if (decision) this.queue.recordDecision(id, decision);
-    this.queue.endWorkerQuestion(id, how === 'moved-on' ? 'the worker moved on' : 'its orchestrator dealt with it');
+    if (how === 'moved-on') this.queue.endWorkerQuestion(id, 'the worker moved on');
+    // An ack records what the relay returned; a card the worker since reopened stays open.
+    else this.queue.endWorkerQuestion(id, 'its orchestrator dealt with it', true);
   }
 
   /** The liveness rule (D-147): connected Session first, then the Pane and the tab that asked. */
@@ -404,6 +414,7 @@ export class NotifyService {
       case 'open-inbox': this.navigate('inbox'); return;
       case 'show-details': await this.updateSettings({ showDetails: command.shown }); return;
       case 'open-in-pane': await this.openInPane(command.id); return;
+      case 'ask-agent': this.askAgentInMainWindow(command.id); return;
       case 'open-link': await this.openLink(command.id, command.index, command.paneId); return;
       default:
         if ('id' in command && command.id && this.queue.remoteTarget(command.id)) await this.runOnMachine(command);
@@ -441,7 +452,7 @@ export class NotifyService {
    * A command for a saved machine's question: it goes to that machine only, under the id the
    * machine knows the question by. What stays on this screen runs here.
    */
-  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' }>): Promise<void> {
+  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'ask-agent' }>): Promise<void> {
     const target = this.queue.remoteTarget(command.id);
     if (!target) return;
     if (command.type === 'close' || command.type === 'reopen' || command.type === 'override') {
@@ -595,6 +606,16 @@ export class NotifyService {
     throw new PaneError('ERR_APPROVALS_LINK_OPEN',
       `Pane couldn't open ${link.label} as a tab (${failure instanceof Error ? failure.message : 'the card names no Pane'}). Nothing was opened.`,
       'url' in link ? 'Open the address in your browser.' : 'Check the file still exists inside the asking Pane\'s folder.');
+  }
+
+  /**
+   * A health card's Ask an agent clicked in a floating window: the main window comes forward and
+   * asks there, where the active machine and the Session it opens are.
+   */
+  private askAgentInMainWindow(itemId: string): void {
+    if (!this.queue.snapshot().items.some(candidate => candidate.id === itemId && candidate.machineHealth)) return;
+    this.windows.closeRound();
+    this.navigate({ askAgent: itemId });
   }
 
   private navigate(target: NotifyNavigateTarget): void {

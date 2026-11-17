@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { NotifyItem } from '../../../shared/types/notify';
 
 /**
  * Which approval the column shows on each surface (P4): a Session (keyed `session:<id>`),
@@ -75,4 +76,29 @@ export const useApprovalColumnStore = create<ApprovalColumnState>((set, get) => 
 /** Opens an approval in a Session's column (from its count, an inline card, or a link). */
 export function openSessionApproval(sessionId: string, itemId: string): void {
   useApprovalColumnStore.getState().openApproval(`session:${sessionId}`, itemId);
+}
+
+/** The key an approval's unsent reply is kept under: one draft per version, shared by every surface. */
+export function draftKey(item: Pick<NotifyItem, 'id' | 'version'>): string {
+  return `${item.id}:${item.version ?? 1}`;
+}
+
+/**
+ * A one-question card's pick (an options card or an approval's Approve/Deny), as an index into
+ * `labels`: -1 until the person picks one. Nothing starts selected, recommended or not (D-385); a
+ * pick the person made is kept in the approval's draft, so it comes back after paging and remounts
+ * and on any other surface in the same window. The draft store is per window: Notify's round runs
+ * in its own window, so a pick made there doesn't reach the main window's column.
+ */
+export function useDraftChoice(item: Pick<NotifyItem, 'id' | 'version'>, labels: readonly string[]): [number, (index: number) => void] {
+  const key = draftKey(item);
+  const draft = useApprovalColumnStore((state) => state.drafts[key]);
+  const setDraft = useApprovalColumnStore((state) => state.setDraft);
+  const picked = draft?.picks[0];
+  const index = picked ? labels.indexOf(picked) : -1;
+  const pick = (next: number) => {
+    const label = labels[next];
+    if (label !== undefined) setDraft(key, { picks: [label], text: draft?.text ?? '' });
+  };
+  return [index, pick];
 }

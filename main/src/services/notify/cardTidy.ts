@@ -1,6 +1,6 @@
 import path from 'path';
-import { NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
-import { CARD_TITLE_REFUSE, unlinkedPaths, type CardFields } from './cardCheck';
+import { NOTIFY_QUESTIONS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
+import { CARD_TITLE_REFUSE, fitLinks, unlinkedPaths, type CardFields } from './cardCheck';
 
 /**
  * Tidying an old paragraph card (D-345, Q-343.2): some agents still send a whole question as one
@@ -138,13 +138,14 @@ export function tidyCard(card: CardFields): TidiedCard | undefined {
   }
   if (card.context?.trim()) contextParts.push(card.context.trim());
 
-  const context = contextParts.join('\n\n');
-  for (const found of unlinkedPaths([split.head, context].join('\n'), links)) links.push(linkOf(found));
+  const joined = contextParts.join('\n\n');
+  for (const found of unlinkedPaths([split.head, joined].join('\n'), links)) links.push(linkOf(found));
+  // The asker's own links first; any without room are named in the context.
+  const { links: allLinks, context } = fitLinks([...(card.links ?? []), ...links], joined);
   const tidied: CardFields = { title: split.head };
   if (context) tidied.context = context;
   if (choices) tidied.choices = choices;
   if (questions) tidied.questions = questions;
-  const allLinks = [...links, ...(card.links ?? [])].slice(0, NOTIFY_LINKS_MAX);
   if (allLinks.length) tidied.links = allLinks;
   if ([...tidied.title].length > CARD_TITLE_REFUSE) return undefined;
   const asSent: TidiedCard['asSent'] = { title };

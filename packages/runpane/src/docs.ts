@@ -64,7 +64,7 @@ export function runDocsSearch(parsed: ParsedArgs): number {
   const query = parsed.query?.trim();
   if (!query) throw new Error('runpane docs search requires --query.');
   const terms = [...new Set(query.toLowerCase().split(/[^a-z0-9]+/).filter((term) => term.length >= 2))];
-  const limit = Math.min(parsed.limit ?? DEFAULT_LIMIT, 20);
+  const limit = parsed.limit ?? DEFAULT_LIMIT;
   const results = loadDocs(parsed.paneDir)
     .map((doc) => ({ doc, score: score(doc, terms) }))
     .filter((hit) => hit.score > 0)

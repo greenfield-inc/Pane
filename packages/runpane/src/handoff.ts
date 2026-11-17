@@ -242,7 +242,7 @@ function readGitState(cwd: string): GitState {
     head,
     remote,
     remoteUrl,
-    dirty: execFileSync('git', ['status', '--porcelain', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean),
+    dirty: execFileSync('git', ['status', '--porcelain', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\0').filter(Boolean),
     pushed: remoteHead !== null && tryGit(['merge-base', '--is-ancestor', head, remoteHead], root) !== null,
   };
 }

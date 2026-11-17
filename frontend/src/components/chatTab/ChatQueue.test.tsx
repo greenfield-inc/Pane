@@ -21,6 +21,7 @@ describe('ChatQueue', () => {
     const markup = render({ queue: [item('a', 'x'.repeat(500)), item('b', '[Pane · Sentinel check] …')], label: value => value.startsWith('[Pane') ? 'Sentinel check' : undefined });
     expect(markup).not.toContain('Send now');
     expect(markup).not.toContain('aria-label="Edit queued message"');
+    expect(text(markup)).toContain(`${'x'.repeat(500)}… Sends next`);
     expect(text(markup)).toContain('Sentinel check');
   });
 

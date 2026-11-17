@@ -37,6 +37,8 @@ import { registerOnboardingHandlers } from './onboarding';
 import { registerVoiceHandlers } from './voice';
 import { registerPaneChatHandlers } from './paneChat';
 import { registerSshHostHandlers } from './sshHosts';
+import { registerSshRouteHandlers } from './sshRoutes';
+import { ensureSshRoute } from '../daemon/sshRoute';
 import { registerUsageHandlers } from './usage';
 import { registerSessionImportHandlers } from './sessionImport';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
@@ -57,6 +59,7 @@ import { registerPaneLinkHandler } from '../services/paneLinks';
 import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { registerWorkspaceAccessHandlers } from './workspaceAccess';
+import { registerDeviceHandlers } from './devices';
 import { readTailscaleStatus, resolveTailnetMachineUrl } from '../services/tailnetMachines';
 import { startedOnFreshBoot } from '../services/freshBoot';
 
@@ -82,6 +85,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     },
     analyticsManager: services.analyticsManager,
     resolveTailnetMachineUrl: (machine) => resolveTailnetMachineUrl(machine, readTailscaleStatus),
+    prepareSshRoute: ensureSshRoute,
     appVersion: services.app.getVersion(),
     freshBoot: startedOnFreshBoot,
   });
@@ -109,6 +113,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerMobilePushHandlers(ipcMain, services, commandRegistry);
   registerSharedCredentialHandlers(services, commandRegistry);
   registerPaneSecretHandlers(ipcMain, commandRegistry);
+  registerDeviceHandlers(ipcMain, services, commandRegistry);
   registerCustomThemeHandlers(ipcMain, commandRegistry, services.configManager, services.getMainWindow);
   registerDialogHandlers(ipcMain, services);
   registerExportHandlers(ipcMain, services);
@@ -147,6 +152,16 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
       }
       getPaneEventSink().send('pane:open-link', target);
     },
+    // A pairing link opened outside Pane: bring the window up on its confirm page.
+    openPairLink: (link) => {
+      const window = services.getMainWindow();
+      if (window && !window.isDestroyed()) {
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+      }
+      getPaneEventSink().send('relay:link-opened', { link });
+    },
   });
   registerClipboardHandlers(ipcMain, services);
   registerResourceMonitorHandlers(ipcMain, services, commandRegistry);
@@ -155,6 +170,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerPaneChatHandlers(ipcMain, services, commandRegistry);
   registerChatTabHandlers(ipcMain, services, commandRegistry);
   registerSshHostHandlers(ipcMain, services, commandRegistry);
+  registerSshRouteHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerAutopilotHandlers(services, commandRegistry, notify);
   registerUsageHandlers(ipcMain, commandRegistry);

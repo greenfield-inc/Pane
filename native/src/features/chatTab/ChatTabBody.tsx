@@ -10,6 +10,9 @@ import { useDaemonEvent, useInvokeQuery } from '@/daemon';
 
 import { ChatTabScreen } from './ChatTabScreen';
 
+/** Brings a device tab forward in the phone's tab strip. */
+const openDevice = (panelId: string) => router.setParams({ panelId });
+
 /** Opens a worker's Pane; one function for every render, so the chat's memoized rows skip. */
 const openWorker = (paneId: string) => router.push({ pathname: '/pane/[paneId]', params: { paneId } });
 
@@ -36,5 +39,6 @@ export function ChatTabBody({ panel, panels }: { panel: ToolPanel; panels: reado
   return <ChatTabScreen key={panel.id} panelId={panel.id} workers={workers}
     placeholder={sessionId ? 'Ask the Session anything' : undefined}
     onOpenWorker={openWorker}
+    onOpenDevice={openDevice}
     onViewDiff={diffId ? viewDiff : undefined} />;
 }

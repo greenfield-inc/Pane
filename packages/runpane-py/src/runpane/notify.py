@@ -112,9 +112,9 @@ def build_took_request(given: Mapping[str, Optional[str]], others: Mapping[str, 
     if took is None:
         raise invalid("tookAs", "tookAs goes with took: --took <id|Q-n> answer|question.")
     if not took.strip():
-        raise invalid("took", "took must be the approval's id or Q-n, such as --took Q-20 answer.")
+        raise invalid("took", "took must be the approval's id or Q-n, such as --took Q-20 question.")
     if took_as is None:
-        raise invalid("took", "took needs answer or question after the id: answer if the reply answers the question, question if it asks one.")
+        raise invalid("took", "took needs answer or question after the id: question if the reply asks something (it reopens the approval), answer to confirm the recorded answer.")
     if took_as not in TOOK_AS:
         raise invalid("took", f'took takes answer or question after the id; got "{took_as}".')
     extra = given_fields({**given, **others}, ("took", "tookAs", "status"))
@@ -137,15 +137,16 @@ def build_update_request(update: str, given: Mapping[str, Optional[str]], others
     extra = given_fields({**given, **others}, (*sorted(UPDATE_FIELDS), "update", "asked", "whatChanged"))
     if extra:
         raise invalid("update", f"update changes only title, context, choices, questions and links, and keeps the approval's ui; remove {', '.join(extra)}.")
-    if not (others["asked"] or "").strip():
-        raise invalid("asked", "asked is required with update: the person's question, as they typed it.")
     if not (others["whatChanged"] or "").strip():
         raise invalid("whatChanged", 'whatChanged is required with update: one line per change, such as "Added: it can be undone from Settings".')
     if given["title"] is not None and not given["title"].strip():
         raise invalid("title", "title must be non-empty text; leave it out to keep the current one.")
     if given["choices"] is not None and given["questions"] is not None:
         raise invalid("questions", "questions asks several questions in place of choices; give choices or questions, not both.")
-    request: Dict[str, Any] = {"update": update, "asked": others["asked"], "whatChanged": others["whatChanged"]}
+    # asked is the person's typed question; an update of the asker's own (a loop's next run, say) has none.
+    request: Dict[str, Any] = {"update": update, "whatChanged": others["whatChanged"]}
+    if (others["asked"] or "").strip():
+        request["asked"] = others["asked"]
     if given["title"] is not None:
         request["title"] = given["title"]
     if given["context"] is not None:

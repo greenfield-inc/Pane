@@ -1,4 +1,5 @@
 import { describeChatContent } from './agentChatPresentation';
+import type { AgentChatMessage } from './types/agentChat';
 import { imageOf, type ChatTurn, type StepGroup, type TurnItem } from './chatTabPresentation';
 
 /**
@@ -30,6 +31,7 @@ function stepLine(group: StepGroup): string {
 function itemMarkdown(item: TurnItem): string {
   switch (item.type) {
     case 'text': return item.text.trim();
+    case 'user': return `**You:**\n\n${messageMarkdown(item.message)}`;
     case 'thought': return '';
     case 'image': return '[Image]';
     case 'steps': return item.groups.map(stepLine).join('\n');
@@ -40,7 +42,11 @@ function itemMarkdown(item: TurnItem): string {
 
 /** What the person wrote, with an attached image as "[Image]". */
 export function userMarkdown(turn: ChatTurn): string {
-  return (turn.user?.parts ?? []).flatMap(part => {
+  return turn.user ? messageMarkdown(turn.user) : '';
+}
+
+function messageMarkdown(message: AgentChatMessage): string {
+  return message.parts.flatMap(part => {
     if (part.type === 'text') return part.text.trim() ? [part.text.trim()] : [];
     return part.type === 'content' && imageOf(part.content) ? ['[Image]'] : [];
   }).join('\n\n');

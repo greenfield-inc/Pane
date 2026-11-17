@@ -87,6 +87,7 @@ async function openRemotePaneSettings(page: Page) {
 }
 
 async function openAdvancedRemoteSetup(page: Page) {
+  await clickDomNode(page.getByRole('tab', { name: 'Tailscale' }));
   const advancedRemoteSetupButton = page.getByTestId('settings-content').getByRole('button', { name: 'Advanced', exact: true });
   await expect(advancedRemoteSetupButton).toBeVisible({ timeout: 5000 });
   await clickDomNode(advancedRemoteSetupButton);
@@ -203,19 +204,18 @@ test.describe('Smoke Tests', () => {
 
     await expect(page.getByText('Latest generated remote token')).toBeVisible();
     await clickDomNode(page.getByRole('button', { name: 'Back to Remote Access' }));
+    await clickDomNode(page.getByRole('tab', { name: /^Computers/ }));
     const host = page.getByTestId('machine-Office Mac mini');
-    await expect(host).toContainText('Added with a code');
+    await expect(host.getByLabel('Public URL', { exact: true })).toBeVisible();
 
     await clickDomNode(host.getByRole('button', { name: 'Switch to Office Mac mini' }));
+    await expect(host).toContainText('Agents run here');
 
-    const active = page.getByTestId('active-machine');
-    await expect(active).toContainText('Office Mac mini');
-
-    const switchBack = active.getByRole('button', { name: /^Switch back to / });
+    const switchBack = page.getByTestId('machine-devbox').getByRole('button', { name: 'Switch to devbox' });
     await expect(switchBack).toBeEnabled();
     await clickDomNode(switchBack);
 
-    await expect(active).not.toContainText('Office Mac mini');
+    await expect(host).not.toContainText('Agents run here');
     await expect(host.getByRole('button', { name: 'Switch to Office Mac mini' })).toBeEnabled();
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
   });
@@ -235,6 +235,7 @@ test.describe('Smoke Tests', () => {
     await clickDomNode(page.getByRole('button', { name: 'Save Remote Profile' }));
 
     await clickDomNode(page.getByRole('button', { name: 'Back to Remote Access' }));
+    await clickDomNode(page.getByRole('tab', { name: /^Computers/ }));
     await expect(page.getByText('Tunnel from laptop').first()).toBeVisible();
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
   });

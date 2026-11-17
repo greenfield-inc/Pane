@@ -17,6 +17,7 @@ Prove what works with evidence, say what you could not determine, and leave a tr
 ## Drive the journeys
 
 - Use browser automation. Select elements by what a user sees: labels, button text, placeholders, routes.
+- For a mobile app, use Pane's device tools: `device_open`, `device_run` to build it, `device_act` (`snapshot -i`, `press @eN --settle`) to drive it, and `device_screenshot` for evidence; `device_close` when done.
 - Use a unique marker for anything you create, such as `agent-e2e-<timestamp>`, so it can be found and removed.
 - Go directly to the requested route. Prefer accessible selectors and targeted snapshots. Capture the visual states the criteria name, plus evidence of failures and important outcomes; skip screenshots of routine clicks and unrelated viewports. Name files in journey order, for example `01-open-invoice.png`, in the caller's evidence folder outside tracked source.
 - Record video only when asked, or when a timing or interaction criterion needs it. Wait for explicit readiness signals instead of fixed sleeps.

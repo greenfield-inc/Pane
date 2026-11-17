@@ -18,10 +18,16 @@ use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
 const TTL: u32 = 60;
 const TXT_TTL: u32 = 10;
+/// For the names of a computer the registry doesn't know, answered as if it were on this relay.
+const UNKNOWN_TTL: u32 = 10;
 
 enum Lookup {
     /// The name exists; these are its records of the asked type (possibly none).
     Found(Vec<RData>),
+    /// A name of a computer the registry doesn't know (asleep and forgotten, or never seen). It
+    /// answers like one on this relay, which refuses its clients until it connects, and briefly:
+    /// "no such name" would be cached past the computer's return, on macOS for up to an hour.
+    Unknown(Vec<RData>),
     NxDomain,
     /// Outside <D>.
     Refused,
@@ -143,39 +149,48 @@ fn lookup(state: &State, qname: &str, qtype: RecordType) -> Lookup {
         [region, "relay"] if known_region(state, region) => {
             (a(state.cfg.region_addr(region)), None)
         }
-        [id] if is_valid_id(id) => match state.registry.get(id) {
-            // A computer's own names, `*.<id>.<D>` included, only through DNS-01 at Let's Encrypt.
-            Some(_) if qtype == RecordType::CAA => {
-                let dns01 = || vec![KeyValue::new("validationmethods", "dns-01")];
-                let issuer = caa_issuer(state);
-                return Lookup::Found(match issuer {
-                    Some(issuer) => vec![
-                        RData::CAA(CAA::new_issue(false, Some(issuer.clone()), dns01())),
-                        RData::CAA(CAA::new_issuewild(false, Some(issuer), dns01())),
-                    ],
-                    None => Vec::new(),
-                });
-            }
-            Some(e) => (a(state.cfg.region_addr(&e.region)), None),
-            None => return Lookup::NxDomain,
-        },
-        [sub, id] if is_valid_id(id) => {
-            let Some(e) = state.registry.get(id) else {
-                return Lookup::NxDomain;
+        [.., id] if is_valid_id(id) => {
+            let entry = state.registry.get(id);
+            let region = entry.as_ref().map_or(&state.cfg.region, |e| &e.region);
+            let records = match labels.as_slice() {
+                // A computer's own names, `*.<id>.<D>` included, only through DNS-01 at Let's Encrypt.
+                [_] if qtype == RecordType::CAA => {
+                    let dns01 = || vec![KeyValue::new("validationmethods", "dns-01")];
+                    match caa_issuer(state) {
+                        Some(issuer) => vec![
+                            RData::CAA(CAA::new_issue(false, Some(issuer.clone()), dns01())),
+                            RData::CAA(CAA::new_issuewild(false, Some(issuer), dns01())),
+                        ],
+                        None => Vec::new(),
+                    }
+                }
+                [_] => by_type(qtype, a(state.cfg.region_addr(region)), None),
+                ["_acme-challenge", _] => {
+                    by_type(qtype, None, entry.as_ref().map(|e| e.txt.clone()))
+                }
+                [sub, _] if *sub == "files" || is_port_label(sub) => {
+                    by_type(qtype, a(state.cfg.region_addr(region)), None)
+                }
+                [sub, _] => match local_address(sub) {
+                    Some(ip) => by_type(qtype, Some(RData::A(A(ip))), None),
+                    None => return Lookup::NxDomain,
+                },
+                _ => return Lookup::NxDomain,
             };
-            if *sub == "_acme-challenge" {
-                (None, Some(e.txt))
-            } else if *sub == "files" || is_port_label(sub) {
-                (a(state.cfg.region_addr(&e.region)), None)
-            } else if let Some(ip) = local_address(sub) {
-                (Some(RData::A(A(ip))), None)
+            return if entry.is_some() {
+                Lookup::Found(records)
             } else {
-                return Lookup::NxDomain;
-            }
+                Lookup::Unknown(records)
+            };
         }
         _ => return Lookup::NxDomain,
     };
-    let records = match qtype {
+    Lookup::Found(by_type(qtype, addr, txt))
+}
+
+/// A name's records of the asked type, from its address and TXT values.
+fn by_type(qtype: RecordType, addr: Option<RData>, txt: Option<Vec<String>>) -> Vec<RData> {
+    match qtype {
         RecordType::A => addr.into_iter().collect(),
         RecordType::TXT => txt
             .unwrap_or_default()
@@ -183,8 +198,7 @@ fn lookup(state: &State, qname: &str, qtype: RecordType) -> Lookup {
             .map(|v| RData::TXT(TXT::new(vec![v])))
             .collect(),
         _ => Vec::new(),
-    };
-    Lookup::Found(records)
+    }
 }
 
 /// `p<port>` with a port in 1..=65535.
@@ -233,14 +247,15 @@ pub fn answer(state: &State, query: &[u8], max_len: usize) -> Option<Vec<u8>> {
         (OpCode::Query, [q]) => {
             resp.add_query(q.clone());
             let qname = q.name().to_ascii();
-            match lookup(state, &qname, q.query_type()) {
-                Lookup::Found(records) => {
+            let looked = lookup(state, &qname, q.query_type());
+            let ttl = match (&looked, q.query_type()) {
+                (_, RecordType::TXT) => TXT_TTL,
+                (Lookup::Unknown(_), _) => UNKNOWN_TTL,
+                _ => TTL,
+            };
+            match looked {
+                Lookup::Found(records) | Lookup::Unknown(records) => {
                     resp.metadata.authoritative = true;
-                    let ttl = if q.query_type() == RecordType::TXT {
-                        TXT_TTL
-                    } else {
-                        TTL
-                    };
                     if records.is_empty() {
                         resp.add_authority(Record::from_rdata(
                             name(&state.domain),

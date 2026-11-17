@@ -9,8 +9,8 @@ let pendingCode: string | null = null;
 /**
  * A scanned or tapped pairing link opens the pairing screen with it filled in: a
  * `pane-remote://` code, or a pairing QR's `https://<domain>/pair#…` (a universal link) or
- * `pane://pair#…` (the browser landing's "Open in Pane app"). It never pairs on its own: the
- * person confirms first.
+ * `pane://pair#…` (the browser landing's "Open in Pane app"). The pairing screen asks before
+ * joining this phone's computers with another group.
  */
 export function redirectPairingLink(path: string): string {
   if (!path.startsWith(PAIRING_SCHEME) && !parseRelayPairingLink(path)) return path;

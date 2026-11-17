@@ -1,4 +1,5 @@
 /// <reference types="electron" />
+import type { DeviceInput, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
 import type { PreferencesApi } from '../../../shared/types/preferences';
 import type { VoiceKeyCheck } from '../../../shared/voice/voiceKeys';
 // Type definitions for Electron preload API
@@ -28,7 +29,7 @@ import type {
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
-import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
+import type { MachineCommand, MachineConnectionsEvent, MachineLatency, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../../shared/types/glasses';
 import type {
   PanePermissionRequest,
@@ -77,7 +78,7 @@ import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpa
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
-import type { RelayStatus } from '../../../shared/types/relay';
+import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../../shared/types/relay';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
 import type {
@@ -125,6 +126,16 @@ interface IPCResponse<T = any> {
 
 interface ElectronAPI {
   /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
+  /** The device tab (docs/DEVICES.md). */
+  devices: {
+    input: (panelId: string, input: DeviceInput) => Promise<IPCResponse<boolean>>;
+    frame: (panelId: string) => Promise<IPCResponse<string>>;
+    visible: (panelId: string, clientId: string, visible: boolean) => Promise<IPCResponse<boolean>>;
+    takeOver: (panelId: string) => Promise<IPCResponse<boolean>>;
+    power: (panelId: string, action: 'boot' | 'restart' | 'shutdown') => Promise<IPCResponse<boolean>>;
+    settings: () => Promise<IPCResponse<DeviceSettingsView>>;
+    updateSettings: (patch: { enabled?: boolean; iosMachineId?: string | null; maxBooted?: number }) => Promise<IPCResponse<DeviceSettings>>;
+  };
   paneSecrets: {
     list: () => Promise<IPCResponse<{ secrets: PaneSecretSummary[]; storage: PaneSecretStorage }>>;
     /** Data is true when it replaced a saved value. */
@@ -157,6 +168,8 @@ interface ElectronAPI {
   // first render already knows whether the page owns the title bar.
   windowControlsOverlayEnabled: boolean;
   appearanceSnapshot?: import('../../../shared/types/appearance').AppearanceSnapshot;
+  /** The chat this launch reopens, drawn in the window's first frame (index.html); absent when there is none. */
+  launchChat?: import('../../../shared/types/hostNavigation').LaunchChatOutline;
   setTitleBarOverlay: (colors: { color: string; symbolColor: string }) => Promise<IPCResponse>;
   setBackgroundColor: (payload: { theme: import('../../../shared/types/appearance').ThemeChoice; color: string }) => Promise<IPCResponse>;
   customTheme?: {
@@ -589,7 +602,9 @@ interface ElectronAPI {
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;
     onRelayStatusChanged: (callback: (status: RelayStatus) => void) => () => void;
-    onRelayPaired: (callback: (event: { clientId: string; label: string }) => void) => () => void;
+    onRelayPaired: (callback: (event: RelayPairedEvent) => void) => () => void;
+    onRelayLinkOpened: (callback: (event: RelayLinkOpenedEvent) => void) => () => void;
+    onSshRouteProgress: (callback: (progress: { host: string; step: 'connecting' | 'checking-node' | 'installing' | 'starting' | 'linked' | 'failed'; message: string }) => void) => () => void;
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => () => void;
     /** A phone or another window saved settings on this host; refetch the config. */
     onRemoteSettingsChanged: (callback: () => void) => () => void;
@@ -818,6 +833,8 @@ interface ElectronAPI {
     run: (machineId: string, command: MachineCommand) => Promise<MachineResult>;
     /** Reconnects an offline saved machine now. */
     retry: (machineId: string) => Promise<void>;
+    /** A saved machine's round trip over the route its connection is on; `ms` null when it is offline or does not answer. */
+    latency: (machineId: string) => Promise<MachineLatency>;
     /** Every machine's list, Notify and permission events, resyncs and online/offline changes. */
     onEvent: (callback: (event: MachineConnectionsEvent) => void) => () => void;
   };

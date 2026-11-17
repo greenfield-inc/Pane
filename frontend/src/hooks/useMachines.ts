@@ -6,6 +6,8 @@ import { buildMachineList, machineOsFromPlatform, type MachineEntry, type Machin
 import { useConnectionPresence } from './useConnectionPresence';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import type { ComputerRoutesReport } from '../../../shared/types/remoteComputers';
+import type { MachineState } from '../../../shared/types/machineConnections';
 
 export type MachineSelectOutcome =
   | { ok: true }
@@ -29,11 +31,14 @@ function errorText(cause: unknown, fallback: string): string {
 }
 
 /**
- * Every machine agents can run on (this computer, saved hosts, and Tailscale machines,
- * connected before or not), plus the one action that switches to or connects any of them.
+ * Every machine agents can run on (this computer, saved computers, and Tailscale machines not
+ * saved yet), plus the one action that switches to or connects any of them.
  */
 export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMachinesOptions) {
-  const profiles = useConfigStore((state) => state.config?.remoteDaemon?.client.profiles);
+  const computers = useConfigStore((state) => state.config?.remoteDaemon?.client.computers);
+  // Each saved computer's live state (online, the route in use), whether or not All machines is on.
+  const [machineStates, setMachineStates] = useState<MachineState[]>([]);
+  const localMode = connectionState.mode !== 'remote';
   const marks = useConfigStore((state) => state.config?.machineMarks);
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const [tailnet, setTailnet] = useState<TailnetMachineList | null>(null);
@@ -59,11 +64,28 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
         setListError(list.error ?? 'Could not list your machines.');
       }
       if (access?.success && access.data?.machineName) setLocalName(access.data.machineName);
+      else if (localMode) {
+        // Without Tailscale, this computer's name is the one it reports to the computers it links with.
+        const report: ComputerRoutesReport | null = await window.electronAPI.invoke('computers:routes-report').catch(() => null);
+        if (mounted.current && report?.name) setLocalName(report.name);
+      }
     } catch (cause) {
       if (mounted.current) setListError(errorText(cause, 'Could not list your machines.'));
     } finally {
       if (mounted.current) setRefreshing(false);
     }
+  }, [localMode]);
+
+  useEffect(() => {
+    let stopped = false;
+    const unsubscribe = window.electronAPI.machines.onEvent((event) => {
+      if (event.type === 'machines') setMachineStates(event.machines);
+    });
+    window.electronAPI.machines.list().then((states) => { if (!stopped) setMachineStates(states); }).catch(() => undefined);
+    return () => {
+      stopped = true;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -82,8 +104,8 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
   // The active machine pulses through the grace window and dims after it, like every other connection dot.
   const { presence: connectionPresence } = useConnectionPresence(connectionState);
   const machines = useMemo(
-    () => buildMachineList({ connectionState, profiles: profiles ?? [], tailnet, localName, localOs, connectionPresence, marks }),
-    [connectionState, profiles, tailnet, localName, localOs, connectionPresence, marks],
+    () => buildMachineList({ connectionState, computers: computers ?? [], tailnet, localName, localOs, connectionPresence, marks, machineStates }),
+    [connectionState, computers, tailnet, localName, localOs, connectionPresence, marks, machineStates],
   );
 
   const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {
@@ -97,15 +119,15 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
         const response = await API.remoteDaemon.updateClientState({ activeProfileId: null, mode: 'local' });
         if (!response.success) return { ok: false, error: response.error ?? `Could not switch back to ${machine.name}.` };
       } else {
-        let profileId = machine.profile?.id;
+        let computerId = machine.computer?.id;
         // A machine never connected, or one asking for its password again, is saved first.
-        if (machine.tailnet && (!profileId || password !== undefined)) {
+        if (machine.tailnet && (!computerId || password !== undefined)) {
           const saved = await API.remoteDaemon.saveTailnetMachine({ name: machine.tailnet.name, password });
           if (!saved.success || !saved.data) return { ok: false, error: saved.error ?? failure };
-          profileId = saved.data.id;
+          computerId = saved.data.id;
         }
-        if (!profileId) return { ok: false, error: failure };
-        const targetId = profileId;
+        if (!computerId) return { ok: false, error: failure };
+        const targetId = computerId;
         const switched = await connect(() => API.remoteDaemon.updateClientState({ activeProfileId: targetId, mode: 'remote' }));
         if (!switched.success) return { ok: false, error: switched.error ?? failure };
       }

@@ -249,7 +249,7 @@ function RepoList({ repos, emptyText, compact, label, checkedPaths, disabled, on
       <div className={cn(minHeight, 'space-y-1.5')} aria-busy="true" aria-label={label}>
         {(compact ? ['w-[60%]', 'w-[48%]'] : ['w-[60%]', 'w-[48%]', 'w-[55%]']).map(width => (
           <div key={width} className="flex h-9 items-center rounded-lg border border-border-secondary bg-surface-secondary px-3">
-            <span className={cn('h-2.5 animate-pulse rounded bg-surface-tertiary', width)} />
+            <span className={cn('h-2.5 animate-skeleton rounded bg-surface-tertiary', width)} />
           </div>
         ))}
       </div>

@@ -3,7 +3,7 @@ import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import { usePanelStore } from '../stores/panelStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useAttentionInboxStore } from '../stores/attentionInboxStore';
-import { rollupSessionAgentState } from '../utils/agentStatus';
+import { isReportedFinish, rollupSessionAgentState } from '../utils/agentStatus';
 
 /** The data of a `panels:agent-statuses` response. */
 export const panelStatusesSchema = boundary.array(boundary.object({
@@ -71,7 +71,7 @@ export function subscribePanelStatus(source: PanelStatusSource = desktopStatusSo
     if (data.state === 'idle' && data.workedVisibly) {
       useAttentionInboxStore.getState().markFinished(data.sessionId);
     }
-    if (prevState === 'working' && data.state === 'idle') {
+    if (data.state === 'idle' && (prevState === 'working' || isReportedFinish(data.reason))) {
       const next = usePanelStore.getState();
       const viewedSessionId = source.viewedSessionId();
       const sessionSettled = rollupSessionAgentState(next.agentStatus, next.agentStatusSession, data.sessionId) === 'idle';

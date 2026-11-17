@@ -76,7 +76,7 @@ export async function runRelayInit(args: string[]): Promise<number> {
      npx --yes runpane@latest relay --domain ${domain} --public-ip ${ip} --ns ${nsHost} \\
        --dns 0.0.0.0:53 --direct-quic 0.0.0.0:7842 --acme-cache /var/lib/pane-relay/acme
 
-4. On each computer, in Pane: Settings › Remote Access › More › Relay address: ${domain}
+4. On each computer, in Pane: Settings › Remote Access › Phones and glasses › Relay address: ${domain}
 `);
 
   const resolver = new Resolver({ timeout: 3_000, tries: 2 });

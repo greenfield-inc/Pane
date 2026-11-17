@@ -255,11 +255,24 @@ impl Agent {
                         upgrade(addr, &relay_cert, &format!("/v1/data/{conn}")).await;
                     assert!(head.starts_with("HTTP/1.1 101"), "{head}");
                     // End the client's TLS with this computer's own certificate and echo one line.
+                    // After `upload <n>` it reads the n bytes that follow slowly, as a computer on a slow
+                    // link does, and answers with the count.
                     let tls = acceptor.accept(data).await.unwrap();
                     let sni = tls.get_ref().1.server_name().unwrap_or("").to_string();
                     let (r, mut w) = tokio::io::split(tls);
+                    let mut r = BufReader::new(r);
                     let mut line = String::new();
-                    BufReader::new(r).read_line(&mut line).await.unwrap();
+                    r.read_line(&mut line).await.unwrap();
+                    if let Some(n) = line.trim().strip_prefix("upload ") {
+                        let (want, mut got) = (n.parse::<usize>().unwrap(), 0);
+                        let mut buf = vec![0u8; 64 * 1024];
+                        while got < want {
+                            tokio::time::sleep(Duration::from_millis(4)).await;
+                            let take = buf.len().min(want - got);
+                            got += r.read(&mut buf[..take]).await.unwrap();
+                        }
+                        line = format!("got {got}\n");
+                    }
                     w.write_all(format!("{sni} {line}").as_bytes())
                         .await
                         .unwrap();
@@ -303,6 +316,32 @@ impl Agent {
         let mut out = String::new();
         s.read_to_string(&mut out).await?;
         Ok(out)
+    }
+}
+
+impl Agent {
+    /// A client sends `bytes` bytes to `sni` through the relay at `addr`. Returns the
+    /// computer's answer and how long the upload took.
+    async fn upload(
+        &self,
+        addr: SocketAddr,
+        sni: &str,
+        bytes: u64,
+    ) -> std::io::Result<(String, Duration)> {
+        let started = std::time::Instant::now();
+        let mut s = tls_connect(addr, sni, &self.cert).await?;
+        s.write_all(format!("upload {bytes}\n").as_bytes()).await?;
+        let chunk = vec![7u8; 256 * 1024];
+        let mut left = bytes;
+        while left > 0 {
+            let n = left.min(chunk.len() as u64) as usize;
+            s.write_all(&chunk[..n]).await?;
+            left -= n as u64;
+        }
+        s.flush().await?;
+        let mut out = String::new();
+        s.read_to_string(&mut out).await?;
+        Ok((out, started.elapsed()))
     }
 }
 
@@ -351,6 +390,27 @@ async fn client_tls_reaches_the_computer_end_to_end() {
         serde_json::from_str::<Value>(&body).unwrap(),
         json!({"ok": true, "region": "us", "computers": 1})
     );
+}
+
+#[tokio::test]
+async fn an_upload_reaches_a_computer_on_a_slow_link() {
+    let env = Env::start(&[]).await;
+    let agent = Agent::connect(&env, &fixed_key()).await;
+    let host = format!("{FIXED_ID}.{D}");
+    let body = vec![7u8; 32 * 1024 * 1024];
+    let mut s = tls_connect(env.addr(), &host, &agent.cert).await.unwrap();
+    s.write_all(format!("upload {}\n", body.len()).as_bytes())
+        .await
+        .unwrap();
+    s.write_all(&body).await.unwrap();
+    s.flush().await.unwrap();
+    // The client then only waits for the answer, so nothing it sends can push the relay along.
+    let mut out = String::new();
+    tokio::time::timeout(Duration::from_secs(30), s.read_to_string(&mut out))
+        .await
+        .expect("the computer got the whole upload in time")
+        .unwrap();
+    assert_eq!(out, format!("{host} got {}\n", body.len()));
 }
 
 #[tokio::test]
@@ -465,6 +525,25 @@ async fn status_reports_online_asleep_and_offline() {
     }
 }
 
+#[tokio::test]
+async fn the_phone_app_opens_pair_and_glasses_links() {
+    let env = Env::start(&[]).await;
+    let (code, body) = env
+        .http("GET", "/.well-known/apple-app-site-association", "", "")
+        .await;
+    assert_eq!(code, 200);
+    let aasa: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        aasa["applinks"]["details"][0]["components"],
+        json!([{"/": "/pair*"}, {"/": "/glasses*"}])
+    );
+    for path in ["/pair", "/glasses"] {
+        let (code, body) = env.http("GET", path, "", "").await;
+        assert_eq!(code, 200, "{path}");
+        assert!(body.contains("It's in TestFlight."), "{path}");
+    }
+}
+
 async fn dns_query(server: SocketAddr, name: String, rtype: RecordType, tcp: bool) -> Message {
     let mut q = Message::query();
     q.metadata.id = 7;
@@ -525,14 +604,17 @@ async fn caa_lets_only_lets_encrypt_issue_and_no_wildcard_for_the_whole_domain()
         caa(format!("{D}.")).await,
         vec!["0 issue \"letsencrypt.org\"", "0 issuewild \";\""]
     );
-    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at Let's Encrypt.
-    assert_eq!(
-        caa(format!("{id}.{D}.")).await,
-        vec![
-            "0 issue \"letsencrypt.org; validationmethods=dns-01\"",
-            "0 issuewild \"letsencrypt.org; validationmethods=dns-01\"",
-        ]
-    );
+    // Each computer's own names, *.<id>.<D> included, only through DNS-01 at Let's Encrypt,
+    // whether or not the relay knows the id.
+    for name in [format!("{id}.{D}."), format!("aaaaaaaaaaaaaaaa.{D}.")] {
+        assert_eq!(
+            caa(name).await,
+            vec![
+                "0 issue \"letsencrypt.org; validationmethods=dns-01\"",
+                "0 issuewild \"letsencrypt.org; validationmethods=dns-01\"",
+            ]
+        );
+    }
 
     // A self-hosted relay on another CA names it, or serves none.
     let other = Env::start(&[
@@ -588,13 +670,33 @@ async fn dns_answers_for_computer_names() {
             .response_code,
         ResponseCode::NXDomain
     );
+    // A computer the relay doesn't know (asleep and forgotten, or never seen) answers as if it
+    // were here, briefly: a cached "no such name" outlasts its return, on macOS by up to an hour.
+    let unknown = a(format!("aaaaaaaaaaaaaaaa.{D}.")).await;
+    assert_eq!(a_records(&unknown), vec![us]);
+    assert_eq!(unknown.answers[0].ttl, 10);
     assert_eq!(
-        a(format!("aaaaaaaaaaaaaaaa.{D}."))
-            .await
-            .metadata
-            .response_code,
-        ResponseCode::NXDomain
+        a_records(&a(format!("p5173.aaaaaaaaaaaaaaaa.{D}.")).await),
+        vec![us]
     );
+    assert_eq!(a(format!("{id}.{D}.")).await.answers[0].ttl, 60);
+    assert_eq!(
+        a_records(&a(format!("files.aaaaaaaaaaaaaaaa.{D}.")).await),
+        vec![us]
+    );
+    assert_eq!(
+        a_records(&a(format!("l192-168-1-20.aaaaaaaaaaaaaaaa.{D}.")).await),
+        vec![Ipv4Addr::new(192, 168, 1, 20)]
+    );
+    let txt = dns_query(
+        env.dns(),
+        format!("_acme-challenge.aaaaaaaaaaaaaaaa.{D}."),
+        RecordType::TXT,
+        false,
+    )
+    .await;
+    assert_eq!(txt.metadata.response_code, ResponseCode::NoError);
+    assert!(txt.answers.is_empty());
     assert_eq!(
         a(format!("www.{D}.")).await.metadata.response_code,
         ResponseCode::NXDomain
@@ -787,13 +889,15 @@ async fn udp_answers_past_the_rate_limit_are_truncated() {
     assert_eq!(a_records(&m), vec![Ipv4Addr::new(203, 0, 113, 10)]);
 }
 
-/// Polls `server` until `name` has A records, then returns them.
+/// Polls `server` until the registry knows `name`, then returns its addresses: a name the
+/// registry doesn't know answers this relay's address for 10 s.
 async fn resolves(server: SocketAddr, name: String) -> Vec<Ipv4Addr> {
     let deadline = Instant::now() + WAIT;
     loop {
-        let ips = a_records(&dns_query(server, name.clone(), RecordType::A, false).await);
-        if !ips.is_empty() || Instant::now() > deadline {
-            return ips;
+        let m = dns_query(server, name.clone(), RecordType::A, false).await;
+        let known = m.answers.first().is_some_and(|r| r.ttl == 60);
+        if known || Instant::now() > deadline {
+            return a_records(&m);
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -1101,29 +1205,30 @@ async fn a_full_registry_makes_room_by_forgetting_its_oldest_offline_computer() 
         "203.0.113.10",
     ])
     .await;
-    let dns = env.dns();
-    let rcode = |id: String| async move {
-        let m = dns_query(dns, format!("{id}.{D}."), RecordType::A, false).await;
-        m.metadata.response_code
+    let env = &env;
+    // A name the registry knows answers for 60 s; a forgotten one answers this relay for 10 s.
+    let known = |id: String| async move {
+        let m = dns_query(env.dns(), format!("{id}.{D}."), RecordType::A, false).await;
+        m.answers[0].ttl == 60
     };
-    let oldest = Agent::connect(&env, &SigningKey::generate()).await;
-    let older = Agent::connect(&env, &SigningKey::generate()).await;
+    let oldest = Agent::connect(env, &SigningKey::generate()).await;
+    let older = Agent::connect(env, &SigningKey::generate()).await;
     let (oldest_id, older_id) = (oldest.id.clone(), older.id.clone());
     oldest.close().await;
-    wait_state(&env, &oldest_id, "offline").await;
+    wait_state(env, &oldest_id, "offline").await;
     older.close().await;
-    wait_state(&env, &older_id, "offline").await;
-    let _online = Agent::connect(&env, &SigningKey::generate()).await;
+    wait_state(env, &older_id, "offline").await;
+    let _online = Agent::connect(env, &SigningKey::generate()).await;
 
     // Full: a new computer takes the place of the one offline longest.
-    let _new = Agent::connect(&env, &SigningKey::generate()).await;
-    assert_eq!(rcode(oldest_id.clone()).await, ResponseCode::NXDomain);
-    assert_eq!(rcode(older_id.clone()).await, ResponseCode::NoError);
-    let _newer = Agent::connect(&env, &SigningKey::generate()).await;
-    assert_eq!(rcode(older_id).await, ResponseCode::NXDomain);
+    let _new = Agent::connect(env, &SigningKey::generate()).await;
+    assert!(!known(oldest_id.clone()).await);
+    assert!(known(older_id.clone()).await);
+    let _newer = Agent::connect(env, &SigningKey::generate()).await;
+    assert!(!known(older_id).await);
 
     // Every entry online: refused.
-    assert_eq!(connect_code(&env, &SigningKey::generate()).await, "full");
+    assert_eq!(connect_code(env, &SigningKey::generate()).await, "full");
 }
 
 #[tokio::test]
@@ -1147,16 +1252,12 @@ async fn computers_that_never_set_txt_are_forgotten_soon_after_going_offline() {
     proven.close().await;
     unproven.close().await;
 
-    let a = |id: String| dns_query(env.dns(), format!("{id}.{D}."), RecordType::A, false);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while a(unproven_id.clone()).await.metadata.response_code != ResponseCode::NXDomain {
+    while !env.status(&unproven_id).await["since"].is_null() {
         assert!(Instant::now() < deadline, "a computer with no TXT was kept");
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    assert_eq!(
-        a_records(&a(proven_id).await),
-        vec![Ipv4Addr::new(203, 0, 113, 10)]
-    );
+    assert!(!env.status(&proven_id).await["since"].is_null());
 }
 
 #[tokio::test]
@@ -1224,19 +1325,17 @@ async fn offline_computers_lose_their_txt_values_then_their_names() {
     let a = || dns_query(env.dns(), format!("{id}.{D}."), RecordType::A, false);
     assert_eq!(a_records(&a().await), vec![Ipv4Addr::new(203, 0, 113, 10)]);
 
-    // Then the whole entry and its status.
+    // Then the whole entry and its status; its name answers like an unknown computer's.
     let deadline = Instant::now() + Duration::from_secs(16);
-    while a().await.metadata.response_code != ResponseCode::NXDomain {
+    while !env.status(&id).await["since"].is_null() {
         assert!(
             Instant::now() < deadline,
             "offline computer was never forgotten"
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    assert_eq!(
-        env.status(&id).await,
-        json!({"state": "offline", "since": null})
-    );
+    assert_eq!(env.status(&id).await["state"], "offline");
+    assert_eq!(a().await.answers[0].ttl, 10);
 }
 
 #[tokio::test]
@@ -1278,6 +1377,69 @@ async fn one_address_has_a_limit_across_all_computers() {
     still_connected(&mut a).await;
     still_connected(&mut b).await;
     assert!(timed(&b, env.addr_v6(), &host_b).await.unwrap() < SLOWED);
+}
+
+#[tokio::test]
+async fn connections_for_a_computer_that_is_not_here_count_against_their_address() {
+    let env = Env::start(&["--listen", "[::]:0", "--limit-ip-conns-per-min", "2"]).await;
+    let agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let host = format!("{}.{D}", agent.id);
+
+    // A Pane retrying a computer that is gone: each attempt is refused, and each one counts.
+    for _ in 0..4 {
+        assert!(
+            timed(&agent, env.addr(), &format!("aaaaaaaaaaaaaaaa.{D}"))
+                .await
+                .is_err()
+        );
+    }
+    assert!(timed(&agent, env.addr(), &host).await.is_err());
+    assert!(timed(&agent, env.addr_v6(), &host).await.unwrap() < SLOWED);
+}
+
+#[tokio::test]
+async fn an_upload_past_the_rate_is_slowed_and_never_closed() {
+    // 8 Mbit/s is 1 MB a second, with one second's worth to start.
+    let env = Env::start(&["--listen", "[::]:0", "--limit-mbit-per-sec", "8"]).await;
+    let mut agent = Agent::connect(&env, &SigningKey::generate()).await;
+    let host = format!("{}.{D}", agent.id);
+
+    let big = agent.upload(env.addr(), &host, 4_000_000);
+    // Another address, while the first is held to its rate, goes at full speed.
+    let other = async {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        agent.upload(env.addr_v6(), &host, 800_000).await
+    };
+    let (big, other) = tokio::join!(big, other);
+    let (answer, took) = big.unwrap();
+    assert_eq!(answer, format!("{host} got 4000000\n"));
+    // 3 MB past the first second's worth, at 1 MB a second.
+    assert!(took >= Duration::from_millis(2_700), "{took:?}");
+    let (answer, took) = other.unwrap();
+    assert_eq!(answer, format!("{host} got 800000\n"));
+    assert!(took < Duration::from_millis(500), "{took:?}");
+    still_connected(&mut agent).await;
+}
+
+#[tokio::test]
+async fn one_address_has_a_rate_across_all_computers() {
+    let env = Env::start(&["--limit-ip-mbit-per-sec", "8"]).await;
+    let a = Agent::connect(&env, &SigningKey::generate()).await;
+    let b = Agent::connect(&env, &SigningKey::generate()).await;
+    let (host_a, host_b) = (format!("{}.{D}", a.id), format!("{}.{D}", b.id));
+
+    let started = std::time::Instant::now();
+    let (to_a, to_b) = tokio::join!(
+        a.upload(env.addr(), &host_a, 2_000_000),
+        b.upload(env.addr(), &host_b, 2_000_000),
+    );
+    assert_eq!(to_a.unwrap().0, format!("{host_a} got 2000000\n"));
+    assert_eq!(to_b.unwrap().0, format!("{host_b} got 2000000\n"));
+    assert!(
+        started.elapsed() >= Duration::from_millis(2_700),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]

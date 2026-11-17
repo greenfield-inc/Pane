@@ -114,7 +114,7 @@ function Header({ snapshot }: { snapshot: AutopilotSnapshot | undefined }) {
 }
 
 /** Autopilot's violet arrow on its tint. */
-export function AutopilotMark({ size }: { size: number }) {
+function AutopilotMark({ size }: { size: number }) {
   const { colors } = useTheme();
   return (
     <View style={[styles.mark, { width: size, height: size, borderRadius: size * 0.3, backgroundColor: withAlpha(colors.autopilot, 0.14) }]}>

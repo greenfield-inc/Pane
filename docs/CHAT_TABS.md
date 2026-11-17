@@ -351,10 +351,17 @@ composer marks it in amber like a mode that never asks.
 - **Queue and Send now** (D-211): a message sent while the agent works (Enter)
   waits in the queue, listed in the order it will be sent. Each queued message
   can be edited (its images are kept), removed, or sent now. **Send now**, or
-  Cmd/Ctrl+Enter in the composer, puts the message first and interrupts the
-  running turn (including one blocked on an approval or question), so it is
-  sent as soon as the turn stops (`chat-tab:send` with `now`, `chat-tab:send-now`,
-  `chat-tab:edit-queued`).
+  Cmd/Ctrl+Enter in the composer, puts the message first and gives it to the
+  agent at once. Claude and Codex take it inside the running turn (ACP's
+  `_session/steering`), where it shows as part of that turn; the turn, its
+  subagents and its background tasks keep
+  running. An approval or question the turn waits on stays open: Claude holds
+  the message until it is answered; when Codex reads it then is not known. A
+  steer the agent refuses leaves the message queued with a notice. An agent
+  without steering, and a turn Claude started on its own, are stopped first and
+  the message is sent next. The view's `sendNowSteers` says which applies, and
+  Send now's tooltip says it (`chat-tab:send` with `now`, `chat-tab:send-now`,
+  `chat-tab:edit-queued`). Only Stop stops a steered turn.
 - **/clear** (or **Clear** above the thread) ends the agent and starts a fresh
   conversation in the same tab, with the same agent, launch and settings
   (`chat-tab:clear`). It asks first while a turn runs; a turn cut off this way is
@@ -369,9 +376,9 @@ composer marks it in amber like a mode that never asks.
 - **Copying**: message text can be selected and copied like any page. Each
   message and each finished response has a copy button (on hover with a mouse,
   always on touch) that copies what was written, as Markdown, without the
-  agent's activity. **Copy conversation** above the thread copies the loaded
-  conversation under **You:** and the agent's name, with each tool step as one
-  short line and no raw output. Code blocks have their own copy button. On the
+  agent's activity. **Copy conversation** above the thread copies the whole
+  conversation, including messages scrolled out of the window, under **You:**
+  and the agent's name, with each tool step as one short line and no raw output. Code blocks have their own copy button. On the
   phone app, each message has a copy action, and a long press on a reply copies
   it.
 - **Attachments** (desktop and PWA): drop photos and files anywhere on the chat,

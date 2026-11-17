@@ -27,7 +27,8 @@ its question and `why`, adds its `files` as links, and turns an `ask` with no
 other JSON shows one `summary`, `step` or `title` line, or none. On `--update`
 the new context is read the same way, but the card keeps its `ui`, and its
 choices and links unless the update passes them. Prose stays as written, even
-when it starts with `[` or `{`. Any card also
+when it starts with `[` or `{`. A card shows up to 6 links; when a status file's `files` add more, the context's
+last line names the rest (`More links: …`). Any card also
 takes up to 6 `links` (`--links`), related files and pages shown as chips:
 `{label, path}` for a file on the asking machine (relative to its working
 directory), `{label, url}` for an http or https page, or `{label, approval}`
@@ -127,7 +128,7 @@ the first answer from the terminal, Approvals, the strip or the phone wins.
   waits, as No does in the terminal. A plan shows its text with "Yes, and
   auto-accept edits", "Yes, and manually approve edits" and "No, keep
   planning".
-- **The phone** lists the prompt in Approvals with **Yes** and
+- **The phone** lists the prompt under home's **Needs you** with **Yes** and
   **No**, and its alert carries the same two buttons. The question's sheet has
   every choice.
 - **Answered in the terminal**: Pane closes the question and lists it in
@@ -207,9 +208,9 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   Session, across saved machines; in the one-machine sidebar its tooltip says
   how many of them wait on other machines. Beside
   it, the queue has **Waiting** and **Done today** tabs and a **Group by** menu,
-  remembered per device: **Most recent** (the default) lists items flat, newest
-  first, each row naming its Session and machine; **By Session** and **By
-  project** group them, each group placed by its newest item; **Sidebar order**
+  remembered per device: **By Session** (the default) and **By project** group
+  items, each group placed by its newest item; **Most recent** lists them flat,
+  newest first, each row naming its Session and machine; **Sidebar order**
   groups by Session in the order the sidebar shows them (the All machines
   arrangement when that's on), following a drag there, with Sessions the
   sidebar doesn't show last, newest first. Each group is boxed under a header
@@ -236,7 +237,7 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   (and leaves the floating strip), and no other item opens until you pick a
   row. Its tabs are **Decide** (the
   subtitle, each question with its why and options, recommended ones
-  pre-selected, the references and one reply box that grows up to half the
+  marked but none selected until you pick, the references and one reply box that grows up to half the
   column), **Summary** (one HTML page: the asker's own, an `.html` passed as a
   worker's `--summary-file` or `summary` in `needs_you`, else one Pane writes
   from the card and the worker's status file; it renders with scripts and
@@ -279,7 +280,8 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   selected.
 - **The round**: press ⌃⇧Space (Ctrl+Shift+Space on Windows and Linux) from
   any other app for a centered panel that works through the queue by
-  keyboard: number keys or arrows choose, ↵ sends, → skips, Tab adds a note,
+  keyboard: nothing starts chosen; number keys or arrows choose, ↵ sends,
+  → skips, Tab adds a note (a note with no pick goes as a reply on its own),
   Esc closes.
 - **The menu bar or tray icon** shows an amber dot while questions wait. Its
   menu lists them and holds Show outside Pane, Pause for 1 hour, a way into
@@ -337,8 +339,9 @@ retries on the next start.
 
 An approval has one reply box. Picks alone are an answer, as before: the call
 returns `{answer}`, or Pane types `answer: Q-20 → Yes, turn it on · One train
-(by you)`. Anything typed is a **reply**, which may be an answer or a question
-about the approval. Pane doesn't decide which; the agent that reads it does
+(by you)`. Anything typed is a **reply**. Pane records it as the answer once
+its reader gets it, and the approval closes with the typed text, like a pick.
+When the reply asks a question instead, the reader reopens the approval
 (D-245, D-258).
 
 **The lines.** The reader's open call returns `{reply, picks?, id, replyId,
@@ -360,9 +363,9 @@ the result's `picks` holds `''` there. Without a Q-n the line names the title
 in quotes, and adds `[id <item id>]` before `(by you)`. Each reply has an id
 and is delivered once.
 
-One reply at a time: while its reader is reading a reply (it has the line but
-hasn't run `--took`), a second typed reply is refused, with your words left in
-the box; picks still answer. A reply still waiting for a busy tab is replaced
+One reply at a time: while a reply is being typed into its reader's tab, a
+second typed reply is refused, with your words left in the box; picks still
+answer. A reply still waiting for a busy tab is replaced
 by a newer one, and only the newer line is typed. The same rule holds on every
 surface: the floating strip and the round send anything typed as a reply too,
 except on a permission prompt, whose note stays a note.
@@ -376,25 +379,36 @@ except on a permission prompt, whose note stays a note.
 4. None: the approval reads "No agent can read replies right now. You can
    still pick an option." The reply stays unread, and picks still answer.
 
-A reader that turns out gone passes the reply to the next one. A reply the
-asker or orchestrator hasn't taken after 10 minutes goes to Autopilot when
-Autopilot is on.
+A reader that turns out gone passes the reply to the next one. When Autopilot
+reads a reply, it is recorded as the answer the same way, and Autopilot acts
+only when it was a question.
+
+For a relayed worker question that the worker reads, the orchestrator's relay
+call gets the reply as its answer. When the worker takes it as a question, Pane
+types `reopened: Q-n → … (by <worker>)` into the orchestrator's tab, the
+orchestrator's `inbox ack` leaves the card open, and the answer to the new
+version reaches the orchestrator as `correction: Q-n → <answer> (by you)`.
 
 **What the reader runs.** Only the reader may; anyone else gets
-`ERR_NOTIFY_NOT_READER` with a `next`. A worker in a Session may run both:
+`ERR_NOTIFY_NOT_READER` with a `next`. While a card waits, a later run of the
+loop that posted it reads it too, since each run of a project loop is a new
+Pane. A worker in a Session may run both:
 they aren't new asks.
 
 ```sh
-runpane notify --took Q-20 answer      # records the reply (picks and text) as the answer
-runpane notify --took Q-20 question    # "Getting more context…" (--status "<text>" to say otherwise)
+runpane notify --took Q-20 question    # reopens it: "Getting more context…" (--status "<text>" to say otherwise)
 runpane notify --update Q-20 --asked "Can it be undone?" \
   --what-changed "Added the undo path to the context" \
   --context "<new context>" --choices '[{"label":"Yes, with undo","was":"Yes, turn it on","recommended":true},{"label":"Not yet"}]'
 ```
 
-`--took` and `--update` take an item id or Q-n and no `--ui`. `--update` needs
-`--asked` (the person's question) and `--what-changed` (one line per change),
-and replaces whichever of `--title`, `--context`, `--choices`, `--questions`
+`--took` and `--update` take an item id or Q-n and no `--ui`. `--took Q-20
+answer` changes nothing: the reply is already the answer. `--update` reopens an
+answered approval as its new version. It needs `--what-changed` (one line per
+change), and `--asked` (the person's question) when it answers a question they
+typed; an update of your own, such as a loop's next run refreshing its card,
+leaves `--asked` out and shows no "You asked". It replaces whichever of
+`--title`, `--context`, `--choices`, `--questions`
 and `--links` it passes. A reworded choice carries `"was"`, its old label.
 `--update` then waits for the answer like any notify call (`waiting`,
 `unavailable` and `--return-after` work the same). It never adds a second
@@ -410,17 +424,17 @@ so older items simply have none.
 | State | Shows |
 | --- | --- |
 | Waiting, no reply | Waiting |
-| Reply delivered, not yet taken | "<reader> is reading your reply…", naming the reader for every kind ("okta-sso-account", "The Doozy orchestrator", "Autopilot") |
-| Taken as an answer | "Taken as your answer", with **It was a question** |
+| Reply waiting for a busy reader | "<reader> is reading your reply…", naming the reader for every kind ("okta-sso-account", "The Doozy orchestrator", "Autopilot") |
+| Reply delivered | "Taken as your answer", with **It was a question** |
 | Taken as a question | "Taken as a question: <reader> is getting more context", with its status when the reader gave one, and **It was my answer** |
-| Updated | "Updated · ready again": your question quoted ("You asked"), What changed and by whom, choices marked NEW, REWORDED (the old label struck) or REMOVED, and a collapsed **Earlier version** |
+| Updated | "Updated · ready again": your question quoted ("You asked", when the update answers one), What changed and by whom, choices marked NEW, REWORDED (the old label struck) or REMOVED, and a collapsed **Earlier version** |
 | No reader | "No agent can read replies right now. You can still pick an option." |
 | A chat tab's built-in question | "Sent to <agent>": the typed reply is its answer, so there is no fix |
 | A chat tab's built-in question that takes only its choices | No reply box: pick one of its options |
 | Answered | Answered |
 
 The fix is one click. **It was a question** sends the reader `correction: Q-n →
-that was a question: "…"`, and the reader updates the approval. **It was my answer**
+that was a question: "…"`, reopens the approval, and the reader updates it. **It was my answer**
 records the reply as the answer and sends `correction: Q-n → that was your
 answer: "…"`, and the reader acts on it. The pager skips items whose reply is
 being read or asked about. Permission prompts stay options only, with no reply
@@ -530,8 +544,9 @@ the agent:
   "Mac mini offline · 4 waiting · they come back when the Mac mini is online",
   since its cards can't be answered; the agents keep waiting. After reconnecting
   the screen shows what is waiting there now. Autopilot says "<machine> offline".
-- **Your phone**: the Pane app lists Approvals with the same sort menu, and an
-  item opens above its Session's tabs and chat. A question still waiting after
+- **Your phone**: the Pane app lists approvals on home's **Needs you** tile, in
+  the same three sorts (chosen on its sort sheet), and an item opens above its
+  Session's tabs and chat. A question still waiting after
   about 90 seconds sends one alert to every phone signed
   in to the host in the Pane app with notifications allowed and **Needs
   Input** on. The alert is titled with the Pane's name and says only "<Pane>
@@ -629,15 +644,19 @@ Pane writes only those lines, plus a line
 break before them when the file didn't end with one; the rest of the file keeps
 every byte. It creates the file only when the agent's config folder exists and
 never deletes it. It leaves alone a file that is a symlink or not a regular
-file, isn't UTF-8, or has a stray marker, and one that another program keeps
-saving while Pane writes. Settings → Approvals → Agent instructions shows each
+file, isn't UTF-8, or has a stray marker, one that another program emptied in
+the last two seconds (it may be partway through saving it), and
+one that another program keeps saving while Pane writes; it tries again at the
+next launch. Settings → Approvals → Agent instructions shows each
 file's state.
 
 To remove the block, turn Approvals off in Settings → Approvals. Pane writes it
 again when you turn Approvals back on, or at the next launch with Approvals on.
 
 The `pane` MCP server's instructions say only to call `notify` instead of asking
-in the terminal. Cursor, which gets no user-level block, learns the rest from
+in the terminal. Claude Code gets that line, the agents intro and the scratch
+rule from its CLAUDE.md block, so while the block is there the server leaves
+all three out of its instructions to Claude Code. Cursor, which gets no user-level block, learns the rest from
 the `notify` tool's description and the repository's managed `AGENTS.md` block,
 which also carries the secrets rule.
 

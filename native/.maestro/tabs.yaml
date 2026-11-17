@@ -3,6 +3,10 @@
 appId: com.dcouple.pane.mobile
 ---
 - runFlow: subflows/demo.yaml
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: fix-checkout
 - tapOn:
     id: "pane-row-demo-fix-checkout-race"
     index: 0

@@ -1,5 +1,8 @@
+import type { WebSocket } from 'ws';
+import { MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL, MACHINE_HEALTH_CLEANUP_CHANNEL, MACHINE_HEALTH_IGNORE_LEAK_CHANNEL, MACHINE_HEALTH_PAUSE_IDLE_CHANNEL, MACHINE_HEALTH_RESTART_PROCESS_CHANNEL, MACHINE_HEALTH_STOP_APP_CHANNEL, MACHINE_HEALTH_STOP_PROCESSES_CHANNEL } from '../../../shared/types/machineHealth';
 import os from 'os';
-import { RemotePaneClient } from '../daemon/client/remotePaneClient';
+import { RemotePaneClient, type RemoteRouteCandidate } from '../daemon/client/remotePaneClient';
+import { primaryProfile, routeProfile, routesReachableHere, type ComputerRoutesReport, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import type { ConfigManager } from './configManager';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneError, reasonOf } from '../../../shared/paneError';
@@ -9,12 +12,16 @@ import type { OrchestrationPanelOverview } from '../../../shared/types/orchestra
 import { configuredAgentSchema } from '../../../shared/agents';
 import { agentReportFields } from './workspaceJournalSchema';
 import type { RemoteMachineAccess } from './orchestrationSessionManager';
+import { readingMachines } from '../daemon/readingMachines';
 import {
   LOCAL_MACHINE_ID,
   MACHINE_EVENT_CHANNELS,
+  MACHINE_HEALTH_ACTIONS,
   MACHINE_READ_CHANNELS,
+  type MachineHealthAction,
   type MachineConnectionsEvent,
   type MachineEventChannel,
+  type MachineLatency,
   type MachineResult,
   type MachineState,
 } from '../../../shared/types/machineConnections';
@@ -23,7 +30,7 @@ import {
 const RETRY_AFTER_GIVE_UP_MS = 60_000;
 
 type RemoteClientOptions = NonNullable<ConstructorParameters<typeof RemotePaneClient>[1]>;
-export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume'>;
+export type MachineClient = Pick<RemotePaneClient, 'connect' | 'disconnect' | 'retryNow' | 'invoke' | 'suspend' | 'resume' | 'openPortStream' | 'measureLatency'>;
 export type CreateMachineClient = (profile: RemotePaneConnectionProfile, options: RemoteClientOptions) => MachineClient;
 
 export interface MachineConnectionsDeps {
@@ -31,6 +38,11 @@ export interface MachineConnectionsDeps {
   /** Runs a command on this computer, as its own command registry does. */
   invokeLocal: (channel: string, args: PaneCommandValue[]) => Promise<PaneCommandValue>;
   createClient?: CreateMachineClient;
+  /** Readies a route before it is dialed, and saves what a computer reports about itself; the remote client controller's. */
+  routes?: {
+    prepare(route: RemoteRouteCandidate): Promise<RemotePaneConnectionProfile>;
+    saveReport(computerId: string, routeId: string | undefined, report: ComputerRoutesReport): Promise<void>;
+  };
 }
 
 interface RemoteMachine {
@@ -48,11 +60,20 @@ interface Invocation {
 }
 
 const readChannels = new Set<string>(MACHINE_READ_CHANNELS);
+const MACHINE_HEALTH_ACTION_CHANNELS = {
+  cleanup: MACHINE_HEALTH_CLEANUP_CHANNEL,
+  'pause-idle': MACHINE_HEALTH_PAUSE_IDLE_CHANNEL,
+  'archive-finished': MACHINE_HEALTH_ARCHIVE_FINISHED_CHANNEL,
+  'stop-processes': MACHINE_HEALTH_STOP_PROCESSES_CHANNEL,
+  'restart-process': MACHINE_HEALTH_RESTART_PROCESS_CHANNEL,
+  'ignore-leak': MACHINE_HEALTH_IGNORE_LEAK_CHANNEL,
+  'stop-app': MACHINE_HEALTH_STOP_APP_CHANNEL,
+} as const satisfies Record<MachineHealthAction, string>;
 const eventChannels = new Set<string>(MACHINE_EVENT_CHANNELS);
 const isMachineEventChannel = (channel: string): channel is MachineEventChannel => eventChannels.has(channel);
 const itemSchema = boundary.object({ kind: boundary.enumeration('pane', 'session'), id: boundary.nonEmptyString });
 const commandTypeSchema = boundary.object({
-  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session', 'preview-switch-to-chat', 'switch-to-chat', 'submit-to-agent'),
+  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session', 'preview-switch-to-chat', 'switch-to-chat', 'submit-to-agent', 'machine-health'),
 });
 const commandSchemas = {
   notify: boundary.object({ command: boundary.jsonObject }),
@@ -66,6 +87,7 @@ const commandSchemas = {
   'create-session': boundary.object({ input: boundary.jsonObject }),
   'preview-switch-to-chat': boundary.object({ sessionId: boundary.nonEmptyString }),
   'switch-to-chat': boundary.object({ sessionId: boundary.nonEmptyString, panelIds: boundary.array(boundary.nonEmptyString) }),
+  'machine-health': boundary.object({ action: boundary.enumeration(...MACHINE_HEALTH_ACTIONS), request: boundary.jsonObject }),
   'submit-to-agent': boundary.object({ panelId: boundary.nonEmptyString, input: boundary.nonEmptyString }),
 };
 
@@ -77,9 +99,11 @@ const commandSchemas = {
  */
 export class MachineConnections {
   private readonly machines = new Map<string, RemoteMachine>();
+  private readonly latencies = new Map<string, Promise<MachineLatency>>();
   private readonly listeners = new Set<(event: MachineConnectionsEvent) => void>();
   private readonly createClient: CreateMachineClient;
   private readonly onConfigUpdated = () => this.refresh();
+  private stopRetryOnArrival: (() => void) | null = null;
 
   constructor(private readonly deps: MachineConnectionsDeps) {
     this.createClient = deps.createClient ?? ((profile, options) => new RemotePaneClient(profile, options));
@@ -87,11 +111,16 @@ export class MachineConnections {
 
   start(): void {
     this.deps.configManager.on('config-updated', this.onConfigUpdated);
+    // A machine back from sleep reopens its streams to the machines it reads, this one among them,
+    // before this one's next retry would reach it: try every offline machine now.
+    this.stopRetryOnArrival = readingMachines.onArrive(() => this.retryOffline());
     this.refresh();
   }
 
   async stop(): Promise<void> {
     this.deps.configManager.off('config-updated', this.onConfigUpdated);
+    this.stopRetryOnArrival?.();
+    this.stopRetryOnArrival = null;
     const machines = [...this.machines.values()];
     this.machines.clear();
     await Promise.all(machines.map(machine => this.close(machine)));
@@ -144,6 +173,32 @@ export class MachineConnections {
     }
   }
 
+  /** One raw byte stream to a loopback port on a saved machine, without switching to it (a linked Mac's device hub). Main only. */
+  openPortStream(machineId: string, port: number): WebSocket {
+    const machine = this.machines.get(machineId);
+    if (!machine) throw unknownMachine(machineId);
+    return machine.client.openPortStream(port);
+  }
+
+  /**
+   * A saved machine's round trip over the route its connection is on, named so the caller can tell it
+   * is the route it shows. Not online: no answer, without a request. Asked again while one measurement
+   * runs, it answers with that one, so quick reopens of a menu never stack handshakes.
+   */
+  measureLatency(machineId: string): Promise<MachineLatency> {
+    const machine = this.machines.get(machineId);
+    if (!machine) return Promise.reject(unknownMachine(machineId));
+    const routeId = machine.state.routeId ?? null;
+    if (machine.state.status !== 'online') return Promise.resolve({ ms: null, routeId });
+    const running = this.latencies.get(machineId);
+    if (running) return running;
+    const measured = machine.client.measureLatency()
+      .then((ms): MachineLatency => ({ ms, routeId }))
+      .finally(() => this.latencies.delete(machineId));
+    this.latencies.set(machineId, measured);
+    return measured;
+  }
+
   /** A saved machine's current state, or undefined for an unknown id. */
   machineState(machineId: string): MachineState | undefined {
     const machine = this.machines.get(machineId);
@@ -167,6 +222,12 @@ export class MachineConnections {
   /** Runs one allowed command on the named machine. Anything outside the list is refused before it is sent. */
   async run(machineId: string, command: PaneCommandValue): Promise<MachineResult> {
     return { machineId, data: await this.invoke(machineId, toInvocation(command), { write: true }) };
+  }
+
+  private retryOffline(): void {
+    for (const [id, machine] of this.machines) {
+      if (machine.state.status === 'offline') void this.retry(id).catch(() => undefined);
+    }
   }
 
   /** Reconnects a saved machine now instead of waiting for its next retry. */
@@ -193,42 +254,49 @@ export class MachineConnections {
     return machine.client.invoke(channel, args);
   }
 
-  /** One connection per saved profile; a changed address or credential reconnects. */
+  /** One connection per saved computer; a changed route or credential reconnects. */
   private refresh(): void {
-    const profiles = this.deps.configManager.getConfig().remoteDaemon?.client.profiles ?? [];
-    const wanted = new Map(profiles.map(profile => [profile.id, profile]));
+    const computers = this.deps.configManager.getConfig().remoteDaemon?.client.computers ?? [];
+    const wanted = new Map(computers.map(computer => [computer.id, computer]));
     let changed = false;
     for (const [id, machine] of this.machines) {
-      const profile = wanted.get(id);
-      if (profile && connectionKey(profile) === machine.key) {
-        if (machine.state.label !== profile.label) { machine.state.label = profile.label; changed = true; }
+      const computer = wanted.get(id);
+      if (computer && connectionKey(computer) === machine.key) {
+        if (machine.state.label !== computer.label) { machine.state.label = computer.label; changed = true; }
         continue;
       }
       this.machines.delete(id);
       void this.close(machine);
       changed = true;
     }
-    for (const [id, profile] of wanted) {
-      if (this.machines.has(id)) continue;
-      this.open(profile);
+    for (const [id, computer] of wanted) {
+      if (this.machines.has(id) || !computer.routes.length) continue;
+      this.open(computer);
       changed = true;
     }
     if (changed) this.emitMachines();
   }
 
-  private open(profile: RemotePaneConnectionProfile): void {
+  private open(computer: RemoteComputer): void {
+    const profile = primaryProfile(computer);
     const id = profile.id;
     const isCurrent = (): boolean => this.machines.get(id) === machine;
+    const routes = routesReachableHere(computer.routes, Object.values(os.networkInterfaces()).flatMap((entries) => entries ?? []))
+      .map((route) => ({ routeId: route.id, kind: route.kind, profile: routeProfile(computer, route) }));
     const machine: RemoteMachine = {
-      key: connectionKey(profile),
+      key: connectionKey(computer),
       profile,
       retryTimer: null,
       state: { id, label: profile.label, kind: 'remote', status: 'connecting', offlineSince: null },
       client: this.createClient(profile, {
         machineId: this.deps.configManager.getConfig().machineId,
+        routes,
+        prepareRoute: (route) => this.deps.routes?.prepare(route) ?? Promise.resolve(route.profile),
         eventSink: { send: (channel, ...args) => { if (isCurrent() && isMachineEventChannel(channel)) this.emit({ type: 'event', machineId: id, channel, args }); } },
         onConnectionStateChange: (status, _error, metadata) => {
           if (!isCurrent()) return;
+          if (metadata?.hostRoutes) void this.deps.routes?.saveReport(id, metadata.routeId, metadata.hostRoutes);
+          if (metadata?.routeId && machine.state.routeId !== metadata.routeId) { machine.state.routeId = metadata.routeId; this.emitMachines(); }
           this.updateStatus(machine, status, metadata?.hostMachineId, metadata?.hostWorkspaceEntries);
           if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {
@@ -289,7 +357,7 @@ function toInvocation(command: PaneCommandValue): Invocation {
   if (!type) {
     const named = decodeOptionalBoundary(command, boundary.object({ type: boundary.string }))?.type;
     throw new PaneError('ERR_MACHINE_COMMAND_REFUSED',
-      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, pause, resume, archive, rename, create, switching a Session to chat and asking a Session's agent to hand it off are allowed. Nothing was sent.`,
+      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, pause, resume, archive, rename, create, switching a Session to chat, asking a Session's agent to hand it off and machine health actions are allowed. Nothing was sent.`,
       'Switch to that machine to do this there.');
   }
   try {
@@ -337,6 +405,11 @@ function toInvocation(command: PaneCommandValue): Invocation {
         const { sessionId, panelIds } = decodeBoundary(command, commandSchemas['switch-to-chat']);
         return { channel: 'chat-tab:switch-session', args: [sessionId, panelIds] };
       }
+      case 'machine-health': {
+        // The host decodes the request and applies its own tiers and protections.
+        const { action, request } = decodeBoundary(command, commandSchemas['machine-health']);
+        return { channel: MACHINE_HEALTH_ACTION_CHANNELS[action], args: [request] };
+      }
       case 'submit-to-agent': {
         // Sent as the person's message, the way the move dialog sends it to the host on screen.
         const { panelId, input } = decodeBoundary(command, commandSchemas['submit-to-agent']);
@@ -361,8 +434,8 @@ function unknownMachine(machineId: string): PaneError {
     'Read the machine list again with machines:list and use one of its ids.');
 }
 
-function connectionKey(profile: RemotePaneConnectionProfile): string {
-  return `${profile.baseUrl}\n${profile.token}`;
+function connectionKey(computer: RemoteComputer): string {
+  return computer.routes.map((route) => `${route.id}\n${route.baseUrl}\n${route.token}`).join('\n');
 }
 
 /** How long a Session overview waits for a member's machine before showing it unreachable. */
@@ -370,7 +443,7 @@ const MEMBER_READ_TIMEOUT_MS = 4_000;
 const panelOverviewSchema: BoundarySchema<OrchestrationPanelOverview> = boundary.object({
   panelId: boundary.string,
   title: boundary.string,
-  type: boundary.optional(boundary.enumeration('terminal', 'chat', 'diff', 'explorer', 'editor', 'logs', 'dashboard', 'setup-tasks', 'browser', 'notes')),
+  type: boundary.optional(boundary.enumeration('terminal', 'chat', 'diff', 'explorer', 'editor', 'logs', 'dashboard', 'setup-tasks', 'browser', 'notes', 'device')),
   agentType: boundary.optional(configuredAgentSchema),
   state: boundary.enumeration('blocked', 'working', 'idle', 'unknown'),
   initialized: boundary.boolean,

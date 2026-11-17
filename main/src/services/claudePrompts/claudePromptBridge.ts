@@ -21,8 +21,10 @@ const TOKEN_HEADER = 'X-Pane-Hook-Token';
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 /** How often Pane reads the transcript's new lines for an answer the hooks don't report (Esc in the dialog). */
 const TRANSCRIPT_POLL_MS = 1_000;
-/** A prompt's first transcript read starts this far from the end; later reads take only new bytes, at most this many. */
+/** A prompt's first transcript read starts at the line this far from the end; later reads take the new lines. */
 const TRANSCRIPT_READ_BYTES = 1024 * 1024;
+/** Past this much new transcript in one poll, Pane stops watching for a terminal answer and says so; Notify still takes the answer. */
+const TRANSCRIPT_WATCH_CEILING = 64 * 1024 * 1024;
 
 export const ANSWERED_IN_TERMINAL = 'Answered in the terminal';
 
@@ -70,6 +72,8 @@ interface TranscriptWatch {
   /** Calls to the prompt's tool, with its input, that had no result yet. */
   calls: Set<string>;
   reading: boolean;
+  /** Set when the transcript outgrew TRANSCRIPT_WATCH_CEILING. */
+  stopped?: boolean;
 }
 
 /** What the endpoint answers a hook: a decision for a prompt, nothing otherwise. */
@@ -244,16 +248,19 @@ export class ClaudePromptBridge {
     const watch: TranscriptWatch = { file, offset: 0, calls: new Set(), reading: true };
     try {
       const { size } = await fs.stat(file);
-      watch.offset = Math.max(0, size - TRANSCRIPT_READ_BYTES);
+      watch.offset = await lineStart(file, Math.max(0, size - TRANSCRIPT_READ_BYTES));
     } catch {
       return;
     }
-    // The first read starts mid-file, so its first line may be partial; JSON parsing skips it.
     const answered = await readNewLines(watch, prompt);
     for (const id of answered) watch.calls.delete(id);
     watch.reading = false;
     if (!this.waiting.has(prompt.id)) return;
     prompt.poll = setInterval(() => {
+      if (watch.stopped) {
+        clearInterval(prompt.poll);
+        return;
+      }
       if (watch.reading) return;
       watch.reading = true;
       void readNewLines(watch, prompt).then((results) => {
@@ -265,9 +272,29 @@ export class ClaudePromptBridge {
   }
 }
 
+/** Where the line holding byte `position` starts, so a read from there gets that line whole. */
+async function lineStart(file: string, position: number): Promise<number> {
+  const handle = await fs.open(file, 'r');
+  try {
+    let end = position;
+    while (end > 0 && position - end < TRANSCRIPT_WATCH_CEILING) {
+      const start = Math.max(0, end - TRANSCRIPT_READ_BYTES);
+      const buffer = Buffer.alloc(end - start);
+      await handle.read(buffer, 0, buffer.length, start);
+      const newline = buffer.lastIndexOf(0x0a);
+      if (newline >= 0) return start + newline + 1;
+      end = start;
+    }
+    // No line start within the ceiling: begin mid-line; parsing skips the partial line.
+    return end > 0 ? position : 0;
+  } finally {
+    await handle.close();
+  }
+}
+
 /**
- * Reads the transcript's complete lines past `watch.offset` (up to TRANSCRIPT_READ_BYTES), adds the
- * prompt's matching calls to `watch.calls`, and returns the ids of the tool results it read.
+ * Reads the transcript's complete lines past `watch.offset`, however long, adds the prompt's
+ * matching calls to `watch.calls`, and returns the ids of the tool results it read.
  */
 async function readNewLines(watch: TranscriptWatch, prompt: WaitingPrompt): Promise<string[]> {
   let text: string;
@@ -276,8 +303,13 @@ async function readNewLines(watch: TranscriptWatch, prompt: WaitingPrompt): Prom
     try {
       const { size } = await handle.stat();
       if (size < watch.offset) watch.offset = size;
-      const length = Math.min(size - watch.offset, TRANSCRIPT_READ_BYTES);
+      const length = size - watch.offset;
       if (length <= 0) return [];
+      if (length > TRANSCRIPT_WATCH_CEILING) {
+        watch.stopped = true;
+        console.warn(`[ClaudePrompts] ${watch.file} grew by ${length} bytes since Pane last read it, more than the ${TRANSCRIPT_WATCH_CEILING} it reads at once, so Pane stopped watching it for an answer given in the terminal. Notify still takes the answer.`);
+        return [];
+      }
       const buffer = Buffer.alloc(length);
       await handle.read(buffer, 0, length, watch.offset);
       const end = buffer.lastIndexOf(0x0a) + 1;

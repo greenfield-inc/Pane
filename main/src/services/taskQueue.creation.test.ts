@@ -140,6 +140,26 @@ describe('pane creation name reuse', () => {
     expect(created.worktree_name).toBe('feature-2');
   });
 
+  it('keeps a long name whole and cuts its worktree and branch at a word', async () => {
+    const name = 'Investigate why the nightly release pipeline intermittently fails when the macOS notarization step times out '
+      + 'and retries overlap with the Windows signing job, then propose a fix and a rollout plan for the team. '
+      + 'Also cover the Linux packaging job, the release notes draft, and the rollback steps if the fix misbehaves.';
+    const worktreeName = 'investigate-why-the-nightly-release-pipeline-intermittently-fails-when-the-macos-notarization-step';
+
+    const created = await createPane(name);
+
+    expect(created.name).toBe(name);
+    expect(created.worktree_name).toBe(worktreeName);
+    expect(created.worktree_path).toBe(path.join(project.path, 'worktrees', worktreeName));
+    expect((await runner.execFile('git', ['branch', '--show-current'], created.worktree_path)).stdout.trim()).toBe(worktreeName);
+  });
+
+  it('cuts a long name at 100 characters when its only word break is near the start', async () => {
+    const created = await createPane(`A ${'b'.repeat(200)}`);
+
+    expect(created.worktree_name).toBe(`a-${'b'.repeat(98)}`);
+  });
+
   it('respects an absolute worktree folder and preserves existing files', async () => {
     project.worktree_folder = path.join(tempDir, 'custom-worktrees');
     const existingPath = path.join(project.worktree_folder, 'feature');

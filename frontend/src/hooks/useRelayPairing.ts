@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RelayPairingInfo, RelayStatus } from '../../../shared/types/relay';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 
-/** What the Pair a phone dialog shows in its code box. */
+/** What Add a device › Phone shows in its code box. */
 export type PairingView =
   | { step: 'preparing' }
   | { step: 'error'; message: string }
@@ -13,11 +13,12 @@ export type PairingView =
 const SETUP_FAILED = "Pane's servers didn't answer";
 
 /**
- * Phone pairing while `open`: turns phone access on if it is off, waits for this computer to be
- * ready, then keeps one current pairing code. A used code (`relay:paired`) or an expired one is
- * replaced at once. Phone access it turned on is turned off again if it closes before ever being ready.
+ * Pairing while `open`: turns phone access on if it is off and waits for this computer to be ready.
+ * With `showCode` it keeps one current 10-minute pairing code; a used code (`relay:paired`) or an
+ * expired one is replaced at once. Phone access it turned on is turned off again if it closes before
+ * ever being ready.
  */
-export function useRelayPairing(open: boolean) {
+export function useRelayPairing(open: boolean, showCode = true) {
   const [status, setStatus] = useState<RelayStatus | null>(null);
   const [code, setCode] = useState<RelayPairingInfo | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -59,7 +60,9 @@ export function useRelayPairing(open: boolean) {
     setRenewal(null);
     void prepare(false);
     const offStatus = window.electronAPI.events.onRelayStatusChanged((next) => setStatus(next));
-    const offPaired = window.electronAPI.events.onRelayPaired(({ label }) => {
+    const offPaired = window.electronAPI.events.onRelayPaired(({ kind, label }) => {
+      // A computer that used a copied link spent its own secret, not this code (Add a device › Computer shows it).
+      if (kind === 'computer') return;
       setPaired(label);
       setRenewal('paired');
       setCode(null);
@@ -79,7 +82,7 @@ export function useRelayPairing(open: boolean) {
   const ready = open && status?.phase === 'ready';
   useEffect(() => {
     if (ready) reachedReady.current = true;
-    if (!ready || code || failure || requesting.current) return;
+    if (!ready || !showCode || code || failure || requesting.current) return;
     requesting.current = true;
     const asked = ++generation.current;
     window.electronAPI.invoke('relay:pairing-code').then(
@@ -95,7 +98,7 @@ export function useRelayPairing(open: boolean) {
         setFailure(ipcErrorMessage(cause, "Pane couldn't make a pairing code"));
       },
     );
-  }, [ready, code, failure]);
+  }, [ready, showCode, code, failure]);
 
   const expiresAt = code ? Date.parse(code.expiresAt) : null;
   useEffect(() => {
@@ -126,7 +129,7 @@ export function useRelayPairing(open: boolean) {
   else if (renewal === 'expired' && status?.phase === 'ready') view = { step: 'renewing' };
   else view = { step: 'preparing' };
 
-  return { view, paired, renewal, retry, relay: status?.relay ?? null };
+  return { view, ready, paired, renewal, retry, relay: status?.relay ?? null };
 }
 
 /** Undoes a pairing attempt that never got ready, so later launches don't keep retrying the relay. */

@@ -63,6 +63,8 @@ interface OrchestrationSessionRecord {
   wslDistribution?: string;
   id: string;
   name: string;
+  /** The name is still the default `New chat`; the Session agent renames it once. */
+  nameIsDefault?: boolean;
   archived?: boolean;
   isPinned?: boolean;
   /** Set while the Session's chat and every Pane in it are paused. */
@@ -1535,6 +1537,7 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   id: boundary.nonEmptyString,
   name: boundary.nonEmptyString,
+  nameIsDefault: boundary.optional(boundary.boolean),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
   paused: boundary.optional(pausedMarkSchema),
@@ -3713,7 +3716,12 @@ export async function runPanelsOutput(parsed: ParsedArgs): Promise<number> {
   if (result.text && !result.text.endsWith('\n')) {
     output.write('\n');
   }
+  if (result.hasMore) console.error(olderOutputNote(result.limit));
   return 0;
+}
+
+function olderOutputNote(limit: number): string {
+  return `(older output not shown; raise --limit above ${limit} to see more)`;
 }
 
 export async function runPanelsInput(parsed: ParsedArgs): Promise<number> {
@@ -3755,6 +3763,7 @@ export async function runPanelsScreen(parsed: ParsedArgs): Promise<number> {
   if (text && !text.endsWith('\n')) {
     output.write('\n');
   }
+  if (result.hasMore) console.error(olderOutputNote(result.limit));
   return 0;
 }
 

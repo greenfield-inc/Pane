@@ -4,12 +4,18 @@ import { encodePaneDaemonFrame, PaneDaemonFrameDecoder } from '../daemon/socketF
 import { getPaneDaemonEndpoint } from '../daemon/socketPath';
 import type { PaneLinkNavigation, PaneLinkTarget } from '../../../shared/types/paneLinks';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { parseRelayPairingLink } from '../../../shared/remoteClient/relay';
+import type { RelayLinkOpenedEvent } from '../../../shared/types/relay';
+import { getPaneEventSink } from '../core/runtime';
 
 /**
  * pane:// deep links: `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, or
  * `pane://open?session=<id>`. Opening one navigates the app to what it names, and a panel link
  * opens that tab's oldest waiting question in Approvals, as Open in Pane does. It never answers a card or changes
  * other Pane state, and anything that doesn't parse exactly is rejected.
+ *
+ * `pane://pair#…` is another computer's one-time link (the relay landing page's "Open Pane"): it
+ * opens the confirm page on `relay:link-opened`, and links nothing until the person confirms there.
  */
 export const PANE_LINK_SCHEME = 'pane';
 export const OPEN_PANE_LINK_CHANNEL = 'runpane:links:open';
@@ -55,6 +61,11 @@ export function parsePaneLink(link: string): PaneLinkTarget {
   return target;
 }
 
+/** A `pane://pair#…` one-time link, which the renderer's confirm page redeems. */
+export function isPanePairLink(link: string): boolean {
+  return link.length <= MAX_LINK_LENGTH && link.startsWith(`${PANE_LINK_SCHEME}://pair`) && parseRelayPairingLink(link) !== null;
+}
+
 export function findPaneLinkArg(argv: readonly string[]): string | undefined {
   return argv.find((arg) => arg.startsWith(`${PANE_LINK_SCHEME}://`));
 }
@@ -65,13 +76,26 @@ interface PaneLinkOpener {
   repoExists: (repoId: number) => boolean;
   /** Opens Approvals on the tab's oldest waiting question, as Open in Pane does; does nothing when none waits. */
   showWaitingCard: (paneId: string, panelId: string) => void | Promise<void>;
+  /** Shows the window and the confirm page for a `pane://pair#…` link; by default it only tells the renderer. */
+  openPairLink?: (link: string) => void;
+}
+
+/** Tells the renderer a one-time link arrived, so it opens the confirm page. */
+function sendPairLinkOpened(link: string): void {
+  const event: RelayLinkOpenedEvent = { link };
+  getPaneEventSink().send('relay:link-opened', event);
 }
 
 /** Registers `runpane:links:open`, the one path every pane:// link (OS or CLI) goes through. */
 export function registerPaneLinkHandler(commandRegistry: PaneCommandRegistry, opener: PaneLinkOpener): void {
   commandRegistry.register(OPEN_PANE_LINK_CHANNEL, async (link: PaneCommandValue) => {
     try {
-      const target = parsePaneLink(decodeBoundary(link, boundary.string));
+      const text = decodeBoundary(link, boundary.string);
+      if (isPanePairLink(text)) {
+        (opener.openPairLink ?? sendPairLinkOpened)(text);
+        return { success: true, data: { opened: { kind: 'pair' } } };
+      }
+      const target = parsePaneLink(text);
       if (target.kind === 'pane') {
         // The same code path as `runpane panes focus`: validates the pane and panel, raises the window.
         await commandRegistry.invoke('runpane:panes:focus', [{ paneId: target.paneId, panelId: target.panelId, source: 'user' }]);

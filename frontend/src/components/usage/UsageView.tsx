@@ -1,3 +1,4 @@
+import { CATEGORY_COLORS } from '../ui/charts/palette';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, CalendarDays, Check, Download, Loader2, RefreshCw, Share2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
@@ -13,6 +14,7 @@ import { LeaderboardTab } from './LeaderboardTab';
 import { settingDomId } from '../settings/catalog';
 import { PaneUsageSummary } from './PaneUsageSummary';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
+import { hasNoAgentTranscripts } from './usageEmptyState';
 import { presetCalendarRange, rollingUsageRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
@@ -51,7 +53,7 @@ const SERIES_COLORS = {
   cacheWrite: '#e0913a',
 } as const;
 
-const MODEL_COLORS = ['#4f8ef7', '#37b877', '#e0913a', '#c765d6', '#e05a6b', '#3fb8c4', '#8f8ff0', '#c2a63a'];
+const MODEL_COLORS = CATEGORY_COLORS;
 
 type PaneSortKey =
   | 'paneName'
@@ -410,7 +412,7 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
     ];
   }, [report]);
 
-  const bothRootsMissing = (report?.index.missingRoots.length ?? 0) >= 2;
+  const noAgentTranscripts = hasNoAgentTranscripts(report?.index);
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
@@ -575,13 +577,13 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}
           </div>
-        ) : bothRootsMissing ? (
+        ) : noAgentTranscripts ? (
           <div className="mx-auto max-w-lg rounded border border-border-primary bg-surface-secondary p-6 text-center">
             <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>
             <p className="text-xs text-text-secondary">
               Usage is read from the Claude Code and Codex transcript files in your home directory.
-              Neither <code className="font-mono">~/.claude/projects</code> nor{' '}
-              <code className="font-mono">~/.codex/sessions</code> exists yet — run an agent once and
+              Nothing was found in <code className="font-mono">~/.claude/projects</code> or{' '}
+              <code className="font-mono">~/.codex/sessions</code> yet — run an agent once and
               come back.
             </p>
           </div>

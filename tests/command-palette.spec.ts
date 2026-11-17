@@ -338,7 +338,7 @@ test('⌘K shows the selected row’s actions, filters them, and Esc goes back',
   await page.keyboard.press('ControlOrMeta+K');
   await page.keyboard.type('archive');
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('dialog', { name: 'Archive Pane' })).toContainText('Archive pane "wsl-runpane"?');
+  await expect(page.getByRole('dialog', { name: 'Archive Make runpane work in Pane’s WSL terminals?' })).toContainText('Its agents stop and its git worktree is removed');
 });
 
 test('Search is centered in the window and fully on screen at any width', async ({ page }) => {

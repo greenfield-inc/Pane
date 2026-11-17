@@ -83,7 +83,7 @@ function validateRequest(value: PaneCommandValue): SubmitFeedbackRequest {
     throw new Error('Feedback text is required.');
   }
   if (request.body.length > MAX_BODY_LENGTH) {
-    throw new Error('Feedback text is too long.');
+    throw new Error(`Feedback text is ${request.body.length.toLocaleString('en-US')} characters; it takes up to ${MAX_BODY_LENGTH.toLocaleString('en-US')}. Shorten it and send again.`);
   }
   return request;
 }

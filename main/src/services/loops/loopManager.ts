@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import {
   LOOP_KEPT_RUNS,
   LOOP_NAME_MAX_LENGTH,
+  LOOP_NEW_SESSION,
   type Loop,
   type LoopAgent,
   type LoopInput,
@@ -19,11 +20,48 @@ const KEPT_RUN_NOTE = 'Kept because the run Pane has unfinished work (a busy age
 /** The longest the timer sleeps, so a changed clock or a slept laptop is noticed within the grace period. */
 const MAX_SLEEP_MS = 60 * 1000;
 
+/** A Session loop's Session that a run brought back: restored from the archive, or made again. */
+export interface LoopSessionRecovery {
+  kind: 'restored' | 'recreated';
+  sessionId: string;
+  sessionName: string;
+}
+
+export interface LoopRunStart {
+  sessionId: string | null;
+  warning?: string;
+  recovered?: LoopSessionRecovery;
+}
+
 /**
  * Starts one run: a project loop's Pane, as `runpane panes create`, returning
  * its id; or a Session loop's message to its agent, returning no Pane.
  */
-export type LoopRunStarter = (loop: StoredLoop, slotAtMs: number) => Promise<{ sessionId: string | null; warning?: string }>;
+export type LoopRunStarter = (loop: StoredLoop, slotAtMs: number) => Promise<LoopRunStart>;
+
+type LoopCardKind = 'recovered' | 'failed';
+
+interface HeldCard {
+  kind: LoopCardKind;
+  card: LoopCard;
+  act: (answer: string | null) => Promise<void>;
+}
+
+/** A card that waits in Approvals until the person answers it. */
+export interface LoopCard {
+  title: string;
+  context: string;
+  /** The first is the recommended one. */
+  choices: string[];
+  /** Files the card under this Session, by id. */
+  sessionId?: string;
+}
+
+const LOOP_CARD_KEEP = 'Keep it';
+const LOOP_CARD_UNDO = 'Undo';
+const LOOP_CARD_NEW_SESSION = 'Point it at a new Session';
+const LOOP_CARD_RUN_AGAIN = 'Run again';
+const LOOP_CARD_PAUSE = 'Pause the loop';
 
 export interface LoopManagerOptions {
   repo: LoopRepository;
@@ -36,6 +74,13 @@ export interface LoopManagerOptions {
    * Session id, and make that Session's agent run `agent` without permission prompts.
    */
   prepareSession: (target: string, loop: { name: string; agent: LoopAgent }) => Promise<string>;
+  /**
+   * Shows a card that waits, and resolves with the chosen label, or null for any other answer.
+   * Aborting the signal takes the card down, as when a later run makes a failure card stale.
+   */
+  ask?: (card: LoopCard, signal: AbortSignal) => Promise<string | null>;
+  /** Archives a Session, as Undo on a card does. */
+  archiveSession?: (sessionId: string) => Promise<void>;
   /** Called after any loop or run changes, so clients refetch. */
   onChange?: () => void;
   now?: () => number;
@@ -54,6 +99,10 @@ export class LoopManager {
   private readonly starting = new Set<string>();
   /** Old runs whose Pane is being archived, so two trims never archive one Pane twice. */
   private readonly archiving = new Set<string>();
+  /** Loops with a card waiting on the person, so a loop never posts a second one. */
+  private readonly cardOpen = new Map<string, { kind: LoopCardKind; abort: AbortController }>();
+  /** The latest card a loop raised while one waited, posted once that one is answered. */
+  private readonly cardNext = new Map<string, HeldCard>();
   private readonly now: () => number;
 
   constructor(private readonly options: LoopManagerOptions) {
@@ -74,6 +123,13 @@ export class LoopManager {
 
   list(): Loop[] {
     return this.options.repo.list().map(loop => this.present(loop));
+  }
+
+  /** The loop a caller works for: a project loop's run Pane, or a Session loop's Session. */
+  loopFor(caller: { paneId: string; sessionId?: string }): StoredLoop | null {
+    const { repo } = this.options;
+    return repo.list().find(loop => (caller.sessionId !== undefined && loop.orchestrationSessionId === caller.sessionId)
+      || repo.runs(loop.id).some(run => run.sessionId === caller.paneId)) ?? null;
   }
 
   async save(input: LoopInput): Promise<Loop> {
@@ -136,6 +192,9 @@ export class LoopManager {
 
   delete(id: string): void {
     if (!this.options.repo.get(id)) throw loopNotFound(id);
+    // A deleted loop's cards have nothing left to act on.
+    this.cardNext.delete(id);
+    this.cardOpen.get(id)?.abort.abort();
     this.options.repo.delete(id);
     this.changed();
   }
@@ -206,14 +265,17 @@ export class LoopManager {
     this.starting.add(loop.id);
     try {
       this.options.onChange?.();
-      const { sessionId, warning } = await this.options.startRun(loop, slotAtMs);
+      const { sessionId, warning, recovered } = await this.options.startRun(loop, slotAtMs);
       repo.finishRun(run.id, { status: 'started', error: warning ?? null, sessionId });
-      const where = sessionId ? `as Pane ${sessionId}` : `for Session ${loop.orchestrationSessionId}`;
+      this.dropStaleFailure(loop.id);
+      if (recovered) this.recovered(loop, recovered, warning);
+      const where = sessionId ? `as Pane ${sessionId}` : `for Session ${recovered?.sessionId ?? loop.orchestrationSessionId}`;
       this.options.logger?.info(`[Loops] Started "${loop.name}" ${where}${warning ? `; it needs attention: ${warning}` : '.'}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       repo.finishRun(run.id, { status: 'failed', error: message, sessionId: null });
       this.options.logger?.warn(`[Loops] "${loop.name}" did not start: ${message}`);
+      this.failed(loop, message);
     } finally {
       this.starting.delete(loop.id);
     }
@@ -262,6 +324,96 @@ export class LoopManager {
           this.options.onChange?.();
         });
     }
+  }
+
+  /**
+   * A run brought the loop's Session back. A new Session becomes the loop's target, and the
+   * person gets a card with Undo: archive the Session again and pause the loop.
+   */
+  private recovered(loop: StoredLoop, recovered: LoopSessionRecovery, warning: string | undefined): void {
+    const { repo } = this.options;
+    if (recovered.kind === 'recreated') {
+      const current = repo.get(loop.id);
+      if (current) repo.upsert({ ...current, orchestrationSessionId: recovered.sessionId });
+    }
+    const what = recovered.kind === 'restored'
+      ? `Its Session ${recovered.sessionName} was archived, so Pane restored it`
+      : `Its Session was gone, so Pane made ${recovered.sessionName} in its place`;
+    // A run whose prompt was held says so: the restore happened, the send did not.
+    const context = warning ? `${what}. ${warning}` : `${what} and sent this run there.`;
+    this.raise(loop, 'recovered', {
+      title: `${loop.name}: Session ${recovered.kind === 'restored' ? 'restored' : 'recreated'}`,
+      context: `${context} Undo archives it and pauses the loop.`,
+      choices: [LOOP_CARD_KEEP, LOOP_CARD_UNDO],
+      sessionId: recovered.sessionId,
+    }, async answer => {
+      if (answer !== LOOP_CARD_UNDO) return;
+      this.setEnabled(loop.id, false);
+      await this.options.archiveSession?.(recovered.sessionId);
+    });
+  }
+
+  /** A run that did not start: a card with the one-click fixes, so it is not only a red dot on the Loops page. */
+  private failed(loop: StoredLoop, message: string): void {
+    const sessionLoop = Boolean(loop.orchestrationSessionId);
+    this.raise(loop, 'failed', {
+      title: `${loop.name} did not run`,
+      context: `${message} The loop tries again at its next scheduled run.`,
+      choices: sessionLoop ? [LOOP_CARD_NEW_SESSION, LOOP_CARD_RUN_AGAIN, LOOP_CARD_PAUSE] : [LOOP_CARD_RUN_AGAIN, LOOP_CARD_PAUSE],
+      sessionId: loop.orchestrationSessionId,
+    }, async answer => {
+      if (answer === LOOP_CARD_PAUSE) {
+        this.setEnabled(loop.id, false);
+        return;
+      }
+      const current = this.options.repo.get(loop.id);
+      if (!current) return;
+      if (answer === LOOP_CARD_NEW_SESSION) {
+        await this.save({ ...inputOf(current), orchestrationSessionId: LOOP_NEW_SESSION });
+      } else if (answer !== LOOP_CARD_RUN_AGAIN) {
+        return;
+      }
+      await this.runNow(loop.id);
+    });
+  }
+
+  /**
+   * One card per loop at a time. A card raised while one waits replaces any other held back, and
+   * is posted once the waiting one is answered and acted on; a run that starts meanwhile drops a
+   * held failure, which it made stale.
+   */
+  private raise(loop: StoredLoop, kind: LoopCardKind, card: LoopCard, act: (answer: string | null) => Promise<void>): void {
+    const { ask, logger } = this.options;
+    if (!ask) return;
+    if (this.cardOpen.has(loop.id)) {
+      this.cardNext.set(loop.id, { kind, card, act });
+      return;
+    }
+    const open = { kind, abort: new AbortController() };
+    this.cardOpen.set(loop.id, open);
+    void ask(card, open.abort.signal)
+      .then(answer => (open.abort.signal.aborted ? undefined : act(answer)))
+      .catch(error => logger?.warn(`[Loops] The card for "${loop.name}" failed: ${error instanceof Error ? error.message : String(error)}`))
+      .finally(() => {
+        if (this.cardOpen.get(loop.id) === open) this.cardOpen.delete(loop.id);
+        const next = this.cardNext.get(loop.id);
+        this.cardNext.delete(loop.id);
+        if (next) this.raise(loop, next.kind, next.card, next.act);
+      });
+  }
+
+  /** A run started, so a failure card, waiting or held back, is stale: its Run again would start an extra run. */
+  private dropStaleFailure(loopId: string): void {
+    if (this.cardNext.get(loopId)?.kind === 'failed') this.cardNext.delete(loopId);
+    const open = this.cardOpen.get(loopId);
+    if (open?.kind === 'failed') open.abort.abort();
+  }
+
+  /** Pauses the loops that send to a Session that was just archived, so no run brings it back. Returns their names. */
+  pauseForArchivedSession(sessionId: string): string[] {
+    const paused = this.options.repo.list().filter(loop => loop.enabled && loop.orchestrationSessionId === sessionId);
+    for (const loop of paused) this.setEnabled(loop.id, false);
+    return paused.map(loop => loop.name);
   }
 
   private countsFrom(loop: StoredLoop): number {
@@ -313,6 +465,12 @@ export class LoopManager {
     }, Math.max(1_000, sleepMs));
     this.timer.unref?.();
   }
+}
+
+/** What saving a stored loop again takes. */
+function inputOf(loop: StoredLoop): LoopInput {
+  const { scheduleFromMs: _scheduleFromMs, createdAtMs: _createdAtMs, ...input } = loop;
+  return input;
 }
 
 function loopNotFound(id: string): PaneError {

@@ -231,8 +231,8 @@ function givenFields(fields: NotifyQuestionFlags & NotifyOtherFlags, keep: (fiel
 /** `--took <id|Q-n> answer|question`: how the reader took the person's reply. It asks nothing new. */
 function buildTookRequest(given: NotifyQuestionFlags, others: NotifyOtherFlags, caller: NotifyCaller): NotifyRequest {
   if (others.took === undefined) throw invalid('tookAs', 'tookAs goes with took: --took <id|Q-n> answer|question.');
-  if (!others.took.trim()) throw invalid('took', "took must be the approval's id or Q-n, such as --took Q-20 answer.");
-  if (others.tookAs === undefined) throw invalid('took', 'took needs answer or question after the id: answer if the reply answers the question, question if it asks one.');
+  if (!others.took.trim()) throw invalid('took', "took must be the approval's id or Q-n, such as --took Q-20 question.");
+  if (others.tookAs === undefined) throw invalid('took', 'took needs answer or question after the id: question if the reply asks something (it reopens the approval), answer to confirm the recorded answer.');
   const tookAs = TOOK_AS.find((candidate) => candidate === others.tookAs);
   if (!tookAs) throw invalid('took', `took takes answer or question after the id; got "${others.tookAs}".`);
   const extra = givenFields({ ...given, ...others }, (field) => field === 'took' || field === 'tookAs' || field === 'status');
@@ -251,11 +251,12 @@ function buildUpdateRequest(update: string, given: NotifyQuestionFlags, others: 
   if (!update.trim()) throw invalid('update', "update must be the approval's id or Q-n, such as --update Q-20.");
   const extra = givenFields({ ...given, ...others }, (field) => UPDATE_FIELDS.has(field) || field === 'update' || field === 'asked' || field === 'whatChanged');
   if (extra.length > 0) throw invalid('update', `update changes only title, context, choices, questions and links, and keeps the approval's ui; remove ${extra.join(', ')}.`);
-  if (!others.asked?.trim()) throw invalid('asked', "asked is required with update: the person's question, as they typed it.");
   if (!others.whatChanged?.trim()) throw invalid('whatChanged', 'whatChanged is required with update: one line per change, such as "Added: it can be undone from Settings".');
   if (given.title !== undefined && !given.title.trim()) throw invalid('title', 'title must be non-empty text; leave it out to keep the current one.');
   if (given.choices !== undefined && given.questions !== undefined) throw invalid('questions', 'questions asks several questions in place of choices; give choices or questions, not both.');
-  const request: Omit<NotifyRequest, 'caller'> = { update, asked: others.asked, whatChanged: others.whatChanged };
+  // asked is the person's typed question; an update of the asker's own (a loop's next run, say) has none.
+  const request: Omit<NotifyRequest, 'caller'> = { update, whatChanged: others.whatChanged };
+  if (others.asked?.trim()) request.asked = others.asked;
   if (given.title !== undefined) request.title = given.title;
   if (given.context !== undefined) request.context = given.context;
   if (given.choices !== undefined) request.choices = parseChoices(parseJson(given.choices), 'choices', 'choices', true);

@@ -140,7 +140,7 @@ export async function waitForPendingWorktreeTrash(): Promise<void> {
  * POSIX never reports a directory busy for being someone's cwd, so the first
  * attempt succeeds and the loop ends.
  */
-async function renameWhileBusy(from: string, to: string, budgetMs: number): Promise<void> {
+export async function renameWhileBusy(from: string, to: string, budgetMs: number): Promise<void> {
   const deadline = Date.now() + budgetMs;
   for (let attempt = 1; ; attempt++) {
     const failure = await fs.rename(from, to).then(() => undefined, (error: NodeJS.ErrnoException) => error);
@@ -226,7 +226,7 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function sweepTrashRoot(trashRoot: string): Promise<void> {
+export async function sweepTrashRoot(trashRoot: string): Promise<void> {
   let entries: string[];
   try {
     entries = await fs.readdir(trashRoot);
@@ -236,7 +236,7 @@ async function sweepTrashRoot(trashRoot: string): Promise<void> {
   await Promise.all(entries.map(entry => deleteTrashEntry(path.join(trashRoot, entry))));
 }
 
-function deleteTrashEntry(trashPath: string): Promise<boolean> {
+export function deleteTrashEntry(trashPath: string): Promise<boolean> {
   const pending = pendingDeletes.get(trashPath);
   if (pending) return pending;
   const deletion = fs.rm(trashPath, { recursive: true, force: true, maxRetries: 3 })

@@ -15,6 +15,7 @@
 //   caps                replies with the client capabilities, session _meta and mode
 //   steps N             N completed steps of mixed kinds, then a reply
 //   turn S              a turn of S seconds that streams a dot every second, then replies "Done."
+//                       A message steered into it (_session/steering) is answered "Heard: <text>" within the turn.
 //   hold S              a tool call that runs silently for S seconds, then replies "Held."
 //   stall               sends one chunk, then goes silent with no tool running until cancelled
 //   run COMMAND         runs COMMAND in a shell as a tool call (the real one, with this tab's
@@ -32,7 +33,7 @@
 //   background          replies, then runs a turn of its own with no prompt open (as Claude does for a
 //                       finished background task), announced as an async task to a client that takes them
 //
-// SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired; SCRIPTED_AGENT_LIST_FAILS=1 refuses session/list.
+// SCRIPTED_AGENT_NO_STEERING=1 does not offer steering; SCRIPTED_AGENT_STEER_FAILS=1 answers each steer `failed` (as codex-acp can); SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired; SCRIPTED_AGENT_LIST_FAILS=1 refuses session/list.
 import { agent, methods, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
 import { Readable, Writable } from 'node:stream';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -75,7 +76,8 @@ function configOptions(session) {
 const app = agent()
   .onRequest(methods.agent.initialize, ({ params }) => {
     clientCapabilities = params.clientCapabilities ?? {};
-    return { protocolVersion: 1, agentCapabilities: { loadSession: process.env.SCRIPTED_AGENT_NO_LOAD !== '1', promptCapabilities: { image: true }, sessionCapabilities: { close: {}, list: {} } } };
+    const steering = process.env.SCRIPTED_AGENT_NO_STEERING === '1' ? {} : { _meta: { steering: { supported: true } } };
+    return { protocolVersion: 1, agentCapabilities: { loadSession: process.env.SCRIPTED_AGENT_NO_LOAD !== '1', promptCapabilities: { image: true }, sessionCapabilities: { close: {}, list: {} } }, ...steering };
   })
   .onRequest(methods.agent.session.new, async ({ params, client }) => {
     if (process.env.SCRIPTED_AGENT_SIGNED_OUT === '1') throw RequestError.authRequired();
@@ -134,8 +136,22 @@ const app = agent()
     if (session) session.ownTurnStopped = true;
     return { stopped: true };
   })
+  // As claude-agent-acp and codex-acp: into a running turn, or promptRequired when none runs and the client opted in.
+  .onRequest('_session/steering', { parse: value => value }, ({ params }) => {
+    const session = sessions.get(params.sessionId);
+    if (!session?.running) return { outcome: 'promptRequired', reason: 'noRunningTurn' };
+    if (process.env.SCRIPTED_AGENT_STEER_FAILS === '1') return { outcome: 'failed' };
+    (session.steered ??= []).push(params.prompt.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'));
+    return { outcome: 'injected' };
+  })
   .onNotification(methods.agent.session.cancel, ({ params }) => { const session = sessions.get(params.sessionId); if (session) session.cancelled = true; })
-  .onRequest(methods.agent.session.prompt, async ({ params, client }) => {
+  .onRequest(methods.agent.session.prompt, async request => {
+    const session = sessions.get(request.params.sessionId);
+    session.running = true;
+    try { return await prompt(request); } finally { session.running = false; }
+  });
+
+async function prompt({ params, client }) {
     const id = params.sessionId;
     const session = sessions.get(id);
     session.cancelled = false;
@@ -187,6 +203,7 @@ const app = agent()
       const seconds = Number(rest[0] ?? 0);
       for (let second = 0; second < seconds && !session.cancelled; second += 1) {
         await say('.');
+        for (const heard of session.steered?.splice(0) ?? []) await say(`Heard: ${heard}`);
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
       if (session.cancelled) return { stopReason: 'cancelled' };
@@ -311,7 +328,7 @@ const app = agent()
     await send({ sessionUpdate: 'tool_call', toolCallId, title: 'Read README.md', kind: 'read', status: 'completed' });
     await say(`You said: ${text}`);
     return { stopReason: 'end_turn' };
-  });
+}
 
 async function commands(client, sessionId) {
   await client.notify(methods.client.session.update, { sessionId, update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'Compact the conversation' }, { name: 'review', description: 'Review changes', input: { hint: 'what to review' } }] } });

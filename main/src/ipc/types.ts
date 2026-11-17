@@ -14,6 +14,11 @@ import type { LoopManager } from '../services/loops/loopManager';
 import type { SessionInbox } from '../services/sessionInbox';
 import type { ExpectedReportTracker } from '../services/expectedReports';
 import type { NotifyService } from '../services/notify/notifyService';
+import type { MachineHealthService } from '../services/machineHealth/machineHealthService';
+import type { CleanupEngine } from '../services/machineHealth/cleanupEngine';
+import type { FinishedPaneMonitor } from '../services/machineHealth/finishedPanes';
+import type { MemoryRelief } from '../services/machineHealth/memoryRelief';
+import type { OtherApps } from '../services/machineHealth/otherApps';
 import type { ApprovalStore } from '../services/approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 
@@ -38,6 +43,15 @@ export interface DaemonHostServices extends CoreServices {
   approvalImport?: JsonStoreImportOutcome;
   expectedReportTracker?: ExpectedReportTracker;
   notifyService?: NotifyService;
+  /** Free disk, memory pressure and per-Pane process cost, sampled every minute. */
+  machineHealth?: MachineHealthService;
+  /** The one path machine health deletes through. */
+  machineCleanup?: CleanupEngine;
+  /** Finished Panes, checked every 6 hours. */
+  finishedPanes?: FinishedPaneMonitor;
+  /** Early pause under memory pressure and leftover processes. */
+  memoryRelief?: MemoryRelief;
+  otherApps?: OtherApps;
 }
 
 export interface AppServices extends DaemonHostServices {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentChatMessage } from '../../../../shared/types/agentChat';
-import { chatTurns, currentActivity, messageTime, planEntryKeys, stoppedText, turnDisplay, workerNotes, type ChatTurn, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import { chatTurns, currentActivity, messageTime, planEntryKeys, steeredMessageId, stoppedText, turnDisplay, workerNotes, type ChatTurn, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 
 const user = (id: string, text: string): AgentChatMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
 const say = (id: string, text: string): AgentChatMessage => ({ id, role: 'assistant', parts: [{ type: 'text', text }] });
@@ -50,6 +50,25 @@ describe('chat turns', () => {
     expect(steps.type === 'steps' && steps.groups[0]).toMatchObject({ kind: 'run', label: '3 commands', detail: 'pnpm test ×2, git fetch' });
     expect(turn.current?.command).toBe('pnpm test');
     expect(foldLabel(turn)).toBe('Running pnpm test');
+  });
+
+  it('keeps a message sent now inside the running turn, which stays one running turn', () => {
+    const messages = [
+      user('user:op-1', 'Start two subagents'),
+      tool('task1', 'think', { status: 'in_progress' }),
+      user(steeredMessageId('op-2'), 'Reply PINEAPPLE'),
+      say('a1', 'PINEAPPLE'),
+    ];
+    const running = chatTurns(messages, { running: true });
+    expect(running).toHaveLength(1);
+    expect(running[0].running).toBe(true);
+    expect(running[0].items.map(item => item.type)).toEqual(['steps', 'user', 'text']);
+    expect(turnDisplay(running[0]).before.map(item => item.id)).toEqual(['steer:op-2', 'a1:0']);
+    const ended = chatTurns([...messages, say('a2', 'all done'), end('t1', 90)], { running: false });
+    expect(ended).toHaveLength(1);
+    expect(foldLabel(ended[0])).toBe('Worked for 1m 30s');
+    // After the turn ended, the same kind of message starts a turn of its own.
+    expect(chatTurns([...messages, end('t1', 90), user(steeredMessageId('op-3'), 'late')], { running: false })).toHaveLength(2);
   });
 
   it('says how a turn stopped when it did not end normally', () => {

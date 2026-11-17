@@ -10,10 +10,12 @@ import { LinksSettings } from './settings/categories/LinksSettings';
 import { AIAgentsSettings } from './settings/categories/AIAgentsSettings';
 import { AgentsSettings } from './settings/categories/AgentsSettings';
 import { WorktreesGitSettings } from './settings/categories/WorktreesGitSettings';
+import { MachineHealthSettings } from './settings/categories/MachineHealthSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { NotifySettings } from './settings/categories/NotifySettings';
 import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings';
 import { IntegrationsSettings } from './settings/categories/IntegrationsSettings';
+import { DevicesSettings } from './settings/categories/DevicesSettings';
 import { SecretsSettings } from './settings/categories/SecretsSettings';
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
 import { PrivacySettings } from './settings/categories/PrivacySettings';
@@ -65,7 +67,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   const [platform, setPlatform] = useState('darwin');
   const [systemMonoFonts, setSystemMonoFonts] = useState<string[]>([]);
   const [remoteSubview, setRemoteSubview] = useState<RemoteAccessSubviewId | undefined>();
-  const [addCodeRequest, setAddCodeRequest] = useState<number>();
+  /** A setting on Remote Access a link asked for; Remote Access opens the tab that holds it. */
+  const [remoteSettingRequest, setRemoteSettingRequest] = useState<{ setting: SettingsSettingId; nonce: number }>();
   /** Usage & Limits opens on this tab; a request for its leaderboard sets it. */
   const [usageTab, setUsageTab] = useState<UsageTab>('usage');
   // Remote Access › Machine details: the machine shown, while open.
@@ -74,7 +77,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   const passwordNonce = useRef(0);
   // A request opens its field once; leaving the page drops it so coming back starts closed.
   const clearRemoteRequests = useCallback(() => {
-    setAddCodeRequest(undefined);
+    setRemoteSettingRequest(undefined);
     setPasswordRequest(undefined);
   }, []);
   const openMachineDetails = useCallback((machineId: string) => {
@@ -120,7 +123,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       onCategoryChange(openRequest.target.category);
       setRemoteSubview(openRequest.target.subview);
       setRemoteMachineId(undefined);
-      if (openRequest.target.setting === 'remote-add-code') setAddCodeRequest(openRequest.nonce);
+      const { category: requestedCategory, setting } = openRequest.target;
+      setRemoteSettingRequest(requestedCategory === 'remote-access' && setting ? { setting, nonce: openRequest.nonce } : undefined);
       setUsageTab(openRequest.target.setting === 'usage-leaderboard' ? 'leaderboard' : 'usage');
       if (openRequest.target.machine) askMachinePassword(openRequest.target.machine);
       // A machine's password field takes focus itself once its row is listed.
@@ -204,6 +208,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <UsageView key={usageTab} initialTab={usageTab} />;
       case 'worktrees-git':
         return <WorktreesGitSettings persistence={persistence} {...sharedDirtyProps} />;
+      case 'machine-health':
+        return <MachineHealthSettings persistence={persistence} />;
       case 'notify':
         return <NotifySettings persistence={persistence} />;
       case 'autopilot':
@@ -222,7 +228,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
             controller={remote}
             onOpenSubview={openRemoteSubview}
             onOpenMachine={openMachineDetails}
-            addCodeRequest={addCodeRequest}
+            settingRequest={remoteSettingRequest}
             passwordRequest={passwordRequest}
           />
         );
@@ -230,6 +236,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <IntegrationsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'secrets':
         return <SecretsSettings />;
+      case 'devices':
+        return <DevicesSettings />;
       case 'shortcuts':
         return <ShortcutsSettings persistence={persistence} platform={platform} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':

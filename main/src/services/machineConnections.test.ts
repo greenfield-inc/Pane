@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigManager } from './configManager';
 import { MachineConnections, type CreateMachineClient, type MachineClient } from './machineConnections';
 import { SharedCredentialSync } from './sharedCredentialSync';
-import { createDefaultRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
+import { readingMachines } from '../daemon/readingMachines';
+import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import type { MachineConnectionsEvent } from '../../../shared/types/machineConnections';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
@@ -17,13 +18,20 @@ function profile(id: string): RemotePaneConnectionProfile {
   return { id, label: id, baseUrl: `http://${id}.tail1234.ts.net:4800/`, token: `token-${id}`, transport: 'http+sse' };
 }
 
+const started: MachineConnections[] = [];
+
+afterEach(async () => {
+  await Promise.all(started.splice(0).map(machines => machines.stop()));
+});
+
 function setup(ids: string[]) {
   const configManager = new ConfigManager();
   const defaults = createDefaultRemoteDaemonConfig();
   vi.spyOn(configManager, 'getConfig').mockReturnValue({
     gitRepoPath: '',
     verbose: false,
-    remoteDaemon: { ...defaults, client: { ...defaults.client, profiles: ids.map(profile) } },
+    // Saved before computers: each entry converts to one computer.
+    remoteDaemon: normalizeRemoteDaemonConfig({ ...defaults, client: { ...defaults.client, computers: undefined, profiles: ids.map(profile) } }),
   });
   const clients = new Map<string, FakeClient>();
   const invokeLocal = vi.fn(async () => ({ success: true }));
@@ -39,6 +47,8 @@ function setup(ids: string[]) {
         retryNow: vi.fn(async () => undefined),
         suspend: vi.fn(),
         resume: vi.fn(),
+        openPortStream: vi.fn(),
+        measureLatency: vi.fn(async () => 4),
       };
       clients.set(saved.id, client);
       return client;
@@ -47,6 +57,7 @@ function setup(ids: string[]) {
   const events: MachineConnectionsEvent[] = [];
   machines.subscribe(event => events.push(event));
   machines.start();
+  started.push(machines);
   const client = (id: string): FakeClient => {
     const found = clients.get(id);
     if (!found) throw new Error(`no client for ${id}`);
@@ -124,6 +135,20 @@ describe('MachineConnections', () => {
       .rejects.toThrow(/Pane can't send "submit-to-agent" to another machine/);
   });
 
+  it('runs a machine health cleanup on the named machine through that machine\'s own engine', async () => {
+    const { machines, client, connect } = setup(['studio-mac', 'build-box']);
+    connect('build-box');
+
+    await machines.run('build-box', { type: 'machine-health', action: 'cleanup', request: { kinds: ['agent-temp'], source: 'ui' } });
+    await machines.run('build-box', { type: 'machine-health', action: 'pause-idle', request: { source: 'card' } });
+
+    expect(client('build-box').invoke.mock.calls).toEqual([
+      ['resource-monitor:machine-cleanup', [{ kinds: ['agent-temp'], source: 'ui' }]],
+      ['resource-monitor:machine-pause-idle', [{ source: 'card' }]],
+    ]);
+    expect(client('studio-mac').invoke).not.toHaveBeenCalled();
+  });
+
   it('sets a Pane\'s pin to the requested state in one host call', async () => {
     const { machines, client, connect } = setup(['build-box']);
     connect('build-box');
@@ -179,12 +204,39 @@ describe('MachineConnections', () => {
     expect(machines.list().find(machine => machine.id === 'build-box')).toMatchObject({ installId: 'c3d4-book', status: 'online', onlineSince: '2026-11-12T20:00:00.000Z' });
   });
 
+  it('retries its offline machines at once when another Pane starts reading this computer, as a computer back from sleep does', () => {
+    const { client, connect } = setup(['devbox', 'mini']);
+    connect('mini');
+    client('devbox').options.onConnectionStateChange?.('reconnecting');
+
+    // A stream left half-open from before the devbox slept is still counted when its new one opens.
+    readingMachines.add('devbox-install');
+    expect(client('devbox').retryNow).toHaveBeenCalledTimes(1);
+    readingMachines.add('devbox-install');
+    readingMachines.remove('devbox-install');
+    readingMachines.remove('devbox-install');
+
+    expect(client('devbox').retryNow).toHaveBeenCalledTimes(2);
+    expect(client('mini').retryNow).not.toHaveBeenCalled();
+  });
+
   it('closes every saved machine\'s stream while this computer sleeps, and reopens them on wake', () => {
     const { machines, client } = setup(['build-box', 'mini']);
     machines.suspend();
     expect([client('build-box').suspend, client('mini').suspend].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
     machines.resume();
     expect([client('build-box').resume, client('mini').resume].map(fn => fn.mock.calls.length)).toEqual([1, 1]);
+  });
+
+  it('measures a machine only once it is online, names the route it measured, and shares a measurement already running', async () => {
+    const { machines, client } = setup(['build-box']);
+    expect(await machines.measureLatency('build-box')).toEqual({ ms: null, routeId: null });
+    expect(client('build-box').measureLatency).not.toHaveBeenCalled();
+    client('build-box').options.onConnectionStateChange?.('connected', undefined, { routeId: 'relay:https://bb.runpane.net' });
+    const [first, second] = await Promise.all([machines.measureLatency('build-box'), machines.measureLatency('build-box')]);
+    expect(first).toEqual({ ms: 4, routeId: 'relay:https://bb.runpane.net' });
+    expect(second).toEqual(first);
+    expect(client('build-box').measureLatency).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a write to an offline machine before sending it', async () => {

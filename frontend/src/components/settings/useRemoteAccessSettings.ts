@@ -329,10 +329,11 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     return 'Using local runtime.';
   });
 
-  const deleteProfile = (profileId: string) => runRemoteAction(async () => {
-    const response = await API.remoteDaemon.deleteConnectionProfile(profileId);
-    if (!response.success) throw new Error(response.error || 'Failed to delete profile');
-    return 'Remote profile deleted.';
+  /** Removes a saved computer, every route with it, from this computer's list. */
+  const forgetComputer = (computerId: string) => runRemoteAction(async () => {
+    const response = await API.remoteDaemon.deleteConnectionProfile(computerId);
+    if (!response.success) throw new Error(response.error || 'Pane could not forget this computer. Nothing changed; try again.');
+    return 'Computer forgotten.';
   });
 
   const saveHostConfig = () => runRemoteAction(async () => {
@@ -460,7 +461,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     importConnection,
     useProfile,
     useLocal,
-    deleteProfile,
+    forgetComputer,
     saveHostConfig,
     createPair,
     saveProfile,

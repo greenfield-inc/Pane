@@ -3523,6 +3523,65 @@ print(json.dumps({"codes": codes, "calls": calls, "stdout": stdout.getvalue().sp
   assert.ok(python.stderr.includes('transcript-unavailable: No claude transcript reply found.'), python.stderr.join('\n'));
 }
 
+async function checkOlderOutputNote() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const output = {
+    ok: true, panelId: 'panel-1', paneId: 'session-1', limit: 2, returnedCount: 1, hasMore: true,
+    outputs: [{ type: 'stdout', data: 'line 9\nline 10', timestamp: '2026-09-27T18:00:00.000Z' }], text: 'line 9\nline 10',
+  };
+  const screen = {
+    ok: true, panelId: 'panel-1', paneId: 'session-1', source: 'scrollback', limit: 2, returnedLineCount: 2, hasMore: true,
+    text: 'line 9\nline 10', state: { initialized: true }, composer: { isPresent: false, hasUndeliveredText: false },
+  };
+  const complete = { ...screen, hasMore: false };
+  const note = '(older output not shown; raise --limit above 2 to see more)';
+  const respond = (channel, request) => channel === 'runpane:panels:output' ? output : request.panelId === 'panel-2' ? complete : screen;
+  const written = [];
+  const stderr = [];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleError = console.error;
+  const originalWrite = process.stdout.write;
+  daemonClient.invokeDaemon = async (channel, args, schema) => decodeBoundary(respond(channel, args[0]), schema);
+  console.error = (line) => stderr.push(String(line));
+  process.stdout.write = (chunk) => { written.push(String(chunk)); return true; };
+  try {
+    await localControl.runPanelsOutput(parseRunpaneArgs(['panels', 'output', '--panel', 'panel-1', '--limit', '2']));
+    await localControl.runPanelsScreen(parseRunpaneArgs(['panels', 'screen', '--panel', 'panel-1', '--limit', '2']));
+    await localControl.runPanelsScreen(parseRunpaneArgs(['panels', 'screen', '--panel', 'panel-2', '--limit', '2']));
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.error = originalConsoleError;
+    process.stdout.write = originalWrite;
+  }
+  assert.strictEqual(written.join(''), 'line 9\nline 10\n'.repeat(3), 'stdout carries only the panel text');
+  assert.deepStrictEqual(stderr, [note, note], 'output and screen note dropped lines; a complete screen adds nothing');
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+output = json.loads(${JSON.stringify(JSON.stringify(output))})
+screen = json.loads(${JSON.stringify(JSON.stringify(screen))})
+complete = json.loads(${JSON.stringify(JSON.stringify(complete))})
+local_control.invoke_daemon = lambda channel, args, **kwargs: output if channel == "runpane:panels:output" else complete if args[0]["panelId"] == "panel-2" else screen
+stdout = io.StringIO()
+stderr = io.StringIO()
+with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+    local_control.run_panels_output(parse_args(["panels", "output", "--panel", "panel-1", "--limit", "2"]))
+    local_control.run_panels_screen(parse_args(["panels", "screen", "--panel", "panel-1", "--limit", "2"]))
+    local_control.run_panels_screen(parse_args(["panels", "screen", "--panel", "panel-2", "--limit", "2"]))
+print(json.dumps({"stdout": stdout.getvalue(), "stderr": stderr.getvalue().splitlines()}))
+`));
+  assert.strictEqual(python.stdout, 'line 9\nline 10\n'.repeat(3));
+  assert.deepStrictEqual(python.stderr, [note, note]);
+}
+
 async function checkPanelsCloseParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -5085,6 +5144,173 @@ local_control.run_sessions_overview(parse_args(["sessions", "overview", "--sessi
   assert.strictEqual(pythonPanelText.replace(/\r\n/g, '\n').trim(), panelText.trim());
 }
 
+async function checkMachineParity() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runMachineHealth, runMachineCleanup } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'machine.js'));
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const GB = 1024 ** 3;
+  const replaced = { kind: 'update-snapshot', tier: 1, modifiedAt: 1, sessionId: null, reason: 'A replaced update snapshot.' };
+  const foreignPath = '/pd/sessions.db.before-repair';
+  const howToFree = `Delete ${foreignPath} once you no longer need it.`;
+  const inventory = {
+    scannedAt: 1_763_200_000_000,
+    durationMs: 40,
+    items: [
+      { ...replaced, id: 'update-snapshot:/pd/updates/old', path: '/pd/updates/old', sizeBytes: 1.5 * GB },
+      { ...replaced, id: 'update-snapshot:/pd/updates/older', path: '/pd/updates/older', sizeBytes: 524_288 },
+      { id: 'agent-temp:/t/a', kind: 'agent-temp', tier: 2, path: '/t/a', sizeBytes: 2048, modifiedAt: 1, sessionId: 's1', reason: 'Agent temp folder of an archived Pane.' },
+      { id: `foreign-pane-data:${foreignPath}`, kind: 'foreign-pane-data', tier: 3, path: foreignPath, sizeBytes: 3 * 1024 * 1024, modifiedAt: 1, sessionId: null, reason: 'A database copy in Pane\'s data folder that Pane did not write.', howToFree },
+    ],
+    panes: [],
+    buckets: { paneWorktrees: 0, dependencies: 0, qaAndScratch: 0, agentTemp: 2048, paneData: 0 },
+  };
+  const snapshot = {
+    sampledAt: 1_763_200_000_000,
+    platform: 'darwin',
+    hostname: 'studio',
+    disk: { level: 'warning', volumes: [{ path: '/pd', roles: ['pane-data', 'worktrees'], totalBytes: 500 * GB, freeBytes: 12.25 * GB, level: 'warning' }] },
+    memory: { level: 'ok', source: 'macos-pressure', detail: 'normal', totalBytes: 32 * GB, freeBytes: 8 * GB, swapUsedBytes: null },
+    cpuPercent: 12,
+    app: { rssMB: 400, cpuPercent: 3 },
+    panes: [
+      { sessionId: 's1', name: 'small', rssMB: 100, cpuPercent: 0, processes: [] },
+      { sessionId: 's2', name: 'big', rssMB: 2048, cpuPercent: 12.25, processes: [{ pid: 7 }] },
+    ],
+    leaks: [{ pid: 7, started: 'x', name: 'node', sessionId: 's2', panelId: null, memoryMB: 1536, growthMB: 512, windowMs: 1_800_000, series: [1024, 1536] }],
+  };
+  const run = {
+    at: 2,
+    source: 'cli',
+    removed: [{ id: 'update-snapshot:/pd/updates/old', kind: 'update-snapshot', path: '/pd/updates/old', sizeBytes: 1.5 * GB }],
+    skipped: [{ id: 'update-snapshot:/pd/updates/older', kind: 'update-snapshot', path: '/pd/updates/older', sizeBytes: 524_288, reason: 'Recently used.' }],
+    freedBytes: 1.5 * GB,
+  };
+  // A newer Pane may send fields this CLI does not know; both CLIs leave them out of cleanup's JSON.
+  const replies = {
+    'resource-monitor:machine-health': snapshot,
+    'resource-monitor:machine-inventory': { ...inventory, items: inventory.items.map(item => ({ ...item, addedLater: true })) },
+    'resource-monitor:machine-cleanup': { ...run, addedLater: true, removed: run.removed.map(entry => ({ ...entry, addedLater: true })) },
+  };
+  const scenarios = [
+    ['machine', 'health'],
+    ['machine', 'health', '--json'],
+    ['machine', 'cleanup', '--kind', 'update-snapshot'],
+    ['machine', 'cleanup', '--kind', 'update-snapshot', '--json'],
+    ['machine', 'cleanup', '--kind', 'update-snapshot', '--yes'],
+    ['machine', 'cleanup', '--kind', 'update-snapshot', '--yes', '--json'],
+    ['machine', 'cleanup', '--kind', 'foreign-pane-data'],
+    ['machine', 'cleanup', '--kind', 'foreign-pane-data', '--yes', '--json'],
+    ['machine', 'cleanup', '--kind', 'bogus', '--yes'],
+  ];
+
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const node = [];
+  try {
+    for (const args of scenarios) {
+      const result = { calls: [], stdout: [], error: null };
+      // Decodes with the caller's schema, as the real client does.
+      daemonClient.invokeDaemon = async (channel, callArgs, schema) => {
+        result.calls.push({ channel, args: callArgs });
+        return decodeBoundary(replies[channel], schema);
+      };
+      console.log = (line) => result.stdout.push(...String(line).split('\n'));
+      const parsed = parseRunpaneArgs(args);
+      try {
+        await (parsed.command === 'machine health' ? runMachineHealth : runMachineCleanup)(parsed);
+      } catch (error) {
+        result.error = { code: error.code, message: error.message, next: error.next };
+      }
+      node.push(result);
+    }
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import sys
+import runpane.machine as machine
+from runpane.cli import parse_args
+
+fixture = json.loads(sys.stdin.read())
+results = []
+for args in fixture["scenarios"]:
+    result = {"calls": [], "stdout": [], "error": None}
+    def fake_invoke(channel, call_args, **kwargs):
+        result["calls"].append({"channel": channel, "args": call_args})
+        return fixture["replies"][channel]
+    machine.invoke_daemon = fake_invoke
+    parsed = parse_args(args)
+    stdout = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout):
+            (machine.run_machine_health if parsed.command == "machine health" else machine.run_machine_cleanup)(parsed)
+    except machine.RunpaneError as error:
+        result["error"] = {"code": error.code, "message": str(error), "next": error.next}
+    result["stdout"] = stdout.getvalue().splitlines()
+    results.append(result)
+print(json.dumps(results))
+`, JSON.stringify({ scenarios, replies })));
+
+  // Text and errors match line for line; JSON output matches once parsed.
+  const comparable = (results) => results.map((result, index) => ({
+    ...result,
+    stdout: scenarios[index].includes('--json') && result.stdout.length > 0 ? JSON.parse(result.stdout.join('\n')) : result.stdout,
+  }));
+  assert.deepStrictEqual(comparable(python), comparable(node));
+  const [health, healthJson, dryRun, dryRunJson, cleanup, cleanupJson, refused, refusedYes, unknown] = comparable(node);
+
+  assert.deepStrictEqual(health.calls, [
+    { channel: 'resource-monitor:machine-health', args: [] },
+    { channel: 'resource-monitor:machine-inventory', args: [{ refresh: false }] },
+  ]);
+  for (const line of [
+    'Machine health for studio, sampled 2025-11-15T09:46:40.000Z',
+    '  /pd (pane-data, worktrees): 12.3 GB free of 500.0 GB, warning',
+    '  big: 2.0 GB, 12.3% CPU, 1 process',
+    '  node (pid 7) in big: 1.5 GB, grew 512.0 MB in 30 min',
+    'Tier 1, Pane removes these by itself (1.5 GB):',
+    `  foreign-pane-data  3.0 MB  ${foreignPath}: A database copy in Pane's data folder that Pane did not write.`,
+    `    Free it: ${howToFree}`,
+  ]) assert.ok(health.stdout.includes(line), `machine health prints: ${line}\n${health.stdout.join('\n')}`);
+  assert.ok(health.stdout.indexOf('  big: 2.0 GB, 12.3% CPU, 1 process') < health.stdout.indexOf('  small: 100.0 MB, 0.0% CPU, 0 processes'));
+  assert.deepStrictEqual(healthJson.stdout, { ok: true, snapshot, inventory: replies['resource-monitor:machine-inventory'] });
+
+  assert.deepStrictEqual(dryRun.calls, [{ channel: 'resource-monitor:machine-inventory', args: [{ refresh: false }] }]);
+  assert.deepStrictEqual(dryRun.stdout, [
+    '2 update-snapshot items, 1.5 GB:',
+    '  1.5 GB  /pd/updates/old: A replaced update snapshot.',
+    '  512.0 KB  /pd/updates/older: A replaced update snapshot.',
+    'Dry run: nothing was deleted. With --yes, Pane checks each item again and deletes those not in use or protected.',
+  ]);
+  assert.deepStrictEqual(dryRunJson.stdout, { ok: true, dryRun: true, kind: 'update-snapshot', items: inventory.items.slice(0, 2), totalBytes: 1.5 * GB + 524_288 });
+
+  assert.deepStrictEqual(cleanup.calls, [{ channel: 'resource-monitor:machine-cleanup', args: [{ kinds: ['update-snapshot'], source: 'cli' }] }]);
+  assert.deepStrictEqual(cleanup.stdout, [
+    'Removed 1 update-snapshot item, freed 1.5 GB.',
+    '  1.5 GB  /pd/updates/old',
+    'Skipped 1 item:',
+    '  512.0 KB  /pd/updates/older: Recently used.',
+  ]);
+  assert.deepStrictEqual(cleanupJson.stdout, { ok: true, dryRun: false, kind: 'update-snapshot', run });
+
+  for (const result of [refused, refusedYes]) {
+    assert.ok(result.calls.every((call) => call.channel !== 'resource-monitor:machine-cleanup'), 'a tier 3 kind never reaches cleanup');
+    assert.deepStrictEqual(result.stdout, []);
+    assert.strictEqual(result.error.code, 'ERR_MACHINE_CLEANUP_NOT_PANES');
+    assert.match(result.error.message, /did not write\. Nothing was deleted\.$/);
+    assert.strictEqual(result.error.next, `Free it with the tool that owns it: ${howToFree}`);
+  }
+  assert.deepStrictEqual(unknown.calls, []);
+  assert.strictEqual(unknown.error.code, 'ERR_RUNPANE_INVALID_ARGUMENT');
+  assert.match(unknown.error.message, /^Unknown --kind "bogus"\. Valid kinds: update-snapshot, .*other-tool-data\./);
+}
+
 function checkHelpOutput() {
   const python = findPython();
   const pythonEnv = {
@@ -6201,7 +6427,7 @@ async function checkNotifyParity() {
         return { result: { approved: true } };
       }, () => runCliOnce(runtime, ['notify', '--resume', 'n-1', '--json'], paneDir, 20_000, outsidePane));
       assert.deepStrictEqual(JSON.parse(resumed.stdout), { approved: true });
-      // --took takes its id and then answer or question; --update needs asked and whatChanged.
+      // --took takes its id and then answer or question; --update needs whatChanged, and asked when it answers a typed question.
       const took = await withFakeDaemon(paneDir, (frame) => {
         frames[runtime].push(frame);
         return { result: { took: 'answer', id: 'n-1' } };
@@ -6312,9 +6538,9 @@ async function checkNotifyParity() {
     ['questions', ['--ui', 'options', '--title', 'x', '--questions', `[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":${tenChoices}}]`], 'questions[1].choices takes 1 to 9 choices; got 10.'],
     ['questions', ['--ui', 'options', '--title', 'x', '--questions', '[{"title":"A","choices":[{"label":"a"}]},{"title":"B","choices":[{"label":"b"},{"label":"b"}]}]'], 'questions[1].choices[1] repeats the label "b"; each choice needs its own label.'],
     ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a","was":"b"}]'], 'choices[0] has "was", the old label of a reworded choice, which only --update takes.'],
-    ['took', ['--took', 'Q-20'], 'took needs answer or question after the id: answer if the reply answers the question, question if it asks one.'],
+    ['took', ['--took', 'Q-20'], 'took needs answer or question after the id: question if the reply asks something (it reopens the approval), answer to confirm the recorded answer.'],
     ['took', ['--took', 'Q-20', 'maybe'], 'took takes answer or question after the id; got "maybe".'],
-    ['took', ['--took', ' ', 'answer'], "took must be the approval's id or Q-n, such as --took Q-20 answer."],
+    ['took', ['--took', ' ', 'answer'], "took must be the approval's id or Q-n, such as --took Q-20 question."],
     ['took', ['--took', 'Q-20', 'answer', '--ui', 'ask', '--title', 'x'], 'took records how a reply was taken, so it takes no other fields; remove ui, title.'],
     ['took', ['--took', 'Q-20', 'answer', '--update', 'Q-20'], 'took records how a reply was taken, so it takes no other fields; remove update.'],
     ['tookAs', ['--took-as', 'answer'], 'tookAs goes with took: --took <id|Q-n> answer|question.'],
@@ -6324,7 +6550,6 @@ async function checkNotifyParity() {
     ['update', ['--update', 'Q-20', '--ui', 'ask', '--asked', 'Why?', '--what-changed', 'x'], "update changes only title, context, choices, questions and links, and keeps the approval's ui; remove ui."],
     ['update', ['--update', 'Q-20', '--detail', 'x', '--relays', 'in-1', '--asked', 'Why?', '--what-changed', 'x'], "update changes only title, context, choices, questions and links, and keeps the approval's ui; remove detail, relays."],
     ['update', ['--update', ' ', '--asked', 'Why?', '--what-changed', 'x'], "update must be the approval's id or Q-n, such as --update Q-20."],
-    ['asked', ['--update', 'Q-20', '--what-changed', 'x'], "asked is required with update: the person's question, as they typed it."],
     ['whatChanged', ['--update', 'Q-20', '--asked', 'Why?'], 'whatChanged is required with update: one line per change, such as "Added: it can be undone from Settings".'],
     ['asked', ['--ui', 'ask', '--title', 'x', '--asked', 'Why?'], 'asked goes with --update <id|Q-n>, which saves a new version of an approval.'],
     ['title', ['--update', 'Q-20', '--asked', 'Why?', '--what-changed', 'x', '--title', ' '], 'title must be non-empty text; leave it out to keep the current one.'],
@@ -6797,6 +7022,7 @@ async function runChecks() {
   await checkChatTabCreateParity();
   await checkDeliveryParity();
   await checkReportParity();
+  await checkOlderOutputNote();
   await checkPanelsCloseParity();
   await checkArchiveClosedAndCallerPanel();
   await checkReportDeliveryLine();
@@ -6812,6 +7038,7 @@ async function runChecks() {
   await checkRepoSettingsParity();
   await checkSecretsParity();
   await checkLockParity();
+  await checkMachineParity();
   await checkLoopsParity();
   await checkOverviewReportsAndLocks();
   await checkSessionRuntime();

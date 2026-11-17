@@ -85,8 +85,8 @@ export interface SidebarInput {
  * Pinned (Sessions, then panes newest pin first), Sessions with their panes
  * nested, Repositories with every pane, and Archived. A collapsed section keeps
  * its header. `query` keeps Sessions and panes whose names contain every word;
- * while searching, empty sections and repositories are left out, and nothing is
- * returned when no Session or pane matches.
+ * while searching, empty sections and repositories are left out (Archived too,
+ * once it is open and loaded), and nothing is returned when nothing matches.
  */
 export function buildSidebar(input: SidebarInput): SidebarItem[] {
   const { expanded } = input;
@@ -162,8 +162,6 @@ export function buildSidebar(input: SidebarInput): SidebarItem[] {
       ...panes.map(pane => ({ type: 'pane' as const, key: pane.id, pane, label: pane.name })),
     ])));
   }
-  if (searching && items.length === 0) return [];
-
   const archivedSessions = allSessions
     .filter(session => session.archived && matches(session.name))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -171,7 +169,10 @@ export function buildSidebar(input: SidebarInput): SidebarItem[] {
     .filter(pane => matches(`${pane.name} ${project.name}`))
     .map(pane => ({ pane, project })));
   const archivedCount = input.archivedProjects ? archivedSessions.length + archivedPanes.length : undefined;
-  items.push(...section('archived', 'Archived', () => {
+  // An open, loaded archive with no match says nothing during a search.
+  const archivedMatches = !(searching && expanded.archived && archivedCount === 0 && !input.archivedError);
+  if (searching && items.length === 0 && !(expanded.archived && archivedMatches)) return [];
+  if (archivedMatches) items.push(...section('archived', 'Archived', () => {
     const errors: SidebarItem[] = input.archivedError ? [{ type: 'note', key: 'archived-error', text: input.archivedError, danger: true, retry: 'archived' }] : [];
     if (!input.archivedProjects && errors.length) return errors;
     if (!input.archivedProjects) return [{ type: 'note', key: 'archived-loading', text: 'Loading archived panes…' }];

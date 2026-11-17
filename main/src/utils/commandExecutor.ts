@@ -5,6 +5,11 @@ import { WSLContext, buildWSLENV, escapeForBash, getWSLExecArgs } from './wslUti
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const nodeExecAsync = promisify(exec);
+/**
+ * Default output a command may print before Node stops it. Large enough that a real command's
+ * output fits (a verbose build, git status on a huge worktree); past it the command fails loudly.
+ */
+export const COMMAND_OUTPUT_LIMIT = 256 * 1024 * 1024;
 const nodeExecFileAsync = promisify(execFile);
 
 type FileExecutor = (file: string, args: readonly string[], options: ExecFileOptions) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
@@ -116,7 +121,7 @@ export class CommandExecutor {
         console.log(`[CommandExecutor] Executing async (WSL): ${file} ${args.join(' ')} in ${cwd}`);
       }
       const timeout = cleanOptions?.timeout ?? 60_000;
-      const maxBuffer = cleanOptions?.maxBuffer || 10 * 1024 * 1024;
+      const maxBuffer = cleanOptions?.maxBuffer || COMMAND_OUTPUT_LIMIT;
       const wslOptions: ExecFileOptions = {
         ...cleanOptions,
         timeout,
@@ -150,7 +155,7 @@ export class CommandExecutor {
     }
 
     const timeout = options?.timeout ?? 60_000;
-    const maxBuffer = options?.maxBuffer || 10 * 1024 * 1024;
+    const maxBuffer = options?.maxBuffer || COMMAND_OUTPUT_LIMIT;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { silent: _silent, ...cleanOptions } = options || {};
 
@@ -203,7 +208,7 @@ export class CommandExecutor {
       ...cleanOptions,
       cwd,
       timeout: cleanOptions.timeout || 60_000,
-      maxBuffer: cleanOptions.maxBuffer || 10 * 1024 * 1024,
+      maxBuffer: cleanOptions.maxBuffer || COMMAND_OUTPUT_LIMIT,
       env: { ...process.env, ...cleanOptions.env, PATH: shellPath },
     };
 

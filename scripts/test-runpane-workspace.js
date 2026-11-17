@@ -41,26 +41,41 @@ const status = {
 const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-workspace-'));
 fs.writeFileSync(path.join(bin, 'tailscale'), `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify(status)}\nEOF\n`, { mode: 0o755 });
 
-// tylers-mac-mini is shared with everyone on the tailnet; tylers-pc is set to "Only me".
+// tylers-mac-mini is shared with everyone on the tailnet; tylers-pc is set to "Only me". Their Panes
+// answer in-process: runpane's https.request to them gets a reply without a network.
 const answers = path.join(bin, 'teammate-machines.js');
 fs.writeFileSync(answers, `
-const realFetch = globalThis.fetch;
-const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-globalThis.fetch = async (url, init) => {
-  const { hostname } = new URL(String(url));
+const https = require('node:https');
+const { PassThrough, Writable } = require('node:stream');
+const realRequest = https.request;
+function answer(hostname, { channel }) {
   if (hostname === 'tylers-pc.tail.invalid') {
-    return reply(403, { ok: false, error: {
+    return [403, { ok: false, error: {
       code: 'ERR_WORKSPACE_IDENTITY_REFUSED',
       message: "This machine accepts only its owner's Tailscale login; parsa@github is refused.",
-    } });
+    } }];
   }
-  if (hostname !== 'tylers-mac-mini.tail.invalid') return realFetch(url, init);
-  const { channel } = JSON.parse(init.body);
   if (channel === 'runpane:machine:info') {
-    return reply(200, { ok: true, result: { hostname: 'tylers-mac-mini', os: 'macOS', isWsl: false, shell: '/bin/zsh', homeDir: '/Users/tyler', wslDistros: [] } });
+    return [200, { ok: true, result: { hostname: 'tylers-mac-mini', os: 'macOS', isWsl: false, shell: '/bin/zsh', homeDir: '/Users/tyler', wslDistros: [] } }];
   }
-  if (channel === 'runpane:sessions:list') return reply(200, { ok: true, result: { ok: true, sessions: [] } });
-  return reply(404, { ok: false, error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'unknown channel' } });
+  if (channel === 'runpane:sessions:list') return [200, { ok: true, result: { ok: true, sessions: [] } }];
+  return [404, { ok: false, error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'unknown channel' } }];
+}
+https.request = (url, options, callback) => {
+  const { hostname } = new URL(String(url));
+  if (!hostname.startsWith('tylers-')) return realRequest(url, options, callback);
+  let body = '';
+  return new Writable({
+    write(chunk, encoding, done) { body += chunk; done(); },
+    final(done) {
+      const [status, payload] = answer(hostname, JSON.parse(body));
+      const response = new PassThrough();
+      response.statusCode = status;
+      callback(response);
+      response.end(JSON.stringify(payload));
+      done();
+    },
+  });
 };
 `);
 
@@ -88,7 +103,7 @@ test('an ambiguous or unknown name lists the tailnet\'s machines, other people\'
   assert.match(runpane('workspace', 'parsa', 'read', '/x').output, /matches several machines: parsas-macbook-pro, parsa-devbox, parsa-devbox-old/);
   const unknown = runpane('workspace', 'nope', 'read', '/x');
   assert.equal(unknown.status, 1);
-  assert.match(unknown.output, /No machine on your tailnet is called "nope"/);
+  assert.match(unknown.output, /No machine on your tailnet or saved in Pane is called "nope"/);
   assert.match(unknown.output, new RegExp([
     'Machines: build-server \\(Linux, online\\), parsa-devbox \\(Windows, online\\), parsa-devbox-old \\(Windows, offline\\), ',
     "tylers-mac-mini \\(macOS, online, owner tbrownio@github\\), tylers-pc \\(Windows, online, owner tbrownio@github\\)\\.",
@@ -179,28 +194,9 @@ test('another machine answers daemon commands, including workspace state; local-
 
 /** Runs runpane while a fake local Pane answers machine commands; returns the output and what Pane was asked. */
 async function runpaneWithLocalPane(input, ...args) {
-  const { getPaneDaemonEndpoint } = require(path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'daemonClient.js'));
-  const endpoint = getPaneDaemonEndpoint(bin);
-  fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
-  fs.rmSync(endpoint.path, { force: true });
-  const requests = [];
-  const server = net.createServer((socket) => {
-    let buffer = '';
-    socket.on('data', (chunk) => {
-      buffer += chunk;
-      for (let index = buffer.indexOf('\n'); index !== -1; index = buffer.indexOf('\n')) {
-        const frame = JSON.parse(buffer.slice(0, index));
-        buffer = buffer.slice(index + 1);
-        if (frame.id !== 1) continue;
-        requests.push({ channel: frame.channel, args: frame.args });
-        const result = frame.channel === 'runpane:machine:read'
-          ? { path: '/resolved', encoding: 'utf8', content: 'from this Pane\n', bytes: 15 }
-          : { path: '/resolved', bytes: 6 };
-        socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result })}\n`);
-      }
-    });
-  });
-  await new Promise((resolve) => server.listen(endpoint.path, resolve));
+  const pane = await fakeLocalPane(bin, (channel) => (channel === 'runpane:machine:read'
+    ? { path: '/resolved', encoding: 'utf8', content: 'from this Pane\n', bytes: 15 }
+    : { path: '/resolved', bytes: 6 }));
   try {
     const child = spawn(process.execPath, [cli, ...args], {
       cwd: bin,
@@ -211,9 +207,9 @@ async function runpaneWithLocalPane(input, ...args) {
     child.stderr.on('data', (chunk) => { output += chunk; });
     child.stdin.end(input);
     const status = await new Promise((resolve) => child.on('close', resolve));
-    return { status, output, requests };
+    return { status, output, requests: pane.requests };
   } finally {
-    await new Promise((resolve) => server.close(resolve));
+    await pane.close();
   }
 }
 
@@ -232,15 +228,47 @@ test('without a machine name, local reads and writes go through this machine\'s 
   assert.deepEqual(write.requests, [{ channel: 'runpane:machine:write', args: [{ path: nested, content: 'hello\n', encoding: 'utf8' }] }]);
 });
 
+/** A fake local Pane on `paneDir`'s socket: `answer(channel, args)` returns a result or `{ error }`. */
+async function fakeLocalPane(paneDir, answer) {
+  const { getPaneDaemonEndpoint } = require(path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const endpoint = getPaneDaemonEndpoint(paneDir);
+  fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
+  fs.rmSync(endpoint.path, { force: true });
+  const requests = [];
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      for (let index = buffer.indexOf('\n'); index !== -1; index = buffer.indexOf('\n')) {
+        const frame = JSON.parse(buffer.slice(0, index));
+        buffer = buffer.slice(index + 1);
+        if (frame.id !== 1) continue;
+        requests.push({ channel: frame.channel, args: frame.args });
+        const outcome = answer(frame.channel, frame.args);
+        const response = outcome && outcome.error
+          ? { type: 'response', id: 1, ok: false, error: outcome.error }
+          : { type: 'response', id: 1, ok: true, result: outcome };
+        socket.end(`${JSON.stringify(response)}\n`);
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(endpoint.path, resolve));
+  return { requests, close: () => new Promise((resolve) => server.close(resolve)) };
+}
+
+const UNKNOWN_CHANNEL = { error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'No Pane daemon command registered for channel "computers:list".' } };
+
 /**
- * A computer linked by QR pairing, with Tailscale signed out: a real TLS server on localhost
- * (trusted through NODE_EXTRA_CA_CERTS, as a CA-issued certificate would be) behind the local
- * Pane's `relay:linked-computers` answer, which carries `fingerprint`.
+ * Another computer with Tailscale signed out on this one: a real TLS server on localhost (trusted
+ * through NODE_EXTRA_CA_CERTS, as a CA-issued certificate would be), a route that accepts TCP and
+ * never answers (Tailscale signed out on the computer), and this machine's Pane listing what
+ * `computers(addresses)` returns. `tailnet` is a `tailscale status` to report, or none.
  */
-async function withLinkedComputer(fingerprintFor, check) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-linked-'));
-  // No tailscale on PATH: this one exits like a signed-out install.
-  fs.writeFileSync(path.join(home, 'tailscale'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+async function withComputer({ computers, tailnet = null }, check) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-computer-'));
+  // Signed out unless `tailnet` is given; this fake comes first, so a real Tailscale app is never asked.
+  const status = tailnet ?? { BackendState: 'NeedsLogin' };
+  fs.writeFileSync(path.join(home, 'tailscale'), `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify(status)}\nEOF\n`, { mode: 0o755 });
   const certificate = (name) => {
     const key = path.join(home, `${name}-key.pem`);
     const cert = path.join(home, `${name}-cert.pem`);
@@ -262,7 +290,9 @@ async function withLinkedComputer(fingerprintFor, check) {
     request.on('end', () => {
       requests.push({ authorization: request.headers.authorization, channel: JSON.parse(body).channel });
       const reply = (status, payload) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(payload)); };
-      if (request.headers.authorization !== 'Bearer link-token') return reply(403, { ok: false, error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID', message: 'bad token' } });
+      if (!['Bearer link-token', 'Bearer tailscale-password'].includes(request.headers.authorization)) {
+        return reply(401, { ok: false, error: { code: 'ERR_REMOTE_DAEMON_AUTH_INVALID', message: 'bad token' } });
+      }
       const { channel } = JSON.parse(body);
       if (channel === 'runpane:machine:info') {
         return reply(200, { ok: true, result: { hostname: 'travel-laptop', os: 'Linux', isWsl: false, shell: '/bin/bash', homeDir: '/home/ana', wslDistros: [] } });
@@ -272,28 +302,22 @@ async function withLinkedComputer(fingerprintFor, check) {
     });
   });
   await new Promise((resolve) => linked.listen(0, '127.0.0.1', resolve));
-  const address = `https://localhost:${linked.address().port}`;
-  const fingerprint = fingerprintFor({ laptop: laptop.fingerprint, other: other.fingerprint });
-  const { getPaneDaemonEndpoint } = require(path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'daemonClient.js'));
-  const endpoint = getPaneDaemonEndpoint(home);
-  fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
-  const server = net.createServer((socket) => {
-    let buffer = '';
-    socket.on('data', (chunk) => {
-      buffer += chunk;
-      for (let index = buffer.indexOf('\n'); index !== -1; index = buffer.indexOf('\n')) {
-        const frame = JSON.parse(buffer.slice(0, index));
-        buffer = buffer.slice(index + 1);
-        if (frame.id !== 1) continue;
-        const result = frame.channel === 'relay:linked-computers'
-          ? [{ id: 'k3x9linked0000aa', name: 'Travel Laptop', address, token: 'link-token', fingerprint }]
-          : { enabled: false, state: 'off', reason: 'Tailscale is signed out' };
-        socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result })}\n`);
-      }
-    });
+  const held = [];
+  const silent = net.createServer((socket) => { held.push(socket); });
+  await new Promise((resolve) => silent.listen(0, '127.0.0.1', resolve));
+  const addresses = {
+    laptop: `https://localhost:${linked.address().port}`,
+    silent: `https://localhost:${silent.address().port}`,
+    keys: { laptop: laptop.fingerprint, other: other.fingerprint },
+  };
+  const listed = computers(addresses);
+  const pane = await fakeLocalPane(home, (channel) => {
+    if (channel === 'computers:list') return listed.computers ?? UNKNOWN_CHANNEL;
+    if (channel === 'relay:linked-computers') return listed.linkedComputers ?? UNKNOWN_CHANNEL;
+    return { enabled: false, state: 'off', reason: 'Tailscale is signed out' };
   });
-  await new Promise((resolve) => server.listen(endpoint.path, resolve));
   const run = (...args) => new Promise((resolve) => {
+    const started = Date.now();
     const child = spawn(process.execPath, [cli, ...args], {
       cwd: home,
       env: {
@@ -304,40 +328,229 @@ async function withLinkedComputer(fingerprintFor, check) {
     let output = '';
     child.stdout.on('data', (chunk) => { output += chunk; });
     child.stderr.on('data', (chunk) => { output += chunk; });
-    child.on('close', (status) => resolve({ status, output }));
+    child.on('close', (status) => resolve({ status, output, ms: Date.now() - started }));
   });
   try {
-    await check(run, requests);
+    await check(run, requests, { held });
   } finally {
-    await new Promise((resolve) => server.close(resolve));
+    for (const socket of held) socket.destroy();
+    await pane.close();
+    await new Promise((resolve) => silent.close(resolve));
     await new Promise((resolve) => linked.close(resolve));
   }
 }
 
-test('a computer linked by QR pairing answers by name with its token when Tailscale is off', posixOnly, async () => {
-  await withLinkedComputer((keys) => keys.laptop, async (run) => {
+const relayRoute = (baseUrl, fingerprint) => ({
+  id: `relay:${baseUrl}`, kind: 'relay', source: 'link', baseUrl, token: 'link-token', relay: { computerId: 'k3x9linked0000aa', fingerprint },
+});
+/** Travel Laptop as Pane saves it (shared/types/remoteComputers.ts), reached only through the relay. */
+const travelLaptop = (routes) => ({ id: 'relay-k3x9linked0000aa', label: 'Travel Laptop', machineId: 'install-7f3a2c', os: 'Linux', routes });
+
+test('a computer saved in Pane answers by name with its route\'s token when Tailscale is off', posixOnly, async () => {
+  await withComputer({ computers: ({ laptop, keys }) => ({ computers: [travelLaptop([relayRoute(laptop, keys.laptop)])] }) }, async (run, requests) => {
     const read = await run('workspace', 'travel-laptop', 'read', '~/notes.md');
     assert.equal(read.output, 'from the laptop\n');
     assert.equal(read.status, 0);
+    assert.deepEqual(requests, [{ authorization: 'Bearer link-token', channel: 'runpane:machine:read' }]);
   });
 });
 
-test('a linked computer whose key is not the one it linked with never receives the token', posixOnly, async () => {
-  await withLinkedComputer((keys) => keys.other, async (run, requests) => {
+test('a computer whose key is not the one it linked with never receives the token', posixOnly, async () => {
+  await withComputer({ computers: ({ laptop, keys }) => ({ computers: [travelLaptop([relayRoute(laptop, keys.other)])] }) }, async (run, requests) => {
     const read = await run('workspace', 'travel-laptop', 'read', '~/notes.md');
     assert.notEqual(read.status, 0, read.output);
-    assert.match(read.output, /key/, read.output);
+    assert.match(read.output, /presented a key it did not link with/, read.output);
     assert.deepEqual(requests, []);
   });
 });
 
-test('workspace list shows a linked computer without its link token', posixOnly, async () => {
-  await withLinkedComputer((keys) => keys.laptop, async (run) => {
+test('a Pane older than computers still lists the computers it linked through the relay', posixOnly, async () => {
+  const linkedComputers = ({ laptop, keys }) => ({
+    linkedComputers: [{ id: 'k3x9linked0000aa', name: 'Travel Laptop', address: laptop, token: 'link-token', fingerprint: keys.laptop }],
+  });
+  await withComputer({ computers: linkedComputers }, async (run) => {
+    const read = await run('workspace', 'travel-laptop', 'read', '~/notes.md');
+    assert.equal(read.output, 'from the laptop\n');
+  });
+});
+
+test('two saved computers with one name are told apart by relay id, and an unknown OS says so', posixOnly, async () => {
+  // Nothing listens on port 1, so neither computer can say which OS it runs.
+  const studio = (relayId) => ({ id: `relay-${relayId}`, label: 'Studio Mac', routes: [{
+    id: `relay:https://localhost:1/${relayId}`, kind: 'relay', source: 'link', baseUrl: `https://localhost:1/${relayId}`, token: 'link-token',
+    relay: { computerId: relayId, fingerprint: 'unused' },
+  }] });
+  await withComputer({ computers: () => ({ computers: [studio('k7xq2m4n8p3r5t6v'), studio('m2r9w4c6t8b1n3q5')] }) }, async (run) => {
+    const read = await run('workspace', 'studio-mac', 'read', '~/notes.md');
+    assert.notEqual(read.status, 0);
+    assert.match(read.output, /matches several machines: studio-mac \(relay-k7xq2m4n8p3r5t6v\), studio-mac \(relay-m2r9w4c6t8b1n3q5\)/);
+    const unknown = await run('workspace', 'nope', 'read', '~/notes.md');
+    assert.match(unknown.output, /studio-mac \(OS unknown, offline\)/);
+  });
+});
+
+test('when a route does not answer, the next one does, within 10 seconds', posixOnly, async () => {
+  const computers = ({ laptop, silent, keys }) => ({
+    computers: [travelLaptop([
+      { id: `tailscale:${silent}`, kind: 'tailscale', source: 'found', baseUrl: silent, token: '', tailnetMachine: 'travel-laptop', tailnetDomain: 'tail.invalid' },
+      relayRoute(laptop, keys.laptop),
+    ])],
+  });
+  await withComputer({ computers }, async (run, requests, { held }) => {
+    const read = await run('workspace', 'travel-laptop', 'read', '~/notes.md');
+    assert.equal(read.output, 'from the laptop\n');
+    assert.ok(read.ms < 10_000, `took ${read.ms} ms`);
+    assert.equal(held.length, 1, 'the Tailscale route was tried first');
+    assert.deepEqual(requests, [{ authorization: 'Bearer link-token', channel: 'runpane:machine:read' }]);
+  });
+});
+
+test('a Tailscale route sends its password', posixOnly, async () => {
+  const computers = ({ laptop }) => ({
+    computers: [travelLaptop([{ id: `tailscale:${laptop}`, kind: 'tailscale', source: 'manual', baseUrl: laptop, token: 'tailscale-password' }])],
+  });
+  await withComputer({ computers }, async (run, requests) => {
+    assert.equal((await run('workspace', 'travel-laptop', 'read', '~/notes.md')).output, 'from the laptop\n');
+    assert.deepEqual(requests, [{ authorization: 'Bearer tailscale-password', channel: 'runpane:machine:read' }]);
+  });
+});
+
+test('a saved computer on the tailnet is one entry, found by its name, relay id, install id, or MagicDNS name', posixOnly, async () => {
+  const tailnet = {
+    BackendState: 'Running',
+    CertDomains: ['parsas-macbook-pro.tail.invalid'],
+    Self: peer('parsas-macbook-pro', 'macOS', true, '100.64.0.1'),
+    // MagicDNS names under .invalid never resolve, as when Tailscale is signed out on the laptop.
+    Peer: { a: peer('travel-laptop', 'linux', true, '100.64.0.2') },
+    User: { [owner]: { LoginName: 'parsa@github' } },
+  };
+  await withComputer({ tailnet, computers: ({ laptop, keys }) => ({ computers: [travelLaptop([relayRoute(laptop, keys.laptop)])] }) }, async (run) => {
+    for (const name of ['travel-laptop', 'k3x9linked0000aa', 'install-7f3a2c', 'travel-laptop.tail.invalid', '100.64.0.2']) {
+      const read = await run('workspace', name, 'read', '~/notes.md');
+      assert.equal(read.output, 'from the laptop\n', name);
+    }
+    const list = await run('workspace', 'list', '--json');
+    assert.equal(list.status, 0, list.output);
+    const machines = JSON.parse(list.output).machines;
+    assert.deepEqual(machines.map((machine) => machine.name), ['travel-laptop']);
+    assert.deepEqual(machines[0].routes.map(({ kind, answered }) => ({ kind, answered })), [
+      { kind: 'tailscale', answered: false },
+      { kind: 'relay', answered: true },
+    ]);
+    assert.equal(machines[0].joined, true);
+  });
+});
+
+test('workspace list shows a saved computer without its route tokens', posixOnly, async () => {
+  await withComputer({ computers: ({ laptop, keys }) => ({ computers: [travelLaptop([relayRoute(laptop, keys.laptop)])] }) }, async (run) => {
     for (const args of [['workspace', 'list', '--json'], ['workspace', 'list']]) {
       const list = await run(...args);
       assert.equal(list.status, 0, list.output);
       assert.match(list.output, /travel-laptop/, list.output);
       assert.doesNotMatch(list.output, /link-token/, list.output);
+    }
+    assert.match((await run('workspace', 'list')).output, /^travel-laptop \(Linux, online\) \[Pane relay\]: joined through Pane relay, shell \/bin\/bash$/m);
+  });
+});
+
+// ---------------------------------------------------------------- runpane link
+
+const LINK = 'https://runpane.net/pair#s=secret&c=k7xq2m4n8p3r5t6v&n=parsa-devbox';
+
+/** This computer's Pane answering a link's preview and redemption. */
+async function withLinkPane(preview, check) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-link-'));
+  const pane = await fakeLocalPane(home, (channel) => (channel === 'relay:link-preview'
+    ? { expiresAt: '2026-11-15T10:00:00.000Z', ...preview }
+    : { linked: ['parsa-devbox', 'build-box'] }));
+  const run = (...args) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [cli, 'link', ...args, '--pane-dir', home], { env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1' } });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.stdin.end();
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+  try {
+    await check(run, pane.requests, home);
+  } finally {
+    await pane.close();
+  }
+}
+
+const joinsGroups = { maker: 'parsa-devbox', makerGroup: ['parsa-devbox', 'build-box'], here: ['studio-mac'], needsConfirm: true };
+
+test('runpane link on a computer with nothing linked asks too, naming who could run agents here', posixOnly, async () => {
+  await withLinkPane({ maker: 'parsa-devbox', makerGroup: ['parsa-devbox', 'build-box'], here: [], needsConfirm: true }, async (run, requests) => {
+    const refused = await run(LINK, '--json');
+    assert.equal(refused.status, 1);
+    assert.match(JSON.parse(refused.stdout).error.message, /lets parsa-devbox's computers \(parsa-devbox and build-box\) run agents on this computer/);
+    requests.length = 0;
+    const linked = await run(LINK, '--yes');
+    assert.equal(linked.status, 0, linked.stderr);
+    assert.equal(linked.stdout, 'Linked with parsa-devbox and build-box. List them with: runpane workspace list\n');
+    assert.deepEqual(requests.map(({ channel }) => channel), ['relay:link-preview', 'relay:redeem-link']);
+    assert.deepEqual(requests[1].args, [{ link: LINK }]);
+  });
+});
+
+test('runpane link joining two groups needs --yes without a terminal, and spends nothing until then', posixOnly, async () => {
+  await withLinkPane(joinsGroups, async (run, requests) => {
+    const refused = await run(LINK, '--json');
+    assert.equal(refused.status, 1);
+    const { error } = JSON.parse(refused.stdout);
+    assert.equal(error.code, 'ERR_LINK_NEEDS_CONFIRM');
+    assert.match(error.message, /joins your computers \(studio-mac\) with parsa-devbox's \(parsa-devbox and build-box\)/);
+    assert.match(error.next, /--yes/);
+    assert.deepEqual(requests.map(({ channel }) => channel), ['relay:link-preview']);
+
+    const confirmed = await run(LINK, '--yes', '--json');
+    assert.equal(confirmed.status, 0, confirmed.stderr);
+    assert.deepEqual(JSON.parse(confirmed.stdout), { ok: true, maker: 'parsa-devbox', linked: ['parsa-devbox', 'build-box'] });
+    assert.deepEqual(requests.slice(1).map(({ channel }) => channel), ['relay:link-preview', 'relay:redeem-link']);
+  });
+});
+
+test('runpane link asks on a terminal, naming both sides, and links only on yes', posixOnly, async () => {
+  const { PassThrough } = require('node:stream');
+  const { runLink } = require(path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'pairingLink.js'));
+  const { parseRunpaneArgs } = require(path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'commands.js'));
+  await withLinkPane(joinsGroups, async (run, requests, home) => {
+    const terminal = (answer) => {
+      const input = Object.assign(new PassThrough(), { isTTY: true });
+      const output = Object.assign(new PassThrough(), { isTTY: true });
+      let shown = '';
+      output.on('data', (chunk) => { shown += chunk; });
+      input.end(`${answer}\n`);
+      return { input, output, shown: () => shown };
+    };
+    const no = terminal('n');
+    await assert.rejects(runLink(parseRunpaneArgs(['link', LINK, '--pane-dir', home]), no), { code: 'ERR_LINK_CANCELLED' });
+    assert.match(no.shown(), /joins your computers \(studio-mac\) with parsa-devbox's \(parsa-devbox and build-box\)[^]*Link with parsa-devbox\? \[y\/N\]/);
+    assert.deepEqual(requests.map(({ channel }) => channel), ['relay:link-preview']);
+
+    const yes = terminal('y');
+    assert.equal(await runLink(parseRunpaneArgs(['link', LINK, '--pane-dir', home]), yes), 0);
+    assert.match(yes.shown(), /Linked with parsa-devbox and build-box\./);
+    assert.deepEqual(requests.slice(1).map(({ channel }) => channel), ['relay:link-preview', 'relay:redeem-link']);
+  });
+});
+
+test('the Python runpane link refuses and links the same way', posixOnly, async () => {
+  const runPython = (home, ...args) => new Promise((resolve) => {
+    const child = spawn(process.env.PYTHON || 'python3', ['-m', 'runpane', 'link', LINK, ...args, '--pane-dir', home], {
+      env: { ...process.env, PYTHONPATH: path.join(__dirname, '..', 'packages', 'runpane-py', 'src'), PYTHONDONTWRITEBYTECODE: '1', RUNPANE_TELEMETRY_DISABLED: '1' },
+    });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stdin.end();
+    child.on('close', (status) => resolve({ status, stdout }));
+  });
+  await withLinkPane(joinsGroups, async (run, requests, home) => {
+    for (const args of [['--json'], ['--yes', '--json']]) {
+      const [npm, python] = [await run(LINK, ...args), await runPython(home, ...args)];
+      assert.deepEqual({ status: python.status, output: JSON.parse(python.stdout) }, { status: npm.status, output: JSON.parse(npm.stdout) }, args.join(' '));
     }
   });
 });
