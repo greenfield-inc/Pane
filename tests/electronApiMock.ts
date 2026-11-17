@@ -23,6 +23,8 @@ import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneS
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
 import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
+import type { AutopilotDocument } from '../shared/types/autopilot';
+import type { TodoAction, TodoAttachment, TodoDetail, TodosSnapshot } from '../shared/types/todos';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -31,6 +33,34 @@ type AnalyticsMainEvent = {
   eventName: string;
   properties?: JsonObject;
 };
+
+/** The to-dos `electronAPI.todos` serves: the list, each to-do's page by number, and the files its tabs read. */
+export interface TodosMockOptions {
+  snapshot: TodosSnapshot;
+  details: Record<number, TodoDetail>;
+  /** autopilot.readDoc answers by path; any other path reads as the text `Contents of <path>`. */
+  docs?: Record<string, AutopilotDocument>;
+}
+
+/** One `todos:act` the page sent, as getInvokeCalls('todos:act') returns it. */
+export interface TodoActCall {
+  channel: 'todos:act';
+  args: [TodoAction];
+}
+
+/** The to-do hooks on `window.__paneTestElectronMock`, for a spec's `declare global`. */
+export interface TodosMockHooks {
+  getInvokeCalls(channel: 'todos:act'): TodoActCall[];
+  /** While on, a reply (a comment with `replyTo`) fails as main refuses a bad target; returns the words the page shows. */
+  setTodoReplyRefusal(on: boolean): string;
+}
+
+/** What the mock keeps in sessionStorage, so a reload keeps what attach and detach changed. */
+interface TodosMockState {
+  snapshot: TodosSnapshot;
+  details: Record<number, TodoDetail>;
+  nextAttachmentId: number;
+}
 
 export type ElectronApiMockOptions = {
   analyticsConsentShown?: boolean;
@@ -157,6 +187,14 @@ export type ElectronApiMockOptions = {
   hostClients?: RemoteDaemonClientRecord[];
   /** Saved computers with their routes, listed before the ones saved during the test. */
   computers?: RemoteComputer[];
+  /**
+   * Serves window.electronAPI.todos from these to-dos; absent, the API is too. Every todos:act is recorded
+   * (getInvokeCalls('todos:act')), attach and detach change the fixture, and todos:changed follows each act.
+   * Without autopilotSnapshot it also serves a quiet Autopilot API whose readDoc answers from `docs`.
+   */
+  todos?: TodosMockOptions;
+  /** What dialog.openFile picks; absent: nothing (null). */
+  openFilePath?: string;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -681,6 +719,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onRestartToUpdateState') {
           return (callback: MockEventCallback) => subscribe('updater:restart-state', callback);
         }
+        if (prop === 'onTodosChanged') {
+          return (callback: MockEventCallback) => subscribe('todos:changed', callback);
+        }
         return () => unsubscribe;
       },
     });
@@ -991,6 +1032,57 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return Promise.resolve({ success: true, data: true });
       },
     };
+    // window.electronAPI.todos (D-409): the fixture's to-dos. attach and detach change them, kept in sessionStorage so a
+    // reload keeps them; every act is recorded and todos:changed follows it, as main announces a change.
+    const todosStorageKey = 'pane-test-electron-mock-todos';
+    const todoReplyRefusal = "That card's tab isn't in this to-do's Session, so the reply wasn't sent. Reply on a card from this to-do.";
+    let todoRepliesRefused = false;
+    const loadTodosState = (todos: TodosMockOptions): TodosMockState => {
+      const stored = window.sessionStorage.getItem(todosStorageKey);
+      if (stored) return JSON.parse(stored);
+      return { snapshot: clone(todos.snapshot), details: clone(todos.details), nextAttachmentId: 900 };
+    };
+    const todosState = mockOptions.todos ? loadTodosState(mockOptions.todos) : null;
+    const saveTodosState = (state: TodosMockState) => window.sessionStorage.setItem(todosStorageKey, JSON.stringify(state));
+    const applyTodoAction = (state: TodosMockState, detail: TodoDetail, action: TodoAction) => {
+      const own = detail.attachments[0];
+      if (action.kind === 'attach') {
+        const attachment: TodoAttachment = {
+          id: state.nextAttachmentId++, todoNumber: action.number, target: action.target, addedBy: 'you', source: 'attached', addedAt: Date.now(),
+          kind: action.attachmentKind ?? (/^https?:/.test(action.target) ? 'link' : 'doc'),
+          label: action.label ?? action.target.split('/').pop() ?? action.target,
+        };
+        if (own) own.attachments.push(attachment);
+        else detail.attachments.push({ attachments: [attachment] });
+      }
+      if (action.kind === 'detach' && own) own.attachments = own.attachments.filter((attachment) => attachment.id !== action.attachmentId);
+    };
+    const todosApi = todosState ? {
+      snapshot: () => success(clone(todosState.snapshot)),
+      detail: (number: number) => success(clone(todosState.details[number] ?? null)),
+      create: () => Promise.resolve({ success: false, error: 'This mock does not create to-dos.' }),
+      act: (action: TodoAction) => {
+        trackCall('todos:act', [clone(action)]);
+        if (todoRepliesRefused && action.kind === 'comment' && action.replyTo !== undefined) {
+          return Promise.resolve({ success: false, error: `Error invoking remote method 'todos:act': Error [ERR_TODO_REPLY_TARGET]: ${todoReplyRefusal}` });
+        }
+        const detail = todosState.details[action.number];
+        if (!detail) return Promise.resolve({ success: false, error: `No to-do T-${action.number} in this mock.` });
+        applyTodoAction(todosState, detail, action);
+        saveTodosState(todosState);
+        window.setTimeout(() => emit('todos:changed'), 10);
+        return success({ todo: clone(detail.todo) });
+      },
+    } : undefined;
+    const readTodoDoc = (path: string): Promise<AutopilotDocument> =>
+      Promise.resolve(clone(mockOptions.todos?.docs?.[path] ?? { kind: 'text', path, text: `Contents of ${path}` }));
+    // A to-do's files read through Autopilot's readDoc; the rest of Autopilot never answers, so it stays quiet.
+    const quietAutopilotApi = () => new Proxy({ readDoc: readTodoDoc, onChanged: () => unsubscribe }, {
+      get(target, prop: string | symbol) {
+        if (prop in target) return Object.getOwnPropertyDescriptor(target, prop)?.value;
+        return () => new Promise(() => undefined);
+      },
+    });
     const autopilotSnapshot = mockOptions.autopilotSnapshot;
     // Settings › Autopilot (D-196): the file's text, saved as main would (trimmed; applied at once while it runs).
     let autopilotInstructions = '';
@@ -1011,7 +1103,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       snapshot: () => Promise.resolve(clone(autopilotSnapshot)),
       opened: () => Promise.resolve(clone(autopilotSnapshot)),
       onChanged: () => unsubscribe,
-    } : undefined;
+      readDoc: readTodoDoc,
+    } : todosApi ? quietAutopilotApi() : undefined;
     // window.electronAPI.chatTab, served when a fixture panel is a chat tab: an idle Claude chat with no messages.
     const chatTabApi = mockPanels.some((panel) => panel.type === 'chat') ? (() => {
       const messagesOf = (panelId: string) => (mockOptions.chatMessages?.[panelId] ?? [])
@@ -1040,6 +1133,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     })() : undefined;
     const electronAPI = {
       autopilot: autopilotApi,
+      todos: todosApi,
       chatTab: chatTabApi,
       notify: notifyApi,
       paneSecrets: paneSecretsApi,
@@ -1325,6 +1419,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       dialog: namespace({
         openDirectory: () => success('/tmp/pane-worktrees'),
+        openFile: () => success(mockOptions.openFilePath ?? null),
       }),
       onboarding: namespace({
         detectEnvironment: () => success({}),
@@ -2026,6 +2121,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getInvokeCalls(channel: string) {
           return clone(invokeCalls.get(channel) ?? []);
+        },
+        setTodoReplyRefusal(on: boolean) {
+          todoRepliesRefused = on;
+          return todoReplyRefusal;
         },
         getConsoleLogCalls() {
           return clone((invokeCalls.get('console:log') ?? []).map((call) => call.args[0]));
