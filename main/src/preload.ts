@@ -1,5 +1,6 @@
 import type { DeviceInput } from '../../shared/types/devices';
 import type { LoopInput } from '../../shared/types/loop';
+import type { TodoAction, TodoCreateInput } from '../../shared/types/todos';
 import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
@@ -615,6 +616,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runNow: (id: string): Promise<IPCResponse> => invokeIpc('loops:run-now', id),
     preview: (cron: string): Promise<IPCResponse> => invokeIpc('loops:preview', cron),
   },
+  // To-dos (D-409): every to-do on this machine
+  todos: {
+    snapshot: (): Promise<IPCResponse> => invokeIpc('todos:snapshot'),
+    detail: (number: number): Promise<IPCResponse> => invokeIpc('todos:detail', number),
+    create: (input: TodoCreateInput): Promise<IPCResponse> => invokeIpc('todos:create', input),
+    act: (action: TodoAction): Promise<IPCResponse> => invokeIpc('todos:act', action),
+  },
   // Mission Control — live overview of every agent pane across all sessions
   missionControl: {
     listAgents: (options?: { includeArchived?: boolean }): Promise<IPCResponse> => invokeIpc('mission-control:list-agents', options),
@@ -1040,6 +1048,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = () => callback();
       ipcRenderer.on('loops:changed', wrappedCallback);
       return () => ipcRenderer.removeListener('loops:changed', wrappedCallback);
+    },
+    onTodosChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('todos:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('todos:changed', wrappedCallback);
     },
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);

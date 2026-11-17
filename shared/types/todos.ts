@@ -211,6 +211,8 @@ export interface TodosSnapshot {
   rows: TodoListRow[];
   gate: LoadGateSnapshot;
   machine: string;
+  /** Sessions that belong to a top-level to-do: kept out of the sidebar, All machines and Mod+1–9. */
+  ownSessionIds: string[];
 }
 
 /** Inputs the person sends from the New to-do dialog. */
@@ -227,3 +229,164 @@ export interface TodoCreateInput {
 }
 
 export const TODO_AGENT_REPLY_MAX = 2000;
+
+// ── The person's actions from the To-dos screens (app channel `todos:act`) ────
+
+export type TodoAction =
+  | { kind: 'start'; number: number; anyway?: boolean }
+  | { kind: 'stop'; number: number }
+  | { kind: 'resume'; number: number }
+  | { kind: 'done'; number: number }
+  | { kind: 'drop'; number: number; reason?: string }
+  | { kind: 'archive'; number: number }
+  | { kind: 'reopen'; number: number }
+  | { kind: 'never-pause'; number: number; on: boolean }
+  | { kind: 'comment'; number: number; body: string; toOrchestrator?: boolean }
+  | { kind: 'attach'; number: number; target: string; label?: string; attachmentKind?: TodoAttachmentKind }
+  | { kind: 'detach'; number: number; attachmentId: number }
+  | { kind: 'check'; number: number; index: number; met: boolean }
+  | { kind: 'rename'; number: number; title: string };
+
+/** What `todos:act` resolves with: the to-do after the action, and a line for archive's result. */
+export interface TodoActionResult {
+  todo: TodoRecord;
+  message?: string;
+}
+
+// ── `runpane todos …` over the daemon (channels `runpane:todos:<verb>`) ──────
+
+/** Every runpane todos request may name the calling tab, as `panes create` does. */
+export interface RunpaneTodoCaller {
+  callerPanelId?: string;
+}
+
+export interface RunpaneTodoCreateRequest extends RunpaneTodoCaller {
+  title: string;
+  summary?: string;
+  doneWhen?: string[];
+  /** "T-12": makes a sub-to-do in T-12's Session. */
+  parent?: string;
+  /** A repo: its name or id from runpane repos list. */
+  project?: string;
+  agent?: string;
+  /** Files or URLs to attach at once. */
+  attach?: string[];
+  /** Default true: start it now (its own Session and orchestrator), through the load gate. */
+  start?: boolean;
+}
+
+export interface RunpaneTodoRefRequest extends RunpaneTodoCaller {
+  /** "T-12" or "12". */
+  todo: string;
+}
+
+export interface RunpaneTodoUpdateRequest extends RunpaneTodoRefRequest {
+  title?: string;
+  summary?: string;
+  /** Replaces the done-when list; unchanged lines keep their checks. */
+  doneWhen?: string[];
+  /** 1-based done-when lines to mark met or unmet. */
+  check?: number[];
+  uncheck?: number[];
+}
+
+export interface RunpaneTodoAttachRequest extends RunpaneTodoRefRequest {
+  target: string;
+  kind?: string;
+  label?: string;
+  note?: string;
+}
+
+export interface RunpaneTodoDetachRequest extends RunpaneTodoRefRequest {
+  attachment: number;
+}
+
+export interface RunpaneTodoListRequest {
+  /** Include done and dropped to-dos from the last 7 days. */
+  all?: boolean;
+}
+
+export interface RunpaneTodoAssignRequest extends RunpaneTodoRefRequest {
+  /** A tab id; absent hands it back to the Session's orchestrator. */
+  panel?: string;
+}
+
+export interface RunpaneTodoAskRequest extends RunpaneTodoRefRequest {
+  question: string;
+}
+
+export interface RunpaneTodoCommentRequest extends RunpaneTodoRefRequest {
+  body: string;
+  /** From the requester: it can't settle the question, so Pane asks the person. */
+  escalate?: boolean;
+}
+
+export interface RunpaneTodoReviewRequest extends RunpaneTodoRefRequest {
+  summary?: string;
+  /** Why there is nothing to attach; required when the to-do has no attachments. */
+  noAttachments?: string;
+}
+
+export interface RunpaneTodoDoneRequest extends RunpaneTodoRefRequest {
+  /** The person's own words telling the agent to close it. */
+  personSaid?: string;
+}
+
+export interface RunpaneTodoDropRequest extends RunpaneTodoRefRequest {
+  reason?: string;
+}
+
+/** One to-do in `--json`: field order is the byte order npm and Python both print. */
+export interface RunpaneTodo {
+  ref: string;
+  number: number;
+  title: string;
+  state: TodoState;
+  status: TodoShownStatus;
+  reason: string;
+  parent: string | null;
+  sessionId: string | null;
+  requester: string;
+  assignee: string | null;
+  summary: string;
+  doneWhen: TodoDoneWhenItem[];
+  attachmentCount: number;
+  updatedAt: string;
+}
+
+export interface RunpaneTodoAttachment {
+  id: number;
+  kind: string;
+  label: string;
+  target: string;
+  machine: string | null;
+  note: string | null;
+  addedBy: string;
+  source: TodoAttachmentSource;
+  /** "T-12" when inherited from a parent or a sub-to-do; null for its own. */
+  from: string | null;
+  addedAt: string;
+}
+
+export interface RunpaneTodoActivity {
+  id: number;
+  kind: 'message' | 'event';
+  author: string;
+  body: string;
+  at: string;
+}
+
+export interface RunpaneTodoResult { ok: true; todo: RunpaneTodo }
+export interface RunpaneTodoListResult { ok: true; todos: RunpaneTodo[] }
+export interface RunpaneTodoShowResult { ok: true; todo: RunpaneTodo; attachments: RunpaneTodoAttachment[]; subTodos: RunpaneTodo[]; activity: RunpaneTodoActivity[] }
+export interface RunpaneTodoAttachResult { ok: true; todo: string; attachment: RunpaneTodoAttachment }
+export interface RunpaneTodoDetachResult { ok: true; todo: string; detached: number }
+export interface RunpaneTodoAskResult { ok: true; todo: string; routedTo: 'requester' | 'person'; approvalId: string | null }
+export interface RunpaneTodoCommentResult { ok: true; todo: string; activityId: number }
+export interface RunpaneTodoReviewResult { ok: true; todo: RunpaneTodo; approvalId: string }
+export interface RunpaneTodoArchiveResult { ok: true; todo: string; archived: string[]; kept: Array<{ name: string; reason: string }>; sessionArchived: boolean }
+export interface RunpaneTodoStartResult { ok: true; todo: RunpaneTodo; queued: boolean }
+
+/** The `runpane todos` verbs; each is the daemon channel `runpane:todos:<verb>`. */
+export const RUNPANE_TODO_VERBS = ['create', 'update', 'attach', 'detach', 'show', 'list', 'assign', 'ask', 'comment', 'review', 'done', 'drop', 'archive', 'start', 'stop'] as const;
+export type RunpaneTodoVerb = typeof RUNPANE_TODO_VERBS[number];

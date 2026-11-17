@@ -81,6 +81,7 @@ import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPort
 import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../../shared/types/relay';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
+import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoRecord, TodosSnapshot } from '../../../shared/types/todos';
 import type {
   ProjectDashboardData,
   ProjectDashboardSessionUpdateEvent,
@@ -323,6 +324,13 @@ interface ElectronAPI {
     setEnabled: (id: string, enabled: boolean) => Promise<IPCResponse<Loop>>;
     runNow: (id: string) => Promise<IPCResponse<Loop>>;
     preview: (cron: string) => Promise<IPCResponse<LoopSchedulePreview>>;
+  };
+  // To-dos (D-409)
+  todos: {
+    snapshot: () => Promise<IPCResponse<TodosSnapshot>>;
+    detail: (number: number) => Promise<IPCResponse<TodoDetail>>;
+    create: (input: TodoCreateInput) => Promise<IPCResponse<TodoRecord>>;
+    act: (action: TodoAction) => Promise<IPCResponse<TodoActionResult>>;
   };
   // Mission Control — every agent pane across all sessions
   missionControl: {
@@ -598,6 +606,7 @@ interface ElectronAPI {
     onSessionUpdated: (callback: (session: Session) => void) => () => void;
     /** Loops or their runs changed; read them again with `loops.list`. */
     onLoopsChanged: (callback: () => void) => () => void;
+    onTodosChanged: (callback: () => void) => () => void;
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;
