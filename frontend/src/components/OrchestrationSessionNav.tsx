@@ -7,6 +7,7 @@ import { openApprovalsFromCount } from './approvals/useSessionApprovals';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useLoopsStore } from '../stores/loopsStore';
+import { useTodoSessionIds } from '../stores/todosStore';
 import { sessionWaitingCount, useNotifyStore } from '../stores/notifyStore';
 import { LoopLabel, LoopMark } from './loops/LoopMark';
 import {
@@ -122,15 +123,17 @@ export function OrchestrationSessionNav({
   const loopsBySessionTarget = useLoopsStore(state => state.loopsBySessionTarget);
   const notifySnapshot = useNotifyStore(state => state.snapshot);
   const openSessionId = useNavigationStore(state => state.activeView === 'pane-chat') ? selectedSessionIdForList : undefined;
-  // A loop's Session lives under Loops; it joins the list only while a card from it waits on you, or while it is open.
+  const todoSessionIds = useTodoSessionIds();
+  // A loop's Session lives under Loops, and a to-do's own Session under To-dos (D-409); each joins the list
+  // only while a card from it waits on you, or while it is open.
   const activeSessions = useMemo(
     () => sessions.filter(session => !isArchivedOrchestrationSession(session)
-      && (!loopsBySessionTarget.has(session.id) || session.id === openSessionId || sessionWaitingCount(notifySnapshot, session.id) > 0)),
-    [sessions, loopsBySessionTarget, notifySnapshot, openSessionId],
+      && ((!loopsBySessionTarget.has(session.id) && !todoSessionIds.has(session.id)) || session.id === openSessionId || sessionWaitingCount(notifySnapshot, session.id) > 0)),
+    [sessions, loopsBySessionTarget, todoSessionIds, notifySnapshot, openSessionId],
   );
   const pinnedSessions = useMemo(
-    () => activeSessions.filter(session => session.isPinned === true && !loopsBySessionTarget.has(session.id)),
-    [activeSessions, loopsBySessionTarget],
+    () => activeSessions.filter(session => session.isPinned === true && !loopsBySessionTarget.has(session.id) && !todoSessionIds.has(session.id)),
+    [activeSessions, loopsBySessionTarget, todoSessionIds],
   );
   const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
   const availability = useOrchestrationSessionStore(state => state.availability);

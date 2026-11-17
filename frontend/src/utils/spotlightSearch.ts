@@ -5,6 +5,7 @@
  */
 import { matchSorterWithRankInfo, rankings, type KeyOption, type RankedItem } from 'match-sorter';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import { todoRef } from '../../../shared/types/todos';
 import type { EffectiveHotkeyDefinition } from '../stores/hotkeyStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
@@ -34,7 +35,7 @@ interface SearchItemBase {
 
 export type SearchItem =
   | SearchItemBase & { kind: 'pane'; pane: Session; current: boolean; viewedAt: number; prUrl?: string }
-  | SearchItemBase & { kind: 'session'; session: OrchestrationSessionRecord }
+  | SearchItemBase & { kind: 'session'; session: OrchestrationSessionRecord; todoNumber?: number }
   | SearchItemBase & { kind: 'project'; project: Project }
   | SearchItemBase & { kind: 'command'; command: EffectiveHotkeyDefinition; disabledReason: string | null };
 
@@ -46,6 +47,13 @@ export interface SearchSources {
   commands: EffectiveHotkeyDefinition[];
   activePaneId: string | null;
   selectedSessionId?: string;
+  /** To-dos' own Sessions by Session id (D-409): found and shown as "To-do T-n", and open the to-do's page. */
+  todoSessions?: ReadonlyMap<string, TodoSearchRef>;
+}
+
+export interface TodoSearchRef {
+  number: number;
+  title: string;
 }
 
 export interface SearchSection {
@@ -117,6 +125,20 @@ export function buildSearchItems(sources: SearchSources): SearchItem[] {
   }
   for (const session of sources.sessions) {
     if (session.archived) continue;
+    const todo = sources.todoSessions?.get(session.id);
+    if (todo) {
+      items.push({
+        kind: 'session',
+        key: `session:${session.id}`,
+        title: `To-do ${todoRef(todo.number)} · ${todo.title}`,
+        detail: plural(session.associations.length, 'Pane'),
+        recency: time(session.updatedAt),
+        terms: [todoRef(todo.number), `T${todo.number}`, session.name],
+        session,
+        todoNumber: todo.number,
+      });
+      continue;
+    }
     const current = session.id === sources.selectedSessionId;
     items.push({
       kind: 'session',

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { machineViews, useAllMachinesStore } from '../stores/allMachinesStore';
 import { buildAllMachinesTree } from '../utils/allMachinesTree';
+import { useMachineTodoSessionKeys } from '../stores/todosStore';
 
 /** Every machine's views, the tree drawn from them in this computer's arrangement, and which machine the app is on. */
 export function useAllMachinesTree() {
@@ -11,9 +12,11 @@ export function useAllMachinesTree() {
   const clock = useAllMachinesStore((state) => state.clock);
   const sessionOrder = useAllMachinesStore((state) => state.layout.sessions);
   const paneOrder = useAllMachinesStore((state) => state.layout.panes);
+  // A to-do's own Session lives under To-dos (D-409).
+  const todoSessions = useMachineTodoSessionKeys();
   return useMemo(() => {
     const views = machineViews({ machines, snapshots, entries });
-    return { views, tree: buildAllMachinesTree(views, { sessions: sessionOrder, panes: paneOrder }), activeMachineId: entries.find((entry) => entry.active)?.id ?? null };
+    return { views, tree: buildAllMachinesTree(views, { sessions: sessionOrder, panes: paneOrder }, todoSessions), activeMachineId: entries.find((entry) => entry.active)?.id ?? null };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock only marks time passing
-  }, [machines, snapshots, entries, clock, sessionOrder, paneOrder]);
+  }, [machines, snapshots, entries, clock, sessionOrder, paneOrder, todoSessions]);
 }

@@ -1,8 +1,9 @@
-import type { NotifyConnected, NotifyItem, NotifySession } from '../../../../shared/types/notify';
+import type { NotifyConnected, NotifyItem, NotifySession, NotifySource } from '../../../../shared/types/notify';
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
 import { decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { countsAsWaiting } from '../../stores/notifyStore';
 import { approvalHolder, type ApprovalHolder } from '../../../../shared/approvalStatus';
+import { todoPlace } from './approvalCard';
 
 export type ApprovalsTab = 'waiting' | 'answered';
 
@@ -130,12 +131,14 @@ export function splitWaiting(items: readonly NotifyItem[]): WaitingSplit {
   };
 }
 
-/** A new group for `item`'s Session on its machine, Autopilot's, or the one for items in no Session. */
+/** A new group for `item`'s Session (or to-do) on its machine, Autopilot's, or the one for items in no Session. */
 function sessionGroup(item: NotifyItem): ApprovalGroup {
   const { autopilot, session } = item.source;
   const { machineId, machine } = item;
   if (autopilot) return { key: `${machineId ?? 'local'}:autopilot`, label: AUTOPILOT, autopilot: true, machineId, machine, items: [] };
   if (!session) return { key: 'none', label: NOT_IN_A_SESSION, items: [] };
+  const place = todoPlace(item);
+  if (place && item.todo) return { key: `${machineId ?? 'local'}:${session.id}:todo:${item.todo.number}`, label: place, session, machineId, machine, items: [] };
   return { key: `${machineId ?? 'local'}:${session.id}`, label: session.name, session, machineId, machine, items: [] };
 }
 
@@ -277,7 +280,7 @@ export function besideOf(item: NotifyItem, activeMachineId: string): Beside {
   const { source } = item;
   const orchestrator = source.session?.orchestrator || item.originKind === 'orchestrator';
   if (source.paneId && !source.autopilot && !orchestrator && !item.relay) return { kind: 'pane', paneId: source.paneId, panelId: source.panelId, name: source.name };
-  if (connected.kind === 'session') return { kind: 'session', sessionId: connected.id, paneId: connected.paneId, name: connected.name };
+  if (connected.kind === 'session') return { kind: 'session', sessionId: connected.id, paneId: connected.paneId, name: todoPlace(item) ?? connected.name };
   if (connected.kind === 'pane') return { kind: 'pane', paneId: connected.id, name: connected.name };
   return { kind: 'none', name: connected.name };
 }
@@ -287,9 +290,18 @@ export function relayReadOnlyLine(item: NotifyItem): string {
   return `Read-only: ${item.machine ?? 'its machine'} runs an older Pane. Answer there.`;
 }
 
+/** The item as its origin line names it: a to-do's approval reads as asked in the to-do, not its hidden Session. */
+function placedByTodo(item: NotifyItem): NotifyItem {
+  const place = todoPlace(item);
+  const connected = connectedOf(item);
+  if (!place || connected.kind !== 'session') return item;
+  const source: NotifySource = item.source.session ? { ...item.source, session: { ...item.source.session, name: place } } : item.source;
+  return { ...item, source, connected: { ...connected, name: place } };
+}
+
 /** A row's text: `acted` is what happened to it (absent while nothing has), `origin` where it came from. */
 export function approvalRowLines(item: NotifyItem): { acted?: string; origin: string } {
-  const origin = originLine(item);
+  const origin = originLine(placedByTodo(item));
   const receipt = receiptLine(item);
   const decision = decisionLine(item);
   const answered = [item.answerSummary && `→ ${item.answerSummary}`, receipt, decision].filter(Boolean).join(' · ');

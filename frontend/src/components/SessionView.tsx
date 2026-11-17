@@ -83,6 +83,7 @@ import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
 import { LivePreviewPrompt } from './LivePreviewPrompt';
 import { ApprovalsView } from './approvals/ApprovalsView';
+import { TodosView } from './todos/TodosView';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
 import { CUSTOM_COMMAND_KEYS, type CustomCommandId } from '../../../shared/constants/keyboardShortcuts';
 import { useRegionActions } from '../hooks/useRegionNavigation';
@@ -1947,6 +1948,10 @@ export const SessionView = memo(() => {
 
   if (activeView === 'loops') {
     return <LoopsView />;
+  }
+
+  if (activeView === 'todos') {
+    return <TodosView />;
   }
 
   if (activeView === 'autopilot') {

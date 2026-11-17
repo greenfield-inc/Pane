@@ -42,8 +42,8 @@ function decodeDoc(answer: Awaited<ReturnType<MachineRead>>['data']): MachineDoc
   return /larger than 2 MiB/u.test(missing.message ?? '') ? { kind: 'too-large' } : { kind: 'missing' };
 }
 
-/** Reads a linked file from the item's machine. Never rejects: a failed read is a state. */
-export async function readMachineDoc(item: NotifyItem, path: string): Promise<MachineDoc> {
+/** Reads a linked file from the item's machine (a to-do's attachment passes its to-do's). Never rejects: a failed read is a state. */
+export async function readMachineDoc(item: Pick<NotifyItem, 'machineId'>, path: string): Promise<MachineDoc> {
   // SAFETY: main refuses a channel it doesn't serve, and that refusal is a failed read below.
   const read = window.electronAPI.machines.read as MachineRead;
   let timer: ReturnType<typeof setTimeout> | undefined;

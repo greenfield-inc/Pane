@@ -314,8 +314,13 @@ const config = {
         'modal-enter': 'modal-enter var(--duration-modal) var(--ease-out-strong)',
         'title-pill-enter': 'title-pill-enter var(--duration-150) var(--ease-out-strong)',
         'modal-overlay-enter': 'fade-in var(--duration-modal) var(--ease-out-strong)',
+        // A just-created to-do's row lights up once and fades to its own background.
+        'todo-flash': 'todo-flash 1.6s ease-out',
       },
       keyframes: {
+        'todo-flash': {
+          '0%': { backgroundColor: 'color-mix(in srgb, var(--color-interactive-primary) 22%, transparent)' },
+        },
         // Vertical "loading" light that sweeps up and down the working status bar.
         'status-working-sweep': {
           '0%': { transform: 'translateY(-120%)' },

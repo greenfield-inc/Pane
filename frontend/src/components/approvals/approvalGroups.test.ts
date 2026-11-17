@@ -382,3 +382,20 @@ describe('approvalRowLines', () => {
     expect(line.acted).toBe('Read-only');
   });
 });
+
+describe('a to-do’s approval (D-408)', () => {
+  const ownSession = { id: 'todo-14', name: 'T-12 · Keyboard shortcut sheet', paneId: 'todo-pane', orchestrator: true };
+  const asked = item('q14', 5, {
+    source: { name: 'T-12 · Keyboard shortcut sheet', agent: 'Claude', session: ownSession, paneId: 'todo-pane' },
+    originKind: 'orchestrator',
+    todo: { number: 14, title: 'Build the sheet and approval keys' },
+  });
+
+  it('is grouped and named by its to-do, not its hidden Session', () => {
+    const queue = groupApprovals([asked, item('other', 6, { source: { name: 'x', agent: 'Claude', session: launch } })], 'waiting', 'session');
+    expect(queue.groups.map(group => group.label)).toContain('T-14 · Build the sheet and approval keys');
+    expect(queue.groups.map(group => group.label)).not.toContain('T-12 · Keyboard shortcut sheet');
+    expect(approvalRowLines(asked).origin).toBe('orchestrator in T-14 · Build the sheet and approval keys');
+    expect(besideOf(asked, 'local')).toMatchObject({ kind: 'session', sessionId: 'todo-14', name: 'T-14 · Build the sheet and approval keys' });
+  });
+});

@@ -1,5 +1,6 @@
 import type { NotifyChoice, NotifyItem, NotifyLink, NotifySubQuestion, NotifyVersion } from '../../../../shared/types/notify';
 import { approvalStatus, replyReader, sentenceStart } from '../../../../shared/approvalStatus';
+import { todoRef } from '../../../../shared/types/todos';
 
 /**
  * The approval column's logic (P3 of the approval card), kept apart from its rendering: the
@@ -181,12 +182,24 @@ function originPanel(item: NotifyItem): string | undefined {
   return item.source.panelId;
 }
 
+/**
+ * Where a to-do's approval is from, by the to-do (D-408): "T-14 · Build the sheet and approval keys".
+ * Its Session is the to-do's own, hidden from the sidebar, so the to-do names it instead.
+ */
+export function todoPlace(item: Pick<NotifyItem, 'todo'>): string | undefined {
+  return item.todo ? `${todoRef(item.todo.number)} · ${item.todo.title}` : undefined;
+}
+
 /** "doozy-overhaul asks · relayed · Doozy · tylers-mac-mini": who asked, from where. */
 export function askedBy(item: NotifyItem): string[] {
-  const parts = [`${item.source.session?.orchestrator ? `${item.source.session.name} orchestrator` : item.source.name} asks`];
+  // A to-do's own Session is hidden (D-409): its orchestrator is "orchestrator", and the to-do names where.
+  const place = todoPlace(item);
+  const orchestrator = item.source.session?.orchestrator ? (place ? 'orchestrator' : `${item.source.session.name} orchestrator`) : undefined;
+  const parts = [`${orchestrator ?? item.source.name} asks`];
   if (item.relayedBy) parts.push(`relayed by ${item.relayedBy.name}`);
   const session = item.source.session?.name ?? (item.connected?.kind === 'session' ? item.connected.name : undefined);
-  if (session && !item.source.session?.orchestrator) parts.push(session);
+  if (place) parts.push(place);
+  else if (session && !item.source.session?.orchestrator) parts.push(session);
   if (item.machine) parts.push(item.machine);
   return parts;
 }

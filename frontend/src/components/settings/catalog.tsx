@@ -120,8 +120,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Machine health',
     description: 'Disk and memory warnings, finished Panes, leaks, and what Pane may clean up by itself.',
     icon: HardDrive,
-    settingIds: ['machine-health-disk', 'machine-health-memory', 'machine-health-finished', 'machine-health-leak', 'machine-health-auto-archive', 'machine-health-auto-agent-temp', 'machine-health-auto-paused-scratch', 'machine-health-auto-archived-folders', 'machine-health-auto-pause', 'machine-health-run-now'],
-    aliases: ['storage', 'disk', 'disk space', 'free space', 'memory', 'ram', 'pressure', 'swap', 'leak', 'leaking', 'cleanup', 'clean up', 'resources', 'temp', 'tmp', 'snapshot', 'backup', 'finished', 'archive', 'processes'],
+    settingIds: ['machine-health-disk', 'machine-health-memory', 'machine-health-finished', 'machine-health-leak', 'machine-health-auto-archive', 'machine-health-auto-agent-temp', 'machine-health-auto-paused-scratch', 'machine-health-auto-archived-folders', 'machine-health-auto-pause', 'machine-health-hold-todo-agents', 'machine-health-run-now'],
+    aliases: ['storage', 'disk', 'disk space', 'free space', 'memory', 'ram', 'pressure', 'swap', 'leak', 'leaking', 'cleanup', 'clean up', 'resources', 'temp', 'tmp', 'snapshot', 'backup', 'finished', 'archive', 'processes', 'to-dos', 'todos', 'load', 'busy', 'cpu', 'queue', 'hold'],
   },
   {
     id: 'notifications',

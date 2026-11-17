@@ -32,7 +32,7 @@ export function MachineDocView({ doc, label, machine, onRetry }: { doc: MachineD
 }
 
 /** One linked document, read from the item's machine. A failure is one line, and nothing keeps spinning. */
-export function MachineDocument({ item, path, label, machine }: { item: NotifyItem; path: string; label: string; machine: string }) {
+export function MachineDocument({ item, path, label, machine }: { item: Pick<NotifyItem, 'machineId'>; path: string; label: string; machine: string }) {
   const [doc, setDoc] = useState<MachineDoc | null>(null);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {

@@ -53,6 +53,8 @@ import { useSshHostsRefresh, useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
+import { TodosRailButton } from './todos/TodosNavRow';
+import { useTodosMachines, useTodosRefresh } from '../stores/todosStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useRestartToUpdateStore } from '../stores/restartToUpdateStore';
 import { RestoreRegionButton } from './RestoreRegionButton';
@@ -409,6 +411,9 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
   const approvals = useApprovalsNav();
   useSessionNavigationHotkeys({ projects });
   useSshHostsRefresh();
+  // To-dos (D-409): the sidebar entry's count and spinner, and the list behind it, from every machine.
+  useTodosRefresh();
+  useTodosMachines();
 
   useEffect(() => {
     void loadOrchestrationSessions();
@@ -742,6 +747,10 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
                 )}
               </button>
             </Tooltip>}
+
+            <Tooltip content="To-dos" side="right">
+              <TodosRailButton buttonClass={COMPACT_RAIL_BUTTON} activeClass={COMPACT_RAIL_ACTIVE} idleClass={COMPACT_RAIL_IDLE} />
+            </Tooltip>
 
             {missionControlEnabled && (
               <Tooltip content="Mission Control" side="right">

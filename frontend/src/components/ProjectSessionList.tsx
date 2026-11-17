@@ -38,6 +38,7 @@ import { useIsLoopRun, useListedPanes } from '../hooks/useListedPanes';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
+import { TodosNavRow } from './todos/TodosNavRow';
 import { SSH_HOSTS_SESSION_ID } from '../../../shared/types/sshHosts';
 import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../hooks/useRowReorder';
 import { useErrorStore } from '../stores/errorStore';
@@ -460,6 +461,7 @@ export function ProjectSessionList({
         {/* Approvals sits right under Autopilot, which answers them for you (D-117). */}
         <AutopilotNavRow />
         <ApprovalsNavRow />
+        <TodosNavRow />
 
         {missionControlEnabled && (
           <button

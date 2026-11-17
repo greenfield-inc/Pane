@@ -115,6 +115,7 @@ export interface AllMachinesArrangement {
 }
 
 const EMPTY_ARRANGEMENT: AllMachinesArrangement = { sessions: null, panes: {} };
+const NO_HIDDEN_SESSIONS: ReadonlySet<string> = new Set();
 
 /**
  * Rows in the saved order, pinned first. With no saved order they keep the order given (each
@@ -147,7 +148,11 @@ function statusesBySession(statuses: PanelAgentStatusEvent[]): Map<string, Agent
  * arranged it. Rows are keyed by machine and id; a repository open on several machines is one
  * project with each machine's Panes.
  */
-export function buildAllMachinesTree(views: readonly MachineView[], arrangement: AllMachinesArrangement = EMPTY_ARRANGEMENT): AllMachinesTree {
+/**
+ * `hiddenSessions` names Sessions kept out of All machines as `<machine id>:<Session id>`: a to-do's
+ * own Session (D-409). Its Panes stay out too, except one with a card waiting on you.
+ */
+export function buildAllMachinesTree(views: readonly MachineView[], arrangement: AllMachinesArrangement = EMPTY_ARRANGEMENT, hiddenSessions: ReadonlySet<string> = NO_HIDDEN_SESSIONS): AllMachinesTree {
   const sessions: AllMachinesSession[] = [];
   const projects = new Map<string, AllMachinesProject>();
   const panes: AllMachinesPane[] = [];
@@ -163,6 +168,9 @@ export function buildAllMachinesTree(views: readonly MachineView[], arrangement:
     }
     const permissions = [...snapshot.permissions].sort((a, b) => a.timestamp - b.timestamp);
     const paneById = new Map<string, AllMachinesPane>();
+    const hiddenPanes = new Set(snapshot.sessions
+      .filter(session => hiddenSessions.has(`${machine.id}:${session.id}`))
+      .flatMap(session => session.associations.map(association => association.paneId)));
 
     for (const project of snapshot.projects) {
       const key = repositoryKey(project);
@@ -186,15 +194,16 @@ export function buildAllMachinesTree(views: readonly MachineView[], arrangement:
           waiting: waitingPanes.has(pane.id) || permission !== null,
           permission,
         };
+        paneById.set(pane.id, row);
+        if (hiddenPanes.has(pane.id) && !row.waiting) continue;
         merged.panes.push(row);
         panes.push(row);
-        paneById.set(pane.id, row);
       }
     }
 
     const activity = new Map(snapshot.activity.map(item => [item.sessionId, item]));
     for (const session of snapshot.sessions) {
-      if (session.archived) continue;
+      if (session.archived || hiddenSessions.has(`${machine.id}:${session.id}`)) continue;
       const live = offline ? undefined : activity.get(session.id);
       sessions.push({
         key: `${machine.id}:${session.id}`,
