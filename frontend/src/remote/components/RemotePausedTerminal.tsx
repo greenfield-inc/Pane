@@ -2,7 +2,7 @@ import { Play } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { TerminalPausedMark } from '../../../../shared/types/panels';
 import { PausedGlyph } from '../../components/ui/AgentStatusDot';
-import { pausedLabel } from '../../utils/pause';
+import { pauseOffersResume, pausedLabel } from '../../utils/pause';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 
 /** Lines of the saved screen to show under the bar. */
@@ -54,7 +54,7 @@ export function RemotePausedTerminal({ adapter, panelId, mark }: {
           <span className="text-text-tertiary"> · last screen</span>
           {error && <span role="alert" className="ml-2 text-status-error">{error}</span>}
         </span>
-        <button
+        {pauseOffersResume(mark) && <button
           type="button"
           onClick={resume}
           disabled={resuming}
@@ -62,7 +62,7 @@ export function RemotePausedTerminal({ adapter, panelId, mark }: {
         >
           <Play className="h-3 w-3 fill-current" aria-hidden="true" />
           Resume
-        </button>
+        </button>}
       </div>
       <pre
         ref={screenRef}

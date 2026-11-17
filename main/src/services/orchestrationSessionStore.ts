@@ -105,6 +105,12 @@ const sessionSchema = boundary.object({
   runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   promotedFrom: boundary.optional(boundary.object({ paneId: boundary.nonEmptyString, panelId: boundary.nonEmptyString })),
+  move: boundary.optional(boundary.object({
+    state: boundary.enumeration('arriving', 'moving', 'moved'),
+    machine: boundary.nonEmptyString,
+    moveId: boundary.nonEmptyString,
+    at: boundary.string,
+  })),
   id: boundary.nonEmptyString,
   name: boundary.nonEmptyString,
   nameIsDefault: boundary.optional(boundary.boolean),
