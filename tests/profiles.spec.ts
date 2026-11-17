@@ -28,8 +28,9 @@ function library(): MockLibrary {
   return { view: { profiles }, yaml: Object.fromEntries(profiles.map((profile) => [profile.name, readFileSync(profile.file, 'utf8')])) };
 }
 
-async function openProfiles(page: Page, width = 1_440, theme = 'dark') {
+async function openProfiles(page: Page, width = 1_440, theme = 'dark', own?: ProfileLibraryView['ownAgentFarm']) {
   const { view, yaml } = library();
+  if (own) view.ownAgentFarm = own;
   await page.setViewportSize({ width, height: 900 });
   await installElectronApiMock(page, { initialProjects: projects, initialSessions: [], initialConfig: { theme, appearanceMode: 'fixed' }, profileLibrary: view, profileYaml: yaml });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -95,6 +96,14 @@ test('J8: team-only and invalid profiles are listed with Launch disabled and the
   await expect(page.getByTestId('profile-errors')).toContainText('STEP_UNREACHABLE');
   await expect(page.getByTestId('profile-launch')).toBeDisabled();
   await shoot(page, 'j8-invalid');
+});
+
+test('"Your Agent Farm" lists the person\'s own profiles, and is absent when it lists none', async ({ page }) => {
+  await openProfiles(page, 1_440, 'dark', { profiles: [] });
+  await expect(page.getByRole('heading', { name: 'Your Agent Farm' })).toHaveCount(0);
+  await openProfiles(page, 1_440, 'dark', { profiles: [{ name: 'team/helper', source: 'plugin team 1.0.0', harness: 'claude' }] });
+  await expect(page.getByRole('heading', { name: 'Your Agent Farm' })).toBeVisible();
+  await expect(page.getByTestId('own-agent-farm-profile')).toHaveText(/team\/helper/);
 });
 
 test('launch dialog: a CLI per agent, and "Other…" marks the run baseline only', async ({ page }) => {

@@ -167,7 +167,8 @@ export function ProfilesView() {
               {items.map((profile) => <LibraryItem key={`${profile.origin}-${profile.name}-${profile.file}`} profile={profile} selected={profile === selected} onSelect={() => { setSelectedName(profile.name); setTab('flow'); }} />)}
             </Section>
           ))}
-          {library?.ownAgentFarm && (
+          {/* Your own Agent Farm shows only when it lists something, or why it couldn't. */}
+          {library?.ownAgentFarm && (library.ownAgentFarm.profiles.length > 0 || library.ownAgentFarm.error) && (
             <Section title="Your Agent Farm">
               {library.ownAgentFarm.error && <p className="px-3 text-xs text-status-error">{library.ownAgentFarm.error}</p>}
               {library.ownAgentFarm.profiles.map((own) => (
