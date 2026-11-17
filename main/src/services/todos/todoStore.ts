@@ -347,6 +347,11 @@ export class TodoStore {
     return decodeBoundary(this.db.prepare('SELECT * FROM todo_attachments WHERE todo_id = ? AND removed_at IS NULL ORDER BY id').all(todoNumber), boundary.array(attachmentRowSchema)).map(toAttachment);
   }
 
+  /** Every file currently attached to a to-do on this machine (URLs left out). */
+  attachedFiles(): string[] {
+    return decodeBoundary(this.db.prepare("SELECT DISTINCT target FROM todo_attachments WHERE removed_at IS NULL AND machine IS NOT NULL").all(), boundary.array(boundary.object({ target: boundary.string }))).map(row => row.target);
+  }
+
   /** Current attachments per to-do, in one read. */
   attachmentCounts(): Map<number, number> {
     const rows = decodeBoundary(this.db.prepare('SELECT todo_id, COUNT(*) AS count FROM todo_attachments WHERE removed_at IS NULL GROUP BY todo_id').all(), boundary.array(boundary.object({ todo_id: boundary.number, count: boundary.number })));

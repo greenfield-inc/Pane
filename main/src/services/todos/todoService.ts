@@ -263,6 +263,11 @@ export class TodoService extends EventEmitter {
     return groups;
   }
 
+  /** Files attached to this machine's to-dos: another machine may read these to show them in a to-do's split. */
+  attachedFiles(): string[] {
+    return this.store.attachedFiles();
+  }
+
   /** Each to-do's attachments, own and from its sub-to-dos, as the list counts them. */
   attachmentCounts(): Map<number, number> {
     const own = this.store.attachmentCounts();

@@ -57,7 +57,7 @@ const readDocOptionsSchema = boundary.object({ inline: boundary.optional(boundar
 
 const TEXT_LIMIT_BYTES = 2 * 1024 * 1024;
 
-type AutopilotServices = Pick<AppServices, 'configManager' | 'sessionManager' | 'orchestrationSessionManager' | 'skillCacheManager' | 'workspaceJournal'>;
+type AutopilotServices = Pick<AppServices, 'configManager' | 'sessionManager' | 'orchestrationSessionManager' | 'skillCacheManager' | 'workspaceJournal' | 'todoService'>;
 
 /**
  * Autopilot's channels: `autopilot:*` for Pane's UI (the person), `runpane:autopilot:*` for the
@@ -189,7 +189,7 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
   commandRegistry.register('autopilot:read-doc', (file: PaneCommandValue, options?: PaneCommandValue) => readDocument(
     manager,
     decodeBoundary(file, boundary.nonEmptyString),
-    { inline: decodeBoundary(options ?? {}, readDocOptionsSchema).inline === true, links: () => itemLinkPaths(notify) },
+    { inline: decodeBoundary(options ?? {}, readDocOptionsSchema).inline === true, links: () => [...itemLinkPaths(notify), ...(services.todoService?.attachedFiles() ?? [])] },
   ));
 
   // runpane and the pane MCP.
