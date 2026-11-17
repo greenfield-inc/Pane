@@ -1,3 +1,4 @@
+import { DEFAULT_AGENT_ID } from '../../../../shared/agents';
 import type { NotifyResult } from '../../../../shared/types/notify';
 import type { LoadSample } from './loadGate';
 import type { TodoCard, TodoHost, TodoPanelInfo, TodoSessionInfo, TypeResult } from './todoService';
@@ -23,7 +24,7 @@ export class FakeHost implements TodoHost {
     const id = `s${this.nextSession++}`;
     const panelId = `${id}-orch`;
     this.sessions.set(id, { id, name: input.name, orchestratorPanelId: panelId, archived: false, paneIds: [] });
-    this.panels.set(panelId, { name: 'orchestrator', sessionId: id, sessionName: input.name, orchestrator: true, agentId: 'claude' });
+    this.panels.set(panelId, { name: 'orchestrator', sessionId: id, sessionName: input.name, orchestrator: true, agentId: DEFAULT_AGENT_ID });
     this.typed.push({ panelId, text: input.openingPrompt });
     return { sessionId: id, orchestratorPanelId: panelId, prompted: true };
   }

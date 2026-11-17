@@ -26,7 +26,7 @@ export function mergeTodoChat(activity: readonly TodoActivity[], approvalIds: re
   return entries.sort((a, b) => a.at - b.at);
 }
 
-export type ApprovalCardState = 'waiting' | 'answered' | 'closed';
+type ApprovalCardState = 'waiting' | 'answered' | 'closed';
 
 /** What an approval card in the chat says: "Q-10 · answered · D-14", its question, and the answer. */
 export interface ApprovalCardView {

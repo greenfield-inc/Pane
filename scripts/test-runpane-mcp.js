@@ -206,6 +206,29 @@ test('a new contract command becomes a tool with inputs from its usage and agent
   assert.throws(() => buildToolArgv(tool, { widget: 'w1', color: 'red' }), /Unknown argument\(s\) for widgets_frob: color/);
 });
 
+test('todos tools need no yes, take the to-do and text as inputs, and pass lists the CLI reads back', () => {
+  const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
+  const { parseRunpaneArgs } = require(dist('commands.js'));
+  const tools = buildMcpTools().filter((tool) => tool.name.startsWith('todos_'));
+  assert.equal(tools.length, 15);
+  for (const tool of tools) {
+    assert.ok(!('yes' in tool.inputSchema.properties), `${tool.name} must run without yes`);
+    if (tool.name !== 'todos_list') assert.ok(tool.inputSchema.required.includes(tool.name === 'todos_create' ? 'title' : 'todo'), tool.name);
+  }
+  const byName = (name) => tools.find((tool) => tool.name === name);
+  assert.equal(byName('todos_create').inputSchema.properties.doneWhen.type, 'array');
+  assert.equal(byName('todos_create').annotations.destructiveHint, false);
+  assert.equal(byName('todos_list').annotations.readOnlyHint, true);
+  assert.deepEqual(byName('todos_attach').inputSchema.properties.kind.enum, ['plan', 'mockup', 'design', 'pr', 'findings', 'decision', 'doc', 'image', 'link']);
+  const argv = buildToolArgv(byName('todos_create'), { title: '- Fix the sheet', doneWhen: ['Opens with ?', 'Approvals work'], noStart: true });
+  assert.deepEqual(argv, ['todos', 'create', '- Fix the sheet', '--done-when=["Opens with ?","Approvals work"]', '--no-start', '--json']);
+  const parsed = parseRunpaneArgs(argv);
+  assert.deepEqual([parsed.todoArgs, parsed.doneWhen, parsed.noStart], [['- Fix the sheet'], ['Opens with ?', 'Approvals work'], true]);
+  assert.deepEqual(buildToolArgv(byName('todos_comment'), { todo: 'T-12', text: '- done', escalate: true }), ['todos', 'comment', 'T-12', '- done', '--escalate', '--json']);
+  const notify = buildMcpTools().find((tool) => tool.name === 'notify');
+  assert.equal(notify.inputSchema.properties.todo.type, 'string');
+});
+
 test('notify types its inputs, so a model passes choices as objects, and needs no yes', () => {
   const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
   const notify = buildMcpTools().find((tool) => tool.name === 'notify');
@@ -828,7 +851,10 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
-    'theme_read', 'theme_set', 'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
+    'theme_read', 'theme_set',
+    'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
+    'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_start', 'todos_stop', 'todos_update',
+    'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
   ]);
   const devices = await names(['--toolsets', 'devices']);
   assert.deepEqual(devices.map((tool) => tool.name).sort(), [
@@ -838,6 +864,11 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   assert.deepEqual(git.map((tool) => tool.name).sort(), [
     'panes_commit', 'panes_fetch', 'panes_git_status', 'panes_pull', 'panes_push', 'panes_rebase_main',
     'panes_soft_reset', 'panes_squash_rebase', 'panes_stash', 'panes_stash_pop',
+  ]);
+  const todos = await names(['--toolsets', 'todos']);
+  assert.deepEqual(todos.map((tool) => tool.name).sort(), [
+    'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
+    'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_start', 'todos_stop', 'todos_update',
   ]);
   const secrets = await names(['--toolsets', 'secrets']);
   assert.deepEqual(secrets.map((tool) => tool.name).sort(), ['secrets_delete', 'secrets_list']);
@@ -855,6 +886,8 @@ test('the plugin toolset is core without the tools that reach other machines', a
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
+    'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
+    'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_start', 'todos_stop', 'todos_update',
     'workspace_state',
   ]);
 });

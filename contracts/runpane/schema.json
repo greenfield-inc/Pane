@@ -1069,7 +1069,23 @@
         "loops run",
         "loops pause",
         "loops resume",
-        "loops delete"
+        "loops delete",
+        "todos",
+        "todos create",
+        "todos update",
+        "todos attach",
+        "todos detach",
+        "todos show",
+        "todos list",
+        "todos assign",
+        "todos ask",
+        "todos comment",
+        "todos review",
+        "todos done",
+        "todos drop",
+        "todos archive",
+        "todos start",
+        "todos stop"
       ],
       "properties": {
         "default": {
@@ -1475,6 +1491,54 @@
           "$ref": "#/$defs/helpLines"
         },
         "loops delete": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos create": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos update": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos attach": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos detach": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos show": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos assign": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos ask": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos comment": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos review": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos done": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos drop": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos archive": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos start": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "todos stop": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions pin": {

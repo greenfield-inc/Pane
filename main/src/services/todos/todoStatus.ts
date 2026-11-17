@@ -2,7 +2,7 @@ import { MOVING_TODO_STATES, isOpenTodoState, type TodoRecord, type TodoStatus }
 import type { LinkedApproval } from './todoStore';
 
 /** The supervisor's first rung: a to-do quiet this long reads red. */
-export const QUIET_ALERT_MS = 10 * 60_000;
+const QUIET_ALERT_MS = 10 * 60_000;
 
 export interface TodoStatusInputs {
   todo: TodoRecord;

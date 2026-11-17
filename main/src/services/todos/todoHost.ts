@@ -1,3 +1,4 @@
+import { isConfiguredAgent } from '../../../../shared/agents';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { NotifyQuestion, NotifySource } from '../../../../shared/types/notify';
 import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../../shared/types/paneChat';
@@ -63,7 +64,7 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
       const atLaunch = terminalPanelManager.launchShellIsPosix();
       const view = await manager.create({
         name: input.name, isPinned: false, launchCommand: '', customResume: null,
-        agent: input.agent === 'claude' || input.agent === 'codex' || input.agent === 'cursor' ? input.agent : undefined,
+        agent: isConfiguredAgent(input.agent) ? input.agent : undefined,
         openingPrompt: atLaunch ? `${PANE_ONE_TIME_PROMPT_OPENING}, to start a to-do. ${input.openingPrompt}` : undefined,
       });
       if (view.panel.type === 'terminal') await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);

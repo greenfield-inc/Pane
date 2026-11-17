@@ -30,7 +30,7 @@ async function respond<T>(work: () => T | Promise<T>): Promise<TodoResponse<T>> 
   }
 }
 
-export function requireTodoService(services: Pick<AppServices, 'todoService'>): TodoService {
+function requireTodoService(services: Pick<AppServices, 'todoService'>): TodoService {
   if (!services.todoService) {
     throw new PaneError('ERR_TODOS_UNAVAILABLE', 'To-dos are unavailable: this Pane has not started its to-do service. Nothing was changed.', 'Restart Pane, then run the command again.');
   }
@@ -69,7 +69,7 @@ const actionSchema = boundary.union(
 const PERSON: TodoActor = { kind: 'person' };
 
 /** Runs one of the person's actions from the To-dos screens. */
-export async function runTodoAction(service: TodoService, action: TodoAction): Promise<TodoActionResult> {
+async function runTodoAction(service: TodoService, action: TodoAction): Promise<TodoActionResult> {
   switch (action.kind) {
     case 'start': return { todo: (await service.start(action.number, PERSON, { anyway: action.anyway })).todo };
     case 'stop': return { todo: service.stop(action.number, PERSON) };
@@ -120,7 +120,7 @@ function iso(at: number): string {
   return new Date(at).toISOString();
 }
 
-export function runpaneTodoOf(row: TodoListRow, attachmentCount: number): RunpaneTodo {
+function runpaneTodoOf(row: TodoListRow, attachmentCount: number): RunpaneTodo {
   const { todo } = row;
   return {
     ref: todo.ref, number: todo.number, title: todo.title, state: todo.state, status: row.status.status, reason: row.status.reason,

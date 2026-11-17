@@ -75,6 +75,8 @@ export interface NotifyRequest extends Partial<Omit<NotifyQuestion, 'ui'>> {
   relays?: string;
   aboutSession?: string;
   returnAfterMs?: number;
+  /** `--todo <T-n>`: the to-do this card is about. */
+  todo?: string;
   caller: NotifyCaller;
 }
 
@@ -435,6 +437,7 @@ function describeNotifyOutcome(result: NotifyResult): string {
  */
 export async function runNotify(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const request = buildNotifyRequest(parsed, env, process.cwd());
+  if (parsed.todo !== undefined) request.todo = parsed.todo;
   let result: NotifyResult;
   try {
     result = await invokeDaemon('runpane:notify', [request], notifyResultSchema, { paneDir: parsed.paneDir, timeoutMs: Infinity });

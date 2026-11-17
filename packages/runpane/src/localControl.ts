@@ -323,6 +323,8 @@ interface PaneCreateRequest {
   associateSession?: string;
   noAssociate?: boolean;
   expectReport?: boolean;
+  /** `agents start --todo <T-n>`: the to-do the new agent works on. */
+  todo?: string;
 }
 
 interface PaneAdoptRequest {
@@ -867,6 +869,8 @@ interface PanelCreateRequest {
   waitReady?: boolean;
   readyTimeoutMs?: number;
   expectReport?: boolean;
+  /** `agents start --todo <T-n>`: the to-do the new agent works on. */
+  todo?: string;
 }
 
 /** The report Pane waits for after `--expect-report`. */
@@ -3974,6 +3978,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
     summary: summaryText?.slice(0, MAX_SENT_SUMMARY_LENGTH),
     summaryPath,
     question: parsed.question,
+    todo: parsed.todo,
   }], reportResultSchema, {
     paneDir: parsed.paneDir,
   });

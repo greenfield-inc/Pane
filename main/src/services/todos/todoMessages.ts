@@ -11,7 +11,7 @@ function attachmentLine(attachment: TodoAttachment, from?: string): string {
 }
 
 /** The attachments block every starting message carries: own first, then inherited. */
-export function attachmentsBlock(groups: readonly TodoAttachmentGroup[]): string {
+function attachmentsBlock(groups: readonly TodoAttachmentGroup[]): string {
   const lines = groups.flatMap(group => group.attachments.map(attachment => attachmentLine(attachment, group.from ? `T-${group.from.number}` : undefined)));
   if (lines.length === 0) return 'Attachments: none yet. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists.';
   return ['Attachments (read these first):', ...lines].join('\n');

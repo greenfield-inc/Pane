@@ -7,7 +7,7 @@ import { cn } from '../../../utils/cn';
 import { COMPACT_MARKDOWN, SectionAction, SectionLabel, SubTodoRows } from './TodoPageParts';
 
 /** A description taller than this collapses behind "Show more" (J9). */
-export const DESCRIPTION_CLAMP_PX = 150;
+const DESCRIPTION_CLAMP_PX = 150;
 
 /**
  * Markdown in the card, compact: headings near body size, short paragraph gaps, and images as

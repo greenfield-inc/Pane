@@ -34,7 +34,7 @@ export function AgentAvatar({ agentId, name, className }: { agentId?: string; na
 }
 
 /** The words after a sub-to-do's title: "Working · implementer". */
-export function subTodoMeta(row: TodoListRow): string {
+function subTodoMeta(row: TodoListRow): string {
   const who = row.todo.assignee?.name;
   return who ? `${TODO_STATUS_LABEL[row.status.status]} · ${who}` : TODO_STATUS_LABEL[row.status.status];
 }

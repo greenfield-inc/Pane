@@ -8,7 +8,7 @@ import { TODO_STATUS_LABEL } from './TodoStatusIcon';
  * which rows each tab shows, how they group, the counts, and what S, R and Start anyway do.
  */
 
-export const TODOS_TABS = ['open', 'waiting', 'done', 'all'] as const;
+const TODOS_TABS = ['open', 'waiting', 'done', 'all'] as const;
 export type TodosTab = typeof TODOS_TABS[number];
 
 export const TODOS_GROUPINGS = ['status', 'requester', 'repo', 'machine'] as const;
@@ -22,7 +22,7 @@ export const TODOS_GROUPING_LABEL = {
 } as const satisfies Record<TodosGrouping, string>;
 
 /** Status groups in the order the list shows them: what needs you first. */
-export const STATUS_ORDER: readonly TodoShownStatus[] = ['waiting', 'working', 'queued', 'idle', 'done', 'dropped'];
+const STATUS_ORDER: readonly TodoShownStatus[] = ['waiting', 'working', 'queued', 'idle', 'done', 'dropped'];
 
 /** One row of the list: a top-level to-do on this machine or a saved one. */
 export interface TodoEntry {
@@ -81,7 +81,7 @@ function isClosed(entry: TodoEntry): boolean {
   return !isOpenTodoState(entry.row.todo.state);
 }
 
-export function inTab(entry: TodoEntry, tab: TodosTab): boolean {
+function inTab(entry: TodoEntry, tab: TodosTab): boolean {
   switch (tab) {
     case 'open': return !isClosed(entry);
     case 'waiting': return !isClosed(entry) && entry.row.status.status === 'waiting';
@@ -106,7 +106,7 @@ export function requesterLabel(row: TodoListRow): string {
   return requester.name.replace(/\s+orchestrator$/i, '') || requester.name;
 }
 
-export function repoLabel(row: TodoListRow): string {
+function repoLabel(row: TodoListRow): string {
   return row.projectName ?? 'No repo';
 }
 

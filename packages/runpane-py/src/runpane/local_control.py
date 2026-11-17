@@ -1674,6 +1674,7 @@ def run_report(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
         **optional_value("summary", summary[:MAX_SENT_SUMMARY_LENGTH] if summary is not None else None),
         **optional_value("summaryPath", summary_path),
         **optional_value("question", parsed.question),
+        **optional_value("todo", parsed.todo),
     }
     result = invoke_daemon("runpane:report", [request], pane_dir=parsed.pane_dir)
     if parsed.json:

@@ -1416,6 +1416,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
   answerApprove: false, answerDeny: false, hook: false,
+  todoArgs: [], noStart: false, escalate: false,
 };
 
 function normalizeParsedArgs(value) {
@@ -4991,6 +4992,251 @@ print(json.dumps({"calls": calls, "codes": codes, "errors": errors, "stdout": st
   assert.match(python.errors[3], /takes either --repo or --session, not both/);
 }
 
+/** `runpane todos`: both CLIs send the same daemon requests, print the same bytes, and refuse the same mistakes. */
+async function checkTodosParity() {
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runTodos } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'todos.js'));
+  const { runAgentsStart } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'agentTasks.js'));
+  // The daemon may send fields in any order; both CLIs print them in the contract's order.
+  const todo = {
+    updatedAt: '2026-11-16T10:00:00.000Z', ref: 'T-12', number: 12, title: 'Keyboard sheet — approvals', state: 'in_progress', status: 'working', reason: '',
+    parent: null, sessionId: 'session-12', requester: 'you', assignee: null, summary: 'Every shortcut\non one sheet',
+    doneWhen: [{ met: true, text: 'Sheet opens with ?' }, { text: 'Approvals answer', met: false }], attachmentCount: 1,
+  };
+  const queued = { ...todo, status: 'queued', reason: 'devbox is busy · starts when load comes down' };
+  const sub = { ...todo, ref: 'T-13', number: 13, title: 'Focus ring', parent: 'T-12', status: 'idle', reason: 'not started', doneWhen: [] };
+  const attachment = { id: 3, kind: 'plan', label: 'Plan', target: '/repo/plan.html', machine: 'mac', note: 'Read section 2', addedBy: 'you', source: 'attached', from: null, addedAt: '2026-11-16T09:00:00.000Z' };
+  const inherited = { ...attachment, id: 4, kind: 'link', target: 'https://example.com/x', machine: null, note: null, from: 'T-11' };
+  const activity = { id: 1, kind: 'message', author: 'claude', body: 'Sheet   done.\nApprovals next.', at: '2026-11-16T09:30:00.000Z' };
+  const scripted = [
+    { ok: true, todo },
+    { ok: true, todo },
+    { ok: true, todo: 'T-12', attachment },
+    { ok: true, todo: 'T-12', detached: 3 },
+    { ok: true, todo, attachments: [], subTodos: [], activity: [] },
+    { ok: true, todo, attachments: [attachment, inherited], subTodos: [sub], activity: [activity] },
+    { ok: true, todos: [todo, queued, sub] },
+    { ok: true, todos: [] },
+    { ok: true, todo: { ...todo, assignee: 'Codex 2' } },
+    { ok: true, todo: 'T-12', routedTo: 'person', approvalId: 'Q-7' },
+    { ok: true, todo: 'T-12', activityId: 9 },
+    { ok: true, todo: { ...todo, state: 'in_review', status: 'waiting' }, approvalId: 'Q-8' },
+    { ok: true, todo: { ...todo, state: 'done', status: 'done' } },
+    { ok: true, todo: { ...todo, state: 'dropped', status: 'dropped' } },
+    { ok: true, todo: 'T-12', archived: ['keyboard-sheet'], kept: [{ name: 'focus-ring', reason: 'unpushed commits' }], sessionArchived: false },
+    { ok: true, todo: queued, queued: true },
+    { ok: true, todo: { ...todo, state: 'stopped', status: 'idle', reason: 'stopped' } },
+    { ok: true, todo: { ...todo, title: 'Renamed' } },
+    { ok: true, todo: 'T-12', routedTo: 'requester', approvalId: null },
+    { throws: 'No to-do T-99. Nothing was changed.' },
+  ];
+  const argvs = [
+    ['todos', 'create', 'Keyboard', 'sheet', '--summary', 'Every shortcut', '--done-when', 'Sheet opens', '--done-when=["Approvals","Chat"]', '--parent', 't11', '--repo', 'pane', '--agent', 'claude', '--attach', 'docs/plan.html', '--attach', 'https://example.com/x', '--no-start', '--json'],
+    ['todos', 'update', '12', '--check', '1,2', '--uncheck', '3', '--done-when', 'One', '--json'],
+    ['todos', 'attach', 'T-12', 'docs/plan.html', '--kind', 'plan', '--label', 'Plan', '--note', 'Read section 2', '--json'],
+    ['todos', 'detach', 'T-12', '#3', '--json'],
+    ['todos', 'show', 'T-12', '--json'],
+    ['todos', 'show', 'T-12'],
+    ['todos', 'list'],
+    ['todos', 'list', '--all'],
+    ['todos', 'assign', 'T-12', '--panel', 'panel-2'],
+    ['todos', 'ask', 'T-12', 'Should', 'it', 'list', 'chat?', '--json'],
+    ['todos', 'comment', 'T-12', 'Sheet done.', '--escalate'],
+    ['todos', 'review', 'T-12', '--no-attachments', 'A config change only', '--json'],
+    ['todos', 'done', 'T-12', '--person-said', 'ship it'],
+    ['todos', 'drop', 'T-12', '--reason', 'Covered by T-11'],
+    ['todos', 'archive', 'T-12'],
+    ['todos', 'start', 'T-12'],
+    ['todos', 'stop', 'T-12', '--json'],
+    ['todos', 'update', 'T-12', '--title', 'Renamed'],
+    ['todos', 'ask', 'T-12', 'Which?'],
+  ];
+  const invalidArgvs = [
+    ['todos', 'start', 'T-99'],
+    ['todos', 'create', '--summary', 'No title'],
+    ['todos', 'show', 'twelve'],
+    ['todos', 'show', 'T-12', 'extra'],
+    ['todos', 'update', 'T-12'],
+    ['todos', 'attach', 'T-12', 'a.html', '--kind', 'poster'],
+    ['todos', 'detach', 'T-12', 'x'],
+    ['todos', 'ask', 'T-12'],
+    ['todos', 'list', 'T-12'],
+  ];
+  const parseErrors = [
+    ['todos', 'update', 'T-12', '--check', '0'],
+    ['todos', 'show', 'T-12', '--reason', 'x'],
+    ['report', '--state', 'ready', '--parent', 'T-1'],
+  ];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const originalCwd = process.cwd();
+  const originalPanel = process.env.PANE_PANEL_ID;
+  const calls = [];
+  const codes = [];
+  const errors = [];
+  const lines = [];
+  process.env.PANE_PANEL_ID = 'panel-caller';
+  process.chdir(rootDir);
+  daemonClient.invokeDaemon = async (channel, args, schema) => {
+    calls.push({ channel, args });
+    const response = scripted[calls.length - 1];
+    if (response.throws) throw new Error(response.throws);
+    return decodeBoundary(response, schema);
+  };
+  console.log = (line) => { lines.push(line); };
+  try {
+    for (const argv of argvs) codes.push(await runTodos(parseRunpaneArgs(argv)));
+    for (const argv of invalidArgvs) {
+      try {
+        await runTodos(parseRunpaneArgs(argv));
+        errors.push(null);
+      } catch (error) {
+        errors.push(error.message);
+      }
+    }
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+  const nodeParseErrors = parseErrors.map((argv) => {
+    try {
+      parseRunpaneArgs(argv);
+      return null;
+    } catch (error) {
+      return error.message;
+    }
+  });
+
+  assert.deepStrictEqual(codes, argvs.map(() => 0));
+  assert.deepStrictEqual(calls.slice(0, 4), [
+    { channel: 'runpane:todos:create', args: [{
+      title: 'Keyboard sheet', summary: 'Every shortcut', doneWhen: ['Sheet opens', 'Approvals', 'Chat'], parent: 'T-11', project: 'pane', agent: 'claude',
+      attach: [path.join(rootDir, 'docs', 'plan.html'), 'https://example.com/x'], start: false, callerPanelId: 'panel-caller',
+    }] },
+    { channel: 'runpane:todos:update', args: [{ todo: 'T-12', doneWhen: ['One'], check: [1, 2], uncheck: [3], callerPanelId: 'panel-caller' }] },
+    { channel: 'runpane:todos:attach', args: [{ todo: 'T-12', target: path.join(rootDir, 'docs', 'plan.html'), kind: 'plan', label: 'Plan', note: 'Read section 2', callerPanelId: 'panel-caller' }] },
+    { channel: 'runpane:todos:detach', args: [{ todo: 'T-12', attachment: 3, callerPanelId: 'panel-caller' }] },
+  ]);
+  assert.deepStrictEqual(calls[6], { channel: 'runpane:todos:list', args: [{}] });
+  assert.deepStrictEqual(calls[7], { channel: 'runpane:todos:list', args: [{ all: true }] });
+  assert.deepStrictEqual(calls[9].args, [{ todo: 'T-12', question: 'Should it list chat?', callerPanelId: 'panel-caller' }]);
+  assert.deepStrictEqual(calls[10].args, [{ todo: 'T-12', body: 'Sheet done.', escalate: true, callerPanelId: 'panel-caller' }]);
+  assert.deepStrictEqual(calls.map((entry) => entry.channel).slice(11, 17), ['review', 'done', 'drop', 'archive', 'start', 'stop'].map((verb) => `runpane:todos:${verb}`));
+  // Only the daemon's own refusal reached it; every other mistake is refused before any call.
+  assert.strictEqual(calls.length, argvs.length + 1);
+  assert.strictEqual(errors[0], 'No to-do T-99. Nothing was changed.');
+  assert.ok(errors.slice(1).every((message) => /Nothing was changed\.$/.test(message)), errors.join('\n'));
+
+  const showText = lines.slice(5, 21).join('\n');
+  assert.strictEqual(lines[5], 'Attachments:');
+  const showLines = showText.split('\n');
+  assert.ok(showLines.includes('  #3  plan  Plan  /repo/plan.html on mac'), showText);
+  assert.ok(showLines.includes('  #4  link  Plan  https://example.com/x  (from T-11)'), showText);
+  assert.ok(showText.indexOf('Attachments:') < showText.indexOf('T-12  Working  Keyboard sheet — approvals'), 'attachments come first');
+  assert.ok(showLines.includes('    [x] 1. Sheet opens with ?'), showText);
+  assert.ok(showLines.includes('  T-13  Idle  Focus ring · not started'), showText);
+  assert.match(showText, /claude: Sheet done\. Approvals next\.$/m);
+  assert.ok(lines.includes('T-12  Queued  Keyboard sheet — approvals · devbox is busy · starts when load comes down'));
+  assert.ok(lines.includes('No to-dos. Create one with `runpane todos create "<title>"`.'));
+  assert.ok(lines.includes('Asked the requester about T-12.'));
+  assert.ok(lines.includes('Kept focus-ring: unpushed commits'));
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import os
+import sys
+import runpane.todos as todos
+from runpane.cli import COMMAND_HANDLERS, parse_args
+from runpane.daemon_client import PaneDaemonClientError
+
+data = json.loads(sys.stdin.read())
+scripted = data["scripted"]
+calls = []
+def fake_invoke(channel, args=None, **kwargs):
+    calls.append({"channel": channel, "args": args or []})
+    response = scripted[len(calls) - 1]
+    if "throws" in response:
+        raise PaneDaemonClientError(response["throws"], "ERR_TODO_NOT_FOUND", "")
+    return response
+
+todos.invoke_daemon = fake_invoke
+codes = []
+errors = []
+parse_errors = []
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    for argv in data["argvs"]:
+        parsed = parse_args(argv)
+        codes.append(COMMAND_HANDLERS[parsed.command](parsed, {}))
+    for argv in data["invalidArgvs"]:
+        try:
+            parsed = parse_args(argv)
+            COMMAND_HANDLERS[parsed.command](parsed, {})
+            errors.append(None)
+        except Exception as error:
+            errors.append(str(error))
+for argv in data["parseErrors"]:
+    try:
+        parse_args(argv)
+        parse_errors.append(None)
+    except Exception as error:
+        parse_errors.append(str(error))
+sys.stdout.buffer.write(json.dumps({"calls": calls, "codes": codes, "errors": errors, "parseErrors": parse_errors, "stdout": stdout.getvalue()}).encode("utf-8"))
+`, JSON.stringify({ scripted, argvs, invalidArgvs, parseErrors })));
+  process.chdir(originalCwd);
+  if (originalPanel === undefined) delete process.env.PANE_PANEL_ID;
+  else process.env.PANE_PANEL_ID = originalPanel;
+
+  assert.deepStrictEqual(python.calls, calls);
+  assert.deepStrictEqual(python.codes, codes);
+  assert.deepStrictEqual(python.errors, errors);
+  assert.deepStrictEqual(python.parseErrors, nodeParseErrors);
+  assert.ok(nodeParseErrors.every((message) => message !== null), nodeParseErrors.join('\n'));
+  // Both wrappers print the same bytes, --json included.
+  assert.strictEqual(python.stdout, lines.map((line) => `${line}\n`).join(''));
+  assert.strictEqual(JSON.parse(lines[0]).todo.doneWhen[0].text, 'Sheet opens with ?');
+  assert.deepStrictEqual(Object.keys(JSON.parse(lines[0]).todo), ['ref', 'number', 'title', 'state', 'status', 'reason', 'parent', 'sessionId', 'requester', 'assignee', 'summary', 'doneWhen', 'attachmentCount', 'updatedAt']);
+
+  // agents start --todo (npm only): the to-do rides in the panels:create request, then goes to the ready tab.
+  const startCalls = [];
+  const stderr = [];
+  const originalConsoleError = console.error;
+  const created = {
+    ok: true, paneId: 'pane-1', panelId: 'panel-new', title: 'Codex', active: false, focused: false, tool: { title: 'Codex', command: 'codex' },
+    readiness: { ok: true }, initialInput: { submitted: true, verifiedSubmitted: true },
+  };
+  delete process.env.PANE_PANEL_ID;
+  for (const assign of [{ ok: true, todo: { ...todo, assignee: 'Codex' } }, { throws: 'No to-do T-12.' }]) {
+    const responses = [created, assign];
+    daemonClient.invokeDaemon = async (channel, args, schema) => {
+      startCalls.push({ channel, args });
+      const response = responses.shift();
+      if (response.throws) throw new Error(response.throws);
+      return channel === 'runpane:panels:create' ? response : decodeBoundary(response, schema);
+    };
+    console.log = () => {};
+    console.error = (line) => { stderr.push(line); };
+    try {
+      const code = await runAgentsStart(parseRunpaneArgs(['agents', 'start', '--pane', 'pane-1', '--agent', 'codex', '--prompt', 'Review it', '--todo', 'T-12', '--yes', '--json']));
+      assert.strictEqual(code, 0, 'a failed assign leaves the start itself a success');
+    } finally {
+      daemonClient.invokeDaemon = originalInvokeDaemon;
+      console.log = originalConsoleLog;
+      console.error = originalConsoleError;
+    }
+  }
+  if (originalPanel !== undefined) process.env.PANE_PANEL_ID = originalPanel;
+  assert.deepStrictEqual(startCalls.map((entry) => entry.channel), ['runpane:panels:create', 'runpane:todos:assign', 'runpane:panels:create', 'runpane:todos:assign']);
+  assert.strictEqual(startCalls[0].args[0].todo, 'T-12');
+  assert.deepStrictEqual(startCalls[1].args, [{ todo: 'T-12', panel: 'panel-new' }]);
+  assert.strictEqual(stderr.length, 1);
+  assert.match(stderr[0], /^Warning: the agent started, but T-12 was not assigned to its tab: No to-do T-12\. Assign it with `runpane todos assign T-12 --panel panel-new`\.$/);
+}
+
 /** `sessions overview` carries both a Pane's worker report (#839) and the Session's named locks (#834). */
 async function checkOverviewReportsAndLocks() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
@@ -6940,7 +7186,7 @@ print(json.dumps(errors))
     '--about-session is only valid with runpane notify.',
     '--decision is only valid with runpane inbox ack.',
     '--because is only valid with runpane autopilot answer.',
-    '--reason is only valid with runpane secrets request or runpane autopilot close.',
+    '--reason is only valid with runpane secrets request or runpane autopilot close or runpane todos drop.',
     '--approve is only valid with runpane autopilot answer.',
     '--took is only valid with runpane notify.',
     '--update is only valid with runpane notify.',
@@ -7040,6 +7286,7 @@ async function runChecks() {
   await checkLockParity();
   await checkMachineParity();
   await checkLoopsParity();
+  await checkTodosParity();
   await checkOverviewReportsAndLocks();
   await checkSessionRuntime();
   checkBoundaryDecoderCollectsEveryIssue();

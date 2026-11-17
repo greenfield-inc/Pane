@@ -2075,7 +2075,7 @@ export const RUNPANE_CONTRACT = {
       "name": "agents start",
       "summary": "Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.",
       "usage": [
-        "runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]"
+        "runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -2135,7 +2135,7 @@ export const RUNPANE_CONTRACT = {
       "name": "report",
       "summary": "Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.",
       "usage": [
-        "runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]"
+        "runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -2152,7 +2152,7 @@ export const RUNPANE_CONTRACT = {
       "name": "notify",
       "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
       "usage": [
-        "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]",
         "runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
         "runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "runpane notify --resume <id> [--json] [--pane-dir <path>]"
@@ -2743,6 +2743,271 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "loopDeleteResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos create",
+      "summary": "Create a to-do: one piece of work with a title, a summary and what done means. By default Pane starts it at once in its own Session, through the load gate.",
+      "usage": [
+        "runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--agent <agent>] [--attach <file|url>]... [--no-start] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos update",
+      "summary": "Change a to-do's title, summary or done-when lines, or check lines off.",
+      "usage": [
+        "runpane todos update <todo> [--title <title>] [--summary <markdown>] [--done-when <text>]... [--check <n,...>] [--uncheck <n,...>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos attach",
+      "summary": "Attach a file or URL to a to-do: a plan, mock-up, design, PR, findings, decision or other page.",
+      "usage": [
+        "runpane todos attach <todo> <target> [--kind <plan|mockup|design|pr|findings|decision|doc|image|link>] [--label <label>] [--note <text>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoAttachResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos detach",
+      "summary": "Remove an attachment from a to-do.",
+      "usage": [
+        "runpane todos detach <todo> <attachment> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoDetachResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos show",
+      "summary": "Show one to-do: its attachments first, then the to-do, its sub-to-dos and recent activity.",
+      "usage": [
+        "runpane todos show <todo> [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoShowResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos list",
+      "summary": "List open to-dos on this machine with the status the person sees.",
+      "usage": [
+        "runpane todos list [--all] [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoListResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos assign",
+      "summary": "Hand a to-do to the tab doing its work, or back to its Session's orchestrator.",
+      "usage": [
+        "runpane todos assign <todo> [--panel <tab-id>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos ask",
+      "summary": "Ask a question about a to-do: it goes to the to-do's requester first, and to the person only when needed.",
+      "usage": [
+        "runpane todos ask <todo> <question> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoAskResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos comment",
+      "summary": "Post a short message on a to-do's chat: a progress note, or the requester's answer.",
+      "usage": [
+        "runpane todos comment <todo> <text> [--escalate] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoCommentResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos review",
+      "summary": "Send a to-do to the person for review: Pane shows a review card with its attachments.",
+      "usage": [
+        "runpane todos review <todo> [--summary <text>] [--no-attachments <why>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoReviewResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos done",
+      "summary": "Mark a to-do done.",
+      "usage": [
+        "runpane todos done <todo> [--person-said <words>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos drop",
+      "summary": "Drop a to-do: the work won't be done.",
+      "usage": [
+        "runpane todos drop <todo> [--reason <text>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos archive",
+      "summary": "Archive a closed to-do's Panes and Session, keeping any Pane with unsaved work.",
+      "usage": [
+        "runpane todos archive <todo> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoArchiveResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos start",
+      "summary": "Start a to-do that is not running: its Session and orchestrator, through the load gate.",
+      "usage": [
+        "runpane todos start <todo> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoStartResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos stop",
+      "summary": "Stop a to-do: Pane stops keeping it moving until it is started again.",
+      "usage": [
+        "runpane todos stop <todo> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoResult"
       ],
       "localControl": true
     }
@@ -3410,6 +3675,46 @@ export const RUNPANE_CONTRACT = {
         "name": "--kind",
         "value": "<kind>",
         "description": "Kind of item for runpane machine cleanup, such as update-snapshot; runpane machine health lists each item's kind."
+      },
+      {
+        "name": "--done-when",
+        "value": "<text>",
+        "description": "todos create and update: one line of what done means; repeatable. On update it replaces the list."
+      },
+      {
+        "name": "--parent",
+        "value": "<T-n>",
+        "description": "todos create: make a sub-to-do of this to-do, in its Session."
+      },
+      {
+        "name": "--check",
+        "value": "<n,...>",
+        "description": "todos update: done-when line numbers (from 1) now met, comma-separated or repeated."
+      },
+      {
+        "name": "--uncheck",
+        "value": "<n,...>",
+        "description": "todos update: done-when line numbers (from 1) no longer met."
+      },
+      {
+        "name": "--label",
+        "value": "<label>",
+        "description": "todos attach: the attachment's label."
+      },
+      {
+        "name": "--no-attachments",
+        "value": "<why>",
+        "description": "todos review: why there is nothing to attach."
+      },
+      {
+        "name": "--person-said",
+        "value": "<words>",
+        "description": "todos done: the person's own words telling you to close it."
+      },
+      {
+        "name": "--todo",
+        "value": "<T-n>",
+        "description": "notify, report and agents start: the to-do this card, report or agent works on."
       }
     ],
     "localBoolean": [
@@ -3576,6 +3881,14 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--idle",
         "description": "devices free: shut down Pane's devices no Pane holds."
+      },
+      {
+        "name": "--no-start",
+        "description": "todos create only: save the to-do without starting it."
+      },
+      {
+        "name": "--escalate",
+        "description": "todos comment only: from the requester, have Pane ask the person instead."
       }
     ]
   },
@@ -3637,6 +3950,11 @@ export const RUNPANE_CONTRACT = {
         "  runpane loops list [--json]",
         "  runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  runpane loops update|run|pause|resume|delete --loop <id> --yes",
+        "  runpane todos list [--all] [--json]",
+        "  runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--no-start] [--json]",
+        "  runpane todos show|start|stop|done|drop|archive <todo> [--json]",
+        "  runpane todos attach <todo> <file|url> [--kind <kind>] [--label <label>] [--json]",
+        "  runpane todos ask <todo> <question> | comment <todo> <text> | review <todo> [--json]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -4882,7 +5200,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "agents start": [
         "Usage:",
-        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
+        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]",
         "",
         "Start an agent on a task and wait until it is ready: as a new tab in an existing Pane with --pane <id> (review, audit, fix, QA), or in a new Pane with --repo and --name for new work.",
         "",
@@ -4894,6 +5212,7 @@ export const RUNPANE_CONTRACT = {
         "  --prompt <task>                 The task to send once the agent is ready.",
         "  --base-branch <branch>          Branch to start the worktree from.",
         "  --yes                           Confirm this change; required in non-interactive shells.",
+        "  --todo <T-n>                    The to-do the agent works on.",
         "  --json                          Print machine-readable output.",
         "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
@@ -4934,7 +5253,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "report": [
         "Usage:",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]",
         "",
         "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
         "agent.report watch event and reads it in `agents status` and `sessions overview`.",
@@ -4952,6 +5271,7 @@ export const RUNPANE_CONTRACT = {
         "  --pane <pane-id>               Pane id when not running inside a Pane terminal",
         "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --todo <T-n>                   The to-do this report is about",
         "  --json                         Print machine-readable output",
         "",
         "Example:",
@@ -4959,7 +5279,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "notify": [
         "Usage:",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]",
         "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
         "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
@@ -4997,6 +5317,7 @@ export const RUNPANE_CONTRACT = {
         "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --todo <T-n>                   The to-do this card is about; it shows on the to-do's page",
         "  --json                         Print machine-readable output",
         "",
         "Examples:",
@@ -5858,6 +6179,309 @@ export const RUNPANE_CONTRACT = {
         "  --yes                        Delete them. Without --yes, list them and delete nothing.",
         "  --json                       Print JSON output.",
         "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "todos": [
+        "Usage:",
+        "  runpane todos <create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop> [options]",
+        "",
+        "To-dos are the person's list of agent work. Each started to-do gets its own Session and",
+        "orchestrator, and Pane keeps it moving until it is done. Attach every plan, mock-up, design,",
+        "PR and findings page as soon as it exists; ask the requester first with `todos ask`.",
+        "",
+        "Commands:",
+        "  runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--agent <agent>] [--attach <file|url>]... [--no-start] [--json] [--pane-dir <path>]",
+        "  runpane todos update <todo> [--title <title>] [--summary <markdown>] [--done-when <text>]... [--check <n,...>] [--uncheck <n,...>] [--json] [--pane-dir <path>]",
+        "  runpane todos attach <todo> <target> [--kind <plan|mockup|design|pr|findings|decision|doc|image|link>] [--label <label>] [--note <text>] [--json] [--pane-dir <path>]",
+        "  runpane todos detach <todo> <attachment> [--json] [--pane-dir <path>]",
+        "  runpane todos show <todo> [--json] [--pane-dir <path>]",
+        "  runpane todos list [--all] [--json] [--pane-dir <path>]",
+        "  runpane todos assign <todo> [--panel <tab-id>] [--json] [--pane-dir <path>]",
+        "  runpane todos ask <todo> <question> [--json] [--pane-dir <path>]",
+        "  runpane todos comment <todo> <text> [--escalate] [--json] [--pane-dir <path>]",
+        "  runpane todos review <todo> [--summary <text>] [--no-attachments <why>] [--json] [--pane-dir <path>]",
+        "  runpane todos done <todo> [--person-said <words>] [--json] [--pane-dir <path>]",
+        "  runpane todos drop <todo> [--reason <text>] [--json] [--pane-dir <path>]",
+        "  runpane todos archive <todo> [--json] [--pane-dir <path>]",
+        "  runpane todos start <todo> [--json] [--pane-dir <path>]",
+        "  runpane todos stop <todo> [--json] [--pane-dir <path>]"
+      ],
+      "todos create": [
+        "Usage:",
+        "  runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--agent <agent>] [--attach <file|url>]... [--no-start] [--json] [--pane-dir <path>]",
+        "",
+        "Create a to-do: one piece of work with a title, a summary and what done means. By default Pane starts it at once in its own Session, through the load gate.",
+        "A to-do is the unit of agent work the person tracks on the To-dos screen. Started, it gets its own Session and orchestrator agent, which keeps it moving until it is done. With --parent it is a sub-to-do in the parent's Session, for a piece of the parent's work. The caller's tab is recorded as its requester: questions about it come back to you first. Returns the to-do; `status` is what the person sees (waiting, working, queued, idle, done, dropped) and `reason` says why.",
+        "",
+        "Rules:",
+        "  - Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments.",
+        "  - When you need an answer, ask the to-do's requester first with `runpane todos ask`; Pane routes it to the person only when the requester is the person or can't answer. Don't post your own notify card for a to-do's question.",
+        "  - A `machine_busy` error means this machine is too loaded to start more work: wait. Pane queues the to-do and starts it when load comes down; don't retry in a loop or start the work some other way.",
+        "",
+        "Options:",
+        "  <title>                        One line naming the work, as the person would say it.",
+        "  --summary <markdown>           What the work is and why, in Markdown.",
+        "  --done-when <text>             One line of what done means, checked off as it is met. Repeatable on the CLI; over MCP pass a JSON array of lines.",
+        "  --parent <T-n>                 Make it a sub-to-do of this to-do, in that to-do's Session.",
+        "  --repo <selector>              The repo it works in: its name or id from `runpane repos list`.",
+        "  --agent <agent>                The agent its orchestrator runs, such as claude or codex. Defaults to the person's choice in Settings.",
+        "  --attach <file|url>            A file or URL to attach at once; a relative path resolves against the working directory. Repeatable on the CLI; over MCP pass a JSON array.",
+        "  --no-start                     Save it without starting it; it waits as Idle until started.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos create \"Keyboard sheet and keyboard approvals\" --summary \"Every shortcut on one sheet\" --done-when \"Sheet opens with ?\" --done-when \"Approvals answer from the keyboard\" --repo pane --json"
+      ],
+      "todos update": [
+        "Usage:",
+        "  runpane todos update <todo> [--title <title>] [--summary <markdown>] [--done-when <text>]... [--check <n,...>] [--uncheck <n,...>] [--json] [--pane-dir <path>]",
+        "",
+        "Change a to-do's title, summary or done-when lines, or check lines off.",
+        "--done-when replaces the whole list; lines that stay the same keep their checks. --check and --uncheck take 1-based line numbers, comma-separated or repeated. Returns the to-do.",
+        "",
+        "Rules:",
+        "  - Check a done-when line off as soon as it is met, so the person sees progress.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --title <title>                A new title.",
+        "  --summary <markdown>           A new summary, in Markdown.",
+        "  --done-when <text>             The new done-when list, one line each; it replaces the old list. Repeatable on the CLI; over MCP pass a JSON array.",
+        "  --check <n,...>                Done-when line numbers (from 1) now met, such as 1 or 1,3.",
+        "  --uncheck <n,...>              Done-when line numbers (from 1) no longer met.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos update T-12 --check 1,2 --json"
+      ],
+      "todos attach": [
+        "Usage:",
+        "  runpane todos attach <todo> <target> [--kind <plan|mockup|design|pr|findings|decision|doc|image|link>] [--label <label>] [--note <text>] [--json] [--pane-dir <path>]",
+        "",
+        "Attach a file or URL to a to-do: a plan, mock-up, design, PR, findings, decision or other page.",
+        "A file path is made absolute against the working directory and recorded with this machine; a URL is kept as given. Without --kind, Pane picks one from the target. Returns the attachment; its id is what `runpane todos detach` takes.",
+        "",
+        "Rules:",
+        "  - Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  <target>                       A file path (relative paths resolve against the working directory) or an http(s) URL.",
+        "  --kind <plan|mockup|design|pr|findings|decision|doc|image|link> What it is.",
+        "  --label <label>                A short label; defaults to the file name or page title.",
+        "  --note <text>                  One line on what to look at in it.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos attach T-12 tmp/plan/cover-sheet.html --kind plan --label \"Plan cover sheet\" --json"
+      ],
+      "todos detach": [
+        "Usage:",
+        "  runpane todos detach <todo> <attachment> [--json] [--pane-dir <path>]",
+        "",
+        "Remove an attachment from a to-do.",
+        "Takes the attachment id that `runpane todos show` and `todos attach` print. The file or page itself is not touched.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  <attachment>                   The attachment id, such as 3.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos detach T-12 3 --json"
+      ],
+      "todos show": [
+        "Usage:",
+        "  runpane todos show <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Show one to-do: its attachments first, then the to-do, its sub-to-dos and recent activity.",
+        "Read the attachments before you start: they hold the plan, designs and decisions the work follows. Attachments inherited from the parent or a sub-to-do carry `from`. Activity is newest last: the person's messages, agent replies and Pane's events.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos show T-12 --json"
+      ],
+      "todos list": [
+        "Usage:",
+        "  runpane todos list [--all] [--json] [--pane-dir <path>]",
+        "",
+        "List open to-dos on this machine with the status the person sees.",
+        "Each line is the to-do, its status (Waiting on you, Working, Queued, Idle) and its title, then why. --all adds to-dos done or dropped in the last 7 days.",
+        "",
+        "Options:",
+        "  --all                          Also list to-dos done or dropped in the last 7 days.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos list --json"
+      ],
+      "todos assign": [
+        "Usage:",
+        "  runpane todos assign <todo> [--panel <tab-id>] [--json] [--pane-dir <path>]",
+        "",
+        "Hand a to-do to the tab doing its work, or back to its Session's orchestrator.",
+        "The assigned tab gets the to-do's chat and is the one Pane keeps moving. Without --panel the to-do goes back to its Session's orchestrator.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --panel <tab-id>               The tab (panel id) now doing the work.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos assign T-12 --panel <panel-id> --json"
+      ],
+      "todos ask": [
+        "Usage:",
+        "  runpane todos ask <todo> <question> [--json] [--pane-dir <path>]",
+        "",
+        "Ask a question about a to-do: it goes to the to-do's requester first, and to the person only when needed.",
+        "When the requester is another agent, the question lands in its tab and its reply comes back to yours. When the requester is the person, or the requester escalates, Pane shows it to the person as an approval (approvalId). `routedTo` says which.",
+        "",
+        "Rules:",
+        "  - When you need an answer, ask the to-do's requester first with `runpane todos ask`; Pane routes it to the person only when the requester is the person or can't answer. Don't post your own notify card for a to-do's question.",
+        "  - Replies and comments on a to-do are short summaries of at most 2,000 characters; put the detail in an attached page.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  <question>                     The question, standing on its own.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos ask T-12 \"Should the sheet list chat shortcuts too?\" --json"
+      ],
+      "todos comment": [
+        "Usage:",
+        "  runpane todos comment <todo> <text> [--escalate] [--json] [--pane-dir <path>]",
+        "",
+        "Post a short message on a to-do's chat: a progress note, or the requester's answer.",
+        "The message shows on the to-do's page and reaches whoever its chat goes to now. A requester that can't settle a question passes --escalate, and Pane asks the person instead.",
+        "",
+        "Rules:",
+        "  - Replies and comments on a to-do are short summaries of at most 2,000 characters; put the detail in an attached page.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  <text>                         The message, in Markdown; at most 2,000 characters.",
+        "  --escalate                     From the requester: you can't settle it, so Pane asks the person.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos comment T-12 \"Sheet done; approvals next.\" --json"
+      ],
+      "todos review": [
+        "Usage:",
+        "  runpane todos review <todo> [--summary <text>] [--no-attachments <why>] [--json] [--pane-dir <path>]",
+        "",
+        "Send a to-do to the person for review: Pane shows a review card with its attachments.",
+        "Moves the to-do to In review and posts the person's review card (approvalId). Their Accept lets an agent mark it done; their changes come back on its chat.",
+        "",
+        "Rules:",
+        "  - `runpane todos review` needs at least one attachment, or `--no-attachments \"<why>\"` when there is truly nothing to show.",
+        "  - Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --summary <text>               What changed and what to look at, in a few lines.",
+        "  --no-attachments <why>         Why there is nothing to attach; required when the to-do has no attachments.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos review T-12 --summary \"Sheet and approvals ship; see the PR.\" --json"
+      ],
+      "todos done": [
+        "Usage:",
+        "  runpane todos done <todo> [--person-said <words>] [--json] [--pane-dir <path>]",
+        "",
+        "Mark a to-do done.",
+        "Closes it and stops Pane keeping it moving. Its Panes stay until `runpane todos archive`.",
+        "",
+        "Rules:",
+        "  - An agent may mark a top-level to-do done only after the person accepts it on its review card, or with `--person-said \"<their words>\"` quoting the person telling you to close it. Sub-to-dos close when their work is done.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --person-said <words>          The person's own words telling you to close it, quoted.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos done T-13 --json"
+      ],
+      "todos drop": [
+        "Usage:",
+        "  runpane todos drop <todo> [--reason <text>] [--json] [--pane-dir <path>]",
+        "",
+        "Drop a to-do: the work won't be done.",
+        "Closes it as dropped and stops Pane keeping it moving. Drop only when the person or the requester says so.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --reason <text>                Why it was dropped, shown on its page.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos drop T-14 --reason \"Covered by T-12\" --json"
+      ],
+      "todos archive": [
+        "Usage:",
+        "  runpane todos archive <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Archive a closed to-do's Panes and Session, keeping any Pane with unsaved work.",
+        "Archives each of its Panes whose work is saved, and its Session once nothing is left. `kept` lists the Panes left and why, such as unpushed commits.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos archive T-12 --json"
+      ],
+      "todos start": [
+        "Usage:",
+        "  runpane todos start <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Start a to-do that is not running: its Session and orchestrator, through the load gate.",
+        "When the machine is busy the to-do is queued (`queued: true`) and starts when load comes down.",
+        "",
+        "Rules:",
+        "  - A `machine_busy` error means this machine is too loaded to start more work: wait. Pane queues the to-do and starts it when load comes down; don't retry in a loop or start the work some other way.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos start T-12 --json"
+      ],
+      "todos stop": [
+        "Usage:",
+        "  runpane todos stop <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Stop a to-do: Pane stops keeping it moving until it is started again.",
+        "Its agents finish their turn and are not nudged again. Start it again with `runpane todos start`.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos stop T-12 --json"
       ]
     },
     "pip": {
@@ -5948,6 +6572,11 @@ export const RUNPANE_CONTRACT = {
         "  python -m runpane loops list [--json]",
         "  python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  python -m runpane loops update|run|pause|resume|delete --loop <id> --yes",
+        "  python -m runpane todos list [--all] [--json]",
+        "  python -m runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--no-start] [--json]",
+        "  python -m runpane todos show|start|stop|done|drop|archive <todo> [--json]",
+        "  python -m runpane todos attach <todo> <file|url> [--kind <kind>] [--label <label>] [--json]",
+        "  python -m runpane todos ask <todo> <question> | comment <todo> <text> | review <todo> [--json]",
         "  runpane help [command]",
         "",
         "Quick start:",
@@ -7103,7 +7732,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "agents start": [
         "Usage:",
-        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
+        "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]",
         "",
         "`runpane agents start` ships in the npm package and the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest agents start"
@@ -7130,7 +7759,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "report": [
         "Usage:",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]",
         "",
         "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
         "agent.report watch event and reads it in `agents status` and `sessions overview`.",
@@ -7148,6 +7777,7 @@ export const RUNPANE_CONTRACT = {
         "  --pane <pane-id>               Pane id when not running inside a Pane terminal",
         "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --todo <T-n>                   The to-do this report is about",
         "  --json                         Print machine-readable output",
         "",
         "Example:",
@@ -7155,7 +7785,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "notify": [
         "Usage:",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]",
         "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
         "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
@@ -7193,6 +7823,7 @@ export const RUNPANE_CONTRACT = {
         "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --todo <T-n>                   The to-do this card is about; it shows on the to-do's page",
         "  --json                         Print machine-readable output",
         "",
         "Examples:",
@@ -7951,6 +8582,309 @@ export const RUNPANE_CONTRACT = {
         "  --yes                        Delete them. Without --yes, list them and delete nothing.",
         "  --json                       Print JSON output.",
         "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "todos": [
+        "Usage:",
+        "  python -m runpane todos <create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop> [options]",
+        "",
+        "To-dos are the person's list of agent work. Each started to-do gets its own Session and",
+        "orchestrator, and Pane keeps it moving until it is done. Attach every plan, mock-up, design,",
+        "PR and findings page as soon as it exists; ask the requester first with `todos ask`.",
+        "",
+        "Commands:",
+        "  python -m runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--agent <agent>] [--attach <file|url>]... [--no-start] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos update <todo> [--title <title>] [--summary <markdown>] [--done-when <text>]... [--check <n,...>] [--uncheck <n,...>] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos attach <todo> <target> [--kind <plan|mockup|design|pr|findings|decision|doc|image|link>] [--label <label>] [--note <text>] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos detach <todo> <attachment> [--json] [--pane-dir <path>]",
+        "  python -m runpane todos show <todo> [--json] [--pane-dir <path>]",
+        "  python -m runpane todos list [--all] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos assign <todo> [--panel <tab-id>] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos ask <todo> <question> [--json] [--pane-dir <path>]",
+        "  python -m runpane todos comment <todo> <text> [--escalate] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos review <todo> [--summary <text>] [--no-attachments <why>] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos done <todo> [--person-said <words>] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos drop <todo> [--reason <text>] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos archive <todo> [--json] [--pane-dir <path>]",
+        "  python -m runpane todos start <todo> [--json] [--pane-dir <path>]",
+        "  python -m runpane todos stop <todo> [--json] [--pane-dir <path>]"
+      ],
+      "todos create": [
+        "Usage:",
+        "  python -m runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--agent <agent>] [--attach <file|url>]... [--no-start] [--json] [--pane-dir <path>]",
+        "",
+        "Create a to-do: one piece of work with a title, a summary and what done means. By default Pane starts it at once in its own Session, through the load gate.",
+        "A to-do is the unit of agent work the person tracks on the To-dos screen. Started, it gets its own Session and orchestrator agent, which keeps it moving until it is done. With --parent it is a sub-to-do in the parent's Session, for a piece of the parent's work. The caller's tab is recorded as its requester: questions about it come back to you first. Returns the to-do; `status` is what the person sees (waiting, working, queued, idle, done, dropped) and `reason` says why.",
+        "",
+        "Rules:",
+        "  - Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments.",
+        "  - When you need an answer, ask the to-do's requester first with `runpane todos ask`; Pane routes it to the person only when the requester is the person or can't answer. Don't post your own notify card for a to-do's question.",
+        "  - A `machine_busy` error means this machine is too loaded to start more work: wait. Pane queues the to-do and starts it when load comes down; don't retry in a loop or start the work some other way.",
+        "",
+        "Options:",
+        "  <title>                        One line naming the work, as the person would say it.",
+        "  --summary <markdown>           What the work is and why, in Markdown.",
+        "  --done-when <text>             One line of what done means, checked off as it is met. Repeatable on the CLI; over MCP pass a JSON array of lines.",
+        "  --parent <T-n>                 Make it a sub-to-do of this to-do, in that to-do's Session.",
+        "  --repo <selector>              The repo it works in: its name or id from `runpane repos list`.",
+        "  --agent <agent>                The agent its orchestrator runs, such as claude or codex. Defaults to the person's choice in Settings.",
+        "  --attach <file|url>            A file or URL to attach at once; a relative path resolves against the working directory. Repeatable on the CLI; over MCP pass a JSON array.",
+        "  --no-start                     Save it without starting it; it waits as Idle until started.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos create \"Keyboard sheet and keyboard approvals\" --summary \"Every shortcut on one sheet\" --done-when \"Sheet opens with ?\" --done-when \"Approvals answer from the keyboard\" --repo pane --json"
+      ],
+      "todos update": [
+        "Usage:",
+        "  python -m runpane todos update <todo> [--title <title>] [--summary <markdown>] [--done-when <text>]... [--check <n,...>] [--uncheck <n,...>] [--json] [--pane-dir <path>]",
+        "",
+        "Change a to-do's title, summary or done-when lines, or check lines off.",
+        "--done-when replaces the whole list; lines that stay the same keep their checks. --check and --uncheck take 1-based line numbers, comma-separated or repeated. Returns the to-do.",
+        "",
+        "Rules:",
+        "  - Check a done-when line off as soon as it is met, so the person sees progress.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --title <title>                A new title.",
+        "  --summary <markdown>           A new summary, in Markdown.",
+        "  --done-when <text>             The new done-when list, one line each; it replaces the old list. Repeatable on the CLI; over MCP pass a JSON array.",
+        "  --check <n,...>                Done-when line numbers (from 1) now met, such as 1 or 1,3.",
+        "  --uncheck <n,...>              Done-when line numbers (from 1) no longer met.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos update T-12 --check 1,2 --json"
+      ],
+      "todos attach": [
+        "Usage:",
+        "  python -m runpane todos attach <todo> <target> [--kind <plan|mockup|design|pr|findings|decision|doc|image|link>] [--label <label>] [--note <text>] [--json] [--pane-dir <path>]",
+        "",
+        "Attach a file or URL to a to-do: a plan, mock-up, design, PR, findings, decision or other page.",
+        "A file path is made absolute against the working directory and recorded with this machine; a URL is kept as given. Without --kind, Pane picks one from the target. Returns the attachment; its id is what `runpane todos detach` takes.",
+        "",
+        "Rules:",
+        "  - Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  <target>                       A file path (relative paths resolve against the working directory) or an http(s) URL.",
+        "  --kind <plan|mockup|design|pr|findings|decision|doc|image|link> What it is.",
+        "  --label <label>                A short label; defaults to the file name or page title.",
+        "  --note <text>                  One line on what to look at in it.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos attach T-12 tmp/plan/cover-sheet.html --kind plan --label \"Plan cover sheet\" --json"
+      ],
+      "todos detach": [
+        "Usage:",
+        "  python -m runpane todos detach <todo> <attachment> [--json] [--pane-dir <path>]",
+        "",
+        "Remove an attachment from a to-do.",
+        "Takes the attachment id that `runpane todos show` and `todos attach` print. The file or page itself is not touched.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  <attachment>                   The attachment id, such as 3.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos detach T-12 3 --json"
+      ],
+      "todos show": [
+        "Usage:",
+        "  python -m runpane todos show <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Show one to-do: its attachments first, then the to-do, its sub-to-dos and recent activity.",
+        "Read the attachments before you start: they hold the plan, designs and decisions the work follows. Attachments inherited from the parent or a sub-to-do carry `from`. Activity is newest last: the person's messages, agent replies and Pane's events.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos show T-12 --json"
+      ],
+      "todos list": [
+        "Usage:",
+        "  python -m runpane todos list [--all] [--json] [--pane-dir <path>]",
+        "",
+        "List open to-dos on this machine with the status the person sees.",
+        "Each line is the to-do, its status (Waiting on you, Working, Queued, Idle) and its title, then why. --all adds to-dos done or dropped in the last 7 days.",
+        "",
+        "Options:",
+        "  --all                          Also list to-dos done or dropped in the last 7 days.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos list --json"
+      ],
+      "todos assign": [
+        "Usage:",
+        "  python -m runpane todos assign <todo> [--panel <tab-id>] [--json] [--pane-dir <path>]",
+        "",
+        "Hand a to-do to the tab doing its work, or back to its Session's orchestrator.",
+        "The assigned tab gets the to-do's chat and is the one Pane keeps moving. Without --panel the to-do goes back to its Session's orchestrator.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --panel <tab-id>               The tab (panel id) now doing the work.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos assign T-12 --panel <panel-id> --json"
+      ],
+      "todos ask": [
+        "Usage:",
+        "  python -m runpane todos ask <todo> <question> [--json] [--pane-dir <path>]",
+        "",
+        "Ask a question about a to-do: it goes to the to-do's requester first, and to the person only when needed.",
+        "When the requester is another agent, the question lands in its tab and its reply comes back to yours. When the requester is the person, or the requester escalates, Pane shows it to the person as an approval (approvalId). `routedTo` says which.",
+        "",
+        "Rules:",
+        "  - When you need an answer, ask the to-do's requester first with `runpane todos ask`; Pane routes it to the person only when the requester is the person or can't answer. Don't post your own notify card for a to-do's question.",
+        "  - Replies and comments on a to-do are short summaries of at most 2,000 characters; put the detail in an attached page.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  <question>                     The question, standing on its own.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos ask T-12 \"Should the sheet list chat shortcuts too?\" --json"
+      ],
+      "todos comment": [
+        "Usage:",
+        "  python -m runpane todos comment <todo> <text> [--escalate] [--json] [--pane-dir <path>]",
+        "",
+        "Post a short message on a to-do's chat: a progress note, or the requester's answer.",
+        "The message shows on the to-do's page and reaches whoever its chat goes to now. A requester that can't settle a question passes --escalate, and Pane asks the person instead.",
+        "",
+        "Rules:",
+        "  - Replies and comments on a to-do are short summaries of at most 2,000 characters; put the detail in an attached page.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  <text>                         The message, in Markdown; at most 2,000 characters.",
+        "  --escalate                     From the requester: you can't settle it, so Pane asks the person.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos comment T-12 \"Sheet done; approvals next.\" --json"
+      ],
+      "todos review": [
+        "Usage:",
+        "  python -m runpane todos review <todo> [--summary <text>] [--no-attachments <why>] [--json] [--pane-dir <path>]",
+        "",
+        "Send a to-do to the person for review: Pane shows a review card with its attachments.",
+        "Moves the to-do to In review and posts the person's review card (approvalId). Their Accept lets an agent mark it done; their changes come back on its chat.",
+        "",
+        "Rules:",
+        "  - `runpane todos review` needs at least one attachment, or `--no-attachments \"<why>\"` when there is truly nothing to show.",
+        "  - Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --summary <text>               What changed and what to look at, in a few lines.",
+        "  --no-attachments <why>         Why there is nothing to attach; required when the to-do has no attachments.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos review T-12 --summary \"Sheet and approvals ship; see the PR.\" --json"
+      ],
+      "todos done": [
+        "Usage:",
+        "  python -m runpane todos done <todo> [--person-said <words>] [--json] [--pane-dir <path>]",
+        "",
+        "Mark a to-do done.",
+        "Closes it and stops Pane keeping it moving. Its Panes stay until `runpane todos archive`.",
+        "",
+        "Rules:",
+        "  - An agent may mark a top-level to-do done only after the person accepts it on its review card, or with `--person-said \"<their words>\"` quoting the person telling you to close it. Sub-to-dos close when their work is done.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --person-said <words>          The person's own words telling you to close it, quoted.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos done T-13 --json"
+      ],
+      "todos drop": [
+        "Usage:",
+        "  python -m runpane todos drop <todo> [--reason <text>] [--json] [--pane-dir <path>]",
+        "",
+        "Drop a to-do: the work won't be done.",
+        "Closes it as dropped and stops Pane keeping it moving. Drop only when the person or the requester says so.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --reason <text>                Why it was dropped, shown on its page.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos drop T-14 --reason \"Covered by T-12\" --json"
+      ],
+      "todos archive": [
+        "Usage:",
+        "  python -m runpane todos archive <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Archive a closed to-do's Panes and Session, keeping any Pane with unsaved work.",
+        "Archives each of its Panes whose work is saved, and its Session once nothing is left. `kept` lists the Panes left and why, such as unpushed commits.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos archive T-12 --json"
+      ],
+      "todos start": [
+        "Usage:",
+        "  python -m runpane todos start <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Start a to-do that is not running: its Session and orchestrator, through the load gate.",
+        "When the machine is busy the to-do is queued (`queued: true`) and starts when load comes down.",
+        "",
+        "Rules:",
+        "  - A `machine_busy` error means this machine is too loaded to start more work: wait. Pane queues the to-do and starts it when load comes down; don't retry in a loop or start the work some other way.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos start T-12 --json"
+      ],
+      "todos stop": [
+        "Usage:",
+        "  python -m runpane todos stop <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Stop a to-do: Pane stops keeping it moving until it is started again.",
+        "Its agents finish their turn and are not nudged again. Start it again with `runpane todos start`.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos stop T-12 --json"
       ]
     }
   },
@@ -8061,6 +8995,10 @@ export const RUNPANE_CONTRACT = {
       "runpane loops create --repo active --name nightly-bug-sweep --cron \"0 3 * * *\" --agent claude --prompt \"Fix one bug from yesterday's issues\" --yes --json",
       "runpane loops list --json",
       "runpane loops run --loop <loop-id> --yes --json",
+      "runpane todos create \"Keyboard sheet\" --done-when \"Sheet opens with ?\" --repo pane --json",
+      "runpane todos attach T-12 tmp/plan/cover-sheet.html --kind plan --json",
+      "runpane todos ask T-12 \"Should the sheet list chat shortcuts too?\" --json",
+      "runpane todos review T-12 --summary \"Ready; see the PR.\" --json",
       "runpane agents start --repo active --name fix-login --agent claude --prompt \"Fix the login redirect\" --yes --json",
       "runpane agents start --pane <pane-id> --agent codex --prompt \"Review the PR from this branch and report findings\" --yes --json",
       "runpane agents status --pane <pane-id> --json",
@@ -8137,6 +9075,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
       "`runpane machine health` shows this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free by tier. `runpane machine cleanup --kind <kind>` lists one kind of tier 1 or 2 item (a dry run) and deletes them with `--yes`; tier 3 items are not Pane's, so it refuses them and says how to free them. Agents free disk only through this command, never with rm.",
       "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
+      "`runpane todos create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop` manage to-dos, the person's list of agent work: each started to-do gets its own Session and orchestrator, and Pane keeps it moving until it is done. Each call records the caller's tab ($PANE_PANEL_ID). Attach plans, mock-ups, designs, PRs, findings and decisions as soon as they exist; ask the requester first with `todos ask`; replies are summaries of at most 2,000 characters; `todos review` needs attachments or `--no-attachments`; an agent marks a top-level to-do done only after the person's Accept or with `--person-said`. `--todo <T-n>` on `notify`, `report` and `agents start` links that card, report or agent to a to-do.",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
       "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
@@ -9729,6 +10668,212 @@ export const RUNPANE_CONTRACT = {
         "cleanup",
         "--kind",
         "update-snapshot",
+        "--yes",
+        "--json"
+      ],
+      [
+        "todos",
+        "create",
+        "Keyboard sheet",
+        "--summary",
+        "Every shortcut",
+        "--done-when",
+        "Sheet opens",
+        "--done-when",
+        "Approvals work",
+        "--parent",
+        "T-11",
+        "--repo",
+        "pane",
+        "--agent",
+        "claude",
+        "--attach",
+        "plan.html",
+        "--attach",
+        "https://example.com/x",
+        "--no-start",
+        "--json"
+      ],
+      [
+        "todos",
+        "create",
+        "--repo",
+        "pane",
+        "Fix",
+        "the",
+        "focus",
+        "ring"
+      ],
+      [
+        "todos",
+        "create",
+        "--done-when=[\"one\",\"two\"]",
+        "--attach=[\"a.html\",\"b.png\"]",
+        "Two lines"
+      ],
+      [
+        "todos",
+        "create",
+        "--",
+        "-x flag title"
+      ],
+      [
+        "todos",
+        "comment",
+        "T-12",
+        "- did the sheet\n- next: approvals",
+        "--json"
+      ],
+      [
+        "todos",
+        "update",
+        "T-12",
+        "--title",
+        "New title",
+        "--summary",
+        "New",
+        "--done-when",
+        "One",
+        "--check",
+        "1,3",
+        "--check",
+        "2",
+        "--uncheck",
+        "4",
+        "--json"
+      ],
+      [
+        "todos",
+        "attach",
+        "T-12",
+        "docs/plan.html",
+        "--kind",
+        "plan",
+        "--label",
+        "Plan",
+        "--note",
+        "Read section 2",
+        "--json"
+      ],
+      [
+        "todos",
+        "detach",
+        "12",
+        "3",
+        "--json"
+      ],
+      [
+        "todos",
+        "show",
+        "T-12",
+        "--json"
+      ],
+      [
+        "todos",
+        "list",
+        "--all",
+        "--json"
+      ],
+      [
+        "todos",
+        "assign",
+        "T-12",
+        "--panel",
+        "panel-1",
+        "--json"
+      ],
+      [
+        "todos",
+        "ask",
+        "T-12",
+        "Should it list chat shortcuts?",
+        "--json"
+      ],
+      [
+        "todos",
+        "comment",
+        "T-12",
+        "Sheet done.",
+        "--escalate",
+        "--json"
+      ],
+      [
+        "todos",
+        "review",
+        "T-12",
+        "--summary",
+        "Ready",
+        "--no-attachments",
+        "A config change only",
+        "--json"
+      ],
+      [
+        "todos",
+        "done",
+        "T-12",
+        "--person-said",
+        "ship it",
+        "--json"
+      ],
+      [
+        "todos",
+        "drop",
+        "T-12",
+        "--reason",
+        "Covered by T-11",
+        "--json"
+      ],
+      [
+        "todos",
+        "archive",
+        "T-12",
+        "--json"
+      ],
+      [
+        "todos",
+        "start",
+        "T-12",
+        "--json"
+      ],
+      [
+        "todos",
+        "stop",
+        "T-12",
+        "--pane-dir",
+        "/tmp/pane",
+        "--json"
+      ],
+      [
+        "notify",
+        "--ui",
+        "ask",
+        "--title",
+        "Which?",
+        "--todo",
+        "T-12",
+        "--json"
+      ],
+      [
+        "report",
+        "--state",
+        "ready",
+        "--summary",
+        "Done",
+        "--todo",
+        "T-12",
+        "--json"
+      ],
+      [
+        "agents",
+        "start",
+        "--pane",
+        "pane-1",
+        "--agent",
+        "codex",
+        "--prompt",
+        "Review it",
+        "--todo",
+        "T-12",
         "--yes",
         "--json"
       ]
@@ -19960,6 +21105,469 @@ export const RUNPANE_CONTRACT = {
           "additionalProperties": false
         }
       ]
+    },
+    "todo": {
+      "type": "object",
+      "description": "One to-do. `status` is what the person sees, worked out each time; `state` is the stored lifecycle.",
+      "required": [
+        "ref",
+        "number",
+        "title",
+        "state",
+        "status",
+        "reason",
+        "parent",
+        "sessionId",
+        "requester",
+        "assignee",
+        "summary",
+        "doneWhen",
+        "attachmentCount",
+        "updatedAt"
+      ],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "description": "T-12."
+        },
+        "number": {
+          "type": "number"
+        },
+        "title": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "todo",
+            "in_progress",
+            "in_review",
+            "accepted",
+            "stopped",
+            "done",
+            "dropped"
+          ]
+        },
+        "status": {
+          "enum": [
+            "waiting",
+            "working",
+            "queued",
+            "idle",
+            "done",
+            "dropped"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why it shows that status, such as \"devbox is busy · starts when load comes down\"; empty while working."
+        },
+        "parent": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The parent to-do (T-11) of a sub-to-do."
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requester": {
+          "type": "string",
+          "description": "\"you\", or the requesting Session's name."
+        },
+        "assignee": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The tab doing the work; null means the Session's orchestrator."
+        },
+        "summary": {
+          "type": "string"
+        },
+        "doneWhen": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/todoDoneWhenItem"
+          }
+        },
+        "attachmentCount": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO 8601."
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoDoneWhenItem": {
+      "type": "object",
+      "required": [
+        "text",
+        "met"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "met": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoAttachment": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "target",
+        "machine",
+        "note",
+        "addedBy",
+        "source",
+        "from",
+        "addedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "number"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "description": "A file path on `machine`, or a URL."
+        },
+        "machine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The machine the file is on; null for a URL."
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "addedBy": {
+          "type": "string",
+          "description": "\"you\", an agent's name, or \"Pane\"."
+        },
+        "source": {
+          "enum": [
+            "attached",
+            "pr",
+            "approval",
+            "opened"
+          ]
+        },
+        "from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "T-12 when inherited from the parent or a sub-to-do; null for its own."
+        },
+        "addedAt": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoActivity": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "author",
+        "body",
+        "at"
+      ],
+      "properties": {
+        "id": {
+          "type": "number"
+        },
+        "kind": {
+          "enum": [
+            "message",
+            "event"
+          ]
+        },
+        "author": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "at": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todo"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todo": {
+          "$ref": "#/jsonSchemas/todo"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todos"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/todo"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoShowResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todo",
+        "attachments",
+        "subTodos",
+        "activity"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todo": {
+          "$ref": "#/jsonSchemas/todo"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/todoAttachment"
+          }
+        },
+        "subTodos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/todo"
+          }
+        },
+        "activity": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/todoActivity"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoAttachResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todo",
+        "attachment"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todo": {
+          "type": "string"
+        },
+        "attachment": {
+          "$ref": "#/jsonSchemas/todoAttachment"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoDetachResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todo",
+        "detached"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todo": {
+          "type": "string"
+        },
+        "detached": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoAskResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todo",
+        "routedTo",
+        "approvalId"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todo": {
+          "type": "string"
+        },
+        "routedTo": {
+          "enum": [
+            "requester",
+            "person"
+          ]
+        },
+        "approvalId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The person's approval, when the question went to them."
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoCommentResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todo",
+        "activityId"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todo": {
+          "type": "string"
+        },
+        "activityId": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoReviewResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todo",
+        "approvalId"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todo": {
+          "$ref": "#/jsonSchemas/todo"
+        },
+        "approvalId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoArchiveResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todo",
+        "archived",
+        "kept",
+        "sessionArchived"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todo": {
+          "type": "string"
+        },
+        "archived": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Panes archived."
+        },
+        "kept": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "reason"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "sessionArchived": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoStartResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "todo",
+        "queued"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "todo": {
+          "$ref": "#/jsonSchemas/todo"
+        },
+        "queued": {
+          "type": "boolean",
+          "description": "The machine is busy: it starts when load comes down."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "agentContext": {
@@ -24217,6 +25825,12 @@ export const RUNPANE_CONTRACT = {
             "description": "Confirm this change; required in non-interactive shells."
           },
           {
+            "name": "--todo",
+            "value": "<T-n>",
+            "required": false,
+            "description": "The to-do the agent works on (T-12). Pane records the new tab on the to-do, so its status follows that agent."
+          },
+          {
             "name": "--json",
             "required": false,
             "description": "Print machine-readable output."
@@ -24406,6 +26020,12 @@ export const RUNPANE_CONTRACT = {
             "value": "<panel-id>",
             "required": false,
             "description": "Panel id when not running inside a Pane terminal (PANE_PANEL_ID)."
+          },
+          {
+            "name": "--todo",
+            "value": "<T-n>",
+            "required": false,
+            "description": "The to-do this report is about (T-12). Pane records it on the to-do's activity."
           },
           {
             "name": "--json",
@@ -26122,6 +27742,12 @@ export const RUNPANE_CONTRACT = {
             "description": "The id from a waiting result: keep waiting on that question. Pass no other fields."
           },
           {
+            "name": "--todo",
+            "value": "<T-n>",
+            "required": false,
+            "description": "The to-do this card is about (T-12). Pane links the approval to it, so it shows on the to-do's page and makes it read Waiting on you."
+          },
+          {
             "name": "--json",
             "required": false,
             "description": "Print machine-readable output."
@@ -27041,6 +28667,688 @@ export const RUNPANE_CONTRACT = {
           "Clean machines only through this command, never with rm or another raw delete.",
           "Run it without --yes first. Add --yes yourself only for a tier 1 kind; for a tier 2 kind, show the person the list and total size and wait for their OK."
         ]
+      },
+      "todos create": {
+        "name": "todos create",
+        "summary": "Create a to-do: one piece of work with a title, a summary and what done means. By default Pane starts it at once in its own Session, through the load gate.",
+        "details": "A to-do is the unit of agent work the person tracks on the To-dos screen. Started, it gets its own Session and orchestrator agent, which keeps it moving until it is done. With --parent it is a sub-to-do in the parent's Session, for a piece of the parent's work. The caller's tab is recorded as its requester: questions about it come back to you first. Returns the to-do; `status` is what the person sees (waiting, working, queued, idle, done, dropped) and `reason` says why.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<title>",
+            "required": true,
+            "description": "One line naming the work, as the person would say it."
+          },
+          {
+            "name": "--summary",
+            "value": "<markdown>",
+            "required": false,
+            "description": "What the work is and why, in Markdown."
+          },
+          {
+            "name": "--done-when",
+            "value": "<text>",
+            "required": false,
+            "description": "One line of what done means, checked off as it is met. Repeatable on the CLI; over MCP pass a JSON array of lines.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "name": "--parent",
+            "value": "<T-n>",
+            "required": false,
+            "description": "Make it a sub-to-do of this to-do, in that to-do's Session."
+          },
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": false,
+            "description": "The repo it works in: its name or id from `runpane repos list`."
+          },
+          {
+            "name": "--agent",
+            "value": "<agent>",
+            "required": false,
+            "description": "The agent its orchestrator runs, such as claude or codex. Defaults to the person's choice in Settings."
+          },
+          {
+            "name": "--attach",
+            "value": "<file|url>",
+            "required": false,
+            "description": "A file or URL to attach at once; a relative path resolves against the working directory. Repeatable on the CLI; over MCP pass a JSON array.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "name": "--no-start",
+            "required": false,
+            "description": "Save it without starting it; it waits as Idle until started."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos create \"Keyboard sheet and keyboard approvals\" --summary \"Every shortcut on one sheet\" --done-when \"Sheet opens with ?\" --done-when \"Approvals answer from the keyboard\" --repo pane --json",
+          "runpane todos create \"Fix the sheet's focus ring\" --parent T-12 --json"
+        ],
+        "jsonSchemas": [
+          "todoResult"
+        ],
+        "notes": [
+          "Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments.",
+          "When you need an answer, ask the to-do's requester first with `runpane todos ask`; Pane routes it to the person only when the requester is the person or can't answer. Don't post your own notify card for a to-do's question.",
+          "A `machine_busy` error means this machine is too loaded to start more work: wait. Pane queues the to-do and starts it when load comes down; don't retry in a loop or start the work some other way."
+        ]
+      },
+      "todos update": {
+        "name": "todos update",
+        "summary": "Change a to-do's title, summary or done-when lines, or check lines off.",
+        "details": "--done-when replaces the whole list; lines that stay the same keep their checks. --check and --uncheck take 1-based line numbers, comma-separated or repeated. Returns the to-do.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--title",
+            "value": "<title>",
+            "required": false,
+            "description": "A new title."
+          },
+          {
+            "name": "--summary",
+            "value": "<markdown>",
+            "required": false,
+            "description": "A new summary, in Markdown."
+          },
+          {
+            "name": "--done-when",
+            "value": "<text>",
+            "required": false,
+            "description": "The new done-when list, one line each; it replaces the old list. Repeatable on the CLI; over MCP pass a JSON array.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "name": "--check",
+            "value": "<n,...>",
+            "required": false,
+            "description": "Done-when line numbers (from 1) now met, such as 1 or 1,3."
+          },
+          {
+            "name": "--uncheck",
+            "value": "<n,...>",
+            "required": false,
+            "description": "Done-when line numbers (from 1) no longer met."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos update T-12 --check 1,2 --json"
+        ],
+        "jsonSchemas": [
+          "todoResult"
+        ],
+        "notes": [
+          "Check a done-when line off as soon as it is met, so the person sees progress."
+        ]
+      },
+      "todos attach": {
+        "name": "todos attach",
+        "summary": "Attach a file or URL to a to-do: a plan, mock-up, design, PR, findings, decision or other page.",
+        "details": "A file path is made absolute against the working directory and recorded with this machine; a URL is kept as given. Without --kind, Pane picks one from the target. Returns the attachment; its id is what `runpane todos detach` takes.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "<target>",
+            "required": true,
+            "description": "A file path (relative paths resolve against the working directory) or an http(s) URL."
+          },
+          {
+            "name": "--kind",
+            "value": "<plan|mockup|design|pr|findings|decision|doc|image|link>",
+            "required": false,
+            "description": "What it is.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "plan",
+                "mockup",
+                "design",
+                "pr",
+                "findings",
+                "decision",
+                "doc",
+                "image",
+                "link"
+              ]
+            }
+          },
+          {
+            "name": "--label",
+            "value": "<label>",
+            "required": false,
+            "description": "A short label; defaults to the file name or page title."
+          },
+          {
+            "name": "--note",
+            "value": "<text>",
+            "required": false,
+            "description": "One line on what to look at in it."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos attach T-12 tmp/plan/cover-sheet.html --kind plan --label \"Plan cover sheet\" --json",
+          "runpane todos attach T-12 https://github.com/org/repo/pull/1390 --kind pr --json"
+        ],
+        "jsonSchemas": [
+          "todoAttachResult"
+        ],
+        "notes": [
+          "Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments."
+        ]
+      },
+      "todos detach": {
+        "name": "todos detach",
+        "summary": "Remove an attachment from a to-do.",
+        "details": "Takes the attachment id that `runpane todos show` and `todos attach` print. The file or page itself is not touched.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "<attachment>",
+            "required": true,
+            "description": "The attachment id, such as 3."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos detach T-12 3 --json"
+        ],
+        "jsonSchemas": [
+          "todoDetachResult"
+        ],
+        "notes": []
+      },
+      "todos show": {
+        "name": "todos show",
+        "summary": "Show one to-do: its attachments first, then the to-do, its sub-to-dos and recent activity.",
+        "details": "Read the attachments before you start: they hold the plan, designs and decisions the work follows. Attachments inherited from the parent or a sub-to-do carry `from`. Activity is newest last: the person's messages, agent replies and Pane's events.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos show T-12 --json"
+        ],
+        "jsonSchemas": [
+          "todoShowResult"
+        ],
+        "notes": []
+      },
+      "todos list": {
+        "name": "todos list",
+        "summary": "List open to-dos on this machine with the status the person sees.",
+        "details": "Each line is the to-do, its status (Waiting on you, Working, Queued, Idle) and its title, then why. --all adds to-dos done or dropped in the last 7 days.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--all",
+            "required": false,
+            "description": "Also list to-dos done or dropped in the last 7 days."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos list --json"
+        ],
+        "jsonSchemas": [
+          "todoListResult"
+        ],
+        "notes": []
+      },
+      "todos assign": {
+        "name": "todos assign",
+        "summary": "Hand a to-do to the tab doing its work, or back to its Session's orchestrator.",
+        "details": "The assigned tab gets the to-do's chat and is the one Pane keeps moving. Without --panel the to-do goes back to its Session's orchestrator.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--panel",
+            "value": "<tab-id>",
+            "required": false,
+            "description": "The tab (panel id) now doing the work."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos assign T-12 --panel <panel-id> --json"
+        ],
+        "jsonSchemas": [
+          "todoResult"
+        ],
+        "notes": []
+      },
+      "todos ask": {
+        "name": "todos ask",
+        "summary": "Ask a question about a to-do: it goes to the to-do's requester first, and to the person only when needed.",
+        "details": "When the requester is another agent, the question lands in its tab and its reply comes back to yours. When the requester is the person, or the requester escalates, Pane shows it to the person as an approval (approvalId). `routedTo` says which.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "<question>",
+            "required": true,
+            "description": "The question, standing on its own."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos ask T-12 \"Should the sheet list chat shortcuts too?\" --json"
+        ],
+        "jsonSchemas": [
+          "todoAskResult"
+        ],
+        "notes": [
+          "When you need an answer, ask the to-do's requester first with `runpane todos ask`; Pane routes it to the person only when the requester is the person or can't answer. Don't post your own notify card for a to-do's question.",
+          "Replies and comments on a to-do are short summaries of at most 2,000 characters; put the detail in an attached page."
+        ]
+      },
+      "todos comment": {
+        "name": "todos comment",
+        "summary": "Post a short message on a to-do's chat: a progress note, or the requester's answer.",
+        "details": "The message shows on the to-do's page and reaches whoever its chat goes to now. A requester that can't settle a question passes --escalate, and Pane asks the person instead.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "<text>",
+            "required": true,
+            "description": "The message, in Markdown; at most 2,000 characters."
+          },
+          {
+            "name": "--escalate",
+            "required": false,
+            "description": "From the requester: you can't settle it, so Pane asks the person."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos comment T-12 \"Sheet done; approvals next.\" --json"
+        ],
+        "jsonSchemas": [
+          "todoCommentResult"
+        ],
+        "notes": [
+          "Replies and comments on a to-do are short summaries of at most 2,000 characters; put the detail in an attached page."
+        ]
+      },
+      "todos review": {
+        "name": "todos review",
+        "summary": "Send a to-do to the person for review: Pane shows a review card with its attachments.",
+        "details": "Moves the to-do to In review and posts the person's review card (approvalId). Their Accept lets an agent mark it done; their changes come back on its chat.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--summary",
+            "value": "<text>",
+            "required": false,
+            "description": "What changed and what to look at, in a few lines."
+          },
+          {
+            "name": "--no-attachments",
+            "value": "<why>",
+            "required": false,
+            "description": "Why there is nothing to attach; required when the to-do has no attachments."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos review T-12 --summary \"Sheet and approvals ship; see the PR.\" --json"
+        ],
+        "jsonSchemas": [
+          "todoReviewResult"
+        ],
+        "notes": [
+          "`runpane todos review` needs at least one attachment, or `--no-attachments \"<why>\"` when there is truly nothing to show.",
+          "Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments."
+        ]
+      },
+      "todos done": {
+        "name": "todos done",
+        "summary": "Mark a to-do done.",
+        "details": "Closes it and stops Pane keeping it moving. Its Panes stay until `runpane todos archive`.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--person-said",
+            "value": "<words>",
+            "required": false,
+            "description": "The person's own words telling you to close it, quoted."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos done T-13 --json",
+          "runpane todos done T-12 --person-said \"ship it, close the to-do\" --json"
+        ],
+        "jsonSchemas": [
+          "todoResult"
+        ],
+        "notes": [
+          "An agent may mark a top-level to-do done only after the person accepts it on its review card, or with `--person-said \"<their words>\"` quoting the person telling you to close it. Sub-to-dos close when their work is done."
+        ]
+      },
+      "todos drop": {
+        "name": "todos drop",
+        "summary": "Drop a to-do: the work won't be done.",
+        "details": "Closes it as dropped and stops Pane keeping it moving. Drop only when the person or the requester says so.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--reason",
+            "value": "<text>",
+            "required": false,
+            "description": "Why it was dropped, shown on its page."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos drop T-14 --reason \"Covered by T-12\" --json"
+        ],
+        "jsonSchemas": [
+          "todoResult"
+        ],
+        "notes": []
+      },
+      "todos archive": {
+        "name": "todos archive",
+        "summary": "Archive a closed to-do's Panes and Session, keeping any Pane with unsaved work.",
+        "details": "Archives each of its Panes whose work is saved, and its Session once nothing is left. `kept` lists the Panes left and why, such as unpushed commits.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos archive T-12 --json"
+        ],
+        "jsonSchemas": [
+          "todoArchiveResult"
+        ],
+        "notes": []
+      },
+      "todos start": {
+        "name": "todos start",
+        "summary": "Start a to-do that is not running: its Session and orchestrator, through the load gate.",
+        "details": "When the machine is busy the to-do is queued (`queued: true`) and starts when load comes down.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos start T-12 --json"
+        ],
+        "jsonSchemas": [
+          "todoStartResult"
+        ],
+        "notes": [
+          "A `machine_busy` error means this machine is too loaded to start more work: wait. Pane queues the to-do and starts it when load comes down; don't retry in a loop or start the work some other way."
+        ]
+      },
+      "todos stop": {
+        "name": "todos stop",
+        "summary": "Stop a to-do: Pane stops keeping it moving until it is started again.",
+        "details": "Its agents finish their turn and are not nudged again. Start it again with `runpane todos start`.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos stop T-12 --json"
+        ],
+        "jsonSchemas": [
+          "todoResult"
+        ],
+        "notes": []
       }
     },
     "managedBlock": [
@@ -27055,6 +29363,8 @@ export const RUNPANE_CONTRACT = {
       "To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).",
       "",
       "Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.",
+      "",
+      "To-dos: `runpane todos` (or the `todos_*` MCP tools) is a work list Pane keeps moving. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists, with `runpane todos attach <T-n> <file|url>`; ask questions about a to-do with `--todo <T-n>`; `runpane docs read --doc docs/TODOS.md` has the rest.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",

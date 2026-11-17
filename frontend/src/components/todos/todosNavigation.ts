@@ -10,7 +10,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 let returnSessionId: string | undefined;
 
 /** Opens To-dos: the list, or to-do `number`'s page. */
-export function openTodos(number: number | null = null): void {
+function openTodos(number: number | null = null): void {
   const navigation = useNavigationStore.getState();
   if (navigation.activeView !== 'todos') returnSessionId = useOrchestrationSessionStore.getState().selectedSessionId;
   navigation.navigateToTodos({ number, returnPaneId: useSessionStore.getState().activeSessionId });
