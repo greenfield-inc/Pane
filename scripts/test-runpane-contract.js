@@ -3754,6 +3754,53 @@ print(json.dumps({"codes": codes, "calls": calls, "stdout": stdout.getvalue().sp
   assert.ok(python.missing.next);
 }
 
+// `devices open --focus|--no-focus` reaches the daemon as focus/noFocus, the pair is refused before any
+// call, and device_open offers both over MCP (#1432).
+async function checkDevicesOpenFocus() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const devices = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'devices.js'));
+  const { buildMcpTools } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'mcpTools.js'));
+
+  const parsed = parseRunpaneArgs(['devices', 'open', '--platform', 'ios', '--no-focus', '--json']);
+  assert.strictEqual(parsed.command, 'devices open');
+  assert.strictEqual(parsed.devicePlatform, 'ios');
+  assert.strictEqual(parsed.noFocus, true);
+  assert.ok(!parsed.focus);
+  assert.strictEqual(parseRunpaneArgs(['devices', 'open', '--platform', 'android', '--focus']).focus, true);
+
+  const requests = [];
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  daemonClient.invokeDaemon = async (channel, args) => {
+    requests.push({ channel, request: JSON.parse(JSON.stringify(args[0])) });
+    return { ok: true, device: { name: 'Pane iPhone', platform: 'ios', os: '18.0', machine: 'This Mac', state: 'booted' } };
+  };
+  console.log = () => undefined;
+  let conflict;
+  try {
+    await devices.runDevicesOpen(parseRunpaneArgs(['devices', 'open', '--platform', 'ios', '--json']));
+    await devices.runDevicesOpen(parseRunpaneArgs(['devices', 'open', '--platform', 'ios', '--device', 'My iPhone', '--no-focus', '--json']));
+    await devices.runDevicesOpen(parseRunpaneArgs(['devices', 'open', '--platform', 'android', '--focus', '--json']));
+    conflict = await devices.runDevicesOpen(parseRunpaneArgs(['devices', 'open', '--platform', 'ios', '--focus', '--no-focus', '--json'])).then(() => undefined, (error) => error);
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+  assert.deepStrictEqual(requests, [
+    { channel: 'runpane:devices:open', request: { platform: 'ios' } },
+    { channel: 'runpane:devices:open', request: { platform: 'ios', device: 'My iPhone', noFocus: true } },
+    { channel: 'runpane:devices:open', request: { platform: 'android', focus: true } },
+  ]);
+  assert.strictEqual(conflict?.code, 'ERR_DEVICE_INVALID_REQUEST', 'devices open refuses --focus with --no-focus');
+  assert.ok(conflict.next, 'the --focus/--no-focus refusal says what to run next');
+
+  const tool = buildMcpTools().find((candidate) => candidate.name === 'device_open');
+  assert.ok(tool, 'device_open is an MCP tool');
+  assert.strictEqual(tool.inputSchema.properties.noFocus?.type, 'boolean', 'device_open takes noFocus');
+  assert.strictEqual(tool.inputSchema.properties.focus?.type, 'boolean', 'device_open takes focus');
+}
+
 async function checkArchiveClosedAndCallerPanel() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -7088,6 +7135,7 @@ async function runChecks() {
   await checkOlderOutputNote();
   await checkPanelsCloseParity();
   await checkArchiveClosedAndCallerPanel();
+  await checkDevicesOpenFocus();
   await checkReportDeliveryLine();
   await checkReportStructuredOptions();
   await checkPanelsConversation();

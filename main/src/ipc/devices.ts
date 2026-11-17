@@ -25,7 +25,12 @@ const RUN_WAIT_MS = 120_000;
 /** What device_run returns: the contract's devicesRunResult. */
 interface DeviceRunResult { ok: true; synced?: boolean; cwd?: string; machine: string; jobId?: string; state?: 'running' | 'exited'; exitCode?: number; logTail?: string }
 
-const openSchema = boundary.object({ platform: boundary.enumeration('ios', 'android'), device: boundary.optional(boundary.string) });
+const openSchema = boundary.object({
+  platform: boundary.enumeration('ios', 'android'),
+  device: boundary.optional(boundary.string),
+  noFocus: boundary.optional(boundary.boolean),
+  focus: boundary.optional(boundary.boolean),
+});
 const platformField = boundary.optional(boundary.enumeration('ios', 'android'));
 const targetSchema = boundary.object({ platform: platformField });
 const actSchema = boundary.object({ args: boundary.array(boundary.string), platform: platformField });
@@ -216,37 +221,46 @@ async function followDeviceChange(change: DeviceChange): Promise<void> {
 }
 
 /**
- * The Pane's device tab for `platform`, created in a split beside the caller and selected, as
- * `runpane panels open` does. It brings the tab forward on clients showing this Pane; it never raises the window.
+ * Whether `devices open` selects the device tab: `default` selects a new tab only, `focus` also
+ * reselects one that is already open, and `none` never selects it.
  */
-async function ensureDeviceTab(caller: DeviceCaller, platform: DevicePlatform, initial: Partial<DevicePanelState>): Promise<ToolPanel> {
+type DeviceTabFocus = 'default' | 'focus' | 'none';
+
+/**
+ * The Pane's device tab for `platform`, created in a split beside the caller, as `runpane panels open`
+ * does. A new tab is selected unless `focus` is `none`; an open tab stays where it is (so a repeated
+ * open never hides the terminal the person is typing in) unless `focus` is `focus`. Selecting brings
+ * the tab forward on clients showing this Pane; it never raises the window.
+ */
+async function ensureDeviceTab(caller: DeviceCaller, platform: DevicePlatform, initial: Partial<DevicePanelState>, focus: DeviceTabFocus): Promise<ToolPanel> {
   const existing = devicePanels(caller.paneId).find(panel => panelState(panel)?.platform === platform);
   const name = platform === 'ios' ? 'iPhone' : 'Android';
   const state: DevicePanelState = { platform, name, machine: localMachineLabel(), phase: 'booting', ...initial };
   if (caller.panelId) state.openedBy = caller.panelId;
   if (existing) {
     await setPanelState(existing, state);
-    await panelManager.setActivePanel(caller.paneId, existing.id, 'split');
+    if (focus === 'focus') await panelManager.setActivePanel(caller.paneId, existing.id, 'split');
     return panelManager.getPanel(existing.id) ?? existing;
   }
+  const activate = focus !== 'none';
   return panelManager.createPanel({
     sessionId: caller.paneId,
     type: 'device',
     title: state.name,
     initialState: { customState: state },
     metadata: caller.panelId ? { openPlacement: 'split', openedBy: { source: 'agent', panelId: caller.panelId } } : { openPlacement: 'split' },
-    activate: true,
-    announceActivation: true,
+    activate,
+    announceActivation: activate,
   });
 }
 
 /** iOS for a computer without Xcode: the device opens on a linked Mac Pane picks (or the pinned one). */
-async function openOnMac(services: AppServices, caller: DeviceCaller, device: string | undefined) {
+async function openOnMac(services: AppServices, caller: DeviceCaller, device: string | undefined, focus: DeviceTabFocus) {
   // Only the desktop app keeps connections to saved computers; headless Pane has none to reach a Mac through.
   if (!machines) {
     throw new PaneError('ERR_DEVICE_NEEDS_DESKTOP', 'This computer has no Xcode, and iOS on a linked Mac needs Pane\'s desktop app here; headless Pane does not connect to saved computers. Nothing was opened.', 'Open the Pane desktop app on this computer, or run the agent on the Mac. Android works here now.');
   }
-  const panel = await ensureDeviceTab(caller, 'ios', { phase: 'booting' });
+  const panel = await ensureDeviceTab(caller, 'ios', { phase: 'booting' }, focus);
   try {
     const { lease, device: summary } = await remoteDevices(services).open(caller.paneId, caller.paneName, 'ios', device);
     const why = lease.reason === 'pinned'
@@ -291,10 +305,14 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
 
   commandRegistry.register('runpane:devices:open', async (request: PaneCommandValue) => {
     const caller = deviceCaller(services);
-    const { platform, device } = decode(request, openSchema, 'devices open');
+    const { platform, device, noFocus, focus: wantsFocus } = decode(request, openSchema, 'devices open');
+    if (noFocus === true && wantsFocus === true) {
+      throw new PaneError('ERR_DEVICE_INVALID_REQUEST', 'The devices open request asks for both focus and noFocus. Nothing was opened.', 'Pass one of --focus or --no-focus, or neither.');
+    }
+    const focus: DeviceTabFocus = noFocus === true ? 'none' : wantsFocus === true ? 'focus' : 'default';
     lastPlatform.set(caller.paneId, platform);
-    if (platform === 'ios' && !(await devices().probe()).ios.ready) return openOnMac(services, caller, device);
-    const panel = await ensureDeviceTab(caller, platform, { phase: devices().helpersInstalled() ? 'booting' : 'installing' });
+    if (platform === 'ios' && !(await devices().probe()).ios.ready) return openOnMac(services, caller, device, focus);
+    const panel = await ensureDeviceTab(caller, platform, { phase: devices().helpersInstalled() ? 'booting' : 'installing' }, focus);
     try {
       const opened = await devices().open(caller, device ? { platform, device } : { platform }, (phase) => { void setPanelState(panel, { phase }); });
       const summary = opened.device;
@@ -529,7 +547,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
         return true;
       }
       // The same open an agent's device_open does, so the tab names the device and Mac again.
-      await openOnMac(services, caller, state.machineId ? state.deviceId : undefined);
+      await openOnMac(services, caller, state.machineId ? state.deviceId : undefined, 'default');
       return true;
     }
     if (state.deviceId && (action === 'shutdown' || action === 'restart')) await devices().shutdownDevice(state.deviceId);

@@ -476,7 +476,7 @@ runpane secrets delete --project <project> --name <name> --yes [--json] [--pane-
 runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... [--pane-dir <path>] -- <command>...
 runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json] [--pane-dir <path>]
 runpane devices list [--json] [--pane-dir <path>]
-runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]
+runpane devices open --platform <ios|android> [--device <name-or-id>] [--focus|--no-focus] [--json] [--pane-dir <path>]
 runpane devices screenshot [--platform <ios|android>] [--json] [--pane-dir <path>]
 runpane devices act [--platform <ios|android>] [--json] [--pane-dir <path>] -- <command>
 runpane devices run [--platform <ios|android>] [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>
