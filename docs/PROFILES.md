@@ -106,8 +106,9 @@ refreshes as runs move.
 
 Each run is `<PANE_DIR>/sessions/<Session id>/profile-runs/<run id>.json`, written before every
 move, so a restart resumes runs without starting anything twice. Tabs that
-Pane's own quit stops move nothing; a step whose tab is gone after the restart
-asks for its outcome.
+Pane's own quit stops move nothing. After the restart, a command step (whose
+command Pane doesn't run again) and a step whose tab is gone ask for their
+outcome.
 Code: `main/src/services/profiles/` (`flowMachine.ts`, `profileRunner.ts`,
 `profileRunnerHost.ts`), `main/src/ipc/profiles.ts`,
 `frontend/src/components/profiles/`.
