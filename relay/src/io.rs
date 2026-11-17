@@ -164,3 +164,42 @@ pub async fn respond_json<S: AsyncWrite + Unpin>(
 
 pub const SWITCHING: &[u8] =
     b"HTTP/1.1 101 Switching Protocols\r\nupgrade: pane-relay/1\r\nconnection: Upgrade\r\n\r\n";
+
+/// TLS over an in-memory pipe that holds only a few KB, as a slow link does. tokio-rustls
+/// accepts a write once rustls has encrypted it, while the pipe may still hold back part of
+/// the encrypted output; only a flush or a later write sends the rest. So a write that is not
+/// flushed reliably leaves its tail unsent here, where over loopback TCP it only sometimes does.
+#[cfg(test)]
+pub mod test_tls {
+    use rustls::pki_types::ServerName;
+    use std::sync::Arc;
+    use tokio::io::DuplexStream;
+    use tokio_rustls::{TlsAcceptor, TlsConnector, client, server};
+
+    /// The pipe's capacity in bytes: well under one 16 KB TLS record.
+    pub const PIPE: usize = 4096;
+
+    /// A connected client and server, handshake done.
+    pub async fn pair() -> (
+        client::TlsStream<DuplexStream>,
+        server::TlsStream<DuplexStream>,
+    ) {
+        let (key, _) = crate::tls::self_signed(vec!["localhost".into()]).unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(key.cert[0].clone()).unwrap();
+        let (server_cfg, _) = crate::tls::server_config(key).unwrap();
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let client_cfg = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let (a, b) = tokio::io::duplex(PIPE);
+        let name = ServerName::try_from("localhost").unwrap();
+        let (c, s) = tokio::join!(
+            TlsConnector::from(Arc::new(client_cfg)).connect(name, a),
+            TlsAcceptor::from(server_cfg).accept(b),
+        );
+        (c.unwrap(), s.unwrap())
+    }
+}
