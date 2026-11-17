@@ -64,7 +64,7 @@ import { onTerminalReflow } from '../../utils/terminalReflow';
 import { createMaskOwnership } from '../../utils/maskOwnership';
 import { readTerminalScreen, rememberTerminalScreen } from '../../utils/terminalScreens';
 import { TerminalSkeleton } from './TerminalSkeleton';
-import { useSkeletonHold } from '../ui/Skeleton';
+import { REVEAL_MS, useSkeletonHold } from '../ui/Skeleton';
 import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
 
@@ -411,7 +411,17 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const maskHeld = overlayActive || firstLoad.holding;
   // The terminal fades in over a skeleton the person saw; a fast load just appears.
   const [fadeIn, setFadeIn] = useState(false);
-  const skeletonSeen = firstLoad.reveal;
+  // Latched for this load: the skeleton stays up until the mask lifts.
+  const [skeletonSeenKey, setSkeletonSeenKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (firstLoad.reveal) setSkeletonSeenKey(loadKey);
+  }, [firstLoad.reveal, loadKey]);
+  const skeletonSeen = firstLoad.reveal || skeletonSeenKey === loadKey;
+  useEffect(() => {
+    if (!fadeIn) return;
+    const timer = setTimeout(() => setFadeIn(false), REVEAL_MS);
+    return () => clearTimeout(timer);
+  }, [fadeIn]);
   // When the terminal became ready: a skeleton's hold counts toward the linger.
   const readyAt = useRef(0);
   useEffect(() => {

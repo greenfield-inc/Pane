@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import type { CSSProperties, Ref } from 'react';
 import { TerminalSkeleton } from './panels/TerminalSkeleton';
 import { Bone, Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
 
@@ -9,7 +9,7 @@ const INSPECTOR_TABS = ['Details', 'Files', 'Changes'] as const;
  * it will open at: the tab bar, the active tab's terminal, the Terminal dock
  * and the inspector, or the swapped layout's terminal rail and bottom inspector.
  */
-export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidth, railWidth, bottomInspectorHeight }: {
+export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidth, railWidth, bottomInspectorHeight, contentRef, centerRef }: {
   /** For screen readers: what is opening. */
   name: string;
   swapped: boolean;
@@ -21,6 +21,9 @@ export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidt
   railWidth: number;
   /** Swapped layout: the bottom inspector's height. */
   bottomInspectorHeight: number;
+  /** SessionView's measured boxes, which size the dock and inspector as they will open. */
+  contentRef: Ref<HTMLDivElement>;
+  centerRef: Ref<HTMLDivElement>;
 }) {
   const stage = (
     <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]">
@@ -38,8 +41,8 @@ export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidt
         </div>
         <span className="ml-0.5 inline-flex h-7 w-7 items-center justify-center"><Bone className="h-4 w-4" /></span>
       </Skeleton>
-      <div className="flex min-h-0 flex-1 flex-row">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={contentRef} className="flex min-h-0 flex-1 flex-row">
+        <div ref={centerRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
           {stage}
           {swapped
             ? bottomInspectorHeight > 0 && <InspectorSkeleton className="border-t" style={{ height: bottomInspectorHeight }} />

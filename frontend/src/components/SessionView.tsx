@@ -1969,7 +1969,8 @@ export const SessionView = memo(() => {
           dockHeight={immersiveMode ? 0 : isTerminalCollapsed ? 32 : terminalResize.renderedPx || terminalResize.effectivePx}
           inspectorWidth={detailVisible && !immersiveMode ? detailResize.renderedPx || detailResize.effectivePx : 0}
           railWidth={rightTerminalResize.renderedPx || rightTerminalResize.effectivePx}
-          bottomInspectorHeight={isDetailCollapsed ? 32 : bottomDetailResize.renderedPx || bottomDetailResize.effectivePx} />}
+          bottomInspectorHeight={isDetailCollapsed ? 32 : bottomDetailResize.renderedPx || bottomDetailResize.effectivePx}
+          contentRef={sessionContentBox.ref} centerRef={centerColumnBox.ref} />}
     </div>
     : null;
 

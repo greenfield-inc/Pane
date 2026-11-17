@@ -7,6 +7,8 @@ export const SKELETON_DELAY_MS = 150;
 export const SKELETON_MIN_VISIBLE_MS = 300;
 /** The bone breathe period (`pane-skeleton-breathe` in index.css). */
 const SKELETON_PERIOD_MS = 2000;
+/** How long content that replaces a skeleton carries `skeleton-reveal` (index.css fades it 120 ms). */
+export const REVEAL_MS = 200;
 /** A skeleton that replaces another within this gap continues its timing. */
 const CHAIN_GAP_MS = 100;
 
@@ -85,8 +87,8 @@ export function TextBone({ text, className }: { text: string; className?: string
 /**
  * Holds `loading` on so a skeleton that became visible stays at least
  * SKELETON_MIN_VISIBLE_MS. A load that ends before the skeleton appears is
- * released at once. `reveal` is true for the render that replaces a visible
- * skeleton, for a cross-fade.
+ * released at once. `reveal` is true for REVEAL_MS after a visible skeleton
+ * is replaced: give the content `skeleton-reveal` then, for a cross-fade.
  */
 export function useSkeletonHold(loading: boolean): { holding: boolean; reveal: boolean } {
   const [state, setState] = useState<{ since: number | null; held: boolean; reveal: boolean }>(
@@ -114,6 +116,13 @@ export function useSkeletonHold(loading: boolean): { holding: boolean; reveal: b
     const timer = setTimeout(release, remaining);
     return () => clearTimeout(timer);
   }, [loading, state.held, state.since]);
+
+  // The fade runs once: a class left on would fade again when a background window refocuses.
+  useLayoutEffect(() => {
+    if (!state.reveal) return;
+    const timer = setTimeout(() => setState(current => (current.reveal ? { ...current, reveal: false } : current)), REVEAL_MS);
+    return () => clearTimeout(timer);
+  }, [state.reveal]);
 
   return { holding: loading || state.held, reveal: state.reveal };
 }

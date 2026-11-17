@@ -660,6 +660,13 @@ body.understory {
   to { opacity: 1; }
 }
 
+/* Animations pause in a background window (top of this file); a paused fade
+   would hold the content invisible, so there it appears at once. */
+html.window-blurred .skeleton-reveal,
+html.window-hidden .skeleton-reveal {
+  animation: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* No scale under the pointer; the colour change still confirms the press. */
   .pane-press:active:not(:disabled):not([aria-disabled='true']) {
