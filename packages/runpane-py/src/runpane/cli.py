@@ -173,7 +173,7 @@ AUTOPILOT_ITEM_COMMANDS = {"autopilot answer", "autopilot close", "autopilot rew
 FLAG_OWNERS = {
     "--relays": ("notify",),
     "--about-session": ("notify",),
-    "--questions": ("notify",),
+    "--questions": ("notify", "report"),
     "--took": ("notify",),
     "--took-as": ("notify",),
     "--status": ("notify", "update"),
@@ -787,6 +787,8 @@ def validate_report_args(parsed: ParsedArgs) -> None:
         raise ValueError("runpane report accepts either --summary or --summary-file, not both.")
     if parsed.report_state == "blocked" and not (parsed.question or "").strip():
         raise ValueError('runpane report --state blocked requires --question "<what you need answered>".')
+    if parsed.report_state != "blocked" and (parsed.notify_choices is not None or parsed.notify_questions is not None):
+        raise ValueError("runpane report takes --choices and --questions only with --state blocked: they are the buttons on its question card.")
 
 
 def validate_conversation_args(parsed: ParsedArgs) -> None:

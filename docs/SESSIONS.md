@@ -1470,7 +1470,11 @@ default), a Session has one voice to the person: its orchestrator.
   worker's `notify` call isn't shown to the person; it returns `unavailable`
   with a `next` that says to report blocked.
 - **A worker's question is a card at once.** Its blocked report shows in
-  Approvals straight away. From a JSON status file or a bare `needs_you`
+  Approvals straight away. Its buttons are the report's own `--choices` or
+  `--questions` (checked as `runpane notify` checks them) first. A question
+  that ends with options in brackets ("(A / B)") and has no buttons from
+  either source is refused with `ERR_REPORT_PACKED_OPTIONS`, showing nothing.
+  From a JSON status file or a bare `needs_you`
   block, the card takes its question and `why` as
   context, its question's `options` as answer buttons (a `(recommended)`
   suffix marks the recommended one; several questions get an answer box), and

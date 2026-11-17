@@ -86,7 +86,12 @@ Session go under "Not in a Session". Items Autopilot asks itself go under
 - **Workers in a Session don't call `notify`.** Approvals come from the
   Session's orchestrator, not from the agents in its Panes. A worker reports
   blocked to its orchestrator (`runpane report --state blocked --question
-  "<question>"`). That question is a card at once, with an answer box, and it
+  "<question>"`, with its options as `--choices` or `--questions` in the JSON
+  `runpane notify` takes, or with `--summary-file <status file>` whose
+  `needs_you` lists them). A question that ends with its options in brackets
+  ("(A / B)") and gives no buttons either way is refused
+  (`ERR_REPORT_PACKED_OPTIONS`) and nothing is shown; a question with no
+  options is an open question, answered in words. That question is a card at once, with an answer box, and it
   rings once the orchestrator relays it or after 10 minutes, so the orchestrator
   first settles what the plan already answers. Your answer goes straight to the
   worker's tab (`answer: Q-n → <answer> (by you)`), even with the orchestrator

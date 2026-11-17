@@ -203,6 +203,24 @@ def parse_notify_question(given: Mapping[str, Optional[str]]) -> Dict[str, Any]:
     return question
 
 
+REPORT_OPTIONS_NEXT = (
+    "Fix the JSON and run runpane report again, such as "
+    "runpane report --state blocked --question 'Q-3: Use the invoice id?' "
+    "--choices '[{\"label\":\"Invoice id\",\"recommended\":true},{\"label\":\"Invoice number\"}]'."
+)
+
+
+def parse_report_options(title: str, choices: Optional[str], questions: Optional[str]) -> Optional[Dict[str, Any]]:
+    """`runpane report --state blocked --choices|--questions`: notify's own checks on the same JSON. None when neither was given."""
+    if choices is None and questions is None:
+        return None
+    try:
+        parsed = parse_notify_question({"ui": "options", "title": title, "choices": choices, "questions": questions})
+    except RunpaneError as error:
+        raise RunpaneError(error.code, str(error), REPORT_OPTIONS_NEXT) from None
+    return {"questions": parsed["questions"]} if "questions" in parsed else {"choices": parsed["choices"]}
+
+
 def notify_caller_fields(env: Mapping[str, str], cwd: str) -> Tuple[Dict[str, str], Dict[str, int]]:
     """Who is asking, from the Pane terminal's environment, and how soon to return waiting; shared with `secrets request`."""
     caller = {"cwd": cwd}

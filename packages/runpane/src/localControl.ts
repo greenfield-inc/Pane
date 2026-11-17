@@ -9,6 +9,7 @@ import { invokeDaemon, PaneDaemonClientError, routedOtherMachine } from './daemo
 import { confirmMutation } from './daemonActions';
 import { RunpaneError, describeFailure } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
+import { parseReportOptions, type NotifyChoice, type NotifySubQuestion } from './notify';
 import {
   CONVERSATION_ID_PATTERN,
   CONVERSATION_SOURCES,
@@ -747,6 +748,10 @@ export interface AgentReport {
   summaryTruncated?: true;
   summaryPath?: string;
   question?: string;
+  /** A blocked report's buttons (`--choices`). */
+  choices?: NotifyChoice[];
+  /** A blocked report's several questions (`--questions`). */
+  questions?: NotifySubQuestion[];
   reportedAt: string;
 }
 
@@ -1352,6 +1357,11 @@ const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.obj
     kind: boundary.enumeration('composer', 'editor'),
   }))),
 });
+const reportChoiceSchema = boundary.object({
+  label: boundary.nonEmptyString,
+  detail: boundary.optional(boundary.string),
+  recommended: boundary.optional(boundary.boolean),
+});
 const agentReportFields = {
   state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
   pr: boundary.optional(boundary.number),
@@ -1360,6 +1370,12 @@ const agentReportFields = {
   summaryTruncated: boundary.optional(boundary.literal(true)),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  choices: boundary.optional(boundary.array(reportChoiceSchema)),
+  questions: boundary.optional(boundary.array(boundary.object({
+    title: boundary.string,
+    choices: boundary.array(reportChoiceSchema),
+    why: boundary.optional(boundary.string),
+  }))),
   reportedAt: boundary.string,
 };
 const agentReportSchema: BoundarySchema<AgentReport> = boundary.object(agentReportFields);
@@ -3966,6 +3982,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
   const summaryPath = parsed.summaryFile !== undefined && parsed.summaryFile !== '-'
     ? path.resolve(parsed.summaryFile)
     : undefined;
+  const options = parseReportOptions(parsed.question ?? '', parsed.notifyChoices, parsed.notifyQuestions);
   const result = await invokeDaemon('runpane:report', [{
     ...identity,
     state: parsed.reportState,
@@ -3974,6 +3991,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
     summary: summaryText?.slice(0, MAX_SENT_SUMMARY_LENGTH),
     summaryPath,
     question: parsed.question,
+    ...options,
   }], reportResultSchema, {
     paneDir: parsed.paneDir,
   });

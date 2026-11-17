@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { NOTIFY_QUESTIONS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
+import { PaneError } from '../../../../shared/paneError';
 import { admitCard, type AdmittedCard } from './cardAdmit';
 import { fitLinks } from './cardCheck';
 
@@ -242,6 +243,24 @@ function statusFileText(summaryPath: string): { text: string; overLimit: boolean
   }
 }
 
+/**
+ * A question whose text ends with its options in brackets, "(A / B)" or "(A (recommended) / B)".
+ * Each option may hold one bracketed note; a slash needs a space either side, so "(iOS/Android)" is prose.
+ */
+const PACKED_OPTIONS = /\((?:[^()]|\([^()]*\))*?\s\/\s(?:[^()]|\([^()]*\))*\)\s*[.?!]?\s*$/u;
+
+function packedOptionsError(question: string): PaneError {
+  const list = PACKED_OPTIONS.exec(question)?.[0].trim() ?? '';
+  return new PaneError(
+    'ERR_REPORT_PACKED_OPTIONS',
+    `The question ends with its options in brackets, ${list}, but the report gives no buttons for them, so the person would get a card with nothing to press. Nothing was shown to the person.`,
+    'Give the options as buttons: runpane report --state blocked --question \'Q-3: Use the invoice id?\' '
+      + '--choices \'[{"label":"Invoice id","recommended":true},{"label":"Invoice number"}]\' (or --questions for several), '
+      + 'or pass your status file as --summary-file with the options in needs_you.questions[].options. Drop the bracketed list from --question.',
+  );
+}
+
+/** A blocked report's own buttons, `--choices` or `--questions`, come before a status file's needs_you. */
 export interface WorkerCardOptions {
   /** Keep a card that fails the check as it was sent, for reports recorded before the check existed. */
   quietly?: boolean;
@@ -251,12 +270,17 @@ export interface WorkerCardOptions {
   readStatusFile?: boolean;
   /** The label of the status file's own link, listed first among the card's links. */
   statusLabel?: string;
+  /** The report's own buttons, from --choices or --questions. */
+  choices?: NotifyChoice[];
+  questions?: NotifySubQuestion[];
 }
 
 /**
  * A worker's question card as Pane posts it: built from its report, tidied when the question is an
- * old paragraph, and checked. Throws the check's refusal (a PaneError); `quietly` keeps a card that
- * fails as it was sent instead, for reports recorded before the check existed. Links past what a card
+ * old paragraph, and checked. Its buttons are the report's `--choices` or `--questions`, else its
+ * status file's needs_you options. Throws the check's refusal (a PaneError), and refuses a question
+ * that packs its options into the text with no buttons for them; `quietly` keeps a card that fails
+ * as it was sent instead, for reports recorded before the checks existed. Links past what a card
  * shows are named in its context.
  */
 export function workerCard(summary: string | undefined, question: string, options: WorkerCardOptions = {}): StatusCard & { title: string; asSent?: AdmittedCard['asSent']; warnings: string[] } {
@@ -265,6 +289,16 @@ export function workerCard(summary: string | undefined, question: string, option
   const html = summaryPath !== undefined && /\.html?$/iu.test(summaryPath);
   const file = !html && summaryPath && options.readStatusFile ? statusFileText(summaryPath) : undefined;
   const card = html ? {} : workerReportCard(file?.text ?? summary, question);
+  if (options.questions?.length) {
+    card.questions = options.questions;
+    delete card.choices;
+  } else if (options.choices?.length) {
+    card.choices = options.choices;
+    delete card.questions;
+  }
+  if (!card.choices?.length && !card.questions?.length && PACKED_OPTIONS.test(question) && !options.quietly) {
+    throw packedOptionsError(question);
+  }
   const statusLink = summaryPath && options.statusLabel ? [{ label: options.statusLabel, path: summaryPath }] : [];
   const fitted = fitLinks([...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== summaryPath)], card.context);
   const fields = { title: question, context: fitted.context, choices: card.choices, questions: card.questions, links: fitted.links.length ? fitted.links : undefined };

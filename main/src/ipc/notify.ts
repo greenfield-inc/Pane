@@ -906,6 +906,16 @@ function readStatusContext(request: NotifyRequest, newCard: boolean): void {
   }
 }
 
+/**
+ * `runpane report --state blocked --choices|--questions`: the same checks as an options card's,
+ * for a report sent by a CLI that did not check them. Neither given is fine.
+ */
+export function checkNotifyOptions(choices: NotifyRequest['choices'], questions: NotifyRequest['questions']): void {
+  if (choices && questions) throw invalid('pass choices or questions, not both.');
+  if (choices) checkChoices(choices, 'choices');
+  if (questions) checkQuestions(questions);
+}
+
 /** 1 to 9 choices with different labels. */
 function checkChoices(choices: NonNullable<NotifyRequest['choices']>, where: string): void {
   const count = choices.length;

@@ -8,7 +8,7 @@ type NotifyUi = 'options' | 'approve' | 'ask' | 'info';
 /** `runpane secrets request` sends ui secret; `runpane notify --ui` never takes it. */
 type NotifyRequestUi = NotifyUi | 'secret';
 
-interface NotifyChoice {
+export interface NotifyChoice {
   label: string;
   detail?: string;
   recommended?: boolean;
@@ -16,7 +16,7 @@ interface NotifyChoice {
   was?: string;
 }
 
-interface NotifySubQuestion {
+export interface NotifySubQuestion {
   title: string;
   choices: NotifyChoice[];
   /** Why this question matters, shown under it. */
@@ -297,6 +297,30 @@ export function parseNotifyQuestion(given: NotifyQuestionFlags): NotifyQuestion 
   if (given.action !== undefined) question.action = decodeOr(parseJson(given.action), actionSchema, invalid('action', ACTION_EXPECTED));
   if (given.links !== undefined) question.links = parseLinks(given.links);
   return question;
+}
+
+/** A blocked report's buttons: `--choices` or `--questions`, as notify sends them. */
+export interface ReportOptions {
+  choices?: NotifyChoice[];
+  questions?: NotifySubQuestion[];
+}
+
+const REPORT_OPTIONS_NEXT = 'Fix the JSON and run runpane report again, such as '
+  + `runpane report --state blocked --question 'Q-3: Use the invoice id?' --choices '[{"label":"Invoice id","recommended":true},{"label":"Invoice number"}]'.`;
+
+/**
+ * `runpane report --state blocked --choices|--questions`: notify's own checks on the same JSON, so
+ * a report's card takes exactly what an options card takes. Undefined when neither was given.
+ */
+export function parseReportOptions(title: string, choices: string | undefined, questions: string | undefined): ReportOptions | undefined {
+  if (choices === undefined && questions === undefined) return undefined;
+  try {
+    const parsed = parseNotifyQuestion({ ui: 'options', title, choices, questions });
+    return parsed.questions ? { questions: parsed.questions } : { choices: parsed.choices };
+  } catch (error) {
+    if (error instanceof RunpaneError) throw new RunpaneError(error.code, error.message, REPORT_OPTIONS_NEXT);
+    throw error;
+  }
 }
 
 /**
