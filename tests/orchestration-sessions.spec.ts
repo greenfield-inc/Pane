@@ -631,7 +631,7 @@ test('Session runtime defaults to Windows and submits the selected installed dis
   await page.getByLabel('Session name (optional)', { exact: true }).fill('WSL planning');
   await page.screenshot({ path: 'tmp/verify/session-runtime/01-wsl-create.png' });
   await page.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'WSL planning', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'WSL planning', exact: true })).toBeAttached();
   const result = await page.evaluate(() => window.electronAPI.orchestrationSessions.list());
   expect(result.data?.sessions.find(session => session.name === 'WSL planning')).toMatchObject({ runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' });
 });
@@ -675,12 +675,12 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
 
   await expect(page.getByTestId('sessions-section-header')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('orchestration-session-roadmap').click();
-  await expect(page.getByRole('heading', { name: 'Roadmap', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Roadmap', exact: true })).toBeAttached();
   await expect(page.getByRole('button', { name: 'Show details', exact: true })).toBeVisible();
   await expect(page.getByText('Roadmap context stays here.', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  // The Overview is the selected tab of the split beside the conversation.
   await expect(page.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
-  const roadmapOverview = page.getByRole('complementary', { name: 'Session overview', exact: true });
+  const roadmapOverview = page.getByTestId('session-overview');
   await expect(roadmapOverview.getByRole('heading', { name: 'Roadmap', exact: true })).toBeVisible();
   await expect(roadmapOverview.getByRole('heading', { name: 'Associated Panes', exact: true })).toBeVisible();
   await expect(roadmapOverview.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
@@ -705,7 +705,7 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await expect(createDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
   await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
 
-  await expect(page.getByRole('heading', { name: 'New chat 3', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'New chat 3', exact: true })).toBeAttached();
   await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
   const configUpdates = await page.evaluate(() => {
     // SAFETY: installElectronApiMock installs this controller before the app loads.
@@ -728,20 +728,19 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await namedCreateDialog.getByLabel('Session name (optional)', { exact: true }).fill('  Custom named chat  ');
   await expect(namedCreateDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
   await namedCreateDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Custom named chat', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Custom named chat', exact: true })).toBeAttached();
   await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Open Session Onboarding', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Onboarding', exact: true })).toBeAttached();
-  await page.getByRole('button', { name: 'Show details', exact: true }).click();
-  const onboardingOverview = page.getByRole('complementary', { name: 'Session overview', exact: true });
+  await expect(page.getByRole('heading', { level: 1, name: 'Onboarding', exact: true })).toBeAttached();
+  const onboardingOverview = page.getByTestId('session-overview');
   await expect(onboardingOverview.getByRole('heading', { name: 'Onboarding', exact: true })).toBeVisible();
   await expect(onboardingOverview.getByRole('heading', { name: 'Activity', exact: true })).toBeVisible();
   await expect(onboardingOverview.getByText('Onboarding context stays here.', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Checklist context stays here.', { exact: true })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Open Session Release checklist renamed', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Release checklist renamed', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Release checklist renamed', exact: true })).toBeAttached();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
   await expect(page.getByText('Checklist context stays here.', { exact: true })).toHaveCount(0);
   await expect(page.getByText('Onboarding context stays here.', { exact: true })).toHaveCount(0);
@@ -793,7 +792,7 @@ test('Session creation hides unsupported Cursor on Windows', async ({ page }) =>
   await expect(dialog.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'New chat', exact: true })).toBeAttached();
   await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
 });
 
@@ -809,7 +808,7 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
   const firstSessionRow = page.getByTestId('orchestration-session-alpha');
   await expect(firstSessionRow).toBeVisible({ timeout: 10_000 });
   await firstSessionRow.click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   const sessionsHeader = page.getByTestId('sessions-section-header');
   const beforeHeaderBox = await layoutBox(sessionsHeader);
   const beforeFirstRowBox = await layoutBox(firstSessionRow);
@@ -854,13 +853,13 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
   const loadingStatus = page.getByRole('status', { name: 'Loading Sessions', exact: true });
   expect(await layoutBox(sessionsHeader)).toEqual(beforeHeaderBox);
   expect(await layoutBox(firstSessionRow)).toEqual(beforeFirstRowBox);
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Beta', exact: true })).toBeAttached();
   await page.waitForTimeout(400);
   await expect(loadingStatus).toHaveCount(0);
   expect(await layoutBox(sessionsHeader)).toEqual(beforeHeaderBox);
   expect(await layoutBox(firstSessionRow)).toEqual(beforeFirstRowBox);
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1, name: 'Beta', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds these controls before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationSelectCalls: () => number } };
@@ -880,7 +879,7 @@ test('Session view follows an external agent switch without selecting again or r
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
   await alphaRow.click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
   const initialViewRequests = await page.evaluate(() => {
     // SAFETY: installSessionsFixture adds these controls before the app loads.
@@ -1052,9 +1051,8 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await expect(sessionsToggle).toHaveAttribute('aria-expanded', 'false');
   await sessionsToggle.click();
 
-  await expect(page.getByRole('heading', { name: 'Pane evolution', exact: true })).toBeAttached();
-  await page.getByRole('button', { name: 'Show details', exact: true }).click();
-  const evolutionOverview = page.getByRole('complementary', { name: 'Session overview', exact: true });
+  await expect(page.getByRole('heading', { level: 1, name: 'Pane evolution', exact: true })).toBeAttached();
+  const evolutionOverview = page.getByTestId('session-overview');
   await expect(evolutionOverview.getByText('Unstarted terminal', { exact: true })).toBeVisible();
   await expect(evolutionOverview.getByText('Initialized terminal', { exact: true })).toBeVisible();
   await expect(evolutionOverview.getByText('Working', { exact: true })).toBeVisible();
@@ -1062,6 +1060,7 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
   await expect(evolutionOverview.getByText('Unknown', { exact: true })).toHaveCount(0);
   await expect(evolutionOverview.getByText('Not started', { exact: true })).toHaveCount(0);
   await expect(evolutionOverview.getByText('Status unavailable', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
   const sessionChanges = page.getByRole('complementary', { name: 'Session changes' });
   await expect(sessionChanges).toContainText('Pane/pane chat to session');
@@ -1079,11 +1078,11 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
 
   const doozyRow = page.getByTestId('orchestration-session-doozy');
   await doozyRow.click();
-  await expect(page.getByRole('heading', { name: 'Doozy fixes', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Doozy fixes', exact: true })).toBeAttached();
   await page.getByRole('button', { name: 'Expand Doozy fixes Panes' }).click();
   await page.getByRole('button', { name: 'Pane/managed pane sidebar', exact: true }).click();
   await doozyRow.click();
-  await expect(page.getByRole('heading', { name: 'Doozy fixes', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Doozy fixes', exact: true })).toBeAttached();
 
   await page.evaluate(async () => {
     await window.electronAPI.orchestrationSessions.associate(
@@ -1224,7 +1223,7 @@ test('a banner explains the folder-trust prompt only while the Session agent sho
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   const emit = (state: string, reason: string) => page.evaluate(({ state, reason }) => {
     // SAFETY: installElectronApiMock adds these controls before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelAgentStatus: (panelId: string, sessionId: string, state: string, reason: string) => void } };
@@ -1362,12 +1361,15 @@ test('an Undo still refreshing when the host changes does not reopen the Session
   const localRow = page.getByTestId('orchestration-session-shared-id');
   await expect(localRow).toBeVisible({ timeout: 10_000 });
   await localRow.click();
-  await expect(page.getByRole('heading', { name: 'Local', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Local', exact: true })).toBeAttached({ timeout: 10_000 });
   await localRow.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
   await page.getByRole('dialog', { name: 'Archive Local?' }).getByRole('button', { name: 'Archive', exact: true }).click();
   const home = page.getByRole('heading', { name: 'Preferences', exact: true });
   await expect(home).toBeVisible();
+  // Navigation memory is written after a short debounce; let Home land before the host changes,
+  // or the Session opened a moment ago is still this desktop's remembered one.
+  await expect.poll(() => page.evaluate(async () => (await window.electronAPI.uiState.getNavigationMemory(null)).data?.orchestrationSessionId ?? null)).toBeNull();
 
   type HostSwitchMock = {
     holdOrchestrationLists: () => void;
@@ -1408,7 +1410,7 @@ test('an Undo still refreshing when the host changes does not reopen the Session
   // The app may auto-select another Session; it must never select the restored id on the new host.
   expect((await selectedIds()).slice(selectionsBeforeUndo)).not.toContain('shared-id');
   await expect(home).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Remote twin', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1, name: 'Remote twin', exact: true })).toHaveCount(0);
 });
 
 test('Undo restores an archived Session without pulling the person off where they went next', async ({ page }) => {
@@ -1423,20 +1425,20 @@ test('Undo restores an archived Session without pulling the person off where the
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
   await alphaRow.click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   await alphaRow.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
   await page.getByRole('dialog', { name: 'Archive Alpha?' }).getByRole('button', { name: 'Archive', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toBeVisible();
 
   await page.getByTestId('orchestration-session-beta').click();
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Beta', exact: true })).toBeAttached();
   await page.getByRole('status').filter({ hasText: 'Archived Alpha' }).getByRole('button', { name: 'Undo', exact: true }).click();
 
   await expect(page.getByTestId('orchestration-session-alpha')).toBeVisible();
   await page.waitForTimeout(500);
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1, name: 'Beta', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toHaveCount(0);
 });
 
 test('Session rows archive and restore without losing selection or associated Panes', async ({ page }) => {
@@ -1458,7 +1460,7 @@ test('Session rows archive and restore without losing selection or associated Pa
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
   await alphaRow.click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Expand Alpha Panes' }).click();
   await expect(page.getByRole('button', { name: 'Associated Alpha Pane', exact: true })).toBeVisible();
 
@@ -1483,7 +1485,7 @@ test('Session rows archive and restore without losing selection or associated Pa
   // Home holds even after the app auto-selects another active Session (Beta) for the chat view.
   await page.waitForTimeout(1_000);
   await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1, name: 'Beta', exact: true })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationSelectedSessionId: () => string | undefined } };
@@ -1588,7 +1590,7 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
   await dismissStartupDialogs(page);
   await expect(page.getByTestId('orchestration-session-alpha')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('orchestration-session-alpha').click();
-  const alphaChat = page.getByRole('heading', { name: 'Alpha', exact: true });
+  const alphaChat = page.getByRole('heading', { level: 1, name: 'Alpha', exact: true });
   await expect(alphaChat).toBeAttached({ timeout: 10_000 });
 
   const actions = page.getByRole('button', { name: 'Actions for Alpha', exact: true });
@@ -1663,7 +1665,7 @@ test('a Pane opened from a Session names it in the title bar as a way back', asy
   await expect(back).toHaveCSS('-webkit-app-region', 'no-drag');
 
   await back.click();
-  await expect(page.getByRole('heading', { name: 'Checkout launch', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Checkout launch', exact: true })).toBeAttached({ timeout: 10_000 });
   await expect(label).toHaveText('Session·Checkout launch');
 });
 
@@ -1755,7 +1757,7 @@ test('Archiving a Session during a delayed chat load cannot reinstall its view',
   const alphaRow = page.getByTestId('orchestration-session-alpha');
   await expect(alphaRow).toBeVisible({ timeout: 10_000 });
   await alphaRow.click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   const initialViewRequestCount = await page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationViewRequests: () => Array<unknown> } };
@@ -1785,8 +1787,8 @@ test('Archiving a Session during a delayed chat load cannot reinstall its view',
       { archived: true },
     );
   });
-  await expect(page.getByRole('heading', { name: 'Beta', exact: true })).toBeAttached({ timeout: 10_000 });
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { level: 1, name: 'Beta', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationSelectedSessionId: () => string | undefined } };
@@ -1823,9 +1825,8 @@ test('Session overview refreshes for associated Pane activity without reacting t
   const trackedSessionRow = page.getByTestId('orchestration-session-tracked-session');
   await expect(trackedSessionRow).toBeVisible({ timeout: 10_000 });
   await trackedSessionRow.click();
-  await expect(page.getByRole('heading', { name: 'Tracked Session', exact: true })).toBeAttached({ timeout: 10_000 });
-  await page.getByRole('button', { name: 'Show details', exact: true }).click();
-  const overview = page.getByRole('complementary', { name: 'Session overview', exact: true });
+  await expect(page.getByRole('heading', { level: 1, name: 'Tracked Session', exact: true })).toBeAttached({ timeout: 10_000 });
+  const overview = page.getByTestId('session-overview');
   await expect(overview.getByText('Tracked Pane', { exact: true })).toBeVisible();
   await expect(overview.getByText('feature/tracked', { exact: true })).toBeVisible();
   await expect(overview.getByText('Tracked terminal', { exact: true })).toBeVisible();
@@ -1963,7 +1964,7 @@ test('Session launch settings preserve custom arguments, profile, and agent acro
   await page.screenshot({ path: '/tmp/pane-session-behavior-editor.png' });
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
   await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Launch settings', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Launch settings', exact: true })).toBeAttached();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByTestId('orchestration-session-created-session-1').click();
   await expect(page.getByTestId('pane-chat-agent-badge')).toHaveCount(0);
@@ -2078,7 +2079,7 @@ test('Session app defaults save for new Sessions without changing existing launc
   await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Coordinate only the requested work.');
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
   await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'New chat', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'New chat', exact: true })).toBeAttached();
   await page.getByRole('button', { name: 'Session settings', exact: true }).click();
   const sessionSettings = page.getByRole('dialog', { name: 'Session settings', exact: true });
   await expect(sessionSettings.getByLabel('Custom command and arguments')).toHaveValue('af run coordinator --quiet');
@@ -2118,7 +2119,7 @@ test('Sessions open persistent shell and Files panels in their own workspace', a
   await page.goto('/');
   await page.getByTestId('orchestration-session-tools').click();
   // The window title bar names the Session; its tabs are the next row.
-  const workspaceTabs = page.getByTestId('session-workspace-tabs');
+  const workspaceTabs = page.locator('.panel-group-tab-bar').first();
   const activeTab = workspaceTabs.getByRole('tab').first();
   await expect(activeTab).toBeVisible();
   await expect(activeTab).toHaveAttribute('aria-selected', 'true');
@@ -2282,9 +2283,9 @@ test('the Session "+" menu opens terminals and browsers as tabs, apart from the 
   await installSessionsFixture(page, [sessionFixture('addtool', 'Add tool demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
   await page.getByTestId('orchestration-session-addtool').click();
-  const workspaceTabs = page.getByTestId('session-workspace-tabs');
+  const workspaceTabs = page.locator('.panel-group-tab-bar').first();
   await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
-  const addTool = page.locator('.pane-chat-shell').getByRole('button', { name: 'Add tool', exact: true });
+  const addTool = page.locator('.pane-chat-shell').getByRole('button', { name: 'Add tool', exact: true }).first();
   await expect(addTool).toBeEnabled();
 
   await addTool.click();
@@ -2316,6 +2317,117 @@ test('the Session "+" menu opens terminals and browsers as tabs, apart from the 
   expect(colours.segment).toBe(colours.sidebar);
 });
 
+test('the Overview is the first tab of every Session\'s right split, beside the conversation', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('roadmap', 'Roadmap', 'Plan the next release.', '', new Date(0).toISOString())], [], { rememberPaneLayouts: true });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-roadmap').click();
+  const groupStrips = page.locator('.panel-group-tab-bar');
+  // A Session with no split yet opens one: the conversation, then the Overview showing.
+  await expect(groupStrips).toHaveCount(2);
+  await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
+  const overviewTab = groupStrips.nth(1).getByRole('tab', { name: 'Overview', exact: true });
+  await expect(groupStrips.nth(1).getByRole('tab').first()).toHaveAccessibleName('Overview');
+  await expect(overviewTab).toHaveAttribute('aria-selected', 'true');
+  await expect(groupStrips.nth(1).getByRole('button', { name: 'Close Overview' })).toHaveCount(0);
+  const overviewPanel = page.locator(`[data-panel-group-id] [role="tabpanel"]`).filter({ has: page.getByRole('heading', { level: 2, name: 'Roadmap', exact: true }) });
+  await expect(overviewPanel.getByText('Plan the next release.', { exact: true })).toBeVisible();
+  // The right sidebar keeps Files and Changes only.
+  await page.getByRole('button', { name: 'Show details', exact: true }).click();
+  await expect(page.getByRole('tablist', { name: 'Session inspector' }).getByRole('tab')).toHaveText(['Files', 'Changes']);
+  await expect(page.getByRole('complementary', { name: 'Session changes' })).toBeVisible();
+  await page.getByRole('button', { name: 'Hide details', exact: true }).click();
+
+  // A page the agent opens beside the chat goes after the Overview, which stays leftmost.
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock adds these controls before the app loads.
+    const mock = (window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelActivation: (request: PanelActivationRequest) => void } }).__paneTestElectronMock;
+    const now = new Date(0).toISOString();
+    const sessionId = '__orchestration_session_roadmapterminal__';
+    mock.emitPanelCreated({
+      id: 'plan-page', sessionId, type: 'browser', title: 'plan.html',
+      state: { isActive: true, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } },
+      metadata: { createdAt: now, lastActiveAt: now, position: 5, openPlacement: 'split' },
+    });
+    mock.emitPanelActivation({ sessionId, panelId: 'plan-page', placement: 'split' });
+  });
+  await expect.poll(() => tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html']);
+  await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
+  // It can be selected again, and right-click offers nothing to close or rename.
+  await overviewTab.click();
+  await expect(overviewTab).toHaveAttribute('aria-selected', 'true');
+  await overviewTab.click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Close tab' })).toHaveCount(0);
+});
+
+test('a saved split without the Overview gains it as the leftmost tab and keeps its selected tab', async ({ page }) => {
+  const sessionId = '__orchestration_session_plansterminal__';
+  const now = new Date(0).toISOString();
+  const planPage = { id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+    { type: 'group', id: 'g1', panelIds: ['__orchestration_panel_plans_claude'], activePanelId: '__orchestration_panel_plans_claude' },
+    { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
+  ] }, focusedGroupId: 'g1' };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now)], [], { initialPanels: [planPage], initialLayout: savedLayout });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').click();
+  const groupStrips = page.locator('.panel-group-tab-bar');
+  await expect(groupStrips).toHaveCount(2);
+  await expect.poll(() => tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html']);
+  await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('a Session link lands on its Overview, from another Session and when already open', async ({ page }) => {
+  const sessionId = '__orchestration_session_plansterminal__';
+  const now = new Date(0).toISOString();
+  const planPage = { id: 'plan-page', sessionId, type: 'browser', title: 'plan.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+    { type: 'group', id: 'g1', panelIds: ['__orchestration_panel_plans_claude'], activePanelId: '__orchestration_panel_plans_claude' },
+    { type: 'group', id: 'g2', panelIds: ['plan-page'], activePanelId: 'plan-page' },
+  ] }, focusedGroupId: 'g1' };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', now), sessionFixture('other', 'Other work', '', '', now)], [], { initialPanels: [planPage], initialLayout: savedLayout });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-other').click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Other work', exact: true })).toBeAttached();
+  const openLink = () => page.evaluate(() => {
+    // SAFETY: installElectronApiMock adds these controls before the app loads.
+    (window as typeof window & { __paneTestElectronMock: { emitPaneOpenLink: (target: { kind: 'session'; sessionId: string }) => void } }).__paneTestElectronMock.emitPaneOpenLink({ kind: 'session', sessionId: 'plans' });
+  });
+  await openLink();
+  await expect(page.getByRole('heading', { level: 1, name: 'Plan demo', exact: true })).toBeAttached();
+  const sideStrip = page.locator('.panel-group-tab-bar').nth(1);
+  await expect.poll(() => tabNames(sideStrip)).toEqual(['Overview', 'plan.html']);
+  await expect(sideStrip.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
+  // Already open on another tab, the link brings the Overview back.
+  await sideStrip.getByRole('tab', { name: 'plan.html' }).click();
+  await expect(sideStrip.getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
+  await openLink();
+  await expect(sideStrip.getByRole('tab', { name: 'Overview', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('keyboard focus arriving in the Overview makes its split the one tab actions apply to', async ({ page }) => {
+  const sessionId = '__orchestration_session_focusproofterminal__';
+  const chatId = '__orchestration_panel_focusproof_claude';
+  const now = new Date(0).toISOString();
+  const workPage = { id: 'work-page', sessionId, type: 'browser', title: 'work.html', state: { isActive: true, hasBeenViewed: true, customState: { currentUrl: 'about:blank' } }, metadata: { createdAt: now, lastActiveAt: now, position: 5 } };
+  const savedLayout = { version: 1, root: { type: 'split', id: 's1', direction: 'row', sizes: [50, 50], children: [
+    { type: 'group', id: 'chat-group', panelIds: [chatId, 'work-page'], activePanelId: 'work-page' },
+    { type: 'group', id: 'overview-group', panelIds: [`session-overview:${sessionId}`], activePanelId: `session-overview:${sessionId}` },
+  ] }, focusedGroupId: 'chat-group' };
+  await installSessionsFixture(page, [sessionFixture('focusproof', 'Focus proof', 'Review proof', '', now)], [], { initialPanels: [workPage], initialLayout: savedLayout, rememberPaneLayouts: true });
+  await page.goto('/');
+  await dismissStartupDialogs(page);
+  await page.getByTestId('orchestration-session-focusproof').click();
+  await expect(page.locator('.panel-group-tab-bar')).toHaveCount(2);
+  await page.getByRole('tab', { name: 'work.html', exact: true }).click();
+  // F6 moves keyboard focus into the Overview's own controls, past its group's DOM.
+  await page.keyboard.press('F6');
+  await expect(page.getByRole('button', { name: 'Refresh Session overview', exact: true })).toBeFocused();
+  await expect(page.locator('[data-panel-group-id="overview-group"]')).toHaveAttribute('data-group-focused', 'true');
+  // Close tab now applies to the Overview's split, where there is nothing to close.
+  await page.keyboard.press('ControlOrMeta+w');
+  await expect(page.getByRole('tab', { name: 'work.html', exact: true })).toHaveCount(1);
+});
+
 test('agent-opened pages open as tabs in a split beside the Session conversation', async ({ page }, testInfo) => {
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())]);
   await page.addInitScript(() => {
@@ -2329,7 +2441,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   });
   await page.goto('/');
   await page.getByTestId('orchestration-session-plans').click();
-  const workspaceTabs = page.getByTestId('session-workspace-tabs');
+  const workspaceTabs = page.locator('.panel-group-tab-bar').first();
   await expect(workspaceTabs.getByRole('tab').first()).toBeVisible();
   await expect(page.locator('.xterm-screen')).toHaveCount(1);
   await expect(page.locator('.xterm-screen').first()).toBeVisible();
@@ -2358,11 +2470,11 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
   await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
-  // Split, every group owns a strip: the agent tab moves into its group's strip
-  // (the toolbar row goes away) and opened pages get the side strip, so all tabs
-  // sit on one row under the title bar.
-  await expect(workspaceTabs).toHaveCount(0);
+  // Split, every group owns a strip: the agent tab sits in its group's strip
+  // and opened pages go after the Overview in the side strip, so all tabs sit
+  // on one row under the title bar.
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html']);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
   const [agentStrip, pageStrip] = [await layoutBox(groupStrips.nth(0)), await layoutBox(groupStrips.nth(1))];
   expect(pageStrip.y).toBe(agentStrip.y);
@@ -2378,7 +2490,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
   await openPage('report-page', 'report.html', true, true);
   await expect(groupStrips).toHaveCount(2);
-  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(2);
+  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(3);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'report.html' })).toHaveAttribute('aria-selected', 'true');
   await page.evaluate(() => {
     // SAFETY: the fixture installs these event controls; this test owns the read resolver.
@@ -2397,7 +2509,10 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
 
   await groupStrips.nth(1).getByRole('button', { name: 'Close report.html' }).click();
   await groupStrips.nth(1).getByRole('button', { name: 'Close plan.html' }).click();
-  await expect(groupStrips).toHaveCount(0);
+  // The Overview keeps the split open, showing again.
+  await expect(groupStrips).toHaveCount(2);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview']);
+  await expect(groupStrips.nth(1).getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
   await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
 });
 
@@ -2457,7 +2572,7 @@ test('a Session dropped on another tiles beside it, survives a reload, and close
 
   await page.getByTestId('orchestration-session-alpha').click();
   const tiles = page.getByTestId('session-tile-header');
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached();
 
   // Drop Beta on the right quarter of Alpha's tile: an edge drop splits.
   const stage = await layoutBox(page.getByTestId('session-tile-layout'));
@@ -2472,7 +2587,7 @@ test('a Session dropped on another tiles beside it, survives a reload, and close
   await expect(tiles.nth(0)).toContainText('Alpha');
   await expect(tiles.nth(1)).toContainText('Beta');
   // Both tiles stay mounted and live; neither is a placeholder for the other.
-  await expect(page.getByTestId('session-workspace-tabs')).toHaveCount(2);
+  await expect(page.locator('[data-session-content-id]')).toHaveCount(2);
 
   // The layout is remembered per host, so reopening Sessions brings it back
   // whole rather than dropping to the one Session that was selected. Writes are
@@ -2489,8 +2604,8 @@ test('a Session dropped on another tiles beside it, survives a reload, and close
 
   // Closing a tile stops tiling that Session without touching the Session.
   await page.getByRole('button', { name: 'Stop tiling Beta', exact: true }).click();
-  await expect(page.getByTestId('session-workspace-tabs')).toHaveCount(1);
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached();
+  await expect(page.locator('[data-session-content-id]')).toHaveCount(1);
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached();
   await expect(page.getByTestId('orchestration-session-beta')).toBeVisible();
 });
 
@@ -2557,24 +2672,25 @@ test('dragging a Session tab to the stage edge opens a split beside the conversa
   await installSessionsFixture(page, [sessionFixture('tabdrag', 'Tab drag demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
   await page.getByTestId('orchestration-session-tabdrag').click();
-  const workspaceTabs = page.getByTestId('session-workspace-tabs');
-  const addTool = page.locator('.pane-chat-shell').getByRole('button', { name: 'Add tool', exact: true });
+  const workspaceTabs = page.locator('.panel-group-tab-bar').first();
+  const addTool = page.locator('.pane-chat-shell').getByRole('button', { name: 'Add tool', exact: true }).first();
   await expect(addTool).toBeEnabled();
   await addTool.click();
   await page.getByRole('menu').getByRole('menuitem', { name: 'Browser' }).click();
   await expect(workspaceTabs.getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
   const agentTabName = await workspaceTabs.getByRole('tab').first().innerText();
 
-  const stage = await layoutBox(page.locator('.pane-chat-shell [role="tabpanel"]:visible'));
+  const stage = await layoutBox(page.locator('.pane-chat-shell [role="tabpanel"]:visible').first());
   const accepted = await dragTab(page, workspaceTabs.getByRole('tab', { name: 'Browser' }), [pointIn(stage, 'right')]);
   expect(accepted).toEqual([true]);
 
+  // A new split opens right beside the conversation, before the Overview's.
   const groupStrips = page.locator('.panel-group-tab-bar');
-  await expect(groupStrips).toHaveCount(2);
-  await expect(workspaceTabs).toHaveCount(0);
+  await expect(groupStrips).toHaveCount(3);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveText(agentTabName);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
+  expect(await tabNames(groupStrips.nth(2))).toEqual(['Overview']);
 });
 
 /** As the host does when an agent opens a page: the tab is created, then brought forward. */
@@ -2597,15 +2713,16 @@ async function openAgentPage(page: Page, sessionKey: string, id: string, title: 
 /** Opens a Session with a Browser tab beside the conversation and an agent page split to its right. */
 async function openSplitSession(page: Page, key: string, pages: string[]): Promise<{ groupStrips: Locator; stages: Locator }> {
   await page.getByTestId(`orchestration-session-${key}`).click();
-  const addTool = page.locator('.pane-chat-shell').getByRole('button', { name: 'Add tool', exact: true });
+  const addTool = page.locator('.pane-chat-shell').getByRole('button', { name: 'Add tool', exact: true }).first();
   await expect(addTool).toBeEnabled();
   await addTool.click();
   await page.getByRole('menu').getByRole('menuitem', { name: 'Browser' }).click();
-  await expect(page.getByTestId('session-workspace-tabs').getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.panel-group-tab-bar').first().getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
   for (const title of pages) await openAgentPage(page, key, title.replace('.html', '-page'), title);
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
-  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(pages.length);
+  // The right split leads with the Overview.
+  await expect(groupStrips.nth(1).getByRole('tab')).toHaveCount(pages.length + 1);
   return { groupStrips, stages: page.locator('.pane-chat-shell [role="tabpanel"]:visible') };
 }
 
@@ -2627,40 +2744,42 @@ test('dragging a Session tab onto the split beside it moves it there and survive
   expect(accepted).toEqual([true]);
 
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['plan.html', 'Browser']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html', 'Browser']);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveCount(1);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
 
   // Leaving flushes the layout; coming back shows the tab where it was dropped.
   await page.getByTestId('orchestration-session-elsewhere').click();
-  await expect(page.getByRole('heading', { name: 'Elsewhere', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Elsewhere', exact: true })).toBeAttached();
   await page.getByTestId('orchestration-session-movetab').click();
   await expect(groupStrips).toHaveCount(2);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['plan.html', 'Browser']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html', 'Browser']);
 });
 
 test('a Session tab dropped on a strip lands at the marked slot, and reorders within its own strip', async ({ page }) => {
+  // Wide enough for the right strip's four tabs (the Overview first) to fit without scrolling.
+  await page.setViewportSize({ width: 1600, height: 900 });
   await installSessionsFixture(page, [sessionFixture('striptab', 'Strip demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
   const { groupStrips } = await openSplitSession(page, 'striptab', ['one.html', 'two.html']);
   const right = groupStrips.nth(1);
-  expect(await tabNames(right)).toEqual(['one.html', 'two.html']);
+  expect(await tabNames(right)).toEqual(['Overview', 'one.html', 'two.html']);
 
   // The left half of a tab inserts before it.
   const two = await layoutBox(right.getByRole('tab', { name: 'two.html' }));
   expect(await dragTab(page, groupStrips.nth(0).getByRole('tab', { name: 'Browser' }), [{ x: two.x + 6, y: two.y + two.height / 2 }])).toEqual([true]);
-  expect(await tabNames(right)).toEqual(['one.html', 'Browser', 'two.html']);
+  expect(await tabNames(right)).toEqual(['Overview', 'one.html', 'Browser', 'two.html']);
   await expect(right.getByRole('tab', { name: 'Browser' })).toHaveAttribute('aria-selected', 'true');
 
   // The empty space after the last tab appends.
   const last = await layoutBox(right.getByRole('tab', { name: 'two.html' }));
   expect(await dragTab(page, right.getByRole('tab', { name: 'Browser' }), [{ x: last.x + last.width + 8, y: last.y + last.height / 2 }])).toEqual([true]);
-  expect(await tabNames(right)).toEqual(['one.html', 'two.html', 'Browser']);
+  expect(await tabNames(right)).toEqual(['Overview', 'one.html', 'two.html', 'Browser']);
 
   // Past the second tab's midpoint reorders without splitting.
   const second = await layoutBox(right.getByRole('tab', { name: 'two.html' }));
   expect(await dragTab(page, right.getByRole('tab', { name: 'one.html' }), [{ x: second.x + second.width - 6, y: second.y + second.height / 2 }])).toEqual([true]);
-  expect(await tabNames(right)).toEqual(['two.html', 'one.html', 'Browser']);
+  expect(await tabNames(right)).toEqual(['Overview', 'two.html', 'one.html', 'Browser']);
   await expect(groupStrips).toHaveCount(2);
 });
 
@@ -2668,16 +2787,22 @@ test('emptying a Session group by drag closes it, and an edge drop opens a new o
   await installSessionsFixture(page, [sessionFixture('emptytab', 'Empty group demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
   const { groupStrips, stages } = await openSplitSession(page, 'emptytab', ['plan.html']);
+  // With one group left, its tabs move up to the toolbar strip.
   const workspaceTabs = page.getByTestId('session-workspace-tabs');
 
+  await dragTab(page, groupStrips.nth(1).getByRole('tab', { name: 'plan.html' }), [pointIn(await layoutBox(stages.nth(0)))]);
+  await expect(groupStrips).toHaveCount(2);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview']);
+
   // A group's only tab dropped on its own stage changes nothing.
-  const planStage = await layoutBox(stages.nth(1));
-  await dragTab(page, groupStrips.nth(1).getByRole('tab', { name: 'plan.html' }), [pointIn(planStage, 'left')]);
+  const overviewStage = await layoutBox(stages.nth(1));
+  await dragTab(page, groupStrips.nth(1).getByRole('tab', { name: 'Overview' }), [pointIn(overviewStage, 'left')]);
   await expect(groupStrips).toHaveCount(2);
 
-  await dragTab(page, groupStrips.nth(1).getByRole('tab', { name: 'plan.html' }), [pointIn(await layoutBox(stages.nth(0)))]);
+  // Moving the Overview too empties the right group, which closes.
+  await dragTab(page, groupStrips.nth(1).getByRole('tab', { name: 'Overview' }), [pointIn(await layoutBox(stages.nth(0)))]);
   await expect(groupStrips).toHaveCount(0);
-  await expect(workspaceTabs.getByRole('tab')).toHaveCount(3);
+  await expect(workspaceTabs.getByRole('tab')).toHaveCount(4);
 
   const stage = await layoutBox(stages.first());
   await dragTab(page, workspaceTabs.getByRole('tab', { name: 'plan.html' }), [pointIn(stage, 'left')]);
@@ -2695,7 +2820,7 @@ test('a cancelled Session tab drag leaves the layout and the stage as they were'
   // Hovered, then released without a drop: only dragend arrives.
   expect(await dragTab(page, browserTab, [pointIn(rightStage, 'right')], { drop: false })).toEqual([true]);
   expect(await tabNames(groupStrips.nth(0))).toHaveLength(2);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['plan.html']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'plan.html']);
   // No drop target is left mounted: the stage takes clicks again and refuses a stray dragover.
   const stray = await page.evaluate(({ x, y }) => {
     const over = document.elementFromPoint(x, y);
@@ -2714,28 +2839,29 @@ test('a tab dragged over a tiled neighbour Session is refused there and moves no
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached();
   const tileLayout = await layoutBox(page.getByTestId('session-tile-layout'));
   await dragSessionOntoTile(page, 'orchestration-session-beta', { x: tileLayout.x + tileLayout.width - 20, y: tileLayout.y + tileLayout.height / 2 });
   const tiles = page.getByTestId('session-tile-header');
   await expect(tiles).toHaveCount(2);
-  const strips = page.getByTestId('session-workspace-tabs');
-  await expect(strips).toHaveCount(2);
-  await expect(strips.nth(0).getByRole('tab')).toHaveCount(1);
-  await expect(strips.nth(1).getByRole('tab')).toHaveCount(1);
+  // Each tile is split: its conversation, and its Overview beside it.
+  const [alpha, beta] = [page.locator('[data-session-content-id]').nth(0), page.locator('[data-session-content-id]').nth(1)];
+  const [alphaStrips, betaStrips] = [alpha.locator('.panel-group-tab-bar'), beta.locator('.panel-group-tab-bar')];
+  await expect(alphaStrips).toHaveCount(2);
+  await expect(betaStrips).toHaveCount(2);
 
   // The drag is live over Alpha's own stage, but Beta's stage and strip both
   // refuse Alpha's tab: no target there, and nothing moves.
-  const stages = page.locator('[data-session-content-id] [role="tabpanel"]:visible');
-  const [alphaStage, betaStage] = [await layoutBox(stages.nth(0)), await layoutBox(stages.nth(1))];
-  const betaTab = await layoutBox(strips.nth(1).getByRole('tab'));
-  const accepted = await dragTab(page, strips.nth(0).getByRole('tab'), [
+  const alphaStage = await layoutBox(alpha.locator('[role="tabpanel"]:visible').first());
+  const betaStage = await layoutBox(beta.locator('[role="tabpanel"]:visible').first());
+  const betaTab = await layoutBox(betaStrips.nth(0).getByRole('tab'));
+  const accepted = await dragTab(page, alphaStrips.nth(0).getByRole('tab'), [
     pointIn(alphaStage), pointIn(betaStage, 'right'), pointIn(betaStage), { x: betaTab.x + betaTab.width + 8, y: betaTab.y + betaTab.height / 2 },
   ]);
   expect(accepted).toEqual([true, false, false, false]);
-  await expect(strips.nth(0).getByRole('tab')).toHaveCount(1);
-  await expect(strips.nth(1).getByRole('tab')).toHaveCount(1);
-  await expect(page.locator('.panel-group-tab-bar')).toHaveCount(0);
+  await expect(alphaStrips.nth(0).getByRole('tab')).toHaveCount(1);
+  await expect(betaStrips.nth(0).getByRole('tab')).toHaveCount(1);
+  await expect(page.locator('.panel-group-tab-bar')).toHaveCount(4);
   await expect(tiles).toHaveCount(2);
 });
 
@@ -2774,7 +2900,7 @@ test('New creates a Session with its selected WSL runtime and agent', async ({ p
   await page.getByTestId('create-session-agent-cursor').click();
   await page.getByLabel('Session name (optional)').fill('Coordinate new work');
   await page.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Coordinate new work', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Coordinate new work', exact: true })).toBeAttached();
   const result = await page.evaluate(() => window.electronAPI.orchestrationSessions.list());
   expect(result.data?.sessions.find(session => session.name === 'Coordinate new work')).toMatchObject({ agent: 'cursor', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' });
 });
@@ -2976,11 +3102,11 @@ test('a page an agent opens while you are in another Session lands beside the co
   await page.goto('/');
   // Visit the Session once, so this desktop remembers its layout.
   await page.getByTestId('orchestration-session-away').click();
-  const workspaceTabs = page.getByTestId('session-workspace-tabs');
+  const workspaceTabs = page.locator('.panel-group-tab-bar').first();
   await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
   const agentTabName = await workspaceTabs.getByRole('tab').first().innerText();
   await page.getByTestId('orchestration-session-elsewhere').click();
-  await expect(page.getByRole('heading', { name: 'Elsewhere', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Elsewhere', exact: true })).toBeAttached();
   await expect.poll(() => rememberedFocusedGroup(page, '__orchestration_session_awayterminal__')).not.toBeNull();
 
   await openAgentPage(page, 'away', 'report-page', 'report.html');
@@ -2990,7 +3116,7 @@ test('a page an agent opens while you are in another Session lands beside the co
   await expect(groupStrips).toHaveCount(2);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveText(agentTabName);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['report.html']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'report.html']);
   // The conversation keeps the focus this desktop remembered.
   await expect.poll(() => rememberedFocusedGroup(page, '__orchestration_session_awayterminal__')).toEqual(['__orchestration_panel_away_claude']);
 });
@@ -2999,7 +3125,7 @@ test('reopening a page that sits beside the Session conversation moves it into t
   await installSessionsFixture(page, [sessionFixture('reopen', 'Reopen demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
   await page.getByTestId('orchestration-session-reopen').click();
-  const workspaceTabs = page.getByTestId('session-workspace-tabs');
+  const workspaceTabs = page.locator('.panel-group-tab-bar').first();
   await expect(workspaceTabs.getByRole('tab')).toHaveCount(1);
   const agentTabName = await workspaceTabs.getByRole('tab').first().innerText();
   const open = (placement: 'split' | 'tab', reused: boolean) => page.evaluate(({ placement, reused }) => {
@@ -3025,13 +3151,13 @@ test('reopening a page that sits beside the Session conversation moves it into t
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
   await expect(groupStrips.nth(0).getByRole('tab')).toHaveText(agentTabName);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['notes.html']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'notes.html']);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'notes.html' })).toHaveAttribute('aria-selected', 'true');
 
   // Already beside the conversation: it stays there and stays shown.
   await open('split', true);
   await expect(groupStrips).toHaveCount(2);
-  expect(await tabNames(groupStrips.nth(1))).toEqual(['notes.html']);
+  expect(await tabNames(groupStrips.nth(1))).toEqual(['Overview', 'notes.html']);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'notes.html' })).toHaveAttribute('aria-selected', 'true');
 });
 
@@ -3300,7 +3426,7 @@ test('an archived Session restored with Undo returns to its place, and tiling a 
 
   // Tiling uses the same drag; dropping on the workspace tiles and the sidebar order stays.
   await page.getByTestId('orchestration-session-a').click();
-  await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached();
+  await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached();
   const stage = await layoutBox(page.getByTestId('session-tile-layout'));
   await dragSessionOntoTile(page, 'orchestration-session-c', { x: stage.x + stage.width - 20, y: stage.y + stage.height / 2 });
   await expect(page.getByTestId('session-tile-header')).toHaveCount(2);
@@ -3556,7 +3682,7 @@ test('the Pane Chat offer shows over a Pane, retries a failed start, and follows
   await expect(offer.getByRole('alert')).toHaveText('Pane Chat could not start: Session storage is busy. No Session was opened. Try again.');
   await offer.getByRole('button', { name: 'Try it', exact: true }).click();
 
-  await expect(page.getByRole('heading', { name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
   await expect(offer).toBeVisible();
   await expect(offer.getByRole('button', { name: 'Try it' })).toHaveCount(0);
   const creates = (await paneChatOfferRecord(page)).creates;
@@ -3574,7 +3700,7 @@ test('the Pane Chat offer opens a Session that was saved before its tab failed, 
   await page.getByRole('button', { name: 'checkout-copy', exact: true }).click();
   await offer.getByRole('button', { name: 'Try it', exact: true }).click();
 
-  await expect(page.getByRole('heading', { name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
   await expect(offer.getByRole('button', { name: 'Try it' })).toHaveCount(0);
   expect((await paneChatOfferRecord(page)).creates).toEqual([
     { name: 'Pane fixtures tasks', launchCommand: '', openingPrompt: expect.stringMatching(/^Pane sent this once/) },
@@ -3589,7 +3715,7 @@ test('where the launch shell can\'t carry the opening prompt, Try it offers it t
   await page.getByRole('button', { name: 'checkout-copy', exact: true }).click();
   await offer.getByRole('button', { name: 'Try it', exact: true }).click();
 
-  await expect(page.getByRole('heading', { name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(page.getByRole('heading', { level: 1, name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
   expect((await paneChatOfferRecord(page)).creates).toEqual([{ name: 'Pane fixtures tasks', launchCommand: '', openingPrompt: undefined }]);
   await expect(offer).toContainText('Paste its first message into Pane Chat to start.');
   await offer.getByRole('button', { name: 'Copy first message', exact: true }).click();
@@ -3654,9 +3780,9 @@ test('a Session inspector opened later still minimizes and maximizes by key (F-3
   await page.goto('/');
   await page.getByTestId('orchestration-session-aside').click();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
-  const aside = page.getByRole('complementary', { name: 'Session overview' });
+  const aside = page.getByRole('complementary', { name: 'Session changes' });
   await expect(aside).toBeVisible();
-  await aside.getByRole('tab', { name: 'Overview', exact: true }).focus();
+  await aside.getByRole('tab', { name: 'Changes', exact: true }).focus();
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
   await page.keyboard.down(mod);
   await page.keyboard.press('k');
@@ -3664,9 +3790,9 @@ test('a Session inspector opened later still minimizes and maximizes by key (F-3
   await page.keyboard.up(mod);
   await expect(aside.getByTestId('restore-region')).toBeVisible();
   await aside.getByTestId('restore-region').click();
-  await aside.getByRole('tab', { name: 'Overview', exact: true }).focus();
+  await aside.getByRole('tab', { name: 'Changes', exact: true }).focus();
   await page.keyboard.press('ControlOrMeta+Shift+M');
-  await expect(page.getByRole('complementary', { name: /Session (overview|files|changes)/ })).toHaveCount(0);
+  await expect(page.getByRole('complementary', { name: /Session (files|changes)/ })).toHaveCount(0);
 });
 
 for (const scheme of ['light', 'dark'] as const) {
@@ -3796,8 +3922,17 @@ function sessionApprovalsSnapshot(): NotifySnapshot {
   };
 }
 
+/**
+ * A saved layout where the person dragged the Overview into the conversation's group: one
+ * group and no split, the only way a Session has none.
+ */
+function overviewFoldedIntoChat(key: string): JsonObject {
+  const chat = `__orchestration_panel_${key}_claude`;
+  return { version: 1, root: { type: 'group', id: 'folded', panelIds: [chat, `session-overview:__orchestration_session_${key}terminal__`], activePanelId: chat }, focusedGroupId: 'folded' };
+}
+
 test('an approval covers the Session\'s right split exactly, and ✕ shows it again unchanged; with no split it opens one and ✕ collapses it', async ({ page }, testInfo) => {
-  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: sessionApprovalsSnapshot() });
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: sessionApprovalsSnapshot(), initialLayout: overviewFoldedIntoChat('plans') });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
   await page.getByTestId('orchestration-session-plans').click();
@@ -3863,7 +3998,7 @@ async function sessionFocusSide(page: Page): Promise<{ side: 'column' | 'group' 
 }
 
 test('D-335: the split keys move focus between the Session chat and its approval column both ways, and the focused side carries the accent', async ({ page }, testInfo) => {
-  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: sessionApprovalsSnapshot() });
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())], [], { notifySnapshot: sessionApprovalsSnapshot(), initialLayout: overviewFoldedIntoChat('plans') });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
   await page.getByTestId('orchestration-session-plans').click();
@@ -3946,7 +4081,7 @@ for (const keys of JOURNEY_KEYS) {
       sessionFixture('gamma', 'Gamma work', '', '', now),
     ], [], {
       notifySnapshot: sessionApprovalsSnapshot(), initialPanels: [chatAgent],
-      initialConfig: keys.config,
+      initialConfig: keys.config, initialLayout: overviewFoldedIntoChat('plans'),
     });
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/');

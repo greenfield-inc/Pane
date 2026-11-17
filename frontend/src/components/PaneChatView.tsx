@@ -999,7 +999,7 @@ interface SessionOverviewPanelProps {
 const OVERVIEW_ACTION = 'rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive';
 
 /**
- * The Overview tab. With a status page in the Session folder it shows the page under this
+ * The Overview tab, first in the Session's right split. With a status page in the Session folder it shows the page under this
  * header, and Show Session details brings back the record below; without one it is the record alone.
  */
 function SessionOverviewPanel({ record, folderSessionId, overview, error, onRefresh, onUpdate, onRetry }: SessionOverviewPanelProps) {
@@ -1049,7 +1049,7 @@ function SessionOverviewPanel({ record, folderSessionId, overview, error, onRefr
           <button type="button" aria-label="Refresh Session overview" title="Refresh" onClick={() => void onRefresh()} className={OVERVIEW_ACTION}><RefreshCw className="h-3.5 w-3.5" /></button>
           <button type="button" aria-label={editing ? 'Cancel renaming Session' : 'Rename Session'} title={editing ? 'Cancel renaming' : 'Rename Session'} onClick={() => setEditing(value => !value)} className={OVERVIEW_ACTION}>{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</button>
           {statusPage && <>
-            <button type="button" aria-label="Open beside chat" title="Open beside chat" className={OVERVIEW_ACTION}
+            <button type="button" aria-label="Open as a browser tab" title="Open as a browser tab" className={OVERVIEW_ACTION}
               onClick={() => void openBesideChat(folderSessionId, statusPage).catch((cause: unknown) => console.error('[SessionOverview] Did not open the status page beside chat:', cause))}>
               <PanelRight className="h-3.5 w-3.5" />
             </button>
