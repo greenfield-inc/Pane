@@ -133,7 +133,9 @@ impl Meter<'_> {
                 Level::Slow => tokio::time::sleep(self.state.slow_delay(n as u64)).await,
                 Level::Ok => {}
             }
-            if w.write_all(&buf[..n]).await.is_err() {
+            // TLS can accept the bytes yet hold some back until a flush; without one the
+            // end of a request waits for the client's next bytes, or for it to give up.
+            if w.write_all(&buf[..n]).await.is_err() || w.flush().await.is_err() {
                 break;
             }
         }

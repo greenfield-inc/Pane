@@ -85,7 +85,8 @@ async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             Level::Slow => tokio::time::sleep(state.slow_delay(n as u64)).await,
             Level::Ok => {}
         }
-        if w.write_all(&buf[..n]).await.is_err() {
+        // As in `client.rs`: TLS holds bytes back until a flush.
+        if w.write_all(&buf[..n]).await.is_err() || w.flush().await.is_err() {
             break;
         }
     }
