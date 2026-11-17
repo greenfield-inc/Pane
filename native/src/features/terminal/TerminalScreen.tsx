@@ -198,9 +198,8 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
         onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
         onClose={closePanel}
       />
-      {leadingTab && leading ? (
-        <View key={leadingTab.id} style={styles.fill}>{leading.render(leadingTab.id)}</View>
-      ) : panel && view !== 'terminal' ? (
+      {leading ? <LeadingBodies leading={leading} selectedId={leadingTab?.id ?? null} /> : null}
+      {leadingTab ? null : panel && view !== 'terminal' ? (
         <TabBody panel={panel} title={title} panels={panels} />
       ) : panel && paused ? (
         <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resumePanel.isPending} onResume={() => resume(panel)} />
@@ -244,6 +243,21 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
 export interface LeadingTabs {
   tabs: readonly LeadingTab[];
   render: (id: string) => ReactNode;
+}
+
+/**
+ * The bodies of a screen's own tabs. The first stays mounted, hidden while another tab shows, so
+ * what was typed or picked there (an approval's answer) survives a look at another tab.
+ */
+export function LeadingBodies({ leading, selectedId }: { leading: LeadingTabs; selectedId: string | null }) {
+  const first = leading.tabs[0];
+  const other = leading.tabs.find(tab => tab.id === selectedId && tab !== first);
+  return (
+    <>
+      {first ? <View style={first.id === selectedId ? styles.fill : styles.hidden}>{leading.render(first.id)}</View> : null}
+      {other ? <View key={other.id} style={styles.fill}>{leading.render(other.id)}</View> : null}
+    </>
+  );
 }
 
 /** A tab that is not a terminal, drawn by its type. */
@@ -479,6 +493,7 @@ function useKeyboardVisible(): boolean {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  hidden: { display: 'none' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   // The web app insets xterm 8 pt from the sides and top.
   screen: { flex: 1, paddingHorizontal: 8, paddingTop: 8 },

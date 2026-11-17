@@ -44,8 +44,8 @@ export interface LeadingTab {
   id: string;
   title: string;
   icon: { ios: SFSymbol; android: AndroidSymbol };
-  /** The word VoiceOver reads after its title. */
-  label: string;
+  /** The word VoiceOver reads after its title, when the title doesn't say it. */
+  label?: string;
   /** Closes it, after the long press's menu. Absent for a tab that can't be closed. */
   onClose?: () => void;
 }
@@ -53,11 +53,12 @@ export interface LeadingTab {
 export interface PanelTabsProps {
   panels: readonly ToolPanel[];
   selectedId: string | null;
-  onSelect: (panel: ToolPanel) => void;
+  /** Absent with no Pane tabs to pick. */
+  onSelect?: (panel: ToolPanel) => void;
   /** No + without it. */
   onAdd?: () => void;
   /** A long press on a tab, or the VoiceOver and TalkBack action, offers to close it. */
-  onClose: (panel: ToolPanel) => void;
+  onClose?: (panel: ToolPanel) => void;
   /** A Session's agent chat, drawn with a chat icon. */
   chatId?: string;
   leading?: readonly LeadingTab[];
@@ -111,7 +112,7 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
             id={tab.id}
             title={tab.title}
             icon={tab.icon}
-            accessibilityLabel={`${tab.title}, ${tab.label}`}
+            accessibilityLabel={tab.label ? `${tab.title}, ${tab.label}` : tab.title}
             selected={tab.id === selectedId}
             onLayout={onTabLayout}
             onSelect={() => onSelectLeading?.(tab.id)}
@@ -134,8 +135,8 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
               dimmed={dimmed}
               paused={paused}
               onLayout={onTabLayout}
-              onSelect={() => onSelect(panel)}
-              onClose={() => onClose(panel)}
+              onSelect={() => onSelect?.(panel)}
+              onClose={onClose ? () => onClose(panel) : undefined}
             />
           );
         })}

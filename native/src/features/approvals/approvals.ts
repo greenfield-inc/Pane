@@ -362,11 +362,3 @@ export function questionSubtitle(item: NotifyItem): string | undefined {
 export function summaryItemId(item: NotifyItem): string | null {
   return !item.machineId || item.machineId === 'local' ? item.id : null;
 }
-
-/**
- * The Summary's WebView loads only the page it was handed (`about:blank`, how a WebView names
- * inline html); every link and redirect is refused, so a Summary never navigates anywhere.
- */
-export function summaryLoadAllowed(url: string): boolean {
-  return url === 'about:blank';
-}

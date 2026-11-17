@@ -7,7 +7,7 @@ import { StateScreen } from '@/features/tabs/StateScreen';
 import { useTheme } from '@/theme';
 import { ErrorState } from '@/ui';
 
-import { StaticPage } from './StaticPage';
+import { StaticPage } from '@/features/pages/StaticPage';
 
 /**
  * An approval's Summary tab (P4): the asker's own page, or the one Pane writes from the card, read

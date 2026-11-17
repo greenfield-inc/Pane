@@ -1,22 +1,16 @@
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { WebView } from 'react-native-webview';
 
 import { decisionModel } from '@shared/autopilotDecision';
-import type { AutopilotDocument } from '@shared/types/autopilot';
 
-import { useDaemon, useInvokeQuery } from '@/daemon';
-import { StaticPage } from '@/features/approvals/StaticPage';
-import { browserPage } from '@/features/browser/browserPage';
-import { usePorts } from '@/features/browser/usePorts';
 import { ConnectionBar } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { useNotifyShared } from '@/features/notify/hooks';
-import { StateScreen } from '@/features/tabs/StateScreen';
-import { monoFontFamily, useTheme } from '@/theme';
-import { Button, ErrorState, Icon, Text } from '@/ui';
+import { FileDoc, UrlDoc } from '@/features/pages/StaticPage';
+import { useTheme } from '@/theme';
+import { Icon, Text } from '@/ui';
 
 import { docBackLabel, fileName, autopilotItems } from './autopilot';
 import { useAutopilot } from './hooks';
@@ -70,47 +64,11 @@ export function AutopilotDocScreen({ notifyId, path, url, label }: { notifyId?: 
   );
 }
 
-/** A linked file read through the phone's connection: an html page drawn as a `StaticPage`, any other file as text. */
-export function FileDoc({ path }: { path: string }) {
-  const { colors } = useTheme();
-  const { profile } = useDaemon();
-  const doc = useInvokeQuery<AutopilotDocument>('autopilot:read-doc', [path, { inline: true }], { retry: false });
-  if (doc.isPending) return <View style={styles.center}><ActivityIndicator /></View>;
-  if (doc.isError) return <ErrorState title={`Couldn’t open ${fileName(path)}`} error={doc.error} onRetry={() => void doc.refetch()} testID="autopilot-doc-error" />;
-  const read = doc.data;
-  if (read.kind === 'missing') return <StateScreen testID="autopilot-doc-missing" icon={{ ios: 'doc.questionmark', android: 'draft' }} title={`Can’t open ${fileName(path)}`} message={read.message} />;
-  if (read.kind === 'html') {
-    // A computer from before the phone could read pages inline sends only its file URL.
-    if (read.html === undefined) return <StateScreen testID="autopilot-doc-update" icon={{ ios: 'arrow.down.circle', android: 'system_update' }} title="Update Pane on the computer" message={`${profile.label}’s Pane is too old to send this page to the phone. Update it, or open the page in Pane there.`} />;
-    return <StaticPage testID="autopilot-doc-page" html={read.html} />;
-  }
-  return (
-    <ScrollView testID="autopilot-doc-text" style={styles.fill} contentContainerStyle={styles.text}>
-      <Text variant="footnote" selectable style={{ fontFamily: monoFontFamily, color: colors.text }}>{read.text}</Text>
-    </ScrollView>
-  );
-}
-
-/** A page: through the phone addresses the computer makes for its dev servers, or the address itself. */
-export function UrlDoc({ url }: { url: string }) {
-  const page = browserPage(url, usePorts(), 'autopilot');
-  if (page.kind === 'web') return <WebView testID="autopilot-doc-page" source={{ uri: page.src }} style={styles.fill} />;
-  if (page.kind === 'loading') return <View style={styles.center}><ActivityIndicator /></View>;
-  let message = 'The phone can’t load this page here.';
-  if (page.kind === 'refused') message = `Nothing is listening on port ${page.port} on the computer right now.`;
-  else if (page.kind === 'pages-off') message = page.reason;
-  else if (page.kind === 'update') message = 'The computer’s Pane is too old to share its pages with the phone.';
-  return <StateScreen testID="autopilot-doc-unavailable" icon={{ ios: 'globe', android: 'language' }} title={`Can’t open ${page.address || url}`} message={message}
-    actions={/^https?:/i.test(url) ? <Button title="Open in the browser" variant="secondary" onPress={() => void Linking.openURL(url)} /> : undefined} />;
-}
-
 const styles = StyleSheet.create({
   fill: { flex: 1, minWidth: 0 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   bar: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12 },
   back: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingRight: 8 },
   name: { flex: 1, textAlign: 'right' },
   square: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  text: { padding: 16 },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
 });

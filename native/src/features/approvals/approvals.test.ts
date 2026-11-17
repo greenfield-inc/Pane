@@ -34,7 +34,6 @@ import {
   startOfDay,
   staleItems,
   summaryItemId,
-  summaryLoadAllowed,
   waitingCounts,
   type ApprovalSort,
 } from './approvals';
@@ -454,11 +453,4 @@ describe('the subtitle and the Summary (P4)', () => {
     expect(summaryItemId(item('studio:q1', 1, { machineId: 'studio' }))).toBeNull();
   });
 
-  it('loads only the page it was handed, never a link', () => {
-    expect(summaryLoadAllowed('about:blank')).toBe(true);
-    expect(summaryLoadAllowed('https://example.com/')).toBe(false);
-    expect(summaryLoadAllowed('file:///etc/hosts')).toBe(false);
-    expect(summaryLoadAllowed('pane://open?pane=1')).toBe(false);
-    expect(summaryLoadAllowed('about:blank#top')).toBe(false);
-  });
 });

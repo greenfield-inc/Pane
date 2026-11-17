@@ -8,7 +8,7 @@ import { originLine } from '@shared/approvalReceipts';
 import type { NotifyItem, NotifyLink, NotifySharedState } from '@shared/types/notify';
 
 import { useDaemon } from '@/daemon';
-import { FileDoc, UrlDoc } from '@/features/autopilot/AutopilotDocScreen';
+import { FileDoc, UrlDoc } from '@/features/pages/StaticPage';
 import { ConnectionBar } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { MachineBadge } from '@/features/machines/MachineBadge';
@@ -21,7 +21,7 @@ import { Notice } from '@/features/panes/PaneKit';
 import { useSessionView } from '@/features/sessions/hooks';
 import { sinceLabel } from '@/features/allMachines/allMachinesList';
 import { PanelTabs, type LeadingTab } from '@/features/terminal/PanelTabs';
-import { type LeadingTabs, TerminalScreen } from '@/features/terminal/TerminalScreen';
+import { LeadingBodies, type LeadingTabs, TerminalScreen } from '@/features/terminal/TerminalScreen';
 import { StateScreen } from '@/features/tabs/StateScreen';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
@@ -100,7 +100,7 @@ export function ApprovalScreen({ notifyId, hintPaneId, list = 'waiting' }: { not
     card = <TabFrame testID="approval-loading"><ActivityIndicator /></TabFrame>;
   }
 
-  const tabs: LeadingTab[] = [{ id: APPROVAL_TAB, title: 'Approval', icon: { ios: 'checkmark.circle', android: 'check_circle' }, label: 'approval' }];
+  const tabs: LeadingTab[] = [{ id: APPROVAL_TAB, title: 'Approval', icon: { ios: 'checkmark.circle', android: 'check_circle' } }];
   for (const id of openIds) {
     const reference = item ? referenceOf(item, id) : null;
     if (reference) tabs.push({ id, title: reference.title, icon: reference.icon, label: 'page', onClose: () => closeTab(id) });
@@ -139,7 +139,6 @@ function referenceOf(item: NotifyItem, id: string): Reference | null {
  * the machine the phone is on serves its own approvals' files.
  */
 function ReferenceBody({ item, reference }: { item: NotifyItem; reference: Reference }) {
-  const { profile } = useDaemon();
   if (reference.kind === 'summary') return <SummaryTab notifyId={reference.notifyId} />;
   const { link } = reference;
   if ('url' in link) return <UrlDoc url={link.url} />;
@@ -213,17 +212,12 @@ function Bare({ topBar, leading }: { topBar: ReactNode; leading: LeadingTabs }) 
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
   const tab = leading.tabs.find(candidate => candidate.id === panelId) ?? leading.tabs[0];
   return (
-    <KeyboardAvoidingView testID="approval-bare" behavior="padding" style={[styles.fill, { backgroundColor: theme.colors.surface, paddingBottom: insets.bottom }]}>
+    <KeyboardAvoidingView testID="approval-bare" behavior="padding" style={[styles.fill, { backgroundColor: theme.colors.surface }]}>
       {topBar}
-      <PanelTabs
-        panels={[]}
-        selectedId={tab?.id ?? null}
-        leading={leading.tabs}
-        onSelectLeading={id => router.setParams({ panelId: id })}
-        onSelect={() => undefined}
-        onClose={() => undefined}
-      />
-      {tab ? <View key={tab.id} style={styles.fill}>{leading.render(tab.id)}</View> : null}
+      <PanelTabs panels={[]} selectedId={tab?.id ?? null} leading={leading.tabs} onSelectLeading={id => router.setParams({ panelId: id })} />
+      <LeadingBodies leading={leading} selectedId={tab?.id ?? null} />
+      {/* The home indicator's area stays clear, as under a Pane's tabs (padding here would be overridden by the keyboard's). */}
+      <View style={{ height: insets.bottom }} />
     </KeyboardAvoidingView>
   );
 }
