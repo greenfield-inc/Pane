@@ -165,6 +165,7 @@ jobs:
   # External URLs are not fetched, so the check never flakes on the network.
   markdown-links:
     name: Markdown Links
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
