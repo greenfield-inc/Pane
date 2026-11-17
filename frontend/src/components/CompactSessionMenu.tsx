@@ -22,7 +22,8 @@ export interface CompactSessionMenuState {
 interface CompactSessionMenuProps {
   menu: CompactSessionMenuState | null;
   onClose: () => void;
-  onTogglePinned: () => void;
+  /** Absent for a loop's run Pane, which is never pinned: the menu has no Pin. */
+  onTogglePinned?: () => void;
   onArchive: () => void;
 }
 
@@ -85,12 +86,14 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
         </div>
       ) : (
       <div role="menu" aria-label={`Pane actions for ${menu?.session.name || 'Untitled'}`}>
-        <PopoverButton role="menuitem" onClick={onTogglePinned}>
-          <span className="flex items-center gap-2">
-            <Pin className="h-4 w-4 rotate-45" />
-            {menu?.session.isFavorite ? 'Unpin' : 'Pin'}
-          </span>
-        </PopoverButton>
+        {onTogglePinned && (
+          <PopoverButton role="menuitem" onClick={onTogglePinned}>
+            <span className="flex items-center gap-2">
+              <Pin className="h-4 w-4 rotate-45" />
+              {menu?.session.isFavorite ? 'Unpin' : 'Pin'}
+            </span>
+          </PopoverButton>
+        )}
         {/* Pause sits under Pin: it is safe to undo, so the reflex slot is fine. */}
         <PopoverButton role="menuitem" onClick={() => {
           if (menu) void runPauseAction({ kind: 'pane', id: menu.session.id }, !menu.session.paused);

@@ -114,6 +114,17 @@ describe.skipIf(process.platform === 'win32')('installing agents from the ACP Re
     expect(execFileSync(run!.executable).toString().trim()).toBe('helper');
   });
 
+  it('installs with an npm whose Node.js sits beside it but not on Pane\'s own PATH, as when Pane starts from Finder', async () => {
+    const tools = scratch();
+    writeFileSync(path.join(tools, 'pane-test-node'), '#!/bin/sh\nexec /bin/sh "$@"\n', { mode: 0o755 });
+    const npm = fakeNpm(tools);
+    writeFileSync(npm, readFileSync(npm, 'utf8').replace('#!/bin/sh', '#!/usr/bin/env pane-test-node'), { mode: 0o755 });
+    const entry = { id: 'gemini', name: 'Gemini CLI', version: '0.9.0', distribution: { npx: { package: '@google/gemini-cli@0.9.0' } } };
+    const agents = registry(new Map([[`${URL_BASE}registry.json`, index([entry])]]), scratch(), { npm, node: '/usr/bin/env-node' });
+    await agents.install('gemini');
+    expect(execFileSync((await agents.resolve('gemini'))!.executable).toString().trim()).toBe('helper');
+  });
+
   it('lists neither uvx-only agents nor ones a configured agent covers, and skips a malformed entry', async () => {
     const files = new Map<string, Buffer | string>([[`${URL_BASE}registry.json`, index([
       { id: 'pyagent', name: 'Py', version: '1.0.0', distribution: { uvx: { package: 'pyagent' } } },

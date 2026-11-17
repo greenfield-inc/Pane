@@ -29,6 +29,8 @@ export function SwipeRow({ testIDPrefix, id, pinned, onTogglePinned, onArchive, 
     <View style={[styles.outer, { borderRadius: theme.radius.md }]}>
       <ReanimatedSwipeable
         friction={2}
+        // The screen's left edge belongs to swipe-back on pushed screens.
+        hitSlop={{ left: -24 }}
         overshootFriction={8}
         leftThreshold={48}
         rightThreshold={48}

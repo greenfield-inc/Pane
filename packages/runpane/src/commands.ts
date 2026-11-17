@@ -77,6 +77,12 @@ export interface ParsedArgs {
   envRemove?: string[];
   /** `runpane secrets`: the secret project, exec's --only and --file names, and request's reason. */
   project?: string;
+  /** `runpane devices`: open's platform and device, run's --background and --wait-ms, free's --idle. */
+  devicePlatform?: string;
+  deviceName?: string;
+  deviceWaitMs?: number;
+  deviceBackground?: boolean;
+  deviceIdle?: boolean;
   only?: string[];
   secretFiles?: string[];
   reason?: string;
@@ -84,6 +90,8 @@ export interface ParsedArgs {
   themeId?: string;
   themeColors?: string;
   themeCss?: string;
+  /** `runpane machine cleanup --kind`: checked against the contract's reclaim kinds when it runs. */
+  kind?: string;
   timeoutMs?: number;
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -218,6 +226,8 @@ export interface ParsedArgs {
   cwd?: string;
   /** `workspace write --content`; without it, write reads stdin. */
   writeContent?: string;
+  /** `runpane link <link>`: a one-time link from another computer's Pane. */
+  pairingLink?: string;
   /** `runpane handoff <destination...>` */
   handoffDestination?: string;
   handoffTemplate?: boolean;
@@ -261,7 +271,7 @@ const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactForm
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops', 'secrets', 'autopilot']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'secrets', 'autopilot', 'devices']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -274,7 +284,7 @@ const AUTOPILOT_ITEM_COMMANDS = new Set(['autopilot answer', 'autopilot close', 
 const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--relays', ['notify']],
   ['--about-session', ['notify']],
-  ['--questions', ['notify']],
+  ['--questions', ['notify', 'report']],
   ['--took', ['notify']],
   ['--took-as', ['notify']],
   ['--status', ['notify', 'update']],
@@ -287,9 +297,15 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
   ['--reason', ['secrets request', 'autopilot close']],
+  ['--platform', ['devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close']],
+  ['--device', ['devices open']],
+  ['--wait-ms', ['devices run']],
+  ['--background', ['devices run']],
+  ['--idle', ['devices free']],
   ['--theme', ['theme set']],
   ['--colors', ['theme set']],
   ['--css', ['theme set']],
+  ['--kind', ['machine cleanup']],
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
 ]);
@@ -527,8 +543,9 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
   return args.splice(1, 1)[0];
 }
 
-/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item'> {
+/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one; link takes the link. */
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink'> {
+  if (command === 'link') return args[0] !== undefined && !args[0].startsWith('-') ? { pairingLink: args.shift() ?? '' } : {};
   if (AUTOPILOT_ITEM_COMMANDS.has(command)) {
     return args[0] !== undefined && !args[0].startsWith('-') ? { item: args.shift() ?? '' } : {};
   }
@@ -544,6 +561,11 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
   }
   // Every word after `relay` is pane-relay's, --help included.
   if (command === 'relay') return { execCommand: args.splice(0) };
+  // agent-device's words, or device_run's command line, after `--`.
+  if (command === 'devices act' || command === 'devices run') {
+    const separator = args.indexOf('--');
+    return separator === -1 ? {} : { execCommand: args.splice(separator).slice(1) };
+  }
   if (command === 'workspace exec' || command === 'secrets exec') {
     const separator = args.indexOf('--');
     if (separator !== -1) return { execCommand: args.splice(separator).slice(1) };
@@ -587,6 +609,9 @@ function validateReportArgs(parsed: ParsedArgs): void {
   }
   if (parsed.reportState === 'blocked' && !parsed.question?.trim()) {
     throw new Error('runpane report --state blocked requires --question "<what you need answered>".');
+  }
+  if (parsed.reportState !== 'blocked' && (parsed.notifyChoices !== undefined || parsed.notifyQuestions !== undefined)) {
+    throw new Error('runpane report takes --choices and --questions only with --state blocked: they are the buttons on its question card.');
   }
 }
 
@@ -945,6 +970,14 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.all = true;
     return;
   }
+  if (flag === '--background') {
+    parsed.deviceBackground = true;
+    return;
+  }
+  if (flag === '--idle') {
+    parsed.deviceIdle = true;
+    return;
+  }
   if (flag === '--push') {
     parsed.handoffPush = true;
     return;
@@ -1160,6 +1193,20 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.project = value;
     return;
   }
+  if (flag === '--platform') {
+    parsed.devicePlatform = value;
+    return;
+  }
+  if (flag === '--device') {
+    parsed.deviceName = value;
+    return;
+  }
+  if (flag === '--wait-ms') {
+    const ms = Number(value);
+    if (!Number.isInteger(ms) || ms < 0) throw new Error('--wait-ms must be a whole number of milliseconds.');
+    parsed.deviceWaitMs = ms;
+    return;
+  }
   if (flag === '--reason') {
     parsed.reason = value;
     return;
@@ -1174,6 +1221,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--css') {
     parsed.themeCss = value;
+    return;
+  }
+  if (flag === '--kind') {
+    parsed.kind = value;
     return;
   }
   if (flag === '--timeout-ms') {

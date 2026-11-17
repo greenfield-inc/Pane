@@ -11,7 +11,7 @@ import { RUNPANE_CONTRACT } from './generated/contract';
 import { paneListResultSchema, repoListResultSchema } from './localControl';
 import { quote } from './handoff';
 import { windowsBatchCommand } from './secrets';
-import { readMachines, resolveMachine, workspaceTarget } from './workspace';
+import { requireTailnet, resolveMachine, workspaceTarget } from './workspace';
 
 /**
  * `runpane ask` runs one read-only agent turn headless and prints its answer; `runpane models`
@@ -168,8 +168,7 @@ const machineInfoSchema = boundary.object({ shell: boundary.string, os: boundary
 async function placeFor(machineName: string | undefined, paneDir: string | undefined, environment: Place['environment'] = 'native'): Promise<Place> {
   const here: Place = { machine: thisMachineName(), environment };
   if (!machineName) return here;
-  const tailnet = await readMachines(paneDir);
-  if (!tailnet.ok) throw new RunpaneError('ERR_ASK_MACHINE', `Can't reach ${machineName}: ${tailnet.reason}.`, tailnet.fix);
+  const tailnet = await requireTailnet(paneDir);
   const machine = resolveMachine(machineName, [tailnet.self, ...tailnet.machines]);
   if (machine.self) return here;
   const remote = workspaceTarget(machine);
@@ -435,15 +434,23 @@ async function listAt(place: Place, agents: readonly RunpaneAgent[]): Promise<Mo
   return rows.flat();
 }
 
+const savedEntry = boundary.object({ tailnetMachine: boundary.optional(boundary.string), label: boundary.string });
+const savedComputer = boundary.object({ label: boundary.string, routes: boundary.array(boundary.object({ tailnetMachine: boundary.optional(boundary.string) })) });
 const savedProfilesSchema = boundary.object({
-  remoteDaemon: boundary.optional(boundary.object({ client: boundary.object({ profiles: boundary.array(boundary.object({ tailnetMachine: boundary.optional(boundary.string), label: boundary.string })) }) })),
+  remoteDaemon: boundary.optional(boundary.object({ client: boundary.object({
+    // Pane before computers saved one entry per route in `profiles`.
+    profiles: boundary.optional(boundary.array(savedEntry)),
+    computers: boundary.optional(boundary.array(savedComputer)),
+  }) })),
 });
 
 /** Machines saved in this machine's Pane (All machines). */
 function savedMachineNames(paneDir?: string): string[] {
   try {
     const config = decodeBoundary(JSON.parse(fs.readFileSync(path.join(resolvePaneDirectory(paneDir), 'config.json'), 'utf8')), savedProfilesSchema);
-    return (config.remoteDaemon?.client.profiles ?? []).map(profile => profile.tailnetMachine ?? profile.label);
+    const client = config.remoteDaemon?.client;
+    if (client?.computers) return client.computers.map(computer => computer.routes.find(route => route.tailnetMachine)?.tailnetMachine ?? computer.label);
+    return (client?.profiles ?? []).map(profile => profile.tailnetMachine ?? profile.label);
   } catch {
     return [];
   }

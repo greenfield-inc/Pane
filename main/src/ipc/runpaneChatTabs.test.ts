@@ -46,6 +46,17 @@ describe('runpane on a chat tab', () => {
     expect(chatTabOutput(manager, panel, 100).outputs[0]).toMatchObject({ type: 'acp-transcript' });
   });
 
+  it('says the screen has more when the conversation is longer than it reads', async () => {
+    const { manager, panel } = setup();
+    await manager.ensure(panel.id);
+    await submitChatTab(manager, panel, 'x'.repeat(210_000), { interrupt: false });
+
+    const screen = chatTabScreen(manager, panel, 10_000);
+
+    expect(screen.returnedLineCount).toBeLessThan(10_000);
+    expect(screen.hasMore).toBe(true);
+  });
+
   it('returns at once as blocked while an approval waits, and queues a prompt sent meanwhile', async () => {
     const { manager, panel } = setup();
     await manager.ensure(panel.id);

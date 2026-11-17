@@ -503,7 +503,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 <div
                   role="status"
                   aria-label="Loading main repository session"
-                  className="h-full animate-pulse"
+                  className="h-full animate-skeleton"
                 >
                   <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-primary bg-surface-secondary">
                     <div className="h-3 w-28 bg-surface-tertiary rounded" />
@@ -584,7 +584,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
         <div
           role="status"
           aria-label="Loading main repository session"
-          className="flex-1 animate-pulse"
+          className="flex-1 animate-skeleton"
         >
           {/* Tab bar skeleton */}
           <div className="flex items-center gap-1 px-2 py-1 border-b border-border-primary bg-surface-secondary">

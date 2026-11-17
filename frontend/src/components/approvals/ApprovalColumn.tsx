@@ -274,8 +274,8 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
     return () => { shown.current = false; };
   }, []);
   const waiting = item.state === 'waiting';
-  // What the column has no form of its own for: a secret, a prompt the terminal now holds, an update.
-  const plain = item.ui === 'secret' || item.ui === 'info' || item.agentPrompt?.inTerminal || item.relay;
+  // What the column has no form of its own for: a secret, a prompt the terminal now holds, an update, a machine health card.
+  const plain = item.ui === 'secret' || item.ui === 'info' || item.agentPrompt?.inTerminal || item.relay || item.machineHealth;
   // Answered or closed: its receipt, Reopen and Override are the card's own.
   const ended = item.state === 'answered' || item.state === 'expired';
   const [closing, setClosing] = useState(false);
@@ -334,13 +334,16 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
           <section className="mt-4 rounded-xl border border-status-info/30 bg-status-info/10 p-4" data-testid="approval-revision">
             <div className="flex items-center gap-2 text-[14px] font-semibold text-text-primary">
               <Sparkles className="h-4 w-4 text-status-info" aria-hidden="true" />
-              <span className="min-w-0 flex-1">Updated after your question{item.readyAgain !== undefined ? ' · ready again' : ''}</span>
+              <span className="min-w-0 flex-1">{item.revision.asked ? 'Updated after your question' : 'Updated'}{item.readyAgain !== undefined ? ' · ready again' : ''}</span>
               <span className="rounded-full bg-surface-primary px-2 py-px text-[12px] font-semibold text-status-info-on-tint">v{item.version ?? 2}</span>
             </div>
-            <blockquote className="mt-3 rounded-lg border-l-[3px] border-status-info bg-surface-primary px-3 py-2">
-              <div className="text-[12px] text-text-tertiary">You asked</div>
-              <div className="text-[14px] text-text-primary">“{item.revision.asked}”</div>
-            </blockquote>
+            {/* The asker's own update (a loop's next run, say) answers no question of yours. */}
+            {item.revision.asked && (
+              <blockquote className="mt-3 rounded-lg border-l-[3px] border-status-info bg-surface-primary px-3 py-2">
+                <div className="text-[12px] text-text-tertiary">You asked</div>
+                <div className="text-[14px] text-text-primary">“{item.revision.asked}”</div>
+              </blockquote>
+            )}
             <div className="mt-3 text-[13.5px] text-text-primary"><span className="font-semibold">What changed</span> · {item.revision.by}</div>
             <ul className="mt-1 list-disc pl-5 text-[13.5px] leading-relaxed text-text-primary" data-testid="approval-what-changed">
               {item.revision.whatChanged.map((change, at) => <li key={at}>{change}</li>)}

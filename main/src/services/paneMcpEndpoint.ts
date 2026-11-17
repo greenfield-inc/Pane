@@ -133,7 +133,7 @@ export class PaneMcpEndpoint {
           // Pane points only agents it measured holding a call open (Claude: 40 minutes over HTTP) at this endpoint.
           clientFor: (auth) => {
             const tab = auth && this.tabs.get(auth.token);
-            return tab ? { name: tab.agentLabel, waitsLong: true } : undefined;
+            return tab ? { name: tab.agentLabel, waitsLong: true, env: tab.env } : undefined;
           },
           onerror: (error) => console.warn('[PaneMcp]', error.message),
         }),
@@ -222,7 +222,20 @@ export function setPaneMcpEndpoint(endpoint: PaneMcpEndpoint | undefined): void 
 
 /** Whether the agent reaches Pane's tools over HTTP in a terminal tab (its config names a per-launch MCP config flag). */
 export function terminalUsesPaneMcp(agentType: string | undefined): boolean {
-  return Boolean(agentType && agentConfig(agentType)?.terminal.paneMcpConfigFlag);
+  const terminal = agentType ? agentConfig(agentType)?.terminal : undefined;
+  return Boolean(terminal?.paneMcpConfigFlag || terminal?.paneMcpConfigEnv);
+}
+
+/**
+ * The environment that gives an agent configured by environment (OpenCode) Pane's `pane` server
+ * for this launch. The config names the tab's endpoint and token by variable, so no token is in it.
+ * A config the person already set for the agent is left alone, and the agent keeps stdio tools.
+ */
+export function paneMcpConfigEnv(agentType: string | undefined, env: Readonly<Record<string, string | undefined>>) {
+  const variable = agentType ? agentConfig(agentType)?.terminal.paneMcpConfigEnv : undefined;
+  if (!variable || env[variable] || !env[PANE_MCP_URL_ENV]) return {};
+  const config = { mcp: { [PANE_MCP_SERVER_NAME]: { type: 'remote', url: `{env:${PANE_MCP_URL_ENV}}`, headers: { Authorization: `Bearer {env:${PANE_MCP_TOKEN_ENV}}` } } } };
+  return { [variable]: JSON.stringify(config) };
 }
 
 /** The environment that points a tab's agent at Pane's tools, or undefined when it should use stdio. */

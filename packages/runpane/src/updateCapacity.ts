@@ -36,6 +36,8 @@ export const PANE_UNSNAPSHOTTED_FOLDERS = [
   'scratch',
   // A Session move's staging on each machine; a move under way when Pane quits can't be finished.
   'moves', 'moves-out',
+  // Device tools Pane installs with npm, build checkouts for linked computers, and screenshots: fetched or rebuilt on the next device call.
+  'devices',
 ] as const;
 
 const stateFolders = new Set<string>(PANE_STATE_FOLDERS);

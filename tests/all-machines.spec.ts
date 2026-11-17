@@ -333,6 +333,27 @@ test('row actions run on the row\'s own machine without switching', async ({ pag
   await expect(page.getByRole('button', { name: 'Showing all machines. Switch machine' })).toBeVisible();
 });
 
+test('Archive from a row menu asks first, names the machine, and runs there only when confirmed', async ({ page }) => {
+  await openAllMachines(page);
+  const row = page.getByRole('button', { name: 'load-test-checkout on build-box' });
+  const dialog = page.getByRole('dialog', { name: 'Archive load-test-checkout?' });
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Archive' }).click();
+  await expect(dialog).toContainText('On build-box:');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  // The menu item that opened the dialog is gone, so focus returns to the row.
+  await expect(row).toBeFocused();
+  expect(await (await mock(page)).evaluate(api => api.getMachineRuns())).toEqual([]);
+
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Archive' }).click();
+  await expect(dialog.getByRole('button', { name: 'Archive', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await mock(page)).evaluate(api => api.getMachineRuns()))
+    .toEqual([{ machineId: 'build', command: { type: 'archive', target: { kind: 'pane', id: 'a1' } } }]);
+});
+
 for (const scheme of ['light', 'dark'] as const) {
   test(`Switch to chat on a Session runs on its own machine, after showing what it will skip (${scheme})`, async ({ page }, testInfo) => {
     const tab = (panelId: string, paneName: string, title: string) => ({ panelId, paneName, title });

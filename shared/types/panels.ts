@@ -4,6 +4,7 @@ import type { DiffScope } from './gitDiff';
 import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
 import type { BoundaryCursor, BoundarySchema } from '../validation/boundaryDecoder';
 import type { ConfiguredAgentId } from '../agents';
+import type { NotifyChoice, NotifySubQuestion } from './notify';
 
 /**
  * Panel and session types for Pane.
@@ -22,7 +23,7 @@ export interface ToolPanel {
 }
 
 /** `chat`: an agent tab that runs Claude or Codex over ACP, with no terminal (see chatTab.ts). */
-export type ToolPanelType = 'terminal' | 'chat' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes';
+export type ToolPanelType = 'terminal' | 'chat' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes' | 'device';
 
 export interface ToolPanelState {
   isActive: boolean;
@@ -56,6 +57,10 @@ export interface TerminalAgentReport {
   summaryPath?: string;
   /** What the worker needs answered; present when `state` is `blocked`. */
   question?: string;
+  /** A blocked report's buttons (`--choices`), as notify takes them. */
+  choices?: NotifyChoice[];
+  /** A blocked report's several questions (`--questions`), each with its own buttons. */
+  questions?: NotifySubQuestion[];
   reportedAt: string;
 }
 
@@ -461,10 +466,13 @@ interface PanelCapabilityRegistry {
   'setup-tasks': PanelCapabilities;
   browser: PanelCapabilities;
   notes: PanelCapabilities;
+  device: PanelCapabilities;
 }
 
 // Panel Registry - Currently only terminal is implemented
 export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
+  /** A phone simulator or emulator's live screen (docs/DEVICES.md); one per platform per Pane. */
+  device: { canEmit: [], canConsume: [], singleton: false, canAppearInProjects: true, canAppearInWorktrees: true },
   notes: { canEmit: [], canConsume: [], singleton: true, canAppearInProjects: true, canAppearInWorktrees: true },
   terminal: {
     canEmit: ['terminal:exit'],

@@ -31,8 +31,11 @@ import { rollupSessionAgentState } from '../utils/agentStatus';
 import { AutopilotNavRow } from './autopilot/AutopilotNavRow';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { MovedSessionRow } from './MovedSessionRow';
+import { confirmPaneArchive } from './archiveConfirm';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
+import { LoopLabel, LoopMark } from './loops/LoopMark';
+import { useIsLoopRun, useListedPanes } from '../hooks/useListedPanes';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
@@ -107,7 +110,9 @@ export function ProjectSessionList({
   const [dragProjectId, setDragProjectId] = useState<number | null>(null);
   const [dragOverProjectId, setDragOverProjectId] = useState<number | null>(null);
 
-  const sessions = useSessionStore(s => s.sessions);
+  const allPanes = useSessionStore(s => s.sessions);
+  const sessions = useListedPanes();
+  const isLoopRun = useIsLoopRun();
   const sessionsLoaded = useSessionStore(s => s.isLoaded);
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const setActiveSession = useSessionStore(s => s.setActiveSession);
@@ -193,8 +198,9 @@ export function ProjectSessionList({
   const blockedAgentCount = useBlockedAgentCount();
 
   const pinnedSessions = useMemo(() => {
-    return getPinnedSessions(sessions, projectById);
-  }, [sessions, projectById]);
+    // A loop's run Pane is never pinned in the sidebar.
+    return getPinnedSessions(sessions.filter(pane => !isLoopRun(pane.id)), projectById);
+  }, [sessions, isLoopRun, projectById]);
 
   // mod+1-9 session switch hotkeys are registered in useSessionNavigationHotkeys
   // (always mounted in Sidebar), and new-project auto-expansion lives there too.
@@ -262,17 +268,6 @@ export function ProjectSessionList({
     onProjectsRefresh();
     window.dispatchEvent(new Event('project-changed'));
   };
-
-  // Session operations
-  const handleArchiveSession = useCallback(async (sessionId: string) => {
-    try {
-      const response = await API.sessions.delete(sessionId);
-      if (!response.success) showActionError('Could not archive the Pane', response.error);
-    } catch (e) {
-      console.error('Failed to archive session:', e);
-      showActionError('Could not archive the Pane', e);
-    }
-  }, []);
 
   const handleTogglePinnedSession = useCallback(async (sessionId: string) => {
     try {
@@ -376,8 +371,8 @@ export function ProjectSessionList({
   }, [projects, expandedProjects, sessionsByProject, inboxActive, inboxSessions]);
 
   const paneById = useMemo(
-    () => new Map(sessions.map(session => [session.id, session])),
-    [sessions],
+    () => new Map(allPanes.map(session => [session.id, session])),
+    [allPanes],
   );
 
   const availablePaneIds = useMemo(
@@ -408,13 +403,12 @@ export function ProjectSessionList({
         isActive={activeView === 'sessions' && sidebarNavigationScope === 'orchestration' && parentSessionId === selectedOrchestrationSessionId && pane.id === activeSessionId}
         globalIndex={globalSessionIndex.get(pane.id) ?? -1}
         onClick={() => void handleManagedPaneClick(pane.id, parentSessionId)}
-        onArchive={() => void handleArchiveSession(pane.id)}
         onTogglePinned={() => void handleTogglePinnedSession(pane.id)}
         onDismiss={inboxActive ? () => dismissInboxPane(pane.id) : undefined}
         rowLayout={sidebarPaneRowLayout}
       />
     );
-  }, [activeView, sidebarNavigationScope, selectedOrchestrationSessionId, activeSessionId, globalSessionIndex, handleArchiveSession, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout, inboxActive, inboxMembers, dismissInboxPane]);
+  }, [activeView, sidebarNavigationScope, selectedOrchestrationSessionId, activeSessionId, globalSessionIndex, handleManagedPaneClick, handleTogglePinnedSession, paneById, sidebarPaneRowLayout, inboxActive, inboxMembers, dismissInboxPane]);
 
   const pinnedPaneRows = pinnedSessions.length > 0 ? (
     <div>
@@ -427,7 +421,6 @@ export function ProjectSessionList({
           displayName={label}
           repositoryName={repositoryName}
           onClick={() => handleSessionClick(session.id, 'pinned')}
-          onArchive={() => handleArchiveSession(session.id)}
           onTogglePinned={() => handleTogglePinnedSession(session.id)}
           rowLayout={sidebarPaneRowLayout}
         />
@@ -570,7 +563,6 @@ export function ProjectSessionList({
                 isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
                 globalIndex={globalSessionIndex.get(session.id) ?? -1}
                 onClick={() => handleSessionClick(session.id, 'repositories')}
-                onArchive={() => handleArchiveSession(session.id)}
                 onTogglePinned={() => handleTogglePinnedSession(session.id)}
                 onDismiss={() => dismissInboxPane(session.id)}
                 rowLayout={sidebarPaneRowLayout}
@@ -697,7 +689,6 @@ export function ProjectSessionList({
                       isActive={activeView === 'sessions' && sidebarNavigationScope === 'repositories' && session.id === activeSessionId}
                       globalIndex={globalSessionIndex.get(session.id) ?? -1}
                       onClick={() => handleSessionClick(session.id, 'repositories')}
-                      onArchive={() => handleArchiveSession(session.id)}
                       onTogglePinned={() => handleTogglePinnedSession(session.id)}
                       rowLayout={sidebarPaneRowLayout}
                       nested
@@ -962,7 +953,7 @@ export function SessionRowContent({
   showUnviewedCompleted,
   agentDisplayStatus,
   rowLayout,
-  isLoopRun,
+  loopName,
   notifyWaiting,
 }: {
   session: Session;
@@ -977,7 +968,8 @@ export function SessionRowContent({
   showUnviewedCompleted: boolean;
   agentDisplayStatus: AgentDisplayStatus;
   rowLayout: SidebarPaneRowLayout;
-  isLoopRun: boolean;
+  /** The loop this Pane is a run of: the loop icon replaces the status dot, labelled "Loop: <name>". */
+  loopName?: string;
   /** A Notify question from this Pane is waiting: an amber dot and "Waiting". */
   notifyWaiting: boolean;
 }) {
@@ -987,15 +979,16 @@ export function SessionRowContent({
   const waiting = notifyWaiting && !paused;
   const statusIndicator = (className?: string) => paused
     ? <PausedGlyph size="sm" className={cn('flex-shrink-0', className)} />
-    : waiting
+    : loopName !== undefined
+      ? <LoopMark loopName={loopName} className={className} />
+      : waiting
       ? <NotifyWaitingDot className={className} />
       : <AgentStatusDot status={agentDisplayStatus} size="sm" className={cn('flex-shrink-0', className)} />;
   const titleTone = paused ? 'font-normal text-text-muted' : 'font-medium text-text-primary';
   const branchIconColor = paused ? 'text-text-disabled' : iconColor;
   const prNumber = gs?.prNumber;
   const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
-  // A loop's run Pane wears the loop icon until it has a PR.
-  const BranchIcon = isLoopRun ? Repeat : GitBranch;
+  const trailingLabel = loopName !== undefined ? <LoopLabel loopName={loopName} /> : waiting && <NotifyWaitingLabel />;
   const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
   // The repository yields all its space before the Pane name gives up any.
   const repositoryLabel = repositoryName ? (
@@ -1008,7 +1001,7 @@ export function SessionRowContent({
         {prNumber ? (
           <PullRequestIcon className={`w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
         ) : (
-          <BranchIcon className={`w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
+          <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
         )}
         {statusIndicator()}
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
@@ -1022,7 +1015,7 @@ export function SessionRowContent({
           </span>
           {repositoryLabel}
         </span>
-        {waiting && <NotifyWaitingLabel />}
+        {trailingLabel}
       </div>
     );
   }
@@ -1032,7 +1025,7 @@ export function SessionRowContent({
       {prNumber ? (
         <PullRequestIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
       ) : (
-        <BranchIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
+        <GitBranch className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
       )}
       {statusIndicator('mt-0.5')}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -1046,7 +1039,7 @@ export function SessionRowContent({
             {title}
           </span>
           {repositoryLabel}
-          {waiting && <NotifyWaitingLabel />}
+          {trailingLabel}
         </span>
         {showMetadata && (
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[10px] font-semibold leading-3">
@@ -1076,7 +1069,6 @@ interface SessionRowProps {
   isActive: boolean;
   globalIndex: number;
   onClick: () => void;
-  onArchive: () => void;
   onTogglePinned: () => void;
   /** Attention inbox only: hide the row until the agent works again. */
   onDismiss?: () => void;
@@ -1095,14 +1087,14 @@ interface GitStatusIPCResponse {
 
 function SessionRow({
   session, isActive, globalIndex, onClick,
-  onArchive, onTogglePinned, onDismiss, displayName, repositoryName, rowLayout, nested = false, reorder,
+  onTogglePinned, onDismiss, displayName, repositoryName, rowLayout, nested = false, reorder,
 }: SessionRowProps) {
   const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
   const initialGitStatusRequestRef = useRef<string | null>(null);
 
   const hasUnviewedCompletedActivity = usePanelStore(s => Boolean(s.unviewedCompletedActivity[session.id]));
   const agentDisplayStatus = useSessionAgentDisplayStatus(session.id);
-  const isLoopRun = useLoopsStore(s => s.runsBySessionId.has(session.id));
+  const loopName = useLoopsStore(s => s.runsBySessionId.get(session.id)?.loop.name);
   const notifyWaiting = useNotifyStore(s => paneHasWaitingQuestion(s.snapshot, session.id));
 
   // Queue the initial refresh even when cached status is available, so cached
@@ -1139,6 +1131,9 @@ function SessionRow({
   const hasDiff = adds > 0 || dels > 0;
   const showActivity = agentDisplayStatus === 'working';
   const accessibleName = displayName || gs?.prTitle || session.name || 'Untitled';
+  const openButtonRef = useRef<HTMLButtonElement>(null);
+  // The dialog names the Pane as this row does, and focus comes back to the row when it closes.
+  const archive = () => confirmPaneArchive(session, { label: accessibleName, returnFocus: openButtonRef.current });
   // Composite translucent row tokens over an opaque base to mask the title.
   const actionSurfaceClassName = cn(
     'flex h-full items-center bg-surface-secondary transition-opacity group-hover/session:opacity-100 group-focus-within/session:opacity-100',
@@ -1172,6 +1167,7 @@ function SessionRow({
       >
         <button
           type="button"
+          ref={openButtonRef}
           data-row-open
           data-sidebar-item
           data-sidebar-key={`pane-${session.id}`}
@@ -1195,7 +1191,7 @@ function SessionRow({
           showUnviewedCompleted={hasUnviewedCompletedActivity && !isActive && !showActivity}
           agentDisplayStatus={agentDisplayStatus}
           rowLayout={rowLayout}
-          isLoopRun={isLoopRun}
+          loopName={loopName}
           notifyWaiting={notifyWaiting}
         />
       </div>
@@ -1220,7 +1216,7 @@ function SessionRow({
         <div className={cn(actionSurfaceClassName, 'pr-0.5 opacity-0')}>
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onArchive(); }}
+            onClick={(e) => { e.stopPropagation(); archive(); }}
             className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-hover hover:text-status-error"
             title="Archive"
             aria-label={`Archive ${accessibleName}`}
@@ -1228,7 +1224,7 @@ function SessionRow({
             <Archive className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className={cn(actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
+        {loopName === undefined && <div className={cn(actionSurfaceClassName, session.isFavorite ? 'opacity-100' : 'opacity-0')}>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onTogglePinned(); }}
@@ -1238,12 +1234,13 @@ function SessionRow({
           >
             <Pin className="h-3.5 w-3.5 rotate-45" />
           </button>
-        </div>
+        </div>}
       </div>
     </div>
     <CompactSessionMenu menu={contextMenu} onClose={() => setContextMenu(null)}
-      onArchive={() => { setContextMenu(null); onArchive(); }}
-      onTogglePinned={() => { setContextMenu(null); onTogglePinned(); }} />
+      onArchive={() => { setContextMenu(null); archive(); }}
+      // A loop's run Pane is never pinned.
+      onTogglePinned={loopName === undefined ? () => { setContextMenu(null); onTogglePinned(); } : undefined} />
   </>);
 }
 
@@ -1450,7 +1447,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
       {showArchived && (
         <div id={archivedContentId} className="pb-2 max-h-[40vh] overflow-y-auto">
           {isLoadingArchived ? (
-            <div className="px-4 py-2 space-y-2 animate-pulse">
+            <div className="px-4 py-2 space-y-2 animate-skeleton">
               {[1, 2, 3].map(i => (
                 <div key={i} className="h-7 bg-surface-tertiary rounded" />
               ))}

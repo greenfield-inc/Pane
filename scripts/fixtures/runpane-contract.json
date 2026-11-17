@@ -1534,6 +1534,25 @@
       "--questions",
       "[{\"title\":\"A\",\"choices\":[{\"label\":\"x\"}]},{\"title\":\"B\",\"choices\":[{\"label\":\"y\"}]}]",
       "--json"
+    ],
+    [
+      "link",
+      "https://runpane.net/pair#s=secret&c=k7xq2m4n8p3r5t6v&n=parsa-devbox",
+      "--yes",
+      "--json"
+    ],
+    [
+      "machine",
+      "health",
+      "--json"
+    ],
+    [
+      "machine",
+      "cleanup",
+      "--kind",
+      "update-snapshot",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

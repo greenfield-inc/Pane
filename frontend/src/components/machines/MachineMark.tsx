@@ -76,14 +76,11 @@ export function MachineRowMark({ machine, className }: { machine: { name: string
 export function MachineMarkStack({ machines }: { machines: ReadonlyArray<{ id: string; letters: string; slot: number }> }) {
   return (
     <span className="flex flex-none items-center" aria-hidden="true">
+      {/* Each tile is tinted, so an opaque disc under it hides the letters of the tile it overlaps. */}
       {machines.slice(0, 3).map((machine, index) => (
-        <MachineMark
-          key={machine.id}
-          letters={machine.letters}
-          slot={machine.slot}
-          size="sm"
-          className={cn('rounded-full ring-2 ring-surface-secondary', index > 0 && '-ml-1.5')}
-        />
+        <span key={machine.id} className={cn('flex-none rounded-full bg-surface-secondary ring-2 ring-surface-secondary', index > 0 && '-ml-1.5')}>
+          <MachineMark letters={machine.letters} slot={machine.slot} size="sm" className="rounded-full" />
+        </span>
       ))}
     </span>
   );

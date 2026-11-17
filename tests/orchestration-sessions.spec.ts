@@ -1326,6 +1326,7 @@ test('switching hosts replaces the Sessions and pinned Sessions in the sidebar',
   // An archive Undo belongs to the host that archived the Session.
   await page.getByTestId('orchestration-session-local').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Archive Local?' }).getByRole('button', { name: 'Archive', exact: true }).click();
   const undoToast = page.getByRole('status').filter({ hasText: 'Archived Local' });
   await expect(undoToast).toBeVisible();
 
@@ -1364,6 +1365,7 @@ test('an Undo still refreshing when the host changes does not reopen the Session
   await expect(page.getByRole('heading', { name: 'Local', exact: true })).toBeAttached({ timeout: 10_000 });
   await localRow.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Archive Local?' }).getByRole('button', { name: 'Archive', exact: true }).click();
   const home = page.getByRole('heading', { name: 'Preferences', exact: true });
   await expect(home).toBeVisible();
 
@@ -1424,6 +1426,7 @@ test('Undo restores an archived Session without pulling the person off where the
   await expect(page.getByRole('heading', { name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
   await alphaRow.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Archive Alpha?' }).getByRole('button', { name: 'Archive', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Preferences', exact: true })).toBeVisible();
 
   await page.getByTestId('orchestration-session-beta').click();
@@ -1459,9 +1462,20 @@ test('Session rows archive and restore without losing selection or associated Pa
   await page.getByRole('button', { name: 'Expand Alpha Panes' }).click();
   await expect(page.getByRole('button', { name: 'Associated Alpha Pane', exact: true })).toBeVisible();
 
+  // Archive asks first: Escape keeps the Session, and Enter archives it from the focused Archive button.
+  const confirmArchive = page.getByRole('dialog', { name: 'Archive Alpha?' });
+  await alphaRow.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  await expect(confirmArchive).toContainText('Archiving this Session also archives its Pane.');
+  await page.keyboard.press('Escape');
+  await expect(confirmArchive).toBeHidden();
+  await expect(alphaRow).toBeVisible();
+
   await alphaRow.click({ button: 'right' });
   await expect(page.getByRole('menuitem', { name: 'Archive Session', exact: true })).toBeVisible();
   await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  await expect(confirmArchive.getByRole('button', { name: 'Archive', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
 
   await expect(alphaRow).toHaveCount(0);
   await expect(page.getByRole('status').filter({ hasText: 'Archived Alpha' })).toBeVisible();
@@ -1597,6 +1611,9 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
 
   await page.keyboard.press('Enter');
   await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  // The confirm dialog opens on its Archive button, so one more Enter archives.
+  await expect(page.getByRole('dialog', { name: 'Archive Alpha?' }).getByRole('button', { name: 'Archive', exact: true })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('orchestration-session-alpha')).toHaveCount(0);
   // Archiving the open Session lands on Home.
@@ -3276,6 +3293,7 @@ test('an archived Session restored with Undo returns to its place, and tiling a 
 
   await page.getByTestId('orchestration-session-b').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Archive Bravo?' }).getByRole('button', { name: 'Archive', exact: true }).click();
   await expect.poll(() => listedSessions(page, 'orchestration-sessions-list')).toEqual(['Alpha', 'Delta', 'Charlie']);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(() => listedSessions(page, 'orchestration-sessions-list')).toEqual(['Alpha', 'Delta', 'Bravo', 'Charlie']);

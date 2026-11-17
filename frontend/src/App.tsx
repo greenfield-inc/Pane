@@ -1,4 +1,7 @@
+import { HealthCardDialog } from './components/machineHealth/HealthCardDialog';
+import { askAgentAbout, isHealthCard } from './components/machineHealth/healthCardActions';
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
+import { AddDeviceHost } from './components/addDevice/AddDeviceDialog';
 import { ConnectionChecklist } from './components/ConnectionChecklist';
 import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from './hooks/useConnectionPresence';
@@ -44,9 +47,11 @@ import { acceleratorFromKeys } from './components/notify/notifyFormat';
 import { openApprovals, toggleApprovals } from './components/approvals/approvalsNavigation';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
+import { forgetShownTerminal, forgetShownTerminalsInSession } from './utils/shownTerminals';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
 import { onOpenFirstRunRequest } from './utils/openFirstRun';
+import { dropLaunchOutline, revealApp } from './utils/launchOutline';
 import { prepareLaunchChat, restoreHostNavigation, restoreLaunchChat, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
 import { useRegionNavigation } from './hooks/useRegionNavigation';
 import { KeySequenceHint } from './components/KeySequenceHint';
@@ -59,6 +64,7 @@ import { ContextMenuProvider } from './contexts/ContextMenuContext';
 
 import { CommandPalette } from './components/CommandPalette';
 import { SessionArchiveConfirmDialog } from './components/SessionArchiveConfirmDialog';
+import { ArchiveConfirmDialog } from './components/ArchiveConfirmDialog';
 import { Settings } from './components/Settings';
 import { CreateSessionDialog } from './components/CreateSessionDialog';
 import { AddProjectDialog } from './components/AddProjectDialog';
@@ -227,7 +233,17 @@ function App() {
       toggleApprovals();
       return;
     }
-    openApprovals(target === 'inbox' ? undefined : target.approval);
+    if (target === 'inbox') {
+      openApprovals();
+      return;
+    }
+    if ('askAgent' in target) {
+      // A health card's Ask an agent from a floating window: this window knows the active machine.
+      const item = useNotifyStore.getState().snapshot?.items.find(candidate => candidate.id === target.askAgent);
+      if (item && isHealthCard(item)) void askAgentAbout(item);
+      return;
+    }
+    openApprovals(target.approval);
   }), [closeSettings, openSettings]);
 
   /**
@@ -245,9 +261,11 @@ function App() {
     const events = window.electronAPI?.events;
     const unsubscribePanel = events?.onPanelDeleted?.((data) => {
       usePanelStore.getState().forgetPanel(data.panelId);
+      forgetShownTerminal(data.panelId);
     });
     const unsubscribeSession = events?.onSessionDeleted?.((session) => {
       usePanelStore.getState().forgetSession(session.id);
+      forgetShownTerminalsInSession(session.id);
     });
     return () => {
       unsubscribePanel?.();
@@ -807,6 +825,7 @@ function App() {
         if (restored) {
           useRestartToUpdateStore.getState().showRestoreResult(restored);
           if (!useConfigStore.getState().config) await useConfigStore.getState().fetchConfig();
+          dropLaunchOutline();
           if (!cancelled) await restoreHostNavigation(() => true, restored.navigation);
           // Panes whose agents could not resume stay interrupted; offer them as on any launch.
           if (cancelled || restored.panesFailed === 0) return;
@@ -836,10 +855,13 @@ function App() {
     };
   }, [isLoaded]);
 
-  // Main keeps the window hidden until the first frame with sessions is painted.
+  // The first frame with sessions replaces the launch outline (index.html), and main may now send menu actions and links.
   useEffect(() => {
     if (!isLoaded) return;
-    const frame = requestAnimationFrame(() => window.electronAPI?.notifyRendererReady?.());
+    const frame = requestAnimationFrame(() => {
+      revealApp();
+      window.electronAPI?.notifyRendererReady?.();
+    });
     return () => cancelAnimationFrame(frame);
   }, [isLoaded]);
 
@@ -983,6 +1005,7 @@ function App() {
           <TailnetHttpsBanner />
         </div>
         <RemoteConnectionBanner onSettings={() => openSettings({ category: 'remote-access' })} />
+        <AddDeviceHost />
         <div className="pane-main-layout relative flex flex-1 min-h-0">
         <MainProcessLogger />
         {isSettingsOpen && (
@@ -1015,7 +1038,6 @@ function App() {
             onAboutClick={() => setIsAboutOpen(true)}
             onSettingsClick={() => openSettings()}
             onRemoteSettingsClick={() => openSettings({ category: 'remote-access' })}
-            onAddMachineClick={() => openSettings({ category: 'remote-access', setting: 'remote-add-code' })}
             onMachinePasswordRequest={(machine) => openSettings({ category: 'remote-access', setting: 'remote-machines', machine })}
             width={sidebarWidth}
             maximized={sidebarMaximized}
@@ -1041,6 +1063,7 @@ function App() {
               ? <MachineOfflineView onMachineDetails={() => openSettings({ category: 'remote-access', setting: 'remote-machines' })} />
               : <SessionView />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
+          <HealthCardDialog suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </RemoteWorkspace>
         </div>
         <OnboardingDialog
@@ -1097,6 +1120,7 @@ function App() {
           onNewPane={handleNewPaneInProject}
         />
         <SessionArchiveConfirmDialog />
+        <ArchiveConfirmDialog />
         {showCreateSessionDialog && activeProject && (
           <CreateSessionDialog
             isOpen={showCreateSessionDialog}

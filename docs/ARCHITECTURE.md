@@ -36,7 +36,11 @@ remote PWA / mobile ──HTTP + SSE──▶ daemon ◀──socket── runpa
   that module, and run `pnpm build:main` to check the bundle still loads.
 - **Renderer** (`frontend/src`) is React with Zustand stores
   (`frontend/src/stores`). `frontend/index.html` is the desktop app;
-  `frontend/remote.html` is the Remote PWA that `mobile/` also bundles.
+  `frontend/remote.html` is the Remote PWA that `mobile/` also bundles. The
+  desktop window shows on its first frame, the launch outline that an inline
+  script in `index.html` draws before any app code loads: the title bar,
+  sidebar and, when launch reopens a chat, that chat's message box, which the
+  chat takes over as it mounts (`frontend/src/utils/launchOutline.ts`).
 - **Daemon** (`main/src/daemon`) serves the command registry over a local
   socket (a `pane-daemon-*` directory under the system temp directory, or a
   named pipe on Windows). The `runpane` CLI talks to it. For Remote Pane it also
@@ -45,6 +49,9 @@ remote PWA / mobile ──HTTP + SSE──▶ daemon ◀──socket── runpa
   and codeless desktop remote mode (`workspaceHost.ts`,
   `services/tailnetMachines.ts`, [RUNPANE_WORKSPACES.md](RUNPANE_WORKSPACES.md)).
   Who it admits is the visibility and optional password in `auth.ts`.
+  A desktop saves each computer it reaches once, with its routes in order
+  (`shared/types/remoteComputers.ts`), and `daemon/client/remotePaneClient.ts`
+  connects on the nearest route that answers ([Routes](QR_PAIRING.md#routes)).
   `pnpm daemon:headless` runs it
   without a window. Remote setup and lifecycle:
   [SELF_HOSTED_REMOTE_DAEMON.md](SELF_HOSTED_REMOTE_DAEMON.md) and
@@ -65,7 +72,8 @@ above that component describes the activation lifecycle; read it before you
 change how panels show, hide or refresh.
 
 Agent status (working, idle, blocked) is derived in
-`main/src/services/agentStatus/`.
+`main/src/services/agentStatus/`, from each tab's screen or from the program's
+own OSC 7501 reports ([PROGRAM_STATUS.md](PROGRAM_STATUS.md)).
 
 ## File previews
 
@@ -199,6 +207,11 @@ settings cog holds promotion and deletion actions. Agent visibility is automatic
 within scope, with no sharing controls in the editor. Restoring an archived
 Pane refreshes its derived context from current project notes.
 
+Every marked section Pane keeps in an instruction file someone else can edit (the
+Notify block, notes' Pane memories, the repository `AGENTS.md` section and Session
+folder instructions) goes through `writeOwnedBlock` in `instructionsBlock.ts`: Pane
+adds, updates or removes only its own marked lines and keeps every other byte.
+
 `noteExports.ts` derives marked instruction sections and drawing assets from saved
 documents. Excalidraw scenes remain editable JSON, with PNG previews and readable
 labels in agent-facing Markdown. Global destinations are Claude's user
@@ -241,6 +254,7 @@ Notes tab.
 | Adding an agent CLI | `main/src/services/agents/` | [ADDING_NEW_CLI_TOOLS.md](ADDING_NEW_CLI_TOOLS.md) |
 | Panels | `panelManager.ts`, `shared/types/panels.ts` | [TOOL_PANEL_SYSTEM.md](TOOL_PANEL_SYSTEM.md) |
 | Chat tabs (ACP agents without a terminal) | `main/src/services/chatTabs/`, `main/src/ipc/chatTabs.ts`, `frontend/src/components/chatTab/` | [CHAT_TABS.md](CHAT_TABS.md) |
+| Machine health (disk, memory, cleanup, Resources) | `main/src/services/machineHealth/`, `main/src/ipc/resourceMonitor.ts`, `frontend/src/components/machineHealth/` | [MACHINE_HEALTH.md](MACHINE_HEALTH.md) |
 | Autopilot (experimental agent above every Session) | `main/src/services/autopilot/`, `main/src/ipc/autopilot.ts`, `frontend/src/components/autopilot/` | [AUTOPILOT.md](AUTOPILOT.md) |
 | Renderer updates | IPC events in `main/src/events.ts` | [STATE_MANAGEMENT.md](STATE_MANAGEMENT.md) |
 | Timestamps | `main/src/utils/timestampUtils.ts` | [TIMESTAMP_HANDLING.md](TIMESTAMP_HANDLING.md) |

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Pair glasses with Pane</title>
+<style>
+:root { color-scheme: light dark; --bg: #ffffff; --fg: #18181b; --muted: #71717a; --line: #e4e4e7; --primary: #18181b; --on-primary: #ffffff; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f0f11; --fg: #f4f4f5; --muted: #a1a1aa; --line: #2e2e33; --primary: #f4f4f5; --on-primary: #18181b; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px;
+  background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { width: 100%; max-width: 360px; text-align: center; }
+h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+p { margin: 0 0 24px; color: var(--muted); }
+a.btn { display: block; padding: 12px 16px; margin-top: 12px; border-radius: 10px; border: 1px solid var(--line);
+  color: var(--fg); text-decoration: none; font-weight: 500; }
+a.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+p.note { margin: 24px 0 0; font-size: 14px; }
+p.note a { color: var(--fg); font-weight: 500; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Pair your glasses</h1>
+  <p>Glasses pair through the Pane app on your phone, in Settings › Glasses.</p>
+  <a class="btn primary" href="pane://glasses">Open in Pane app</a>
+  <p class="note">No Pane app yet? It's in TestFlight.<br><a href="https://discord.gg/BdMyubeAZn" target="_blank" rel="noopener">Ask to join on Discord</a></p>
+</main>
+</body>
+</html>

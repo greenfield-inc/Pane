@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { ArrowLeft, Search } from 'lucide-react';
 import { useScrollSurface } from '../../hooks/useScrollSurface';
-import type { SettingsCategoryDefinition } from './catalog';
+import { matchSettingsCategories, type SettingsCategoryDefinition } from './catalog';
 import type { SettingsCategoryId } from '../../types/settings';
 import {
   Select,
@@ -25,6 +25,8 @@ export function SettingsLayout({ category, categories, onCategoryChange, onBack,
     // SAFETY: The Select items are generated exclusively from SettingsCategoryId values.
     onCategoryChange(value as SettingsCategoryId);
   };
+  const [query, setQuery] = useState('');
+  const shown = matchSettingsCategories(categories, query);
   const scrollSurfaceRef = useScrollSurface<HTMLElement>({
     id: 'settings-content',
     priority: 80,
@@ -36,9 +38,22 @@ export function SettingsLayout({ category, categories, onCategoryChange, onBack,
         <button type="button" onClick={onBack} className="mb-3 inline-flex h-7 items-center gap-1.5 rounded px-2 text-left text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary">
           <ArrowLeft className="h-3.5 w-3.5" /> Back
         </button>
-        <h1 className="mb-4 px-2 text-[14px] font-semibold text-text-primary">Settings</h1>
+        <h1 className="mb-3 px-2 text-[14px] font-semibold text-text-primary">Settings</h1>
+        <label className="mb-3 flex h-7 items-center gap-1.5 rounded-md border border-border-primary bg-surface-primary px-2 text-[12px] text-text-tertiary focus-within:border-border-focus">
+          <Search className="h-3.5 w-3.5 flex-none" aria-hidden="true" />
+          <input
+            type="search"
+            aria-label="Search settings"
+            placeholder="Search settings"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            onKeyDown={event => { if (event.key === 'Enter' && shown[0]) onCategoryChange(shown[0].id); }}
+            className="min-w-0 flex-1 bg-transparent text-text-primary outline-none placeholder:text-text-tertiary"
+          />
+        </label>
         <nav aria-label="Settings categories" className="min-h-0 space-y-0.5 overflow-y-auto">
-          {categories.map((item) => {
+          {shown.length === 0 && <p className="px-2.5 text-[12px] text-text-tertiary">No settings match.</p>}
+          {shown.map((item) => {
             const Icon = item.icon;
             const selected = item.id === category;
             return (

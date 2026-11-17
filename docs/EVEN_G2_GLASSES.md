@@ -14,7 +14,7 @@ It talks straight to each of your computers over Tailscale, or through each comp
 - Each computer reachable from the Pane phone app in one of two ways:
   - paired with the phone by [QR code](QR_PAIRING.md); or
   - over Tailscale: Tailscale on the phone and the computer, signed in with the same login, and
-    Pane's **Settings › Remote Access › Who can connect** set to **Only me** or **Everyone on
+    Pane's **Settings › Remote Access › Tailscale › Who can connect** set to **Only me** or **Everyone on
     tailnet** (on by default for the Pane that owns `~/.pane`).
 - Pane open on each computer.
 - For dictation and voice answers, a Deepgram key (live) or a fal key (recorded) on the computer
@@ -24,14 +24,15 @@ It talks straight to each of your computers over Tailscale, or through each comp
 ## Install and pair
 
 1. In the Even Realities app, open **Even Hub** and install **Pane**.
-2. In the Pane phone app, open **Settings › Glasses** and tap **Pair glasses**. The phone asks each
+2. In the Pane phone app, open **Settings › Glasses** and tap **Pair glasses**. (To get there from a
+   computer, scan the code in Pane's **Add a device › Wearables** with your phone.) The phone asks each
    of your computers (the ones on your Tailscale login and the ones it paired by QR code) for a
    one-time pairing secret and copies them as one code. The code works for 10 minutes and only once
    per computer. A computer the phone reaches both ways is paired once, over Tailscale, when its
    Tailscale name matches its name in Pane.
 3. Tap **Open Even app**, open Pane there, and tap **Paste**, then **Connect**.
 4. The glasses show **Pane · N computers**. Each computer now lists the glasses under
-   **Settings › Remote Access › Devices**, named after your phone, with when they were last used.
+   **Settings › Remote Access › Phones and glasses**, named after your phone, with when they were last used.
 
 Pair once; your other computers join on their own on launch and every 10 minutes. The glasses ask
 one paired computer to get pairing secrets from your other Pane computers on Tailscale (yours, with
@@ -165,7 +166,7 @@ notification mirroring, as the title only ("planner has a question").
 
 - On the phone: **Settings › Glasses › Revoke Glasses** revokes them on every computer it can reach,
   and finishes the rest when they next answer.
-- On a computer: **Settings › Remote Access › Devices**, then **Revoke** next to the glasses for
+- On a computer: **Settings › Remote Access › Phones and glasses**, then **Revoke** next to the glasses for
   that computer only, or **Revoke on all my computers** for this computer and every computer of
   yours it can reach. It names the computers it could not reach, such as "Not reached: laptop
   (offline)", and offers **Retry on my other computers** while that page stays open.
@@ -201,7 +202,7 @@ hold:
   the computer only as a hash. Tokens travel only in the `Authorization` header (and the voice
   WebSocket's subprotocol), never in a URL.
 - It comes from an **allowed origin**: the Even app's `http://127.0.0.1` on any port, or one the
-  owner allowed in **Settings › Remote Access › Devices**, matched exactly except that a loopback
+  owner allowed in **Settings › Remote Access › Phones and glasses**, matched exactly except that a loopback
   origin matches on any port. Null, missing and wildcard origins are never accepted. A page served
   from `127.0.0.1` on your phone still needs a glasses token, which only the paired glasses hold.
 - Over Tailscale, the source is not **locked out**: 5 refused attempts in 10 minutes lock it out

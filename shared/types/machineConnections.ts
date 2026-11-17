@@ -25,8 +25,16 @@ export interface MachineState {
   onlineSince?: string;
   /** The machine's install id ("Show cards on" names it by this): this computer's own, or a saved machine's from its last connection. Absent until it answers, and from releases before it. */
   installId?: string;
+  /** The route a saved computer's connection is on (`ComputerRoute.id`): the dot on its pill. */
+  routeId?: string;
   /** Whether the machine's Pane sends its Session members' reports; absent until it first answers. */
   workspaceEntries?: boolean;
+}
+
+/** A saved machine's round trip: `ms` null when it did not answer; `routeId` the route it was measured over (`ComputerRoute.id`). */
+export interface MachineLatency {
+  ms: number | null;
+  routeId: string | null;
 }
 
 /** The reads `machines:read` serves; each takes the arguments the same channel takes today. */
@@ -44,6 +52,13 @@ export const MACHINE_READ_CHANNELS = [
   'projects:list-branches',
   'projects:detect-branch',
   'remote:pwa-affordances',
+  // Machine health (Resources): the snapshot, inventory, finished Panes, relief offer, cleanup history and other apps.
+  'resource-monitor:machine-health',
+  'resource-monitor:machine-inventory',
+  'resource-monitor:machine-finished-panes',
+  'resource-monitor:machine-relief',
+  'resource-monitor:machine-cleanup-history',
+  'resource-monitor:machine-apps',
 ] as const;
 export type MachineReadChannel = typeof MACHINE_READ_CHANNELS[number];
 
@@ -67,6 +82,8 @@ export const MACHINE_EVENT_CHANNELS = [
   'notify:shared-changed',
   'remote:settings-changed',
   'workspace:entry',
+  'resource-monitor:machine-health-changed',
+  'resource-monitor:machine-inventory-changed',
 ] as const;
 export type MachineEventChannel = typeof MACHINE_EVENT_CHANNELS[number];
 
@@ -94,7 +111,13 @@ export type MachineCommand =
   /** Sends `input` to an agent tab as the person's message (`runpane panels submit`); Move to machine… uses it. */
   | { type: 'submit-to-agent'; panelId: string; input: string }
   /** The Move dialog's calls on the machine the Session lives on (`SESSION_MOVE_CHANNELS`). */
-  | { type: 'move-session'; channel: string; request: JsonObject };
+  | { type: 'move-session'; channel: string; request: JsonObject }
+  /** Machine health on that machine, through its own engine and protections. */
+  | { type: 'machine-health'; action: MachineHealthAction; request: object };
+
+/** What Resources and its cards can ask another machine to do, each through that machine's own checks. */
+export const MACHINE_HEALTH_ACTIONS = ['cleanup', 'pause-idle', 'archive-finished', 'stop-processes', 'restart-process', 'ignore-leak', 'stop-app'] as const;
+export type MachineHealthAction = typeof MACHINE_HEALTH_ACTIONS[number];
 
 /** A read's or command's answer, exactly as the machine gave it, tagged with that machine. */
 export interface MachineResult {

@@ -84,9 +84,9 @@ name: Pause journeys
 - tapOn:
     text: "Archive"
     rightOf: "Cancel"
+# Search covers the archive: the Pane now shows there, with Restore.
 - extendedWaitUntil:
-    visible:
-      id: panes-no-results
+    visible: "Restore ${output.pane}"
     timeout: 20000
 - tapOn:
     id: panes-search-clear
@@ -114,6 +114,11 @@ name: Pause journeys
     start: 5%, 50%
     end: 90%, 50%
     duration: 400
+# Home lists Session rows under a search.
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: ${output.session}
 - extendedWaitUntil:
     visible: "Open Session ${output.session}"
     timeout: 15000

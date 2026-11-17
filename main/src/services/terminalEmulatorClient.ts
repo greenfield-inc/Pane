@@ -10,7 +10,7 @@ import {
 
 type Reply = ScreenState | RestoreSnapshot | string | null;
 
-const EMPTY_STATE: ScreenState = { screenText: '', inputScreenText: '', ghostScreenText: '', isAlternateScreen: false, oscTitle: '', oscProgress: '' };
+const EMPTY_STATE: ScreenState = { screenText: '', inputScreenText: '', ghostScreenText: '', isAlternateScreen: false, oscTitle: '', oscProgress: '', programStatus: null };
 
 /** Main-side end of an emulator host; one host serves many terminals. */
 export class TerminalEmulatorHostConnection {
@@ -19,6 +19,7 @@ export class TerminalEmulatorHostConnection {
   private closed = false;
   private readonly pending = new Map<number, (reply: Reply) => void>();
   private readonly stateListeners = new Map<number, (state: ScreenState) => void>();
+  private readonly queryListeners = new Map<number, () => void>();
 
   constructor(private readonly host: EmulatorHost) {
     host.on('message', (message) => this.onMessage(message));
@@ -38,9 +39,10 @@ export class TerminalEmulatorHostConnection {
     return new RemoteTerminalEmulator(this, cols, rows);
   }
 
-  register(cols: number, rows: number, onState: (state: ScreenState) => void): number {
+  register(cols: number, rows: number, onState: (state: ScreenState) => void, onProgramStatusQuery: () => void): number {
     const id = this.nextId++;
     this.stateListeners.set(id, onState);
+    this.queryListeners.set(id, onProgramStatusQuery);
     this.post({ op: 'create', id, cols, rows });
     return id;
   }
@@ -69,6 +71,7 @@ export class TerminalEmulatorHostConnection {
   /** Drop the model; resolves to its final capture, scrollback included. */
   release(id: number): Promise<RestoreSnapshot | null> {
     this.stateListeners.delete(id);
+    this.queryListeners.delete(id);
     // SAFETY: the host answers 'dispose' with a RestoreSnapshot (or null).
     return this.request({ op: 'dispose', id }) as Promise<RestoreSnapshot | null>;
   }
@@ -87,6 +90,10 @@ export class TerminalEmulatorHostConnection {
       this.stateListeners.get(message.id)?.(message.state);
       return;
     }
+    if (message.op === 'programStatusQuery') {
+      this.queryListeners.get(message.id)?.();
+      return;
+    }
     this.pending.get(message.req)?.(message.op === 'scrollbackReply' ? message.text : message.state);
     this.pending.delete(message.req);
   }
@@ -97,6 +104,7 @@ export class TerminalEmulatorHostConnection {
     for (const resolve of this.pending.values()) resolve(null);
     this.pending.clear();
     this.stateListeners.clear();
+    this.queryListeners.clear();
   }
 }
 
@@ -121,11 +129,13 @@ export class RemoteTerminalEmulator {
   private readonly id: number;
   private cached: ScreenState = EMPTY_STATE;
   private final: Promise<RestoreSnapshot | null> | null = null;
+  /** Answers a program's `OSC 7501 ; ? ST` feature-detection query. */
+  onProgramStatusQuery: (() => void) | undefined;
 
   constructor(private readonly host: TerminalEmulatorHostConnection, cols: number, rows: number) {
     this.id = host.register(cols, rows, (state) => {
       this.cached = state;
-    });
+    }, () => this.onProgramStatusQuery?.());
   }
 
   get state(): ScreenState {
@@ -142,6 +152,18 @@ export class RemoteTerminalEmulator {
 
   clearScrollback(): void {
     if (!this.final) this.host.post({ op: 'clear', id: this.id });
+  }
+
+  /**
+   * See TerminalStateEmulator.dropProgramStatus. Until the host pushes the
+   * records left, reads show none rather than the one being dropped.
+   */
+  dropProgramStatus(which: 'running' | 'finished'): void {
+    if (this.final) return;
+    this.host.post({ op: 'dropProgramStatus', id: this.id, which });
+    const state = this.cached.programStatus?.state;
+    const finished = state === 'done' || state === 'error';
+    if (state && finished === (which === 'finished')) this.cached = { ...this.cached, programStatus: null };
   }
 
   async refresh(): Promise<ScreenState> {

@@ -3,7 +3,7 @@ import { Card } from './ui/Card';
 
 export const ProjectDashboardSkeleton: React.FC = () => {
   return (
-    <Card className="animate-pulse">
+    <Card className="animate-skeleton">
       {/* Header Skeleton */}
       <div className="px-6 py-4 border-b border-border-primary">
         <div className="flex items-center justify-between">

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { clearShellPathCache, getShellPath, warmShellPath } from './shellPath';
+import { clearShellPathCache, findExecutableInPath, getShellPath, warmShellPath } from './shellPath';
 
 // A stand-in login shell: logs each run, fails its first run when asked, and
 // prints a fixed PATH.
@@ -61,5 +61,23 @@ describe.skipIf(process.platform === 'win32')('shellPath', () => {
 
     expect(shellPath.split(':').slice(0, 2)).toEqual(['/opt/fake-shell/bin', '/usr/bin']);
     expect(shellRuns()).toBe(2);
+  });
+});
+
+describe.runIf(process.platform === 'win32')('findExecutableInPath on Windows', () => {
+  it('picks npm.cmd over the extensionless npm shell script beside it, as cmd.exe does', () => {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'find-executable-'));
+    const originalPath = process.env.PATH;
+    try {
+      fs.writeFileSync(path.join(bin, 'npm'), '#!/bin/sh\n');
+      fs.writeFileSync(path.join(bin, 'npm.cmd'), '@echo off\r\n');
+      process.env.PATH = `${bin};${originalPath ?? ''}`;
+      clearShellPathCache();
+      expect(findExecutableInPath('npm')).toBe(path.join(bin, 'npm.cmd'));
+    } finally {
+      process.env.PATH = originalPath;
+      clearShellPathCache();
+      fs.rmSync(bin, { recursive: true, force: true });
+    }
   });
 });

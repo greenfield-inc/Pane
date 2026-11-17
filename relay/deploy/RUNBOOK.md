@@ -1,7 +1,7 @@
 # Deploy Pane's relays
 
 Pane's relays give every computer an address at `<id>.runpane.net`, so the
-desktop app's "Pair a phone" QR code works on any network. Four relays run on
+desktop app's **Add a device** QR code works on any network. Four relays run on
 Google Compute Engine in the project `pane-pwa-preview`: `us` (us-central1),
 `eu` (europe-west1), `asia` (asia-southeast1) and `west` (us-west1).
 To add one, add a line to `RELAYS` in `deploy.sh` and its region to

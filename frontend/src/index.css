@@ -653,6 +653,11 @@ body.understory {
     animation: none;
   }
 
+  /* A loading skeleton's shape already says "loading", so its breathe stops. */
+  .animate-skeleton {
+    animation: none;
+  }
+
   /* The typing indicator keeps its colour cycle and loses the scale pulse. */
   .animate-typing-dot {
     animation: typing-dots-color 1.5s ease-in-out infinite;

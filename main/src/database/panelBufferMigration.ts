@@ -86,6 +86,9 @@ function readUserVersion(db: Database.Database): number {
   return decodeBoundary(db.pragma('user_version', { simple: true }), boundary.number);
 }
 
+/** The backup's file name: `<database file>.pre-panel-buffers-<epoch ms>.bak`. Machine health removes old ones. */
+export const PANEL_BUFFER_BACKUP_NAME = /^sessions\.db\.pre-panel-buffers-\d+\.bak$/u;
+
 function writeBackup(dbPath: string): string | null {
   if (!existsSync(dbPath)) return null;
   const backupPath = `${dbPath}.pre-panel-buffers-${Date.now()}.bak`;

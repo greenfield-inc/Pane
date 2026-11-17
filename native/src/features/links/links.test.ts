@@ -155,6 +155,12 @@ describe('parseIncomingLink', () => {
     expect(parseIncomingLink('pane://pane/%E0?host=x')).toEqual({ type: 'route' });
   });
 
+  it('opens Settings › Glasses from the Wearables QR code and the landing page', () => {
+    expect(parseIncomingLink('https://runpane.net/glasses')).toEqual({ type: 'glasses' });
+    expect(parseIncomingLink('pane://glasses')).toEqual({ type: 'glasses' });
+    expect(parseIncomingLink('https://runpane.net/glassesfoo')).toEqual({ type: 'route' });
+  });
+
   it('leaves other links alone', () => {
     expect(parseIncomingLink('pane-remote://eyJhIjoxfQ')).toEqual({ type: 'route' });
     expect(parseIncomingLink('pane://settings')).toEqual({ type: 'route' });

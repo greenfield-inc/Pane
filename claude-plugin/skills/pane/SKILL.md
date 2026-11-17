@@ -74,7 +74,7 @@ rather than asking in the terminal.
 - **Claude's own card (AskUserQuestion)** only when all of these hold: you are answering the person's latest message in the chat they are typing in; the answer only steers this turn (nothing recorded as a decision, nothing for another agent, nothing irreversible or outward-facing); and the question stands on its own, without context, links or a Summary. Examples: "Update the snapshot too, or leave it?", "Which of these two files did you mean?"
 - **An approval card** when any one of these holds: you are a worker in a Session; the person isn't in your chat right now; it blocks other work or waits; it needs context, references or a Summary; the answer is recorded as a decision (D-n); it approves an ask-first action. Examples: a plan approval, a sign-in the person must do, a migration.
 - Unsure? Use an approval card. Codex and other agents without a built-in card always use an approval.
-- How to post one: a worker runs `runpane report --state blocked --question "<title>" --summary-file <its status file>` (its `needs_you` gives the questions, options and files); a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker's question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.
+- How to post one: a worker runs `runpane report --state blocked --question "<title>"` with its options as `--choices` or `--questions` (the JSON `runpane notify` takes), or with `--summary-file <its status file>` whose `needs_you` gives the questions, options and files; Pane refuses a question that ends with options in brackets, such as "(A / B)", and has neither; a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker's question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.
 
 ### The card
 
@@ -86,7 +86,7 @@ rather than asking in the terminal.
 
 ### Replies
 
-- A typed reply may be an answer or a question. Whoever reads it runs `runpane notify --took <id|Q-n> answer` or `--took <id|Q-n> question`.
+- Pane records a typed reply as the answer once its reader gets it. When the reply asks a question instead, the reader runs `runpane notify --took <id|Q-n> question`.
 - For a question: find out, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links`. The card shows "Updated · ready again" and waits for the answer. Don't post a second card.
 
 ### Posting an approval card
@@ -110,14 +110,13 @@ reply: the open call's result `{reply, picks?, id, replyId, next}` (pass its
 from outside a Pane tab too), or this line in your tab:
 `reply: Q-n → "<their words>" (picked: <picks>) (by you)` (`(picked: …)`
 only when they picked something; without a Q-n it names the title and ends
-`[id <item id>]`). A reply is an answer or a question about the approval,
-and you decide which:
+`[id <item id>]`). Pane records the reply as the answer once it reaches you, and the approval
+closes with it, like a pick. Read it:
 
-- **An answer:** run `runpane notify --took <id|Q-n> answer --json`, then act
-  on it.
+- **An answer:** act on it.
 - **A question:** run `runpane notify --took <id|Q-n> question --json` at
-  once (the approval reads "Getting more context…"; `--status "<text>"` says
-  what you're doing instead). Find out, then run
+  once. That reopens the approval, which reads "Getting more context…"
+  (`--status "<text>"` says what you're doing instead). Find out, then run
   `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>" --json`
   with any changed `--title`, `--context`, `--choices`, `--questions` or
   `--links`. A reworded choice carries `"was":"<old label>"`. That saves a
@@ -138,9 +137,11 @@ orchestrator that relayed a worker's question, else Autopilot.
 - **A worker in a Session** (`PANE_SESSION_DIR` is set and
   `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator
   or a parent status file) doesn't call `notify`. Run
-  `runpane report --state blocked --question "<question>"` (with
-  `--summary-file <status file>` when you keep one, after writing the
-  question there). It shows at once in Approvals with an answer box, and it rings when
+  `runpane report --state blocked --question "<question>"`, with its options
+  as `--choices '<json>'` or `--questions '<json>'` (the JSON `notify`
+  takes), or with `--summary-file <status file>` when you keep one, after
+  writing the question in its `needs_you`. Never pack options into the
+  question as "(A / B)": Pane refuses that and shows nothing. It shows at once in Approvals with an answer box, and it rings when
   your orchestrator relays it or after 10 minutes. The answer reaches this tab as
   `answer: Q-n → <answer> (by you)`; `closed: Q-n (by you)` and
   `correction: Q-n → <answer> (by you)` are the person's word too. A typed
@@ -161,6 +162,17 @@ For an API key, token or password, call the `secrets_request` tool (or
 never `ask`. Pane saves the value as a Pane secret and returns only saved or
 declined; run commands with it through `runpane secrets exec`. If it returns
 `unavailable`, ask the person to save it in Pane under Settings > Secrets.
+
+## Phone simulators
+
+To see or test an iOS or Android app, call `device_open` (or
+`runpane devices open --platform ios|android --json`). Pane boots a shared
+simulator for this Pane and shows it in a tab beside you; on a computer without
+Xcode, iOS runs on a linked Mac. Then `device_run` builds and runs the app
+there (`--background` for Metro), `device_act` drives it with agent-device
+commands (`open <app id>`, `snapshot -i`, `press @eN --settle`), and
+`device_screenshot` shows you the screen. Call `device_close` when done, so
+another Pane can use it. `runpane docs read --doc docs/DEVICES.md` has the rest.
 
 ## Restyle Pane
 

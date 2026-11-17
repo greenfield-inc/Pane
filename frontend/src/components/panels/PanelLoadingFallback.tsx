@@ -11,7 +11,7 @@ interface PanelLoadingFallbackProps {
 export const PanelLoadingFallback: React.FC<PanelLoadingFallbackProps> = React.memo(({
   panelType = 'panel',
 }) => (
-  <div className="h-full bg-bg-primary animate-pulse">
+  <div className="h-full bg-bg-primary animate-skeleton">
     {/* Header skeleton */}
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-primary bg-surface-secondary">
       <div className="h-3 w-28 bg-surface-tertiary rounded" />

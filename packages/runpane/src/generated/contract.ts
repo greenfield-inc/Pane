@@ -99,6 +99,21 @@ export const RUNPANE_CONTRACT = {
       "cursor",
       "opencode",
       "pi"
+    ],
+    "reclaimKinds": [
+      "update-snapshot",
+      "migration-backup",
+      "archived-pane-folder",
+      "agent-temp",
+      "paused-scratch",
+      "foreign-worktree",
+      "foreign-pane-data",
+      "other-tool-data"
+    ],
+    "foreignReclaimKinds": [
+      "foreign-worktree",
+      "foreign-pane-data",
+      "other-tool-data"
     ]
   },
   "agents": {
@@ -130,6 +145,9 @@ export const RUNPANE_CONTRACT = {
         },
         "transcriptDirs": [
           ".claude/projects"
+        ],
+        "tempDirs": [
+          "{tmp}/claude-{uid}"
         ],
         "signIn": [
           "auth",
@@ -368,6 +386,7 @@ export const RUNPANE_CONTRACT = {
           "fullAccessArgs": [
             "--auto"
           ],
+          "paneMcpConfigEnv": "OPENCODE_CONFIG_CONTENT",
           "hotkey": "mod+alt+6",
           "session": {
             "flag": "--session",
@@ -629,6 +648,18 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "link",
+      "summary": "Link this computer with the one that made a one-time link, so each can reach the other.",
+      "usage": [
+        "runpane link <link> [--yes] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "jsonSchemas": [
+        "linkRedeemResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "repos list",
       "summary": "List repositories saved in the running Pane app.",
       "usage": [
@@ -783,6 +814,164 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "devices list",
+      "mcpName": "device_list",
+      "summary": "List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.",
+      "usage": [
+        "runpane devices list [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesListResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices open",
+      "mcpName": "device_open",
+      "summary": "Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.",
+      "usage": [
+        "runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesOpenResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices screenshot",
+      "mcpName": "device_screenshot",
+      "summary": "Capture the screen of this Pane's open device as an image.",
+      "usage": [
+        "runpane devices screenshot [--platform <ios|android>] [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesScreenshotResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices act",
+      "mcpName": "device_act",
+      "summary": "Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.",
+      "usage": [
+        "runpane devices act [--platform <ios|android>] [--json] [--pane-dir <path>] -- <command>"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesActResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices run",
+      "mcpName": "device_run",
+      "summary": "Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.",
+      "usage": [
+        "runpane devices run [--platform <ios|android>] [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>"
+      ],
+      "mutates": true,
+      "openWorld": true,
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesRunResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices close",
+      "mcpName": "device_close",
+      "summary": "Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. The device stays warm for 10 minutes.",
+      "usage": [
+        "runpane devices close [--platform <ios|android>] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesCloseResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices usage",
+      "mcpName": "device_usage",
+      "summary": "Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.",
+      "usage": [
+        "runpane devices usage [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesUsageResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
+      "name": "devices free",
+      "mcpName": "device_free",
+      "summary": "Shut down unused devices (--idle), or also delete every unused device Pane made and the build checkouts no Pane holds (--all).",
+      "usage": [
+        "runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "devices"
+      ],
+      "jsonSchemas": [
+        "devicesFreeResult"
+      ],
+      "localControl": true,
+      "wrappers": [
+        "npm"
+      ]
+    },
+    {
       "name": "theme read",
       "summary": "Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.",
       "usage": [
@@ -881,7 +1070,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace list",
-      "summary": "List the machines on your tailnet, each with its owner, and whether each answers workspaces.",
+      "summary": "List your computers saved in Pane and the machines on your tailnet, one entry per computer, and whether each answers workspaces.",
       "usage": [
         "runpane workspace list [--json] [--pane-dir <path>]"
       ],
@@ -924,7 +1113,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace read",
-      "summary": "Print a file from a machine on your tailnet; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+      "summary": "Print a file from another of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
       "usage": [
         "runpane workspace [<machine>] read <path> [--json]"
       ],
@@ -943,7 +1132,7 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "workspace write",
-      "summary": "Write --content or stdin to a file on a machine on your tailnet, creating parent folders.",
+      "summary": "Write --content or stdin to a file on another of your machines, creating parent folders.",
       "usage": [
         "runpane workspace [<machine>] write <path> [--content <text>] [--json]"
       ],
@@ -1946,7 +2135,7 @@ export const RUNPANE_CONTRACT = {
       "name": "report",
       "summary": "Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.",
       "usage": [
-        "runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]"
+        "runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -1965,7 +2154,7 @@ export const RUNPANE_CONTRACT = {
       "usage": [
         "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
         "runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
-        "runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
+        "runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "runpane notify --resume <id> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
@@ -2284,6 +2473,36 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "lockListResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "machine health",
+      "summary": "Show this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free, by tier.",
+      "usage": [
+        "runpane machine health [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "machine"
+      ],
+      "jsonSchemas": [
+        "machineHealthResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "machine cleanup",
+      "confirmDescription": "Delete the listed items (the CLI's --yes). Without it the call is a dry run that lists them and deletes nothing.",
+      "summary": "Free disk space that Pane made: list one kind of tier 1 or 2 item with its size (a dry run), or delete them with --yes.",
+      "usage": [
+        "runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "machine"
+      ],
+      "jsonSchemas": [
+        "machineCleanupResult"
       ],
       "localControl": true
     },
@@ -3045,7 +3264,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--choices",
         "value": "<json>",
-        "description": "notify --ui options: 1 to 9 choices as a JSON array of {label, detail?, recommended?}; with --update a reworded choice adds \"was\", its old label."
+        "description": "notify --ui options: 1 to 9 choices as a JSON array of {label, detail?, recommended?}; with --update a reworded choice adds \"was\", its old label. report --state blocked takes the same, as its card's buttons."
       },
       {
         "name": "--detail",
@@ -3105,7 +3324,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--questions",
         "value": "<json>",
-        "description": "notify --ui options, instead of --choices: 2 to 4 questions as a JSON array of {title, choices}, each with 1 to 9 choices and one pick."
+        "description": "notify --ui options, instead of --choices: 2 to 4 questions as a JSON array of {title, choices}, each with 1 to 9 choices and one pick. report --state blocked takes the same."
       },
       {
         "name": "--took",
@@ -3130,7 +3349,7 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--asked",
         "value": "<text>",
-        "description": "notify --update: the person's question, as they typed it."
+        "description": "notify --update: the person's question, as they typed it. Needed when the update answers their typed question; leave it out for your own update, such as a loop's next run."
       },
       {
         "name": "--what-changed",
@@ -3171,6 +3390,26 @@ export const RUNPANE_CONTRACT = {
         "name": "--search",
         "value": "<text>",
         "description": "models only: keep models whose name contains this text."
+      },
+      {
+        "name": "--platform",
+        "value": "<ios|android>",
+        "description": "devices open: ios or android. devices screenshot, act, run and close: which of the Pane's devices; defaults to the one opened last."
+      },
+      {
+        "name": "--device",
+        "value": "<name-or-id>",
+        "description": "devices open: one of the person's own devices by name or id."
+      },
+      {
+        "name": "--wait-ms",
+        "value": "<milliseconds>",
+        "description": "devices run: how long to wait for the command to exit."
+      },
+      {
+        "name": "--kind",
+        "value": "<kind>",
+        "description": "Kind of item for runpane machine cleanup, such as update-snapshot; runpane machine health lists each item's kind."
       }
     ],
     "localBoolean": [
@@ -3329,6 +3568,14 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--hook",
         "description": "runpane panels conversation: read a Claude Code SessionStart hook's JSON from stdin and report it for PANE_PANEL_ID. Prints nothing and always exits 0."
+      },
+      {
+        "name": "--background",
+        "description": "devices run: keep the command running after the call returns; it stops at devices close."
+      },
+      {
+        "name": "--idle",
+        "description": "devices free: shut down Pane's devices no Pane holds."
       }
     ]
   },
@@ -3347,6 +3594,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agent-context [--json]",
         "  runpane mcp [--toolsets <name,...>] [--read-only]",
         "  runpane relay [pane-relay flags...]",
+        "  runpane link <link> [--yes] [--json]",
         "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
@@ -3358,6 +3606,14 @@ export const RUNPANE_CONTRACT = {
         "  runpane secrets delete --project <project> --name <name> --yes",
         "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
         "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "  runpane devices list [--json] [--pane-dir <path>]",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "  runpane devices screenshot [--json] [--pane-dir <path>]",
+        "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
+        "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
+        "  runpane devices close [--json] [--pane-dir <path>]",
+        "  runpane devices usage [--json] [--pane-dir <path>]",
+        "  runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]",
         "  runpane theme read [--json]",
         "  runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json]",
         "  runpane theme set --theme <id> [--json]",
@@ -3376,6 +3632,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane machine health [--json]",
+        "  runpane machine cleanup --kind <kind> [--yes] [--json]",
         "  runpane loops list [--json]",
         "  runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  runpane loops update|run|pause|resume|delete --loop <id> --yes",
@@ -3416,7 +3674,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
         "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
@@ -3781,7 +4039,7 @@ export const RUNPANE_CONTRACT = {
         "  --json                         Print machine-readable output"
       ],
       "workspace": [
-        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale or the routes Pane saved for them.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -3793,7 +4051,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane workspace <machine> <runpane command>      (any command that talks to Pane, e.g. sessions list --json)",
         "  runpane workspace enable|disable",
         "",
-        "<machine> is a Tailscale name, unique prefix, or IP. Your own machines are reachable, and a teammate's machine when its owner set Who can connect to Everyone on tailnet.",
+        "<machine> is a name from workspace list, an id it is saved under in Pane (such as its relay id), a unique prefix, or a Tailscale IP. Your own machines are reachable, and a teammate's machine when its owner set Who can connect to Everyone on tailnet.",
+        "A computer saved in Pane is tried route by route (same network, Tailscale, SSH, public URL, Pane relay, in its order); one that does not connect gives way to the next.",
         "Without <machine>, read, write, and exec route a path that cannot exist here (C:\\... on a Mac) to the one joined machine it fits.",
         "Commands that only run here (doctor, agent-context, mcp, docs) run there with: runpane workspace <machine> exec -- 'runpane doctor'"
       ],
@@ -3880,7 +4139,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --repo <selector>              active, id, exact path, or saved repository name",
         "  --name <name>                  Pane/session name",
-        "  --worktree-name <name>         Worktree directory name; defaults to --name",
+        "  --worktree-name <name>         Worktree directory name, cut to 100 characters at a word; defaults to --name",
         "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
         "  --base-branch <ref>            Ref to branch from; --base is an alias",
         "  --agent <codex|claude|cursor|opencode|pi>  Built-in terminal template; with --tool-command, the agent it runs",
@@ -4096,7 +4355,7 @@ export const RUNPANE_CONTRACT = {
         "The MCP server ships in the npm package and inside the Pane app. The Python package does not include it.",
         "",
         "Options:",
-        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, workspace, git, docs, links, admin",
+        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, workspace, machine, git, docs, links, admin",
         "  --read-only                    Serve only read-only tools"
       ],
       "relay": [
@@ -4115,6 +4374,19 @@ export const RUNPANE_CONTRACT = {
         "  npx --yes runpane@latest relay --dev",
         "",
         "Guide: docs/SELF_HOSTED_RELAY.md"
+      ],
+      "link": [
+        "Usage:",
+        "  runpane link <link> [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "Link this computer with the one that made a one-time link, so each can reach the other.",
+        "Copy the link in Pane on the other computer: Add a device › Computer.",
+        "A computer that already has linked computers asks before the two groups join.",
+        "",
+        "Options:",
+        "  --yes                           Join without asking; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
       "agents doctor": [
         "Usage:",
@@ -4662,13 +4934,18 @@ export const RUNPANE_CONTRACT = {
       ],
       "report": [
         "Usage:",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
         "",
         "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
         "agent.report watch event and reads it in `agents status` and `sessions overview`.",
         "Inside a Pane terminal the panel comes from PANE_SESSION_ID and PANE_PANEL_ID.",
         "It prints how many watches were waiting and received it (\"Delivered to 1 waiting watcher.\"). With no Session and",
         "nobody waiting, the report is still stored: a named-cursor watch receives it when it next waits.",
+        "",
+        "With --state blocked the person sees the question as a card. Its buttons come from --choices or",
+        "--questions, else from needs_you in the status file passed as --summary-file. A --question that",
+        "ends with options in brackets, such as \"(A (recommended) / B)\", and has neither is refused:",
+        "nothing is shown. A question with no options is an open question, answered in words.",
         "",
         "Options:",
         "  --state <state>                ready, blocked, failed, or done",
@@ -4677,27 +4954,31 @@ export const RUNPANE_CONTRACT = {
         "  --summary <text>               Summary text; up to 16,000 characters are kept",
         "  --summary-file <path|->        Read the summary from a file or stdin",
         "  --question <text>              What you need answered; required with --state blocked",
+        "  --choices <json>               blocked: the question's buttons, as notify takes them: 1 to 9 of",
+        "                                 [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
+        "  --questions <json>             blocked, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}]",
         "  --pane <pane-id>               Pane id when not running inside a Pane terminal",
         "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "",
-        "Example:",
-        "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md"
+        "Examples:",
+        "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md",
+        "  runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"recommended\":true},{\"label\":\"Invoice number\"}]'"
       ],
       "notify": [
         "Usage:",
         "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
         "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
-        "  runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
+        "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
         "",
         "Asks the person a question, or tells them something, on screen wherever they are, and",
         "prints their answer. The call waits until they answer; --ui info returns at once.",
         "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
         "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
-        "A typed reply comes back as a reply result (or a `reply:` line in your tab): it may answer",
-        "the question or ask one. Say which with --took; for a question, find out, then --update.",
+        "A typed reply comes back as a reply result (or a `reply:` line in your tab), recorded as the",
+        "answer. If it asks something instead, run --took question, find out, then --update.",
         "",
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
@@ -4715,12 +4996,13 @@ export const RUNPANE_CONTRACT = {
         "                                 instead of posting a second one; the call waits on it, and the answer goes to the worker's tab",
         "  --about-session <id|name>      Autopilot's own item: the Session it is about",
         "  --took <id|Q-n> <answer|question>",
-        "                                 Say how you took the person's reply: answer records it as the answer;",
-        "                                 question shows that you are getting more context",
+        "                                 The person's reply was a question: question reopens the approval and shows",
+        "                                 you are getting more context. answer only confirms the recorded answer",
         "  --status <text>                With --took question: what you are doing (default Getting more context…)",
         "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
         "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
-        "  --asked <text>                 With --update: the person's question, as they typed it",
+        "  --asked <text>                 With --update: the person's question, as they typed it; leave out",
+        "                                  for your own update, such as a loop's next run",
         "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
@@ -4728,7 +5010,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "Examples:",
         "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
-        "  runpane notify --took Q-20 answer",
+        "  runpane notify --took Q-20 question",
         "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
       ],
       "panels resume": [
@@ -4893,6 +5175,33 @@ export const RUNPANE_CONTRACT = {
         "With --repo, each run is a new Pane in a fresh worktree from the repo's default base branch.",
         "A Session loop sends its prompt to that Session's agent each run instead of creating a new Pane.",
         "",
+        "Writing a good loop (the person is away while it runs):",
+        "  1. Reach the person only through cards and artifacts; they never open the loop's Pane,",
+        "     Session or terminal. Each finding, question or error (a source unreachable, a sign-in",
+        "     expired) is a `runpane notify` card that stands on its own: what was tried, the one thing",
+        "     they can do, and every artifact in --links. Act on their answers on the card.",
+        "  2. Remember across runs. Keep a ledger file of the items found, what each run covered, what",
+        "     was surfaced and the id of each card posted. Start each run by reading it, the last one or",
+        "     two outputs, and the card answers since the last run. Scan only what is new, and re-check",
+        "     open items.",
+        "  3. Never repeat. Surface an item only when it is new, newly urgent or overdue, matched by",
+        "     meaning, not wording, and record when it was last surfaced. While a card is unanswered,",
+        "     update it instead of posting another: `runpane notify --update <id> --what-changed <line>`,",
+        "     with the id from the ledger. Any later run of the same loop may update it.",
+        "  4. Post one card per run, or none when nothing qualifies.",
+        "  5. Publish each run's output to one place: the person's document destination, one folder",
+        "     per loop, named by date and slot, linking the previous output. Keep a copy by the ledger.",
+        "  6. Ask before acting outward. Propose anything that messages or changes something for",
+        "     someone else on an approve card, act only on approval, and limit how often one reminder",
+        "     is proposed.",
+        "  7. Start with a small window. Set the default look-ahead or look-back, widen it when the",
+        "     evidence calls for it, and record the window each run used.",
+        "  8. Keep the prompt in a file. After each edit, run `loops update --prompt-file` and read the",
+        "     saved loop back with `loops list`.",
+        "  9. Use cards that wait: --ui options or approve (such as \"Got it\" / \"Not interested\").",
+        "     An --ui info card disappears before the person is back.",
+        "`runpane docs read --doc docs/LOOPS.md` has a worked prompt.",
+        "",
         "Options:",
         "  --repo <selector>               Repository: active, id, exact path, or saved name.",
         "  --session <id|name|new>         Session whose agent gets the prompt each run, instead of",
@@ -4924,6 +5233,33 @@ export const RUNPANE_CONTRACT = {
         "Change a loop's repo or Session, name, schedule, agent or command, prompt, or worktree template. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.",
         "With --repo, each run is a new Pane in a fresh worktree from the repo's default base branch.",
         "A Session loop sends its prompt to that Session's agent each run instead of creating a new Pane.",
+        "",
+        "Writing a good loop (the person is away while it runs):",
+        "  1. Reach the person only through cards and artifacts; they never open the loop's Pane,",
+        "     Session or terminal. Each finding, question or error (a source unreachable, a sign-in",
+        "     expired) is a `runpane notify` card that stands on its own: what was tried, the one thing",
+        "     they can do, and every artifact in --links. Act on their answers on the card.",
+        "  2. Remember across runs. Keep a ledger file of the items found, what each run covered, what",
+        "     was surfaced and the id of each card posted. Start each run by reading it, the last one or",
+        "     two outputs, and the card answers since the last run. Scan only what is new, and re-check",
+        "     open items.",
+        "  3. Never repeat. Surface an item only when it is new, newly urgent or overdue, matched by",
+        "     meaning, not wording, and record when it was last surfaced. While a card is unanswered,",
+        "     update it instead of posting another: `runpane notify --update <id> --what-changed <line>`,",
+        "     with the id from the ledger. Any later run of the same loop may update it.",
+        "  4. Post one card per run, or none when nothing qualifies.",
+        "  5. Publish each run's output to one place: the person's document destination, one folder",
+        "     per loop, named by date and slot, linking the previous output. Keep a copy by the ledger.",
+        "  6. Ask before acting outward. Propose anything that messages or changes something for",
+        "     someone else on an approve card, act only on approval, and limit how often one reminder",
+        "     is proposed.",
+        "  7. Start with a small window. Set the default look-ahead or look-back, widen it when the",
+        "     evidence calls for it, and record the window each run used.",
+        "  8. Keep the prompt in a file. After each edit, run `loops update --prompt-file` and read the",
+        "     saved loop back with `loops list`.",
+        "  9. Use cards that wait: --ui options or approve (such as \"Got it\" / \"Not interested\").",
+        "     An --ui info card disappears before the person is back.",
+        "`runpane docs read --doc docs/LOOPS.md` has a worked prompt.",
         "",
         "Options:",
         "  --loop <id>                     Loop to change; other flags replace its values.",
@@ -5386,6 +5722,151 @@ export const RUNPANE_CONTRACT = {
         "  --session <id|name>            Named Session id or exact name",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
+      ],
+      "devices list": [
+        "Usage:",
+        "  runpane devices list [--json] [--pane-dir <path>]",
+        "",
+        "Lists this machine's iOS simulators and Android emulators, plus the iOS machine Pane uses when this one has no Xcode. paneMade marks the devices Pane created; device_open uses those unless you name another.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices open": [
+        "Usage:",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "",
+        "Leases a device to the calling tab's Pane and boots it. Without --device, Pane uses its own device (Pane iPhone or Pane_Android) and makes one from the newest installed runtime when needed. The first call on a machine installs Pane's device tools (agent-device and Expo's device hub), which takes a minute. When every device Pane may boot is held by another Pane, it waits up to 60 seconds, then fails with ERR_DEVICE_BUSY naming the holder. On a machine without Xcode, iOS opens on a linked Mac. Later device calls act on this device; you never pass it again.",
+        "",
+        "Options:",
+        "  --platform <ios|android>       ios for an iOS simulator, android for an Android emulator",
+        "  --device <name-or-id>          One of the person's own devices by name or id, from device_list. Leave it out to use Pane's own device",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices screenshot": [
+        "Usage:",
+        "  runpane devices screenshot [--json] [--pane-dir <path>]",
+        "",
+        "Returns the PNG's path; MCP clients also get the image itself.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices act": [
+        "Usage:",
+        "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
+        "",
+        "Passes the command to agent-device, pinned to the device this Pane holds. Start with `open <app id>`, then `snapshot -i` for @refs, then `press @eN --settle`. agent-device's own help: `help workflow`. Flags that pick another device, session or daemon (--session, --device, --udid, --serial, --platform) are refused.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices run": [
+        "Usage:",
+        "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
+        "",
+        "On this machine it runs in the Pane's worktree. When the device runs on a linked Mac, Pane first syncs the worktree there (uncommitted changes included) and runs in Pane's checkout on the Mac. It waits up to --wait-ms (default 120000) and returns the exit code and log tail (the last 16 KB, starting with [earlier output cut] when output was dropped), or a jobId while it still runs. --background keeps a server such as Metro running until device_close. Pass an empty command to sync only.",
+        "",
+        "Options:",
+        "  --background                   Keep the command running after the call returns (Metro); it stops at device_close",
+        "  --wait-ms <milliseconds>       How long to wait for the command to exit (default 120000)",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices close": [
+        "Usage:",
+        "  runpane devices close [--json] [--pane-dir <path>]",
+        "",
+        "Ends the lease so another Pane can use the device. It shuts down 10 minutes later unless a Pane opens it again.",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices usage": [
+        "Usage:",
+        "  runpane devices usage [--json] [--pane-dir <path>]",
+        "",
+        "For machine health. Lists every simulator and emulator on this machine, including ones made outside Pane (paneMade false), with OS, disk and, when booted, memory (simslim measure when installed, otherwise the simulator's processes).",
+        "",
+        "Options:",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices free": [
+        "Usage:",
+        "  runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]",
+        "",
+        "Never touches the person's own devices or runtimes, or a device a Pane holds.",
+        "",
+        "Options:",
+        "  --idle                         Shut down Pane's devices no Pane holds",
+        "  --all                          Also erase and delete them",
+        "  --yes                          Confirm the change",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "devices": [
+        "Usage:",
+        "  runpane devices <list|open|screenshot|act|run|close|usage|free> [options]",
+        "",
+        "Phone simulators and emulators for agents. device_open boots a device for the calling tab's Pane and shows its live screen in a device tab beside the agent; the other commands act only on that Pane's device.",
+        "On a machine without Xcode, iOS runs on a linked Mac. See docs/DEVICES.md.",
+        "",
+        "Commands:",
+        "  runpane devices list [--json] [--pane-dir <path>]",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "  runpane devices screenshot [--json] [--pane-dir <path>]",
+        "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
+        "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
+        "  runpane devices close [--json] [--pane-dir <path>]",
+        "  runpane devices usage [--json] [--pane-dir <path>]",
+        "  runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]"
+      ],
+      "machine": [
+        "Usage:",
+        "  runpane machine <health|cleanup> [options]",
+        "",
+        "Shows this machine's health and frees the disk space Pane made.",
+        "Tier 1: Pane made it and nothing uses it now; Pane removes it by itself.",
+        "Tier 2: may still be wanted (archived Pane folders, paused Panes' scratch, agent temp folders); Pane asks before it deletes.",
+        "Tier 3: not Pane's: another tool's data, a database copy Pane did not write, or a worktree Pane did not create.",
+        "Pane never deletes tier 3; machine health says how to free each one.",
+        "",
+        "Commands:",
+        "  runpane machine health [--json] [--pane-dir <path>]",
+        "  runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]"
+      ],
+      "machine health": [
+        "Usage:",
+        "runpane machine health [--json] [--pane-dir <path>]",
+        "",
+        "Shows free disk per volume, the memory level and its source, the Panes using the most memory,",
+        "leak warnings, and the last storage scan by tier, with sizes and reasons. It deletes nothing.",
+        "",
+        "Options:",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "machine cleanup": [
+        "Usage:",
+        "runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "Without --yes, lists the tier 1 and 2 items of that kind from the last scan and their total size,",
+        "and deletes nothing. With --yes, Pane re-checks each item, deletes it, and reports what it skipped and why.",
+        "Tier 3 kinds (foreign-worktree, foreign-pane-data, other-tool-data) are refused: free them with the tool that owns them.",
+        "",
+        "Options:",
+        "  --kind <kind>                Kind of item to delete, from machine health:",
+        "                               update-snapshot, migration-backup, archived-pane-folder,",
+        "                               agent-temp, paused-scratch.",
+        "  --yes                        Delete them. Without --yes, list them and delete nothing.",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
       ]
     },
     "pip": {
@@ -5402,6 +5883,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agent-context [--json]",
         "  runpane mcp [--toolsets <name,...>] [--read-only]",
         "  runpane relay [pane-relay flags...]",
+        "  runpane link <link> [--yes] [--json]",
         "  runpane agents doctor --agent <codex|claude|cursor|opencode|pi> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
@@ -5448,7 +5930,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]",
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text> [--choices <json>]] [--json]",
         "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--relays <item>] [--resume <id>] [--took <id|Q-n> <answer|question>] [--update <id|Q-n> ...] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json]",
@@ -5470,6 +5952,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]",
         "  runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  python -m runpane machine health [--json]",
+        "  python -m runpane machine cleanup --kind <kind> [--yes] [--json]",
         "  python -m runpane loops list [--json]",
         "  python -m runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>] --yes",
         "  python -m runpane loops update|run|pause|resume|delete --loop <id> --yes",
@@ -5819,7 +6303,7 @@ export const RUNPANE_CONTRACT = {
         "  --json"
       ],
       "workspace": [
-        "Workspace commands: this machine's Panes, and your other machines over Tailscale.",
+        "Workspace commands: this machine's Panes, and your other machines over Tailscale or the routes Pane saved for them.",
         "",
         "Usage:",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -5910,7 +6394,7 @@ export const RUNPANE_CONTRACT = {
         "Options:",
         "  --repo <selector>              active, id, exact path, or saved repository name",
         "  --name <name>                  Pane/session name",
-        "  --worktree-name <name>         Worktree directory name; defaults to --name",
+        "  --worktree-name <name>         Worktree directory name, cut to 100 characters at a word; defaults to --name",
         "  --branch <name>                Exact new branch name (slashes kept); must not exist; defaults to the worktree name",
         "  --base-branch <ref>            Ref to branch from; --base is an alias",
         "  --agent <codex|claude|cursor|opencode|pi>  Built-in terminal template; with --tool-command, the agent it runs",
@@ -6127,6 +6611,19 @@ export const RUNPANE_CONTRACT = {
         "",
         "`runpane relay` ships in the npm package, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest relay"
+      ],
+      "link": [
+        "Usage:",
+        "  runpane link <link> [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "Link this computer with the one that made a one-time link, so each can reach the other.",
+        "Copy the link in Pane on the other computer: Add a device › Computer.",
+        "A computer that already has linked computers asks before the two groups join.",
+        "",
+        "Options:",
+        "  --yes                           Join without asking; required in non-interactive shells.",
+        "  --json                          Print machine-readable output.",
+        "  --pane-dir <path>               Connect to a specific Pane data directory."
       ],
       "agents doctor": [
         "Usage:",
@@ -6642,13 +7139,18 @@ export const RUNPANE_CONTRACT = {
       ],
       "report": [
         "Usage:",
-        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
+        "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]",
         "",
         "Hands back a worker's structured report for its panel: the orchestrator receives it as an",
         "agent.report watch event and reads it in `agents status` and `sessions overview`.",
         "Inside a Pane terminal the panel comes from PANE_SESSION_ID and PANE_PANEL_ID.",
         "It prints how many watches were waiting and received it (\"Delivered to 1 waiting watcher.\"). With no Session and",
         "nobody waiting, the report is still stored: a named-cursor watch receives it when it next waits.",
+        "",
+        "With --state blocked the person sees the question as a card. Its buttons come from --choices or",
+        "--questions, else from needs_you in the status file passed as --summary-file. A --question that",
+        "ends with options in brackets, such as \"(A (recommended) / B)\", and has neither is refused:",
+        "nothing is shown. A question with no options is an open question, answered in words.",
         "",
         "Options:",
         "  --state <state>                ready, blocked, failed, or done",
@@ -6657,27 +7159,31 @@ export const RUNPANE_CONTRACT = {
         "  --summary <text>               Summary text; up to 16,000 characters are kept",
         "  --summary-file <path|->        Read the summary from a file or stdin",
         "  --question <text>              What you need answered; required with --state blocked",
+        "  --choices <json>               blocked: the question's buttons, as notify takes them: 1 to 9 of",
+        "                                 [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
+        "  --questions <json>             blocked, instead of --choices: 2 to 4 of [{\"title\":\"...\",\"choices\":[...]}]",
         "  --pane <pane-id>               Pane id when not running inside a Pane terminal",
         "  --panel <panel-id>             Panel id when not running inside a Pane terminal",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "",
-        "Example:",
-        "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md"
+        "Examples:",
+        "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md",
+        "  runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"recommended\":true},{\"label\":\"Invoice number\"}]'"
       ],
       "notify": [
         "Usage:",
         "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]",
         "  runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]",
-        "  runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
+        "  runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
         "",
         "Asks the person a question, or tells them something, on screen wherever they are, and",
         "prints their answer. The call waits until they answer; --ui info returns at once.",
         "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
         "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
-        "A typed reply comes back as a reply result (or a `reply:` line in your tab): it may answer",
-        "the question or ask one. Say which with --took; for a question, find out, then --update.",
+        "A typed reply comes back as a reply result (or a `reply:` line in your tab), recorded as the",
+        "answer. If it asks something instead, run --took question, find out, then --update.",
         "",
         "Options:",
         "  --ui <ui>                      options, approve, ask, or info",
@@ -6695,12 +7201,13 @@ export const RUNPANE_CONTRACT = {
         "                                 instead of posting a second one; the call waits on it, and the answer goes to the worker's tab",
         "  --about-session <id|name>      Autopilot's own item: the Session it is about",
         "  --took <id|Q-n> <answer|question>",
-        "                                 Say how you took the person's reply: answer records it as the answer;",
-        "                                 question shows that you are getting more context",
+        "                                 The person's reply was a question: question reopens the approval and shows",
+        "                                 you are getting more context. answer only confirms the recorded answer",
         "  --status <text>                With --took question: what you are doing (default Getting more context…)",
         "  --update <id|Q-n>              Save a new version of the approval after the person's question, and wait on it;",
         "                                 pass only what changed, and mark a reworded choice with \"was\" (its old label)",
-        "  --asked <text>                 With --update: the person's question, as they typed it",
+        "  --asked <text>                 With --update: the person's question, as they typed it; leave out",
+        "                                  for your own update, such as a loop's next run",
         "  --what-changed <text>          With --update: one line per change",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
@@ -6708,7 +7215,7 @@ export const RUNPANE_CONTRACT = {
         "",
         "Examples:",
         "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'",
-        "  runpane notify --took Q-20 answer",
+        "  runpane notify --took Q-20 question",
         "  runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: it can be undone from Settings\" --context \"...\""
       ],
       "panels resume": [
@@ -6873,6 +7380,33 @@ export const RUNPANE_CONTRACT = {
         "With --repo, each run is a new Pane in a fresh worktree from the repo's default base branch.",
         "A Session loop sends its prompt to that Session's agent each run instead of creating a new Pane.",
         "",
+        "Writing a good loop (the person is away while it runs):",
+        "  1. Reach the person only through cards and artifacts; they never open the loop's Pane,",
+        "     Session or terminal. Each finding, question or error (a source unreachable, a sign-in",
+        "     expired) is a `runpane notify` card that stands on its own: what was tried, the one thing",
+        "     they can do, and every artifact in --links. Act on their answers on the card.",
+        "  2. Remember across runs. Keep a ledger file of the items found, what each run covered, what",
+        "     was surfaced and the id of each card posted. Start each run by reading it, the last one or",
+        "     two outputs, and the card answers since the last run. Scan only what is new, and re-check",
+        "     open items.",
+        "  3. Never repeat. Surface an item only when it is new, newly urgent or overdue, matched by",
+        "     meaning, not wording, and record when it was last surfaced. While a card is unanswered,",
+        "     update it instead of posting another: `runpane notify --update <id> --what-changed <line>`,",
+        "     with the id from the ledger. Any later run of the same loop may update it.",
+        "  4. Post one card per run, or none when nothing qualifies.",
+        "  5. Publish each run's output to one place: the person's document destination, one folder",
+        "     per loop, named by date and slot, linking the previous output. Keep a copy by the ledger.",
+        "  6. Ask before acting outward. Propose anything that messages or changes something for",
+        "     someone else on an approve card, act only on approval, and limit how often one reminder",
+        "     is proposed.",
+        "  7. Start with a small window. Set the default look-ahead or look-back, widen it when the",
+        "     evidence calls for it, and record the window each run used.",
+        "  8. Keep the prompt in a file. After each edit, run `loops update --prompt-file` and read the",
+        "     saved loop back with `loops list`.",
+        "  9. Use cards that wait: --ui options or approve (such as \"Got it\" / \"Not interested\").",
+        "     An --ui info card disappears before the person is back.",
+        "`runpane docs read --doc docs/LOOPS.md` has a worked prompt.",
+        "",
         "Options:",
         "  --repo <selector>               Repository: active, id, exact path, or saved name.",
         "  --session <id|name|new>         Session whose agent gets the prompt each run, instead of",
@@ -6904,6 +7438,33 @@ export const RUNPANE_CONTRACT = {
         "Change a loop's repo or Session, name, schedule, agent or command, prompt, or worktree template. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.",
         "With --repo, each run is a new Pane in a fresh worktree from the repo's default base branch.",
         "A Session loop sends its prompt to that Session's agent each run instead of creating a new Pane.",
+        "",
+        "Writing a good loop (the person is away while it runs):",
+        "  1. Reach the person only through cards and artifacts; they never open the loop's Pane,",
+        "     Session or terminal. Each finding, question or error (a source unreachable, a sign-in",
+        "     expired) is a `runpane notify` card that stands on its own: what was tried, the one thing",
+        "     they can do, and every artifact in --links. Act on their answers on the card.",
+        "  2. Remember across runs. Keep a ledger file of the items found, what each run covered, what",
+        "     was surfaced and the id of each card posted. Start each run by reading it, the last one or",
+        "     two outputs, and the card answers since the last run. Scan only what is new, and re-check",
+        "     open items.",
+        "  3. Never repeat. Surface an item only when it is new, newly urgent or overdue, matched by",
+        "     meaning, not wording, and record when it was last surfaced. While a card is unanswered,",
+        "     update it instead of posting another: `runpane notify --update <id> --what-changed <line>`,",
+        "     with the id from the ledger. Any later run of the same loop may update it.",
+        "  4. Post one card per run, or none when nothing qualifies.",
+        "  5. Publish each run's output to one place: the person's document destination, one folder",
+        "     per loop, named by date and slot, linking the previous output. Keep a copy by the ledger.",
+        "  6. Ask before acting outward. Propose anything that messages or changes something for",
+        "     someone else on an approve card, act only on approval, and limit how often one reminder",
+        "     is proposed.",
+        "  7. Start with a small window. Set the default look-ahead or look-back, widen it when the",
+        "     evidence calls for it, and record the window each run used.",
+        "  8. Keep the prompt in a file. After each edit, run `loops update --prompt-file` and read the",
+        "     saved loop back with `loops list`.",
+        "  9. Use cards that wait: --ui options or approve (such as \"Got it\" / \"Not interested\").",
+        "     An --ui info card disappears before the person is back.",
+        "`runpane docs read --doc docs/LOOPS.md` has a worked prompt.",
         "",
         "Options:",
         "  --loop <id>                     Loop to change; other flags replace its values.",
@@ -7304,6 +7865,110 @@ export const RUNPANE_CONTRACT = {
         "  --session <id|name>            Named Session id or exact name",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
+      ],
+      "devices list": [
+        "Usage:",
+        "  runpane devices list [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices list` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices list"
+      ],
+      "devices open": [
+        "Usage:",
+        "  runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices open` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices open"
+      ],
+      "devices screenshot": [
+        "Usage:",
+        "  runpane devices screenshot [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices screenshot` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices screenshot"
+      ],
+      "devices act": [
+        "Usage:",
+        "  runpane devices act [--json] [--pane-dir <path>] -- <command>",
+        "",
+        "`runpane devices act` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices act"
+      ],
+      "devices run": [
+        "Usage:",
+        "  runpane devices run [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>",
+        "",
+        "`runpane devices run` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices run"
+      ],
+      "devices close": [
+        "Usage:",
+        "  runpane devices close [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices close` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices close"
+      ],
+      "devices usage": [
+        "Usage:",
+        "  runpane devices usage [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices usage` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices usage"
+      ],
+      "devices free": [
+        "Usage:",
+        "  runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]",
+        "",
+        "`runpane devices free` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices free"
+      ],
+      "devices": [
+        "Usage:",
+        "  runpane devices <list|open|screenshot|act|run|close|usage|free> [options]",
+        "",
+        "`runpane devices` ships in the npm package and the Pane app, not in the Python package.",
+        "Run it with Node instead: npx --yes runpane@latest devices"
+      ],
+      "machine": [
+        "Usage:",
+        "  python -m runpane machine <health|cleanup> [options]",
+        "",
+        "Shows this machine's health and frees the disk space Pane made.",
+        "Tier 1: Pane made it and nothing uses it now; Pane removes it by itself.",
+        "Tier 2: may still be wanted (archived Pane folders, paused Panes' scratch, agent temp folders); Pane asks before it deletes.",
+        "Tier 3: not Pane's: another tool's data, a database copy Pane did not write, or a worktree Pane did not create.",
+        "Pane never deletes tier 3; machine health says how to free each one.",
+        "",
+        "Commands:",
+        "  python -m runpane machine health [--json] [--pane-dir <path>]",
+        "  python -m runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]"
+      ],
+      "machine health": [
+        "Usage:",
+        "python -m runpane machine health [--json] [--pane-dir <path>]",
+        "",
+        "Shows free disk per volume, the memory level and its source, the Panes using the most memory,",
+        "leak warnings, and the last storage scan by tier, with sizes and reasons. It deletes nothing.",
+        "",
+        "Options:",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
+      ],
+      "machine cleanup": [
+        "Usage:",
+        "python -m runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]",
+        "",
+        "Without --yes, lists the tier 1 and 2 items of that kind from the last scan and their total size,",
+        "and deletes nothing. With --yes, Pane re-checks each item, deletes it, and reports what it skipped and why.",
+        "Tier 3 kinds (foreign-worktree, foreign-pane-data, other-tool-data) are refused: free them with the tool that owns them.",
+        "",
+        "Options:",
+        "  --kind <kind>                Kind of item to delete, from machine health:",
+        "                               update-snapshot, migration-backup, archived-pane-folder,",
+        "                               agent-temp, paused-scratch.",
+        "  --yes                        Delete them. Without --yes, list them and delete nothing.",
+        "  --json                       Print JSON output.",
+        "  --pane-dir <path>            Connect to a specific Pane data directory."
       ]
     }
   },
@@ -7408,6 +8073,9 @@ export const RUNPANE_CONTRACT = {
       "runpane lock acquire --name testing-account --ttl 30m --wait 1800000 --note \"call QA\" --json",
       "runpane lock release --name testing-account --json",
       "runpane lock list --json",
+      "runpane machine health --json",
+      "runpane machine cleanup --kind update-snapshot --json",
+      "runpane machine cleanup --kind update-snapshot --yes --json",
       "runpane loops create --repo active --name nightly-bug-sweep --cron \"0 3 * * *\" --agent claude --prompt \"Fix one bug from yesterday's issues\" --yes --json",
       "runpane loops list --json",
       "runpane loops run --loop <loop-id> --yes --json",
@@ -7485,10 +8153,11 @@ export const RUNPANE_CONTRACT = {
       "`sessions detach` detach a Pane from a named Session.",
       "`sessions overview` read a live status, activity, git, and pull request overview for a named Session. Each panel in `panes[].panels[]` carries its own latest `runpane report` as `report`, so one call shows what every worker last reported and when (`reportedAt`, next to the panel's `state` and `lastActivityAt`). When a report's summary is a complete JSON object, such as a status file sent with `--summary-file`, `report.data` holds it exactly as the worker gave it; Pane never reads, renames or validates its fields. A summary that is not a JSON object (plain text, an array, a scalar or invalid JSON), is nested more than 64 levels deep, or was truncated (`summaryTruncated`), has no `data`. A panel that never reported has no `report`. `panes[].report` is still the newest report among the Pane's panels. Each panel also has `type` (`terminal`, `browser`, `editor`, `explorer`, `diff`, ...): a Pane linked whole lists every tab, with `explorer` and `diff` last, and a link that names tabs lists exactly those.",
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
+      "`runpane machine health` shows this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free by tier. `runpane machine cleanup --kind <kind>` lists one kind of tier 1 or 2 item (a dry run) and deletes them with `--yes`; tier 3 items are not Pane's, so it refuses them and says how to free them. Agents free disk only through this command, never with rm.",
       "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
-      "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
-      "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab): the reply may answer the question or ask one. `runpane notify --took <id|Q-n> answer` records it as the answer; `--took <id|Q-n> question [--status <text>]` shows that the agent is getting more context, and `runpane notify --update <id|Q-n> --asked <text> --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
+      "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered, with its buttons as `--choices` or `--questions` in notify's JSON), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
+      "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.",
       "Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.",
       "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. A send with --no-expect-report is a reply (an answer, or an addition to the current work): it is delivered while a report is outstanding and leaves that expectation in place. Then watch for the original result.",
       "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on), plus `answers`, what its workers were told, kept 7 days; an answer with no `decision` still needs its D-n. `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items, and `runpane inbox ack <item-id>... --decision <D-n>` records the D-n, even on an item already cleared. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
@@ -9061,6 +9730,25 @@ export const RUNPANE_CONTRACT = {
         "--questions",
         "[{\"title\":\"A\",\"choices\":[{\"label\":\"x\"}]},{\"title\":\"B\",\"choices\":[{\"label\":\"y\"}]}]",
         "--json"
+      ],
+      [
+        "link",
+        "https://runpane.net/pair#s=secret&c=k7xq2m4n8p3r5t6v&n=parsa-devbox",
+        "--yes",
+        "--json"
+      ],
+      [
+        "machine",
+        "health",
+        "--json"
+      ],
+      [
+        "machine",
+        "cleanup",
+        "--kind",
+        "update-snapshot",
+        "--yes",
+        "--json"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -9765,7 +10453,8 @@ export const RUNPANE_CONTRACT = {
                 "enum": [
                   "macOS",
                   "Windows",
-                  "Linux"
+                  "Linux",
+                  "unknown"
                 ]
               },
               "online": {
@@ -11875,6 +12564,69 @@ export const RUNPANE_CONTRACT = {
         },
         "reportedAt": {
           "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "label"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "recommended": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "A blocked report's buttons (--choices)."
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "title",
+              "choices"
+            ],
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
+              "choices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "label"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "recommended": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "A blocked report's several questions (--questions), each with its own buttons."
         }
       },
       "additionalProperties": false
@@ -15206,6 +15958,31 @@ export const RUNPANE_CONTRACT = {
       },
       "additionalProperties": false
     },
+    "linkRedeemResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "maker",
+        "linked"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "maker": {
+          "type": "string",
+          "description": "The computer that made the link."
+        },
+        "linked": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The computers this one is now linked with."
+        }
+      },
+      "additionalProperties": false
+    },
     "docsSearchResult": {
       "type": "object",
       "required": [
@@ -16317,7 +17094,7 @@ export const RUNPANE_CONTRACT = {
       "additionalProperties": false
     },
     "notifyRequest": {
-      "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply; resume alone; took with tookAs (and status); or update with asked, whatChanged and the changed fields. Only `secrets request` sends ui secret.",
+      "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, with relays or aboutSession when they apply; resume alone; took with tookAs (and status); or update with whatChanged, asked when it answers the person's typed question, and the changed fields. Only `secrets request` sends ui secret.",
       "type": "object",
       "required": [
         "caller"
@@ -16413,7 +17190,7 @@ export const RUNPANE_CONTRACT = {
             "answer",
             "question"
           ],
-          "description": "answer records the reply as the answer; question shows the reader is getting more context."
+          "description": "question reopens the approval and shows the reader is getting more context; answer confirms the reply, already recorded as the answer."
         },
         "status": {
           "type": "string",
@@ -16498,7 +17275,7 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "type": "object",
-          "description": "The person typed a reply: it may answer the question or ask one. The approval keeps waiting; say which with `runpane notify --took <replyId> answer|question` (see next).",
+          "description": "The person typed a reply, and Pane recorded it as the answer. If it asks something instead, run `runpane notify --took <replyId> question` (see next).",
           "required": [
             "reply",
             "id",
@@ -16678,7 +17455,7 @@ export const RUNPANE_CONTRACT = {
       "properties": {
         "name": {
           "type": "string",
-          "description": "Tailscale machine name; pass it as `machine`."
+          "description": "Machine name; pass it as `machine`."
         },
         "dnsName": {
           "type": "string"
@@ -16828,6 +17605,47 @@ export const RUNPANE_CONTRACT = {
               "error": {
                 "type": "string",
                 "description": "Why it does not answer."
+              },
+              "ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Other names a saved computer answers to: its Pane id, install id, relay id, and route host names."
+              },
+              "routes": {
+                "type": "array",
+                "description": "A saved computer's routes, in the order runpane tries them. Absent for a tailnet machine Pane has not saved.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "baseUrl",
+                    "answered"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "lan",
+                        "tailscale",
+                        "ssh",
+                        "public",
+                        "relay"
+                      ]
+                    },
+                    "baseUrl": {
+                      "type": "string"
+                    },
+                    "fingerprint": {
+                      "type": "string",
+                      "description": "The key this route accepts (relay and same-network routes)."
+                    },
+                    "answered": {
+                      "type": "boolean",
+                      "description": "This route answered the check."
+                    }
+                  }
+                }
               }
             }
           }
@@ -18256,6 +19074,986 @@ export const RUNPANE_CONTRACT = {
         }
       },
       "additionalProperties": false
+    },
+    "deviceSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "platform",
+        "name",
+        "os",
+        "machine",
+        "state",
+        "paneMade"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "platform": {
+          "enum": [
+            "ios",
+            "android"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "machine": {
+          "type": "string",
+          "description": "The machine the device runs on."
+        },
+        "state": {
+          "enum": [
+            "booted",
+            "shutdown"
+          ]
+        },
+        "paneMade": {
+          "type": "boolean",
+          "description": "Pane created this device; it erases and deletes only these."
+        },
+        "heldBy": {
+          "type": "object",
+          "required": [
+            "paneId",
+            "paneName"
+          ],
+          "properties": {
+            "paneId": {
+              "type": "string"
+            },
+            "paneName": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "devices"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/deviceSummary"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesOpenResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "device",
+        "machine",
+        "panelId",
+        "paneDevice",
+        "next"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "device": {
+          "$ref": "#/jsonSchemas/deviceSummary"
+        },
+        "machine": {
+          "type": "object",
+          "required": [
+            "name",
+            "reason"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why this machine runs the device."
+            }
+          },
+          "additionalProperties": false
+        },
+        "panelId": {
+          "type": "string",
+          "description": "The device tab beside the agent."
+        },
+        "paneDevice": {
+          "type": "object",
+          "description": "Marker a chat tab uses to show the device card.",
+          "required": [
+            "kind",
+            "panelId",
+            "name",
+            "machine"
+          ],
+          "properties": {
+            "kind": {
+              "const": "pane-device"
+            },
+            "panelId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "os": {
+              "type": "string"
+            },
+            "machine": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "next": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesScreenshotResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "path",
+        "mimeType"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "path": {
+          "type": "string",
+          "description": "PNG on the caller's machine."
+        },
+        "mimeType": {
+          "const": "image/png"
+        },
+        "width": {
+          "type": "number"
+        },
+        "height": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesActResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "exitCode",
+        "output"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "exitCode": {
+          "type": "number",
+          "description": "agent-device's exit code."
+        },
+        "output": {
+          "type": "string",
+          "description": "agent-device's output."
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesRunResult": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "synced": {
+          "type": "boolean"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "Where the command ran: the worktree, or Pane's synced checkout on a linked Mac."
+        },
+        "machine": {
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "exited"
+          ]
+        },
+        "exitCode": {
+          "type": "number"
+        },
+        "logTail": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesCloseResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "closed",
+        "jobsStopped"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "closed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "jobsStopped": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesUsageResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "machines"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "machines": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "machine",
+              "devices",
+              "helpers",
+              "checkouts",
+              "runtimes",
+              "slimSim"
+            ],
+            "properties": {
+              "machine": {
+                "type": "string"
+              },
+              "devices": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "platform",
+                    "name",
+                    "os",
+                    "paneMade",
+                    "booted"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "platform": {
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "os": {
+                      "type": "string",
+                      "description": "The device's OS runtime, such as iOS 27.0."
+                    },
+                    "paneMade": {
+                      "type": "boolean",
+                      "description": "Pane made it; false for simulators made outside Pane."
+                    },
+                    "booted": {
+                      "type": "boolean"
+                    },
+                    "heldBy": {
+                      "type": "string"
+                    },
+                    "lastUsedAt": {
+                      "type": "string"
+                    },
+                    "memoryBytes": {
+                      "type": "number"
+                    },
+                    "diskBytes": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "helpers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "pid",
+                    "memoryBytes"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "pid": {
+                      "type": "number"
+                    },
+                    "memoryBytes": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "checkouts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "path",
+                    "bytes"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "runtimes": {
+                "type": "array",
+                "description": "The OS runtimes and system images installed here, which devices are made from.",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "platform",
+                    "name"
+                  ],
+                  "properties": {
+                    "platform": {
+                      "enum": [
+                        "ios",
+                        "android"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "slimSim": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "devicesFreeResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "machine",
+        "shutdown",
+        "deleted",
+        "checkouts",
+        "freedBytes"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "machine": {
+          "type": "string"
+        },
+        "shutdown": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deleted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "checkouts": {
+          "type": "array",
+          "description": "Build checkouts deleted (--all): those no Pane on this machine or a linked computer holds a device for.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "freedBytes": {
+          "type": "number",
+          "description": "Disk freed by the deleted devices and checkouts."
+        }
+      },
+      "additionalProperties": false
+    },
+    "reclaimItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "tier",
+        "path",
+        "sizeBytes",
+        "modifiedAt",
+        "sessionId",
+        "reason"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "update-snapshot",
+            "migration-backup",
+            "archived-pane-folder",
+            "agent-temp",
+            "paused-scratch",
+            "foreign-worktree",
+            "foreign-pane-data",
+            "other-tool-data"
+          ]
+        },
+        "tier": {
+          "enum": [
+            1,
+            2,
+            3
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "number"
+        },
+        "modifiedAt": {
+          "type": "number"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "projectPath": {
+          "type": "string"
+        },
+        "howToFree": {
+          "type": "string"
+        }
+      }
+    },
+    "machineHealthResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "snapshot",
+        "inventory"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "snapshot": {
+          "type": "object",
+          "required": [
+            "sampledAt",
+            "platform",
+            "hostname",
+            "disk",
+            "memory",
+            "cpuPercent",
+            "app",
+            "panes",
+            "leaks"
+          ],
+          "properties": {
+            "sampledAt": {
+              "type": "number"
+            },
+            "platform": {
+              "type": "string"
+            },
+            "hostname": {
+              "type": "string"
+            },
+            "disk": {
+              "type": "object",
+              "required": [
+                "level",
+                "volumes"
+              ],
+              "properties": {
+                "level": {
+                  "enum": [
+                    "ok",
+                    "warning",
+                    "critical"
+                  ]
+                },
+                "volumes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "path",
+                      "roles",
+                      "totalBytes",
+                      "freeBytes",
+                      "level"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "enum": [
+                            "pane-data",
+                            "worktrees",
+                            "temp"
+                          ]
+                        }
+                      },
+                      "totalBytes": {
+                        "type": "number"
+                      },
+                      "freeBytes": {
+                        "type": "number"
+                      },
+                      "level": {
+                        "enum": [
+                          "ok",
+                          "warning",
+                          "critical"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "memory": {
+              "type": "object",
+              "required": [
+                "level",
+                "source",
+                "detail",
+                "totalBytes",
+                "freeBytes",
+                "swapUsedBytes"
+              ],
+              "properties": {
+                "level": {
+                  "enum": [
+                    "ok",
+                    "warning",
+                    "critical"
+                  ]
+                },
+                "source": {
+                  "enum": [
+                    "macos-pressure",
+                    "psi",
+                    "available"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "totalBytes": {
+                  "type": "number"
+                },
+                "freeBytes": {
+                  "type": "number"
+                },
+                "swapUsedBytes": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "cpuPercent": {
+              "type": "number"
+            },
+            "app": {
+              "type": "object",
+              "required": [
+                "rssMB",
+                "cpuPercent"
+              ],
+              "properties": {
+                "rssMB": {
+                  "type": "number"
+                },
+                "cpuPercent": {
+                  "type": "number"
+                }
+              }
+            },
+            "panes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "sessionId",
+                  "name",
+                  "rssMB",
+                  "cpuPercent",
+                  "processes"
+                ],
+                "properties": {
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "rssMB": {
+                    "type": "number"
+                  },
+                  "cpuPercent": {
+                    "type": "number"
+                  },
+                  "processes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            },
+            "leaks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "pid",
+                  "name",
+                  "sessionId",
+                  "memoryMB",
+                  "growthMB",
+                  "windowMs"
+                ],
+                "properties": {
+                  "pid": {
+                    "type": "number"
+                  },
+                  "started": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "panelId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "memoryMB": {
+                    "type": "number"
+                  },
+                  "growthMB": {
+                    "type": "number"
+                  },
+                  "windowMs": {
+                    "type": "number"
+                  },
+                  "series": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "inventory": {
+          "description": "Null until the first storage scan after Pane starts has finished.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "scannedAt",
+                "durationMs",
+                "items",
+                "panes",
+                "buckets"
+              ],
+              "properties": {
+                "scannedAt": {
+                  "type": "number"
+                },
+                "durationMs": {
+                  "type": "number"
+                },
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/jsonSchemas/reclaimItem"
+                  }
+                },
+                "panes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                },
+                "buckets": {
+                  "type": "object"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "machineCleanupResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "dryRun",
+            "kind",
+            "items",
+            "totalBytes"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "dryRun": {
+              "const": true
+            },
+            "kind": {
+              "enum": [
+                "update-snapshot",
+                "migration-backup",
+                "archived-pane-folder",
+                "agent-temp",
+                "paused-scratch",
+                "foreign-worktree",
+                "foreign-pane-data",
+                "other-tool-data"
+              ]
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/jsonSchemas/reclaimItem"
+              }
+            },
+            "totalBytes": {
+              "type": "number"
+            },
+            "scanning": {
+              "type": "boolean",
+              "description": "True when Pane has not finished its first storage scan; items is empty. Run the dry run again in a few minutes."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "ok",
+            "dryRun",
+            "kind",
+            "run"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "dryRun": {
+              "const": false
+            },
+            "kind": {
+              "enum": [
+                "update-snapshot",
+                "migration-backup",
+                "archived-pane-folder",
+                "agent-temp",
+                "paused-scratch",
+                "foreign-worktree",
+                "foreign-pane-data",
+                "other-tool-data"
+              ]
+            },
+            "run": {
+              "type": "object",
+              "required": [
+                "at",
+                "source",
+                "removed",
+                "skipped",
+                "freedBytes"
+              ],
+              "properties": {
+                "at": {
+                  "type": "number"
+                },
+                "source": {
+                  "const": "cli"
+                },
+                "removed": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "kind",
+                      "path",
+                      "sizeBytes"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "update-snapshot",
+                          "migration-backup",
+                          "archived-pane-folder",
+                          "agent-temp",
+                          "paused-scratch",
+                          "foreign-worktree",
+                          "foreign-pane-data",
+                          "other-tool-data"
+                        ]
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "sizeBytes": {
+                        "type": "number"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "skipped": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "kind",
+                      "path",
+                      "sizeBytes"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "update-snapshot",
+                          "migration-backup",
+                          "archived-pane-folder",
+                          "agent-temp",
+                          "paused-scratch",
+                          "foreign-worktree",
+                          "foreign-pane-data",
+                          "other-tool-data"
+                        ]
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "sizeBytes": {
+                        "type": "number"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "freedBytes": {
+                  "type": "number"
+                },
+                "deleting": {
+                  "type": "boolean",
+                  "description": "True while removed items are still being deleted in the background; freedBytes is 0 until they are."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "agentContext": {
@@ -19012,7 +20810,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--toolsets",
             "value": "<name,...>",
             "required": false,
-            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, git, docs, links, admin."
+            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, machine, git, docs, links, admin."
           },
           {
             "name": "--read-only",
@@ -19050,6 +20848,47 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "The Python package prints how to run it with npx.",
           "Fails with ERR_RELAY_UNSUPPORTED_PLATFORM on a platform with no prebuilt binary, ERR_RELAY_DOWNLOAD_FAILED when the release cannot be reached or lists no binary for this platform, and ERR_RELAY_CHECKSUM_MISMATCH when the download differs from pane-relay-sha256.txt; nothing is cached then."
+        ]
+      },
+      "link": {
+        "name": "link",
+        "summary": "Link this computer with the one that made a one-time link, so each can reach the other.",
+        "details": "Redeems a link copied from Pane on another computer (Add a device › Computer) through this computer's running Pane, the way opening the link does. The computer that made the link, and every computer already linked with it, become reachable from this one with runpane workspace, and this one from them. For a computer with no screen.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<link>",
+            "required": true,
+            "description": "The link, https://<relay>/pair#s=…&c=…&n=…, as copied. Any expiry (10 minutes, 1 hour or 24 hours)."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Join two groups of computers without asking; required in non-interactive shells when this computer already has linked computers."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane link 'https://runpane.net/pair#s=…&c=…&n=…'",
+          "runpane link 'https://runpane.net/pair#s=…&c=…&n=…' --yes --json"
+        ],
+        "jsonSchemas": [
+          "linkRedeemResult"
+        ],
+        "notes": [
+          "A computer with nothing linked links without asking. One that already reaches computers asks first, naming both sides, because the two groups become one.",
+          "Each link works once. A used link fails with \"This code was already used\", an old one with \"This code expired\"."
         ]
       },
       "repos list": {
@@ -19730,7 +21569,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--worktree-name",
             "value": "<name>",
             "required": false,
-            "description": "Worktree directory name; defaults to --name."
+            "description": "Worktree directory name, cut to 100 characters at a word; defaults to --name."
           },
           {
             "name": "--prompt",
@@ -20444,7 +22283,7 @@ export const RUNPANE_CONTRACT = {
       "panels output": {
         "name": "panels output",
         "summary": "Read recent terminal output from a panel.",
-        "details": "Use this to inspect recent terminal output from a terminal-backed panel without loading the full history by default. Live terminal scrollback is returned as bounded recent lines; persisted output fallback is returned as bounded records. Terminal control noise is stripped before returning text.",
+        "details": "Use this to inspect recent terminal output from a terminal-backed panel without loading the full history by default. Live terminal scrollback is returned as bounded recent lines; persisted output fallback is returned as bounded records. Terminal control noise is stripped before returning text. When older output exists, hasMore is true and the text output says so on stderr.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -20598,7 +22437,7 @@ export const RUNPANE_CONTRACT = {
       "panels screen": {
         "name": "panels screen",
         "summary": "Read a compact current-screen view from a terminal panel.",
-        "details": "Use this for token-safe current terminal state. It prefers active alternate-screen/TUI output, then live scrollback, then persisted output. On a chat tab it returns the newest transcript lines with source acpTranscript. Default output is bounded to 80 lines.",
+        "details": "Use this for token-safe current terminal state. It prefers active alternate-screen/TUI output, then live scrollback, then persisted output. On a chat tab it returns the newest transcript lines with source acpTranscript. Default output is bounded to 80 lines. When older lines exist, hasMore is true and the text output says so on stderr.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -22648,7 +24487,19 @@ export const RUNPANE_CONTRACT = {
             "name": "--question",
             "value": "<text>",
             "required": false,
-            "description": "What you need answered; required with --state blocked."
+            "description": "What you need answered; required with --state blocked. It is the card's title: put options in --choices or --questions, not in brackets at its end."
+          },
+          {
+            "name": "--choices",
+            "value": "<json>",
+            "required": false,
+            "description": "With --state blocked: the question's buttons, exactly as `runpane notify --choices` takes them (1 to 9 of {label, detail?, recommended?}) and checked the same way."
+          },
+          {
+            "name": "--questions",
+            "value": "<json>",
+            "required": false,
+            "description": "With --state blocked, instead of --choices: 2 to 4 questions as `runpane notify --questions` takes them ({title, choices, why?}), each with its own buttons."
           },
           {
             "name": "--pane",
@@ -22676,7 +24527,8 @@ export const RUNPANE_CONTRACT = {
         ],
         "examples": [
           "runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md --json",
-          "runpane report --state blocked --question \"Should the migration drop the old column?\""
+          "runpane report --state blocked --question \"Should the migration drop the old column?\"",
+          "runpane report --state blocked --question 'Q-3: Use the invoice id in the PDF filename?' --choices '[{\"label\":\"Invoice id\",\"detail\":\"Ids are stable\",\"recommended\":true},{\"label\":\"Invoice number\"}]' --summary 'Invoice PDFs'"
         ],
         "jsonSchemas": [
           "reportResult"
@@ -22686,7 +24538,8 @@ export const RUNPANE_CONTRACT = {
           "Each report replaces the panel's previous one and survives a Pane restart.",
           "agent.report is in the default kinds of `runpane watch --follow` and `--until-event`, and arrives from any panel, a shell tab included. REPORT lines skip the --min-interval batch.",
           "The output says who received it: \"Delivered to N waiting watcher(s).\" counts watches waiting at that moment (liveWatchers in JSON). With no Session and nobody waiting it adds that the report is stored on the panel (runpane agents status --panel <id>) and that a named-cursor watch (runpane watch --as <name> --kinds agent.report) still receives it when it next waits. Zero is not a failure; the exit code is 0 either way.",
-          "With --state blocked and --question, the person sees an answerable card at once; it rings once the orchestrator relays it or after 10 minutes. The answer reaches this tab as `answer: Q-n → <answer> (by you)`. `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)` lines are the person's word too."
+          "With --state blocked and --question, the person sees an answerable card at once; it rings once the orchestrator relays it or after 10 minutes. The answer reaches this tab as `answer: Q-n → <answer> (by you)`. `closed: Q-n (by you)` and `correction: Q-n → <answer> (by you)` lines are the person's word too.",
+          "A blocked report's buttons come from --choices or --questions first, then from the `needs_you` block of the status file passed as --summary-file. Invalid --choices or --questions JSON fails with ERR_NOTIFY_INVALID, as notify does. A --question that ends with an option list in brackets (\"(A / B)\" or \"(A (recommended) / B)\") and has no options from either source is refused with ERR_REPORT_PACKED_OPTIONS and nothing is shown; a question with no option list is accepted as an open question."
         ]
       },
       "sessions list": {
@@ -23059,8 +24912,8 @@ export const RUNPANE_CONTRACT = {
       },
       "workspace list": {
         "name": "workspace list",
-        "summary": "List the machines on your tailnet, each with its owner, and whether each answers workspaces.",
-        "details": "Shows this machine's workspace state, then each other Mac, Windows, and Linux machine on your tailnet with its OS, online state, and shell. Your own machines come first; other people's machines carry their owner's login and answer only when their owner lets you in.",
+        "summary": "List your computers saved in Pane and the machines on your tailnet, one entry per computer, and whether each answers workspaces.",
+        "details": "Shows this machine's workspace state, then one entry per computer: those saved in Pane (Settings › Remote Access › Computers) with their routes in the order runpane tries them, and the other Mac, Windows, and Linux machines on your tailnet. Each shows its OS, online state, shell, and the route that answered. Your own machines come first; other people's machines carry their owner's login and answer only when their owner lets you in.",
         "requiresPaneDaemon": false,
         "mutates": false,
         "arguments": [
@@ -23074,7 +24927,8 @@ export const RUNPANE_CONTRACT = {
           "runpane workspace list --json"
         ],
         "notes": [
-          "A machine has joined when Pane runs there with workspaces on; it answers on https://<machine>.<tailnet>.ts.net:8443."
+          "A saved computer is tried route by route; one that does not connect within 2.5 seconds gives way to the next, so Tailscale being off falls back to the relay.",
+          "A tailnet machine Pane has not saved answers on https://<machine>.<tailnet>.ts.net:8443 when Pane runs there with workspaces on."
         ],
         "jsonSchemas": [
           "workspaceListResult"
@@ -23122,7 +24976,7 @@ export const RUNPANE_CONTRACT = {
       },
       "workspace read": {
         "name": "workspace read",
-        "summary": "Print a file from a machine on your tailnet; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
+        "summary": "Print a file from another of your machines; any path form works (C:\\..., /mnt/c/..., /home/..., ~/...).",
         "details": "Reads the same way on every OS. On Windows, /mnt/c/... reaches C:\\... and WSL paths such as /home/<user>/... are read through \\\\wsl.localhost\\<distro>\\. Directories list their entries.",
         "requiresPaneDaemon": false,
         "mutates": false,
@@ -23130,7 +24984,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "<machine>",
             "required": false,
-            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+            "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
           },
           {
             "name": "<path>",
@@ -23156,7 +25010,7 @@ export const RUNPANE_CONTRACT = {
       },
       "workspace write": {
         "name": "workspace write",
-        "summary": "Write --content or stdin to a file on a machine on your tailnet, creating parent folders.",
+        "summary": "Write --content or stdin to a file on another of your machines, creating parent folders.",
         "details": "Takes the same path forms as workspace read. The content replaces the file.",
         "requiresPaneDaemon": false,
         "mutates": true,
@@ -23164,7 +25018,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "<machine>",
             "required": false,
-            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+            "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
           },
           {
             "name": "<path>",
@@ -23203,7 +25057,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "<machine>",
             "required": false,
-            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to let a --cwd that cannot exist here pick the one joined machine it fits."
+            "description": "A name from `runpane workspace list`, a unique prefix, an id it is saved under in Pane (such as its relay id), a MagicDNS name, or a Tailscale IP. Omit it to let a --cwd that cannot exist here pick the one joined machine it fits."
           },
           {
             "name": "--cwd",
@@ -23929,7 +25783,14 @@ export const RUNPANE_CONTRACT = {
           "loopDryRunResult"
         ],
         "notes": [
-          "Saving rejects a cron whose runs fall less than 60 minutes apart. Check one first with --dry-run."
+          "Saving rejects a cron whose runs fall less than 60 minutes apart. Check one first with --dry-run.",
+          "Writing a good loop: a loop runs while the person is away. Reach them only through `runpane notify` cards that wait (`--ui options` or `approve`, never `info`), each standing on its own with what was tried, the one thing they can do and every artifact in `--links`; act on their answers on the card.",
+          "Keep a ledger file of items found, what each run covered, what was surfaced and the id of each card posted. Start each run by reading it, the last one or two outputs and the card answers since the last run; scan only what is new and re-check open items.",
+          "Surface an item only when it is new, newly urgent or overdue, matched by meaning, not wording. Post one card per run, or none; while a card is unanswered, update it with `runpane notify --update <id> --what-changed <line>` (the id from the ledger) instead of posting another. Any later run of the same loop may update it.",
+          "Publish each run's output to the person's document destination, one folder per loop, named by date and slot and linking the previous output; keep a local copy by the ledger.",
+          "Propose anything that messages or changes something for someone else on an approve card and act only on approval; limit how often one reminder is proposed.",
+          "Start with a small look-ahead or look-back window, widen it when the evidence calls for it, and record the window each run used.",
+          "Keep the prompt in a file: after each edit run `runpane loops update --loop <id> --prompt-file <path> --yes` and read the saved loop back with `runpane loops list --json`. `runpane docs read --doc docs/LOOPS.md` has a worked prompt."
         ]
       },
       "loops update": {
@@ -24029,7 +25890,15 @@ export const RUNPANE_CONTRACT = {
           "loopResult",
           "loopDryRunResult"
         ],
-        "notes": []
+        "notes": [
+          "Writing a good loop: a loop runs while the person is away. Reach them only through `runpane notify` cards that wait (`--ui options` or `approve`, never `info`), each standing on its own with what was tried, the one thing they can do and every artifact in `--links`; act on their answers on the card.",
+          "Keep a ledger file of items found, what each run covered, what was surfaced and the id of each card posted. Start each run by reading it, the last one or two outputs and the card answers since the last run; scan only what is new and re-check open items.",
+          "Surface an item only when it is new, newly urgent or overdue, matched by meaning, not wording. Post one card per run, or none; while a card is unanswered, update it with `runpane notify --update <id> --what-changed <line>` (the id from the ledger) instead of posting another. Any later run of the same loop may update it.",
+          "Publish each run's output to the person's document destination, one folder per loop, named by date and slot and linking the previous output; keep a local copy by the ledger.",
+          "Propose anything that messages or changes something for someone else on an approve card and act only on approval; limit how often one reminder is proposed.",
+          "Start with a small look-ahead or look-back window, widen it when the evidence calls for it, and record the window each run used.",
+          "Keep the prompt in a file: after each edit run `runpane loops update --loop <id> --prompt-file <path> --yes` and read the saved loop back with `runpane loops list --json`. `runpane docs read --doc docs/LOOPS.md` has a worked prompt."
+        ]
       },
       "loops run": {
         "name": "loops run",
@@ -24315,13 +26184,13 @@ export const RUNPANE_CONTRACT = {
             "name": "--took",
             "value": "<id|Q-n>",
             "required": false,
-            "description": "After a reply result or a `reply:` line: the approval's id or Q-n, with tookAs answer (record the reply as the answer) or question (it asked something; find out, then call update). Pass no question fields."
+            "description": "After a reply result or a `reply:` line: the approval's id or Q-n, with tookAs question when the reply asked something (it reopens the approval; find out, then call update). The reply is already recorded as the answer, so tookAs answer changes nothing. Pass no question fields."
           },
           {
             "name": "--took-as",
             "value": "<answer|question>",
             "required": false,
-            "description": "With took: answer or question. On the command line it can follow the id instead (`--took Q-20 answer`).",
+            "description": "With took: answer or question. On the command line it can follow the id instead (`--took Q-20 question`).",
             "schema": {
               "type": "string",
               "enum": [
@@ -24340,13 +26209,13 @@ export const RUNPANE_CONTRACT = {
             "name": "--update",
             "value": "<id|Q-n>",
             "required": false,
-            "description": "After you took a reply as a question and found out: the approval's id or Q-n. Saves a new version with any of title, context, choices, questions and links you pass (the rest stay), shows it as updated, and waits on it like any notify call. Needs asked and whatChanged; takes no ui."
+            "description": "After you took a reply as a question and found out: the approval's id or Q-n. Saves a new version with any of title, context, choices, questions and links you pass (the rest stay), shows it as updated, and waits on it like any notify call. Needs whatChanged, and asked when it answers the person's typed question; takes no ui."
           },
           {
             "name": "--asked",
             "value": "<text>",
             "required": false,
-            "description": "With update: the person's question, as they typed it."
+            "description": "With update: the person's question, as they typed it. Required when the update answers their typed question; leave it out for your own update, such as a loop's next run."
           },
           {
             "name": "--what-changed",
@@ -24380,7 +26249,6 @@ export const RUNPANE_CONTRACT = {
           "runpane notify --ui approve --title \"Ship the release notes?\" --links '[{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"},{\"label\":\"PR #812\",\"url\":\"https://github.com/org/repo/pull/812\"}]' --json",
           "runpane notify --relays in-1a2b3c4d --ui options --title \"Q-39: Run the script?\" --choices '[{\"label\":\"Run it\",\"recommended\":true},{\"label\":\"Hold\"}]' --json",
           "runpane notify --ui options --title \"Ship 2.5 today: which parts go out?\" --questions '[{\"title\":\"Release notes\",\"choices\":[{\"label\":\"Ship as written\",\"recommended\":true},{\"label\":\"Hold\"}]},{\"title\":\"Intel Mac build\",\"choices\":[{\"label\":\"Include it\"},{\"label\":\"Skip it\"}]}]' --json",
-          "runpane notify --took Q-20 answer --json",
           "runpane notify --took Q-20 question --status \"Checking whether it can be undone\" --json",
           "runpane notify --update Q-20 --asked \"Can it be undone?\" --what-changed \"Added: Settings > Search turns it off again\" --context \"Search takes 4 s; the index brings it under 100 ms. It can be undone from Settings.\" --json",
           "runpane notify --resume n-4f2a --json"
@@ -24394,13 +26262,13 @@ export const RUNPANE_CONTRACT = {
           "Write the card as its Summary: a title of about 80 to 100 characters on one line; context as a subtitle of one or two sentences saying why it matters; 2 to 4 choices, each saying what it does, with exactly one recommended; links to every file, page or approval it mentions. Pane refuses a title over 160 characters or with a line break, and two recommended choices.",
           "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",
           "Results: options returns {answer: <chosen label>, note?}, with questions also answers (one label per question); approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
-          "A result of {reply, picks?, id, replyId, next} means the person typed a reply instead of only picking: it may answer the question or ask one. Read it, then call `runpane notify --took <replyId> answer` to record it as the answer, or `runpane notify --took <replyId> question` and find out, then `runpane notify --update <replyId> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line; `correction:` lines fix how it was taken. --took returns {took, id, next?}. Use its replyId rather than the Q-n: only this call was given it, so it works from outside a Pane tab too.",
+          "A result of {reply, picks?, id, replyId, next} means the person typed a reply instead of only picking: Pane records it as the answer, so the approval is done. If it asks something instead, call `runpane notify --took <replyId> question` and find out, then `runpane notify --update <replyId> --asked \"<their question>\" --what-changed \"<one line per change>\"` with whatever changed, instead of asking again. With no open call the reply reaches your tab as a `reply:` line, recorded the same way; `correction:` lines fix how it was taken. --took returns {took, id, next?}. Use its replyId rather than the Q-n: only this call was given it, so it works from outside a Pane tab too.",
           "Only the reply's reader may run took and update: the asker, the orchestrator that relayed it, or Autopilot. Anyone else gets ERR_NOTIFY_NOT_READER.",
           "A result of {waiting: true, id} means the question is still on screen and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting. After 15 minutes on this loop Pane gives up and returns unavailable.",
           "A result of {unavailable, next} means nobody can answer through Pane right now (Pane is not running, Notify is off, or the wait ended): ask in the terminal instead. It is a result, not an error.",
           "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
           "An older Pane ignores links and shows the card without them.",
-          "With relays the call waits on the worker's card as on any notify, and the answer also goes straight to the worker's tab as `answer: Q-n → <answer> (by you)`. Then record it: `runpane inbox ack <item> --decision <D-n>`.",
+          "With relays the call waits on the worker's card as on any notify, and the answer also goes straight to the worker's tab as `answer: Q-n → <answer> (by you)`. Then record it: `runpane inbox ack <item> --decision <D-n>`. If the worker takes a typed reply as a question, you get `reopened: Q-n → … (by <worker>)` instead, and the answer to the new version comes as `correction: Q-n → <answer> (by you)`.",
           "Invalid input, such as choices with ui ask, 10 choices, or ui with took or update, fails with a message naming the field, and nothing is shown.",
           "Examples of a good title and context. Needs a decision (ui approve): \"Speed up slow search: run the database change?\" with \"Search takes 4 s and an index brings it under 100 ms. It changes the live database and can't easily be undone.\", not \"Approve the migration?\" Blocked (ui options): \"The 2.5 release is stuck on a GitHub hiccup\" with \"The fixes pass everywhere except one Mac build machine, which errored. That's GitHub's machine, not our code.\", not \"Blocked\". Just so you know (ui info): \"Questions from agents now wait until you answer\", not \"Done\"."
         ],
@@ -24914,6 +26782,373 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "The person's way back from any Custom theme; an agent switches away with `runpane theme set --theme <id>` instead."
         ]
+      },
+      "devices list": {
+        "name": "devices list",
+        "summary": "List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.",
+        "details": "Lists this machine's iOS simulators and Android emulators, plus the iOS machine Pane uses when this one has no Xcode. paneMade marks the devices Pane created; device_open uses those unless you name another.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices list --json"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesListResult"
+        ]
+      },
+      "devices open": {
+        "name": "devices open",
+        "summary": "Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.",
+        "details": "Leases a device to the calling tab's Pane and boots it. Without --device, Pane uses its own device (Pane iPhone or Pane_Android) and makes one from the newest installed runtime when needed. The first call on a machine installs Pane's device tools (agent-device and Expo's device hub), which takes a minute. When every device Pane may boot is held by another Pane, it waits up to 60 seconds, then fails with ERR_DEVICE_BUSY naming the holder. On a machine without Xcode, iOS opens on a linked Mac. Later device calls act on this device; you never pass it again.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--platform",
+            "value": "<ios|android>",
+            "required": true,
+            "description": "ios for an iOS simulator, android for an Android emulator."
+          },
+          {
+            "name": "--device",
+            "value": "<name-or-id>",
+            "required": false,
+            "description": "One of the person's own devices by name or id, from device_list. Leave it out to use Pane's own device."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices open --platform ios --json"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesOpenResult"
+        ]
+      },
+      "devices screenshot": {
+        "name": "devices screenshot",
+        "summary": "Capture the screen of this Pane's open device as an image.",
+        "details": "Returns the PNG's path; MCP clients also get the image itself.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices screenshot --json"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesScreenshotResult"
+        ]
+      },
+      "devices act": {
+        "name": "devices act",
+        "summary": "Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.",
+        "details": "Passes the command to agent-device, pinned to the device this Pane holds. Start with `open <app id>`, then `snapshot -i` for @refs, then `press @eN --settle`. agent-device's own help: `help workflow`. Flags that pick another device, session or daemon (--session, --device, --udid, --serial, --platform) are refused.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "-- <command>",
+            "required": true,
+            "description": "The agent-device command and its arguments, such as `snapshot -i` or `press @e3 --settle`."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices act --json -- open com.apple.Preferences",
+          "runpane devices act --json -- snapshot -i"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesActResult"
+        ]
+      },
+      "devices run": {
+        "name": "devices run",
+        "summary": "Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.",
+        "details": "On this machine it runs in the Pane's worktree. When the device runs on a linked Mac, Pane first syncs the worktree there (uncommitted changes included) and runs in Pane's checkout on the Mac. It waits up to --wait-ms (default 120000) and returns the exit code and log tail (the last 16 KB, starting with [earlier output cut] when output was dropped), or a jobId while it still runs. --background keeps a server such as Metro running until device_close. Pass an empty command to sync only.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--background",
+            "required": false,
+            "description": "Keep the command running after the call returns (Metro); it stops at device_close."
+          },
+          {
+            "name": "--wait-ms",
+            "value": "<milliseconds>",
+            "required": false,
+            "description": "How long to wait for the command to exit (default 120000)."
+          },
+          {
+            "name": "-- <command>",
+            "required": true,
+            "description": "The command line to run, or empty to sync only."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices run --json -- npx expo run:ios",
+          "runpane devices run --background --json -- npx expo start"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesRunResult"
+        ]
+      },
+      "devices close": {
+        "name": "devices close",
+        "summary": "Release this Pane's device and stop the commands device_run started. The device stays warm for 10 minutes.",
+        "details": "Ends the lease so another Pane can use the device. It shuts down 10 minutes later unless a Pane opens it again.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices close --json"
+        ],
+        "notes": [
+          "Acts only for the Pane of the calling tab: a call from outside a Pane tab, or for a device another Pane holds, is refused. Settings > Devices > Agent device tools turns these tools off."
+        ],
+        "jsonSchemas": [
+          "devicesCloseResult"
+        ]
+      },
+      "devices usage": {
+        "name": "devices usage",
+        "summary": "Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.",
+        "details": "For machine health. Lists every simulator and emulator on this machine, including ones made outside Pane (paneMade false), with OS, disk and, when booted, memory (simslim measure when installed, otherwise the simulator's processes).",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices usage --json"
+        ],
+        "notes": [
+          "For machine health: answers only callers on this machine, and never touches the person's own devices or runtimes."
+        ],
+        "jsonSchemas": [
+          "devicesUsageResult"
+        ]
+      },
+      "devices free": {
+        "name": "devices free",
+        "summary": "Shut down unused devices (--idle), or also delete every unused device Pane made (--all).",
+        "details": "Never touches the person's own devices or runtimes, or a device a Pane holds.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--idle",
+            "required": false,
+            "description": "Shut down Pane's devices no Pane holds."
+          },
+          {
+            "name": "--all",
+            "required": false,
+            "description": "Also erase and delete them."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm the change."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane devices free --idle --yes --json"
+        ],
+        "notes": [
+          "For machine health: answers only callers on this machine, and never touches the person's own devices or runtimes."
+        ],
+        "jsonSchemas": [
+          "devicesFreeResult"
+        ]
+      },
+      "machine health": {
+        "name": "machine health",
+        "summary": "Show this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free, by tier.",
+        "details": "Reads this machine's latest health snapshot and the last storage scan; it deletes nothing. disk lists each watched volume with free and total bytes; memory gives the level and the OS signal it came from; panes lists each Pane's processes and their memory; leaks lists processes whose memory keeps growing. inventory.items lists what can be freed, each with kind, tier, size and reason. Tier 1: Pane made it and nothing uses it now (replaced update snapshots, old migration backups); Pane also removes these by itself. Tier 2: may still be wanted, so Pane asks first (archived Pane folders, scratch of paused Panes, agent temp folders). Tier 3: not Pane's (other tools' data, database copies Pane did not write, worktrees Pane did not create); Pane never deletes these, and each item's howToFree says how to free it.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane machine health --json",
+          "runpane workspace <machine> machine health --json"
+        ],
+        "jsonSchemas": [
+          "machineHealthResult"
+        ],
+        "notes": [
+          "Free disk on any machine only through `runpane machine cleanup`, never with rm: cleanup re-checks each item, skips Panes in use, and moves each item to a trash folder before deleting it."
+        ]
+      },
+      "machine cleanup": {
+        "name": "machine cleanup",
+        "summary": "Free disk space that Pane made: list one kind of tier 1 or 2 item with its size (a dry run), or delete them with --yes.",
+        "details": "Without --yes it is a dry run: it lists the tier 1 and 2 items of --kind from the last scan and their total size, and deletes nothing. With --yes, Pane re-checks each item (it may be gone, in use, or protected because its Pane is pinned, focused, busy or has uncommitted changes), deletes the rest, and returns what it removed, what it skipped and why, and the bytes freed. A tier 3 kind is refused with ERR_MACHINE_CLEANUP_NOT_PANES, and `next` says how to free it with the tool that owns it. Tier 1: Pane made it and nothing uses it now (replaced update snapshots, old migration backups); Pane also removes these by itself. Tier 2: may still be wanted, so Pane asks first (archived Pane folders, scratch of paused Panes, agent temp folders). Tier 3: not Pane's (other tools' data, database copies Pane did not write, worktrees Pane did not create); Pane never deletes these, and each item's howToFree says how to free it.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--kind",
+            "value": "<kind>",
+            "required": true,
+            "description": "Kind of item to delete: update-snapshot, migration-backup, archived-pane-folder, agent-temp, paused-scratch. Tier 3 kinds (foreign-worktree, foreign-pane-data, other-tool-data) are refused.",
+            "schema": {
+              "enum": [
+                "update-snapshot",
+                "migration-backup",
+                "archived-pane-folder",
+                "agent-temp",
+                "paused-scratch",
+                "foreign-worktree",
+                "foreign-pane-data",
+                "other-tool-data"
+              ]
+            }
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Delete the items. Without it, list them and delete nothing."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane machine cleanup --kind update-snapshot --json",
+          "runpane machine cleanup --kind update-snapshot --yes --json",
+          "runpane workspace <machine> machine cleanup --kind update-snapshot --yes --json"
+        ],
+        "jsonSchemas": [
+          "machineCleanupResult"
+        ],
+        "notes": [
+          "Clean machines only through this command, never with rm or another raw delete.",
+          "Run it without --yes first. Add --yes yourself only for a tier 1 kind; for a tier 2 kind, show the person the list and total size and wait for their OK."
+        ]
       }
     },
     "managedBlock": [
@@ -24925,14 +27160,20 @@ export const RUNPANE_CONTRACT = {
       "",
       "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
       "",
+      "To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).",
+      "",
+      "Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.",
+      "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
+      "",
+      "Devices: the `device_*` MCP tools (or `runpane devices`) open an iOS simulator or Android emulator as a tab in the calling Pane, then drive it. `runpane docs read --doc docs/DEVICES.md` has the rest.",
       "",
       "MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = \"npx\"` and `args = [\"--yes\", \"runpane@latest\", \"mcp\"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too."
     ],
     "notifyGuidance": {
       "rules": [
         "Claude's own card (AskUserQuestion) only for a quick question about the person's latest message, in the chat they are typing in, that steers only this turn. Anything else (it waits, blocks other work, is recorded as a decision or approves an ask-first action) is an approval card (`notify`). Unsure? Use an approval card. Codex and other agents always do.",
-        "In a Session, only its orchestrator asks the person. A worker (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator or a parent status file) doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"`. `answer:`, `closed:` and `correction:` lines ending `(by you)` in its tab are the person's word.",
+        "In a Session, only its orchestrator asks the person. A worker (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator or a parent status file) doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"` (its buttons in `--choices` or `--questions`, as notify takes them). `answer:`, `closed:` and `correction:` lines ending `(by you)` in its tab are the person's word.",
         "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`."
       ]
     }

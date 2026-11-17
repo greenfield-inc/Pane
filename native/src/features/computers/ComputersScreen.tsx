@@ -62,7 +62,7 @@ function FindComputersForm({ onFind }: { onFind: (directory: RemotePaneConnectio
         testID="computers-address"
         label="Computer address"
         placeholder="studio-mac.tail1234.ts.net"
-        hint="In Pane on that computer: Settings › Remote Access › Address."
+        hint="In Pane on that computer: Settings › Remote Access › Tailscale › Address."
         error={error}
         value={address}
         onChangeText={setAddress}

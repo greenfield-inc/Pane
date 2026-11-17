@@ -6,7 +6,7 @@ import {
   contextLeft, DEFAULT_STATUS_ITEMS, prStateName, readStatusItems, STATUS_ITEM_NAMES, STATUS_ITEMS, taskAge, writeStatusItems, type StatusItem,
 } from '../../../../shared/chatStatusBar';
 import { Dropdown } from '../ui/Dropdown';
-import { sendNowKeys } from './chatKeys';
+import { sendNowEffect, sendNowKeys } from './chatKeys';
 
 /** The pull request of the chat's Pane, when it has one. */
 export interface ChatStatusPullRequest { number: number; url?: string; state?: string; draft?: boolean }
@@ -54,6 +54,8 @@ export interface ChatStatusBarProps {
   /** Opens an agent's tab, or its Pane when the tab is unknown. */
   onOpenAgent?: (paneId: string, panelId?: string) => void;
   working: boolean;
+  /** Send now delivers into the running turn instead of stopping it. */
+  sendNowSteers?: boolean;
   phone: boolean;
   /** Offered beside the context left, when the tab can /clear. */
   onClear?: () => void;
@@ -67,7 +69,7 @@ export interface ChatStatusBarProps {
  * composer row.
  * "…" picks which items show, remembered on this device. Items with nothing to say stay out.
  */
-export function ChatStatusBar({ context, tasks = [], queued, pr, agents = [], onOpenAgent, working, phone, onClear, onStopTask, onShowQueue }: ChatStatusBarProps) {
+export function ChatStatusBar({ context, tasks = [], queued, pr, agents = [], onOpenAgent, working, sendNowSteers, phone, onClear, onStopTask, onShowQueue }: ChatStatusBarProps) {
   const shown = useStatusItems();
   const now = useNow(tasks.length > 0);
   const left = contextLeft(context);
@@ -156,6 +158,6 @@ export function ChatStatusBar({ context, tasks = [], queued, pr, agents = [], on
       {items.map(item => <div key={item.id} className="chat-status-cell" data-item={item.id}>{item.node}</div>)}
     </div>
     {customize}
-    {working && !phone && <span className="chat-status-hint" title="Send now: stops this turn and sends your message"><kbd>{sendNowKeys()}</kbd><span className="chat-status-hint-text"> send now</span></span>}
+    {working && !phone && <span className="chat-status-hint" title={`Send now: ${sendNowEffect(sendNowSteers)}`}><kbd>{sendNowKeys()}</kbd><span className="chat-status-hint-text"> send now</span></span>}
   </div>;
 }

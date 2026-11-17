@@ -432,7 +432,7 @@ export function CreatePaneForm({
             {repositoryPicker}
             {/* 1. Base Branch (select first, auto-populates session name) */}
             {isLoadingBranches && branches.length === 0 ? (
-              <div className="px-6 pt-6 pb-5 border-b border-border-primary animate-pulse">
+              <div className="px-6 pt-6 pb-5 border-b border-border-primary animate-skeleton">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-4 h-4 bg-surface-tertiary rounded" />
                   <div className="w-24 h-4 bg-surface-tertiary rounded" />

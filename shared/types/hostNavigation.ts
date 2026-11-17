@@ -6,7 +6,7 @@ import type { BoundarySchema } from '../validation/boundaryDecoder';
  * aliases this, because a host's remembered location crosses the IPC boundary
  * and has to be decodable in main.
  */
-export const PANE_NAVIGATION_VIEWS = ['sessions', 'project', 'pane-chat', 'mission-control', 'ssh', 'loops', 'notify', 'autopilot'] as const;
+export const PANE_NAVIGATION_VIEWS = ['sessions', 'project', 'pane-chat', 'mission-control', 'ssh', 'loops', 'notify', 'autopilot', 'resources'] as const;
 
 export type PaneNavigationView = (typeof PANE_NAVIGATION_VIEWS)[number];
 
@@ -31,6 +31,29 @@ export interface HostNavigationMemory {
 export interface LaunchChat {
   paneId: string;
   panelId: string;
+}
+
+/**
+ * The launch chat as the window's first frame draws it (frontend/index.html): its message box
+ * sits above the Pane's terminal strip when the Pane has a dock terminal. Only for a Pane that
+ * shows one group of tabs; in a split the box's place is the app's to work out.
+ */
+export interface LaunchChatOutline {
+  panelId: string;
+  dockTerminal: boolean;
+}
+
+/** The outline travels in the window's start arguments, like the appearance snapshot, so it is there before the first paint. */
+const LAUNCH_CHAT_ARG_PREFIX = '--pane-launch-chat=';
+
+export function encodeLaunchChatArg(outline: LaunchChatOutline): string {
+  return `${LAUNCH_CHAT_ARG_PREFIX}${outline.panelId}${outline.dockTerminal ? ',dock' : ''}`;
+}
+
+export function decodeLaunchChatArg(argv: readonly string[]): LaunchChatOutline | undefined {
+  const value = argv.find(argument => argument.startsWith(LAUNCH_CHAT_ARG_PREFIX))?.slice(LAUNCH_CHAT_ARG_PREFIX.length);
+  const [panelId, flag] = value?.split(',') ?? [];
+  return panelId ? { panelId, dockTerminal: flag === 'dock' } : undefined;
 }
 
 const hostNavigationMemorySchema: BoundarySchema<HostNavigationMemory> = boundary.object({

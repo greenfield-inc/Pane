@@ -24,8 +24,23 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-/** A copy button whose icon turns into a check (or a cross, if copying failed) for a moment. */
-export function ChatCopyButton({ label, text, className = 'chat-copy', showLabel = false }: { label: string; text: () => string; className?: string; showLabel?: boolean }) {
+/**
+ * Copies text that is still loading. The clipboard write starts inside the click, with the text
+ * as a promised Blob, because Safari drops the click's permission across an await; without
+ * ClipboardItem it copies once the text arrives.
+ */
+function copyLoading(text: Promise<string>): Promise<void> {
+  if (navigator.clipboard?.write && window.isSecureContext && 'ClipboardItem' in window) {
+    return navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then(value => new Blob([value], { type: 'text/plain' })) })]);
+  }
+  return text.then(copyText);
+}
+
+/**
+ * A copy button whose icon turns into a check (or a cross, if copying failed) for a moment.
+ * `text` may load what it copies; if that rejects, nothing is copied.
+ */
+export function ChatCopyButton({ label, text, className = 'chat-copy', showLabel = false }: { label: string; text: () => string | Promise<string>; className?: string; showLabel?: boolean }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   useEffect(() => {
     if (state === 'idle') return;
@@ -35,7 +50,16 @@ export function ChatCopyButton({ label, text, className = 'chat-copy', showLabel
   const Icon = state === 'copied' ? Check : state === 'failed' ? X : Copy;
   const status = state === 'copied' ? 'Copied' : state === 'failed' ? 'Could not copy' : label;
   return <button type="button" className={className} data-state={state} aria-label={label} title={status}
-    onClick={() => { copyText(text()).then(() => setState('copied'), () => setState('failed')); }}>
+    onClick={() => {
+      let copying: Promise<void>;
+      try {
+        const content = text();
+        copying = content instanceof Promise ? copyLoading(content) : copyText(content);
+      } catch (error) {
+        copying = Promise.reject(error);
+      }
+      copying.then(() => setState('copied'), () => setState('failed'));
+    }}>
     <span className="chat-copy-icon"><Icon aria-hidden="true" /></span>
     {showLabel && <span>{status}</span>}
     <span className="sr-only" role="status">{state === 'idle' ? '' : status}</span>

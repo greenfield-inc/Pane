@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from .daemon_actions import confirm_mutation
 from .daemon_client import PaneDaemonClientError, invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
-from .notify import RunpaneError
+from .notify import RunpaneError, parse_report_options
 
 
 def run_repos_list(parsed: Any) -> int:
@@ -1442,7 +1442,13 @@ def run_panels_output(parsed: Any) -> int:
     sys.stdout.write(text)
     if text and not text.endswith("\n"):
         sys.stdout.write("\n")
+    if result.get("hasMore"):
+        print(older_output_note(result.get("limit")), file=sys.stderr)
     return 0
+
+
+def older_output_note(limit: Any) -> str:
+    return f"(older output not shown; raise --limit above {limit} to see more)"
 
 
 def run_panels_input(parsed: Any) -> int:
@@ -1477,6 +1483,8 @@ def run_panels_screen(parsed: Any) -> int:
     sys.stdout.write(text)
     if text and not text.endswith("\n"):
         sys.stdout.write("\n")
+    if result.get("hasMore"):
+        print(older_output_note(result.get("limit")), file=sys.stderr)
     return 0
 
 
@@ -1658,6 +1666,7 @@ def run_report(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
     identity = resolve_report_identity(parsed, env)
     summary = strip_utf8_bom(read_input_source(parsed.summary_file)) if parsed.summary_file is not None else parsed.summary
     summary_path = os.path.abspath(parsed.summary_file) if parsed.summary_file not in (None, "-") else None
+    options = parse_report_options(parsed.question or "", parsed.notify_choices, parsed.notify_questions)
     request: Dict[str, Any] = {
         **identity,
         "state": parsed.report_state,
@@ -1666,6 +1675,7 @@ def run_report(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
         **optional_value("summary", summary[:MAX_SENT_SUMMARY_LENGTH] if summary is not None else None),
         **optional_value("summaryPath", summary_path),
         **optional_value("question", parsed.question),
+        **(options or {}),
     }
     result = invoke_daemon("runpane:report", [request], pane_dir=parsed.pane_dir)
     if parsed.json:

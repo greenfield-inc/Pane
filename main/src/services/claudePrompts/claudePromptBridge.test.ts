@@ -153,6 +153,27 @@ describe('ClaudePromptBridge', () => {
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });
   });
 
+  it('notices Esc in the terminal when the transcript has lines over a megabyte', async () => {
+    const ctx = await setup();
+    bridge = ctx.bridge;
+    const transcript = path.join(mkdtempSync(path.join(os.tmpdir(), 'pane-claude-prompts-')), 's-1.jsonl');
+    // A Write of a large file: its call alone is longer than a megabyte.
+    const write = { file_path: '/work/acme-web/fixtures/big.json', content: 'x'.repeat(1_500_000) };
+    const toolUse = (id: string) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Write', input: write }] } });
+    const toolResult = (id: string) => JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: "The user doesn't want to proceed with this tool use." }] } });
+    writeFileSync(transcript, `${toolUse('toolu_write')}\n`);
+    const response = ctx.call({ hook_event_name: 'PermissionRequest', tool_name: 'Write', tool_input: write, transcript_path: transcript });
+    await ctx.waiting();
+
+    // Another long line lands before the answer.
+    appendFileSync(transcript, `${JSON.stringify({ type: 'system', content: 'y'.repeat(2_500_000) })}\n`);
+    await new Promise(resolve => setTimeout(resolve, 1_200));
+    appendFileSync(transcript, `${toolResult('toolu_write')}\n`);
+
+    expect(await (await response).json()).toEqual({});
+    expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });
+  }, 10_000);
+
   it('keeps the question, without answers, when Claude stops waiting on the hook; the terminal still settles it', async () => {
     const ctx = await setup();
     bridge = ctx.bridge;
