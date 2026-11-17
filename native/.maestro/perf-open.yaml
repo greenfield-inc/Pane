@@ -1,0 +1,14 @@
+# Opens LINK in the app, answering iOS's "Open in Pane?" prompt. The perf journeys
+# (scripts/perf/journeys.sh) navigate with it; the timing marks come from the app's log.
+appId: com.dcouple.pane.mobile
+---
+- openLink: ${LINK}
+- extendedWaitUntil:
+    visible: "Open"
+    timeout: 4000
+    optional: true
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
