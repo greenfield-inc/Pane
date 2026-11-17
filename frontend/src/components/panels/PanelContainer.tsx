@@ -20,7 +20,7 @@ const loadTerminalPanel = () => import('./TerminalPanel').then(module => {
 const LazyTerminalPanel = lazy(loadTerminalPanel);
 // Almost every screen shows a terminal: fetch its code while the app is idle, so
 // the first Session or Pane opened does not wait for it.
-if (typeof window !== 'undefined') {
+if (globalThis.window) {
   const preload = () => { void loadTerminalPanel().catch(() => undefined); };
   if ('requestIdleCallback' in window) window.requestIdleCallback(preload, { timeout: 2000 });
   else setTimeout(preload, 1000);

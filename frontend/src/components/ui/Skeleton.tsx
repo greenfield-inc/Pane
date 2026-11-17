@@ -1,10 +1,10 @@
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '../../utils/cn';
 
 /** A load that finishes sooner shows no skeleton at all. */
-export const SKELETON_DELAY_MS = 150;
+const SKELETON_DELAY_MS = 150;
 /** A skeleton that appeared stays at least this long, so it never blinks. */
-export const SKELETON_MIN_VISIBLE_MS = 300;
+const SKELETON_MIN_VISIBLE_MS = 300;
 /** The bone breathe period (`pane-skeleton-breathe` in index.css). */
 const SKELETON_PERIOD_MS = 2000;
 /** How long content that replaces a skeleton carries `skeleton-reveal` (index.css fades it 120 ms). */
@@ -77,12 +77,14 @@ export function Skeleton({ className, style, children, testId, chain = APP_CHAIN
   }, [visible, shownAt]);
 
   // Every skeleton breathes in one phase, whenever it mounted.
-  const [phase] = useState(() => `-${Math.round(performance.now() % SKELETON_PERIOD_MS)}ms`);
+  const surface = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    surface.current?.style.setProperty('--skeleton-phase', `-${Math.round(performance.now() % SKELETON_PERIOD_MS)}ms`);
+  }, []);
 
   return (
-    <div aria-hidden="true" data-skeleton={visible ? 'visible' : 'waiting'} data-testid={testId}
-      className={cn('pointer-events-none select-none overflow-hidden', className)}
-      style={{ ...style, ['--skeleton-phase' as string]: phase }}>
+    <div ref={surface} aria-hidden="true" data-skeleton={visible ? 'visible' : 'waiting'} data-testid={testId}
+      className={cn('pointer-events-none select-none overflow-hidden', className)} style={style}>
       {children}
     </div>
   );
@@ -107,7 +109,14 @@ export function TextBone({ text, className }: { text: string; className?: string
  * released at once. `reveal` is true for REVEAL_MS after a visible skeleton
  * is replaced: give the content `skeleton-reveal` then, for a cross-fade.
  */
-export function useSkeletonHold(loading: boolean, chain = APP_CHAIN): { holding: boolean; reveal: boolean } {
+export interface SkeletonHold {
+  /** Show the skeleton: still loading, or held to its minimum. */
+  holding: boolean;
+  /** Give the content `skeleton-reveal` now. */
+  reveal: boolean;
+}
+
+export function useSkeletonHold(loading: boolean, chain = APP_CHAIN): SkeletonHold {
   const [state, setState] = useState<{ since: number | null; held: boolean; reveal: boolean }>(
     () => ({ since: loading ? visibleAt(chain, performance.now()) : null, held: false, reveal: false }),
   );

@@ -38,7 +38,8 @@ function measureCell(fontFamily: string, fontSize: number): CellSize {
   const key = `${fontSize}px ${fontFamily}`;
   const known = cellSizes.get(key);
   if (known) return known;
-  if (typeof document === 'undefined') return { width: fontSize * 0.6, height: Math.ceil(fontSize * 1.3) };
+  // Server rendering (tests) has no document to measure in.
+  if (!globalThis.document) return { width: fontSize * 0.6, height: Math.ceil(fontSize * 1.3) };
   const probe = document.createElement('span');
   probe.textContent = 'W'.repeat(32);
   probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;line-height:normal;font-size:${fontSize}px;font-family:${fontFamily}`;
