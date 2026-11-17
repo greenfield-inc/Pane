@@ -6,6 +6,7 @@ import { cn } from '../../utils/cn';
 import { runNotify, selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { relativeAge } from '../notify/notifyFormat';
+import { Tooltip } from '../ui/Tooltip';
 import { useNow } from '../notify/useNow';
 import { dockApprovals, dockKey, latestReplied, questionsOf, referenceCount, statusKey } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
@@ -76,11 +77,13 @@ function CompactCard({ item, index, total, open, onStep, onOpen, onDismiss }: {
         {qn && <span className="shrink-0 font-semibold text-status-warning-on-tint">{qn}</span>}
         <span className="min-w-0 truncate">{[qn ? '' : 'Approval', who, count > 1 ? `${count} questions` : count === 1 ? '1 question' : '', relativeAge(item.createdAt, now)].filter(Boolean).join(' · ')}</span>
         {open && <span className="ml-auto shrink-0 rounded-md bg-surface-secondary px-1.5 py-px text-[11px] font-semibold text-text-secondary" data-testid="session-approval-card-open-label">Open</span>}
-        <button type="button" onClick={onDismiss} aria-label="Dismiss" title="Dismiss: it stays in Approvals"
-          className={cn('-mr-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text-primary', !open && 'ml-auto')}
-          data-testid="session-approval-card-dismiss">
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
+        <Tooltip content="Dismiss: it stays in Approvals" side="top">
+          <button type="button" onClick={onDismiss} aria-label="Dismiss"
+            className={cn('-mr-1.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover hover:text-text-primary', !open && 'ml-auto')}
+            data-testid="session-approval-card-dismiss">
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </Tooltip>
       </div>
       <p className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-text-primary" data-testid="session-approval-card-title">{item.title}</p>
       {item.context && <p className="line-clamp-2 text-[13.5px] leading-snug text-text-secondary" data-testid="session-approval-card-subtitle">{item.context}</p>}
