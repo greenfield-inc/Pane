@@ -78,6 +78,11 @@ type PaneDaemonClientWrite = (clientId: string, socket: net.Socket, encodedFrame
 
 const UNIX_SOCKET_DIRECTORY_MODE = 0o700;
 const UNIX_SOCKET_FILE_MODE = 0o600;
+/**
+ * How often a running Pane checks that its Unix socket still exists, and re-creates it if not.
+ * The runpane CLIs quote this in their missing-socket error (`daemonClient.ts`, `daemon_client.py`).
+ */
+const PANE_DAEMON_SOCKET_CHECK_INTERVAL_MS = 5_000;
 const MAX_PENDING_BYTES_PER_CLIENT = 4 * 1024 * 1024;
 const daemonEventFilterRequestSchema = boundary.object({
   include: boundary.nullable(boundary.array(boundary.string)),
@@ -88,6 +93,9 @@ export class PaneDaemonServer {
   private readonly clients = new Map<string, ConnectedPaneDaemonClient>();
   private readonly endpoint: PaneDaemonEndpoint;
   private nextClientId = 1;
+  private unixSocketWatch: NodeJS.Timeout | null = null;
+  private restoringUnixSocket = false;
+  private readonly unixSocketCheckIntervalMs: number;
 
   private readonly daemonEventSink: PaneEventSink = {
     send: (channel: string, ...args: unknown[]) => {
@@ -116,8 +124,10 @@ export class PaneDaemonServer {
     appDirectory: string,
     platform: NodeJS.Platform = process.platform,
     private readonly clientWrite: PaneDaemonClientWrite = (_clientId, socket, encodedFrame) => socket.write(encodedFrame),
+    options: { unixSocketCheckIntervalMs?: number } = {},
   ) {
     this.endpoint = getPaneDaemonEndpoint(appDirectory, platform);
+    this.unixSocketCheckIntervalMs = options.unixSocketCheckIntervalMs ?? PANE_DAEMON_SOCKET_CHECK_INTERVAL_MS;
   }
 
   getEndpoint(): PaneDaemonEndpoint {
@@ -154,6 +164,7 @@ export class PaneDaemonServer {
     }
 
     this.server = await this.listen();
+    this.startUnixSocketWatch();
   }
 
   private async listen(): Promise<net.Server> {
@@ -195,6 +206,7 @@ export class PaneDaemonServer {
   async stop(): Promise<void> {
     const server = this.server;
     this.server = null;
+    this.stopUnixSocketWatch();
 
     for (const clientId of [...this.clients.keys()]) {
       this.dropClient(clientId);
@@ -212,6 +224,65 @@ export class PaneDaemonServer {
 
     if (this.endpoint.transport === 'unix' && fs.existsSync(this.endpoint.path)) {
       fs.unlinkSync(this.endpoint.path);
+    }
+  }
+
+  /**
+   * Re-creates the Unix socket, and its folder, when something deleted them while Pane runs
+   * (a cleanup of /tmp, say). The listener keeps serving the deleted file's clients, but no
+   * new client can find it, so the local runpane CLI and MCP server would fail with ENOENT
+   * until Pane restarts. Clients already connected stay connected. A file someone else put
+   * at the path, such as another Pane on this data directory, is left alone. Windows named
+   * pipes cannot be deleted this way, so they are never touched.
+   * Resolves true when it listened again.
+   */
+  async restoreUnixSocketIfMissing(): Promise<boolean> {
+    const previous = this.server;
+    if (this.endpoint.transport !== 'unix' || !previous || this.restoringUnixSocket || fs.existsSync(this.endpoint.path)) {
+      return false;
+    }
+
+    this.restoringUnixSocket = true;
+    try {
+      // Closing a Unix listener removes whatever file is at its path, so the listener on the
+      // deleted file closes before its replacement listens. Its clients keep their connections.
+      if (previous.listening) {
+        previous.close();
+      }
+      this.createUnixSocketDirectory();
+      const replacement = await this.listen();
+      if (this.server !== previous) {
+        // Stopped while this call listened.
+        replacement.close();
+        return false;
+      }
+      this.server = replacement;
+      console.warn(`[Pane daemon] Re-created the local socket at ${this.endpoint.path}: it was deleted while Pane ran.`);
+      return true;
+    } catch (error) {
+      console.error(`[Pane daemon] Could not re-create the local socket at ${this.endpoint.path}; it will try again in ${this.unixSocketCheckIntervalMs / 1000} s:`, error);
+      return false;
+    } finally {
+      this.restoringUnixSocket = false;
+    }
+  }
+
+  private startUnixSocketWatch(): void {
+    if (this.endpoint.transport !== 'unix') {
+      return;
+    }
+
+    this.unixSocketWatch = setInterval(() => {
+      void this.restoreUnixSocketIfMissing();
+    }, this.unixSocketCheckIntervalMs);
+    // The check must never keep the process alive on its own.
+    this.unixSocketWatch.unref();
+  }
+
+  private stopUnixSocketWatch(): void {
+    if (this.unixSocketWatch) {
+      clearInterval(this.unixSocketWatch);
+      this.unixSocketWatch = null;
     }
   }
 
