@@ -4,8 +4,9 @@ import { onOpenNewDialogRequest } from '../utils/openNewDialog';
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
+import { confirmPaneArchive } from './archiveConfirm';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Inbox, Server, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, Keyboard, LayoutGrid, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Inbox, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -132,6 +133,8 @@ interface SidebarProps {
   /** Title-bar slot the toggle and menu render into; null keeps them in the sidebar header. */
   titleBarControlsSlot?: HTMLDivElement | null;
   onHelpClick: () => void;
+  /** Opens the keyboard shortcut sheet (⌘/). */
+  onShortcutsClick: () => void;
   onDocsClick: () => void;
   onFeedbackClick: () => void;
   onDiscordClick: () => void;
@@ -153,7 +156,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
+export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onShortcutsClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   // Maximize spreads the sidebar over the main area; minimize collapses it to its rail (P4).
   const shellRef = useRef<HTMLDivElement>(null);
@@ -471,23 +474,19 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
     navigateToSessions();
   }, [navigateToSessions, setActiveSession, setSidebarNavigationScope]);
 
+  // The rail icon a menu opened from, so focus returns to it when the archive confirm closes.
+  const compactMenuOpener = useRef<HTMLElement | null>(null);
   const openCompactSessionMenu = useCallback((event: React.MouseEvent, session: Session) => {
     event.preventDefault();
     event.stopPropagation();
+    compactMenuOpener.current = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     setCompactSessionMenu({ session, x: event.clientX, y: event.clientY });
   }, []);
 
-  const archiveCompactSession = useCallback(async () => {
+  const archiveCompactSession = useCallback(() => {
     if (!compactSessionMenu) return;
-    const { id } = compactSessionMenu.session;
     setCompactSessionMenu(null);
-    try {
-      const response = await API.sessions.delete(id);
-      if (!response.success) showActionError('Could not archive the Pane', response.error);
-    } catch (error) {
-      console.error('Failed to archive session:', error);
-      showActionError('Could not archive the Pane', error);
-    }
+    confirmPaneArchive(compactSessionMenu.session, { returnFocus: compactMenuOpener.current });
   }, [compactSessionMenu]);
 
   const toggleCompactSessionPinned = useCallback(async () => {
@@ -503,6 +502,8 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
     }
   }, [compactSessionMenu]);
 
+  const shortcutSheetKey = useHotkeyStore((state) => state.hotkeys.get('show-keyboard-shortcuts')?.keys ?? '');
+
   const goHome = () => {
     setSidebarNavigationScope('repositories');
     void setActiveSession(null);
@@ -517,6 +518,13 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           label: 'Help',
           icon: HelpCircleIcon,
           onClick: onHelpClick
+        },
+        {
+          id: 'keyboard-shortcuts',
+          label: 'Keyboard Shortcuts',
+          description: shortcutSheetKey ? formatKeyDisplay(shortcutSheetKey) : undefined,
+          icon: Keyboard,
+          onClick: onShortcutsClick
         },
         // Actions on the host: each re-sorts its Panes once, then drags hold until the next pick.
         {
@@ -954,7 +962,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
           menu={compactSessionMenu}
           onClose={() => setCompactSessionMenu(null)}
           onTogglePinned={() => void toggleCompactSessionPinned()}
-          onArchive={() => void archiveCompactSession()}
+          onArchive={archiveCompactSession}
         />
       </>
     );

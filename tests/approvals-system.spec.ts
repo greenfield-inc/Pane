@@ -54,6 +54,12 @@ function snapshot(items: NotifyItem[]): NotifySnapshot {
   };
 }
 
+type MockWindow = typeof window & { __paneTestElectronMock: { getNotifyCommands(): unknown[]; emitNotifySnapshot(snapshot: NotifySnapshot): void } };
+// SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+const notifyCommands = (page: Page) => page.evaluate(() => (window as MockWindow).__paneTestElectronMock.getNotifyCommands());
+// SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+const emitSnapshot = (page: Page, next: NotifySnapshot) => page.evaluate((value) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(value), next);
+
 async function openChat(page: Page, items: NotifyItem[]): Promise<void> {
   await installElectronApiMock(page, { initialProjects: [project], initialSessions: [pane], initialPanels: panels, activeProjectId: project.id, notifySnapshot: snapshot(items) });
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -89,4 +95,23 @@ test('J8: after a send, a status line names the agent reading the reply, and the
   await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 1');
   await expect(page.getByTestId('session-approval-card-title')).toHaveText(q44.title);
   await page.screenshot({ path: testInfo.outputPath('10-reading.png') });
+});
+
+test('Q-389: Dismiss on the chat\'s card closes it without answering; it stays in Approvals and comes back only when it changes', async ({ page }, testInfo) => {
+  await openChat(page, [q44, q45]);
+  await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 2');
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
+  await page.screenshot({ path: testInfo.outputPath('q389-chat-card-with-dismiss.png') });
+
+  await page.getByTestId('session-approval-card-dismiss').click();
+  // No answer: only the strip's dismiss, which keeps the item waiting in Approvals.
+  await expect.poll(() => notifyCommands(page)).toEqual([{ type: 'dismiss', id: 'q45' }]);
+  await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 1');
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q44.title);
+  await page.screenshot({ path: testInfo.outputPath('q389-after-dismiss.png') });
+
+  // A new version of the dismissed item brings it back to this chat.
+  await emitSnapshot(page, snapshot([q44, { ...q45, version: 2 }]));
+  await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 2');
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
 });

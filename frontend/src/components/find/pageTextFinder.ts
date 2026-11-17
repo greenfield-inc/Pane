@@ -32,25 +32,51 @@ const SKIPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'TEXTAR
  */
 const FIND_EMPTY_ATTRIBUTE = 'data-find-empty';
 
-// Every page-text tab contributes to the same two named highlights.
-const highlightsByTab = new Map<string, { all: Range[]; current: Range | null }>();
+// Every page-text tab contributes to the same two named highlights, kept per
+// window: a Summary frame paints its matches with its own highlight registry.
+const highlightsByTab = new Map<string, { all: Range[]; current: Range | null; view: HighlightWindow | null }>();
+
+type HighlightWindow = Window & typeof globalThis;
+const paintedWindows = new Set<HighlightWindow>();
+
+function windowOf(range: Range | null | undefined): HighlightWindow | null {
+  // SAFETY: a document's defaultView is a full Window with its own CSS and Highlight.
+  return (range?.startContainer.ownerDocument?.defaultView as HighlightWindow | null | undefined) ?? null;
+}
+
+function canHighlight(view: HighlightWindow): boolean {
+  return 'CSS' in view && 'highlights' in view.CSS && 'Highlight' in view;
+}
 
 function syncHighlights(): void {
-  if (!('CSS' in globalThis) || !('highlights' in CSS)) return;
-  const all: Range[] = [];
-  const current: Range[] = [];
+  const byWindow = new Map<HighlightWindow, { all: Range[]; current: Range[] }>();
   for (const entry of highlightsByTab.values()) {
-    all.push(...entry.all);
-    if (entry.current) current.push(entry.current);
+    if (!entry.view) continue;
+    const slot = byWindow.get(entry.view) ?? { all: [], current: [] };
+    slot.all.push(...entry.all);
+    if (entry.current) slot.current.push(entry.current);
+    byWindow.set(entry.view, slot);
   }
-  if (all.length) CSS.highlights.set(MATCH_HIGHLIGHT, new Highlight(...all));
-  else CSS.highlights.delete(MATCH_HIGHLIGHT);
-  if (current.length) {
-    const highlight = new Highlight(...current);
-    highlight.priority = 1;
-    CSS.highlights.set(CURRENT_HIGHLIGHT, highlight);
-  } else {
-    CSS.highlights.delete(CURRENT_HIGHLIGHT);
+  for (const view of paintedWindows) {
+    if (!byWindow.has(view)) byWindow.set(view, { all: [], current: [] });
+  }
+  for (const [view, { all, current }] of byWindow) {
+    // A frame that reloaded or went away keeps nothing to clear.
+    if (view.closed || !canHighlight(view)) {
+      paintedWindows.delete(view);
+      continue;
+    }
+    if (all.length) view.CSS.highlights.set(MATCH_HIGHLIGHT, new view.Highlight(...all));
+    else view.CSS.highlights.delete(MATCH_HIGHLIGHT);
+    if (current.length) {
+      const highlight = new view.Highlight(...current);
+      highlight.priority = 1;
+      view.CSS.highlights.set(CURRENT_HIGHLIGHT, highlight);
+    } else {
+      view.CSS.highlights.delete(CURRENT_HIGHLIGHT);
+    }
+    if (all.length || current.length) paintedWindows.add(view);
+    else paintedWindows.delete(view);
   }
 }
 
@@ -114,7 +140,7 @@ function collectPageText(root: Element): CollectedText {
 }
 
 function isScrollable(element: Element): boolean {
-  const style = getComputedStyle(element);
+  const style = (element.ownerDocument.defaultView ?? window).getComputedStyle(element);
   return /(auto|scroll)/.test(style.overflowY + style.overflowX)
     && (element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth);
 }
@@ -123,7 +149,15 @@ function scrollRangeIntoView(range: Range, root: Element): void {
   const rect = range.getBoundingClientRect();
   let container: Element | null = range.startContainer.parentElement;
   while (container && container !== root && !isScrollable(container)) container = container.parentElement;
-  if (!container || !isScrollable(container)) return;
+  if (!container || !isScrollable(container)) {
+    // A Summary frame scrolls its own document, not an element inside it.
+    const frameScroller = root.ownerDocument !== document ? root.ownerDocument.scrollingElement : null;
+    if (!frameScroller) return;
+    const view = root.ownerDocument.defaultView;
+    const height = view?.innerHeight ?? 0;
+    if (rect.top < 0 || rect.bottom > height) frameScroller.scrollTop += rect.top - (height - rect.height) / 2;
+    return;
+  }
   const bounds = container.getBoundingClientRect();
   if (rect.top < bounds.top || rect.bottom > bounds.bottom) {
     container.scrollTop += rect.top - bounds.top - (bounds.height - rect.height) / 2;
@@ -239,7 +273,7 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
       // screen is inside `around`; skip the on-screen scan (it forces layout).
       const currentMatch = toRange(matches[current - 1]);
       if (currentMatch && text) scrollRangeIntoView(currentMatch, text.root);
-      highlightsByTab.set(panelId, { all, current: currentRange });
+      highlightsByTab.set(panelId, { all, current: currentRange, view: windowOf(all[0]) });
       syncHighlights();
       return;
     }
@@ -248,7 +282,7 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
       addInterval(visible, around);
       painted.push(visible);
     }
-    highlightsByTab.set(panelId, { all, current: currentRange });
+    highlightsByTab.set(panelId, { all, current: currentRange, view: windowOf(all[0]) });
     syncHighlights();
   };
 

@@ -157,3 +157,63 @@ test.describe('a remote desktop loading a host page', () => {
     await expect(page.getByText('on old host')).toHaveCount(0);
   });
 });
+
+test('Open in your browser hands the tab\'s address to the OS, and says why when it cannot', async ({ page }) => {
+  await openBrowserPanel(page, 'http://localhost:5173/login');
+  await loadConfig(page, 'local');
+  const open = page.getByTitle('Open in your browser');
+
+  await open.click();
+  await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['http://localhost:5173/login']);
+
+  // A link clicked inside the page moves the tab without a new address being typed.
+  await page.locator('webview').evaluate(webview => {
+    Object.assign(webview, { getURL: () => 'http://localhost:5173/settings', canGoBack: () => true, canGoForward: () => false });
+    webview.dispatchEvent(new Event('did-navigate'));
+  });
+  await open.click();
+  await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally.at(-1))).toBe('http://localhost:5173/settings');
+
+  // A page that fails to load never sends did-navigate, but the tab shows its address.
+  await page.locator('webview').evaluate(webview => {
+    Object.assign(webview, { getURL: () => 'http://localhost:5174/' });
+    webview.dispatchEvent(Object.assign(new Event('did-fail-load'), { isMainFrame: true, errorCode: -102, errorDescription: 'ERR_CONNECTION_REFUSED' }));
+  });
+  await open.click();
+  await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally.at(-1))).toBe('http://localhost:5174/');
+
+  await page.evaluate(() => { window.portsTest.openExternalError = 'That port on the host is not reachable from this computer right now.'; });
+  await open.click();
+  await expect(page.getByText('That port on the host is not reachable from this computer right now.')).toBeVisible();
+});
+
+test('Open in your browser opens a local .html page, and its tooltip says why it is disabled', async ({ page }) => {
+  await openBrowserPanel(page, 'file:///Users/me/status.html');
+  await loadConfig(page, 'local');
+
+  await page.getByTitle('Open in your browser').click();
+  await expect.poll(() => page.evaluate(() => window.portsTest.openedLocally)).toEqual(['file:///Users/me/status.html']);
+
+  await page.locator('webview').evaluate(webview => {
+    Object.assign(webview, { getURL: () => 'file:///Users/me/notes.txt', canGoBack: () => true, canGoForward: () => false });
+    webview.dispatchEvent(new Event('did-navigate'));
+  });
+  await expect(page.getByTitle("Can't open in your browser: Only .html and .htm files open in your browser")).toBeDisabled();
+
+  await page.locator('webview').evaluate(webview => {
+    Object.assign(webview, { getURL: () => 'file://server/share/page.html' });
+    webview.dispatchEvent(new Event('did-navigate'));
+  });
+  await expect(page.getByTitle("Can't open in your browser: This file is on server, not this computer")).toBeDisabled();
+});
+
+test('on a remote desktop, Open in your browser waits for a forwarded port', async ({ page }) => {
+  await openBrowserPanel(page, 'http://localhost:5173/');
+  await loadConfig(page, 'remote');
+  await answerPortsList(page, snapshot(5173));
+  await expect(page.getByTitle("Can't open in your browser: Port 5173 on devbox isn't forwarded to this computer")).toBeDisabled();
+
+  await emitPorts(page, { host: 'devbox', ports: [{ port: 5173, localPort: 5173, pid: 1, process: 'node', group: 'other', kind: 'web' }] });
+  await page.getByTitle('Open in your browser').click();
+  await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['http://localhost:5173/']);
+});

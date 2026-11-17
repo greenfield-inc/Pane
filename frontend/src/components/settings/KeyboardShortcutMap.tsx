@@ -69,7 +69,8 @@ export function KeyboardShortcutMap({
     });
   }, [visible]);
   const lowerQuery = query.trim().toLowerCase();
-  const visibleReference = REFERENCE_ROWS.filter((reference) =>
+  // Rows whose key comes from a command or another setting are changed there, so only fixed keys show here.
+  const visibleReference = REFERENCE_ROWS.filter((reference) => !reference.follows && !reference.answerAll).filter((reference) =>
     !lowerQuery || reference.label.toLowerCase().includes(lowerQuery) || reference.chord.toLowerCase().includes(lowerQuery));
   const conflicted = map.conflicts.length > 0;
   const sources = { terminalShortcuts, customCommands };

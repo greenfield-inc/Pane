@@ -11,6 +11,7 @@ import { usePanelStore } from '../../stores/panelStore';
 import { formatBytes, formatMB } from '../../../../shared/utils/formatBytes';
 import { CATEGORY_COLORS } from '../ui/charts/palette';
 import { MachineSwitcher } from './MachineSwitcher';
+import { OtherAppsList } from './OtherAppsList';
 import { runHealthAction, useMachineHealth, type FinishedPaneRow, type MachineHealthData } from './useMachineHealth';
 
 const MB = 1024 * 1024;
@@ -53,13 +54,21 @@ function StackedBar({ parts, total }: { parts: BarPart[]; total: number }) {
   );
 }
 
-function Legend({ parts }: { parts: BarPart[] }) {
+/** `expand` turns the part with that label into a chevron toggle. */
+function Legend({ parts, expand }: { parts: BarPart[]; expand?: { label: string; open: boolean; onToggle: () => void } }) {
   return (
     <dl className="mt-3 grid grid-cols-1 gap-x-8 gap-y-1.5 text-sm sm:grid-cols-3">
       {parts.map(part => (
         <div key={part.label} className="flex items-center gap-2">
           <span className={cn('h-2.5 w-2.5 shrink-0 rounded-sm', part.className)} style={{ backgroundColor: part.color }} aria-hidden="true" />
-          <dt className="min-w-0 flex-1 truncate text-text-secondary">{part.label}</dt>
+          <dt className="min-w-0 flex-1 truncate text-text-secondary">
+            {expand?.label === part.label ? (
+              <button type="button" aria-expanded={expand.open} onClick={expand.onToggle} className="-ml-1 inline-flex max-w-full items-center gap-0.5 rounded px-1 hover:bg-surface-hover hover:text-text-primary">
+                <span className="truncate">{part.label}</span>
+                <ChevronDown className={cn('h-4 w-4 shrink-0 transition-transform', !expand.open && '-rotate-90')} aria-hidden="true" />
+              </button>
+            ) : part.label}
+          </dt>
           <dd className="tabular-nums text-text-primary">{formatBytes(part.bytes)}</dd>
         </div>
       ))}
@@ -102,10 +111,11 @@ function LevelBadge({ level, text }: { level: MachineHealthSnapshot['disk']['lev
   );
 }
 
-function MemorySection({ data, onPause, busy, hours, runsOn, readOnlyReason }: {
-  data: MachineHealthData; onPause: () => void; busy: boolean; hours: number | null; runsOn: string | null; readOnlyReason: string | null;
+function MemorySection({ data, machineId, reload, onPause, busy, hours, runsOn, readOnlyReason }: {
+  data: MachineHealthData; machineId: string; reload: () => void; onPause: () => void; busy: boolean; hours: number | null; runsOn: string | null; readOnlyReason: string | null;
 }) {
   const { snapshot, relief } = data;
+  const [appsOpen, setAppsOpen] = useState(false);
   const used = snapshot.memory.totalBytes - snapshot.memory.freeBytes;
   const processes = snapshot.panes.flatMap(pane => pane.processes);
   const agents = processes.filter(proc => AGENT_EXECUTABLES.has(processBase(proc.name)));
@@ -138,7 +148,9 @@ function MemorySection({ data, onPause, busy, hours, runsOn, readOnlyReason }: {
         )}
       </div>
       <div className="mt-3"><StackedBar parts={parts} total={snapshot.memory.totalBytes} /></div>
-      <Legend parts={[...parts, { label: 'Free', bytes: snapshot.memory.freeBytes, className: 'bg-surface-tertiary border border-border-primary' }]} />
+      <Legend parts={[...parts, { label: 'Free', bytes: snapshot.memory.freeBytes, className: 'bg-surface-tertiary border border-border-primary' }]}
+        expand={{ label: 'Other apps', open: appsOpen, onToggle: () => setAppsOpen(!appsOpen) }} />
+      {appsOpen && <OtherAppsList machineId={machineId} readAt={data.readAt} readOnlyReason={readOnlyReason} onStopped={reload} />}
     </section>
   );
 }
@@ -577,7 +589,7 @@ export function ResourcesView() {
           // Keyed by machine: switching machines starts every section fresh for the new one.
           <div key={machineId} className={cn('flex flex-col gap-5', offline && 'opacity-60')}>
             <DiskSection data={data} />
-            <MemorySection data={data} hours={data.relief.idle.hours ?? (remote ? null : pauseHours)} runsOn={runsOn} readOnlyReason={readOnlyReason} busy={pausing} onPause={async () => {
+            <MemorySection data={data} machineId={machineId} reload={() => { void reload(); }} hours={data.relief.idle.hours ?? (remote ? null : pauseHours)} runsOn={runsOn} readOnlyReason={readOnlyReason} busy={pausing} onPause={async () => {
               setPausing(true);
               try {
                 await runHealthAction(machineId, 'pause-idle', { source: 'ui' });

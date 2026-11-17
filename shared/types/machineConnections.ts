@@ -51,12 +51,13 @@ export const MACHINE_READ_CHANNELS = [
   'projects:list-branches',
   'projects:detect-branch',
   'remote:pwa-affordances',
-  // Machine health (Resources): the snapshot, inventory, finished Panes, relief offer and cleanup history.
+  // Machine health (Resources): the snapshot, inventory, finished Panes, relief offer, cleanup history and other apps.
   'resource-monitor:machine-health',
   'resource-monitor:machine-inventory',
   'resource-monitor:machine-finished-panes',
   'resource-monitor:machine-relief',
   'resource-monitor:machine-cleanup-history',
+  'resource-monitor:machine-apps',
 ] as const;
 export type MachineReadChannel = typeof MACHINE_READ_CHANNELS[number];
 
@@ -112,7 +113,7 @@ export type MachineCommand =
   | { type: 'machine-health'; action: MachineHealthAction; request: object };
 
 /** What Resources and its cards can ask another machine to do, each through that machine's own checks. */
-export const MACHINE_HEALTH_ACTIONS = ['cleanup', 'pause-idle', 'archive-finished', 'stop-processes', 'restart-process', 'ignore-leak'] as const;
+export const MACHINE_HEALTH_ACTIONS = ['cleanup', 'pause-idle', 'archive-finished', 'stop-processes', 'restart-process', 'ignore-leak', 'stop-app'] as const;
 export type MachineHealthAction = typeof MACHINE_HEALTH_ACTIONS[number];
 
 /** A read's or command's answer, exactly as the machine gave it, tagged with that machine. */

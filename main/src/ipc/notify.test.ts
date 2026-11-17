@@ -16,6 +16,9 @@ import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
+import { LoopManager } from '../services/loops/loopManager';
+import { LoopRepository } from '../services/loops/loopRepository';
+import { createLoopTestDb } from '../services/loops/loopTestDb';
 
 /** A Pane's Notify handlers, registered the way the app registers them; no window or phone. */
 async function startPane() {
@@ -401,6 +404,9 @@ describe('Approvals items, through the registered handlers', () => {
     ['session-pane', { id: 'session-pane', name: 'Launch' }],
     ['worker', { id: 'worker', name: 'api-fix' }],
     ['loose', { id: 'loose', name: 'docs' }],
+    ['run-1', { id: 'run-1', name: 'deal-watch · Nov 16 09:00' }],
+    ['run-2', { id: 'run-2', name: 'deal-watch · Nov 17 09:00' }],
+    ['run-3', { id: 'run-3', name: 'deal-watch · Nov 18 09:00' }],
   ]);
   const launch = { id: 'session-1', name: 'Launch', paneId: 'session-pane' };
   const later = { id: 'session-2', name: 'Later', paneId: 'later-pane' };
@@ -424,7 +430,7 @@ describe('Approvals items, through the registered handlers', () => {
   afterEach(() => { openSessions = [launch, later]; });
 
   /** A Pane with Sessions and, optionally, a Session inbox. */
-  async function startWithSessions(inbox?: ReturnType<typeof inboxOf>) {
+  async function startWithSessions(inbox?: ReturnType<typeof inboxOf>, loopManager?: LoopManager) {
     const registry = new PaneCommandRegistry();
     const configManager = new ConfigManager();
     await configManager.initialize();
@@ -435,9 +441,106 @@ describe('Approvals items, through the registered handlers', () => {
       getMainWindow: () => null,
       orchestrationSessionManager: sessions,
       sessionInbox: inbox,
+      loopManager,
     };
     return { configManager, registry, notify: registerNotifyHandlers(ipcMain, services, registry) };
   }
+
+  it('lets a later run of a loop update the card an earlier run posted, and nobody else (#1446)', async () => {
+    const db = createLoopTestDb();
+    let run = 0;
+    const loops = new LoopManager({
+      repo: new LoopRepository(() => db),
+      startRun: async () => ({ sessionId: `run-${++run}` }),
+      archiveRun: async () => true,
+      projectExists: () => true,
+      prepareSession: async target => target,
+    });
+    const loop = await loops.save({ name: 'deal-watch', projectId: 1, cron: '0 9 * * *', agent: 'claude', enabled: false });
+    await loops.runNow(loop.id);
+    await loops.runNow(loop.id);
+    const pane = await startWithSessions(undefined, loops);
+    const posted = await pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      ui: 'options', caller: { paneId: 'run-1', panelId: 'run-1-tab' }, title: '3 new deals?', context: 'Two under $40.',
+      choices: [{ label: 'Got it' }, { label: 'Not interested' }], returnAfterMs: 1,
+    }]);
+    const id = pane.notify.snapshot().items[0].id;
+    expect(posted).toMatchObject({ waiting: true });
+    // A loop refreshing its own card has no question of the person's to quote: no --asked.
+    const update = (paneId: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      update: id, whatChanged: 'Now 5 deals', title: '5 new deals?', caller: { paneId, panelId: `${paneId}-tab` }, returnAfterMs: 1,
+    }]);
+
+    await expect(update('loose')).rejects.toMatchObject({ code: 'ERR_NOTIFY_NOT_READER' });
+    await update('run-2');
+    expect(pane.notify.snapshot().items).toMatchObject([{ title: '5 new deals?', revision: { asked: '' } }]);
+
+    // Once the person answers, the card stays answered: a later run can no longer reopen it.
+    await pane.notify.run({ type: 'answer', id, answer: { choice: 'Got it' } });
+    await expect(update('run-2')).rejects.toMatchObject({ code: expect.stringMatching(/^ERR_NOTIFY_/u) });
+    pane.notify.dispose();
+  });
+
+  it('acts on the run\'s own Q-n card before another run\'s, and else on the newest (#1451 FU-2)', async () => {
+    const db = createLoopTestDb();
+    let run = 0;
+    const loops = new LoopManager({
+      repo: new LoopRepository(() => db),
+      startRun: async () => ({ sessionId: `run-${++run}` }),
+      archiveRun: async () => true,
+      projectExists: () => true,
+      prepareSession: async target => target,
+    });
+    const loop = await loops.save({ name: 'deal-watch', projectId: 1, cron: '0 9 * * *', agent: 'claude', enabled: false });
+    for (let index = 0; index < 3; index += 1) await loops.runNow(loop.id);
+    const pane = await startWithSessions(undefined, loops);
+    const ask = (paneId: string, title: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      ui: 'options', caller: { paneId, panelId: `${paneId}-tab` }, title, context: 'Deals.', choices: [{ label: 'Got it' }, { label: 'Not interested' }], returnAfterMs: 1,
+    }]);
+    // Two runs each asked a Q-1, both still waiting.
+    await ask('run-1', 'Q-1: 3 new deals?');
+    await ask('run-2', 'Q-1: 4 new deals?');
+    const update = (paneId: string, title: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      update: 'Q-1', whatChanged: 'More deals', title, caller: { paneId, panelId: `${paneId}-tab` }, returnAfterMs: 1,
+    }]);
+    const titles = () => pane.notify.snapshot().items.map(item => `${item.source.paneId}: ${item.title}`).sort();
+
+    // Run 2 updates its own Q-1, never run 1's older one.
+    await update('run-2', 'Q-1: 5 new deals?');
+    expect(titles()).toEqual(['run-1: Q-1: 3 new deals?', 'run-2: Q-1: 5 new deals?']);
+    // A run with no Q-1 of its own takes the newest one the loop posted.
+    await update('run-3', 'Q-1: 6 new deals?');
+    expect(titles()).toEqual(['run-1: Q-1: 3 new deals?', 'run-2: Q-1: 6 new deals?']);
+    pane.notify.dispose();
+  });
+
+  it("warns a loop off info cards, which disappear before the person is back (#1446)", async () => {
+    const db = createLoopTestDb();
+    const loops = new LoopManager({
+      repo: new LoopRepository(() => db),
+      startRun: async loop => ({ sessionId: loop.projectId ? 'loose' : null }),
+      archiveRun: async () => true,
+      projectExists: () => true,
+      prepareSession: async target => target,
+    });
+    const projectLoop = await loops.save({ name: 'deal-watch', projectId: 1, cron: '0 9 * * *', agent: 'claude', enabled: false });
+    await loops.runNow(projectLoop.id);
+    await loops.save({ name: 'standup', orchestrationSessionId: launch.id, cron: '0 8 * * *', agent: 'claude', initialInput: 'Summarize.', enabled: false });
+    const pane = await startWithSessions(undefined, loops);
+    const ask = (ui: string, paneId: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
+      ui, caller: { paneId, panelId: `${paneId}-tab` }, title: '3 new deals', context: 'Two under $40.', returnAfterMs: 1,
+      ...(ui === 'options' && { choices: [{ label: 'Got it' }, { label: 'Not interested' }] }),
+    }]);
+
+    // A project loop's run Pane, and a Session loop's own Session.
+    expect((await ask('info', 'loose')).warnings).toEqual([expect.stringMatching(/^The loop "deal-watch" runs while the person is away.*--ui options/u)]);
+    expect((await ask('info', 'session-pane')).warnings).toEqual([expect.stringMatching(/^The loop "standup"/u)]);
+    // A card that waits is what a loop should post; a Pane no loop runs in is not a loop.
+    expect((await ask('options', 'loose')).warnings ?? []).not.toContainEqual(expect.stringMatching(/^The loop/u));
+    loops.delete(projectLoop.id);
+    expect((await ask('info', 'loose')).warnings).toBeUndefined();
+    pane.notify.dispose();
+  });
 
   /** A Session inbox stand-in: its items, and a way to change them as an ack or a new report would. */
   function inboxOf(items: RunpaneInboxItem[]) {

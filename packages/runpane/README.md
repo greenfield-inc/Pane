@@ -315,9 +315,9 @@ orchestrator relays a worker's question into its card with `runpane notify
 
 When the person types a reply on an approval, `runpane notify` returns
 `{reply, picks?, id, next}` (or, with no open call, Pane types a `reply:` line
-into the asking tab). The reply may answer the question or ask one: `runpane
-notify --took <id|Q-n> answer` records it as the answer, and `--took <id|Q-n>
-question [--status <text>]` shows that you are getting more context. Then
+into the asking tab), and Pane records the reply as the answer. When it asks a
+question instead, `runpane notify --took <id|Q-n> question [--status <text>]`
+reopens the approval and shows that you are getting more context. Then
 `runpane notify --update <id|Q-n> --asked <text> --what-changed <text>` with
 any changed `--title`, `--context`, `--choices` (a reworded choice adds
 `"was"`, its old label), `--questions` or `--links` saves a new version and

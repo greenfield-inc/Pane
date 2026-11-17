@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
   useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore, type Attachment as ComposerAttachment,
@@ -26,11 +26,15 @@ import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, r
 import { ChatStatusBar, type ChatStatusPullRequest } from './ChatStatusBar';
 import { sendNowEffect, sendNowKeys } from './chatKeys';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
-import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
+import { ChatAttachmentAdapter, dragHasFiles, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
+import { describeUpload } from '../../utils/hostUpload';
+import type { UploadProgress } from '../../../../shared/chunkedUpload';
 import { ChatCopyButton } from './ChatCopyButton';
 import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
+import { FindBar } from '../find/FindBar';
+import { usePageTextFind } from '../find/usePageTextFind';
 import { takeLaunchDraft } from '../../utils/launchOutline';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
@@ -48,14 +52,19 @@ function ImagePreview() {
   return url ? <img className="chat-attachment-preview" src={url} alt="" /> : <span className="chat-attachment-icon" aria-hidden><ImageIcon /></span>;
 }
 
-/** An attached image or file before sending; a file shows "Copying…" until it is on the chat's machine. */
+/** How each file's copy to the chat's machine is going, by attachment id. */
+const CopyProgressContext = createContext<ReadonlyMap<string, UploadProgress>>(new Map());
+
+/** An attached image or file before sending; a file shows its copy's progress until it is on the chat's machine. */
 function Attachment() {
   const kind = useAuiState(state => state.attachment.type);
+  const id = useAuiState(state => state.attachment.id);
   const copying = useAuiState(state => state.attachment.status.type === 'running');
+  const progress = useContext(CopyProgressContext).get(id);
   return <AttachmentPrimitive.Root className="chat-attachment" data-kind={kind} aria-busy={copying}>
     {kind === 'image' ? <ImagePreview /> : <span className="chat-attachment-icon" aria-hidden>{copying ? <LoaderCircle className="chat-spin" /> : <FileText />}</span>}
     <span className="chat-attachment-name"><AttachmentPrimitive.Name /></span>
-    {copying && <span className="chat-attachment-status">Copying…</span>}
+    {copying && <span className="chat-attachment-status" title={progress ? `Copying ${describeUpload(progress)}` : 'Copying'}>{progress ? describeUpload(progress, { short: true }) : '0%'}</span>}
     <AttachmentPrimitive.Remove aria-label="Remove attachment" title="Remove attachment"><X className="h-3 w-3" /></AttachmentPrimitive.Remove>
   </AttachmentPrimitive.Root>;
 }
@@ -213,6 +222,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     followLiveEnd.current?.();
   }, [messages]);
   const viewportRef = useRef<HTMLDivElement>(null);
+  // ⌘F searches the whole loaded conversation and the cards docked under it (approvals, questions).
+  const findRootRef = useRef<HTMLDivElement>(null);
+  usePageTextFind(panelId, findRootRef);
   const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length, !!snapshot.hasNewer);
   const onViewportScroll = () => {
     recordAnchor();
@@ -224,12 +236,19 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
-  const [copying, setCopying] = useState(0);
+  const [copies, setCopies] = useState<ReadonlyMap<string, UploadProgress>>(new Map());
+  const copying = copies.size;
   const canAttachImages = !!view?.canAttachImages;
   const attachments = useMemo(() => {
-    const options = { images: canAttachImages, saveFile, onCopying: (delta: 1 | -1) => setCopying(count => count + delta) };
+    const onProgress = (id: string, progress: UploadProgress | null) => setCopies(current => {
+      const next = new Map(current);
+      if (progress) next.set(id, progress);
+      else next.delete(id);
+      return next;
+    });
+    const options = { images: canAttachImages, saveFile, onProgress, panelId };
     return ChatAttachmentAdapter.available(options) ? new ChatAttachmentAdapter(options) : undefined;
-  }, [canAttachImages, saveFile]);
+  }, [canAttachImages, saveFile, panelId]);
   /** Why dropped, pasted or picked files were not attached; shown until dismissed or the next attempt. */
   const [attachProblems, setAttachProblems] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -498,14 +517,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     setCommandIndex(0);
   };
 
-  return <AssistantRuntimeProvider runtime={runtime}>
-    <ThreadPrimitive.Root className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} {...dragProps}>
+  return <AssistantRuntimeProvider runtime={runtime}><CopyProgressContext.Provider value={copies}>
+    <ThreadPrimitive.Root ref={findRootRef} className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} {...dragProps}>
+      <FindBar panelId={panelId} />
       {dragging && <div className="chat-drop" aria-hidden>
         <div className="chat-drop-card">
           <Paperclip className="chat-drop-icon" />
           <p className="chat-drop-title">Drop to attach</p>
           <p className="chat-drop-detail">{saveFile
-            ? `Images up to ${megabytes(MAX_IMAGE_BYTES)}; other files up to ${megabytes(MAX_FILE_BYTES)} are copied to the chat's machine.`
+            ? `Images up to ${megabytes(MAX_IMAGE_BYTES)} go to the agent as images; other files, of any size, are copied to the chat's machine.`
             : `PNG, JPEG, WebP or GIF images up to ${megabytes(MAX_IMAGE_BYTES)}.`}</p>
         </div>
       </div>}
@@ -646,5 +666,5 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         </ComposerPrimitive.Root>
       </div>
     </ThreadPrimitive.Root>
-  </AssistantRuntimeProvider>;
+  </CopyProgressContext.Provider></AssistantRuntimeProvider>;
 }

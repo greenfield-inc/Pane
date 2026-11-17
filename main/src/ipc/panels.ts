@@ -27,6 +27,7 @@ import { readBrowserPanelFile } from '../services/browserPanelFiles';
 import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
 import { clearPaneBrowserData } from '../services/browserData';
 import { ChunkedUploadStore, type UploadStart } from '../services/chunkedUploadStore';
+import { MACHINE_HEALTH_DEFAULTS } from '../../../shared/types/machineHealth';
 import { agentConfig } from '../../../shared/agents';
 import { decodeChatPanelState } from '../services/chatTabs/state';
 
@@ -91,13 +92,14 @@ async function readCleanTerminalScrollback(panelId: string, lines: number): Prom
   return sanitizeTerminalOutput(persistedScrollback).split('\n').slice(-lines).join('\n');
 }
 
-const MAX_PASTE_BYTES = 50 * 1024 * 1024;
+/** A file's bytes: in memory (a paste), or a finished upload on disk that is moved into place. */
+type LandingBytes = Buffer | { path: string };
 
 /**
  * Save a pasted or uploaded image to the session's images folder and return
  * its path with an image number for UI ordering.
  */
-async function landPastedImage(sessionId: string, buffer: Buffer, mimeType: string) {
+async function landPastedImage(sessionId: string, bytes: LandingBytes, mimeType: string) {
   // Initialize counter from existing files on disk if not cached.
   // Note: this counts files in the host-side .pane/images/ for backwards compat —
   // it's just a counter for UI ordering, not a strict inventory of saved files.
@@ -117,11 +119,7 @@ async function landPastedImage(sessionId: string, buffer: Buffer, mimeType: stri
   const extension = MIME_EXTENSIONS[mimeType] ?? 'png';
   const filename = `${sessionId}_${count}_${timestamp}_${randomStr}.${extension}`;
 
-  if (buffer.length > MAX_PASTE_BYTES) {
-    throw new Error('Image too large (max 50 MB)');
-  }
-
-  const resolvedPath = await saveFileForSession(sessionId, 'images', filename, buffer);
+  const resolvedPath = await saveFileForSession(sessionId, 'images', filename, bytes);
 
   // Commit counter only after successful save
   sessionImageCounters.set(sessionId, count);
@@ -134,7 +132,7 @@ async function landPastedImage(sessionId: string, buffer: Buffer, mimeType: stri
  * With `keepName` (a chat attachment, D-162) the file keeps its own name, inside a folder of
  * its own so two files with one name never collide; otherwise it gets a generated name.
  */
-async function landPastedFile(sessionId: string, buffer: Buffer, originalFileName: string, keepName = false) {
+async function landPastedFile(sessionId: string, bytes: LandingBytes, originalFileName: string, keepName = false) {
   const extMatch = originalFileName.match(/\.([a-zA-Z0-9]+)$/);
   const extension = extMatch ? extMatch[1].toLowerCase() : 'bin';
   const timestamp = Date.now();
@@ -142,11 +140,7 @@ async function landPastedFile(sessionId: string, buffer: Buffer, originalFileNam
   const unique = `${sessionId}_${timestamp}_${randomStr}`;
   const filename = keepName ? `${unique}/${attachmentFileName(originalFileName)}` : `${unique}.${extension}`;
 
-  if (buffer.length > MAX_PASTE_BYTES) {
-    throw new Error('File too large (max 50 MB)');
-  }
-
-  const resolvedPath = await saveFileForSession(sessionId, 'files', filename, buffer);
+  const resolvedPath = await saveFileForSession(sessionId, 'files', filename, bytes);
   return { filePath: resolvedPath };
 }
 
@@ -159,6 +153,7 @@ const uploadStartSchema: BoundarySchema<UploadStart> = boundary.object({
   mimeType: boundary.string,
   size: boundary.number,
   md5: boundary.string,
+  keepName: boundary.optional(boundary.boolean),
 });
 const uploadChunkSchema = boundary.object({
   uploadId: boundary.nonEmptyString,
@@ -167,9 +162,37 @@ const uploadChunkSchema = boundary.object({
 });
 
 let chunkedUploads: ChunkedUploadStore | null = null;
-function uploadStore(): ChunkedUploadStore {
-  chunkedUploads ??= new ChunkedUploadStore({ dir: getAppSubdirectory('uploads') });
+/** Besides on every new upload, partial files nobody finished (a closed app, a lost phone) are swept this often. */
+const UPLOAD_SWEEP_MS = 60 * 60 * 1000;
+/** Uploads leave Machine health's critical level of free space untouched, as set in Settings. */
+function uploadStore(configManager: AppServices['configManager']): ChunkedUploadStore {
+  if (!chunkedUploads) {
+    const store = new ChunkedUploadStore({
+      dir: getAppSubdirectory('uploads'),
+      reserveBytes: () => (configManager.getConfig().machineHealth?.diskCriticalGB ?? MACHINE_HEALTH_DEFAULTS.diskCriticalGB) * 1024 ** 3,
+    });
+    const sweep = () => void store.sweep().catch(error => console.warn('[Uploads] Could not delete abandoned uploads:', error));
+    sweep();
+    setInterval(sweep, UPLOAD_SWEEP_MS).unref();
+    chunkedUploads = store;
+  }
   return chunkedUploads;
+}
+
+/** Writes `bytes` to `target`; a finished upload is renamed into place, or copied across volumes. */
+async function writeLanding(target: string, bytes: LandingBytes): Promise<void> {
+  if (Buffer.isBuffer(bytes)) {
+    await fs.writeFile(target, bytes);
+    return;
+  }
+  try {
+    await fs.rename(bytes.path, target);
+  } catch (error) {
+    // Another volume (a WSL share): copy, then drop the staged file.
+    if (!(error instanceof Error && 'code' in error && error.code === 'EXDEV')) throw error;
+    await fs.copyFile(bytes.path, target);
+    await fs.rm(bytes.path, { force: true });
+  }
 }
 
 /**
@@ -190,7 +213,7 @@ async function saveFileForSession(
   sessionId: string,
   subdir: 'images' | 'files',
   filename: string,
-  bytes: Buffer,
+  bytes: LandingBytes,
 ): Promise<string> {
   // Only attempt WSL-native save on Windows hosts with a WSL-enabled project.
   if (process.platform === 'win32') {
@@ -210,7 +233,7 @@ async function saveFileForSession(
           if (!existsSync(uncDir)) {
             await fs.mkdir(uncDir, { recursive: true });
           }
-          await fs.writeFile(uncPath, bytes);
+          await writeLanding(uncPath, bytes);
           return linuxPath;
         }
       } catch (err) {
@@ -227,7 +250,7 @@ async function saveFileForSession(
   if (!existsSync(hostDir)) {
     await fs.mkdir(hostDir, { recursive: true });
   }
-  await fs.writeFile(hostPath, bytes);
+  await writeLanding(hostPath, bytes);
   return resolveImagePathForSession(hostPath, sessionId);
 }
 
@@ -367,9 +390,6 @@ async function readClipboardImageFallback(sessionId: string): Promise<{ filePath
     const img = clipboard.readImage();
     if (img.isEmpty()) return null;
     const bytes = img.toPNG();
-    if (bytes.length > 10 * 1024 * 1024) {
-      throw new Error('Image too large');
-    }
     const filename = `${sessionId}_${count}_${timestamp}_${randomStr}.${extension}`;
     const resolvedPath = await saveFileForSession(sessionId, 'images', filename, bytes);
     sessionImageCounters.set(sessionId, count);
@@ -414,13 +434,7 @@ async function readClipboardImageFallback(sessionId: string): Promise<{ filePath
       await fs.unlink(filePath).catch(() => {});
       return null;
     }
-    // Backend size validation (10MB limit)
-    if (stat.size > 10 * 1024 * 1024) {
-      await fs.unlink(filePath).catch(() => {});
-      throw new Error('Image too large');
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message === 'Image too large') throw err;
+  } catch {
     return null;
   }
 
@@ -851,7 +865,6 @@ export function registerPanelHandlers(
   commandRegistry.register('terminal:input', async (panelId: string, data: string) => {
     // Desktop, phone and remote web all type through here, so it is always a person.
     getMobilePushSender(services.configManager).observeInput(panelId, data);
-    services.orchestrationSessionManager?.observeInput(panelId, data);
     return terminalPanelManager.writeToTerminal(panelId, data);
   });
   
@@ -962,9 +975,6 @@ export function registerPanelHandlers(
       return await readClipboardImageFallback(sessionId);
     } catch (err) {
       console.error('[ClipboardFallback] Failed:', err);
-      if (err instanceof Error && err.message === 'Image too large') {
-        throw err;
-      }
       return null;
     }
   });
@@ -1014,25 +1024,29 @@ export function registerPanelHandlers(
     return landPastedFile(sessionId, Buffer.from(base64Data, 'base64'), originalFileName, keepName);
   });
 
-  // Uploads from a phone on a slow link arrive in chunks and land exactly
-  // like a paste: images through landPastedImage, anything else through
-  // landPastedFile. See ChunkedUploadStore for resume and retry.
+  // Every file sent to this computer (phone, desktop, PWA; terminal or chat)
+  // arrives in chunks and lands exactly like a paste: images through
+  // landPastedImage, anything else (or a chat attachment that keeps its name)
+  // through landPastedFile. See ChunkedUploadStore for resume, retry and the
+  // free-space rule.
+  // Created at start-up, so abandoned partial files are swept even if no upload ever starts.
+  uploadStore(services.configManager);
   commandRegistry.register('terminal:upload-start', (input: PaneCommandValue) =>
-    uploadStore().start(decodeBoundary(input, uploadStartSchema)));
+    uploadStore(services.configManager).start(decodeBoundary(input, uploadStartSchema)));
   commandRegistry.register('terminal:upload-chunk', (uploadId: PaneCommandValue, offset: PaneCommandValue, base64: PaneCommandValue) => {
     const chunk = decodeBoundary({ uploadId, offset, base64 }, uploadChunkSchema);
-    return uploadStore().append(chunk.uploadId, chunk.offset, chunk.base64);
+    return uploadStore(services.configManager).append(chunk.uploadId, chunk.offset, chunk.base64);
   });
   commandRegistry.register('terminal:upload-commit', (uploadId: PaneCommandValue) =>
-    uploadStore().commit(decodeBoundary(uploadId, boundary.nonEmptyString), async (record, bytes) => {
+    uploadStore(services.configManager).commit(decodeBoundary(uploadId, boundary.nonEmptyString), async (record, filePath) => {
       // Image types an agent can attach land as images; anything else (HEIC, video) keeps its own extension.
-      const landed = record.mimeType in MIME_EXTENSIONS
-        ? await landPastedImage(record.sessionId, bytes, record.mimeType)
-        : await landPastedFile(record.sessionId, bytes, record.fileName);
+      const landed = record.mimeType in MIME_EXTENSIONS && !record.keepName
+        ? await landPastedImage(record.sessionId, { path: filePath }, record.mimeType)
+        : await landPastedFile(record.sessionId, { path: filePath }, record.fileName, record.keepName === true);
       return landed.filePath;
     }));
   commandRegistry.register('terminal:upload-cancel', (uploadId: PaneCommandValue) =>
-    uploadStore().cancel(decodeBoundary(uploadId, boundary.nonEmptyString)));
+    uploadStore(services.configManager).cancel(decodeBoundary(uploadId, boundary.nonEmptyString)));
 
   // Check if a panel type should be auto-created (not previously closed by user)
   commandRegistry.register('panels:shouldAutoCreate', async (sessionId: string, panelType: string) => {

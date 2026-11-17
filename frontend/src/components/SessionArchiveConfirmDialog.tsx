@@ -1,6 +1,8 @@
 import { useRef } from 'react';
+import { Archive } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { Button } from './ui/Button';
+import { ConfirmDialog } from './ConfirmDialog';
 import { useSessionArchiveConfirmStore } from './orchestrationSessionActions';
 import type { RunpanePaneArchiveBlockCode } from '../../../shared/types/runpaneOrchestration';
 
@@ -13,7 +15,10 @@ const BLOCK_REASONS = {
   'status-unknown': 'Pane could not check for unsaved work',
 } satisfies Record<RunpanePaneArchiveBlockCode, string>;
 
-/** Asks what to do with a Session's Panes that have work in progress before archiving the Session. */
+/**
+ * Confirms archiving a Session: says what it does to the loops that send to it, and asks what to
+ * do with its Panes that have work in progress.
+ */
 export function SessionArchiveConfirmDialog() {
   const confirm = useSessionArchiveConfirmStore(state => state.confirm);
   const keepRef = useRef<HTMLButtonElement>(null);
@@ -23,10 +28,28 @@ export function SessionArchiveConfirmDialog() {
   const total = confirm.panes.length;
   const title = `Archive ${confirm.sessionName}?`;
 
+  if (unsafe.length === 0) {
+    const panesLine = total === 0 ? 'It has no Panes.' : `Archiving this Session also archives its ${total === 1 ? 'Pane' : `${total} Panes`}.`;
+    return (
+      <ConfirmDialog
+        isOpen
+        onClose={() => confirm.choose(null)}
+        // No Pane has work in progress, so `keep` archives the Session with all its Panes.
+        onConfirm={() => confirm.choose('keep')}
+        title={title}
+        message={`${confirm.loopNote ? `${confirm.loopNote} ` : ''}${panesLine} You can undo right after.`}
+        confirmText={confirm.loopNote ? 'Archive and pause' : 'Archive'}
+        variant="warning"
+        icon={<Archive className="h-6 w-6 flex-shrink-0 text-status-warning" />}
+      />
+    );
+  }
+
   return (
     <Modal isOpen onClose={() => confirm.choose(null)} size="md" ariaLabel={title} initialFocusRef={keepRef}>
       <div className="p-6 pt-2">
         <h3 className="mb-3 text-lg font-medium text-text-primary">{title}</h3>
+        {confirm.loopNote && <p className="mb-3 text-text-secondary">{confirm.loopNote}</p>}
         <p className="mb-3 text-text-secondary">
           Archiving this Session also archives its {total === 1 ? 'Pane' : `${total} Panes`}.{' '}
           {unsafe.length === 1 ? 'This one has' : `These ${unsafe.length} have`} work in progress:

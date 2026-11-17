@@ -30,6 +30,7 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { commandOnMachine, openOnMachine, runOnMachine } from '../../utils/machineRowActions';
+import { confirmMachineArchive } from '../archiveConfirm';
 import { savedOrderAfterMove, type AllMachinesPane, type AllMachinesSession, type MachineRef } from '../../utils/allMachinesTree';
 import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../../hooks/useRowReorder';
 import { cn } from '../../utils/cn';
@@ -138,7 +139,12 @@ function RowActionsMenu({ menu, onClose, onRename, onMove, onReviewPermission }:
           </PopoverButton>
         )}
         <div className="my-1 border-t border-border-primary" />
-        <PopoverButton role="menuitem" variant="danger" onClick={() => act(() => runOnMachine(machineId, { type: 'archive', target: ref }, `Could not archive the ${noun}`))}>
+        <PopoverButton role="menuitem" variant="danger" onClick={() => {
+          if (!menu) return;
+          const archive = () => runOnMachine(machineId, { type: 'archive', target: ref }, `Could not archive the ${noun}`);
+          confirmMachineArchive(pane ? { kind: 'pane', pane: pane.pane } : { kind: 'session', name: session?.session.name ?? '' }, menu.machine.name, archive, opener.current);
+          onClose();
+        }}>
           <span className="flex items-center gap-2"><Archive className="h-4 w-4" />Archive</span>
         </PopoverButton>
       </div>
@@ -222,7 +228,6 @@ function PaneRow({ row, active, nested, onMenu, reorder }: { row: AllMachinesPan
           showUnviewedCompleted={false}
           agentDisplayStatus={row.status}
           rowLayout="single"
-          isLoopRun={false}
           notifyWaiting={row.waiting}
         />
       </div>

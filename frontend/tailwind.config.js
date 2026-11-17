@@ -15,6 +15,13 @@ const ATTENTION_PULSES = 3;
  */
 const WORKING_TURNS = 6;
 
+/**
+ * Loading skeletons run Tailwind's pulse in opacity steps: 5 values each way
+ * over its 2 s period, so the compositor paints about 4 frames a second instead
+ * of one per display refresh (120-144 a second).
+ */
+const SKELETON_STEPS = 5;
+
 /** @type {import('tailwindcss').Config} */
 const config = {
   darkMode: 'class',
@@ -293,7 +300,7 @@ const config = {
         },
       },
       animation: {
-        shimmer: 'shimmer 2s linear infinite',
+        skeleton: `pulse 2s steps(${SKELETON_STEPS}, jump-none) infinite`,
         // Tailwind's `animate-pulse`, run a set number of times instead of forever.
         'attention-pulse': defaultTheme.animation.pulse.replace('infinite', String(ATTENTION_PULSES)),
         // Tailwind's `animate-spin`, run a set number of turns instead of forever.
@@ -309,10 +316,6 @@ const config = {
         'modal-overlay-enter': 'fade-in var(--duration-modal) var(--ease-out-strong)',
       },
       keyframes: {
-        shimmer: {
-          '0%': { transform: 'translateX(-100%)' },
-          '100%': { transform: 'translateX(100%)' },
-        },
         // Vertical "loading" light that sweeps up and down the working status bar.
         'status-working-sweep': {
           '0%': { transform: 'translateY(-120%)' },

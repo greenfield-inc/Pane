@@ -864,11 +864,15 @@ export function RemotePwaApp() {
       await runtime.updateOrchestrationSession(session.id, { isPinned: session.isPinned !== true });
       await refreshOrchestrationSessions(runtime);
     }),
-    setSessionArchived: (session, archived) => void runSidebarAction(session.id, archived ? 'Failed to archive Session' : 'Failed to restore Session', async (runtime) => {
-      await runtime.updateOrchestrationSession(session.id, { archived });
-      setArchivedSessionToast(current => archived ? session : current?.id === session.id ? null : current);
-      await refreshOrchestrationSessions(runtime);
-    }),
+    setSessionArchived: (session, archived) => {
+      // Asks before archiving, as archiving a pane does; restoring and Undo need no confirm.
+      if (archived && !window.confirm(`Archive Session "${session.name || 'Untitled'}"?`)) return;
+      void runSidebarAction(session.id, archived ? 'Failed to archive Session' : 'Failed to restore Session', async (runtime) => {
+        await runtime.updateOrchestrationSession(session.id, { archived });
+        setArchivedSessionToast(current => archived ? session : current?.id === session.id ? null : current);
+        await refreshOrchestrationSessions(runtime);
+      });
+    },
     setSessionPaused: (session, paused) => void runSidebarAction(session.id, paused ? 'Failed to pause Session' : 'Failed to resume Session', async (runtime) => {
       const note = await runtime.setPaused({ kind: 'session', id: session.id }, paused);
       await Promise.all([refreshOrchestrationSessions(runtime), refreshProjects(runtime)]);

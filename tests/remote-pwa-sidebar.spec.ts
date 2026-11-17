@@ -110,11 +110,17 @@ test('the Diff tab shows the branch\'s changes read-only, each file opening to i
   await expect(page.getByText('panels are visible in desktop Pane')).toHaveCount(0);
 });
 
-test('archiving a Session from its row menu can be undone from the toast', async ({ page }) => {
+test('archiving a Session from its row menu asks first and can be undone from the toast', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openConnectedRemotePwa(page, { orchestrationSessionNames: ['Release prep'] });
   await page.getByRole('button', { name: 'Open remote panes' }).click();
 
+  // Dismissing the confirm keeps the Session.
+  page.once('dialog', dialog => { expect(dialog.message()).toBe('Archive Session "Release prep"?'); void dialog.dismiss(); });
+  await archiveSession(page, 'Release prep');
+  await expect(page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session Release prep' })).toBeVisible();
+
+  page.once('dialog', dialog => void dialog.accept());
   await archiveSession(page, 'Release prep');
   await expect(page.getByRole('button', { name: 'Open Session Release prep' })).toHaveCount(0);
   await page.getByRole('status').filter({ hasText: 'Archived Release prep' }).getByRole('button', { name: 'Undo' }).click();

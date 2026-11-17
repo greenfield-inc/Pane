@@ -47,7 +47,7 @@ export function SessionStatusPage({ url, folderSessionId }: { url: string; folde
       <webview ref={webviewRef} src={url} partition={SHARED_BROWSER_PARTITION}
         className="flex-1 border-0" style={{ display: 'inline-flex' }} />
       {!loaded && <div role="status" aria-label="Loading the status page" className="absolute inset-0 bg-surface-primary">
-        <div aria-hidden="true" className="flex animate-pulse flex-col gap-3 p-3">
+        <div aria-hidden="true" className="flex animate-skeleton flex-col gap-3 p-3">
           <div className="h-5 w-1/2 rounded bg-surface-secondary" />
           <div className="h-8 w-full rounded bg-surface-secondary" />
           <div className="h-40 w-full rounded bg-surface-secondary" />

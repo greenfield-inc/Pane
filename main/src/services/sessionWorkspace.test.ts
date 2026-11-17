@@ -33,6 +33,19 @@ describe('Session workspace instructions', () => {
     await expect(fs.readFile(path.join(first, 'notes.md'), 'utf8')).resolves.toBe('Keep this artifact.');
   });
 
+  it('asks the agent to name only a Session that still has its default name', async () => {
+    const base: OrchestrationSessionRecord = {
+      id: 'unnamed', name: 'New chat', agent: 'claude', internalSessionId: 'owner',
+      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor', opencode: 'opencode' },
+      goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+      associations: [], activity: [], revision: 1, createdAt: '2026-11-16', updatedAt: '2026-11-16',
+    };
+    const agentsFor = async (record: OrchestrationSessionRecord) =>
+      fs.readFile(path.join(prepareSessionWorkspace(record.id, undefined, record), 'AGENTS.md'), 'utf8');
+    expect(await agentsFor({ ...base, nameIsDefault: true })).toContain('runpane sessions update --session unnamed');
+    expect(await agentsFor({ ...base, id: 'named', name: 'Billing exports' })).not.toContain('runpane sessions update');
+  });
+
   it.each(['runtime-context.md', '.pane-runtime/runpane', '.pane-runtime/notes.txt', 'notes.txt'])('retains failed WSL scaffolds with user content in %s', async fileName => {
     const record: OrchestrationSessionRecord = {
       id: 'failed-wsl', name: 'WSL', agent: 'codex', internalSessionId: 'owner', runtime: 'wsl', wslDistribution: 'Ubuntu',
@@ -66,6 +79,11 @@ describe('Session workspace instructions', () => {
     const edited = await fs.readFile(file, 'utf8');
     expect(isPristineSessionWorkspace(record)).toBe(false);
     expect(await fs.readFile(file, 'utf8')).toBe(edited);
+  });
+
+  it.skipIf(process.platform === 'win32')('creates Session instruction files only the person can read', async () => {
+    const cwd = prepareSessionWorkspace('private');
+    for (const name of ['AGENTS.md', 'CLAUDE.md']) expect((await fs.stat(path.join(cwd, name))).mode & 0o777).toBe(0o600);
   });
 
   it('prepares Sessions under a repository such as a dotfiles home, and stops git discovery above them', async () => {
@@ -113,7 +131,7 @@ describe('Session workspace instructions', () => {
     const agentsPath = path.join(cwd, 'AGENTS.md');
     const broken = 'User content.\n<!-- pane-session-context:start -->\nIncomplete';
     await fs.writeFile(agentsPath, broken);
-    expect(() => prepareSessionWorkspace('session-a')).toThrow('markers are incomplete');
+    expect(() => prepareSessionWorkspace('session-a')).toThrow("markers in it don't pair up");
     await expect(fs.readFile(agentsPath, 'utf8')).resolves.toBe(broken);
   });
   it('tells the agent to write plans as HTML, link them from the status document, and open them only when needed', async () => {
@@ -132,8 +150,8 @@ describe('Session workspace instructions', () => {
     const agents = (await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8')).replace(/\s+/g, ' ');
     expect(agents).toContain('## Keep the Session tidy');
     expect(agents).toContain('Clean up as you go, without asking. In your next message, say in one line what you closed or archived.');
-    expect(agents).toContain('Keep one status document for this Session, in the Session folder, and update it in place.');
-    expect(agents).toContain('Open it beside the person when you first write it');
+    expect(agents).toContain('Keep one status document for this Session at `session/index.html` in the Session folder, and update it in place.');
+    expect(agents).toContain("Pane shows it in the Session's Overview tab, so never open it as a tab.");
     expect(agents).toContain('Open a page beside the person only when they need to look at it now');
     expect(agents).toContain('runpane panels close --panel <id> --yes --json');
     expect(agents).toContain('A tab\'s age is a signal to close it; having been viewed recently is not a reason to keep it.');
@@ -206,7 +224,7 @@ describe('Session workspace instructions', () => {
     expect(agents).toContain('runpane inbox ack <item> --decision <D-n>');
     expect(agents).toContain('correction: Q-n → <answer> (by you)');
     expect(agents).toContain('reply: Q-n → "<their words>" (picked: <picks>) (by you)');
-    expect(agents).toContain('run runpane notify --took <id|Q-n> answer and act on it');
+    expect(agents).toContain('Pane records it as the answer once its reader gets it. If it answers, act on it. If it\'s a question, run runpane notify --took <id|Q-n> question at once (it reopens the approval)');
     expect(agents).toContain('runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"');
     expect(agents).toContain('never post a second approval for it');
     expect(agents).toContain('## Asking the person in Pane');
