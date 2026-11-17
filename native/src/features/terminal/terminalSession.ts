@@ -34,6 +34,8 @@ export interface TerminalSize {
 
 export class TerminalSession {
   private size: TerminalSize | null = null;
+  /** The size the host's PTY last took from this screen. */
+  private hostSize: TerminalSize | null = null;
   /** Bumped by every restore and by `detach`, so stale restores stop writing. */
   private generation = 0;
   private live = false;
@@ -44,9 +46,9 @@ export class TerminalSession {
   constructor(private readonly options: TerminalSessionOptions) {}
 
   /**
-   * Shows the panel at `size`: starts the PTY if needed, sizes it, then replaces
-   * the screen with the host's snapshot. Call again after reconnecting or
-   * returning to the foreground, since the event stream does not replay output.
+   * Shows the panel at `size` in two round trips: the start check, the PTY size and this viewer's
+   * visibility go together, then the host's snapshot is read. Call again after reconnecting,
+   * since the event stream does not replay output. A return at the same size skips the resize.
    */
   async restore(size: TerminalSize): Promise<void> {
     const generation = ++this.generation;
@@ -57,21 +59,24 @@ export class TerminalSession {
     const cols = () => this.size?.cols ?? size.cols;
     const rows = () => this.size?.rows ?? size.rows;
     try {
-      const initialized = await invoke('panels:checkInitialized', [panelId]);
+      const [initialized] = await Promise.all([
+        invoke('panels:checkInitialized', [panelId]),
+        // Sized before the snapshot is read, so the host serializes it at the width this screen shows.
+        // An unstarted panel refuses it and starts at the size below instead.
+        this.sizeHostAt(cols(), rows()),
+        invoke('terminal:setVisibility', [panelId, true, viewerId]),
+      ]);
       if (generation !== this.generation) return;
       if (initialized !== true) {
         // A panel this screen starts has nothing to restore. Going live first
         // shows its first frame, which the host's snapshot can lag behind.
         sink.reset('');
         this.live = true;
-        await invoke('terminal:setVisibility', [panelId, true, viewerId]);
         await invoke('panels:initialize', [panelId, { sessionId, cols: cols(), rows: rows() }]);
         return;
       }
-      // Size the PTY before reading the snapshot, so the host serializes it at
-      // the width this screen shows.
-      await invoke('terminal:resize', [panelId, cols(), rows()]);
-      await invoke('terminal:setVisibility', [panelId, true, viewerId]);
+      // The screen resized while the first trip was out.
+      await this.sizeHostAt(cols(), rows());
       const state = await invoke('terminal:getState', [panelId]) as HostTerminalSnapshot | null;
       if (generation !== this.generation) return;
       sink.reset(terminalSnapshotText(state));
@@ -84,6 +89,15 @@ export class TerminalSession {
     } catch (error) {
       if (generation === this.generation) this.options.onError?.(error);
     }
+  }
+
+  /** Sizes the host's PTY unless it is already at this size. */
+  private async sizeHostAt(cols: number, rows: number): Promise<void> {
+    if (this.hostSize?.cols === cols && this.hostSize.rows === rows) return;
+    await this.options.invoke('terminal:resize', [this.options.panelId, cols, rows]).then(
+      () => { this.hostSize = { cols, rows }; },
+      () => undefined,
+    );
   }
 
   /**
@@ -132,8 +146,7 @@ export class TerminalSession {
     if (this.size && this.size.cols === size.cols && this.size.rows === size.rows) return;
     this.size = size;
     // A lost resize only leaves the PTY at the old size until the next one.
-    void this.options.invoke('terminal:resize', [this.options.panelId, size.cols, size.rows])
-      .catch(() => undefined);
+    void this.sizeHostAt(size.cols, size.rows);
   }
 
   /** Tells the host nobody is watching, so it stops pacing the PTY to this screen. */

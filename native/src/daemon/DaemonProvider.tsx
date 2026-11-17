@@ -46,9 +46,17 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
   const [connection, setConnection] = useState<RemoteDaemonConnectionState>(() => client.getState());
 
   useEffect(() => {
+    // When this connection, or the latest return to the app, began.
+    let since = Date.now();
     const unsubscribeRestore = client.onRestore(async signal => {
-      await queryClient.refetchQueries({ queryKey: [profile.id], type: 'active' }, { throwOnError: true });
-      connectionMark('restored=workspace-lists', { repeat: true });
+      // The stream replays nothing, so each open list reads again: once. A read already on its way
+      // since the return (the focus refetch) is joined, a list answered since then is skipped, and
+      // one list failing (a channel an older host lacks) fails only itself. Nothing here holds up
+      // the connection: screens show what they have and update as the answers land.
+      void queryClient.refetchQueries(
+        { queryKey: [profile.id], type: 'active', predicate: query => query.state.dataUpdatedAt < since },
+        { cancelRefetch: false },
+      ).then(() => connectionMark('restored=workspace-lists', { repeat: true }));
       if (signal.aborted) return;
       // A switch changed while this computer was away reaches it now.
       requestPushRegistration();
@@ -64,6 +72,7 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
     const appState = AppState.addEventListener('change', status => {
       if (status === 'background') client.suspend();
       else if (status === 'active') {
+        since = Date.now();
         if (client.getState().status === 'local') void connect();
         else client.resume();
       }

@@ -63,7 +63,7 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
   const home = useHomeFeeds({ active: focused });
-  const { here, all, feeds, chipMachines, current, presence, notice, retry } = home;
+  const { here, all, feeds, chipMachines, current, presence, live, notice, retry } = home;
   const profile = here.profile;
   const autopilot = useAutopilot();
   const actions = usePaneActions();
@@ -87,8 +87,8 @@ export function HomeScreen() {
   const held = listed.waiting.filter(row => archiving.hidden.has(row.key));
   const loading = all ? feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined && feed.error === undefined) : here.loading;
   const counts = loading ? undefined : boardCounts(board, held);
-  // One machine's Home dims while it isn't connected; All never dims as a whole.
-  const dimmed = !all && presence !== 'connected';
+  // One machine's Home dims once its connection has been down past the grace window; All never dims as a whole.
+  const dimmed = !all && !live;
   useValueMark('counts', counts ? `${counts.needs}/${counts.working}/${counts.ready}/${counts.all}` : '-');
   useLiveMarks('home', !dimmed && !loading, Math.min(here.projects.dataUpdatedAt, here.statuses.dataUpdatedAt, here.notify.dataUpdatedAt));
   useEffect(() => markNextFrame(['launch', 'switch'], 'home-frame'), []);

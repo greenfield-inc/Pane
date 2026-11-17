@@ -386,6 +386,49 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
 });
 
 describe('RemoteDaemonClient when the phone leaves and returns', () => {
+  it('sends a read again when an attempt gets no answer for 15 s, as on a socket that died in the background', async () => {
+    const host = createFakeHost();
+    let attempts = 0;
+    host.onInvoke(() => (++attempts === 1 ? new Promise<Response>(() => {}) : Response.json({ ok: true, result: ['pane'] })));
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+
+    let answer: unknown;
+    void client.invoke('sessions:get-all-with-projects').then(result => { answer = result; });
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(answer).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(answer).toEqual(['pane']);
+    expect(attempts).toBe(2);
+    client.disconnect();
+  });
+
+  it('lets a screen wait for the connection to come back, up to a limit', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+    await expect(client.whenConnected(10_000)).resolves.toBeUndefined();
+
+    client.suspend();
+    let back = false;
+    void client.whenConnected(10_000).then(() => { back = true; });
+    client.resume();
+    await flush();
+    expect(back).toBe(true);
+
+    client.suspend();
+    host.dropTunnel(true);
+    const waiting = client.whenConnected(10_000);
+    const gaveUp = expect(waiting).rejects.toThrow('did not come back');
+    client.resume();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await gaveUp;
+    client.disconnect();
+  });
+
   it('reconnects on return after more than five minutes in the background', async () => {
     const host = createFakeHost();
     // No heartbeats in these tests; keep the stale-stream timer out of the way.

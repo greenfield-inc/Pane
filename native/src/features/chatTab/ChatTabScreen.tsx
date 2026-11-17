@@ -15,6 +15,7 @@ import { Text } from '@/ui';
 
 import { ComposerSheet } from '../composer/ComposerSheet';
 import { Dimmed } from '../hosts/ConnectionStatus';
+import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { ChatCommandList } from './ChatCommandList';
 import { ChatTabComposer } from './ChatTabComposer';
 import { ChatTabSettings } from './ChatTabSettings';
@@ -62,7 +63,8 @@ export interface ChatTabScreenProps {
 export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, onViewDiff, placeholder, blocks, userNotice, queuedLabel, settings: showSettings = true }: ChatTabScreenProps) {
   const theme = useTheme();
   useScreenJourney('chat');
-  const { chat, viewer, snapshot, connected } = useChatTab(panelId);
+  const { chat, viewer, snapshot, whenConnected } = useChatTab(panelId);
+  const { live } = useConnectionPresence();
   const catalog = useChatAgents();
   const view = snapshot.view;
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
@@ -79,7 +81,8 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     renderBlock: (language, content) => blocks?.[language]?.(content),
   }), [onViewDiff, onOpenWorker, onOpenDevice, blocks]);
   const agent = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
-  const disabled = !connected || !view || view.status === 'stopped';
+  // Full strength and typing while the connection comes back; a send waits for it.
+  const disabled = !live || !view || view.status === 'stopped';
   useJourneyMark('chat', 'messages', messages.length > 0);
   useJourneyMark('chat', 'live', !disabled);
   useLiveMarks('chat', !disabled);
@@ -96,6 +99,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   const deliver = async (request: ChatTabSend, retry: boolean) => {
     viewer.setPendingDelivery(request);
     try {
+      await whenConnected();
       const receipt = retry ? await chat.send(panelId, request) : await chat.receipt(panelId, request.operationId);
       if (!receipt) { viewer.setError('The computer has no record of that message yet. Retry sends it once, with the same ID.'); return; }
       viewer.setPendingDelivery(undefined);
@@ -175,12 +179,12 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     : view?.notice ? <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>{view.notice}</Text> : null;
   return <AssistantRuntimeProvider runtime={runtime}>
     <ThreadPrimitive.Root testID="chat-tab" style={[styles.fill, { backgroundColor: theme.chat.background }]}>
-      {view?.problem && <View style={styles.pad}><ProblemBanner problem={view.problem} agent={agent} busy={busy || !connected}
+      {view?.problem && <View style={styles.pad}><ProblemBanner problem={view.problem} agent={agent} busy={busy || !live}
         onRestart={() => void act(() => chat.restart(panelId))} onSignIn={() => void act(() => chat.signIn(panelId))} /></View>}
       {error && <View accessibilityLiveRegion="polite" testID="chat-error" style={[styles.error, { backgroundColor: theme.chat.dangerSoft, borderColor: theme.chat.danger }]}>
         <Text selectable variant="subhead" style={{ color: theme.chat.danger }}>{error}</Text>
       </View>}
-      <Dimmed dimmed={!connected} style={styles.fill}>
+      <Dimmed dimmed={!live} style={styles.fill}>
         {!snapshot.transcript && !view?.problem
           ? <View style={styles.loading}><ActivityIndicator color={theme.chat.mutedForeground} /><Text style={{ color: theme.chat.mutedForeground }}>{view?.status === 'starting' || !view ? `Starting ${agent}…` : 'Loading conversation…'}</Text></View>
           : <LegendList testID="chat-rows" data={rows} keyExtractor={row => row.key} estimatedItemSize={60} recycleItems={false}
@@ -194,15 +198,15 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
       <View style={styles.dock}>
         {snapshot.pendingDelivery && <View style={styles.inline}>
           <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Delivery is unconfirmed.</Text>
-          <DockButton testID="chat-check-delivery" title="Check delivery" disabled={!connected} onPress={() => void deliver(snapshot.pendingDelivery!, false)} />
-          <DockButton testID="chat-retry-delivery" title="Retry same message" disabled={!connected} onPress={() => void deliver(snapshot.pendingDelivery!, true)} />
+          <DockButton testID="chat-check-delivery" title="Check delivery" disabled={!live} onPress={() => void deliver(snapshot.pendingDelivery!, false)} />
+          <DockButton testID="chat-retry-delivery" title="Retry same message" disabled={!live} onPress={() => void deliver(snapshot.pendingDelivery!, true)} />
         </View>}
         {view?.questions.map(question => <QuestionCard key={question.id} question={question} disabled={disabled || busy} onAnswer={answer => void act(() => chat.answer(panelId, question.id, answer))} />)}
         {view?.permissions.map(permission => <ApprovalCard key={permission.id} permission={permission} agent={agent} disabled={disabled || busy} onAnswer={optionId => void act(() => chat.permission(panelId, permission.id, optionId))} />)}
         {!!view?.queue.length && <QueueList queue={view.queue} label={queuedLabel} onRemove={operationId => void act(() => chat.unqueue(panelId, operationId))} />}
         <ChatCommandList commands={commands} onPick={pickCommand} />
         <ChatTabComposer agent={agent} placeholder={placeholder ?? 'Ask anything'}
-          disabled={disabled} pending={pending} working={working} canStop={!busy && connected} canAttach={!!view?.canAttachImages}
+          disabled={disabled} pending={pending} working={working} canStop={!busy && live} canAttach={!!view?.canAttachImages}
           model={labels.model} effort={labels.effort}
           riskyMode={riskyMode} canConfigure={!!view?.controls.length} settings={showSettings}
           onDraft={text => viewer.setDraft(text)} onAttach={() => void attach()} onSettings={() => setSettings(true)} onStop={() => void act(() => chat.cancel(panelId))} />

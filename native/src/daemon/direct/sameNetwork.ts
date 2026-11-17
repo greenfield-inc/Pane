@@ -5,6 +5,8 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 const PROBE_TIMEOUT_MS = 1_500;
 /** While on the relay, how often the same-network addresses are tried again. */
 const RECHECK_MS = 60_000;
+/** A same-network request with no answer by then means the phone left that network. */
+const SAME_NETWORK_STALL_MS = 3_000;
 
 interface SameNetwork {
   /** The same-network address in use, or null while on the relay. */
@@ -38,9 +40,9 @@ function sameNetworkBases(profile: RelayConnectionProfile): string[] {
 
 /**
  * Wraps `fetch` so a relay computer's requests go to its same-network address (`relay.local`)
- * when one answers within a short timeout, and through the relay otherwise. A failed request on
- * the same network sends the next ones through the relay; the same network is tried again after
- * a minute.
+ * once one has answered a short check, and through the relay otherwise. The check runs beside
+ * the requests and never holds one up. A same-network request that fails, or gets no answer for
+ * 3 s, sends the next ones through the relay; the same network is tried again after a minute.
  */
 export function sameNetworkFetch(profile: RemotePaneConnectionProfile, fetch: RemoteFetch, now: () => number = Date.now): RemoteFetch {
   if (!isRelayProfile(profile)) return fetch;
@@ -60,13 +62,21 @@ export function sameNetworkFetch(profile: RemotePaneConnectionProfile, fetch: Re
         return base;
       });
     }
-    const base = entry.base ?? (entry.probe ? await entry.probe : null);
+    const base = entry.base;
     if (!base) return fetch(url, init);
-    return fetch(`${base}${url.slice(relayBase.length)}`, init).catch((error: unknown) => {
-      if (!init?.signal?.aborted && entry.base === base) {
-        entry.base = null;
-        entry.checkedAt = now();
-      }
+    const leave = () => {
+      if (entry.base !== base) return;
+      entry.base = null;
+      entry.checkedAt = now();
+    };
+    // Off that Wi-Fi, a request can hang rather than fail; stop sending new ones there.
+    const stalled = setTimeout(leave, SAME_NETWORK_STALL_MS);
+    return fetch(`${base}${url.slice(relayBase.length)}`, init).then(response => {
+      clearTimeout(stalled);
+      return response;
+    }, (error: unknown) => {
+      clearTimeout(stalled);
+      if (!init?.signal?.aborted) leave();
       throw error;
     });
   };

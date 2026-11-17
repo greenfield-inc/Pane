@@ -177,6 +177,8 @@ const MAX_FAILED_REQUESTS_IN_A_ROW = 3;
 const RECONNECT_GAVE_UP_MESSAGE = 'Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.';
 /** A resent write's attempt with no answer by then is sent again; a repeat of a slow write waits for the first on the host. */
 const RESENT_WRITE_ATTEMPT_TIMEOUT_MS = 30_000;
+/** A read's attempt with no answer by then is sent again, so a socket that died in the background fails fast. */
+const READ_ATTEMPT_TIMEOUT_MS = 15_000;
 /**
  * A tunnel such as Tailscale's takes a moment to come back after sleep, and a request sent before
  * it does may never answer. For the first seconds after a wake a fresh probe goes out every 250 ms,
@@ -403,6 +405,14 @@ export class RemoteDaemonClient {
     if (this.abortController && !this.abortController.signal.aborted) void this.openEventStream(this.abortController.signal);
   }
 
+  /**
+   * Resolves once the workspace is connected, or rejects after `timeoutMs`. A screen that lets
+   * the person act while the connection comes back waits here, then sends the action once.
+   */
+  whenConnected(timeoutMs: number): Promise<void> {
+    return this.waitUntilConnected(Date.now() + timeoutMs);
+  }
+
   async invoke<T = unknown>(channel: string, args: unknown[] = []): Promise<T> {
     // SAFETY: The named IPC/API channel contract establishes this response payload type.
     return this.inputQueue.invoke(channel, args) as Promise<T>;
@@ -456,6 +466,8 @@ export class RemoteDaemonClient {
           attemptSignal = abortSignalAny([signal, this.resendAttempts.signal], this.schedule, RESENT_WRITE_ATTEMPT_TIMEOUT_MS);
         } else if (attemptTimeoutMs !== undefined) {
           attemptSignal = abortSignalAny([signal], this.schedule, attemptTimeoutMs);
+        } else if (retryableRead) {
+          attemptSignal = abortSignalAny([signal], this.schedule, READ_ATTEMPT_TIMEOUT_MS);
         }
         const context = await this.requestContext();
         if (requestId !== undefined) context.requestId = requestId;
