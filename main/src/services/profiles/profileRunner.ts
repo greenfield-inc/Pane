@@ -456,7 +456,10 @@ export class ProfileRunner {
       await this.apply(run.id, profile, { run, effect: this.unfinishedEffect(run, profile) });
       return;
     }
-    if (run.wait.kind === 'step' && !this.ports.tabExists(run.wait.panelId)) {
+    // Pane restores a command step's tab as a fresh shell and never runs the command again, so
+    // its exit code will never come: ask for its outcome, as for a tab that is gone.
+    const commandStep = profile.flow?.steps.find((candidate) => candidate.id === run.step)?.kind === 'command';
+    if (run.wait.kind === 'step' && (commandStep || !this.ports.tabExists(run.wait.panelId))) {
       const lost = stepLost(run, profile, this.ports.now());
       if (lost) await this.apply(run.id, profile, lost);
     }

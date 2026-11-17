@@ -260,6 +260,21 @@ describe('ProfileRunner', () => {
     expect(restarted.list()[0]).toMatchObject({ step: 'build', wait: { panelId: 'tab-2' } });
   });
 
+  it('asks for a command step\'s outcome after a restart even when its tab is back, since the command did not run again', async () => {
+    const pane = new FakePane();
+    const first = new ProfileRunner(pane.ports());
+    await first.launch(launchRequest());
+    await first.reportOutcome('tab-1', 'plan ready');
+    pane.answer(pane.cards[0], 'approve');
+    await settle();
+    await first.reportOutcome('tab-2', 'PR ready');
+    const restarted = new ProfileRunner(pane.ports());
+    await restarted.resumeAll();
+    expect(restarted.list()[0]).toMatchObject({ step: 'checks', wait: { kind: 'card', card: 'set-outcome' } });
+    expect(pane.cards.at(-1)).toMatchObject({ title: 'Which outcome did checks have?' });
+    expect(pane.tabs).toHaveLength(3);
+  });
+
   it('asks for the outcome when the step\'s tab is gone after a restart', async () => {
     const pane = new FakePane();
     await new ProfileRunner(pane.ports()).launch(launchRequest());
