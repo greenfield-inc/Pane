@@ -133,10 +133,10 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
 
   // A browser tab's local page: the file is on this computer only when this desktop runs its own Pane.
   ipcMain.handle('openLocalPage', async (_event, fileUrl: string) => {
-    if (remotePaneClientController.getConnectionState().mode === 'remote') {
-      return { success: false, error: 'This file is on the host, so your browser on this computer can\'t open it. Nothing was opened.' };
-    }
     try {
+      if (remotePaneClientController.getConnectionState().mode === 'remote') {
+        throw new PaneError('ERR_LOCAL_PAGE_ON_HOST', 'Pane did not open this file in your browser: it is on the host, not this computer. Nothing was opened.', 'Open the page on the host, or serve it over http and open its port from the Ports menu.');
+      }
       await openLocalPage(fileUrl);
       return { success: true };
     } catch (error) {

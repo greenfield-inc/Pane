@@ -1,3 +1,4 @@
+import { realpath, stat } from 'fs/promises';
 import { extname } from 'path';
 import { fileURLToPath } from 'url';
 import { PaneError } from '../../../shared/paneError';
@@ -47,8 +48,29 @@ export function toLocalPagePath(value: string): string {
   } catch {
     path = null;
   }
-  if (path !== null && LOCAL_PAGE_EXTENSIONS.has(extname(path).toLowerCase())) return path;
-  throw new PaneError(
+  if (path !== null && isLocalPageName(path)) return path;
+  throw localPageBlocked();
+}
+
+/**
+ * The real file a local page's `file:` URL names, to hand to the OS. A link is followed, and the file it reaches must
+ * be a page too, so `page.html -> setup.command` is refused. Throws `ERR_LOCAL_PAGE_BLOCKED` or `ERR_LOCAL_PAGE_MISSING`.
+ */
+export async function toLocalPageFile(value: string): Promise<string> {
+  const path = toLocalPagePath(value);
+  const real = await realpath(path).catch(() => {
+    throw new PaneError('ERR_LOCAL_PAGE_MISSING', `Pane did not open ${path} in your browser: the file no longer exists.`, 'Reload the tab, or open the page again.');
+  });
+  if (!isLocalPageName(real) || !(await stat(real)).isFile()) throw localPageBlocked();
+  return real;
+}
+
+function isLocalPageName(path: string): boolean {
+  return LOCAL_PAGE_EXTENSIONS.has(extname(path).toLowerCase());
+}
+
+function localPageBlocked(): PaneError {
+  return new PaneError(
     'ERR_LOCAL_PAGE_BLOCKED',
     'Pane did not open this file in your browser: only .html and .htm files on this computer open there. Nothing was opened.',
     'Open the file from Finder or your file manager if you trust it.',

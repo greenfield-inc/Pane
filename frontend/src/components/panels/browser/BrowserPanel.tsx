@@ -397,7 +397,10 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     if (!externalUrl) return 'Open a page first';
     if (isLocalPage) {
       if (isRemoteMode) return `This file is on ${ports?.host ?? 'the host'}, so your browser on this computer can't open it`;
-      return /\.html?$/i.test(new URL(externalUrl).pathname) ? null : 'Only .html and .htm files open in your browser';
+      const page = new URL(externalUrl);
+      // A file URL's host is another computer's share, except the hosts Windows serves local WSL files from.
+      if (page.host && !/^wsl(?:\.localhost|\$)$/i.test(page.hostname)) return `This file is on ${page.hostname}, not this computer`;
+      return /\.html?$/i.test(page.pathname) ? null : 'Only .html and .htm files open in your browser';
     }
     if (!/^https?:/i.test(externalUrl)) return 'Only http, https and .html pages open in your browser';
     const external = targetOf(externalUrl);

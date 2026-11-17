@@ -199,6 +199,12 @@ test('Open in your browser opens a local .html page, and its tooltip says why it
     webview.dispatchEvent(new Event('did-navigate'));
   });
   await expect(page.getByTitle("Can't open in your browser: Only .html and .htm files open in your browser")).toBeDisabled();
+
+  await page.locator('webview').evaluate(webview => {
+    Object.assign(webview, { getURL: () => 'file://server/share/page.html' });
+    webview.dispatchEvent(new Event('did-navigate'));
+  });
+  await expect(page.getByTitle("Can't open in your browser: This file is on server, not this computer")).toBeDisabled();
 });
 
 test('on a remote desktop, Open in your browser waits for a forwarded port', async ({ page }) => {

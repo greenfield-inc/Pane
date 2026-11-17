@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { pathToFileURL } from 'url';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PaneError } from '../../../shared/paneError';
-import { externalUrlOrNull, toExternalUrl, toLocalPagePath } from './externalUrl';
+import { externalUrlOrNull, toExternalUrl, toLocalPageFile, toLocalPagePath } from './externalUrl';
 
 describe('externalUrlOrNull', () => {
   it.each([
@@ -77,5 +81,39 @@ describe.runIf(process.platform === 'win32')('toLocalPagePath on Windows', () =>
 
   it('refuses a page on a network share', () => {
     expect(() => toLocalPagePath('file://server/share/page.html')).toThrow(PaneError);
+  });
+});
+
+// Creating symlinks on Windows needs Developer Mode or admin rights.
+describe.skipIf(process.platform === 'win32')('toLocalPageFile', () => {
+  let dir: string;
+  const urlOf = (name: string) => pathToFileURL(join(dir, name)).href;
+  beforeEach(() => { dir = realpathSync(mkdtempSync(join(tmpdir(), 'local-page-'))); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('gives the page itself', async () => {
+    writeFileSync(join(dir, 'status.html'), '<h1>status</h1>');
+    await expect(toLocalPageFile(urlOf('status.html'))).resolves.toBe(join(dir, 'status.html'));
+  });
+
+  it('gives the page a .html link points at', async () => {
+    writeFileSync(join(dir, 'real.html'), '<h1>real</h1>');
+    symlinkSync(join(dir, 'real.html'), join(dir, 'index.html'));
+    await expect(toLocalPageFile(urlOf('index.html'))).resolves.toBe(join(dir, 'real.html'));
+  });
+
+  it('refuses a .html link to a program', async () => {
+    writeFileSync(join(dir, 'setup.command'), '#!/bin/sh\necho ran\n');
+    symlinkSync(join(dir, 'setup.command'), join(dir, 'index.html'));
+    await expect(toLocalPageFile(urlOf('index.html'))).rejects.toMatchObject({ code: 'ERR_LOCAL_PAGE_BLOCKED' });
+  });
+
+  it('refuses a folder named like a page', async () => {
+    mkdirSync(join(dir, 'Tool.html'));
+    await expect(toLocalPageFile(urlOf('Tool.html'))).rejects.toMatchObject({ code: 'ERR_LOCAL_PAGE_BLOCKED' });
+  });
+
+  it('says the file is gone when it no longer exists', async () => {
+    await expect(toLocalPageFile(urlOf('gone.html'))).rejects.toMatchObject({ code: 'ERR_LOCAL_PAGE_MISSING' });
   });
 });
