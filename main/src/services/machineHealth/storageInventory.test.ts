@@ -6,7 +6,8 @@ import { measureSizesHere } from './sizeWalker';
 import { recheckItem, scanStorage, type InventoryDeps, type InventoryPane } from './storageInventory';
 
 const DAY = 86_400_000;
-const NOW = Date.parse('2026-11-15T12:00:00Z');
+// Real time: the scan compares this with the birth time of folders the test creates now.
+const NOW = Date.now();
 
 let root: string;
 const file = (rel: string, bytes: number, ageDays = 0) => {
