@@ -399,8 +399,9 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
     <div className="flex flex-col pb-2" data-testid="all-machines-sidebar">
       <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
       {/* Same order as the single-machine sidebar: Loops, Autopilot, Approvals (D-117, D-198). */}
-      <LoopsNavRow active={activeView === 'loops'} />
+      {/* Profiles sits above Loops: Loops, Autopilot and Approvals stay together (D-117). */}
       <ProfilesNavRow active={activeView === 'profiles'} />
+      <LoopsNavRow active={activeView === 'loops'} />
       <AutopilotNavRow />
       <ApprovalsNavRow />
 
