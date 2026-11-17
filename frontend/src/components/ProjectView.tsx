@@ -4,6 +4,8 @@ import { API } from '../utils/api';
 import { useSessionStore } from '../stores/sessionStore';
 import type { Session } from '../types/session';
 import { PanelTabBar } from './panels/PanelTabBar';
+import { TabStripSkeleton } from './panels/TabStripSkeleton';
+import { TerminalSkeleton } from './panels/TerminalSkeleton';
 import { PanelContainer } from './panels/PanelContainer';
 import { usePanelStore } from '../stores/panelStore';
 import { panelApi } from '../services/panelApi';
@@ -28,6 +30,7 @@ import { useNavigationStore } from '../stores/navigationStore';
 import { PANEL_CAPABILITIES } from '../../../shared/types/panels';
 import type { ProjectEnvironment } from '../../../shared/types/panels';
 import type { ConfiguredIde } from '../../../shared/utils/ideCommands';
+import { LoadingStatus } from './ui/Skeleton';
 
 interface ProjectViewProps {
   projectId: number;
@@ -500,25 +503,9 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
             {/* Center: panel content */}
             <div className="flex-1 relative min-h-0 min-w-0 overflow-hidden">
               {isLoadingSession ? (
-                <div
-                  role="status"
-                  aria-label="Loading main repository session"
-                  className="h-full animate-skeleton"
-                >
-                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-border-primary bg-surface-secondary">
-                    <div className="h-3 w-28 bg-surface-tertiary rounded" />
-                    <div className="flex items-center gap-2">
-                      <div className="h-3.5 w-3.5 bg-surface-tertiary rounded" />
-                      <div className="h-3.5 w-3.5 bg-surface-tertiary rounded" />
-                    </div>
-                  </div>
-                  <div className="p-4 space-y-3">
-                    <div className="h-4 w-40 bg-surface-tertiary rounded" />
-                    <div className="h-3 w-full bg-surface-tertiary rounded" />
-                    <div className="h-3 w-3/4 bg-surface-tertiary rounded" />
-                    <div className="h-3 w-5/6 bg-surface-tertiary rounded" />
-                    <div className="h-3 w-2/3 bg-surface-tertiary rounded" />
-                  </div>
+                <div className="relative h-full bg-[var(--color-terminal-bg)]">
+                  <LoadingStatus label="Loading main repository session" />
+                  <TerminalSkeleton />
                 </div>
               ) : workingPanels.length > 0 && currentActivePanel ? (
                 workingPanels.map(panel => {
@@ -581,25 +568,10 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
 
       {/* Loading state when no session yet */}
       {!activeMainRepoSession && isLoadingSession && (
-        <div
-          role="status"
-          aria-label="Loading main repository session"
-          className="flex-1 animate-skeleton"
-        >
-          {/* Tab bar skeleton */}
-          <div className="flex items-center gap-1 px-2 py-1 border-b border-border-primary bg-surface-secondary">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="h-7 w-20 bg-surface-tertiary rounded" />
-            ))}
-          </div>
-          {/* Panel content skeleton */}
-          <div className="p-4 space-y-3">
-            <div className="h-4 w-48 bg-surface-tertiary rounded" />
-            <div className="h-3 w-full bg-surface-tertiary rounded" />
-            <div className="h-3 w-3/4 bg-surface-tertiary rounded" />
-            <div className="h-3 w-5/6 bg-surface-tertiary rounded" />
-            <div className="h-3 w-1/2 bg-surface-tertiary rounded" />
-          </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <LoadingStatus label="Loading main repository session" />
+          <TabStripSkeleton titles={['Terminal']} />
+          <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]"><TerminalSkeleton /></div>
         </div>
       )}
 

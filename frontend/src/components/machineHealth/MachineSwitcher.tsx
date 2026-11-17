@@ -6,6 +6,7 @@ import { cn } from '../../utils/cn';
 import { formatBytes } from '../../../../shared/utils/formatBytes';
 import { healthReadProblem } from './healthReadError';
 import { readHealthSnapshot } from './useMachineHealth';
+import { Bone, Skeleton } from '../ui/Skeleton';
 
 const initials = (name: string) => name.split(/[\s._-]+/u).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase() ?? '').join('') || '?';
 const osLabel = (platform: string) => (platform === 'win32' ? 'Windows' : platform === 'linux' ? 'Linux' : platform === 'darwin' ? 'macOS' : platform);
@@ -14,8 +15,7 @@ type Summary = { kind: 'ok'; snapshot: MachineHealthSnapshot } | { kind: 'offlin
 /** "this Mac" beside this computer's own name. */
 const thisMachine = (platform: string | undefined) => (platform === 'darwin' ? 'this Mac' : platform === 'win32' ? 'this PC' : 'this computer');
 
-function summaryLine(summary: Summary | undefined): string {
-  if (!summary || summary.kind === 'loading') return 'Reading…';
+function summaryLine(summary: Exclude<Summary, { kind: 'loading' }>): string {
   if (summary.kind === 'offline') return 'Offline';
   if (summary.kind === 'outdated') return 'Update Pane on this machine to see its health';
   if (summary.kind === 'error') return 'Could not read its health';
@@ -93,7 +93,9 @@ export function MachineSwitcher({ machineId, hostname, onSelect }: {
                       {local && <span className="text-text-tertiary">{thisMachine(snapshot?.platform)}</span>}
                       {snapshot && !local && <span className="rounded bg-surface-secondary px-1.5 text-xs text-text-secondary">{osLabel(snapshot.platform)}</span>}
                     </span>
-                    <span className={cn('block text-sm', level === 'critical' ? 'text-status-error' : level === 'warning' ? 'text-status-warning' : 'text-text-secondary')}>{summaryLine(summary)}</span>
+                    {!summary || summary.kind === 'loading'
+                      ? <Skeleton className="flex h-5 items-center"><Bone className="h-3.5 w-36" /></Skeleton>
+                      : <span className={cn('block text-sm', level === 'critical' ? 'text-status-error' : level === 'warning' ? 'text-status-warning' : 'text-text-secondary')}>{summaryLine(summary)}</span>}
                   </span>
                 </button>
               </li>

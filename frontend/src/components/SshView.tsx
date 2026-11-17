@@ -12,7 +12,9 @@ import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { PanelTabStrip } from './panels/PanelTabStrip';
 import { SplitLayout } from './panels/SplitLayout';
-import { SelectionLoading } from './ui/SelectionLoading';
+import { TabStripSkeleton } from './panels/TabStripSkeleton';
+import { TerminalSkeleton } from './panels/TerminalSkeleton';
+import { LoadingStatus } from './ui/Skeleton';
 
 const EMPTY_PANELS: ToolPanel[] = [];
 const GROUP_ID = 'ssh-hosts';
@@ -128,7 +130,11 @@ function SshViewForHost() {
   if (!loaded) {
     return <div className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
       {error ? <LoadFailure message={`${error} Retry, and if it keeps failing, check the connection to the machine this window controls.`} onRetry={() => setLoadAttempt(value => value + 1)} />
-        : <SelectionLoading name="SSH" />}
+        : <>
+          <LoadingStatus label="Opening SSH" />
+          <TabStripSkeleton titles={['ssh']} addButton={false} />
+          <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]"><TerminalSkeleton /></div>
+        </>}
     </div>;
   }
 

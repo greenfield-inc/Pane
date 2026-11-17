@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
+import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
 import { machineDocFailure, machineFileLinks, readMachineDoc, type MachineDoc } from './machineDoc';
 
 /**
@@ -8,7 +9,17 @@ import { machineDocFailure, machineFileLinks, readMachineDoc, type MachineDoc } 
  * why not, with Retry when the machine didn't answer.
  */
 export function MachineDocView({ doc, label, machine, onRetry }: { doc: MachineDoc | null; label: string; machine: string; onRetry?: () => void }) {
-  if (!doc) return <p className="m-auto text-[13px] text-text-tertiary" role="status">Opening {label}…</p>;
+  if (!doc) return (
+    <>
+      <LoadingStatus label={`Opening ${label}`} />
+      {/* The document's text, as the pre below lays it out. */}
+      <Skeleton className="min-h-0 flex-1 px-5 py-4">
+        {['w-1/3', '', 'w-full', 'w-11/12', 'w-4/5', '', 'w-full', 'w-2/3', 'w-5/6', 'w-1/2'].map((width, index) => (
+          <div key={index} className="flex h-5 items-center">{width && <Bone className={`h-2.5 ${width}`} />}</div>
+        ))}
+      </Skeleton>
+    </>
+  );
   const failure = machineDocFailure(doc, label, machine);
   if (failure) {
     return (

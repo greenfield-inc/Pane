@@ -12,6 +12,7 @@ import { AgentChatPermissions } from './AgentChatPermissions';
 import { AgentChatHeader } from './AgentChatHeader';
 import { AgentChatConfiguration } from './AgentChatConfiguration';
 import { MessageRow } from './AgentChatParts';
+import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
 import { ChatPermissionContext } from './chatPermissionContext';
 import { permissionToolId } from '../../../../shared/agentChatPresentation';
 import './agentChat.css';
@@ -69,13 +70,28 @@ function ChatViewport({ viewer, loading }: { viewer: ReturnType<typeof agentChat
         }
       }} className="chat-viewport">
         <div className="chat-column">
-        <ThreadPrimitive.Empty><p className="py-8 text-sm">{loading ? 'Loading conversation…' : ''}</p></ThreadPrimitive.Empty>
+        <ThreadPrimitive.Empty>{loading && <ConversationSkeleton />}</ThreadPrimitive.Empty>
         {start > 0 && <button type="button" className="chat-button chat-button-outline self-center" onClick={() => { flushSync(() => viewer.setWindowEnd(start)); viewportStore.getState().scrollToBottom({ behavior: 'instant' }); }}>Earlier messages ({start})</button>}
         {messages.slice(start, end).map((message, index) => <ThreadPrimitive.MessageByIndex key={message.id} index={start + index} components={{ Message: MessageRow }} />)}
         {end < messages.length && <div className="flex gap-2 py-2 text-xs"><button type="button" className="rounded border border-border-primary px-3 py-2" onClick={() => viewer.setWindowEnd(Math.min(messages.length, end + 200))}>Newer messages</button><button type="button" className="rounded border border-border-primary px-3 py-2" onClick={showLatest}>Latest messages ({messages.length - end} newer)</button></div>}
         </div>
       </ThreadPrimitive.Viewport>
   );
+}
+
+/** Two turns shaped like MessageRow: a user bubble, then a reply's lines. */
+function ConversationSkeleton() {
+  return <>
+    <LoadingStatus label="Loading conversation" />
+    <Skeleton className="flex flex-col gap-6">
+      {['w-56', 'w-40'].map((bubble, turn) => <div key={turn} className="contents">
+        <div className="chat-message" data-role="user"><Bone className={`col-start-2 h-10 rounded-2xl ${bubble}`} /></div>
+        <div className="chat-message flex flex-col gap-2" data-role="assistant">
+          <Bone className="h-4 w-full" /><Bone className="h-4 w-11/12" /><Bone className="h-4 w-2/3" />
+        </div>
+      </div>)}
+    </Skeleton>
+  </>;
 }
 
 function ScrollToLatest({ viewer }: { viewer: ReturnType<typeof agentChatViewer> }) {

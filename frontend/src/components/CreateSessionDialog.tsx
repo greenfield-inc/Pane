@@ -8,6 +8,7 @@ import { Toggle } from './ui/Toggle';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { Bone, Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
 import { useSessionPreferencesStore, type SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -432,14 +433,20 @@ export function CreatePaneForm({
             {repositoryPicker}
             {/* 1. Base Branch (select first, auto-populates session name) */}
             {isLoadingBranches && branches.length === 0 ? (
-              <div className="px-6 pt-6 pb-5 border-b border-border-primary animate-skeleton">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-4 h-4 bg-surface-tertiary rounded" />
-                  <div className="w-24 h-4 bg-surface-tertiary rounded" />
-                </div>
-                <div className="w-full h-9 bg-surface-tertiary rounded-md" />
-                <div className="w-64 h-3 bg-surface-tertiary rounded mt-2" />
-              </div>
+              <>
+                <LoadingStatus label="Loading branches" />
+                <Skeleton className="px-6 pt-6 pb-5 border-b border-border-primary">
+                  <div className="flex items-center gap-2 mb-2 text-sm font-medium leading-5">
+                    <Bone className="w-4 h-4" />
+                    <TextBone text="Base Branch" />
+                  </div>
+                  <div className="flex h-[38px] items-center gap-2 rounded-md border border-border-primary px-3">
+                    <Bone className="w-4 h-4 shrink-0" />
+                    <Bone className="h-3.5 w-28" />
+                  </div>
+                  <p className="mt-2 text-xs"><TextBone text="Remote branches will automatically track the remote for git pull/push." /></p>
+                </Skeleton>
+              </>
             ) : branches.length > 0 ? (
               <div className="px-6 pt-6 pb-5 border-b border-border-primary">
                 <div className="flex items-center gap-2 mb-2">

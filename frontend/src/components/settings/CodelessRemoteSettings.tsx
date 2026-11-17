@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Copy } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
+import { Bone, Skeleton, TextBone, LoadingStatus } from '../ui/Skeleton';
 import { SettingRow } from './SettingRow';
 import { SegmentedControl } from './SettingsControls';
 import { API } from '../../utils/api';
@@ -96,6 +97,8 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
 
   const visibility = pendingVisibility ?? access?.visibility ?? 'owner';
   const passwordValid = passwordDraft !== null && passwordDraft.length >= WORKSPACE_PASSWORD_MIN_LENGTH;
+
+  if (!access && !error) return <CodelessAccessSkeleton />;
 
   return (
     <>
@@ -215,8 +218,32 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
   );
 }
 
+/** The Who can connect and Password rows while this computer's Tailscale access is read. */
+function CodelessAccessSkeleton() {
+  const row = 'grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(180px,auto)] sm:items-start';
+  return (
+    <>
+      <Skeleton className={`${row} ${CARD_ROW}`}>
+        <div className="min-w-0">
+          <div className="text-sm font-medium leading-5"><TextBone text="Who can connect" /></div>
+          <div className="mt-1 flex h-[19.5px] items-center"><Bone className="h-3 w-40" /></div>
+        </div>
+        <Bone className="h-10 w-full rounded-md sm:w-[420px]" />
+      </Skeleton>
+      <Skeleton className={`${row} ${CARD_ROW}`}>
+        <div className="min-w-0">
+          <div className="text-sm font-medium leading-5"><TextBone text="Password" /></div>
+          <div className="mt-1 flex h-[19.5px] items-center"><Bone className="h-3 w-56" /></div>
+        </div>
+        <div className="flex justify-end"><Bone className="h-8 w-28 rounded-button" /></div>
+      </Skeleton>
+      <LoadingStatus label="Checking Tailscale" />
+    </>
+  );
+}
+
 function describeAccess(access: WorkspaceAccessSummary | null): string {
-  if (!access) return 'Checking Tailscale…';
+  if (!access) return '';
   if (access.state === 'off' && access.visibility !== 'off') return `${access.reason ?? 'Not running'}. ${access.fix ?? ''}`.trim();
   if (access.visibility === 'off') return 'No one over Tailscale. Phones paired with a QR code and connection codes still work.';
   return access.visibility === 'tailnet' ? 'Anyone on this tailnet.' : 'Your devices on Tailscale.';

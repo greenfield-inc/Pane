@@ -13,6 +13,7 @@ import {
   type AgentRegistryState,
 } from '../../../stores/agentRegistryStore';
 import { Button } from '../../ui/Button';
+import { Bone, Skeleton, LoadingStatus } from '../../ui/Skeleton';
 import { ConfirmDialog } from '../../ConfirmDialog';
 
 const CAPABILITY_LABELS: ReadonlyArray<[keyof ChatAgentCapabilities, string]> = [
@@ -71,6 +72,33 @@ function registryLabels(agent: RegistryAgent, entry: ChatAgentEntry | undefined)
   return agent.verified ? learned : [...learned, 'No checksum'];
 }
 
+/** Agent SettingRows while the list loads: icon, name, description and support labels, version on the right (and a button for registry rows). */
+function AgentRowsSkeleton({ label, action = false }: { label: string; action?: boolean }) {
+  return <>
+    <Skeleton className="divide-y divide-border-secondary">
+      {[[24, 62, 3], [30, 74, 2], [20, 56, 3]].map(([name, description, labels], index) => (
+        <div key={index} className="grid gap-4 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(180px,auto)] sm:items-center">
+          <div className="flex min-w-0 items-start gap-2">
+            <Bone className="mt-0.5 h-4 w-4 flex-none" />
+            <div className="min-w-0 flex-1">
+              <div className="flex h-5 items-center"><Bone className="h-3.5" style={{ width: `${name}%` }} /></div>
+              <div className="mt-1 flex h-[19.5px] items-center"><Bone className="h-3" style={{ width: `${description}%` }} /></div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 sm:justify-self-end">
+            <Bone className="h-3 w-20" />
+            {action && <Bone className="h-8 w-20 rounded-button" />}
+          </div>
+          <div className="flex gap-1.5 pl-6 sm:col-span-2">
+            {Array.from({ length: labels }, (_, pill) => <Bone key={pill} className="h-[22px] w-24 rounded-full" />)}
+          </div>
+        </div>
+      ))}
+    </Skeleton>
+    <LoadingStatus label={label} />
+  </>;
+}
+
 /** Install, Remove or Refresh; its spinner takes the label's place in the same box, so the row never moves. */
 function RowAction({ label, busyLabel, busy, disabled, onClick }: { label: string; busyLabel: string; busy: boolean; disabled: boolean; onClick: () => void }) {
   return <Button type="button" size="sm" variant="secondary" className="w-20" disabled={disabled} aria-busy={busy} onClick={onClick}>
@@ -99,7 +127,7 @@ export function RegistryAgentList({ state, catalog, canInstall, onInstall, onRem
   onRemove: (agent: RegistryAgent) => void;
 }) {
   const { list, rows } = state;
-  if (!list) return <p role="status" className="py-4 text-sm text-text-tertiary">Loading agents from the ACP Registry…</p>;
+  if (!list) return <AgentRowsSkeleton label="Loading agents from the ACP Registry" action />;
   return <>
     {list.error && <p role="status" className="mt-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-text-primary">
       This list may be out of date. {list.error}
@@ -184,7 +212,7 @@ export function AgentsSettings() {
     <SettingsPage title="Agents" description="The agents this machine can open as chat tabs. Pane learns what an agent supports the first time it starts a chat with it.">
       <SettingsSection title="Chat agents" description={chatTabsOn ? undefined : 'Chat tabs are off. Turn them on in AI & Agents to open these agents as chats.'}>
         {error && <p role="alert" className="py-2 text-sm text-status-error">{error}</p>}
-        {agents ? <AgentList agents={agents} /> : !error && <p role="status" className="py-4 text-sm text-text-tertiary">Loading agents…</p>}
+        {agents ? <AgentList agents={agents} /> : !error && <AgentRowsSkeleton label="Loading agents" />}
       </SettingsSection>
       <RegistrySection chatTabsOn={chatTabsOn} />
     </SettingsPage>

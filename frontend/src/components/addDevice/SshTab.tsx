@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { cn } from '../../utils/cn';
+import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 
 interface SshHost {
@@ -102,7 +103,14 @@ export function SshTab({ onClose }: { onClose: () => void }) {
         <section className={CARD} aria-labelledby="add-device-ssh-hosts">
           <h3 id="add-device-ssh-hosts" className="text-sm font-semibold text-text-primary">Hosts in ~/.ssh/config</h3>
           {hosts === null ? (
-            <p className="text-sm text-text-tertiary">Reading your SSH config…</p>
+            <>
+              <LoadingStatus label="Reading your SSH config" />
+              <Skeleton className="space-y-1">
+                {[28, 40, 34].map((width, index) => (
+                  <div key={index} className="flex h-9 items-center px-3"><Bone className="h-3.5" style={{ width: `${width}%` }} /></div>
+                ))}
+              </Skeleton>
+            </>
           ) : hosts.length === 0 ? (
             <p className="text-sm text-text-tertiary">No hosts in ~/.ssh/config. Type one below.</p>
           ) : (

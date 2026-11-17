@@ -8,7 +8,7 @@ import { useSessionHistoryStore } from '../stores/sessionHistoryStore';
 import { useHotkey } from '../hooks/useHotkey';
 import { useCommittedRef } from '../hooks/useCommittedRef';
 import { useHotkeyStore } from '../stores/hotkeyStore';
-import { SelectionLoading } from './ui/SelectionLoading';
+import { PaneWorkspaceSkeleton } from './PaneWorkspaceSkeleton';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { HomePage } from './HomePage';
 import { PaneChatView } from './PaneChatView';
@@ -36,6 +36,8 @@ import { panelApi } from '../services/panelApi';
 import { requestBrowserNavigation } from './panels/browser/browserNavigation';
 import { setPendingViewCommit } from './panels/diff/pendingViewCommit';
 import { PanelTabBar } from './panels/PanelTabBar';
+import { TabStripSkeleton } from './panels/TabStripSkeleton';
+import { TerminalSkeleton } from './panels/TerminalSkeleton';
 import { PanelContainer } from './panels/PanelContainer';
 import { getDockTerminalPanel } from '../utils/terminalDock';
 import { SplitLayout } from './panels/SplitLayout';
@@ -89,6 +91,7 @@ import { useRegionActions } from '../hooks/useRegionNavigation';
 import { announceTerminalReflow } from '../utils/terminalReflow';
 import { focusActiveTabSoon } from '../services/regionFocus';
 import { useLoopsStore } from '../stores/loopsStore';
+import { LoadingStatus } from './ui/Skeleton';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
   return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
@@ -1898,14 +1901,12 @@ export const SessionView = memo(() => {
   // Show project view if navigation is set to project
   if (activeView === 'project' && activeProjectId) {
     if (isProjectLoading || !projectData) {
+      // ProjectView's own shape: its tab bar over the primary checkout's terminal.
       return (
-        <div className="flex-1 flex flex-col overflow-hidden bg-surface-secondary p-6">
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-interactive mx-auto mb-4"></div>
-              <p className="text-text-secondary">Loading project...</p>
-            </div>
-          </div>
+        <div className="flex flex-1 flex-col overflow-hidden bg-bg-primary">
+          <LoadingStatus label="Loading project" />
+          <TabStripSkeleton titles={['Terminal']} />
+          <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]"><TerminalSkeleton /></div>
         </div>
       );
     }
@@ -1964,7 +1965,11 @@ export const SessionView = memo(() => {
         <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => {
           if (selectionError) void useSessionStore.getState().setActiveSession(selectedPaneId);
           else { setPanelLoad(null); setPanelRetry(value => value + 1); }
-        }}>Retry</button></div> : <SelectionLoading name={activeSession?.name ?? selectedPaneId} />}
+        }}>Retry</button></div> : <PaneWorkspaceSkeleton name={activeSession?.name ?? 'Pane'} swapped={layoutSwapped && !immersiveMode}
+          dockHeight={immersiveMode ? 0 : isTerminalCollapsed ? 32 : terminalResize.renderedPx || terminalResize.effectivePx}
+          inspectorWidth={detailVisible && !immersiveMode ? detailResize.renderedPx || detailResize.effectivePx : 0}
+          railWidth={rightTerminalResize.renderedPx || rightTerminalResize.effectivePx}
+          bottomInspectorHeight={isDetailCollapsed ? 32 : bottomDetailResize.renderedPx || bottomDetailResize.effectivePx} />}
     </div>
     : null;
 

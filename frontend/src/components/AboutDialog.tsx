@@ -3,6 +3,7 @@ import { Download, Check, Loader2, Github } from 'lucide-react';
 import { usePaneLogo } from '../hooks/usePaneLogo';
 import { Modal } from './ui/Modal';
 import { LiveRegion } from './ui/LiveRegion';
+import { Skeleton, TextBone } from './ui/Skeleton';
 
 interface VersionInfo {
   current: string;
@@ -145,9 +146,13 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
 
           {/* Version */}
           <div className="flex items-center justify-center gap-3 mb-6">
-            <span className="select-text text-sm text-text-secondary font-mono">
-              v{versionInfo?.current || '...'}
-            </span>
+            {versionInfo?.current ? (
+              <span className="select-text text-sm text-text-secondary font-mono">
+                v{versionInfo.current}
+              </span>
+            ) : (
+              <Skeleton className="text-sm font-mono"><TextBone text="v0.0.000" /></Skeleton>
+            )}
             {!versionInfo?.hasUpdate && versionInfo?.current && !isChecking && (
               <span className="flex items-center gap-1 text-xs text-status-success">
                 <Check aria-hidden="true" className="w-3 h-3 text-status-success" />

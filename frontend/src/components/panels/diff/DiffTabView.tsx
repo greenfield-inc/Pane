@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DiffModeEnum, DiffView } from '@git-diff-view/react';
 import type { DiffHighlighter } from '@git-diff-view/shiki';
-import { ExternalLink, FileDiff as FileDiffIcon, RefreshCw } from 'lucide-react';
+import { ExternalLink, FileDiff as FileDiffIcon } from 'lucide-react';
 import type { EditorDiffRef } from '../../../../../shared/types/panels';
 import type { FileDiffResult } from '../../../../../shared/types/gitDiff';
 import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
@@ -10,6 +10,7 @@ import { API } from '../../../utils/api';
 import { subscribeToSessionGitChanges } from '../../../utils/session-git-events';
 import { diffRefLabel, isMutableScope, normalizeEditorDiffRef, scopeKey } from './diffScope';
 import { getShikiHighlighter } from './diffSource';
+import { Bone, Skeleton, LoadingStatus } from '../../ui/Skeleton';
 import '@git-diff-view/react/styles/diff-view.css';
 
 interface DiffTabViewProps { sessionId: string; filePath: string; diffRef: EditorDiffRef }
@@ -24,6 +25,23 @@ interface FileDiffLoadState {
 }
 
 const readViewType = (): DiffModeEnum => localStorage.getItem('diffViewType') === 'split' ? DiffModeEnum.Split : DiffModeEnum.Unified;
+
+/** Indent and length (in characters) of each line a diff skeleton draws. */
+const DIFF_LINES: Array<[number, number]> = [[0, 30], [2, 42], [2, 26], [4, 36], [4, 18], [2, 2], [0, 0], [0, 34], [2, 44], [2, 22], [0, 1]];
+
+/** DiffView at 13 px while the patch loads: a hunk header, then lines with both line-number gutters. */
+function DiffSkeleton() {
+  return <>
+    <LoadingStatus label="Loading diff…" />
+    <Skeleton className="font-mono text-[13px]">
+      <div className="flex h-7 items-center border-b border-border-primary px-3"><Bone className="h-3 w-40" /></div>
+      {DIFF_LINES.map(([indent, length], index) => <div key={index} className="flex h-5 items-center">
+        <span className="flex w-24 shrink-0 justify-end gap-4 pr-3"><Bone className="h-2.5 w-3" /><Bone className="h-2.5 w-3" /></span>
+        {length > 0 && <Bone className="h-2.5" style={{ marginLeft: `${indent}ch`, width: `${length}ch` }} />}
+      </div>)}
+    </Skeleton>
+  </>;
+}
 
 export function DiffTabView({ sessionId, filePath, diffRef }: DiffTabViewProps) {
   const { theme } = useTheme();
@@ -110,7 +128,7 @@ export function DiffTabView({ sessionId, filePath, diffRef }: DiffTabViewProps) 
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {loading && !result ? <div className="flex items-center gap-2 p-4 text-sm text-text-secondary"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Loading diff…</div>
+        {loading && !result ? <DiffSkeleton />
           : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
             : !result || result.status === 'no-longer-changed' ? <div className="p-4 text-sm text-text-tertiary">{filePath} is no longer changed in {diffRefLabel(diffRef)}.</div>
               : result.file.isBinary ? <div data-find-empty="" className="p-4 text-sm text-text-secondary">Binary file</div>

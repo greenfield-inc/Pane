@@ -23,7 +23,7 @@ import { DropOverlay } from './panels/DropOverlay';
 import { SessionWorkspacePanels } from './SessionWorkspacePanels';
 import { SessionTileLayout, type SessionTileContext } from './SessionTileLayout';
 import { Button } from './ui/Button';
-import { SelectionLoading } from './ui/SelectionLoading';
+import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
 import { Input } from './ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
@@ -116,14 +116,7 @@ export function PaneChatView() {
 
   const isOpening = legacyLoading || availability === 'idle' || (availability === 'loading' && !hasActiveSessions);
   if (isOpening) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-bg-primary text-text-secondary">
-        <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm">
-          <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" />
-          <span>{availability === 'unavailable' ? 'Opening Pane Chat…' : 'Opening Sessions…'}</span>
-        </div>
-      </div>
-    );
+    return <OpeningSessionSkeleton />;
   }
 
   if (hasActiveSessions) return <SessionWorkspace />;
@@ -369,14 +362,7 @@ function SessionWorkspace() {
   ), [closeTile, dropSession, draggedSessionId, focusTile, toggleTileMaximize]);
 
   if (!layout) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-bg-primary text-text-secondary">
-        <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm">
-          <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" />
-          <span>Opening Sessions…</span>
-        </div>
-      </div>
-    );
+    return <OpeningSessionSkeleton />;
   }
 
   // The displayed tree follows intent in this commit. The passive effect above
@@ -567,7 +553,7 @@ function SessionTile({
         />
       ) : (
         <SessionTileFallback
-          name={record?.name}
+          record={record}
           error={loadingSessionId === sessionId && loadingHostId === hostId && loadingVisit === visit ? selectionError ?? error : null}
           isLoading={!selectionError && (loadingSessionId !== sessionId || loadingHostId !== hostId || loadingVisit !== visit || isLoading)}
           chrome={chrome}
@@ -594,27 +580,43 @@ function SessionTile({
   );
 }
 
-function SessionTileFallback({ name, error, isLoading, chrome, onRetry }: {
-  name?: string;
+function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
+  record?: OrchestrationSessionRecord;
   error: string | null;
   isLoading: boolean;
   chrome: SessionTileChrome;
   onRetry: () => void;
 }) {
+  const name = record?.name;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SessionTileHeader name={name ?? 'Session'} chrome={chrome} />
-      <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center">
-        {isLoading ? (
-          <SelectionLoading name={name ?? 'Session'} />
-        ) : (
+      {isLoading ? (
+        <SessionWorkspaceSkeleton name={name ?? 'Session'} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]} />
+      ) : (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center">
           <div>
             <p role="alert" className="text-sm text-text-secondary">{error ?? 'This Session did not open.'}</p>
             <Button type="button" variant="secondary" size="sm" className="mt-3"
               icon={<RefreshCw className="h-4 w-4" />} onClick={onRetry}>Retry</Button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The agent tab's title, as the host names it, for a Session not open yet. */
+function agentTabTitle(record: OrchestrationSessionRecord | undefined): string {
+  return record ? `${record.name} · ${PANE_CHAT_AGENT_LABELS[record.agent]}` : 'Session';
+}
+
+/** Before the Sessions list arrives: the selected Session's workspace, if it is known yet. */
+function OpeningSessionSkeleton() {
+  const record = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId));
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
+      <SessionWorkspaceSkeleton name={record?.name ?? 'Sessions'} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]} />
     </div>
   );
 }

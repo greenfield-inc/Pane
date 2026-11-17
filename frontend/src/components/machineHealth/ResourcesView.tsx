@@ -11,6 +11,7 @@ import { usePanelStore } from '../../stores/panelStore';
 import { formatBytes, formatMB } from '../../../../shared/utils/formatBytes';
 import { CATEGORY_COLORS } from '../ui/charts/palette';
 import { MachineSwitcher } from './MachineSwitcher';
+import { Bone, Skeleton, TextBone, LoadingStatus } from '../ui/Skeleton';
 import { OtherAppsList } from './OtherAppsList';
 import { runHealthAction, useMachineHealth, type FinishedPaneRow, type MachineHealthData } from './useMachineHealth';
 
@@ -73,6 +74,26 @@ function Legend({ parts, expand }: { parts: BarPart[]; expand?: { label: string;
         </div>
       ))}
     </dl>
+  );
+}
+
+/** A Disk or Memory section while the first health read runs: title, total, bar and legend. */
+function MeterSectionSkeleton({ title, legend }: { title: string; legend: number }) {
+  return (
+    <Skeleton className="rounded-xl border border-border-primary p-5">
+      <div className="flex items-center gap-1.5 text-sm"><Bone className="h-4 w-4" /><TextBone text={title} /></div>
+      <div className="mt-1 flex h-8 items-center"><Bone className="h-6 w-64" /></div>
+      <Bone className="mt-3 h-2.5 w-full rounded-full" />
+      <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-1.5 sm:grid-cols-3">
+        {Array.from({ length: legend }, (_, index) => (
+          <div key={index} className="flex h-5 items-center gap-2">
+            <Bone className="h-2.5 w-2.5 shrink-0 rounded-sm" />
+            <span className="min-w-0 flex-1"><Bone className="h-3.5" style={{ width: `${[62, 48, 70, 54, 40, 58][index % 6]}%` }} /></span>
+            <Bone className="h-3.5 w-14" />
+          </div>
+        ))}
+      </div>
+    </Skeleton>
   );
 }
 
@@ -584,7 +605,13 @@ export function ResourcesView() {
             {offline ? (data ? `Offline. Showing what it reported ${relativeTime(data.readAt, now)}.` : 'Offline. Pane has not read this machine\'s health yet.') : problem.message}
           </div>
         )}
-        {!data && !problem && <p className="text-sm text-text-secondary">Reading this machine's health…</p>}
+        {!data && !problem && (
+          <>
+            <LoadingStatus label="Reading this machine's health" />
+            <MeterSectionSkeleton title="Disk" legend={6} />
+            <MeterSectionSkeleton title="Memory" legend={5} />
+          </>
+        )}
         {data && (
           // Keyed by machine: switching machines starts every section fresh for the new one.
           <div key={machineId} className={cn('flex flex-col gap-5', offline && 'opacity-60')}>

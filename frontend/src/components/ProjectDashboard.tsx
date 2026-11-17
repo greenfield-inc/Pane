@@ -332,7 +332,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
   }
 
   if (isLoading && !dashboardData) {
-    return <div><LiveRegion>{statusAnnouncement}</LiveRegion><ProjectDashboardSkeleton /></div>;
+    return <ProjectDashboardSkeleton projectName={projectName} status={<LiveRegion>{statusAnnouncement}</LiveRegion>} />;
   }
 
   return (

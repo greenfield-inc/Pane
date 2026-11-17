@@ -5,6 +5,7 @@ import { MachineMark } from '../machines/MachineMark';
 import { assignMachineLetters } from '../../../../shared/utils/machineMarks';
 import { preferredMachineColorSlot } from '../../../../shared/utils/machineColor';
 import { useAddDeviceStore, type LinkFlow } from './addDeviceStore';
+import { Bone, Skeleton, TextBone, LoadingStatus } from '../ui/Skeleton';
 
 function useMarks(names: string[]) {
   const key = names.join('\n');
@@ -54,14 +55,48 @@ function ConfirmLink({ flow }: { flow: Extract<LinkFlow, { step: 'confirm' }> })
   );
 }
 
+/** ConfirmLink while the link is read: both marks, the heading, the computers list and the buttons. */
+function ConfirmLinkSkeleton() {
+  return (
+    <>
+      <LoadingStatus label="Reading the link" />
+      <Skeleton className="flex flex-col items-center gap-5">
+        <div className="flex items-center gap-3">
+          <Bone className="h-7 w-7 rounded-md" />
+          <Bone className="h-5 w-5" />
+          <Bone className="h-7 w-7 rounded-md" />
+        </div>
+        <div className="flex w-full flex-col items-center space-y-1">
+          <div className="text-heading-1"><TextBone text="Link this computer with a computer" /></div>
+          <div className="flex h-5 w-full items-center justify-center"><Bone className="h-3.5 w-[90%]" /></div>
+          <div className="flex h-5 w-full items-center justify-center"><Bone className="h-3.5 w-1/2" /></div>
+        </div>
+        <div className="w-full max-w-md divide-y divide-border-primary rounded-lg border border-border-primary">
+          {[40, 52].map((width, index) => (
+            <div key={index} className="flex items-center gap-3 px-3 py-2.5">
+              <Bone className="h-7 w-7 rounded-md" />
+              <Bone className="h-3.5" style={{ width: `${width}%` }} />
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-3">
+          <Bone className="h-9 w-36 rounded-button" />
+          <Bone className="h-9 w-40 rounded-button" />
+        </div>
+      </Skeleton>
+    </>
+  );
+}
+
 /** Every step of a link after it is pasted or opened: checking, the confirm, linking, the result, or why it failed. */
 export function LinkFlowView({ flow, onDone }: { flow: Exclude<LinkFlow, { step: 'idle' }>; onDone: () => void }) {
   if (flow.step === 'confirm') return <ConfirmLink flow={flow} />;
-  if (flow.step === 'checking' || flow.step === 'linking') {
+  if (flow.step === 'checking') return <ConfirmLinkSkeleton />;
+  if (flow.step === 'linking') {
     return (
       <div role="status" className="flex flex-col items-center gap-3 py-8 text-center">
         <Loader2 className="h-6 w-6 animate-spin text-text-tertiary" aria-hidden="true" />
-        <p className="text-sm text-text-secondary">{flow.step === 'checking' ? 'Reading the link…' : `Linking with ${flow.maker}…`}</p>
+        <p className="text-sm text-text-secondary">Linking with {flow.maker}…</p>
       </div>
     );
   }

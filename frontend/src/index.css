@@ -633,6 +633,33 @@ body.understory {
    "busy", and removing them would remove information rather than motion.
    --------------------------------------------------------------------------- */
 
+/* Skeletons (components/ui/Skeleton.tsx): bones stay hidden for the first
+   150 ms of a load, then breathe in one shared phase. Each bone runs the
+   stepped opacity breathe (about 4 frames a second, paused with the window). */
+[data-skeleton='waiting'] .skeleton-bone {
+  visibility: hidden;
+}
+
+[data-skeleton='visible'] .skeleton-bone {
+  animation: pane-skeleton-breathe 2s steps(5, jump-none) infinite;
+  animation-delay: var(--skeleton-phase, 0ms);
+}
+
+@keyframes pane-skeleton-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Content that replaces a visible skeleton fades in over it, in place. */
+.skeleton-reveal {
+  animation: pane-skeleton-reveal 120ms ease-out;
+}
+
+@keyframes pane-skeleton-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* No scale under the pointer; the colour change still confirms the press. */
   .pane-press:active:not(:disabled):not([aria-disabled='true']) {
@@ -654,7 +681,13 @@ body.understory {
   }
 
   /* A loading skeleton's shape already says "loading", so its breathe stops. */
-  .animate-skeleton {
+  .animate-skeleton,
+  [data-skeleton='visible'] .skeleton-bone {
+    animation: none;
+  }
+
+  /* Content replacing a skeleton appears without a fade. */
+  .skeleton-reveal {
     animation: none;
   }
 

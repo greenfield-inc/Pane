@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, RotateCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, RotateCw } from 'lucide-react';
+import { Bone, Skeleton, LoadingStatus } from '../../components/ui/Skeleton';
 import type { ChangedFileSummary } from '../../../../shared/types/gitDiff';
 import { changeBadge, DiffError, parsePatch, versusLabel, type ChangeList } from '../../../../shared/gitDiffClient';
 import { cn } from '../../utils/cn';
@@ -77,7 +78,26 @@ export function RemoteDiffView({ changes, patches, open, onToggle, onRefresh }: 
   onRefresh(): void;
 }) {
   let body;
-  if (changes.status === 'loading') body = <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-text-muted" aria-label="Loading changes" /></div>;
+  if (changes.status === 'loading') body = (
+    <>
+      <LoadingStatus label="Loading changes" />
+      <Skeleton className="flex shrink-0 items-center gap-3 border-b border-border-primary px-4 py-2 text-sm">
+        <span className="flex h-5 items-center"><Bone className="h-3.5 w-14" /></span>
+        <Bone className="h-3.5 w-16" />
+        <Bone className="ml-auto h-3.5 w-20" />
+      </Skeleton>
+      <Skeleton className="min-h-0 flex-1">
+        {['w-3/5', 'w-2/5', 'w-1/2', 'w-1/3'].map((path, index) => (
+          <div key={index} className="flex min-h-11 items-center gap-2 border-b border-border-primary px-4">
+            <Bone className="h-3.5 w-3.5 shrink-0" />
+            <Bone className="h-5 w-5 shrink-0" />
+            <span className="min-w-0 flex-1"><Bone className={`h-3.5 ${path}`} /></span>
+            <Bone className="h-3.5 w-14" />
+          </div>
+        ))}
+      </Skeleton>
+    </>
+  );
   else if (changes.status === 'error') {
     body = (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
@@ -142,7 +162,17 @@ export function RemoteDiffView({ changes, patches, open, onToggle, onRefresh }: 
 }
 
 function Patch({ load }: { load: Load<FilePatch> }) {
-  if (load.status === 'loading') return <div className="px-4 py-3"><Loader2 className="h-4 w-4 animate-spin text-text-muted" aria-label="Loading patch" /></div>;
+  if (load.status === 'loading') return (
+    <div className="pb-1">
+      <LoadingStatus label="Loading patch" />
+      {/* A hunk header, then patch lines at the patch's row height. */}
+      <Skeleton className="font-mono text-xs leading-5">
+        {['w-40', 'w-3/4', 'w-1/2', 'w-2/3', 'w-2/5'].map((width, index) => (
+          <div key={index} className={cn('flex h-5 items-center px-3', index === 0 && 'bg-surface-secondary')}><Bone className={`h-2.5 ${width}`} /></div>
+        ))}
+      </Skeleton>
+    </div>
+  );
   if (load.status === 'error') return <p className="px-4 py-3 text-sm text-text-secondary">{load.message}</p>;
   if (load.value.status === 'no-longer-changed') return <p className="px-4 py-3 text-sm text-text-secondary">This file no longer has changes.</p>;
   const rows = parsePatch(load.value.patch);

@@ -14,7 +14,8 @@ import { PanelContainer } from './panels/PanelContainer';
 import { PanelTabStrip } from './panels/PanelTabStrip';
 import { SplitLayout } from './panels/SplitLayout';
 import { SessionAddToolMenu, type SessionToolSpec } from './SessionAddToolMenu';
-import { SelectionLoading } from './ui/SelectionLoading';
+import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
+import { TerminalSkeleton } from './panels/TerminalSkeleton';
 import { useOuterPanelResize } from '../hooks/useOuterPanelResize';
 import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
@@ -202,6 +203,14 @@ export function SessionWorkspacePanels({
     return () => observer.disconnect();
   }, []);
   const [loaded, setLoaded] = useState(false);
+  // The split layout measures itself before its panels paint: for those first
+  // frames the stage keeps the skeleton the terminal's own mask then takes over.
+  const [stageUnderlay, setStageUnderlay] = useState(true);
+  useEffect(() => {
+    if (!loaded) { setStageUnderlay(true); return; }
+    let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => setStageUnderlay(false)); });
+    return () => cancelAnimationFrame(frame);
+  }, [loaded]);
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const creating = useRef(false);
@@ -709,7 +718,7 @@ export function SessionWorkspacePanels({
 
   if (!loaded) {
     return <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
-      {!error ? <SelectionLoading name="Session tools" /> : <div className="p-6 text-text-secondary"><p role="alert">{error}</p>
+      {!error ? <SessionWorkspaceSkeleton name={agentPanel.title} tabTitle={agentPanel.title} agentPanelId={agentPanel.id} /> : <div className="p-6 text-text-secondary"><p role="alert">{error}</p>
         <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => { setError(null); setRetry(value => value + 1); }}>Retry</button>
       </div>}
     </div>;
@@ -732,6 +741,9 @@ export function SessionWorkspacePanels({
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden" inert={asideMaximized ? true : undefined}>
           <div ref={stageRef} data-focus-region="main" className="relative min-h-0 flex-1">
+            {stageUnderlay && primary?.activePanelId === agentPanelId && <div className="absolute inset-0 bg-[var(--color-terminal-bg)]">
+              <TerminalSkeleton panelId={agentPanelId} />
+            </div>}
             {stageNotice}
             {approval && placement === 'over' && overlay && (
               <div className="absolute z-30 flex min-h-0 min-w-0 border-l border-border-primary bg-bg-primary" style={overlay} data-testid="session-approval-overlay" data-focus-region="approvals" onKeyDown={escapeApprovalColumn}>

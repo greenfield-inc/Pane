@@ -25,6 +25,7 @@ import { registerApprovalSend } from './approvalSend';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { useNow } from '../notify/useNow';
 import { FindBar } from '../find/FindBar';
+import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
 import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
 import {
   askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
@@ -679,7 +680,16 @@ export function SummaryView({ item, page, onRetry }: { item: NotifyItem; page: S
           {machine && <span className="min-w-0 shrink truncate" data-testid="approval-summary-machine">· on {machine}</span>}
           <span className="shrink-0">· sandboxed, no scripts</span>
         </div>
-        {page === null && <p className="m-auto text-[13px] text-text-tertiary">Loading the Summary…</p>}
+        {page === null && <>
+          <LoadingStatus label="Loading the Summary" />
+          {/* A Summary page: its title, a lead paragraph, then a section. */}
+          <Skeleton className="flex min-h-0 w-full flex-1 flex-col gap-3 bg-surface-primary p-6">
+            <Bone className="mb-2 h-6 w-1/2" />
+            <Bone className="h-3.5 w-full" /><Bone className="h-3.5 w-11/12" /><Bone className="h-3.5 w-3/5" />
+            <Bone className="mb-1 mt-4 h-4 w-1/3" />
+            <Bone className="h-3.5 w-full" /><Bone className="h-3.5 w-4/5" />
+          </Skeleton>
+        </>}
         {page?.kind === 'failed' && (
           <div className="m-auto px-6 text-center text-[13px] text-text-secondary" role="status">
             <p>{page.message}</p>

@@ -26,6 +26,7 @@ import { AutopilotStack } from './AutopilotStack';
 import { useObservedContentBox } from '../../hooks/useObservedContentBox';
 import { useOuterPanelResize } from '../../hooks/useOuterPanelResize';
 import { OuterResizeSeparator } from '../ui/OuterResizeSeparator';
+import { Bone, Skeleton, TextBone, LoadingStatus } from '../ui/Skeleton';
 import { OUTER_PANEL_CONFIGS } from '../../utils/outerPanelSizing';
 import { AWAY_BLOCK, controlLine, ITEMS_BLOCK, LOG_BLOCK, queuedControlLabel } from '../../../../shared/autopilotTranscript';
 
@@ -246,6 +247,35 @@ function Header({ snapshot, pending }: { snapshot: AutopilotSnapshot; pending: b
   );
 }
 
+/** Autopilot while its snapshot loads: the chat column and the Stack, each with its header. */
+function AutopilotSkeleton() {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 bg-bg-primary">
+      <LoadingStatus label="Loading Autopilot" />
+      <section className="flex w-[44%] min-w-[340px] max-w-[720px] min-h-0 flex-col border-r border-border-primary">
+        <Skeleton className="flex h-view-header shrink-0 items-center gap-2.5 border-b border-border-primary px-4">
+          <Bone className="h-7 w-7 shrink-0 rounded-lg" />
+          <span className="shrink-0 text-[15px] font-semibold leading-none"><TextBone text="Autopilot" /></span>
+          <span className="shrink-0 text-[10.5px] font-semibold uppercase leading-none tracking-wider"><TextBone text="Experimental" className="px-1.5" /></span>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <Bone className="h-8 w-[118px] rounded-full" />
+            <Bone className="h-8 w-8 rounded-lg" />
+          </div>
+        </Skeleton>
+      </section>
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <Skeleton className="flex h-view-header shrink-0 items-center gap-2 border-b border-border-primary px-4">
+          <Bone className="h-4 w-4 shrink-0" />
+          <span className="hidden shrink-0 text-[14px] font-semibold leading-none min-[1180px]:block"><TextBone text="Stack" /></span>
+          <span className="flex h-7 w-7 items-center justify-center"><Bone className="h-4 w-4" /></span>
+          <span className="flex h-7 w-7 items-center justify-center"><Bone className="h-4 w-4" /></span>
+          <div className="ml-auto"><Bone className="h-7 w-8 rounded-lg" /></div>
+        </Skeleton>
+      </section>
+    </div>
+  );
+}
+
 const RENDERING: ChatRendering = {
   blocks: {
     [ITEMS_BLOCK]: (content) => <AutopilotItemRows content={content} />,
@@ -293,7 +323,7 @@ export function AutopilotView() {
   }, []);
   // Turning Autopilot off while it is open leaves for the Sessions home.
   useEffect(() => { if (snapshot && !snapshot.enabled) navigateToSessions(); }, [snapshot, navigateToSessions]);
-  if (!snapshot) return <div className="flex flex-1 items-center justify-center bg-bg-primary text-[13px] text-text-tertiary">Loading Autopilot…</div>;
+  if (!snapshot) return <AutopilotSkeleton />;
   const fresh = snapshot.state === 'stopped' && snapshot.stack.entries.length === 0;
 
   return (

@@ -16,6 +16,7 @@ import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
 import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { Dropdown } from '../../ui/Dropdown';
+import { Bone, Skeleton, LoadingStatus } from '../../ui/Skeleton';
 import { computerRelayId } from '../../../../../shared/types/remoteComputers';
 import { relayCarrier } from '../../../utils/relayCarrier';
 import type { RemoteDaemonClientRecord } from '../../../../../shared/types/remoteDaemon';
@@ -198,10 +199,8 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
         ))}
       </div>
 
+      {controller.loading && <LoadingStatus label="Loading Remote Pane status" />}
       <div role="tabpanel" id={`remote-panel-${tab}`} aria-labelledby={`remote-tab-${tab}`} className="space-y-8">
-        {controller.loading && (
-          <p className="text-sm text-text-tertiary" aria-live="polite">Loading Remote Pane status...</p>
-        )}
         {controller.error && (
           <ErrorBanner message={controller.error}>
             <Button type="button" variant="secondary" size="sm" onClick={() => void controller.reload()}>Retry</Button>
@@ -509,11 +508,28 @@ function PhoneRows({ controller, here }: { controller: RemoteAccessController; h
           )}
         </PhoneRow>
       ))}
-      {paired.length === 0 && unpaired.length === 0 && (
+      {paired.length === 0 && unpaired.length === 0 && controller.loading && <PhoneRowSkeleton />}
+      {paired.length === 0 && unpaired.length === 0 && !controller.loading && (
         <p className={`text-sm text-text-tertiary ${CARD_ROW}`}>No phones yet. Pair one to use Pane from anywhere.</p>
       )}
       {outcome && <p className={`text-xs text-text-secondary ${CARD_ROW}`} role="status">{outcome}</p>}
     </>
+  );
+}
+
+/** A PhoneRow while the paired phones load. */
+function PhoneRowSkeleton() {
+  return (
+    <Skeleton className={cn('flex items-center justify-between gap-3', CARD_ROW)}>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-surface-secondary"><Bone className="h-4 w-4" /></span>
+        <div className="min-w-0 flex-1">
+          <div className="flex h-5 items-center"><Bone className="h-3.5 w-32" /></div>
+          <div className="flex h-4 items-center"><Bone className="h-3 w-44" /></div>
+        </div>
+      </div>
+      <Bone className="h-8 w-20 rounded-button" />
+    </Skeleton>
   );
 }
 

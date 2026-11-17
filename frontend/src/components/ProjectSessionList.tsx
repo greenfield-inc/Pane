@@ -11,6 +11,7 @@ import { AddProjectDialog } from './AddProjectDialog';
 import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
+import { Bone, Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
 import { AgentStatusDot, PausedGlyph } from './ui/AgentStatusDot';
 import { resumeIfOpenResumes } from '../utils/pause';
 import type { DropdownItem } from './ui/Dropdown';
@@ -1447,11 +1448,28 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
       {showArchived && (
         <div id={archivedContentId} className="pb-2 max-h-[40vh] overflow-y-auto">
           {isLoadingArchived ? (
-            <div className="px-4 py-2 space-y-2 animate-skeleton">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-7 bg-surface-tertiary rounded" />
-              ))}
-            </div>
+            <>
+              <LoadingStatus label="Loading archived Sessions and Panes" />
+              <Skeleton>
+                <div className="pb-1">
+                  <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide"><TextBone text="Sessions" /></p>
+                  {[44, 32].map(width => (
+                    <div key={width} className="flex h-8 items-center gap-2 pl-8 pr-1">
+                      <Bone className="h-3 w-3 flex-shrink-0" />
+                      <Bone className="h-3" style={{ width: `${width}%` }} />
+                    </div>
+                  ))}
+                </div>
+                <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide"><TextBone text="Panes" /></p>
+                {[38, 50].map(width => (
+                  <div key={width} className="flex h-7 items-center gap-2 pl-5 pr-4">
+                    <Bone className="h-3 w-3 flex-shrink-0" />
+                    <Bone className="h-3" style={{ width: `${width}%` }} />
+                    <Bone className="ml-auto h-2.5 w-2" />
+                  </div>
+                ))}
+              </Skeleton>
+            </>
           ) : (
             <>
               <div data-testid="archived-orchestration-sessions" className="pb-1">

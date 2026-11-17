@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowRight, CheckSquare, ChevronDown, ChevronRight, LayoutGrid, Loader2,
+  ArrowRight, CheckSquare, ChevronDown, ChevronRight, LayoutGrid,
   RefreshCw, Settings2, Square, X,
 } from 'lucide-react';
 import { API } from '../../utils/api';
@@ -23,6 +23,8 @@ import { Button } from '../ui/Button';
 import { Dropdown, type DropdownItem } from '../ui/Dropdown';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui/Modal';
 import { MissionControlTile } from './MissionControlTile';
+import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
+import { MIN_TILE_FONT_SIZE, rowHeight } from '../../utils/terminalFit';
 import type {
   MissionControlAgentPanel,
   MissionControlDensity,
@@ -214,6 +216,29 @@ function SegmentedControl<T extends string | number>({ legend, label, options, v
  * share a WebGL texture atlas, and a grid of live terminals would exhaust
  * Chromium's GL contexts (see `TerminalPanel`'s header comment).
  */
+/** One row of snapshot tiles, as MissionControlTile draws them, while the agent list loads. */
+function MissionControlSkeleton({ columns, fontFamily }: { columns: MissionControlDensity; fontFamily: string }) {
+  const bodyHeight = LINES_BY_DENSITY[columns] * rowHeight(MIN_TILE_FONT_SIZE, fontFamily);
+  return <>
+    <LoadingStatus label="Finding agents" />
+    <Skeleton className="grid items-start gap-2.5" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+      {Array.from({ length: columns }, (_, index) => (
+        <div key={index} className="flex min-w-0 flex-col overflow-hidden rounded-md border border-border-primary bg-surface-secondary">
+          <div className="flex h-[23px] items-center gap-1.5 border-b border-border-primary py-1 pl-2.5 pr-2">
+            <Bone className="h-2 w-2 rounded-full" />
+            <span className="min-w-0 flex-1"><Bone className="h-2.5 w-24" /></span>
+            <Bone className="h-3 w-10" />
+            <Bone className="h-2.5 w-2.5" />
+          </div>
+          <div className="flex flex-col justify-end gap-1.5 bg-[var(--color-terminal-bg)] pb-1.5 pl-3 pr-1.5 pt-1.5" style={{ height: bodyHeight }}>
+            <Bone className="h-2 w-3/4" /><Bone className="h-2 w-1/2" /><Bone className="h-2 w-2/3" />
+          </div>
+        </div>
+      ))}
+    </Skeleton>
+  </>;
+}
+
 export function MissionControlView() {
   const [agents, setAgents] = useState<MissionControlAgentPanel[]>([]);
   const [snapshots, setSnapshots] = useState<Record<string, MissionControlSnapshot>>({});
@@ -904,10 +929,7 @@ export function MissionControlView() {
 
       <div ref={gridScrollerRef} className="min-h-0 flex-1 overflow-auto p-3">
         {loading ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-xs text-text-tertiary">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Finding agents…
-          </div>
+          <MissionControlSkeleton columns={fitColumns(density, gridWidth, tileWidth, density)} fontFamily={terminalFontFamily} />
         ) : error ? (
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}

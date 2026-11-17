@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../../ui/Button';
 import { Textarea } from '../../ui/Input';
+import { Skeleton, TextBone, LoadingStatus } from '../../ui/Skeleton';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
@@ -106,8 +107,34 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
                 ))}
               </tbody>
             </table>
+          ) : journeyTimings ? (
+            <span className="text-xs text-text-tertiary">No timings yet</span>
           ) : (
-            <span className="text-xs text-text-tertiary">{journeyTimings ? 'No timings yet' : 'Loading'}</span>
+            <>
+              <Skeleton>
+                <table className="text-xs tabular-nums">
+                  <thead>
+                    <tr>
+                      <th className="pr-4 text-left font-medium"><TextBone text="Journey" /></th>
+                      <th className="px-2 text-right font-medium"><TextBone text="p50" /></th>
+                      <th className="px-2 text-right font-medium"><TextBone text="p75" /></th>
+                      <th className="pl-2 text-right font-medium"><TextBone text="Runs" /></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.values(JOURNEY_LABELS).map((label) => (
+                      <tr key={label}>
+                        <td className="pr-4"><TextBone text={label} /></td>
+                        <td className="px-2 text-right"><TextBone text="000 ms" /></td>
+                        <td className="px-2 text-right"><TextBone text="000 ms" /></td>
+                        <td className="pl-2 text-right"><TextBone text="000" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Skeleton>
+              <LoadingStatus label="Loading journey timings" />
+            </>
           )}
         </SettingRow>
       </SettingsSection>

@@ -62,7 +62,9 @@ import type { InterceptorState, TerminalSuggestion } from '../../services/termin
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import { onTerminalReflow } from '../../utils/terminalReflow';
 import { createMaskOwnership } from '../../utils/maskOwnership';
-import { markTerminalShown, wasTerminalShown } from '../../utils/shownTerminals';
+import { readTerminalScreen, rememberTerminalScreen } from '../../utils/terminalScreens';
+import { TerminalSkeleton } from './TerminalSkeleton';
+import { useSkeletonHold } from '../ui/Skeleton';
 import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
 
@@ -71,46 +73,14 @@ interface DropdownPosition {
   y: number;
 }
 
-// Hold the loading overlay at least this long past ready so the terminal
-// underneath finishes painting before it is revealed.
+// Hold a refit's mask this long past ready so the terminal underneath
+// finishes painting before it is revealed.
 const TERMINAL_OVERLAY_LINGER_MS = 150;
 const TERMINAL_LOADING_TIMEOUT_MS = 30_000;
 
 // The hover toolbar's buttons: a 24px target around a 16px chip.
 const TERMINAL_TOOLBAR_BUTTON = 'group/toolbar-button flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:text-text-secondary transition-colors';
 const TERMINAL_TOOLBAR_CHIP = 'rounded bg-surface-secondary/60 p-0.5 group-hover/toolbar-button:bg-surface-tertiary/80 transition-colors';
-
-const SKELETON_TRANSCRIPT_WIDTHS = ['w-2/3', 'w-1/2', 'w-5/6', 'w-1/3', 'w-3/4', 'w-2/5'];
-
-// Opaque stand-in shaped like a CLI agent session: greeting banner, transcript
-// lines, and a prompt box, breathing as one surface. Shown until the terminal
-// is first revealed; later masks cover a loaded terminal with a plain surface.
-const TerminalLoadingSkeleton: React.FC = () => (
-  <div className="relative w-full h-full overflow-hidden px-4 py-4 font-mono select-none" aria-hidden="true">
-    <div className="flex h-full flex-col gap-4 animate-skeleton">
-      <div className="rounded-md border border-border-primary p-3 space-y-2 max-w-md">
-        <div className="h-3.5 w-40 rounded bg-surface-tertiary" />
-        <div className="h-3 w-56 rounded bg-surface-tertiary" />
-        <div className="h-3 w-32 rounded bg-surface-tertiary" />
-      </div>
-      <div className="space-y-2.5 max-w-2xl">
-        {SKELETON_TRANSCRIPT_WIDTHS.map((w, i) => (
-          <div key={i} className={`h-3 rounded bg-surface-tertiary ${w}`} />
-        ))}
-      </div>
-      <div className="flex-1" />
-      <div className="space-y-2">
-        <div className="rounded-md border border-border-primary px-3 py-2.5">
-          <div className="h-3 w-24 rounded bg-surface-tertiary" />
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="h-2.5 w-20 rounded bg-surface-tertiary" />
-          <div className="h-2.5 w-28 rounded bg-surface-tertiary" />
-        </div>
-      </div>
-    </div>
-  </div>
-);
 
 // Type for terminal state restoration
 interface TerminalRestoreState {
@@ -431,23 +401,43 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     return () => clearTimeout(timeout);
   }, [overlayActive, initAttempt]);
   const [overlayVisible, setOverlayVisible] = useState(true);
-  // A terminal already shown once, in this mount or an earlier one, is loaded:
-  // its refit masks stay plain.
-  const [, setShownRevision] = useState(0);
-  const terminalShown = wasTerminalShown(panel.id);
+  // Until this mount first reveals its terminal, the mask carries the loading
+  // skeleton (held so it never blinks); later refits get a plain mask.
+  // A retry, or a dock instance reused for another panel, loads afresh.
+  const loadKey = `${panel.id}:${initAttempt}`;
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const revealed = revealedKey === loadKey;
+  const firstLoad = useSkeletonHold(overlayActive && !revealed);
+  const maskHeld = overlayActive || firstLoad.holding;
+  // The terminal fades in over a skeleton the person saw; a fast load just appears.
+  const [fadeIn, setFadeIn] = useState(false);
+  const skeletonSeen = firstLoad.reveal;
+  // When the terminal became ready: a skeleton's hold counts toward the linger.
+  const readyAt = useRef(0);
   useEffect(() => {
-    if (overlayActive) {
+    if (!overlayActive) readyAt.current = performance.now();
+  }, [overlayActive]);
+  useEffect(() => {
+    if (maskHeld) {
       setOverlayVisible(true);
       return;
     }
-    const lingerTimer = setTimeout(() => {
+    const lift = () => {
       setOverlayVisible(false);
-      markTerminalShown(panel.id, panel.sessionId);
-      setShownRevision(revision => revision + 1);
+      setRevealedKey(loadKey);
+      if (skeletonSeen) setFadeIn(true);
       markPaneTerminalShown(panel.sessionId);
-    }, TERMINAL_OVERLAY_LINGER_MS);
+    };
+    if (!revealed) {
+      // A first load already waited for the terminal's paint before reporting
+      // ready; two more frames cover the replay's last write.
+      let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(lift); });
+      return () => cancelAnimationFrame(frame);
+    }
+    const linger = Math.max(0, readyAt.current + TERMINAL_OVERLAY_LINGER_MS - performance.now());
+    const lingerTimer = setTimeout(lift, linger);
     return () => clearTimeout(lingerTimer);
-  }, [overlayActive, panel.id, panel.sessionId]);
+  }, [maskHeld, loadKey, skeletonSeen, revealed, panel.sessionId]);
 
   // Listen for cliReady event (only for CLI panels that aren't already ready)
   useEffect(() => {
@@ -1898,6 +1888,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         paneLinksAddonRef.current = null;
       }
 
+      // Remember the screen's shape, for the skeleton when it mounts again.
+      if (xtermRef.current) {
+        try { rememberTerminalScreen(panel.id, terminalRuntimeRef.current.panelSessionId, readTerminalScreen(xtermRef.current)); } catch { /* disposed */ }
+      }
+
       // Save serialized terminal snapshot before disposing
       if (serializeAddonRef.current && xtermRef.current) {
         try {
@@ -2127,7 +2122,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       {/* ph-no-capture keeps xterm out of session recordings: its WebGL canvas
           never replays, and replaying scrollback rewrites the scrollbar
           slider's style thousands of times, which the recorder would serialize. */}
-      <div ref={terminalRef} className="ph-no-capture h-full w-full" data-terminal-font={terminalFontObservation} data-window-focused={windowFocused ? "true" : "false"} />
+      <div ref={terminalRef} className={`ph-no-capture h-full w-full${fadeIn ? ' skeleton-reveal' : ''}`} data-terminal-font={terminalFontObservation} data-window-focused={windowFocused ? "true" : "false"} />
       {refreshError && <div role="status" className="absolute bottom-0 inset-x-0 z-30 bg-surface-secondary px-3 py-2 text-xs text-text-secondary">
         Terminal restoration needs attention: {refreshError}
         <button type="button" className="ml-3 text-text-primary" onClick={() => void handleManualRefresh()}>Retry snapshot</button>
@@ -2219,11 +2214,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       )}
 
       {(overlayVisible || initError) && (
-        <div className="absolute inset-0 bg-surface-primary z-10" data-testid="terminal-activation-mask" role={initError ? undefined : 'status'} aria-label={initError ? undefined : 'Loading terminal'}>
+        // The terminal's own background, so lifting the mask changes nothing but the text.
+        <div className="absolute inset-0 z-10 bg-[var(--color-terminal-bg)]" data-testid="terminal-activation-mask" role={initError ? undefined : 'status'} aria-label={initError ? undefined : 'Loading terminal'}>
           {initError ? <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-text-secondary">
             <p role="alert">Terminal could not load: {initError}</p>
             <button type="button" className="rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => setInitAttempt(attempt => attempt + 1)}>Retry</button>
-          </div> : !terminalShown && <TerminalLoadingSkeleton />}
+          </div> : !revealed && (firstLoad.holding || skeletonSeen) && <TerminalSkeleton panelId={panel.id} />}
         </div>
       )}
 

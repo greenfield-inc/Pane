@@ -6,6 +6,7 @@ import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { formatShare, formatTokens, formatUsd } from './ui/charts/chartScales';
 import { DAY_MS, rollingUsageRange } from './usage/usageDateRange';
 import { cn } from '../utils/cn';
+import { Bone, Skeleton } from './ui/Skeleton';
 import { DEFAULT_USAGE_RANGE_DAYS, type UsageIndexStatus, type UsageReport } from '../../../shared/types/usage';
 
 /** How often the card checks the index while a pass is still running. */
@@ -17,6 +18,7 @@ const TOP_PROJECTS = 3;
 const MODEL_ROWS = 3;
 const MODEL_COLORS = ['bg-interactive', 'bg-status-success', 'bg-text-tertiary'] as const;
 
+const TILE_GRID = 'grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]';
 const tileClass = 'flex h-24 min-w-0 flex-col justify-between rounded-xl px-4 py-3';
 const labelClass = 'h-4 text-[11px] uppercase leading-4 tracking-wider text-text-muted';
 const linkClass = 'whitespace-nowrap text-interactive hover:text-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive rounded-sm';
@@ -105,18 +107,18 @@ function useUsageReport() {
   return { report, status, failed };
 }
 
-/** A fixed line box holding text, or a grey bar of the same height while loading. */
+/** A fixed line box holding text, or a bone of the same height while loading. */
 function Slot({ loading, className, barClass, children }: { loading: boolean; className: string; barClass: string; children?: ReactNode }) {
   return (
     <div className={cn('flex min-w-0 items-center', className)}>
-      {loading ? <div className={cn('rounded bg-surface-tertiary', barClass)} /> : <span className="truncate">{children}</span>}
+      {loading ? <Bone className={barClass} /> : <span className="truncate">{children}</span>}
     </div>
   );
 }
 
 /** One bar per day bucket the report uses (UTC days), across the same rolling range as Usage & Limits. */
 function DailyBars({ report }: { report: UsageReport | null }) {
-  if (!report) return <div className="h-12 w-full rounded bg-surface-tertiary" />;
+  if (!report) return <Bone className="h-12 w-full" />;
   const { fromMs, toMs } = rollingUsageRange(DEFAULT_USAGE_RANGE_DAYS);
   const days: number[] = [];
   for (let day = Math.floor(fromMs / DAY_MS) * DAY_MS; day <= toMs; day += DAY_MS) days.push(day);
@@ -201,13 +203,13 @@ function ModelsTile({ report }: { report: UsageReport | null }) {
         <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full">
           {models.map((model, index) => <div key={model.label} className={MODEL_COLORS[index]} style={{ width: formatShare(model.share) }} />)}
         </div>
-      ) : <div className="h-1.5 rounded-full bg-surface-tertiary" />}
+      ) : <Bone className="h-1.5 rounded-full" />}
       <div className="flex flex-col gap-px">
         {Array.from({ length: MODEL_ROWS }, (_, index) => {
           const model = models?.[index];
           return (
             <div key={index} className="flex h-3.5 items-center gap-1.5 text-[11px] leading-[14px] text-text-tertiary">
-              {!models ? <div className="h-2 w-28 rounded bg-surface-tertiary" /> : model && (
+              {!models ? <Bone className="h-2 w-28" /> : model && (
                 <>
                   <span className={cn('h-2 w-2 flex-none rounded-sm', MODEL_COLORS[index])} />
                   <span className="min-w-0 flex-1 truncate">{model.label}</span>
@@ -277,17 +279,25 @@ export function UsageSnapshotCard({ report, status = null, failed = false, host 
           Open Usage &amp; Limits →
         </button>
       </div>
-      <div className={cn('grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]', state.kind === 'loading' && 'animate-skeleton')}>
-        {state.kind === 'empty' && <EmptyTiles title={`No Claude Code or Codex history ${where} yet`} detail="Start an agent and each day's tokens chart here." />}
-        {state.kind === 'unavailable' && <EmptyTiles title="Pane couldn't read your agent history" detail="Open Usage & Limits to read it again." />}
-        {(state.kind === 'loading' || state.kind === 'ready') && (
-          <>
-            <ChartTile report={shown} />
-            <ProjectsTile report={shown} />
-            <ModelsTile report={shown} />
-          </>
-        )}
-      </div>
+      {state.kind === 'loading' ? (
+        <Skeleton className={TILE_GRID}>
+          <ChartTile report={null} />
+          <ProjectsTile report={null} />
+          <ModelsTile report={null} />
+        </Skeleton>
+      ) : (
+        <div className={TILE_GRID}>
+          {state.kind === 'empty' && <EmptyTiles title={`No Claude Code or Codex history ${where} yet`} detail="Start an agent and each day's tokens chart here." />}
+          {state.kind === 'unavailable' && <EmptyTiles title="Pane couldn't read your agent history" detail="Open Usage & Limits to read it again." />}
+          {state.kind === 'ready' && (
+            <>
+              <ChartTile report={shown} />
+              <ProjectsTile report={shown} />
+              <ModelsTile report={shown} />
+            </>
+          )}
+        </div>
+      )}
       <div className="flex h-5 items-center justify-between gap-4 text-xs text-text-tertiary">
         <span className="flex min-w-0 items-center gap-1.5">
           <Lock className="h-3 w-3 flex-none" aria-hidden="true" />

@@ -14,6 +14,7 @@ import { useListeningPorts } from '../../../hooks/useListeningPorts';
 import { useConfigStore } from '../../../stores/configStore';
 import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
 import { Dropdown } from '../../ui/Dropdown';
+import { Bone, Skeleton, LoadingStatus } from '../../ui/Skeleton';
 import { PortsList } from './PortsList';
 import { RefusedFilesNotice, type FileRefusal } from './RefusedFilesNotice';
 import { FindBar } from '../../find/FindBar';
@@ -785,9 +786,17 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           </div>
           {/* Page webview */}
           {target.kind === 'waiting' && (
-            <div className="flex flex-1 items-center justify-center text-xs text-text-tertiary">
-              Connecting to the host's ports…
-            </div>
+            <>
+              <LoadingStatus label="Connecting to the host's ports…" />
+              {/* The page it loads is unknown: a generic page, a top bar over a heading and text. */}
+              <Skeleton className="flex flex-1 flex-col">
+                <div className="flex h-12 items-center gap-4 border-b border-border-primary px-6"><Bone className="h-5 w-24" /><Bone className="ml-auto h-3 w-16" /><Bone className="h-3 w-16" /></div>
+                <div className="flex flex-col gap-3 px-6 pt-8">
+                  <Bone className="mb-2 h-7 w-1/3" />
+                  <Bone className="h-3.5 w-2/3" /><Bone className="h-3.5 w-1/2" />
+                </div>
+              </Skeleton>
+            </>
           )}
           {target.kind === 'unreachable' && (
             <div role="status" className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center">

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { CHAT_CONVERSATION_LIMIT, type ChatTabConversation } from '../../../../shared/types/chatTab';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
+import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
 import { canPick, conversationTime, conversationTitle, enterOpens, filterConversations, firstPickable, stepPickable } from './pickerRows';
 
 export interface ConversationPickerViewProps {
@@ -36,7 +37,15 @@ export function ConversationPickerView({ rows, filter, selected, busy, error, no
     </div>
     {error && <p role="alert" className="chat-picker-error">{error}</p>}
     {!rows
-      ? <p role="status" className="chat-picker-empty">Loading conversations…</p>
+      ? <>
+        <LoadingStatus label="Loading conversations…" />
+        <Skeleton className="chat-picker-list">
+          {['w-3/5', 'w-2/5', 'w-1/2', 'w-1/3', 'w-2/5'].map((width, index) => <div key={index} className="chat-picker-row">
+            <span className="flex-1 min-w-0"><Bone className={`h-3.5 ${width}`} /></span>
+            <Bone className="h-3 w-12" />
+          </div>)}
+        </Skeleton>
+      </>
       : !shown.length
         // A list that failed says why above; an empty state under it would contradict it (QA F3).
         ? error ? null : <p className="chat-picker-empty">{filter.trim() ? `No conversation matches “${filter.trim()}”.` : 'No past conversations in this folder yet.'}</p>

@@ -9,8 +9,53 @@ import { usePreviewUrl } from './usePreviewUrl';
 import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { fileExtension, getLanguageFromPath } from './fileKinds';
 import { parseDelimitedPreview, readPreviewText } from './documentPreviewData';
+import { Bone, Skeleton, TextBone, LoadingStatus } from '../../ui/Skeleton';
 
 const Editor = lazy(() => import('@monaco-editor/react'));
+
+/** Indent and length (in characters) of each line a code skeleton draws. */
+const CODE_LINES: Array<[number, number]> = [[0, 28], [0, 34], [0, 0], [0, 40], [2, 30], [2, 46], [4, 24], [2, 2], [2, 38], [0, 1], [0, 0], [0, 32], [2, 44], [2, 20], [0, 1]];
+
+/** Monaco at fontSize 14 while it loads: the line-number gutter and the first lines of code. */
+export function CodeSkeleton({ label }: { label: string }) {
+  return <>
+    <LoadingStatus label={label} />
+    <Skeleton className="h-full pt-1 font-mono text-[14px]">
+      {CODE_LINES.map(([indent, length], index) => <div key={index} className="flex h-[19px] items-center">
+        <span className="flex w-16 shrink-0 justify-end pr-6"><Bone className="h-3 w-2" /></span>
+        {length > 0 && <Bone className="h-3" style={{ marginLeft: `${indent}ch`, width: `${length}ch` }} />}
+      </div>)}
+    </Skeleton>
+  </>;
+}
+
+/** The preview's body for each kind while its file is read. */
+function PreviewBodySkeleton({ kind }: { kind: PreviewProps['kind'] }) {
+  if (kind === 'image') return <Skeleton className="h-full flex items-center justify-center p-4"><Bone className="h-48 w-64" /></Skeleton>;
+  if (kind === 'pdf') return <Skeleton className="h-full"><Bone className="h-full w-full rounded-none" /></Skeleton>;
+  if (kind === 'font') return <div className="h-full p-6 space-y-6">
+    <Skeleton><Bone className="h-3.5 w-24" /><Bone className="mt-2 h-10 w-full" /></Skeleton>
+    <FontSpecimenSkeleton />
+  </div>;
+  if (kind === 'table' || kind === 'archive' || kind === 'sqlite') return <Skeleton className="h-full text-sm">
+    {[0, 1, 2, 3, 4, 5, 6].map(row => <div key={row} className={`flex h-9 items-center gap-6 border-b border-border-primary px-3 ${row === 0 ? 'bg-surface-secondary' : ''}`}>
+      <Bone className="h-3.5 w-24" /><Bone className="h-3.5 w-40" /><Bone className="h-3.5 w-16" />
+    </div>)}
+  </Skeleton>;
+  if (kind === 'markdown') return <Skeleton className="h-full p-6 flex flex-col gap-3">
+    <Bone className="mb-2 h-7 w-1/3" />
+    <Bone className="h-3.5 w-full" /><Bone className="h-3.5 w-11/12" /><Bone className="h-3.5 w-3/4" />
+    <Bone className="mt-3 h-3.5 w-full" /><Bone className="h-3.5 w-2/3" />
+  </Skeleton>;
+  return <CodeSkeleton label="Loading preview" />;
+}
+
+/** FontSpecimen's sample lines (16 to 72 px) while the font loads. */
+function FontSpecimenSkeleton() {
+  return <Skeleton className="space-y-6">
+    {[16, 24, 36, 48, 72].map(size => <div key={size} className="flex items-center" style={{ height: size * 1.5 }}><Bone className="w-3/4" style={{ height: size * 0.75 }} /></div>)}
+  </Skeleton>;
+}
 
 interface PreviewProps {
   sessionId: string;
@@ -49,7 +94,7 @@ function FontSpecimen({ url, sessionId, filePath }: { url: string; sessionId: st
   return (
     <div data-find-empty="" className="h-full overflow-auto p-6 space-y-6 text-text-primary">
       <label className="block text-sm">Specimen text<input className="mt-2 w-full rounded border border-border-primary bg-surface-secondary p-2" value={sample} onChange={event => setSample(event.target.value)} /></label>
-      {!family ? <p role="status">Loading font…</p> : <div style={{ fontFamily: family }} className="space-y-6 break-words">
+      {!family ? <><LoadingStatus label="Loading font" /><FontSpecimenSkeleton /></> : <div style={{ fontFamily: family }} className="space-y-6 break-words">
         {[16, 24, 36, 48, 72].map(size => <p key={size} style={{ fontSize: size }}>{sample}</p>)}
         <p className="text-2xl">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br />abcdefghijklmnopqrstuvwxyz<br />0123456789 !@#$%&amp;*()[]</p>
       </div>}
@@ -87,7 +132,16 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
 
   const notice = (message: string) => <FilePreviewNotice sessionId={sessionId} filePath={filePath} message={message} />;
   if (urlError || error) return notice(urlError || error || 'Cannot preview this file.');
-  if (!url || (isText && !document) || ((kind === 'archive' || kind === 'sqlite') && !listing)) return <p role="status" className="p-6 text-text-secondary">Loading preview…</p>;
+  if (!url || (isText && !document) || ((kind === 'archive' || kind === 'sqlite') && !listing)) return (
+    <div className="h-full flex flex-col bg-surface-primary">
+      <LoadingStatus label="Loading preview" />
+      <Skeleton className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-border-primary text-xs leading-none">
+        <span className="flex h-4 items-center"><TextBone text="Read-only preview" /></span>
+        {isText && <div className="flex gap-2"><Bone className="h-6 w-[60px]" /><Bone className="h-6 w-[54px]" /></div>}
+      </Skeleton>
+      <div className="flex-1 min-h-0 overflow-hidden"><PreviewBodySkeleton kind={kind} /></div>
+    </div>
+  );
 
   let content = document?.text ?? '';
   let table: ReturnType<typeof parseDelimitedPreview> | null = null;
@@ -125,7 +179,7 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
         : table ? <PreviewTable columns={table.rows[0] ?? []} rows={table.rows.slice(1)} />
         : !source && kind === 'markdown' ? <div className="h-full overflow-auto p-6"><MarkdownPreview content={content} /></div>
         : (
-          <MonacoErrorBoundary><Suspense fallback={<p role="status" className="p-6 text-text-secondary">Loading source editor...</p>}><Editor theme={isLightTheme(theme) ? 'light' : 'vs-dark'} value={content} language={getLanguageFromPath(filePath)} options={{ readOnly: true, domReadOnly: true, folding: true, minimap: { enabled: false }, wordWrap: 'on', automaticLayout: true }} /></Suspense></MonacoErrorBoundary>
+          <MonacoErrorBoundary><Suspense fallback={<CodeSkeleton label="Loading source editor" />}><Editor theme={isLightTheme(theme) ? 'light' : 'vs-dark'} value={content} language={getLanguageFromPath(filePath)} options={{ readOnly: true, domReadOnly: true, folding: true, minimap: { enabled: false }, wordWrap: 'on', automaticLayout: true }} /></Suspense></MonacoErrorBoundary>
         )}
       </div>
     </div>

@@ -35,6 +35,7 @@ import { MachineMark } from './machines/MachineMark';
 import { SegmentedControl } from './settings/SettingsControls';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
+import { Bone, Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
 
 interface NewDialogProps {
   /** The repositories of the machine the app is on. */
@@ -271,6 +272,30 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
       : !onOtherMachine ? notice('A Pane needs a repository. Add one with the + beside Projects.')
       : otherRepositories?.machineId === machine.id && otherRepositories.error ? notice(otherRepositories.error)
       : repositories ? notice(`${machine.name} has no repositories yet. Switch to ${machine.name} and add one with the + beside Projects.`)
-      : notice(`Reading ${machine.name}'s repositories…`)}
+      : <>
+        {header}
+        <ModalBody className="p-0">
+          <LoadingStatus label={`Reading ${machine.name}'s repositories`} />
+          <Skeleton>
+            <div className="px-6 pt-4">
+              <div className="mb-2 text-sm font-medium leading-5"><TextBone text="Repository" /></div>
+              <div className="flex h-[38px] items-center rounded border border-border-primary px-3"><Bone className="h-3.5 w-36" /></div>
+            </div>
+            <div className="border-b border-border-primary px-6 pb-5 pt-6">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium leading-5"><Bone className="h-4 w-4" /><TextBone text="Base Branch" /></div>
+              <div className="flex h-[38px] items-center gap-2 rounded-md border border-border-primary px-3"><Bone className="h-4 w-4 shrink-0" /><Bone className="h-3.5 w-28" /></div>
+              <p className="mt-2 text-xs"><TextBone text="Remote branches will automatically track the remote for git pull/push." /></p>
+            </div>
+            <div className="border-b border-border-primary px-6 pb-5 pt-6">
+              <div className="mb-2 text-sm font-medium leading-5"><TextBone text="Pane Name" /></div>
+              <div className="h-[38px] rounded-input border border-border-primary" />
+            </div>
+          </Skeleton>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Skeleton><Bone className="h-9 w-40 rounded-button" /></Skeleton>
+        </ModalFooter>
+      </>}
   </Modal>;
 }

@@ -19,6 +19,7 @@ import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
+import { Bone, LoadingStatus, Skeleton } from './ui/Skeleton';
 
 const NOT_RUNNING = /is not initialized/;
 /** How often the dialog asks the Session's host how the move is going. */
@@ -345,7 +346,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
 
   const errorLine = error && <p role="alert" className="mt-3 text-sm text-status-error">{error}</p>;
   const pairedLine = sessionHost.kind === 'paired' && <p className="mt-3 text-sm text-text-secondary">{sessionHost.reason}</p>;
-  const looking = sessionHost.kind !== 'paired' && !targets && !error && <p className="mt-3 text-sm text-text-tertiary">Looking for your machines…</p>;
+  const looking = sessionHost.kind !== 'paired' && !targets && !error && <MachinesLoading />;
 
   let title = `Move “${name}”`;
   let body: ReactNode;
@@ -467,7 +468,7 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
           {preflight && blocks.length > 0 ? needsFixLine(preflight.target, blocks.length) : moveIntro(preflight)}
         </p>
         {pairedLine}
-        {(looking || !statusKnown) && sessionHost.kind !== 'paired' && <p className="mt-3 text-sm text-text-tertiary">Looking for your machines…</p>}
+        {(looking || !statusKnown) && sessionHost.kind !== 'paired' && <MachinesLoading />}
         {statusKnown && machineList(true)}
         {preflight && (
           <ul className="mt-3" aria-label={`Checks on ${preflight.target}`}>
@@ -522,5 +523,21 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
         <ModalFooter>{footer}</ModalFooter>
       </form>
     </Modal>
+  );
+}
+
+/** The destination list while it loads: two machine rows in the list's own row shape. */
+function MachinesLoading() {
+  return (
+    <>
+      <LoadingStatus label="Looking for your machines" />
+      <Skeleton className="mt-3 flex flex-col gap-1.5">
+        {[30, 42].map(width => (
+          <div key={width} className="flex items-center gap-2.5 rounded-md border border-border-primary px-2.5 py-1.5 text-sm">
+            <span className="flex h-5 flex-1 items-center"><Bone className="h-3.5" style={{ width: `${width}%` }} /></span>
+          </div>
+        ))}
+      </Skeleton>
+    </>
   );
 }
