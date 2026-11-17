@@ -3117,7 +3117,7 @@ describe('TerminalPanelManager Agent Farm resume', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     vi.spyOn(databaseService, 'getPanelBuffers').mockReturnValue({ scrollback: `$ ${FARM}\r\n${scrollback}working`, serialized: '', alternate: '' });
     const result = manager.resolveCliLaunchCommand('panel-1', FARM, { initialCommand: FARM, agentType: 'claude' });
-    expect(result.commandToRun).toBe(`${FARM} --resume "${LAUNCH_ID}"`);
+    expect(result.commandToRun).toBe(`${FARM} --resume '${LAUNCH_ID}'`);
   });
 
   it('records a SessionStart report for the running launch, and a later launch ID line does not undo it (D-269)', async () => {
