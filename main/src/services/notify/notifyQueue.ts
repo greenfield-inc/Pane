@@ -1001,8 +1001,19 @@ export class NotifyQueue extends EventEmitter {
     const entry = this.forReader(caller, ref, 'update');
     const { item } = entry;
     // A version that answers the person's typed question quotes it; the asker's own update has none to quote.
-    if (item.reply && !update.asked.trim()) {
-      throw new PaneError('ERR_NOTIFY_INVALID', `${refOf(item)} has a question the person typed, and this update didn't say what it was. Nothing was changed.`, 'Run it again with --asked "<their question, as they typed it>".');
+    let asked = update.asked.trim();
+    let quoted: string | undefined;
+    if (item.reply && !asked) {
+      const typed = item.reply.text.trim();
+      // A caller that never read the reply (a loop's next run, after the run it went to exited) can't
+      // quote it, so Pane does, and says so: the person's words reach the new version either way (#1464).
+      if (typed && item.reply.state !== 'reading' && item.reply.state !== 'sent' && !this.readsReply(entry, caller, ref)) {
+        asked = typed;
+        const how = item.reply.reader ? `it went to ${item.reply.reader.name}` : 'no agent could read it when it came, such as after the run that asked had stopped';
+        quoted = `This call never read the person's reply to ${refOf(item)} (${how}): "${typed}". Pane saved it as this version's --asked, so the card shows it as what they asked. If this version doesn't answer it, run runpane notify --update ${ref.trim()} --asked "<their question>" --what-changed "<one line per change>" again.`;
+      } else {
+        throw new PaneError('ERR_NOTIFY_INVALID', `${refOf(item)} has a question the person typed${typed ? `: "${typed}"` : ''}, and this update didn't say what it was. Nothing was changed.`, 'Run it again with --asked "<their question, as they typed it>", and answer it in the new version.');
+      }
     }
     // A reply taken as the answer was a question after all: the new version waits on the person again.
     if (item.state !== 'waiting') this.reopenTakenReply(entry);
@@ -1031,7 +1042,7 @@ export class NotifyQueue extends EventEmitter {
     if (update.title?.trim() || update.questions || update.choices) delete item.asSent;
     item.version = (item.version ?? 1) + 1;
     const by = item.reply?.reader?.name ?? askerName(item);
-    item.revision = { asked: update.asked.trim(), whatChanged: update.whatChanged.split('\n').map(line => line.trim()).filter(Boolean), by, at: now };
+    item.revision = { asked, whatChanged: update.whatChanged.split('\n').map(line => line.trim()).filter(Boolean), by, at: now };
     // A newer reply still on its way to the reader stays; the one this version answers is done.
     if (item.reply?.state !== 'reading') item.reply = undefined;
     item.readyAgain = now;
@@ -1048,7 +1059,24 @@ export class NotifyQueue extends EventEmitter {
     }
     const result = this.wait(entry, returnAfterMs, signal);
     this.changed();
-    return result;
+    if (quoted === undefined) return result;
+    const warning = quoted;
+    return result.then(body => ({ ...body, warnings: [...body.warnings ?? [], warning] }));
+  }
+
+  /**
+   * Whether `caller` is the agent the reply went to: its reader's tab, or the open call it went
+   * back to (the asker's or the relaying orchestrator's agent, from its tab or by continuation id).
+   */
+  private readsReply(entry: Entry, caller: NotifyReaderCaller, ref: string): boolean {
+    const { item } = entry;
+    const reader = item.reply?.reader;
+    if (!reader) return false;
+    if (reader.panelId) return reader.panelId === caller.panelId;
+    if (entry.continuation !== undefined && entry.continuation === ref.trim()) return true;
+    if (!caller.panelId) return false;
+    if (reader.kind === 'orchestrator') return caller.panelId === item.relayedBy?.panelId;
+    return caller.panelId === item.source.panelId;
   }
 
   /**
