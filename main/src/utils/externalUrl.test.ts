@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PaneError } from '../../../shared/paneError';
-import { externalUrlOrNull, toExternalUrl } from './externalUrl';
+import { externalUrlOrNull, toExternalUrl, toLocalPagePath } from './externalUrl';
 
 describe('externalUrlOrNull', () => {
   it.each([
@@ -45,5 +45,24 @@ describe('toExternalUrl', () => {
     }
     expect(thrown).toBeInstanceOf(PaneError);
     expect(thrown).toMatchObject({ code: 'ERR_EXTERNAL_URL_BLOCKED', next: expect.any(String) });
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('toLocalPagePath', () => {
+  it.each([
+    ['file:///Users/me/status.html', '/Users/me/status.html'],
+    ['file:///Users/me/My%20Plan/index.HTM', '/Users/me/My Plan/index.HTM'],
+  ])('allows %s', (input, expected) => {
+    expect(toLocalPagePath(input)).toBe(expected);
+  });
+
+  it.each([
+    ['an app bundle', 'file:///Applications/Calculator.app'],
+    ['a shell script', 'file:///Users/me/run.command'],
+    ['a file on another machine', 'file://server/share/page.html'],
+    ['an http URL', 'http://localhost:5173/index.html'],
+    ['a bare path', '/Users/me/status.html'],
+  ])('refuses %s', (_label, input) => {
+    expect(() => toLocalPagePath(input)).toThrow(PaneError);
   });
 });

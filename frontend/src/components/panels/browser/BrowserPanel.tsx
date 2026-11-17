@@ -391,9 +391,24 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
 
   // The page the tab shows now, in host form: main maps a host port to where this computer reaches it.
   const externalUrl = shownUrl || url;
-  const canOpenExternal = Boolean(externalUrl) && !hasFileProtocol(externalUrl);
+  const isLocalPage = hasFileProtocol(externalUrl);
+  // Why the button can't open this page, shown as its tooltip; null when it can.
+  const openExternalBlock = ((): string | null => {
+    if (!externalUrl) return 'Open a page first';
+    if (isLocalPage) {
+      if (isRemoteMode) return `This file is on ${ports?.host ?? 'the host'}, so your browser on this computer can't open it`;
+      return /\.html?$/i.test(new URL(externalUrl).pathname) ? null : 'Only .html and .htm files open in your browser';
+    }
+    if (!/^https?:/i.test(externalUrl)) return 'Only http, https and .html pages open in your browser';
+    const external = targetOf(externalUrl);
+    if (external.kind === 'waiting') return 'Pane is still checking where this page runs';
+    if (external.kind === 'unreachable') return `Port ${external.port} on ${ports?.host ?? 'the host'} isn't forwarded to this computer`;
+    return null;
+  })();
+  const canOpenExternal = openExternalBlock === null;
   const handleOpenExternal = () => {
-    void window.electronAPI.openExternal(externalUrl).then(result => {
+    const open = isLocalPage ? window.electronAPI.openLocalPage : window.electronAPI.openExternal;
+    void open(externalUrl).then(result => {
       if (!result.success) setUrlError(result.error || 'Pane could not open this page in your browser');
     });
   };
@@ -674,7 +689,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !canOpenExternal && 'opacity-30 cursor-not-allowed'
           )}
-          title="Open in your browser"
+          title={openExternalBlock ? `Can't open in your browser: ${openExternalBlock}` : 'Open in your browser'}
         >
           <ExternalLink className="w-3.5 h-3.5" />
         </button>
