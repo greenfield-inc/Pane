@@ -62,7 +62,8 @@ import { MachineHealthService } from '../services/machineHealth/machineHealthSer
 import { recheckItem, scanStorage } from '../services/machineHealth/storageInventory';
 import { readFootprints } from '../services/machineHealth/footprint';
 import { parseSessionTimestampMs } from '../services/paneInactivity';
-import { agentTempRoots, ignoredDirs, installPathOf, otherToolPaths, processCwds, readUpdateRecords, wslDiskImages } from '../services/machineHealth/inventorySources';
+import { readUpdateRecords } from '../../../packages/runpane/src/updateRetention';
+import { agentTempRoots, ignoredDirs, installPathOf, otherToolPaths, processCwds, wslDiskImages } from '../services/machineHealth/inventorySources';
 import { DB_CLEAN_OPEN_PREFERENCE } from '../services/machineHealth/reclaimRules';
 import { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import { FinishedPaneMonitor, findFinishedPanes } from '../services/machineHealth/finishedPanes';
@@ -506,7 +507,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       installPath,
       cleanOpenAt: () => Number(databaseService.getUserPreference(DB_CLEAN_OPEN_PREFERENCE)) || null,
       archiveJobsInFlight: () => new Set(archiveCleanupManager.getTasks().filter(task => task.status !== 'completed').map(task => task.sessionId)),
-      readUpdates: () => readUpdateRecords(getAppDirectory()),
+      readUpdates: async () => readUpdateRecords(getAppDirectory()),
       listGitWorktrees,
       ignoredDirs: inventoryIgnoredDirs,
       processCwds,

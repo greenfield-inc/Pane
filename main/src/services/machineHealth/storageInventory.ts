@@ -1,10 +1,11 @@
 import { lstat, readdir, realpath, stat } from 'fs/promises';
 import * as path from 'path';
 import type { DiskBuckets, PaneDiskUsage, ReclaimItem, StorageInventory } from '../../../../shared/types/machineHealth';
-import { agentTempFolderName, classifyPaneDataFile, isWslPath, replacedUpdates, type UpdateRecord } from './reclaimRules';
+import { agentTempFolderName, classifyPaneDataFile, isWslPath } from './reclaimRules';
 import { measureSizes, type SizeRequest, type SizeResult } from './sizeWalker';
 import { PANE_SCRATCH_FOLDER } from '../../../../shared/constants/paneFolders';
 import { appBackupPath } from '../../../../packages/runpane/src/updateArtifacts';
+import { replacedUpdates, type UpdateRecord } from '../../../../packages/runpane/src/updateRetention';
 import { RESERVE_WORKTREE_PREFIX } from '../worktreePoolManager';
 
 const DAY = 86_400_000;
