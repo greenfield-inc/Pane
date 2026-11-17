@@ -150,6 +150,20 @@ describe('loadProfiles: team-only, overlays, duplicates and unreadable files', (
     expect(loaded.errors.map((error) => error.code)).toEqual(['PROFILE_YAML_ALIAS']);
   });
 
+  it('reads a block list of inline maps and lists, which are not aliases', () => {
+    const inline = tempProfile('inline', [
+      'format: pane-profile/1', 'name: inline', 'version: 1.0.0',
+      'agents:', '  writer: { runs: claude, skills: [a, b] }',
+      'flow:', '  start: draft', '  draft: { agent: writer, goal: Draft it, outcomes: { done: end, stuck: end } }',
+      'samples:', '  draft:', '    done: ["Drafted.", "Drafted, with notes."]', '    stuck: ["Stuck.", "Stuck again."]',
+      'runs:', '  A:', '    - { draft: "done #1" }', '  B:', '    - { draft: "stuck #2" }',
+      '',
+    ].join('\n'));
+    const [loaded] = loadProfiles([inline], { skillExists: () => true });
+    expect(loaded.errors).toEqual([]);
+    expect(loaded.profile?.runs.A).toEqual([{ step: 'draft', took: 'done', sample: 1 }]);
+  });
+
   it('refuses a file too large to be a profile, unread', () => {
     const huge = tempProfile('huge', `format: pane-profile/1\nname: huge\nversion: 1.0.0\ndescription: "${'x'.repeat(600 * 1024)}"\n`);
     expect(loadProfiles([huge])[0].errors.map((error) => error.code)).toEqual(['PROFILE_TOO_LARGE']);
