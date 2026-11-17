@@ -257,7 +257,10 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   Session's orchestrator chat docks one compact card above its composer:
   who asks, the title and subtitle across the card, and a bottom row with ‹ n
   of m ›, the reference count, Summary and **Open**; its pager stays in step
-  with the column's. The chat's own AskUserQuestion isn't docked: the chat
+  with the column's. Its ✕ (**Dismiss**) takes the card out of that chat
+  without answering it (and closes the column if it was open there): it
+  keeps waiting in Approvals, and comes back to the chat only when it changes
+  (a new version, a reply or ready again). The chat's own AskUserQuestion isn't docked: the chat
   already shows Claude's card, and Approvals and the phone keep the copy.
   **Send** closes the column, and a status line in the chat names the agent
   reading the reply ("okta-sso-account is reading your reply to Q-42"), then

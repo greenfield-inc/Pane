@@ -35,6 +35,9 @@ interface ApprovalColumnState {
   setTab(surface: ApprovalSurface, itemId: string, tab: string): void;
   openNested(surface: ApprovalSurface, itemId: string, nested: string | undefined): void;
   close(surface: ApprovalSurface): void;
+  /** Cards dismissed from a chat's dock (Q-389): chat → item id → the `dockKey` it was dismissed at. */
+  docked: Record<string, Record<string, string>>;
+  dismissDocked(chat: string, itemId: string, key: string): void;
 }
 
 export const useApprovalColumnStore = create<ApprovalColumnState>((set, get) => ({
@@ -65,6 +68,8 @@ export const useApprovalColumnStore = create<ApprovalColumnState>((set, get) => 
     delete open[surface];
     return { open };
   }),
+  docked: {},
+  dismissDocked: (chat, itemId, key) => set((state) => ({ docked: { ...state.docked, [chat]: { ...state.docked[chat], [itemId]: key } } })),
 }));
 
 /** Opens an approval in a Session's column (from its count, an inline card, or a link). */
