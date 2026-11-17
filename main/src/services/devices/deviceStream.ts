@@ -1,6 +1,6 @@
 import type { DeviceStreamInfo } from '../../../../shared/types/devices';
 
-/** The stream's longest side, in pixels, that a tab may ask for: the hub's own range, from a small tab up. */
+/** The stream's longest side, in pixels, that a tab may ask for: 320 (a small tab) to 4096 (the hub's limit). */
 const MIN_STREAM_PX = 320;
 const MAX_STREAM_PX = 4096;
 const SETTINGS_TIMEOUT_MS = 2_000;
@@ -53,6 +53,7 @@ export class StreamFrameRates {
         while (times.length > 0 && times[0] < at - WINDOW_MS) times.shift();
         controller.enqueue(chunk);
       },
+      flush: () => { if (this.frames.get(panelId) === times) this.frames.delete(panelId); },
     }));
   }
 
