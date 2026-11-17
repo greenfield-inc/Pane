@@ -7,7 +7,9 @@ don't run in them. To sign in to a page beside your agent:
   (the arrow out of a box, after Copy URL) opens the page in your default
   browser, where your password manager's extension already works. On a
   desktop connected to a remote host, it opens the address this computer
-  reaches the host's port at.
+  reaches the host's port at. A local `.html` page, such as a Session's
+  status page, opens there too. When the button is greyed out, its tooltip
+  says why.
 - **Try your password manager's desktop app.** Some fill the focused field in
   any app, which may include a Pane browser tab.
 

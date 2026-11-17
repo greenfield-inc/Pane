@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { Loop } from '../shared/types/loop';
 import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
+import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
 const projects = [
   { id: 1, name: 'Pane', path: '/tmp/pane', active: true, created_at: '2026-10-01T00:00:00.000Z', updated_at: '2026-10-01T00:00:00.000Z' },
@@ -75,8 +76,8 @@ test('creates, runs, pauses, edits and deletes a loop', async ({ page }) => {
   await detail.getByRole('button', { name: 'Run now' }).click();
   await expect(detail.getByRole('row')).toHaveCount(1);
   await expect(detail.getByRole('row')).toContainText('running');
-  // The run is a normal Pane under its project, marked as a loop run.
-  await expect(page.getByRole('button', { name: /^nightly-bug-sweep · / })).toBeVisible();
+  // The run Pane lives under Loops, out of its project's list.
+  await expect(page.locator('[data-pane-part="sidebar-pane"]').filter({ hasText: /^nightly-bug-sweep · / })).toHaveCount(0);
 
   await detail.getByRole('button', { name: /^Open run / }).click();
   const header = page.getByTestId('loop-run-header');
@@ -292,7 +293,7 @@ for (const theme of ['light-rounded', 'dark'] as const) {
     await expect(drawer.getByLabel('Command')).toHaveValue('agent-farm run greenfield/bug-sweep --since 24h');
     await expect(drawer.getByRole('combobox', { name: 'Repeat' })).toHaveText('Daily');
     await drawer.getByRole('button', { name: 'Delete loop' }).click();
-    await expect(drawer.getByText('Delete this loop? Its run Panes stay.')).toBeVisible();
+    await expect(drawer.getByText('Delete this loop? Its schedule stops, and its run Panes stay and move to their project\'s list.')).toBeVisible();
     await shoot(page, `${prefix}08-drawer-edit-delete-confirm`);
     await drawer.getByRole('button', { name: 'Keep' }).click();
     await drawer.getByRole('button', { name: 'Cancel' }).click();
@@ -314,3 +315,176 @@ for (const theme of ['light-rounded', 'dark'] as const) {
     await expect(page.getByRole('button', { name: 'Hide details' })).toBeVisible();
   });
 }
+
+// A loop's Session and its run Panes live under Loops (#1446).
+const WATCH_SESSION = '__orchestration_session_watch__';
+const watchLoop: Loop = {
+  id: 'loop-watch',
+  name: 'promises-watch',
+  orchestrationSessionId: WATCH_SESSION,
+  cron: '30 7 * * *',
+  agent: 'claude',
+  initialInput: 'Remind me of what is due.',
+  enabled: true,
+  createdAtMs: sweepSlots[5],
+  nextRunAtMs: today3am.getTime() + DAY + 4.5 * HOUR,
+  scheduleText: 'Daily at 7:30 AM',
+  runs: [],
+};
+
+/** Approvals with one card waiting from the loop's Session, and one from a run Pane. */
+function loopCards(): NotifySnapshot {
+  const now = Date.now();
+  const session = { id: WATCH_SESSION, name: 'promises-watch', paneId: `${WATCH_SESSION}terminal__` };
+  const restored: NotifyItem = {
+    id: 'loop-card', ui: 'options', title: 'promises-watch: Session restored',
+    context: 'Its Session promises-watch was archived, so Pane restored it and sent this run there. Undo archives it and pauses the loop.',
+    choices: [{ label: 'Keep it', recommended: true }, { label: 'Undo' }],
+    source: { name: 'Loops', agent: 'Pane', session }, state: 'waiting', createdAt: now - 60_000,
+  };
+  const run: NotifyItem = {
+    id: 'run-card', ui: 'options', title: '2 bugs need a decision',
+    choices: [{ label: 'Fix both', recommended: true }, { label: 'Skip' }],
+    source: { paneId: 'sweep-run-22', panelId: 'sweep-run-22-tab', name: 'nightly-bug-sweep', agent: 'Claude' }, state: 'waiting', createdAt: now - 30_000,
+  };
+  return {
+    settings: { ...DEFAULT_NOTIFY_SETTINGS }, items: [restored, run], queue: ['loop-card', 'run-card'], hidden: [], strip: null, stripSurface: null,
+    pausedUntil: null, shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [],
+  };
+}
+
+const emptyApprovals: NotifySnapshot = { ...loopCards(), items: [], queue: [] };
+
+/** The loop's Session and a normal one, with the Session calls the sidebar and archive make. */
+function installLoopSessions() {
+  const at = new Date(0).toISOString();
+  const record = (id: string, name: string, isPinned: boolean) => ({
+    id, name, agent: 'claude', archived: false, isPinned,
+    internalSessionId: `${id}terminal__`,
+    panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor` },
+    goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [], associations: [], activity: [],
+    revision: 1, createdAt: at, updatedAt: at,
+  });
+  const sessions = [record('__orchestration_session_watch__', 'promises-watch', true), record('__orchestration_session_launch__', 'Launch', false)];
+  const live = () => sessions.filter(session => !session.archived);
+  const find = (selector: { sessionId?: string }) => sessions.find(session => session.id === selector.sessionId) ?? sessions[0];
+  const list = async () => ({ success: true, data: { sessions: live(), selectedSessionId: undefined } });
+  Object.assign(window.electronAPI, {
+    orchestrationSessions: {
+      list,
+      select: list,
+      update: async (selector: { sessionId?: string }, input: { archived?: boolean }) => {
+        Object.assign(find(selector), input);
+        return { success: true, data: find(selector) };
+      },
+      archivePreview: async (selector: { sessionId?: string }) => ({ success: true, data: { sessionId: find(selector).id, panes: [] } }),
+      // Like the host: archiving pauses the loops that send to the Session.
+      archive: async (selector: { sessionId?: string }) => {
+        find(selector).archived = true;
+        const loops = await window.electronAPI.loops.list();
+        for (const loop of loops.data ?? []) {
+          if (loop.orchestrationSessionId === find(selector).id) await window.electronAPI.loops.setEnabled(loop.id, false);
+        }
+        return { success: true, data: { session: find(selector), archivedPaneIds: [], keptPanes: [], failedPanes: [] } };
+      },
+    },
+  });
+}
+
+for (const theme of ['light-rounded', 'dark'] as const) {
+  test(`keeps a loop's Session and run Panes under Loops, and marks one that waits on you (${theme})`, async ({ page }) => {
+    const prefix = theme === 'dark' ? 'dark-' : '';
+    // No card waits: the loop's Session and its run Panes stay out of the main lists, even pinned.
+    await open(page, {
+      initialSessions: seededSessions,
+      initialLoops: [seededLoops[0], watchLoop],
+      initialConfig: { theme, appearanceMode: 'fixed' },
+      initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
+      notifySnapshot: emptyApprovals,
+    }, installLoopSessions);
+    await expect(page.getByTestId('orchestration-session-__orchestration_session_launch__')).toBeVisible();
+    await expect(page.getByTestId('orchestration-session-__orchestration_session_watch__')).toHaveCount(0);
+    await expect(page.getByTestId('orchestration-pinned-session-__orchestration_session_watch__')).toHaveCount(0);
+    await expect(page.locator('[data-pane-part="sidebar-pane"]')).toHaveCount(0);
+
+    // A card waits from each: they join the lists with the loop icon and "Loop: <name>", never pinned.
+    await open(page, {
+      initialSessions: seededSessions,
+      initialLoops: [seededLoops[0], watchLoop],
+      initialConfig: { theme, appearanceMode: 'fixed' },
+      initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
+      notifySnapshot: loopCards(),
+    }, installLoopSessions);
+    const sessionRow = page.getByTestId('orchestration-session-__orchestration_session_watch__');
+    await expect(sessionRow).toContainText('Loop: promises-watch');
+    await expect(sessionRow.getByTestId('loop-mark')).toBeVisible();
+    await expect(page.getByTestId('orchestration-pinned-session-__orchestration_session_watch__')).toHaveCount(0);
+    const runRow = page.locator('[data-pane-part="sidebar-pane"]').filter({ hasText: 'Loop: Nightly bug sweep' });
+    await expect(runRow).toHaveCount(1);
+    await expect(runRow.getByTestId('loop-mark')).toBeVisible();
+    await expect(runRow.getByRole('button', { name: /^(Pin|Unpin) / })).toHaveCount(0);
+    await runRow.click({ button: 'right' });
+    const paneMenu = page.getByRole('menu', { name: /^Pane actions for / });
+    await expect(paneMenu.getByRole('menuitem').first()).toBeVisible();
+    await expect(paneMenu.getByRole('menuitem', { name: /^(Pin|Unpin)$/ })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await shoot(page, `${prefix}12-sidebar-loop-rows`);
+
+    // Its menu has no Pin, and archiving says what it does to the loop.
+    await sessionRow.click({ button: 'right' });
+    const menu = page.getByRole('menu', { name: 'Session actions for promises-watch' });
+    await expect(menu.getByRole('menuitem', { name: /Pin Session|Unpin Session/ })).toHaveCount(0);
+    await menu.getByRole('menuitem', { name: 'Archive Session' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Archive promises-watch?' });
+    await expect(dialog).toContainText('promises-watch runs here daily at 7:30 AM. Archiving the Session pauses the loop; once it is resumed on the Loops page, its next run brings the Session back.');
+    await shoot(page, `${prefix}13-archive-loop-session`);
+    await dialog.getByRole('button', { name: 'Archive and pause' }).click();
+    await expect(page.getByText('Archived promises-watch · paused promises-watch')).toBeVisible();
+
+    await page.getByTestId('loops-nav').click();
+    await page.getByTestId('loop-list-item').filter({ hasText: 'promises-watch' }).click();
+    await expect(page.getByTestId('loop-detail').getByText('paused', { exact: true })).toBeVisible();
+  });
+}
+
+test('says what deleting a Session loop does to its Session', async ({ page }) => {
+  await open(page, { initialLoops: [watchLoop], notifySnapshot: emptyApprovals }, installLoopSessions);
+  await page.getByTestId('loops-nav').click();
+  await page.getByTestId('loop-detail').getByRole('button', { name: 'Edit' }).click();
+  const drawer = page.getByRole('dialog');
+  await drawer.getByRole('button', { name: 'Delete loop' }).click();
+  await expect(drawer.getByText('Delete this loop? Its schedule stops, and its Session stays and moves to your Sessions list.')).toBeVisible();
+});
+
+test('numbers only the Panes the sidebar lists, and keeps an open run Pane listed', async ({ page }) => {
+  const feature = { ...runSession('feature-x', Date.now() - DAY, 30, 'stopped'), name: 'feature-x', worktreePath: '/tmp/worktrees/feature-x' };
+  await open(page, {
+    initialSessions: [...seededSessions, feature],
+    initialLoops: [seededLoops[0]],
+    initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
+    notifySnapshot: emptyApprovals,
+  });
+  const rows = page.locator('[data-pane-part="sidebar-pane"]');
+  await expect(rows).toHaveCount(1);
+  // Mod+1 opens the first listed Pane, not a hidden loop run.
+  await page.keyboard.press('ControlOrMeta+1');
+  await expect(rows.filter({ hasText: 'feature-x' }).locator('[aria-current="page"]')).toHaveCount(1);
+
+  // A run opened from Loops stays listed while it is open.
+  await page.getByTestId('loops-nav').click();
+  await page.getByTestId('loop-detail').getByRole('button', { name: /^Open run / }).first().click();
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: 'Loop: Nightly bug sweep' }).locator('[aria-current="page"]')).toHaveCount(1);
+});
+
+test('shows a loop\'s refreshed card as updated, with no "You asked"', async ({ page }) => {
+  const snapshot = loopCards();
+  const refreshed = { ...snapshot.items[1], id: 'run-card', title: '5 bugs need a decision', version: 2, readyAgain: Date.now(), revision: { asked: '', whatChanged: ['Three more bugs since this morning'], by: 'nightly-bug-sweep', at: Date.now() } };
+  await open(page, { initialSessions: seededSessions, initialLoops: [seededLoops[0]], notifySnapshot: { ...snapshot, items: [refreshed], queue: ['run-card'] } });
+  await page.getByTestId('approvals-nav').click();
+  const revision = page.getByTestId('approval-revision');
+  await expect(revision).toContainText('Updated');
+  await expect(revision).toContainText('Three more bugs since this morning');
+  await expect(revision).not.toContainText('You asked');
+  await expect(revision).not.toContainText('after your question');
+});

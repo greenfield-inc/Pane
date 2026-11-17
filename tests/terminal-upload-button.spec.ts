@@ -43,7 +43,7 @@ const panels = ['Bottom Terminal', 'Upload Terminal'].map((title, index) => ({
   },
 }));
 
-test('upload button sends picked files through the drop upload path', async ({ page }) => {
+test('upload button sends picked files through the chunked upload', async ({ page }) => {
   await installElectronApiMock(page, {
     initialProjects: [project],
     initialSessions: [session],
@@ -75,6 +75,11 @@ test('upload button sends picked files through the drop upload path', async ({ p
     return mock.getInvokeCalls(name).map((call) => call.args);
   }, channel);
 
-  await expect.poll(async () => (await invokeCalls('terminal:paste-file')).map((args) => args[2])).toEqual(['notes.txt']);
-  await expect.poll(async () => (await invokeCalls('terminal:paste-image')).map((args) => [args[0], args[3]])).toEqual([[panels[1].id, 'image/png']]);
+  // Both files go up in resumable chunks for the terminal's Pane, one after the other, and each is committed on the host.
+  await expect.poll(async () => (await invokeCalls('terminal:upload-commit')).length).toBe(2);
+  const starts = (await invokeCalls('terminal:upload-start')).map((args) => args[0]);
+  expect(starts).toEqual([
+    expect.objectContaining({ sessionId: session.id, fileName: 'notes.txt', mimeType: 'text/plain', size: 5 }),
+    expect.objectContaining({ sessionId: session.id, fileName: 'shot.png', mimeType: 'image/png', size: 3 }),
+  ]);
 });

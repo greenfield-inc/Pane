@@ -12,7 +12,7 @@ const WHICH_CARD_RULE = [
   "- **Claude's own card (AskUserQuestion)** only when all of these hold: you are answering the person's latest message in the chat they are typing in; the answer only steers this turn (nothing recorded as a decision, nothing for another agent, nothing irreversible or outward-facing); and the question stands on its own, without context, links or a Summary. Examples: \"Update the snapshot too, or leave it?\", \"Which of these two files did you mean?\"",
   '- **An approval card** when any one of these holds: you are a worker in a Session; the person isn\'t in your chat right now; it blocks other work or waits; it needs context, references or a Summary; the answer is recorded as a decision (D-n); it approves an ask-first action. Examples: a plan approval, a sign-in the person must do, a migration.',
   '- Unsure? Use an approval card. Codex and other agents without a built-in card always use an approval.',
-  '- How to post one: a worker runs `runpane report --state blocked --question "<title>" --summary-file <its status file>` (its `needs_you` gives the questions, options and files); a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker\'s question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.',
+  '- How to post one: a worker runs `runpane report --state blocked --question \'<title>\'` with its options as `--choices` or `--questions` (the JSON `runpane notify` takes), or with `--summary-file <its status file>` whose `needs_you` gives the questions, options and files; Pane refuses a question that ends with options in brackets, such as "(A / B)", and has neither; a Session orchestrator runs `runpane notify` (or `--relays <item>` for a worker\'s question), never AskUserQuestion; any other agent calls the `notify` MCP tool or `runpane notify`.',
 ].join('\n');
 
 /** What a good approval card holds. Pane refuses the two clear mistakes and warns on the rest. */
@@ -26,11 +26,11 @@ const CARD_CONTRACT = [
   '- Pane prints a warning for each softer miss (a long title, no subtitle, no recommendation, more than 4 options, options without a consequence, unlinked paths). Fix them on the next card.',
 ].join('\n');
 
-/** After the person replies: say how you took it, and update the card when it was a question. */
+/** After the person replies: reopen and update the card when the reply was a question. */
 const REPLY_RULE = [
   '### Replies',
   '',
-  '- A typed reply may be an answer or a question. Whoever reads it runs `runpane notify --took <id|Q-n> answer` or `--took <id|Q-n> question`.',
+  '- Pane records a typed reply as the answer once its reader gets it. When the reply asks a question instead, the reader runs `runpane notify --took <id|Q-n> question`.',
   '- For a question: find out, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links`. The card shows "Updated · ready again" and waits for the answer. Don\'t post a second card.',
 ].join('\n');
 
