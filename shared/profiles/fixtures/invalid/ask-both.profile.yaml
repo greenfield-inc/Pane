@@ -1,0 +1,8 @@
+# expect: ASK_SHAPE
+format: pane-profile/1
+name: ask-both
+version: 1.0.0
+flow:
+  start: confirm
+  confirm: { ask: Ship it?, choices: { yes: ship, no: end }, next: ship }
+  ship: { run: echo shipped }
