@@ -283,7 +283,7 @@ prompt and nobody has unsent text there. Each line names where it came from:
 | Line starts with | From |
 | --- | --- |
 | `[From Pane, To-dos]` | Pane itself: a new orchestrator's first message, a sub-to-do assignment, a reminder or restart, a pause for load, capacity back, an attachment reminder, or an update for a requester. |
-| `[From the person, via To-dos T-n]` | Your own words from the to-do's page: a chat message, Accept, Ask for changes, Stop, Resume or Drop. |
+| `[From the person, via To-dos T-n]` | Your own words from the to-do's page: a chat message, Accept, Ask for changes, Stop, Resume or Drop. A chat message ends by telling the agent to answer with `runpane todos comment T-n "…"`, because a reply typed only in its tab never reaches the to-do's chat. |
 | `[From <name>, via To-dos T-n]` | A reply in the to-do's chat from its requester or a worker, delivered to its orchestrator. |
 | `[From To-dos T-n, asked by its orchestrator]` | A question for the requester, with how to answer it. |
 

@@ -9,7 +9,7 @@ import {
 } from '../../../../shared/types/todos';
 import { LOAD_GATE, LoadGate, pickShedTarget, type LoadSample } from './loadGate';
 import {
-  acceptedText, assignedText, capacityBackText, changesText, orchestratorStartText, personMessageText, requesterQuestionText,
+  acceptedText, assignedText, capacityBackText, changesText, orchestratorStartText, personChatText, personMessageText, requesterQuestionText,
   requesterReplyText, requesterUpdateText, restartText, resumeText, shedText, stopText, subTodoAddedText, type RequesterUpdate,
 } from './todoMessages';
 import { SUPERVISOR, dayOf, decideSupervisorAction, lastMovedAt, reminderText, attachReminderText, stuckCardText, type SupervisorInputs } from './supervisorRules';
@@ -155,7 +155,7 @@ export class TodoService extends EventEmitter {
     this.startedAt = now();
     this.gate = new LoadGate(() => host.loadGateEnabled());
     for (const message of store.undelivered()) {
-      if (message.toTab) this.outbox.push({ panelId: message.toTab, text: personMessageText(this.require(message.todoNumber), message.body), todoNumber: message.todoNumber, activityId: message.id, resumeIfDown: true });
+      if (message.toTab) this.outbox.push({ panelId: message.toTab, text: personChatText(this.require(message.todoNumber), message.body), todoNumber: message.todoNumber, activityId: message.id, resumeIfDown: true });
     }
   }
 
@@ -638,7 +638,7 @@ export class TodoService extends EventEmitter {
     if (actor.kind === 'person') {
       const target = this.chatTarget(todo, options.toOrchestrator);
       const message = this.store.addActivity({ todoNumber: number, kind: 'message', authorKind: 'person', authorName: 'you', body: text, toTab: target.panelId ?? undefined, toName: target.panelId ? target.name : undefined, now: this.now() });
-      if (target.panelId) this.enqueue({ panelId: target.panelId, text: personMessageText(todo, text), todoNumber: number, activityId: message.id, resumeIfDown: true });
+      if (target.panelId) this.enqueue({ panelId: target.panelId, text: personChatText(todo, text), todoNumber: number, activityId: message.id, resumeIfDown: true });
       this.progress(todo);
       this.changed();
       void this.flush();

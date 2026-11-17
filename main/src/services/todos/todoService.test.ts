@@ -159,7 +159,7 @@ describe('TodoService', () => {
       expect(host.typedInto('s1-orch')).toHaveLength(1);
       host.unsent.delete('s1-orch');
       await service.flush();
-      expect(host.typedInto('s1-orch').at(-1)).toBe('[From the person, via To-dos T-1] use the blue one');
+      expect(host.typedInto('s1-orch').at(-1)).toBe('[From the person, via To-dos T-1] use the blue one\n\nReply in the to-do\u2019s chat with runpane todos comment T-1 "\u2026": the person reads that chat, not this tab.');
       expect(service.detail(todo.number).activity.find(row => row.id === message.id)?.deliveredAt).toBe(START);
     });
 
@@ -171,8 +171,8 @@ describe('TodoService', () => {
       await service.comment(sub.number, 'hi worker', person);
       await service.comment(sub.number, 'hi boss', person, { toOrchestrator: true });
       for (let i = 0; i < 4; i += 1) await service.flush();
-      expect(host.typedInto('w1').at(-1)).toBe('[From the person, via To-dos T-2] hi worker');
-      expect(host.typedInto('s1-orch').at(-1)).toBe('[From the person, via To-dos T-2] hi boss');
+      expect(host.typedInto('w1').at(-1)).toBe('[From the person, via To-dos T-2] hi worker\n\nReply in the to-do\u2019s chat with runpane todos comment T-2 "\u2026": the person reads that chat, not this tab.');
+      expect(host.typedInto('s1-orch').at(-1)).toBe('[From the person, via To-dos T-2] hi boss\n\nReply in the to-do\u2019s chat with runpane todos comment T-2 "\u2026": the person reads that chat, not this tab.');
     });
 
     it('resumes a down tab before delivering to it', async () => {

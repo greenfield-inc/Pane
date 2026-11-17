@@ -31,7 +31,7 @@ export function orchestratorStartText(todo: TodoRecord, groups: readonly TodoAtt
     doneWhenBlock(todo),
     subTodos.length > 0 ? ['Sub-to-dos:', ...subTodos.map(sub => `- ${sub.ref} ${sub.title}`)].join('\n') : '',
     attachmentsBlock(groups),
-    `Keep an agent working on ${todo.ref} until it is ready for review. Split it into sub-to-dos (runpane todos create --parent ${todo.ref} "…") and assign workers (runpane todos assign <T-n> --panel <tab>). Attach what you make or use (runpane todos attach ${todo.ref} <file|url>). Ask ${todo.requester.kind === 'person' ? 'the person with runpane todos ask' : 'your requester first with runpane todos ask'} ${todo.ref} "…". Reply here with short summaries (runpane todos comment ${todo.ref} "…"). When every done-when check is met, run runpane todos review ${todo.ref}. If an agent start fails with machine_busy, wait: Pane tells you when capacity is back. Full detail: runpane todos show ${todo.ref}.`,
+    `Keep an agent working on ${todo.ref} until it is ready for review. Split it into sub-to-dos (runpane todos create --parent ${todo.ref} "…") and assign workers (runpane todos assign <T-n> --panel <tab>). Attach what you make or use (runpane todos attach ${todo.ref} <file|url>). Ask ${todo.requester.kind === 'person' ? 'the person with runpane todos ask' : 'your requester first with runpane todos ask'} ${todo.ref} "…". Post short summaries to the to-do’s chat with runpane todos comment ${todo.ref} "…": the person reads that chat, not this tab. When every done-when check is met, run runpane todos review ${todo.ref}. If an agent start fails with machine_busy, wait: Pane tells you when capacity is back. Full detail: runpane todos show ${todo.ref}.`,
   ].filter(Boolean).join('\n\n');
 }
 
@@ -44,6 +44,11 @@ export function restartText(todos: ReadonlyArray<{ todo: TodoRecord; groups: rea
 
 export function personMessageText(todo: TodoRecord, body: string): string {
   return `[From the person, via To-dos ${todo.ref}] ${body}`;
+}
+
+/** The person's chat message, with where to answer: an agent's reply typed only in its own tab never reaches the to-do's chat. */
+export function personChatText(todo: TodoRecord, body: string): string {
+  return `${personMessageText(todo, body)}\n\nReply in the to-do’s chat with runpane todos comment ${todo.ref} "…": the person reads that chat, not this tab.`;
 }
 
 export function requesterReplyText(todo: TodoRecord, from: string, body: string): string {
