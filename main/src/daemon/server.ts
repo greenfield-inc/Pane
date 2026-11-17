@@ -142,9 +142,7 @@ export class PaneDaemonServer {
     }
 
     if (this.endpoint.transport === 'unix') {
-      const socketDirectory = path.dirname(this.endpoint.path);
-      fs.mkdirSync(socketDirectory, { recursive: true, mode: UNIX_SOCKET_DIRECTORY_MODE });
-      fs.chmodSync(socketDirectory, UNIX_SOCKET_DIRECTORY_MODE);
+      this.createUnixSocketDirectory();
       if (fs.existsSync(this.endpoint.path)) {
         const unixSocketStatus = await probeUnixSocketPath(this.endpoint.path);
         if (unixSocketStatus === 'active') {
@@ -155,6 +153,10 @@ export class PaneDaemonServer {
       }
     }
 
+    this.server = await this.listen();
+  }
+
+  private async listen(): Promise<net.Server> {
     const server = net.createServer((socket) => {
       this.attachClient(socket);
     });
@@ -162,7 +164,6 @@ export class PaneDaemonServer {
     await new Promise<void>((resolve, reject) => {
       const handleError = (error: Error) => {
         server.removeListener('listening', handleListening);
-        this.server = null;
         reject(error);
       };
 
@@ -182,7 +183,13 @@ export class PaneDaemonServer {
     server.on('error', (error) => {
       console.error('[Pane daemon] Server error:', error);
     });
-    this.server = server;
+    return server;
+  }
+
+  private createUnixSocketDirectory(): void {
+    const socketDirectory = path.dirname(this.endpoint.path);
+    fs.mkdirSync(socketDirectory, { recursive: true, mode: UNIX_SOCKET_DIRECTORY_MODE });
+    fs.chmodSync(socketDirectory, UNIX_SOCKET_DIRECTORY_MODE);
   }
 
   async stop(): Promise<void> {
