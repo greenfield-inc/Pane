@@ -5,7 +5,8 @@
 #   journeys.sh <out-dir> [scenario ...]     # default: every scenario
 #
 # Needs Maestro on PATH (navigation answers iOS's link prompt).
-# Starts by resetting the hosts to their seeded snapshot (hosts.sh reset); NO_RESET=1 skips it.
+# Resets the hosts to their seeded snapshot (hosts.sh reset) before each scenario, NO_RESET=1 skips
+# that, and puts the phone on Perf-A with All showing, or stops.
 # Env: UDID (required), RUNS (5), AWAY_S (10), APP (com.dcouple.pane.mobile),
 #      LAUNCH_URL (how a cold launch opens the app: a dev client's Metro link, or empty for an
 #      installed release build), PERF_ROOT (as hosts.sh).
@@ -140,11 +141,23 @@ expected_mark() {
 
 SCENARIOS=("$@")
 [ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(cold-launch return-home return-session-chat return-pane-terminal open-terminal reopen-terminal open-session-chat reopen-session-chat open-approval switch)
-# Every column starts from the same fixture: the returns add Panes, chat messages and terminal output.
-[ "${NO_RESET:-}" = 1 ] || "$REPO/native/scripts/perf/hosts.sh" reset
-eval "$(fixture ids)"
+# The phone must be on Perf-A, with All showing: a phone left on Perf-B would measure the wrong
+# host and still log every mark. Picking Perf-A, then All, works from either.
+on_perf_a() {
+  fresh
+  maestro --device "$UDID" test -e ID=machine-chip-Perf-A "$REPO/native/.maestro/perf-tap.yaml" >/dev/null 2>&1 \
+    && sleep 6 && maestro --device "$UDID" test -e ID=machine-chip-all "$REPO/native/.maestro/perf-tap.yaml" >/dev/null 2>&1 \
+    || { echo "Could not put the phone on Perf-A (the machine-chip-Perf-A and machine-chip-all pills): pair with perf-pair.yaml." >&2; exit 1; }
+  sleep 3
+}
+
 failed=0
 for name in "${SCENARIOS[@]}"; do
+  # Each scenario starts from the same fixture: the returns add Panes, chat messages and terminal
+  # output, and a subset run must match the full column.
+  if [ "${NO_RESET:-}" != 1 ]; then "$REPO/native/scripts/perf/hosts.sh" reset >/dev/null; fi
+  eval "$(fixture ids)"
+  on_perf_a
   echo "$(date +%T) $name (load $(uptime | sed 's/.*load averages: //'))"
   scenario "$name"
   mark=$(expected_mark "$name")

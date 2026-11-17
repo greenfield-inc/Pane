@@ -4,7 +4,7 @@
  *   node scripts/perf-table.mts <scenario>.log [...]
  *
  * Each file holds one scenario's runs (a simulator `log stream`, or a phone's Console export).
- * With `--runs <n>`, a journey that ran a different number of times is reported on stderr.
+ * With `--runs <n>`, a journey that ran a number of times that is not a multiple of n is reported on stderr.
  * Only `[perf] <journey> <mark> <ms>` lines count (src/features/perf/perfMarks.ts). A run begins
  * at `<journey> start 0`. For each scenario the script prints every metric its runs carry: the
  * median, the slowest run and the number of runs.
@@ -119,7 +119,8 @@ export function scenarioMetrics(log: string): Metric[] {
 export function runCountMismatches(log: string, expected: number): string[] {
   const counts = new Map<string, number>();
   for (const run of parseRuns(log).runs) counts.set(run.journey, (counts.get(run.journey) ?? 0) + 1);
-  return [...counts].filter(([, count]) => count !== expected).map(([journey, count]) => `${journey}: ${count}`);
+  // A scenario can start a journey more than once per run (an approval, then Next): a multiple is fine.
+  return [...counts].filter(([, count]) => count % expected !== 0).map(([journey, count]) => `${journey}: ${count}`);
 }
 
 function metricsOf({ runs, stalls }: { runs: Run[]; stalls: number[] }): Metric[] {

@@ -56,8 +56,9 @@ describe('scenarioMetrics', () => {
 });
 
 describe('runCountMismatches', () => {
-  it('names each journey that ran a different number of times than asked', () => {
+  it('names each journey that ran a number of times that is not a multiple of the runs asked', () => {
     expect(runCountMismatches(log, 2)).toEqual([]);
+    expect(runCountMismatches(log, 1)).toEqual([]);
     expect(runCountMismatches(log, 5)).toEqual(['return: 2']);
   });
 });

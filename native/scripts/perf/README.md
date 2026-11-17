@@ -49,7 +49,7 @@ node native/scripts/perf-table.mts --runs 5 <out-dir>/*.log
 native/scripts/perf/hosts.sh down
 ```
 
-`journeys.sh` first resets the hosts to the snapshot (`hosts.sh reset`; `NO_RESET=1` skips it), so every column of numbers starts from the same fixture. It exits with an error when a scenario logs none of the marks it is there to measure, for example when the phone is on host B. Each scenario runs `RUNS` times (5); `perf-table.mts --runs 5` warns about a journey that ran a different number of times. `open-approval` and `switch` start two journeys per run (an approval, then Next; Perf-B, then Perf-A), so they show 10. A return stays away `AWAY_S` seconds (10) and changes something on the host meanwhile: a new Pane for Home, a chat message, terminal output. Record `uptime` with the numbers: a loaded Mac slows everything.
+Before each scenario `journeys.sh` resets the hosts to the snapshot (`hosts.sh reset`; `NO_RESET=1` skips it), so a scenario measures the same fixture whether it runs alone or in a full column, and puts the phone on Perf-A with All showing, or stops. It exits with an error when a scenario logs none of the marks it is there to measure. Each scenario runs `RUNS` times (5); `perf-table.mts --runs 5` warns about a journey whose count is not a multiple of 5. `open-approval` and `switch` start two journeys per run (an approval, then Next; Perf-B, then Perf-A), so they show 10. A return stays away `AWAY_S` seconds (10) and changes something on the host meanwhile: a new Pane for Home, a chat message, terminal output. Record `uptime` with the numbers: a loaded Mac slows everything.
 
 | Scenario | Targets |
 |---|---|
