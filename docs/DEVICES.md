@@ -7,7 +7,7 @@ with no SSH setup.
 
 ## The tools
 
-Every agent gets six device tools through Pane's MCP server, and every terminal has the same
+Every agent gets eight device tools through Pane's MCP server, and every terminal has the same
 commands as `runpane devices`. Pane fills in the Pane, the device and the machine: after
 `device_open`, an agent never names them again.
 
@@ -19,6 +19,8 @@ commands as `runpane devices`. Pane fills in the Pane, the device and the machin
 | `device_act` | `runpane devices act -- snapshot -i` | Runs an [agent-device](https://github.com/callstack/agent-device) command on the device |
 | `device_run` | `runpane devices run -- npx expo run:ios` | Runs a command where the device runs, such as a build, or Metro with `--background` |
 | `device_close` | `runpane devices close` | Ends the lease and stops the commands `device_run` started |
+| `device_usage` | `runpane devices usage` | Every simulator and emulator on this machine, with the memory and disk they use (see below) |
+| `device_free` | `runpane devices free --idle` | Shuts down unused devices; `--all` also deletes Pane's unused devices and build checkouts |
 
 A Pane can hold an iPhone and an Android emulator at once. `device_screenshot`, `device_act`,
 `device_run` and `device_close` act on the device it opened last; pass `--platform ios` or

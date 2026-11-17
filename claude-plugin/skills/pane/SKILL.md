@@ -182,6 +182,9 @@ there (`--background` for Metro), `device_act` drives it with agent-device
 commands (`open <app id>`, `snapshot -i`, `press @eN --settle`), and
 `device_screenshot` shows you the screen. Call `device_close` when done, so
 another Pane can use it. `runpane docs read --doc docs/DEVICES.md` has the rest.
+Turn it with `orientation landscape-left` and fold a foldable with `fold half-open`;
+the tab follows. When the person takes over in the tab, `device_act` waits until
+they hand it back.
 
 ## Restyle Pane
 
