@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import yaml from 'js-yaml';
 import { reasonOf } from '../../../../shared/paneError';
@@ -8,6 +8,8 @@ import type { LoadedProfile, ProfileOrigin, ProfileProblem } from '../../../../s
 import { boundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 
 const PROFILE_FILE_SUFFIX = '.profile.yaml';
+/** Far above any real profile (greenfield is ~8 KB); a larger file is refused unread. */
+const MAX_PROFILE_BYTES = 512 * 1024;
 
 /** One profile file and where its `reads` files live. */
 export interface ProfileSource {
@@ -22,10 +24,15 @@ export interface ProfileLoadOptions {
   skillExists?: (name: string) => boolean;
 }
 
-/** Every `*.profile.yaml` directly in `dir`, sorted; none when the folder doesn't exist. */
+/** Every `*.profile.yaml` directly in `dir`, sorted; none when the folder doesn't exist or can't be listed. */
 export function findProfileFiles(dir: string, origin: ProfileOrigin): ProfileSource[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return entries
     .filter((entry) => entry.endsWith(PROFILE_FILE_SUFFIX))
     .sort()
     .map((entry) => ({ file: join(dir, entry), origin }));
@@ -43,16 +50,36 @@ function readSource(source: ProfileSource): ParsedSource {
   const fallbackName = basename(source.file, PROFILE_FILE_SUFFIX);
   let text: string;
   try {
+    const size = statSync(source.file).size;
+    if (size > MAX_PROFILE_BYTES) {
+      return { source, name: fallbackName, errors: [{ code: 'PROFILE_TOO_LARGE', message: `${basename(source.file)} is ${Math.round(size / 1024)} KB; Pane reads profiles up to ${MAX_PROFILE_BYTES / 1024} KB.`, fix: 'Move long text into files the agents read, and list them under "reads:".' }] };
+    }
     text = readFileSync(source.file, 'utf8');
   } catch (error) {
     return { source, name: fallbackName, errors: [{ code: 'PROFILE_UNREADABLE', message: `Pane couldn't read ${source.file}: ${reasonOf(error)}.`, fix: 'Check the file exists and Pane may read it.' }] };
   }
   let parsed: unknown;
+  // A list or map that closes twice was repeated by a YAML alias (*name). Copying such a file
+  // expands every alias, so nested ones grow exponentially; they are refused before that.
+  const collections = new Set<object>();
+  let aliased = false;
   try {
     // CORE_SCHEMA: plain YAML values only (no timestamps or custom tags), so the result is JSON.
-    parsed = yaml.load(text, { schema: yaml.CORE_SCHEMA, filename: source.file });
+    parsed = yaml.load(text, {
+      schema: yaml.CORE_SCHEMA,
+      listener: (event, state) => {
+        if (event !== 'close' || !(state.result instanceof Object)) return;
+        if (collections.has(state.result)) aliased = true;
+        else collections.add(state.result);
+      },
+    });
   } catch (error) {
-    return { source, name: fallbackName, errors: [{ code: 'PROFILE_YAML', message: `${basename(source.file)} is not valid YAML: ${reasonOf(error)}.`, fix: 'Fix the YAML at the line named, then reload.' }] };
+    // js-yaml's reason and line, without its multi-line snippet or the file's full path.
+    const reason = error instanceof yaml.YAMLException ? `${error.reason}${error.mark ? ` at line ${error.mark.line + 1}` : ''}` : reasonOf(error);
+    return { source, name: fallbackName, errors: [{ code: 'PROFILE_YAML', message: `${basename(source.file)} is not valid YAML: ${reason}.`, fix: 'Fix the YAML at the line named, then reload.' }] };
+  }
+  if (aliased) {
+    return { source, name: fallbackName, errors: [{ code: 'PROFILE_YAML_ALIAS', message: `${basename(source.file)} repeats a list or map with a YAML alias (*name); Pane reads profiles without them.`, fix: 'Write the repeated part out in full where each alias is.' }] };
   }
   const raw = decodeOptionalBoundary(parsed, boundary.jsonObject);
   if (!raw) {
@@ -71,7 +98,7 @@ function filesRootOf(source: ProfileSource): string {
 }
 
 function toLoaded(parsed: ParsedSource, merged: JsonObject | undefined, roots: string[], options: ProfileLoadOptions, extraErrors: ProfileProblem[]): LoadedProfile {
-  const loaded: LoadedProfile = { name: parsed.name, origin: parsed.source.origin, file: parsed.source.file, valid: false, launchable: false, teamOnly: false, errors: [...parsed.errors, ...extraErrors] };
+  const loaded: LoadedProfile = { name: parsed.name, origin: parsed.source.origin, file: parsed.source.file, readsRoots: roots, valid: false, launchable: false, teamOnly: false, errors: [...parsed.errors, ...extraErrors] };
   if (!merged) return loaded;
   const validation = validateProfile(merged, { readExists: readExistsIn(roots), skillExists: options.skillExists });
   loaded.errors.push(...validation.errors);

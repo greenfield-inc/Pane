@@ -1,0 +1,10 @@
+# expect: RUN_UNKNOWN_OUTCOME
+format: pane-profile/1
+name: run-unknown-outcome
+version: 1.0.0
+flow:
+  start: test
+  test: { run: npm test, outcomes: { green: end, red: end } }
+runs:
+  A:
+    - test: amber
