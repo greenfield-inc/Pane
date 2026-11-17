@@ -2,8 +2,18 @@ import type { CustomLink } from '../../../shared/types/customLinks';
 import type { CustomLinkMatch } from '../../../shared/utils/customLinks';
 import MatcherWorker from './customLinkMatcher.worker?worker&inline';
 
-/** How long one line may take to match before the patterns are stopped and the line gets no links. */
+/**
+ * How long one line may take to match before the patterns are stopped and the line gets no links.
+ * It counts from when the worker has loaded, so a slow worker start-up never costs a line its links.
+ */
 export const CUSTOM_LINK_MATCH_TIMEOUT_MS = 250;
+
+/**
+ * How long a new worker may take to say it has loaded before it is stopped and the line waiting on
+ * it gets no links. Generous on purpose: it only catches a worker that hangs while loading, so a
+ * slow start-up on a busy machine still loads in time.
+ */
+export const CUSTOM_LINK_WORKER_STARTUP_TIMEOUT_MS = 10_000;
 
 export interface CustomLinkMatchRequest {
   id: number;
@@ -22,6 +32,11 @@ interface CustomLinkMatchResponse {
   matches: CustomLinkMatch[];
 }
 
+/** The worker's first message: its code has loaded and it is ready to match. */
+export interface CustomLinkWorkerReady {
+  ready: true;
+}
+
 interface QueuedMatch {
   request: CustomLinkMatchRequest;
   resolve: (result: CustomLinkMatchResult) => void;
@@ -31,9 +46,12 @@ interface QueuedMatch {
 const NO_LINKS: CustomLinkMatchResult = { matches: [], timedOut: false };
 
 let worker: Worker | null = null;
+/** The worker has said it loaded; until then the running line waits on the start-up timer only. */
+let workerReady = false;
+let startupTimer: ReturnType<typeof setTimeout> | undefined;
 let nextId = 0;
-/** The line the worker is matching now; only it has a timer running. */
-let running: (QueuedMatch & { timer: ReturnType<typeof setTimeout> }) | null = null;
+/** The line the worker is matching now; only it has a timer, started once it reaches a loaded worker. */
+let running: (QueuedMatch & { timer?: ReturnType<typeof setTimeout> }) | null = null;
 const queue: QueuedMatch[] = [];
 
 function finishRunning(result: CustomLinkMatchResult): void {
@@ -45,7 +63,7 @@ function finishRunning(result: CustomLinkMatchResult): void {
   sendNext();
 }
 
-/** Sends the next line nobody gave up on, starting its timer only now that the worker is free. */
+/** Sends the next line nobody gave up on, starting its timer only once the worker is free and loaded. */
 function sendNext(): void {
   if (running) return;
   let next = queue.shift();
@@ -54,18 +72,38 @@ function sendNext(): void {
     next = queue.shift();
   }
   if (!next) return;
-  if (!worker) {
-    worker = new MatcherWorker();
-    worker.addEventListener('message', (event: MessageEvent<CustomLinkMatchResponse>) => {
-      if (event.data.id === running?.request.id) finishRunning({ matches: event.data.matches, timedOut: false });
-    });
-  }
-  running = { ...next, timer: setTimeout(stopRunning, CUSTOM_LINK_MATCH_TIMEOUT_MS) };
-  worker.postMessage(next.request);
+  running = { ...next };
+  if (!worker) startWorker();
+  else if (workerReady) postRunning();
 }
 
-/** Stops the worker stuck on the running line, which gets no links; the next line goes to a fresh worker. */
+function startWorker(): void {
+  workerReady = false;
+  worker = new MatcherWorker();
+  worker.addEventListener('message', (event: MessageEvent<CustomLinkMatchResponse | CustomLinkWorkerReady>) => {
+    if ('ready' in event.data) {
+      workerReady = true;
+      clearTimeout(startupTimer);
+      postRunning();
+    } else if (event.data.id === running?.request.id) {
+      finishRunning({ matches: event.data.matches, timedOut: false });
+    }
+  });
+  // A worker that fails to load would never say it is ready; stop it so the lines behind it still run.
+  worker.addEventListener('error', stopRunning);
+  // One that hangs while loading raises no error; stop it too, or every later line would wait behind it.
+  startupTimer = setTimeout(stopRunning, CUSTOM_LINK_WORKER_STARTUP_TIMEOUT_MS);
+}
+
+function postRunning(): void {
+  if (!running || !worker) return;
+  running.timer = setTimeout(stopRunning, CUSTOM_LINK_MATCH_TIMEOUT_MS);
+  worker.postMessage(running.request);
+}
+
+/** Stops the worker stuck on (or never loaded for) the running line, which gets no links; the next line goes to a fresh worker. */
 function stopRunning(): void {
+  clearTimeout(startupTimer);
   worker?.terminate();
   worker = null;
   finishRunning({ matches: [], timedOut: true });
