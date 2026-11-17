@@ -5,12 +5,6 @@ const net = require('node:net');
 const { getPaneDaemonEndpoint } = require(process.argv[2]);
 const config = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 const endpoint = getPaneDaemonEndpoint(config.paneDir);
-// The test polls until this file exists, then parses it, so it must appear complete:
-// written beside it, then renamed into place.
-function writeReady(body) {
-  fs.writeFileSync(`${config.ready}.tmp`, body);
-  fs.renameSync(`${config.ready}.tmp`, config.ready);
-}
 if (endpoint.transport === 'unix') fs.mkdirSync(path.dirname(endpoint.path), { recursive: true });
 const repo = { id: 7, name: 'receiver', path: config.repoPath, active: true, sessionCount: 0 };
 let receiverResume;
@@ -91,8 +85,8 @@ const server = net.createServer(socket => {
     }
   });
 });
-server.on('error', error => { writeReady(JSON.stringify({ error: error.message })); process.exit(1); });
-server.listen(endpoint.path, () => writeReady('{}'));
+server.on('error', error => { fs.writeFileSync(config.ready, JSON.stringify({ error: error.message })); process.exit(1); });
+server.listen(endpoint.path, () => fs.writeFileSync(config.ready, '{}'));
 process.on('SIGTERM', () => server.close(() => {
   if (endpoint.transport === 'unix') fs.rmSync(path.dirname(endpoint.path), { recursive: true, force: true });
   process.exit();
