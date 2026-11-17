@@ -34,6 +34,10 @@ the last scan right away and never wait for a new one.
 A memory level counts after two samples in a row, so a moment's spike raises
 nothing. Change the disk figures in Settings › Machine health.
 
+The critical disk figure also limits files sent to this computer (from the
+phone, a terminal or a chat): Pane refuses one whose rest would leave less free
+than that, before any more of it arrives, and says so with the numbers.
+
 ## What Pane may delete
 
 Every item belongs to one tier, and the tier decides whether Pane acts alone,
