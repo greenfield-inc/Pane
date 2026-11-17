@@ -32,6 +32,4 @@ alongside. Entries travel with Settings › Import & Export.
 Patterns run in a web worker (`frontend/src/utils/customLinkMatcher.ts`), one
 terminal row at a time with trailing padding trimmed. A row that takes longer
 than `CUSTOM_LINK_MATCH_TIMEOUT_MS` stops the worker and gets no custom links,
-so a pattern that backtracks badly can't freeze the window. The time counts
-from when the worker says it has loaded, so a slow worker start (the first row,
-or the first row after a stopped worker) doesn't cost a row its links.
+so a pattern that backtracks badly can't freeze the window.
