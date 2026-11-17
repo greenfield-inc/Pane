@@ -41,7 +41,7 @@ export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
           if (agents === null) {
             return (
               <div key={agent.id} className="flex h-10 items-center rounded-lg border border-border-secondary bg-surface-secondary px-3">
-                <span className="h-2.5 w-[40%] animate-pulse rounded bg-surface-tertiary" />
+                <span className="h-2.5 w-[40%] animate-skeleton rounded bg-surface-tertiary" />
               </div>
             );
           }
@@ -116,7 +116,7 @@ export function SessionsStepFooter({ sessions, busy, onYes, onNotNow }: Sessions
   );
 }
 
-/** The last first-run step: what a paired phone gives you. Its button opens the Pair a phone dialog. */
+/** The last first-run step: what a paired phone gives you. Its Pair a phone button opens Add a device on its Phone tab. */
 export function PhoneStepBody() {
   return (
     <div className="space-y-3">

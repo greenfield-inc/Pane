@@ -98,6 +98,7 @@ function turnRows(turn: ChatTurn, latest: boolean, options: ChatRowOptions): Cha
       });
     } else if (item.type === 'text') rows.push({ key: item.id, kind: 'text', text: item.text, at: ended?.full });
     else if (item.type === 'image') rows.push({ key: item.id, kind: 'image', mimeType: item.mimeType, data: item.data });
+    else if (item.type === 'user') rows.push({ key: item.id, kind: 'user', message: item.message });
   };
   before.forEach(pushItem);
   if (fold) {

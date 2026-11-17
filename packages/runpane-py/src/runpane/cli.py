@@ -93,7 +93,9 @@ from .local_control import (
     run_pr_watch_command,
     run_workspace_state,
 )
+from .machine import run_machine_cleanup, run_machine_health
 from .notify import RunpaneError, run_notify
+from .pairing_link import run_link
 from .secrets import run_secrets_delete, run_secrets_exec, run_secrets_list, run_secrets_request, run_secrets_set
 from .platforms import detect_platform
 from .releases import resolve_release
@@ -119,9 +121,11 @@ AGENT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
+COMMAND_GROUP_HELP_TOPICS.add("machine")
 COMMAND_GROUP_HELP_TOPICS.add("loops")
 COMMAND_GROUP_HELP_TOPICS.add("secrets")
 COMMAND_GROUP_HELP_TOPICS.add("autopilot")
+COMMAND_GROUP_HELP_TOPICS.add("devices")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
@@ -182,6 +186,7 @@ FLAG_OWNERS = {
     "--deny": ("autopilot answer",),
     "--because": ("autopilot answer",),
     "--reason": ("secrets request", "autopilot close"),
+    "--kind": ("machine cleanup",),
     "--conversation": ("panels conversation",),
     "--hook": ("panels conversation",),
 }
@@ -250,6 +255,7 @@ class ParsedArgs:
     only: Optional[List[str]] = None
     secret_files: Optional[List[str]] = None
     reason: Optional[str] = None
+    kind: Optional[str] = None
     exec_command: Optional[List[str]] = None
     timeout_ms: Optional[float] = None
     wait_ready: bool = False
@@ -322,6 +328,8 @@ class ParsedArgs:
     wait_timeout_ms: Optional[int] = None
     all: bool = False
     inbox_ids: List[str] = field(default_factory=list)
+    # link: the one-time link from another computer's Pane.
+    pairing_link: Optional[str] = None
     # inbox ack --decision: the D-n to record on each item.
     inbox_decision: Optional[str] = None
     # autopilot stack push: --item, the repeatable --tab <path-or-url>, and --next.
@@ -620,6 +628,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     if parsed.command == "relay":
         # Every word after `relay` is pane-relay's; this package points to npx instead.
         del args[:]
+    if parsed.command == "link" and args and not args[0].startswith("-"):
+        parsed.pairing_link = args.pop(0)
     if parsed.command == "inbox ack":
         while args and not args[0].startswith("-"):
             parsed.inbox_ids.append(args.pop(0))
@@ -852,6 +862,13 @@ def split_inline_values(raw_args: List[str]) -> Tuple[List[str], Set[int]]:
 
 
 def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
+    if parsed.command.startswith("devices "):
+        # npm-only: any of its options gets its help and the npm-only message.
+        own_args = raw_args[: raw_args.index("--")] if "--" in raw_args else raw_args
+        if "-h" in own_args or "--help" in own_args:
+            parsed.help_topic = parsed.command
+            parsed.command = "help"
+        return
     if parsed.command == "watch":
         removed = {
             "--settle": "--ready-settle",
@@ -1226,6 +1243,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--project":
         parsed.project = value
+        return
+    if flag == "--kind":
+        parsed.kind = value
         return
     if flag == "--reason":
         parsed.reason = value
@@ -1737,6 +1757,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "lock acquire": lambda parsed, context: run_lock_acquire(parsed),
     "lock release": lambda parsed, context: run_lock_release(parsed),
     "lock list": lambda parsed, context: run_lock_list(parsed),
+    "machine health": lambda parsed, context: run_machine_health(parsed),
+    "machine cleanup": lambda parsed, context: run_machine_cleanup(parsed),
     "loops list": lambda parsed, context: run_loops_list(parsed),
     "loops create": lambda parsed, context: run_loops_save(parsed),
     "loops update": lambda parsed, context: run_loops_save(parsed),
@@ -1760,6 +1782,14 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "workspace read": lambda parsed, context: run_unsupported_contract(parsed, context),
     "workspace write": lambda parsed, context: run_unsupported_contract(parsed, context),
     "workspace exec": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "devices list": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "devices open": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "devices screenshot": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "devices act": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "devices run": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "devices close": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "devices usage": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "devices free": lambda parsed, context: run_unsupported_contract(parsed, context),
     "handoff": lambda parsed, context: run_unsupported_contract(parsed, context),
     "ask": lambda parsed, context: run_unsupported_contract(parsed, context),
     "models": lambda parsed, context: run_unsupported_contract(parsed, context),
@@ -1803,6 +1833,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "update": lambda parsed, context: run_update(parsed),
     "mcp": lambda parsed, context: run_unsupported_contract(parsed, context),
     "relay": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "link": lambda parsed, context: run_link(parsed),
     "panes git-status": lambda parsed, context: run_daemon_action(parsed, contract_command(parsed.command)["daemonAction"]),
     "panes commit": lambda parsed, context: run_daemon_action(parsed, contract_command(parsed.command)["daemonAction"]),
     "panes push": lambda parsed, context: run_daemon_action(parsed, contract_command(parsed.command)["daemonAction"]),

@@ -13,7 +13,8 @@ export function exportCursorMemoryHook(directory: string, memory: string, platfo
       throw new Error('Cursor memory hook destination is not a regular file.');
     }
   }
-  const config = fs.existsSync(file) ? decodeBoundary(JSON.parse(fs.readFileSync(file, 'utf8')), boundary.jsonObject) : { version: 1 };
+  const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined;
+  const config = text !== undefined ? decodeBoundary(JSON.parse(text), boundary.jsonObject) : { version: 1 };
   if (config.version !== 1) throw new Error('Unsupported Cursor hook configuration version.');
   const hooks = decodeBoundary(config.hooks ?? {}, boundary.jsonObject);
   const existing = decodeBoundary(hooks.sessionStart ?? [], boundary.array(boundary.jsonObject));
@@ -28,6 +29,11 @@ export function exportCursorMemoryHook(directory: string, memory: string, platfo
   writeNoteFile(contextFile, JSON.stringify({ additional_context: memory }).replace(/[\u0080-\uffff]/g,
     character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`));
   if (!own.length) {
-    writeNoteFile(file, JSON.stringify({ ...config, hooks: { ...hooks, sessionStart: [...existing, { command }] } }, null, 2) + '\n');
+    // Pane adds its hook only where rewriting the file changes no other byte: one it creates, or one in this same layout.
+    if (text !== undefined && JSON.stringify(config, null, 2) !== text.replace(/\n$/, '')) {
+      throw new Error(`Cursor's hooks.json has its own formatting, so Pane left it as it is. To give Cursor CLI your Pane memories, add {"command": ${JSON.stringify(command)}} to hooks.sessionStart.`);
+    }
+    const end = text === undefined || text.endsWith('\n') ? '\n' : '';
+    writeNoteFile(file, JSON.stringify({ ...config, hooks: { ...hooks, sessionStart: [...existing, { command }] } }, null, 2) + end);
   }
 }

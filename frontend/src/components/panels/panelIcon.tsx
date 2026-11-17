@@ -1,5 +1,5 @@
 import type React from 'react';
-import { Terminal, GitBranch, FileCode, FileDiff, FileText, FolderTree, BarChart3, Globe } from 'lucide-react';
+import { Terminal, GitBranch, FileCode, FileDiff, FileText, FolderTree, BarChart3, Globe, Smartphone } from 'lucide-react';
 import type { EditorPanelState, ToolPanel, ToolPanelType } from '../../../../shared/types/panels';
 import { agentIdIcon, getCliBrandIcon } from '../ui/brandIconRegistry';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
@@ -36,6 +36,8 @@ export function getPanelIcon(type: ToolPanelType, panel?: Pick<ToolPanel, 'title
       return <BarChart3 className={iconClass} />;
     case 'browser':
       return <Globe className={iconClass} />;
+    case 'device':
+      return <Smartphone className={iconClass} />;
     default:
       return null;
   }

@@ -67,7 +67,8 @@ function setActiveHost(useConfigStore: ConfigStore, hostId: string | null): void
   const remoteDaemon: AppConfig['remoteDaemon'] = {
     ...createDefaultRemoteDaemonConfig(),
     client: {
-      profiles: [{ id: REMOTE_HOST_ID, label: 'Host B', baseUrl: 'https://host-b.example', token: 'token-b', transport: 'http+sse' }],
+      computers: [{ id: REMOTE_HOST_ID, label: 'Host B', routes: [{ id: 'public:https://host-b.example', kind: 'public', source: 'manual', baseUrl: 'https://host-b.example', token: 'token-b' }] }],
+      profiles: [],
       activeProfileId: hostId,
       mode: hostId ? 'remote' : 'local',
     },

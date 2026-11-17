@@ -33,7 +33,7 @@ export interface Machine {
   domain?: string;
 }
 
-// The same words desktop Pane uses under Settings › Remote Access › Your computers.
+// The same words desktop Pane uses under Settings › Remote Access › Computers.
 export const TAILNET_STATE_TEXT = {
   available: 'Ready',
   'password-required': 'Needs password',

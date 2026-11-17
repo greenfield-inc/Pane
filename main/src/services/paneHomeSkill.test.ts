@@ -89,10 +89,11 @@ describe('Pane home skill', () => {
     expect(skill).toContain('Any other agent** calls `notify` as above.');
   });
 
-  it('tells an agent to read a typed reply as an answer or a question, and update instead of re-asking', () => {
+  it('tells an agent a typed reply is recorded as the answer, and to reopen and update instead of re-asking', () => {
     const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
     expect(skill).toContain('`reply: Q-n → "<their words>" (picked: <picks>) (by you)`');
-    expect(skill).toContain('run `runpane notify --took <id|Q-n> answer --json`, then act on it.');
+    expect(skill).toContain('Pane records the reply as the answer once it reaches you');
+    expect(skill).toContain('run `runpane notify --took <id|Q-n> question --json` at once. That reopens the approval');
     expect(skill).toContain('`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>" --json`');
     expect(skill).toContain('never post a second approval for it.');
     expect(skill).toContain('`correction: Q-n → that was your answer: "…" (by you)` means it is recorded as the answer: act on it.');

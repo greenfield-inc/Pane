@@ -2,12 +2,16 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type R
 import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, ShieldCheck, X } from 'lucide-react';
 import type { NotifyAnswer, NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { showActionError } from '../../stores/errorStore';
+import { useDraftChoice } from '../../stores/approvalColumnStore';
+import { canReplyAlone } from '../approvals/approvalCard';
 import { canClose, canCopyAnswer, canOverride, canReopen, decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
 import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
 import { ClampedText } from './ClampedText';
+import { HealthCardBody } from '../machineHealth/HealthCardBody';
+import { isHealthCard, remoteMachineName, reviewHealthCard, type HealthNotifyItem } from '../machineHealth/healthCardActions';
 
 /** The compact strip shows this many choices, then More. */
 const COMPACT_CHOICE_LIMIT = 4;
@@ -74,6 +78,7 @@ export function NotifyCard(props: NotifyCardProps) {
     case 'question':
       // The agent stopped waiting on Pane; its terminal still asks, and answering there clears this.
       if (props.item.agentPrompt?.inTerminal) return <InTerminalCard {...props} />;
+      if (isHealthCard(props.item)) return <HealthNotifyCard {...props} item={props.item} />;
       return <QuestionCard key={props.item.id} {...props} />;
   }
 }
@@ -412,12 +417,14 @@ interface ChipProps {
   label: string;
   detail?: string;
   shaded?: boolean;
+  /** Marked "Recommended" on a tall chip; never selected for the person (D-385). */
+  recommended?: boolean;
   onClick: () => void;
   tall?: boolean;
   inbox?: boolean;
 }
 
-function Chip({ keyLabel, label, detail, shaded, onClick, tall, inbox }: ChipProps) {
+function Chip({ keyLabel, label, detail, shaded, recommended, onClick, tall, inbox }: ChipProps) {
   return (
     <button
       type="button"
@@ -435,6 +442,7 @@ function Chip({ keyLabel, label, detail, shaded, onClick, tall, inbox }: ChipPro
       {tall ? (
         <span className="min-w-0">
           <span className="block break-words">{label}</span>
+          {recommended && <span className="block text-[12px] font-normal text-status-success-on-tint">Recommended</span>}
           {detail && <span className="block text-[12px] font-normal leading-snug text-text-tertiary">{detail}</span>}
         </span>
       ) : <span className="min-w-0 truncate">{label}</span>}
@@ -525,7 +533,8 @@ function QuestionCard({
   // Details: the choices with notes, or an approval's detail.
   const [expanded, setExpanded] = useState(form === 'docked' || (form === 'strip' && Boolean(showDetails)));
   const choices = item.choices ?? [];
-  const [selected, setSelected] = useState(() => recommendedIndex(choices));
+  // Nothing starts selected, recommended or not (D-385); the person's own pick is kept in the draft.
+  const [selected, setSelected] = useDraftChoice(item, choices.map((choice) => choice.label));
   const [note, setNote] = useState('');
   const [denying, setDenying] = useState(false);
   const [text, setText] = useState('');
@@ -548,6 +557,13 @@ function QuestionCard({
   };
   const answerApproval = (approved: boolean, reason?: string) => sendAnswer(cardAnswer(item, { approved }, reason ?? ''));
   const answerText = (value: string) => sendAnswer(cardAnswer(item, null, value));
+  // An options card sends its pick (with any note), or the note alone as a reply (D-245).
+  const replyAlone = selected < 0 && note.trim().length > 0 && canReplyAlone(item);
+  const canSendChoice = selected >= 0 || replyAlone;
+  const sendChoiceOrNote = () => {
+    if (selected >= 0) answerChoice(selected, note);
+    else if (replyAlone) answerText(note);
+  };
   // A secret is sent as typed, and leaves this card's state at once.
   const saveSecret = () => {
     if (!text) return;
@@ -611,6 +627,7 @@ function QuestionCard({
               label={choice.label}
               detail={choice.detail}
               shaded={index === selected}
+              recommended={choice.recommended}
               onClick={() => setSelected(index)}
             />
           ))}
@@ -619,8 +636,8 @@ function QuestionCard({
           <TextField
             value={note}
             onChange={setNote}
-            onSubmit={() => { if (selected >= 0) answerChoice(selected, note); }}
-            placeholder={`Add a note for ${item.source.agent} (optional)`}
+            onSubmit={sendChoiceOrNote}
+            placeholder={`Add a note for ${item.source.agent}, or reply on its own`}
             onFieldFocusRequest={onFieldFocusRequest}
           />
         </div>
@@ -640,7 +657,6 @@ function QuestionCard({
             key={choice.label}
             keyLabel={String(index + 1)}
             label={choice.label}
-            shaded={choice.recommended}
             inbox={form === 'inbox'}
             onClick={() => answerChoice(index)}
           />
@@ -654,7 +670,7 @@ function QuestionCard({
             {more}
           </button>
         )}
-        {recommended >= 0 && form !== 'inbox' && (
+        {recommended >= 0 && (
           <span className="ml-auto pr-2 text-[13px] text-text-tertiary">{recommended + 1} is recommended</span>
         )}
       </div>
@@ -785,8 +801,8 @@ function QuestionCard({
   const send = (
     <button
       type="button"
-      disabled={selected < 0}
-      onClick={() => answerChoice(selected, note)}
+      disabled={!canSendChoice}
+      onClick={sendChoiceOrNote}
       className="h-[30px] rounded-[10px] bg-interactive px-3 text-[12.5px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50"
     >
       Send
@@ -795,7 +811,7 @@ function QuestionCard({
   if (form !== 'inbox' && item.ui === 'options' && expanded) {
     footer = (
       <CardFooter
-        left={<span>Click a choice, then Send</span>}
+        left={<span>Click a choice or type a reply, then Send</span>}
         right={(
           <>
             <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>
@@ -860,7 +876,7 @@ function QuestionCard({
       ) : (
         <div className="flex items-center gap-3 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
           {sendInRow && <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>}
-          {sendInRow && selected < 0 && <span className="min-w-0 truncate">Pick a choice</span>}
+          {sendInRow && !canSendChoice && <span className="min-w-0 truncate">Pick a choice</span>}
           {item.snoozedUntil !== undefined && <span className="min-w-0 truncate">{snoozedLabel(item.snoozedUntil)}</span>}
           <div className="ml-auto flex shrink-0 items-center gap-3">
             {item.source.paneId && !item.elsewhere && (!item.source.autopilot || onOpenInPane) && (
@@ -1135,6 +1151,22 @@ function InfoLine({ item, onCommand, hideAt = null, hideAfterMs = 6000, onOpenUr
         )}
       </div>
       <Countdown hideAt={hideAt} hideAfterMs={hideAfterMs} />
+    </div>
+  );
+}
+
+/** A machine health card on a Notify surface: the same body as the in-window dialog. Ask an agent runs in the main window, which shows the Session. */
+function HealthNotifyCard({ item, form, onCommand, className }: NotifyCardProps & { item: HealthNotifyItem }) {
+  return (
+    <div className={cn('rounded-xl border border-border-primary bg-surface-primary p-4', className)}>
+      <HealthCardBody
+        item={item}
+        compact={form === 'strip'}
+        machineName={remoteMachineName(item)}
+        onAnswer={choice => onCommand({ type: 'answer', id: item.id, answer: { choice } })}
+        onAskAgent={() => onCommand({ type: 'ask-agent', id: item.id })}
+        onReview={form === 'strip' ? undefined : () => { void reviewHealthCard(item); }}
+      />
     </div>
   );
 }

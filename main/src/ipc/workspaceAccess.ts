@@ -4,6 +4,7 @@ import type { AppConfig } from '../types/config';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { normalizeRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
+import { allRouteProfiles, findComputer, routeProfile, upsertComputer, withRoutes, type ComputerRoute, type RemoteComputer } from '../../../shared/types/remoteComputers';
 import { GLASSES_COMMANDS, type GlassesRevokeEverywhereResult } from '../../../shared/types/glasses';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { glassesListSchema } from '../../../shared/glassesRevoke';
@@ -45,36 +46,36 @@ const saveMachineSchema = boundary.object({
   password: boundary.optional(boundary.string),
 });
 
-/** The profile id of a machine's codeless connection; one per machine on each tailnet. */
-function tailnetProfileId(domain: string, name: string): string {
-  return `tailnet-${domain.toLowerCase()}-${name.toLowerCase()}`;
-}
-
 type ConfigManager = AppServices['configManager'];
 
-/** Your Tailscale network's machines, each marked with its saved connection if it has one. */
+/** Your Tailscale network's machines, each marked with the saved computer it is, if any. */
 export async function listTailnetMachines(
   configManager: Pick<ConfigManager, 'getConfig'>,
   dependencies: Pick<WorkspaceAccessDependencies, 'readStatus' | 'probe'> = { readStatus: readTailscaleStatus, probe: probeWorkspace },
 ): Promise<TailnetMachineList> {
-  const profiles = normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client.profiles;
-  const codeless = profiles.flatMap((profile) => (profile.tailnetMachine && profile.tailnetDomain
-    ? [{ id: profile.id, key: savedSecretKey(profile.tailnetDomain, profile.tailnetMachine) }]
-    : []));
+  const { computers } = normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client;
   const list = await discoverTailnetMachines({
     ...dependencies,
-    savedSecrets: savedWorkspaceSecrets(profiles),
+    savedSecrets: savedWorkspaceSecrets(allRouteProfiles(computers)),
     includeRefused: true,
   });
   if (!list.ok) return list;
-  const saved = new Map(codeless.map((profile) => [profile.key, profile.id]));
   return {
     ...list,
     machines: list.machines.map((machine) => {
-      const profileId = saved.get(savedSecretKey(list.domain, machine.name));
-      return profileId ? { ...machine, profileId } : machine;
+      const computer = savedComputerFor(computers, list.domain, machine);
+      return computer ? { ...machine, profileId: computer.id } : machine;
     }),
   };
+}
+
+/** The saved computer a Tailscale machine is: one with its Tailscale route, else by install id or (no id known) its name. */
+function savedComputerFor(computers: readonly RemoteComputer[], domain: string, machine: { name: string; machineId?: string }): RemoteComputer | undefined {
+  const key = savedSecretKey(domain, machine.name);
+  const byRoute = computers.find((computer) => computer.routes.some((route) => route.tailnetMachine && route.tailnetDomain
+    && savedSecretKey(route.tailnetDomain, route.tailnetMachine) === key)
+    && (!machine.machineId || !computer.machineId || computer.machineId === machine.machineId));
+  return byRoute ?? findComputer(computers, { machineId: machine.machineId, tailnetName: machine.name });
 }
 
 /**
@@ -88,7 +89,7 @@ export function registerWorkspaceAccessHandlers(
   commandRegistry: Pick<PaneCommandRegistry, 'invoke'>,
   dependencies: WorkspaceAccessDependencies = { readStatus: readTailscaleStatus, probe: probeWorkspace, call: callWorkspace },
 ): void {
-  const profiles = () => normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client.profiles;
+  const routeProfiles = () => allRouteProfiles(normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client.computers);
 
   ipcMain.handle('remote-daemon:get-workspace-access', () => respond('read remote access settings', () =>
     commandRegistry.invoke('runpane:workspaces:access')));
@@ -121,40 +122,48 @@ export function registerWorkspaceAccessHandlers(
     return revokeGlassesEverywhere(phoneId, {
       name: access.machineName || 'this computer',
       invoke: (channel, args) => commandRegistry.invoke(channel, args),
-    }, { ...dependencies, savedSecrets: savedWorkspaceSecrets(profiles()) });
+    }, { ...dependencies, savedSecrets: savedWorkspaceSecrets(routeProfiles()) });
   }));
   ipcMain.handle('remote-daemon:set-glasses-origin', (_event, update) => respond('change glasses origins', () =>
     commandRegistry.invoke(GLASSES_COMMANDS.setOrigin, [update])));
 
-  // Saves the codeless profile; the caller then activates it like any saved profile.
+  // Saves the machine's Tailscale route on its computer; the caller then activates that computer.
   ipcMain.handle('remote-daemon:save-tailnet-machine', (_event, input) => respond('save the machine', async (): Promise<RemotePaneConnectionProfile> => {
     const { name, password } = decodeBoundary(input, saveMachineSchema);
     const located = await locateTailnetMachine(name, dependencies.readStatus);
-    const id = tailnetProfileId(located.domain, name);
     const current = normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
-    const existing = current.client.profiles.find((profile) => profile.id === id);
-    const profile: RemotePaneConnectionProfile = {
-      id,
-      label: name,
+    // Its install id arrives on the first connect; until then a computer of the same name is this one.
+    const existing = savedComputerFor(current.client.computers, located.domain, { name });
+    const existingRoute = existing?.routes.find((route) => route.kind === 'tailscale');
+    const route: ComputerRoute = {
+      id: `tailscale:${located.url}`,
+      kind: 'tailscale',
+      source: existingRoute?.source ?? 'found',
       baseUrl: located.url,
-      token: password ?? existing?.token ?? '',
-      transport: 'http+sse',
+      token: password ?? existingRoute?.token ?? '',
       tailnetMachine: name,
       tailnetDomain: located.domain,
     };
+    const saved = existing
+      ? {
+          id: existing.id,
+          computers: current.client.computers.map((computer) => (computer.id === existing.id
+            ? { ...computer, routes: withRoutes(computer.routes.filter((candidate) => candidate.kind !== 'tailscale' || candidate.id === route.id), [route]) }
+            : computer)),
+        }
+      : upsertComputer(current.client.computers, { id: tailnetComputerId(located.domain, name), tailnetName: name, label: name, routes: [route] });
     await configManager.updateConfig({
-      remoteDaemon: normalizeRemoteDaemonConfig({
-        ...current,
-        client: {
-          ...current.client,
-          profiles: existing
-            ? current.client.profiles.map((candidate) => (candidate.id === id ? profile : candidate))
-            : [...current.client.profiles, profile],
-        },
-      }),
+      remoteDaemon: normalizeRemoteDaemonConfig({ ...current, client: { ...current.client, computers: saved.computers } }),
     });
-    return profile;
+    const computer = saved.computers.find((candidate) => candidate.id === saved.id);
+    if (!computer) throw new PaneError('ERR_COMPUTER_NOT_SAVED', `${name} was not saved.`, 'Try again from Settings › Remote Access.');
+    return routeProfile(computer, computer.routes.find((candidate) => candidate.id === route.id) ?? route);
   }));
+}
+
+/** The id of a computer first saved from Tailscale: the same as before computers, so per-computer state carries over. */
+function tailnetComputerId(domain: string, name: string): string {
+  return `tailnet-${domain.toLowerCase()}-${name.toLowerCase()}`;
 }
 
 async function respond<Result>(action: string, work: () => Promise<Result>): Promise<PaneCommandValue> {

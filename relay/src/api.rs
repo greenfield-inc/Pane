@@ -11,6 +11,9 @@ use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const PAIR_HTML: &str = include_str!("pair.html");
+const GLASSES_HTML: &str = include_str!("glasses.html");
+/// Paths the phone app opens: the pairing link and the Glasses screen.
+const APP_LINK_PATHS: [&str; 2] = ["/pair*", "/glasses*"];
 const IOS_APP_ID: &str = "FBM5YSF467.com.dcouple.pane.mobile";
 const ANDROID_PACKAGE: &str = "com.dcouple.pane.mobile";
 /// A registry batch: up to 5,000 updates of a few hundred bytes each.
@@ -85,23 +88,14 @@ pub async fn serve(state: Arc<State>, mut s: BoxStream, peer: IpAddr) {
                 respond_json(&mut s, 404, &json!({"error": "not a computer id"})).await
             }
         }
-        ("GET", "/pair") | ("GET", "/pair/") => {
-            let headers = "cache-control: no-store\r\nreferrer-policy: no-referrer\r\n";
-            respond(
-                &mut s,
-                200,
-                "text/html; charset=utf-8",
-                headers,
-                PAIR_HTML.as_bytes(),
-            )
-            .await
-        }
+        ("GET", "/pair") | ("GET", "/pair/") => landing(&mut s, PAIR_HTML).await,
+        ("GET", "/glasses") | ("GET", "/glasses/") => landing(&mut s, GLASSES_HTML).await,
         ("GET", "/.well-known/apple-app-site-association") => {
             let body = json!({"applinks": {"apps": [], "details": [{
                 "appID": IOS_APP_ID,
                 "appIDs": [IOS_APP_ID],
-                "paths": ["/pair*"],
-                "components": [{"/": "/pair*"}],
+                "paths": APP_LINK_PATHS,
+                "components": APP_LINK_PATHS.map(|p| json!({"/": p})),
             }]}});
             respond_json(&mut s, 200, &body).await
         }
@@ -125,6 +119,12 @@ pub async fn serve(state: Arc<State>, mut s: BoxStream, peer: IpAddr) {
         ("POST", "/v1/registry/acme") => registry_post(&state, &req, rest, &mut s, true).await,
         _ => respond(&mut s, 404, "text/plain", "", b"not found\n").await,
     };
+}
+
+/// A landing page the phone app's links fall back to when the app isn't installed.
+async fn landing(s: &mut BoxStream, html: &str) -> std::io::Result<()> {
+    let headers = "cache-control: no-store\r\nreferrer-policy: no-referrer\r\n";
+    respond(s, 200, "text/html; charset=utf-8", headers, html.as_bytes()).await
 }
 
 fn is_upgrade(req: &Request) -> bool {

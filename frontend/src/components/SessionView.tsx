@@ -1,3 +1,4 @@
+import { ResourcesView } from './machineHealth/ResourcesView';
 import { AutopilotView } from './autopilot/AutopilotView';
 import { useRef, useEffect, useState, memo, useMemo, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -19,7 +20,7 @@ import { DetailPanel } from './DetailPanel';
 import { GitErrorDialog } from './session/GitErrorDialog';
 import { CommitMessageDialog } from './session/CommitMessageDialog';
 import { FolderArchiveDialog } from './session/FolderArchiveDialog';
-import { ConfirmDialog } from './ConfirmDialog';
+import { confirmPaneArchive } from './archiveConfirm';
 import { ProjectView } from './ProjectView';
 import { MissionControlView } from './missionControl/MissionControlView';
 import { API } from '../utils/api';
@@ -925,7 +926,7 @@ export const SessionView = memo(() => {
     label: 'Archive Pane',
     category: 'session',
     enabled: () => !!activeSession && !activeSession.archived,
-    action: () => hook.setShowArchiveConfirm(true),
+    action: () => { if (activeSession) confirmPaneArchive(activeSession); },
   });
 
   // --- Split tab group hotkeys ---
@@ -1952,6 +1953,10 @@ export const SessionView = memo(() => {
     return <AutopilotView />;
   }
 
+  if (activeView === 'resources') {
+    return <ResourcesView />;
+  }
+
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);
   const paneLoading = selectedPaneId && (!activeSession || !ownsPanelLoad || loadError)
     ? <div className="flex flex-1 flex-col bg-bg-primary">
@@ -2233,16 +2238,6 @@ export const SessionView = memo(() => {
         onAbortAndUseClaude={hook.handleAbortRebaseAndUseClaude}
       />
 
-      <ConfirmDialog
-        isOpen={hook.showArchiveConfirm}
-        onClose={() => hook.setShowArchiveConfirm(false)}
-        onConfirm={hook.handleConfirmArchive}
-        title="Archive Pane"
-        message={`Archive pane "${activeSession?.name}"? This will:\n\n• Move the pane to the archived panes list\n• Preserve all pane history and outputs\n${activeSession?.isMainRepo ? '• Close the active Claude Code connection' : activeSession?.worktreeOwnership === 'external' ? '• Leave the externally managed worktree untouched' : `• Remove the git worktree locally (${activeSession?.worktreePath?.split('/').pop() || 'worktree'})`}`}
-        confirmText="Archive"
-        variant="warning"
-        icon={<Archive className="w-6 h-6 text-amber-500 flex-shrink-0" />}
-      />
 
       <FolderArchiveDialog
         isOpen={hook.showFolderArchiveDialog}

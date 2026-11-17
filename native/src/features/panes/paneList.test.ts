@@ -233,6 +233,17 @@ describe('buildSidebar', () => {
     expect(buildSidebar(input({ query: 'nothing-like-this' }))).toEqual([]);
   });
 
+  it('searches the archive once it is open, and leaves it out when nothing there matches', () => {
+    const expanded = { pinned: true, sessions: true, repositories: true, archived: true };
+    expect(shape(buildSidebar(input({ expanded, archivedProjects, query: 'spike' })))).toEqual([
+      '# Archived 1',
+      'restore old-spike · pane',
+    ]);
+    expect(shape(buildSidebar(input({ expanded, archivedProjects, query: 'login' })))).not.toContain('# Archived');
+    expect(shape(buildSidebar(input({ expanded, query: 'spike' })))).toEqual(['# Archived', 'note: Loading archived panes…']);
+    expect(buildSidebar(input({ expanded, archivedProjects, query: 'nothing-like-this' }))).toEqual([]);
+  });
+
   it('carries each pane’s live status, agent and project', () => {
     const items = buildSidebar(input({
       query: 'fix',

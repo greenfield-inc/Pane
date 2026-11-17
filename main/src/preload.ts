@@ -1,3 +1,4 @@
+import type { DeviceInput } from '../../shared/types/devices';
 import type { LoopInput } from '../../shared/types/loop';
 import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
@@ -42,7 +43,7 @@ import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
 import type { NotifyCommand, NotifyNavigateTarget, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
 import type { AutopilotDocument, AutopilotInstructionsView, AutopilotSnapshot, AutopilotStackCommand, AutopilotStackPushRequest } from '../../shared/types/autopilot';
-import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
+import type { MachineCommand, MachineConnectionsEvent, MachineLatency, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -58,7 +59,8 @@ import type { PaneLinkTarget } from '../../shared/types/paneLinks';
 import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
-import type { RelayStatus } from '../../shared/types/relay';
+import type { RelayLinkOpenedEvent, RelayPairedEvent, RelayStatus } from '../../shared/types/relay';
+import type { SshRouteProgress } from './daemon/sshRouteSetup';
 import type {
   PanePermissionRequest as PermissionRequest,
   PanePermissionResponse as PermissionResponse,
@@ -68,6 +70,7 @@ import type {
 // verification step rejects any remaining require other than Electron itself.
 import { boundary, decodeBoundary, type JsonObject } from '../../shared/validation/boundaryDecoder';
 import { decodeAppearanceSnapshotArg, type ThemeChoice } from '../../shared/types/appearance';
+import { decodeLaunchChatArg } from '../../shared/types/hostNavigation';
 import type { CustomThemeState } from '../../shared/types/customTheme';
 
 interface LogEntry {
@@ -382,6 +385,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
     delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
   },
+  /** The device tab (docs/DEVICES.md): the local screen, frames, and the person's own controls. */
+  devices: {
+    input: (panelId: string, input: DeviceInput): Promise<IPCResponse> => invokeIpc('devices:input', panelId, input),
+    frame: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame', panelId),
+    visible: (panelId: string, clientId: string, visible: boolean): Promise<IPCResponse> => invokeIpc('devices:visible', panelId, clientId, visible),
+    takeOver: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:take-over', panelId),
+    power: (panelId: string, action: 'boot' | 'restart' | 'shutdown'): Promise<IPCResponse> => invokeIpc('devices:power', panelId, action),
+    settings: (): Promise<IPCResponse> => ipcRenderer.invoke('device-settings:get'),
+    updateSettings: (patch: { enabled?: boolean; iosMachineId?: string | null; maxBooted?: number }): Promise<IPCResponse> => ipcRenderer.invoke('device-settings:update', patch),
+  },
   onNotesChanged: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('notes:changed', listener);
@@ -402,6 +415,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // its first render instead of awaiting IPC and flashing the wrong layout.
   windowControlsOverlayEnabled: process.argv.includes(WINDOW_CONTROLS_OVERLAY_ARG),
   appearanceSnapshot: decodeAppearanceSnapshotArg(process.argv),
+  // The chat this launch reopens, drawn in the window's first frame (frontend/index.html).
+  launchChat: decodeLaunchChatArg(process.argv),
   setTitleBarOverlay: (colors: WindowControlsOverlayColors): Promise<IPCResponse> =>
     invokeIpc('window:set-title-bar-overlay', colors),
   setBackgroundColor: (payload: { theme: ThemeChoice; color: string }): Promise<IPCResponse> =>
@@ -411,7 +426,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     get: (): Promise<IPCResponse<CustomThemeState>> => ipcRenderer.invoke('custom-theme:get'),
     reset: (): Promise<IPCResponse> => ipcRenderer.invoke('custom-theme:reset'),
   },
-  // The window stays hidden until the first render with data; see createWindow.
+  // The first render with data: main then sends menu actions and pane:// links; see createWindow.
   notifyRendererReady: (): void => ipcRenderer.send('window:renderer-ready'),
 
   // Version checking
@@ -993,11 +1008,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('relay:status-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('relay:status-changed', wrappedCallback);
     },
-    /** A phone used this computer's pairing code. */
-    onRelayPaired: (callback: (event: { clientId: string; label: string }) => void) => {
-      const wrappedCallback = (_event: Electron.IpcRendererEvent, paired: { clientId: string; label: string }) => callback(paired);
+    /** A phone or computer used this computer's pairing code or link. */
+    onRelayPaired: (callback: (event: RelayPairedEvent) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, paired: RelayPairedEvent) => callback(paired);
       ipcRenderer.on('relay:paired', wrappedCallback);
       return () => ipcRenderer.removeListener('relay:paired', wrappedCallback);
+    },
+    /** A `pane://pair` link reached this Pane: the renderer shows its confirm page. */
+    onRelayLinkOpened: (callback: (event: RelayLinkOpenedEvent) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, opened: RelayLinkOpenedEvent) => callback(opened);
+      ipcRenderer.on('relay:link-opened', wrappedCallback);
+      return () => ipcRenderer.removeListener('relay:link-opened', wrappedCallback);
+    },
+    /** A step of Add a device › SSH connecting a host. */
+    onSshRouteProgress: (callback: (progress: SshRouteProgress) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: SshRouteProgress) => callback(progress);
+      ipcRenderer.on('ssh:route-progress', wrappedCallback);
+      return () => ipcRenderer.removeListener('ssh:route-progress', wrappedCallback);
     },
     onPaneOpenLink: (callback: (target: PaneLinkTarget) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, target: PaneLinkTarget) => callback(target);
@@ -1414,6 +1441,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('machines:read', machineId, channel, args),
     run: (machineId: string, command: MachineCommand): Promise<MachineResult> => ipcRenderer.invoke('machines:run', machineId, command),
     retry: (machineId: string): Promise<void> => ipcRenderer.invoke('machines:retry', machineId),
+    latency: (machineId: string): Promise<MachineLatency> => ipcRenderer.invoke('machines:latency', machineId),
     onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, event: MachineConnectionsEvent) => callback(event);
       ipcRenderer.on('machines:event', listener);

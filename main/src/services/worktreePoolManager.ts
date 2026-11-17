@@ -7,6 +7,10 @@ import { withArchiveRepositoryLock } from './archiveRepositoryLock';
 import { archivePathKey } from './archiveCleanupFilesystem';
 import { refreshWorktreeBase } from './worktreeBaseRefresh';
 
+/** A reserve worktree's folder name starts with this; the storage inventory skips these folders. */
+export const RESERVE_WORKTREE_PREFIX = '_reserve-';
+const RESERVE_NAME = new RegExp(`^${RESERVE_WORKTREE_PREFIX}[0-9a-f]{8}$`, 'u');
+
 interface ReserveWorktree {
   reserveName: string;
   reservePath: string;
@@ -117,7 +121,7 @@ class WorktreePoolManager {
     }
 
     const hex = crypto.randomBytes(4).toString('hex'); // 8 hex chars
-    const reserveName = `_reserve-${hex}`;
+    const reserveName = `${RESERVE_WORKTREE_PREFIX}${hex}`;
     const branchName = `_reserve/${hex}`;
     const baseDir = this.resolveBaseDir(projectPath, worktreeFolder, pathResolver);
     const reservePath = pathResolver.join(baseDir, reserveName);
@@ -299,7 +303,7 @@ class WorktreePoolManager {
       if (line.startsWith('worktree ')) {
         const wtPath = line.substring('worktree '.length).trim();
         const dirName = path.basename(wtPath);
-        if (/^_reserve-[0-9a-f]{8}$/.test(dirName) && !activeReservePaths.has(archivePathKey(wtPath))) {
+        if (RESERVE_NAME.test(dirName) && !activeReservePaths.has(archivePathKey(wtPath))) {
           orphanPaths.push(wtPath);
         }
       }

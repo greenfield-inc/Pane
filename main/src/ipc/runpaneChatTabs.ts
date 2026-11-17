@@ -78,11 +78,12 @@ function blockedState(panel: ToolPanel, view: ChatTabView): RunpanePanelBlockedS
 
 export function chatTabScreen(manager: ChatTabManager, panel: ToolPanel, limit: number): RunpanePanelScreenResult {
   const view = manager.view(panel.id, 0);
-  const lines = transcriptTail(manager, panel.id, 200_000).text.split('\n');
+  const tail = transcriptTail(manager, panel.id, 200_000);
+  const lines = tail.text.split('\n');
   const shown = lines.slice(-limit);
   return {
     ok: true, panelId: panel.id, paneId: panel.sessionId, source: 'acpTranscript', limit,
-    returnedLineCount: shown.length, hasMore: lines.length > shown.length, text: shown.join('\n'),
+    returnedLineCount: shown.length, hasMore: tail.hasMore || lines.length > shown.length, text: shown.join('\n'),
     state: chatTabState(view), composer: { isPresent: view.status !== 'stopped', hasUndeliveredText: false },
     nextCommand: `runpane panels last-message --panel ${panel.id} --json`,
   };

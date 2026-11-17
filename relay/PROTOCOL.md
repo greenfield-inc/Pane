@@ -49,6 +49,13 @@ The computer's certificate covers `<id>.<D>` and `*.<id>.<D>`.
 Local address names answer only for RFC 1918 (`10/8`, `172.16/12`,
 `192.168/16`) and CGNAT (`100.64/10`) addresses; anything else is NXDOMAIN.
 
+A and CAA answers last 60 s and TXT answers 10 s. The names of an id the
+registry does not know (a computer that was forgotten, or never connected)
+answer as if it were on the answering relay, for 10 s, and that relay refuses
+its clients until the computer connects. A "no such name" answer would stay cached after the
+computer comes back: macOS doubles that cache time on each repeated miss,
+up to more than an hour.
+
 ## Control connection (computer to relay)
 
 The computer opens TLS to `<region>.relay.<D>:443` (certificate checked
@@ -204,9 +211,10 @@ TLS with its own certificate.
 | `GET /healthz` | `200 {"ok":true,"region":"us","computers":<n>}` |
 | `GET /v1/relays` | `{"relays":[{"region":"us","host":"us.relay.<D>","directRelay":"https://us.relay.<D>/"},...]}` |
 | `GET /v1/status/<id>` | `{"state":"online" \| "asleep" \| "offline","since":"<ISO time or null>"}` |
-| `GET /pair` | The pairing landing page (the QR's address; the secret stays in the `#fragment`). |
-| `GET /.well-known/apple-app-site-association` | iOS universal links for `/pair`. |
-| `GET /.well-known/assetlinks.json` | Android app links for `/pair`. |
+| `GET /pair` | The pairing landing page (the QR's address; the secret stays in the `#fragment`). A desktop browser opens desktop Pane with `pane://pair#…`. |
+| `GET /glasses` | The Wearables QR's address: the phone app opens Settings › Glasses; without the app, a page with the TestFlight line. |
+| `GET /.well-known/apple-app-site-association` | iOS universal links for `/pair` and `/glasses`. |
+| `GET /.well-known/assetlinks.json` | Android app links (the app's intent filters name the paths). |
 | `GET /relay`, `GET /ping` | The iroh relay for direct paths (below). |
 
 ## Direct paths
@@ -288,16 +296,25 @@ limited.
 ## Limits
 
 Limits count each client by its address: an IPv4 address, or the /64 that
-holds an IPv6 address. A client over a limit is slowed, and past twice the
-limit its new connections are refused and its open ones closed. The
-computer and its other clients carry on.
+holds an IPv6 address. The computer and its other clients carry on whatever
+one client does.
 
-- Per computer and client address: 50 MB and 100 new client connections a
-  minute (`--limit-bytes-per-min`, `--limit-conns-per-min`).
-- Per client address across all computers: 200 MB and 400 new connections a
-  minute (`--limit-ip-bytes-per-min`, `--limit-ip-conns-per-min`).
-- Per client address on the iroh relay: 50 MB and 100 new connections a
-  minute (the per-computer flags).
+Traffic is a sustained rate, both directions together. A client over a rate
+is slowed to it and never cut off: each address has a token bucket that
+refills at the rate and holds one second of it, so a short burst goes at
+line speed. New connections are counted a minute: past the limit each new
+connection waits a second, and past twice it new connections are refused.
+Open connections stay open.
+
+- Per computer and client address: 500 Mbit/s and 100 new client connections
+  a minute (`--limit-mbit-per-sec`, `--limit-conns-per-min`).
+- Per client address across all computers and the iroh relay: 1,000 Mbit/s
+  and 400 new connections a minute (`--limit-ip-mbit-per-sec`,
+  `--limit-ip-conns-per-min`), half of what a small relay VM sends, so one
+  address cannot fill a relay. Connections for a computer that is not
+  connected count too.
+- Per client address on the iroh relay: 500 Mbit/s and 100 new connections a
+  minute (the per-computer flags), inside the address's rate above.
 - Per computer, its own control connection: past 1,200 frames a minute the
   relay closes it with `over-limit` and refuses it until the minute ends.
 - Per computer address, control connections: 60 a minute
@@ -310,8 +327,8 @@ computer and its other clients carry on.
   a full registry takes the place of the one offline longest. Only when
   every computer is online does it get `full` (a helper skips the new ids it
   is sent then).
-- A computer offline for 7 days is forgotten: its names answer NXDOMAIN and
-  its status `since` is null. One that never set TXT values while the
+- A computer offline for 7 days is forgotten: its names answer as an unknown
+  id's (see Names) and its status `since` is null. One that never set TXT values while the
   registry knew it is forgotten after 1 hour offline. An offline computer's
   TXT values are cleared 10 minutes after it set them; an online computer
   keeps them.

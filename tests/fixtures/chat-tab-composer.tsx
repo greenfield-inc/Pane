@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
 import type { AgentChatConfigOption } from '../../shared/types/agentChat';
@@ -135,10 +136,20 @@ const client: ChatTabClient = {
   dismissBanner: async () => { window.qaDismissed++; delete view.banner; stateListeners.forEach(listener => listener(structuredClone(view))); },
 };
 const width = Number(params.get('width') ?? 360);
-createRoot(document.getElementById('root')!).render(
+const root = createRoot(document.getElementById('root')!);
+// window.qaSwitchAway(): unmounts the panel and mounts it again, as leaving its Pane and coming back does.
+// In StrictMode, as the desktop app's development build renders it.
+const render = (mounted: boolean) => root.render(<StrictMode>
   <div className="bg-bg-secondary" style={{ height: '100vh', display: 'flex' }}>
     <div data-testid="column" className="bg-bg-primary" style={{ width, height: '100%', borderRight: '1px solid var(--color-border-primary)' }}>
-      <ChatTabPanel panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} pr={pr} workers={workers} actions={actions} />
+      {mounted && <ChatTabPanel panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} pr={pr} workers={workers} actions={actions} />}
     </div>
-  </div>,
-);
+  </div>
+</StrictMode>);
+declare global { interface Window { qaSwitchAway: () => Promise<void> } }
+window.qaSwitchAway = async () => {
+  render(false);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  render(true);
+};
+render(true);

@@ -509,13 +509,46 @@ describe('chat tab manager', () => {
     expect(manager.isRunning('p1')).toBe(false);
   });
 
-  it('Send now interrupts the running turn and delivers that message before older queued ones', async () => {
+  it('Send now delivers into the running turn of an agent that takes steering, and the turn goes on', async () => {
     const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'turn 3' });
+    await expect.poll(() => manager.view('p1').status).toBe('working');
+    expect(manager.view('p1').sendNowSteers).toBe(true);
+    manager.send('p1', { operationId: 'op-2', text: 'second' });
+    manager.send('p1', { operationId: 'op-3', text: 'urgent', now: true });
+    await expect.poll(() => manager.receipt('p1', 'op-3')?.state).toBe('completed');
+    expect(manager.view('p1').status).toBe('working');
+    expect(manager.view('p1').queue.map(item => item.operationId)).toEqual(['op-2']);
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 8000 }).toBe('completed');
+    expect(userTexts(manager.view('p1'))).toEqual(['turn 3', 'urgent', 'second']);
+    expect(JSON.stringify(manager.view('p1').transcript)).toContain('Heard: urgent');
+    expect(manager.view('p1').transcript!.messages.filter(message => message.role === 'user').map(message => message.id)).toEqual(['user:op-1', 'steer:op-3', 'user:op-2']);
+    expect(turnEnds(manager.view('p1'))).toEqual(['end_turn', 'end_turn']);
+  });
+
+  it('Send now keeps the message queued, with a notice, when the agent refuses the steer', async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_STEER_FAILS: '1' });
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'turn 2' });
+    await expect.poll(() => manager.view('p1').status).toBe('working');
+    manager.send('p1', { operationId: 'op-2', text: 'urgent', now: true });
+    await expect.poll(() => manager.view('p1').notice).toContain('could not reach the agent');
+    expect(manager.view('p1').queue.map(item => item.operationId)).toEqual(['op-2']);
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 8000 }).toBe('completed');
+    expect(turnEnds(manager.view('p1'))).toEqual(['end_turn', 'end_turn']);
+  });
+
+  it('Send now, for an agent without steering, interrupts the running turn and delivers that message before older queued ones', async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_NO_STEERING: '1' });
     store.add('p1', newTab(directory));
     await manager.ensure('p1');
     manager.send('p1', { operationId: 'op-1', text: 'slow' });
     await expect.poll(() => manager.view('p1').status).toBe('working');
     manager.send('p1', { operationId: 'op-2', text: 'second' });
+    expect(manager.view('p1').sendNowSteers).toBeUndefined();
     manager.send('p1', { operationId: 'op-3', text: 'urgent', now: true });
     await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 5000 }).toBe('completed');
     expect(manager.receipt('p1', 'op-3')?.state).toBe('completed');
@@ -523,8 +556,8 @@ describe('chat tab manager', () => {
     expect(turnEnds(manager.view('p1'))).toEqual(['cancelled', 'end_turn', 'end_turn']);
   });
 
-  it('Send now ends a turn blocked on an approval, withdrawing it', async () => {
-    const { manager, store, directory } = harness();
+  it('Send now, for an agent without steering, ends a turn blocked on an approval, withdrawing it', async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_NO_STEERING: '1' });
     store.add('p1', newTab(directory));
     await manager.ensure('p1');
     manager.send('p1', { operationId: 'op-1', text: 'permission' });
@@ -544,8 +577,8 @@ describe('chat tab manager', () => {
     await expect.poll(() => manager.receipt('p1', 'op-1')?.state).toBe('completed');
   });
 
-  it('sendNow moves a queued message to the front and interrupts the turn', async () => {
-    const { manager, store, directory } = harness();
+  it('sendNow moves a queued message to the front and interrupts the turn of an agent without steering', async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_NO_STEERING: '1' });
     store.add('p1', newTab(directory));
     await manager.ensure('p1');
     manager.send('p1', { operationId: 'op-1', text: 'slow' });

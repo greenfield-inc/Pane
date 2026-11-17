@@ -1,6 +1,7 @@
 import React, { Component, ReactNode } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { Button } from './ui/Button';
+import { dropLaunchOutline } from '../utils/launchOutline';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -27,6 +28,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     console.error('Error caught by boundary:', error, errorInfo);
     console.error('Component stack:', errorInfo.componentStack);
     this.setState({ errorInfo });
+    // The error view, not the launch outline, is what the person should see.
+    dropLaunchOutline();
     window.electronAPI?.diagnostics?.rendererFatal({
       kind: 'error-boundary',
       message: error.message,

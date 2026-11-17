@@ -366,7 +366,11 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
       <ModalFooter className="justify-between">
         {loop && confirmingDelete ? (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-text-secondary">Delete this loop? Its run Panes stay.</span>
+            <span className="text-sm text-text-secondary">
+              {loop.orchestrationSessionId
+                ? 'Delete this loop? Its schedule stops, and its Session stays and moves to your Sessions list.'
+                : 'Delete this loop? Its schedule stops, and its run Panes stay and move to their project\'s list.'}
+            </span>
             <Button size="sm" variant="danger" onClick={() => void handleDelete()} disabled={busy}>Delete</Button>
             <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>Keep</Button>
           </div>

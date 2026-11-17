@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { moveBlockedReason, moveTargets, moveToHostPrompt, sessionHostFor, sessionHostForMachine } from './moveSessionToHost';
 import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import type { ComputerRoute, RemoteComputer } from '../../../shared/types/remoteComputers';
 
 function machine(name: string, overrides: Partial<TailnetMachine> = {}): TailnetMachine {
   return {
@@ -31,46 +32,54 @@ describe('moveToHostPrompt', () => {
   });
 });
 
+const tailscaleRoute: ComputerRoute = {
+  id: 'tailscale:https://tylers-mac-mini.tail1234.ts.net:8443', kind: 'tailscale', source: 'found',
+  baseUrl: 'https://tylers-mac-mini.tail1234.ts.net:8443', token: '', tailnetMachine: 'tylers-mac-mini', tailnetDomain: 'tail1234.ts.net',
+};
+const relayRoute: ComputerRoute = {
+  id: 'relay:https://mini.runpane.net', kind: 'relay', source: 'link', baseUrl: 'https://mini.runpane.net', token: 'synthetic',
+  relay: { computerId: 'mini', fingerprint: 'f' },
+};
+const mini = (routes: ComputerRoute[]): RemoteComputer => ({ id: 'mini', label: 'Mini', routes });
+
 describe('sessionHostFor', () => {
-  const profile: RemoteDaemonConfig['client']['profiles'][number] = { id: 'mini', label: 'Mini', baseUrl: 'https://mini:8443', token: '', transport: 'http+sse' };
-  const config = (mode: 'local' | 'remote', profiles: RemoteDaemonConfig['client']['profiles']): Pick<RemoteDaemonConfig, 'client'> =>
-    ({ client: { mode, activeProfileId: 'mini', profiles } });
+  const config = (mode: 'local' | 'remote', computers: RemoteComputer[]): Pick<RemoteDaemonConfig, 'client'> =>
+    ({ client: { mode, activeProfileId: 'mini', computers, profiles: [] } });
 
   it('is this computer while the app shows its own Pane', () => {
-    expect(sessionHostFor(config('local', [{ ...profile, tailnetMachine: 'tylers-mac-mini' }]))).toEqual({ kind: 'local' });
+    expect(sessionHostFor(config('local', [mini([tailscaleRoute])]))).toEqual({ kind: 'local' });
     expect(sessionHostFor(undefined)).toEqual({ kind: 'local' });
   });
 
-  it('is the Tailscale machine of a codeless host', () => {
-    expect(sessionHostFor(config('remote', [{ ...profile, tailnetMachine: 'tylers-mac-mini' }])))
+  it('is the Tailscale machine of a computer with a Tailscale route, whatever route is first', () => {
+    expect(sessionHostFor(config('remote', [mini([relayRoute, tailscaleRoute])])))
       .toEqual({ kind: 'tailnet', machine: 'tylers-mac-mini' });
   });
 
-  it('cannot be placed for a host paired with a code, and says why', () => {
-    const host = sessionHostFor(config('remote', [profile]));
+  it('cannot be placed for a computer without a Tailscale route, and says why', () => {
+    const host = sessionHostFor(config('remote', [mini([relayRoute])]));
     expect(host.kind).toBe('paired');
-    expect(host.kind === 'paired' && host.reason).toMatch(/pairing code.*Tailscale/);
+    expect(host.kind === 'paired' && host.reason).toMatch(/no Tailscale route.*Tailscale/);
   });
 });
 
 describe('sessionHostForMachine', () => {
-  const profile: RemoteDaemonConfig['client']['profiles'][number] = { id: 'mini', label: 'Mini', baseUrl: 'https://mini:8443', token: '', transport: 'http+sse' };
   // The window shows this computer; All machines rows still name their own machine.
-  const config = (profiles: RemoteDaemonConfig['client']['profiles']): Pick<RemoteDaemonConfig, 'client'> =>
-    ({ client: { mode: 'local', activeProfileId: null, profiles } });
+  const config = (computers: RemoteComputer[]): Pick<RemoteDaemonConfig, 'client'> =>
+    ({ client: { mode: 'local', activeProfileId: null, computers, profiles: [] } });
 
   it('is this computer for a row on this computer, whichever host the window shows', () => {
-    expect(sessionHostForMachine(config([{ ...profile, tailnetMachine: 'tylers-mac-mini' }]), 'local')).toEqual({ kind: 'local' });
+    expect(sessionHostForMachine(config([mini([tailscaleRoute])]), 'local')).toEqual({ kind: 'local' });
   });
 
-  it('is the Tailscale machine of the row\'s saved profile, not the host on screen', () => {
-    expect(sessionHostForMachine(config([{ ...profile, tailnetMachine: 'tylers-mac-mini' }]), 'mini'))
+  it('is the Tailscale machine of the row\'s saved computer, not the host on screen', () => {
+    expect(sessionHostForMachine(config([mini([tailscaleRoute])]), 'mini'))
       .toEqual({ kind: 'tailnet', machine: 'tylers-mac-mini' });
   });
 
-  it('cannot be placed for a machine paired with a code or no longer saved, and says why', () => {
-    const paired = sessionHostForMachine(config([profile]), 'mini');
-    expect(paired.kind === 'paired' && paired.reason).toMatch(/^Mini is connected with a pairing code/);
+  it('cannot be placed for a computer without Tailscale or no longer saved, and says why', () => {
+    const paired = sessionHostForMachine(config([mini([relayRoute])]), 'mini');
+    expect(paired.kind === 'paired' && paired.reason).toMatch(/^Mini has no Tailscale route/);
     const gone = sessionHostForMachine(config([]), 'mini');
     expect(gone.kind === 'paired' && gone.reason).toMatch(/no longer has this machine saved/);
   });

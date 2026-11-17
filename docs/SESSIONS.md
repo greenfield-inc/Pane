@@ -10,8 +10,8 @@ In the sidebar, `+` opens an agent picker, an optional Session name field, and
 an optional "What is this Session for?" field that becomes the Session's goal.
 Pane remembers the chosen agent as the default for future Sessions while
 existing Sessions keep their own agent. A blank name starts as `New chat` or
-`New chat 2` and is renamed once from the first message you send the Session
-agent; a name you type or set later is kept. Each new Session opens as one Pane
+`New chat 2`, and the Session agent renames it once, in 3 to 5 words, when it
+replies to your first task. A name you type or set later is kept. Each new Session opens as one Pane
 Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
@@ -1474,11 +1474,16 @@ default), a Session has one voice to the person: its orchestrator.
   `--questions` (checked as `runpane notify` checks them) first. A question
   that ends with options in brackets ("(A / B)") and has no buttons from
   either source is refused with `ERR_REPORT_PACKED_OPTIONS`, showing nothing.
-  From a JSON status file (even one the journal cut
-  short) or a bare `needs_you` block, the card takes its question and `why` as
+  From a JSON status file or a bare `needs_you`
+  block, the card takes its question and `why` as
   context, its question's `options` as answer buttons (a `(recommended)`
   suffix marks the recommended one; several questions get an answer box), and
-  its `files` as links. Other JSON shows one line (`summary`, `step` or
+  its `files` as links (past six, the card names the rest). When the journal
+  cut the summary short, Pane reads the first 256 KB of the status file itself
+  (a regular file holding JSON), so a long `needs_you` keeps its buttons and
+  links; a `needs_you` past 256 KB gets none, and `runpane report` warns the
+  worker. A worker on another machine keeps the 2,000 characters the journal
+  sent, since its path names a file over there. Other JSON shows one line (`summary`, `step` or
   `title`) or none, never the raw text; the file itself opens as the worker's
   status link. It rings once the orchestrator
   relays it or after 10 minutes, so the orchestrator first settles what the plan
@@ -1496,9 +1501,9 @@ default), a Session has one voice to the person: its orchestrator.
   call's `{reply, picks?, id, replyId, next}` result, whose `replyId` the
   reader passes to `--took` and `--update`). A worker's question's reply goes
   to the worker's tab; when the worker can't read it, to the orchestrator that
-  relayed it; else to Autopilot. The reader decides whether it answers or asks:
-  `runpane notify --took <id|Q-n> answer`, or `--took <id|Q-n> question`, then
-  `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed
+  relayed it; else to Autopilot. Pane records it as the answer once its reader
+  gets it. When it asks a question instead, the reader runs
+  `runpane notify --took <id|Q-n> question`, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed
   "<one line per change>"` with any changed fields. That saves a new version of
   the same approval ("Updated · ready again", at most 10 kept) and waits for the
   answer; nobody posts a second approval for it. `correction: Q-n → that was a
@@ -1534,7 +1539,9 @@ default), a Session has one voice to the person: its orchestrator.
   to tell). It
   records the decision with
   `runpane inbox ack <item> --decision <D-n>`, and the card reads "Recorded as
-  D-n". The older way (post a second card, ack, forward the answer) keeps working
+  D-n". When the worker takes a typed reply as a question, the orchestrator
+  gets `reopened: Q-n → … (by <worker>)`, an ack leaves that card open, and the
+  answer to its new version comes as `correction: Q-n → <answer> (by you)`. The older way (post a second card, ack, forward the answer) keeps working
   for one release. The orchestrator stays free to talk about the item in its
   tab while the card waits. Stopping an item's background call drops its own
   stale item. On start, resume or wake it reconciles against the status files,

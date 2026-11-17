@@ -26,11 +26,11 @@ const CARD_CONTRACT = [
   '- Pane prints a warning for each softer miss (a long title, no subtitle, no recommendation, more than 4 options, options without a consequence, unlinked paths). Fix them on the next card.',
 ].join('\n');
 
-/** After the person replies: say how you took it, and update the card when it was a question. */
+/** After the person replies: reopen and update the card when the reply was a question. */
 const REPLY_RULE = [
   '### Replies',
   '',
-  '- A typed reply may be an answer or a question. Whoever reads it runs `runpane notify --took <id|Q-n> answer` or `--took <id|Q-n> question`.',
+  '- Pane records a typed reply as the answer once its reader gets it. When the reply asks a question instead, the reader runs `runpane notify --took <id|Q-n> question`.',
   '- For a question: find out, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>"` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links`. The card shows "Updated · ready again" and waits for the answer. Don\'t post a second card.',
 ].join('\n');
 

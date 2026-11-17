@@ -1,4 +1,5 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { RunpaneError } from './errors';
@@ -70,4 +71,19 @@ export function scratchRule(): string {
 /** The Pane and Tab working rules, for instruction text that states where a feature's agents go. */
 export function paneAndTabRules(): string {
   return RUNPANE_CONTRACT.agentContext.workspaceRules.filter((rule) => rule.startsWith('Pane:') || rule.startsWith('Tab:')).join(' ');
+}
+
+/**
+ * Whether Claude Code's user CLAUDE.md already states the agents intro and the scratch rule, as
+ * Pane's block there does while Notify is on (the block also says to reach the person through
+ * `notify`). A block written by another Pane version, with other wording, doesn't count.
+ */
+export function claudeMdHasPaneGuidance(env: NodeJS.ProcessEnv = process.env): boolean {
+  const dir = env.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), '.claude');
+  try {
+    const text = fs.readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8');
+    return text.includes(agentsIntroForInstructions()) && text.includes(scratchRule());
+  } catch {
+    return false;
+  }
 }

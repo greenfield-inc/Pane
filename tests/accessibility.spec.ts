@@ -364,13 +364,24 @@ test('seeded pane exposes separate compound actions and arrow-keyed panel tabs',
   await expect(pinButton).toHaveCSS('outline-style', 'solid');
   await expect(pinButton).toHaveCSS('outline-width', '2px');
   await page.screenshot({ path: 'tmp/verify/sidebar-row-action-overlay/keyboard-focus.png' });
-  await archiveButton.click();
   // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
-  await expect.poll(() => page.evaluate(() => (
+  const deleteCalls = () => page.evaluate(() => (
     window as typeof window & {
       __paneTestElectronMock: { getSessionDeleteCalls: () => string[] };
     }
-  ).__paneTestElectronMock.getSessionDeleteCalls())).toEqual([session.id]);
+  ).__paneTestElectronMock.getSessionDeleteCalls());
+  // Archive asks first: Cancel keeps the Pane, and Enter archives it from the focused Archive button.
+  const confirmArchive = page.getByRole('dialog', { name: 'Archive Accessibility pane?' });
+  await archiveButton.click();
+  await expect(confirmArchive).toBeVisible();
+  await expectNoAxeViolations(page);
+  await confirmArchive.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(confirmArchive).toBeHidden();
+  expect(await deleteCalls()).toEqual([]);
+  await archiveButton.click();
+  await expect(confirmArchive.getByRole('button', { name: 'Archive', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(deleteCalls).toEqual([session.id]);
   await expect(paneButton).not.toHaveAttribute('aria-current', 'page');
   await pinButton.click();
   // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.

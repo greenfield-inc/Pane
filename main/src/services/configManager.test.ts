@@ -188,6 +188,13 @@ describe('ConfigManager appearance persistence', () => {
     expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toMatchObject({ theme: 'forge', highContrast: true });
   });
 
+  it('keeps every machine health setting when two saves each send one', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await Promise.all([manager.updateConfig({ machineHealth: { autoClearAgentTemp: true } }), manager.updateConfig({ machineHealth: { finishedIdleDays: 30 } })]);
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).machineHealth).toEqual({ autoClearAgentTemp: true, finishedIdleDays: 30 });
+  });
+
   it('serializes reloads behind in-flight updates', async () => {
     const manager = new ConfigManager();
     await manager.initialize();

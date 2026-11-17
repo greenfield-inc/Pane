@@ -1169,7 +1169,7 @@ const INSPECTOR_TABS = {
 /** What a tab is, shown when it has no live agent state. A terminal's title already says it; Files and Changes are their own label. */
 const PANEL_TYPE_LABELS = {
   terminal: null, chat: null, explorer: null, diff: null,
-  browser: 'Page', editor: 'File', logs: 'Logs', notes: 'Notes', dashboard: 'Dashboard', 'setup-tasks': 'Setup tasks',
+  browser: 'Page', editor: 'File', logs: 'Logs', notes: 'Notes', dashboard: 'Dashboard', 'setup-tasks': 'Setup tasks', device: 'Device',
 } satisfies Record<ToolPanelType, string | null>;
 
 /** What a remote member's row adds after its machine's name. */

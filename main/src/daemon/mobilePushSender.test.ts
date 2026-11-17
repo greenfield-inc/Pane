@@ -4,7 +4,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
-import { MobilePushSender, setRelayPushChannel, STABLE_IDLE_MS, type MobilePushTransport } from './mobilePushSender';
+import { MobilePushSender, PROGRAM_ALERT_COOLDOWN_MS, setRelayPushChannel, STABLE_IDLE_MS, type MobilePushTransport } from './mobilePushSender';
 import { RelayRequestError, type RelayAlert } from './relay/relayAgent';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { encodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
@@ -369,6 +369,39 @@ describe('MobilePushSender', () => {
       await sender.observeStatus({ ...shell, state: 'blocked' });
       await vi.advanceTimersByTimeAsync(60_000);
       expect(alerts()).toEqual([]);
+    });
+
+    it("says a plain shell is blocked when a program in it reports so itself (OSC 7501)", async () => {
+      const { sender, alerts } = await apnsHost();
+      const shell = { sessionId: 'pane-1', panelId: 'shell-1' } as const;
+      await sender.observeStatus({ ...shell, state: 'working', reason: 'program_status:working' });
+      await sender.observeStatus({ ...shell, state: 'blocked', reason: 'program_status:blocked:auth', screenLines: ['Password required'] });
+      expect(alerts()).toEqual([alert('api-fix', 'api-fix is blocked')]);
+    });
+
+    it("alerts again when a plain shell's next program reports blocked after the last one ended unreported", async () => {
+      const { sender, alerts } = await apnsHost();
+      const shell = { sessionId: 'pane-1', panelId: 'shell-1' } as const;
+      await sender.observeStatus({ ...shell, state: 'blocked', reason: 'program_status:blocked:auth' });
+      // The program exits on Ctrl+C; the tab reads its screen again.
+      await sender.observeStatus({ ...shell, state: 'idle', reason: null });
+      await vi.advanceTimersByTimeAsync(PROGRAM_ALERT_COOLDOWN_MS);
+      await sender.observeStatus({ ...shell, state: 'blocked', reason: 'program_status:blocked:permission' });
+      expect(alerts()).toHaveLength(2);
+    });
+
+    it('sends at most one blocked alert per cooldown for a program toggling its own state', async () => {
+      const { sender, alerts } = await apnsHost();
+      const shell = { sessionId: 'pane-1', panelId: 'shell-1' } as const;
+      for (let index = 0; index < 5; index += 1) {
+        await sender.observeStatus({ ...shell, state: 'blocked', reason: 'program_status:blocked' });
+        await sender.observeStatus({ ...shell, state: 'working', reason: 'program_status:working' });
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
+      expect(alerts()).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(PROGRAM_ALERT_COOLDOWN_MS);
+      await sender.observeStatus({ ...shell, state: 'blocked', reason: 'program_status:blocked' });
+      expect(alerts()).toHaveLength(2);
     });
 
     it('replaces and groups alerts per pane', async () => {

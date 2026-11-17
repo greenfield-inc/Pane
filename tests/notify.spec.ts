@@ -91,16 +91,18 @@ test.describe('Approvals in the main window', () => {
     await expect(row('sms-retry')).not.toContainText('Waiting');
   });
 
-  test('Approvals lists newest first, groups by Session, opens the selected item in the column beside the list, and answers it', async ({ page }) => {
+  test('Approvals groups by Session by default, opens the selected item in the column beside the list, and answers it', async ({ page }) => {
     await boot(page);
     await page.getByTestId('approvals-nav').click();
     const queue = page.getByTestId('approvals-queue');
     await expect(queue.getByRole('heading', { name: 'Approvals' })).toBeVisible();
     await expect(queue.getByRole('tab', { name: 'Waiting 3' })).toHaveAttribute('aria-selected', 'true');
-    await expect(queue.getByTestId('approvals-group')).toHaveCount(0);
-    await queue.getByTestId('approvals-sort').click();
-    await page.getByRole('menuitemradio', { name: 'By Session' }).click();
+    // By Session until the person picks another sort.
     await expect(queue.getByTestId('approvals-group')).toHaveText([/Launch\s*1/, /Not in a Session\s*2/]);
+    await queue.getByTestId('approvals-sort').click();
+    const bySession = page.getByRole('menuitemradio', { name: 'By Session' });
+    await expect(bySession).toHaveAttribute('aria-checked', 'true');
+    await bySession.click();
 
     // The first waiting item opens in the column beside the list (P4); the list stays compact rows.
     await expect(queue.getByTestId('approvals-selected')).toHaveCount(0);
@@ -109,7 +111,18 @@ test.describe('Approvals in the main window', () => {
     await expect(column.getByTestId('approval-pager')).toHaveText('1 of 3');
     // Decide first, then Summary, each reference, and the chat where it was asked (D-224).
     await expect(column.getByTestId('approval-tab')).toHaveText(['Decide', 'Summary', 'plan.html', 'PR #812', "auth-refactor's tab"]);
+    // Nothing starts picked, recommended or not, and Send waits for a pick (D-385).
+    await expect(column.locator('[role="radio"][aria-checked="true"]')).toHaveCount(0);
+    await expect(column.getByTestId('approval-send')).toBeDisabled();
+    if (process.env.PANE_VERIFY_DIR) await column.screenshot({ path: `${process.env.PANE_VERIFY_DIR}/approval-column-open.png` });
     await column.getByRole('radio', { name: /Keep Redis/ }).click();
+    // The person's own pick survives paging away and back.
+    await queue.getByTestId('approvals-row').filter({ hasText: 'Apply migration 0042' }).click();
+    await expect(column.getByTestId('approval-title')).toHaveText('Apply migration 0042 to staging?');
+    await expect(column.locator('[role="radio"][aria-checked="true"]')).toHaveCount(0);
+    await queue.getByTestId('approvals-row').filter({ hasText: 'Which session store' }).click();
+    await expect(column.getByRole('radio', { name: /Keep Redis/ })).toHaveAttribute('aria-checked', 'true');
+    if (process.env.PANE_VERIFY_DIR) await column.screenshot({ path: `${process.env.PANE_VERIFY_DIR}/approval-column-restored.png` });
     await column.getByTestId('approval-send').click();
 
     await queue.getByTestId('approvals-row').filter({ hasText: 'Apply migration 0042' }).click();

@@ -14,7 +14,8 @@ import { useOrchestrationSessionStore } from '../src/stores/orchestrationSession
 import { useConfigStore } from '../src/stores/configStore';
 import { useNavigationStore } from '../src/stores/navigationStore';
 import { useSessionWorkspaceLayoutStore } from '../src/stores/sessionWorkspaceLayoutStore';
-import { createDefaultRemoteDaemonConfig } from '../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../shared/types/remoteDaemon';
+import { convertProfiles } from '../../shared/types/remoteComputers';
 import type { OrchestrationSessionCreateInput, OrchestrationSessionRecord, OrchestrationSessionView } from '../../shared/types/orchestrationSession';
 import type { Session } from '../src/types/session';
 import type { AppConfig, UpdateConfigRequest } from '../src/types/config';
@@ -45,12 +46,13 @@ function sessionView(id: string): OrchestrationSessionView<Session> {
 const list = (id = 'a') => ({ success: true, data: { sessions: [...records], selectedSessionId: id } });
 const defaultMethod = () => Promise.resolve({ success: true, data: null });
 const methods = new Proxy({}, { get: () => defaultMethod });
+const profiles: RemotePaneConnectionProfile[] = [{ id: 'outgoing', label: 'Outgoing', token: 'test', baseUrl: 'https://outgoing.example', transport: 'http+sse' }, { id: 'incoming', label: 'Incoming', token: 'test', baseUrl: 'https://incoming.example', transport: 'http+sse' }];
 function runtimeConfig(): AppConfig {
   const config = useConfigStore.getState().config;
   if (!config) throw new Error('Fixture config not initialized');
   const remoteDaemon = config.remoteDaemon ?? createDefaultRemoteDaemonConfig();
   return { ...config, remoteDaemon: { ...remoteDaemon, client: { ...remoteDaemon.client,
-    profiles: [{ id: 'outgoing', label: 'Outgoing', token: 'test', baseUrl: 'https://outgoing.example', transport: 'http+sse' }, { id: 'incoming', label: 'Incoming', token: 'test', baseUrl: 'https://incoming.example', transport: 'http+sse' }], mode: 'remote', activeProfileId: runtime } } };
+    profiles, computers: convertProfiles(profiles, null).computers, mode: 'remote', activeProfileId: runtime } } };
 }
 let runtimeRefreshes = 0;
 window.addEventListener('project-sessions-refresh', () => { runtimeRefreshes += 1; });

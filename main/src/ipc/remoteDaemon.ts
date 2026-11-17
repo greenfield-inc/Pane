@@ -1,3 +1,4 @@
+import { allRouteProfiles, primaryProfile, saveProfileRoute } from '../../../shared/types/remoteComputers';
 import { runRemoteSetupCommand } from '../daemon/remote-setup-command';
 import {
   decodePaneRemoteConnection,
@@ -289,7 +290,7 @@ export function registerRemoteDaemonHandlers(
         },
         client: {
           ...current.client,
-          profiles: upsertById(current.client.profiles, pair.profile),
+          computers: saveProfileRoute(current.client.computers, pair.profile),
         },
       });
 
@@ -383,7 +384,7 @@ export function registerRemoteDaemonHandlers(
       let connected = false;
       let connectionError: string | undefined;
       await applyRemoteClientTransition(async (current) => {
-        const existingProfile = findMatchingConnectionProfile(current.client.profiles, importPayload);
+        const existingProfile = findMatchingConnectionProfile(allRouteProfiles(current.client.computers), importPayload);
         profile = remoteImportPayloadToProfile(importPayload, existingProfile?.id);
 
         if (connect) {
@@ -400,7 +401,7 @@ export function registerRemoteDaemonHandlers(
             ...current,
             client: {
               ...current.client,
-              profiles: upsertById(current.client.profiles, profile),
+              computers: saveProfileRoute(current.client.computers, profile),
               activeProfileId: connected ? profile.id : current.client.activeProfileId,
               mode: connected ? 'remote' : current.client.mode,
             },
@@ -553,17 +554,16 @@ export function registerRemoteDaemonHandlers(
       }
 
       const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
-      const profiles = upsertById(current.client.profiles, profile);
       const next = normalizeRemoteDaemonConfig({
         ...current,
         client: {
           ...current.client,
-          profiles,
+          computers: saveProfileRoute(current.client.computers, profile),
         },
       });
 
       await configManager.updateConfig({ remoteDaemon: next });
-      return { success: true, data: next.client.profiles };
+      return { success: true, data: next.client.computers.map(primaryProfile) };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to save remote daemon connection profile') };
     }
@@ -589,7 +589,7 @@ export function registerRemoteDaemonHandlers(
             ...current,
             client: {
               ...current.client,
-          profiles: current.client.profiles.filter((profile) => profile.id !== decodedProfileId),
+              computers: current.client.computers.filter((computer) => computer.id !== decodedProfileId),
               activeProfileId,
               mode,
             },
@@ -621,7 +621,8 @@ export function registerRemoteDaemonHandlers(
       });
 
       if (candidate.client.mode === 'remote') {
-        const activeProfile = candidate.client.profiles.find((profile) => profile.id === candidate.client.activeProfileId);
+        const activeComputer = candidate.client.computers.find((computer) => computer.id === candidate.client.activeProfileId);
+        const activeProfile = activeComputer ? primaryProfile(activeComputer) : undefined;
         if (!activeProfile) {
           throw new Error(`Remote daemon connection profile "${candidate.client.activeProfileId}" does not exist`);
         }
@@ -754,7 +755,7 @@ function buildNextClientState(
     throw new Error('Remote mode requires an active connection profile');
   }
 
-  if (nextActiveProfileId && !current.profiles.some((profile) => profile.id === nextActiveProfileId)) {
+  if (nextActiveProfileId && !current.computers.some((computer) => computer.id === nextActiveProfileId)) {
     throw new Error(`Remote daemon connection profile "${nextActiveProfileId}" does not exist`);
   }
 

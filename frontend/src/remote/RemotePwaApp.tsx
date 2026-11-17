@@ -33,7 +33,9 @@ import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
 import { loadRemoteProfiles, saveRemoteProfiles } from './runtime/remoteProfileStorage';
 import { withNewProfiles } from '../../../shared/remoteClient/relay';
-import { pairingErrorText, pairThisBrowser, takePairingSecret } from './runtime/relayBrowserPairing';
+import { browserPairingJoin, pairingErrorText, pairThisBrowser, takePairingSecret } from './runtime/relayBrowserPairing';
+import type { RelayLinkJoin } from '../../../shared/remoteClient/relayLinkPreview';
+import { RemotePairJoinScreen } from './components/RemotePairJoinScreen';
 import { RelayConnectionBar } from './components/RelayConnectionBar';
 import { getClientLabel, getRuntimeId } from './runtime/remoteDaemonBrowserClient';
 import { addNativeAppListener, isNativeMobile } from './runtime/nativeMobile';
@@ -46,6 +48,9 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { ErrorDialog } from '../components/ErrorDialog';
 import { UndoToast } from '../components/ui/UndoToast';
 import { PortalContainerProvider } from '../contexts/PortalContainerContext';
+import { DevicePanel } from '../components/panels/device/DevicePanel';
+import { DeviceClientContext } from '../components/panels/device/deviceClient';
+import { remoteDeviceClient } from './components/remoteDeviceClient';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
   terminalShortcuts: [],
@@ -136,6 +141,8 @@ export function RemotePwaApp() {
   const [archivedSessionToast, setArchivedSessionToast] = useState<OrchestrationSessionRecord | null>(null);
   /** The saved profile being reconnected to on open, until that attempt ends. */
   const [reconnectingProfile, setReconnectingProfile] = useState<RemotePaneConnectionProfile | null>(null);
+  /** A pairing link that would join this browser's computers with another group, until the person answers. */
+  const [pendingJoin, setPendingJoin] = useState<{ secret: string; join: RelayLinkJoin } | null>(null);
   /** Whether the notification tap that launched the app, if any, has been read; reconnecting waits for it. */
   const [pushRouteChecked, setPushRouteChecked] = useState(() => !isNativeMobile());
   /** Menus opened from the drawer render inside it, so the drawer's focus trap and outside-click dismissal leave them alone. */
@@ -289,6 +296,7 @@ export function RemotePwaApp() {
   );
   const selectedPanel = selectedPanels.find(panel => panel.id === selectedPanelId) ?? firstSupportedPanel(selectedPanels);
   const { snapshot: listeningPorts, refresh: refreshListeningPorts } = useRemoteListeningPorts(adapter);
+  const deviceClient = useMemo(() => adapter && remoteDeviceClient(adapter, isNativeMobile() ? 'phone' : 'browser'), [adapter]);
   // A browser tab coming on screen shows the host's ports (a new tab lists them), so read them now.
   const browserPanelShown = selectedPanel?.type === 'browser' ? selectedPanel.id : null;
   useEffect(() => {
@@ -608,10 +616,14 @@ export function RemotePwaApp() {
   useEffect(() => {
     if (profilesLoading || !pushRouteChecked || autoConnectStartedRef.current) return;
     autoConnectStartedRef.current = true;
-    // Opened from the pairing page's "Continue in browser": pair with the computer that served this page.
+    // Opened from the pairing page's "Continue in browser": pair with the computer that served this page,
+    // first asking when that joins this browser's computers with another group.
     const pairingSecret = takePairingSecret(window);
     if (pairingSecret) {
-      void pairFromLink(pairingSecret);
+      void browserPairingJoin(window, pairingSecret, (url, init) => fetch(url, init), savedProfiles).then(join => {
+        if (join) setPendingJoin({ secret: pairingSecret, join });
+        else void pairFromLink(pairingSecret);
+      });
       return;
     }
     // saveProfile keeps the last connected profile first.
@@ -852,11 +864,15 @@ export function RemotePwaApp() {
       await runtime.updateOrchestrationSession(session.id, { isPinned: session.isPinned !== true });
       await refreshOrchestrationSessions(runtime);
     }),
-    setSessionArchived: (session, archived) => void runSidebarAction(session.id, archived ? 'Failed to archive Session' : 'Failed to restore Session', async (runtime) => {
-      await runtime.updateOrchestrationSession(session.id, { archived });
-      setArchivedSessionToast(current => archived ? session : current?.id === session.id ? null : current);
-      await refreshOrchestrationSessions(runtime);
-    }),
+    setSessionArchived: (session, archived) => {
+      // Asks before archiving, as archiving a pane does; restoring and Undo need no confirm.
+      if (archived && !window.confirm(`Archive Session "${session.name || 'Untitled'}"?`)) return;
+      void runSidebarAction(session.id, archived ? 'Failed to archive Session' : 'Failed to restore Session', async (runtime) => {
+        await runtime.updateOrchestrationSession(session.id, { archived });
+        setArchivedSessionToast(current => archived ? session : current?.id === session.id ? null : current);
+        await refreshOrchestrationSessions(runtime);
+      });
+    },
     setSessionPaused: (session, paused) => void runSidebarAction(session.id, paused ? 'Failed to pause Session' : 'Failed to resume Session', async (runtime) => {
       const note = await runtime.setPaused({ kind: 'session', id: session.id }, paused);
       await Promise.all([refreshOrchestrationSessions(runtime), refreshProjects(runtime)]);
@@ -1039,6 +1055,18 @@ export function RemotePwaApp() {
     <RelayConnectionBar profile={activeProfile ?? reconnectingProfile ?? savedProfiles[0]} status={connectionStatus} lastError={lastError} />
   );
   if (profilesLoading) return <main className="flex min-h-dvh items-center justify-center bg-bg-primary text-text-secondary">Loading saved connections…</main>;
+  if (pendingJoin) {
+    return (
+      <RemotePairJoinScreen
+        join={pendingJoin.join}
+        onLink={() => {
+          setPendingJoin(null);
+          void pairFromLink(pendingJoin.secret);
+        }}
+        onCancel={() => setPendingJoin(null)}
+      />
+    );
+  }
   if (reconnectingProfile && (!adapter || !activeProfile)) {
     return (
       <main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg-primary px-4 text-center text-text-secondary">
@@ -1222,6 +1250,11 @@ export function RemotePwaApp() {
                   onOpenWorker={openWorkerPane} onSelectPanel={selectPanel} />
               </Suspense>
             )}
+            {selectedPanel.type === 'device' && deviceClient && (
+              <DeviceClientContext.Provider value={deviceClient}>
+                <DevicePanel key={selectedPanel.id} panel={selectedPanel} isActive />
+              </DeviceClientContext.Provider>
+            )}
             {selectedPanel.type === 'diff' && adapter && (
               <RemoteDiffPanel key={selectedPanel.id} adapter={adapter} sessionId={selectedPanel.sessionId} />
             )}
@@ -1270,6 +1303,7 @@ const PANEL_TYPE_LABELS = {
   browser: 'Browser',
   notes: 'Notes',
   chat: 'Chat',
+  device: 'Device',
 } satisfies Record<ToolPanelType, string>;
 
 /** The open Session's recorded blockers, from the latest Session list. */
@@ -1292,7 +1326,7 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       <div className="max-w-md rounded-lg border border-border-primary bg-surface-primary p-6">
         <p className="text-sm font-semibold text-text-primary">{panel.title}</p>
         <p className="mt-2 text-sm text-text-secondary">
-          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA shows terminal, chat, browser, explorer and diff tabs for {session.name}.
+          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA shows terminal, chat, browser, explorer, diff and device tabs for {session.name}.
         </p>
       </div>
     </div>

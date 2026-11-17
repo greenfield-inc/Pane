@@ -23,7 +23,7 @@ export interface ToolPanel {
 }
 
 /** `chat`: an agent tab that runs Claude or Codex over ACP, with no terminal (see chatTab.ts). */
-export type ToolPanelType = 'terminal' | 'chat' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes';
+export type ToolPanelType = 'terminal' | 'chat' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes' | 'device';
 
 export interface ToolPanelState {
   isActive: boolean;
@@ -460,10 +460,13 @@ interface PanelCapabilityRegistry {
   'setup-tasks': PanelCapabilities;
   browser: PanelCapabilities;
   notes: PanelCapabilities;
+  device: PanelCapabilities;
 }
 
 // Panel Registry - Currently only terminal is implemented
 export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
+  /** A phone simulator or emulator's live screen (docs/DEVICES.md); one per platform per Pane. */
+  device: { canEmit: [], canConsume: [], singleton: false, canAppearInProjects: true, canAppearInWorktrees: true },
   notes: { canEmit: [], canConsume: [], singleton: true, canAppearInProjects: true, canAppearInWorktrees: true },
   terminal: {
     canEmit: ['terminal:exit'],

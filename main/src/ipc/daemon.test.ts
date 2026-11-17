@@ -100,4 +100,22 @@ describe('daemon IPC bridge', () => {
       expect.any(Function),
     );
   });
+
+  it('answers this computer\'s own linking, routes and SSH setup locally while switched to another computer', async () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+    registry.register('relay:redeem-link', async () => ({ linked: ['Mac'] }));
+    registry.register('computers:list', async () => []);
+    registry.register('ssh:route-hosts', async () => ['devbox']);
+
+    vi.spyOn(remotePaneClientController, 'invoke').mockResolvedValue({ source: 'remote' });
+    vi.spyOn(remotePaneClientController, 'isRemoteModeActive').mockReturnValue(true);
+    registerDaemonBridgeHandlers(ipcMain, createDaemonBridgeRouter(registry));
+
+    const bridge = ipcMain.handlers.get('daemon:invoke');
+    await expect(bridge?.({}, 'relay:redeem-link', { link: 'https://runpane.net/pair#s=x' })).resolves.toEqual({ linked: ['Mac'] });
+    await expect(bridge?.({}, 'computers:list')).resolves.toEqual([]);
+    await expect(bridge?.({}, 'ssh:route-hosts')).resolves.toEqual(['devbox']);
+    expect(remotePaneClientController.invoke).not.toHaveBeenCalled();
+  });
 });

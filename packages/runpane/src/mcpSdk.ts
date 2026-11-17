@@ -2,6 +2,6 @@
 // published package and the copy shipped inside Pane need no runtime dependencies.
 export {
   createMcpHandler, hostHeaderValidationResponse, localhostAllowedHostnames, localhostAllowedOrigins, originValidationResponse,
-  ProtocolError, ProtocolErrorCode, Server, type AuthInfo, type McpRequestContext,
+  ProtocolError, ProtocolErrorCode, Server, type AuthInfo, type JSONRPCMessage, type McpRequestContext,
 } from '@modelcontextprotocol/server';
-export { serveStdio } from '@modelcontextprotocol/server/stdio';
+export { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';

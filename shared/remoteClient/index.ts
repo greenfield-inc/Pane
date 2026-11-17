@@ -33,7 +33,6 @@ export {
   linkWithSavedRelayComputers,
   parseRelayPairingLink,
   relayAsleepSince,
-  relayBaseUrl,
   relayComputerAddress,
   relayComputerOf,
   relayKeyMatchesId,

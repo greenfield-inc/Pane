@@ -361,14 +361,13 @@ reply: the open call's result \`{reply, picks?, id, replyId, next}\` (pass its
 from outside a Pane tab too), or this line in your tab:
 \`reply: Q-n → "<their words>" (picked: <picks>) (by you)\` (\`(picked: …)\`
 only when they picked something; without a Q-n it names the title and ends
-\`[id <item id>]\`). A reply is an answer or a question about the approval,
-and you decide which:
+\`[id <item id>]\`). Pane records the reply as the answer once it reaches you, and the approval
+closes with it, like a pick. Read it:
 
-- **An answer:** run \`runpane notify --took <id|Q-n> answer --json\`, then act
-  on it.
+- **An answer:** act on it.
 - **A question:** run \`runpane notify --took <id|Q-n> question --json\` at
-  once (the approval reads "Getting more context…"; \`--status "<text>"\` says
-  what you're doing instead). Find out, then run
+  once. That reopens the approval, which reads "Getting more context…"
+  (\`--status "<text>"\` says what you're doing instead). Find out, then run
   \`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>" --json\`
   with any changed \`--title\`, \`--context\`, \`--choices\`, \`--questions\` or
   \`--links\`. A reworded choice carries \`"was":"<old label>"\`. That saves a
@@ -414,6 +413,17 @@ For an API key, token or password, call the \`secrets_request\` tool (or
 never \`ask\`. Pane saves the value as a Pane secret and returns only saved or
 declined; run commands with it through \`runpane secrets exec\`. If it returns
 \`unavailable\`, ask the person to save it in Pane under Settings > Secrets.
+
+## Phone simulators
+
+To see or test an iOS or Android app, call \`device_open\` (or
+\`runpane devices open --platform ios|android --json\`). Pane boots a shared
+simulator for this Pane and shows it in a tab beside you; on a computer without
+Xcode, iOS runs on a linked Mac. Then \`device_run\` builds and runs the app
+there (\`--background\` for Metro), \`device_act\` drives it with agent-device
+commands (\`open <app id>\`, \`snapshot -i\`, \`press @eN --settle\`), and
+\`device_screenshot\` shows you the screen. Call \`device_close\` when done, so
+another Pane can use it. \`runpane docs read --doc docs/DEVICES.md\` has the rest.
 
 ## Restyle Pane
 

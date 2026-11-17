@@ -699,6 +699,194 @@ describe('terminal status events', () => {
   });
 });
 
+// Report sequences from the Program Status Protocol 0.4 examples
+// (https://www.superlogical.com/rex/docs/build/program-status), ended by ST or BEL.
+const BREW_WORKING = '\x1b]7501;state=working:app=brew:msg=SW5zdGFsbGluZyB1cGRhdGVz\x1b\\';
+const BREW_AUTH = '\x1b]7501;state=blocked:kind=auth:app=brew:msg=UGFzc3dvcmQgcmVxdWlyZWQgdG8gaW5zdGFsbCB1cGRhdGVz\x07';
+const BREW_DONE = '\x1b]7501;state=done:app=brew:msg=VXBncmFkZWQgMTIgcGFja2FnZXM=\x1b\\';
+
+describe('program status reports (OSC 7501)', () => {
+  const statuses = () => events.filter(event => event.channel === 'panel:agentStatus').map(event => event.payload);
+
+  it("drives a plain shell tab: working, blocked with the program's message, then done", async () => {
+    const fixture = attach();
+    fixture.terminal.agentType = undefined;
+
+    fixture.data(`${BREW_WORKING}==> Upgrading 12 outdated packages\r\n`);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'working', reason: 'program_status:working' });
+
+    fixture.data(`${BREW_AUTH}Password:`);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({
+      state: 'blocked', reason: 'program_status:blocked:auth', screenLines: ['Password required to install updates'],
+    });
+
+    // Output is still flowing, but the program says it finished.
+    fixture.data(`${BREW_DONE}==> Upgraded 12 packages\r\n`);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:done', workedVisibly: true });
+  });
+
+  it("never hides a prompt the agent's screen shows behind a report that isn't blocked", async () => {
+    const fixture = attach('claude');
+    const rule = '─'.repeat(60);
+    fixture.data(['', rule, ' Accessing workspace:', '', ' /tmp/session', '', ' ❯ No, exit', '   Yes, I trust this folder', '', ' Enter to confirm · Esc to cancel'].join('\r\n'));
+    fixture.data('\x1b]7501;state=working:app=claude-code\x1b\\');
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'blocked', reason: 'workspace_trust_prompt' });
+  });
+
+  // Windows terminals cannot report their foreground, so a record there lasts until replaced or cleared.
+  it.skipIf(process.platform === 'win32')('ends a running record once the program exits, then reads the screen', async () => {
+    let foregroundGroup: number | undefined = 999;
+    manager = new TerminalPanelManager(undefined, undefined, async () => foregroundGroup);
+    // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
+    access = manager as StatusAccess;
+    const fixture = attach();
+    fixture.terminal.agentType = undefined;
+    fixture.terminal.pty.process = 'node';
+    fixture.data('\x1b]7501;state=working:app=deploy\x1b\\');
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'working', reason: 'program_status:working' });
+
+    // Silent for longer than the output settle: the report still holds working.
+    vi.setSystemTime(40_000);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'working' });
+
+    // Pane's shell is back in the foreground: the program exited, so its working record ends.
+    fixture.terminal.pty.process = 'zsh';
+    foregroundGroup = fixture.terminal.pty.pid;
+    await vi.waitFor(async () => {
+      await pollAgentStatus();
+      expect(statuses().at(-1)).toMatchObject({ state: 'idle' });
+    });
+  });
+
+  it.skipIf(process.platform === 'win32')('ends a running record when an agent takes the foreground after it', async () => {
+    const fixture = attach('claude');
+    fixture.terminal.pty.process = 'zsh';
+    manager = new TerminalPanelManager(undefined, undefined, async () => 4242);
+    // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
+    access = manager as StatusAccess;
+    access.terminals.set('p', fixture.terminal);
+    access.agentStatusMonitor.register('p', 0);
+    await pollAgentStatus();
+
+    // A wrapper prints `working`, then starts Claude.
+    fixture.data('\x1b]7501;state=working:app=wrapper\x1b\\');
+    fixture.terminal.pty.process = 'claude';
+    vi.setSystemTime(40_000);
+    await pollAgentStatus();
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle' });
+    expect(statuses()).not.toContainEqual(expect.objectContaining({ reason: 'program_status:working' }));
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps a running record while another process group holds the foreground, checking it seldom', async () => {
+    const readGroup = vi.fn(async () => 4242);
+    manager = new TerminalPanelManager(undefined, undefined, readGroup);
+    // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
+    access = manager as StatusAccess;
+    const fixture = attach();
+    fixture.terminal.agentType = undefined;
+    fixture.terminal.pty.process = 'zsh'; // a script run by the same shell program
+    fixture.data(BREW_AUTH);
+    await pollAgentStatus();
+    await pollAgentStatus();
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'blocked' });
+    expect(readGroup).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(Date.now() + 6_000);
+    await pollAgentStatus();
+    expect(readGroup).toHaveBeenCalledTimes(2);
+  });
+
+  it("doesn't count the next ordinary command after a done report as another finish", async () => {
+    const fixture = attach();
+    fixture.terminal.agentType = undefined;
+    fixture.data(BREW_DONE);
+    await pollAgentStatus();
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:done', workedVisibly: true });
+
+    manager.writeToTerminal('p', 'ls\r');
+    // A poll before the worker confirms the drop must not announce the finish again.
+    access.pollAgentStatus();
+    expect(statuses().filter(status => JSON.stringify(status).includes('program_status:done'))).toHaveLength(1);
+    fixture.data('ls\r\n');
+    fixture.data('notes.txt\r\n$ ');
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'working' });
+    vi.setSystemTime(40_000);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', workedVisibly: false });
+  });
+
+  it('hands the tab back to its screen once the person types after done', async () => {
+    const fixture = attach();
+    fixture.terminal.agentType = undefined;
+    fixture.data(BREW_DONE);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:done' });
+
+    manager.writeToTerminal('p', 'make\r');
+    fixture.data('make\r\n');
+    fixture.data('cc -o app main.c\r\n');
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'working' });
+    expect(statuses().at(-1)).not.toMatchObject({ reason: 'program_status:working' });
+  });
+
+  it('announces each new done or error report, even when the tab already reads idle', async () => {
+    const fixture = attach();
+    fixture.terminal.agentType = undefined;
+    fixture.data('$ ');
+    vi.setSystemTime(40_000); // the shell prompt settled idle long ago
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle' });
+
+    fixture.data(BREW_DONE);
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:done', workedVisibly: true });
+
+    // Output under the same record is not a second finish.
+    const count = statuses().length;
+    fixture.data('tick\r\n');
+    await pollAgentStatus();
+    expect(statuses()).toHaveLength(count);
+
+    fixture.data('\x1b]7501;state=error:app=brew\x1b\\');
+    await pollAgentStatus();
+    expect(statuses().at(-1)).toMatchObject({ state: 'idle', reason: 'program_status:error', workedVisibly: true });
+
+    // The person reruns the command and it reports the same result before the next poll.
+    const before = statuses().length;
+    manager.writeToTerminal('p', '\r');
+    fixture.data('\x1b]7501;state=error:app=brew\x1b\\');
+    await pollAgentStatus();
+    expect(statuses().slice(before)).toContainEqual(expect.objectContaining({ state: 'idle', reason: 'program_status:error' }));
+  });
+
+  it('answers the feature-detection query with the bare reply', async () => {
+    const fixture = attach();
+    fixture.data('\x1b]7501;?\x1b\\');
+    await vi.waitFor(() => expect(fixture.terminal.pty.write).toHaveBeenCalledWith('\x1b]7501;?\x1b\\'));
+  });
+
+  it("changes only the tab the program prints in, and ignores malformed reports", async () => {
+    attach(undefined, 0, 'a');
+    const other = attach(undefined, 0, 'b');
+    other.data(BREW_AUTH);
+    other.data('\x1b]7501;state=blocked:id=a,b\x1b\\');
+    other.data('\x1b]7501;state=paused\x1b\\');
+    await pollAgentStatus();
+    expect(statuses()).toContainEqual(expect.objectContaining({ panelId: 'b', state: 'blocked', reason: 'program_status:blocked:auth' }));
+    expect(statuses()).not.toContainEqual(expect.objectContaining({ panelId: 'a', state: 'blocked' }));
+  });
+});
+
 describe('update resume acceptance', () => {
   const nonce = '11111111-1111-4111-8111-111111111111';
   function resumedFixture(agent: 'claude' | 'codex' = 'codex') {

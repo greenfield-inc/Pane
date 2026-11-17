@@ -13,8 +13,18 @@ const TEST_WORKSPACES = ['main', 'frontend', 'native', 'mobile', 'glasses'];
 const SHARED_DEPENDENTS = ['main', 'frontend', 'native', 'glasses'];
 
 function git(args) {
-  const result = spawnSync('git', args, { encoding: 'utf8' });
+  const result = spawnSync('git', args, { encoding: 'utf8', maxBuffer: Infinity });
   return result.status === 0 ? result.stdout.trim() : null;
+}
+
+/** A file list from git; a failed listing stops the run rather than reading as no changes. */
+function gitFiles(args) {
+  const listing = git(args);
+  if (listing === null) {
+    console.error(`check:fast could not list changed files (git ${args.join(' ')} failed), so it can't tell which tests to run.`);
+    process.exit(2);
+  }
+  return listing.split('\n');
 }
 
 function run(name, command, args, options = {}) {
@@ -42,8 +52,8 @@ if (!base) {
   process.exit(2);
 }
 const changed = [
-  ...(git(['diff', '--name-only', base]) ?? '').split('\n'),
-  ...(git(['ls-files', '--others', '--exclude-standard']) ?? '').split('\n'),
+  ...gitFiles(['diff', '--name-only', base]),
+  ...gitFiles(['ls-files', '--others', '--exclude-standard']),
 ].filter(Boolean);
 const workspaces = TEST_WORKSPACES.filter((workspace) =>
   changed.some((file) => file.startsWith(`${workspace}/`))

@@ -1,8 +1,10 @@
+import fs from 'fs';
 import path from 'path';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import { NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
+import { NOTIFY_QUESTIONS_MAX, type NotifyChoice, type NotifyLink, type NotifySubQuestion } from '../../../../shared/types/notify';
 import { PaneError } from '../../../../shared/paneError';
 import { admitCard, type AdmittedCard } from './cardAdmit';
+import { fitLinks } from './cardCheck';
 
 /** The longest context a card carries; cards clamp it to a few lines with Show more. */
 const MAX_CONTEXT = 2_000;
@@ -10,6 +12,8 @@ const MAX_CONTEXT = 2_000;
 const MAX_CHOICES = 9;
 /** How Pane's journal marks a summary it cut short. */
 const TRUNCATION_MARKER = '[summary truncated]';
+/** How much of a worker's status file a card reads when its report summary was cut short. */
+const MAX_STATUS_FILE = 256 * 1024;
 const RECOMMENDED = /\s*\((recommended)\)\s*$/iu;
 
 const questionSchema = boundary.object({
@@ -78,8 +82,8 @@ function objectAt(text: string, start: number): JsonValue | undefined {
 }
 
 /**
- * The named field's value from JSON that may be cut short (a journal keeps 2,000 characters of a
- * report): an object read to its closing brace, or a string. Undefined when it isn't there whole.
+ * The named field's value from JSON that may be cut short: an object read to its closing brace, or
+ * a string. Undefined when it isn't there whole.
  */
 function fieldOf(text: string, key: string): JsonValue | undefined {
   const match = new RegExp(`"${key}"\\s*:\\s*(\\{|"(?:[^"\\\\]|\\\\.)*")`, 'u').exec(text);
@@ -175,7 +179,7 @@ function cardOf(needsYou: NeedsYou, title: string): StatusCard {
   }
   if (needsYou.why?.trim() && !parts.includes(needsYou.why.trim())) parts.push(needsYou.why.trim());
   if (parts.length) card.context = cut(parts.join('\n\n'));
-  const links = (needsYou.files ?? []).map(linkOf).filter((link): link is NotifyLink => link !== undefined).slice(0, NOTIFY_LINKS_MAX);
+  const links = (needsYou.files ?? []).map(linkOf).filter((link): link is NotifyLink => link !== undefined);
   if (links.length) card.links = links;
   if (needsYou.summary?.trim() && /\.html?(#.*)?$/iu.test(needsYou.summary.trim())) card.summaryPage = needsYou.summary.trim();
   return card;
@@ -217,6 +221,29 @@ export function workerReportCard(summary: string | undefined, question: string):
 }
 
 /**
+ * This machine's status file, read whole up to MAX_STATUS_FILE, in place of a report summary the
+ * journal cut short (it keeps 2,000 characters, and a long needs_you runs past that). Only a regular
+ * file holding JSON counts: a pipe, a device or prose leaves the summary as it is.
+ */
+function statusFileText(summaryPath: string): { text: string; overLimit: boolean } | undefined {
+  let fd: number | undefined;
+  try {
+    // Non-blocking, so a FIFO can't hang the main process before fstat turns it away.
+    fd = fs.openSync(summaryPath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) return undefined;
+    const buffer = Buffer.alloc(Math.min(stat.size, MAX_STATUS_FILE));
+    const text = buffer.toString('utf8', 0, fs.readSync(fd, buffer, 0, buffer.length, 0)).replace(/^\uFEFF/u, '');
+    return text.trimStart().startsWith('{') ? { text, overLimit: stat.size > MAX_STATUS_FILE } : undefined;
+  } catch {
+    // Moved or deleted since the report: the summary is what is left.
+    return undefined;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/**
  * A question whose text ends with its options in brackets, "(A / B)" or "(A (recommended) / B)".
  * Each option may hold one bracketed note; a slash needs a space either side, so "(iOS/Android)" is prose.
  */
@@ -233,11 +260,17 @@ function packedOptionsError(question: string): PaneError {
   );
 }
 
-/** A blocked report's own buttons, `--choices` or `--questions`: they come before a status file's needs_you. */
+/** A blocked report's own buttons, `--choices` or `--questions`, come before a status file's needs_you. */
 export interface WorkerCardOptions {
   /** Keep a card that fails the check as it was sent, for reports recorded before the check existed. */
   quietly?: boolean;
+  /** The report's --summary-file. */
   summaryPath?: string;
+  /** Read summaryPath in place of the summary: this machine's own report, which was cut short. */
+  readStatusFile?: boolean;
+  /** The label of the status file's own link, listed first among the card's links. */
+  statusLabel?: string;
+  /** The report's own buttons, from --choices or --questions. */
   choices?: NotifyChoice[];
   questions?: NotifySubQuestion[];
 }
@@ -246,12 +279,16 @@ export interface WorkerCardOptions {
  * A worker's question card as Pane posts it: built from its report, tidied when the question is an
  * old paragraph, and checked. Its buttons are the report's `--choices` or `--questions`, else its
  * status file's needs_you options. Throws the check's refusal (a PaneError), and refuses a question
- * that packs its options into the text with no buttons for them; `quietly` keeps such a card as it
- * was sent instead, for reports recorded before the checks existed.
+ * that packs its options into the text with no buttons for them; `quietly` keeps a card that fails
+ * as it was sent instead, for reports recorded before the checks existed. Links past what a card
+ * shows are named in its context.
  */
 export function workerCard(summary: string | undefined, question: string, options: WorkerCardOptions = {}): StatusCard & { title: string; asSent?: AdmittedCard['asSent']; warnings: string[] } {
+  const { summaryPath } = options;
   // An .html passed as --summary-file is the card's Summary page, never its subtitle.
-  const card = options.summaryPath && /\.html?$/iu.test(options.summaryPath) ? {} : workerReportCard(summary, question);
+  const html = summaryPath !== undefined && /\.html?$/iu.test(summaryPath);
+  const file = !html && summaryPath && options.readStatusFile ? statusFileText(summaryPath) : undefined;
+  const card = html ? {} : workerReportCard(file?.text ?? summary, question);
   if (options.questions?.length) {
     card.questions = options.questions;
     delete card.choices;
@@ -259,19 +296,24 @@ export function workerCard(summary: string | undefined, question: string, option
     card.choices = options.choices;
     delete card.questions;
   }
-  if (!card.choices?.length && !card.questions?.length && PACKED_OPTIONS.test(question)) {
-    if (!options.quietly) throw packedOptionsError(question);
+  if (!card.choices?.length && !card.questions?.length && PACKED_OPTIONS.test(question) && !options.quietly) {
+    throw packedOptionsError(question);
   }
-  const fields = { title: question, context: card.context, choices: card.choices, questions: card.questions, links: card.links };
+  const statusLink = summaryPath && options.statusLabel ? [{ label: options.statusLabel, path: summaryPath }] : [];
+  const fitted = fitLinks([...statusLink, ...(card.links ?? []).filter(link => !('path' in link) || link.path !== summaryPath)], card.context);
+  const fields = { title: question, context: fitted.context, choices: card.choices, questions: card.questions, links: fitted.links.length ? fitted.links : undefined };
+  const fileWarnings = file?.overLimit && !card.choices && !card.questions
+    ? [`The status file is over ${MAX_STATUS_FILE / 1024} KB and Pane found no whole needs_you in its first ${MAX_STATUS_FILE / 1024} KB, so the card has no buttons or file links. Put needs_you near the top of the file, or shorten the file, and report again.`]
+    : [];
   let admitted: AdmittedCard;
   try {
     admitted = admitCard(fields);
   } catch (error) {
     if (!options.quietly) throw error;
-    return { ...card, title: question, warnings: [] };
+    return { ...card, ...fields, summaryPage: card.summaryPage, warnings: fileWarnings };
   }
   const { title, context, choices, questions, links } = admitted.card;
   // A status file's options are plain labels, with no field for a consequence: that warning is no use to a worker.
-  const warnings = admitted.warnings.filter(warning => !warning.startsWith('Some options have no consequence'));
+  const warnings = [...fileWarnings, ...admitted.warnings.filter(warning => !warning.startsWith('Some options have no consequence'))];
   return { title, context, choices, questions, links, summaryPage: card.summaryPage, asSent: admitted.asSent, warnings };
 }
