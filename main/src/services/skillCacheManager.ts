@@ -7,7 +7,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import type { AppConfig } from '../types/config';
 import type { Project } from '../database/models';
 import { syncPaneHomeSkill } from './paneHomeSkill';
-import { keepSessionTidySection } from './sessionTidyRules';
+import { keepSessionTidySection, todosSection } from './sessionTidyRules';
 import { APPROVALS_RULES } from './approvalsRules';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 
@@ -688,6 +688,8 @@ Idle, stopped, and exited states are activity signals. Completion needs a
 report with inspectable evidence, a timestamp, and provenance, and newer
 activity makes an older report stale. Keep findings in this conversation.
 
+${todosSection()}
+
 ## Which skill
 
 | Job | Skill |
@@ -889,6 +891,12 @@ For worker dispatch, delivery checks and completion waits, follow
 owns completion handling, including blocked reports. The optional CLI
 \`--wait\` result contract is documented in \`agent-context\`; do not add
 it as a second consumer for this route.
+
+To-dos: this watch still keeps the workers on a to-do's sub-to-dos moving.
+Pane's to-do supervisor watches only you, the orchestrator: when nothing has
+moved on an in-progress to-do it types a \`[From Pane, To-dos]\` reminder into
+your tab, restarts you in the same conversation, and then asks the person, as
+"To-dos: your work list" says. It is no reason to re-arm, poll or add a watcher.
 
 Inbox: Pane coalesces reports per panel, clears BLOCKED when the panel moves
 on, and keeps at most 200 items per Session until acknowledged or superseded.

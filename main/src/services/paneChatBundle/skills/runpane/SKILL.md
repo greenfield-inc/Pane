@@ -214,6 +214,21 @@ through review, QA, and required checks. When feedback needs only an
 authorized reply or resolution, post it, read it back, and continue. Keep
 working while a review is pending.
 
+## To-dos
+
+A to-do (T-n) is one piece of the person's agent work; a Session's work list
+is its to-do list. Drive them with `runpane todos create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop`
+and link questions, reports and agent starts with `--todo T-n`.
+[`pane-orchestration`](../pane-orchestration/SKILL.md#to-dos) holds the rules.
+
+- Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists. Read a to-do's attachments before you start on it.
+- Ask the requester first (`runpane todos ask T-n`), then the person with
+  `--todo T-n`; reply in the to-do's chat with short summaries
+  (`runpane todos comment`, at most 2,000 characters).
+- Ask for review with `runpane todos review T-n`; mark a top-level to-do done
+  only after the person's Accept, or with `--person-said "<their words>"`.
+- `machine_busy` means wait: Pane types "Capacity is back" into your tab.
+
 ## Worker reports
 
 A worker's `runpane report` is its hand-back, like a background subagent's

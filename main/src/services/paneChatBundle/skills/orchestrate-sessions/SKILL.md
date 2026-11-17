@@ -164,7 +164,7 @@ Record decisions and deliver answers through the host's worker messaging or resu
 
 ## Ledger, board and completion
 
-Use host-provided durable state when available; otherwise `.agent/ledger.json` in the orchestrator workspace. It is a minimal cross-reference; ownership stays with the host. Read it when a coordination event arrives. See [references/ledger.md](references/ledger.md).
+In Pane, the to-do list is the host's work list: create a to-do or sub-to-do for each item as soon as it exists, assign it to the worker doing it, and attach its plan, mock-ups, PR, findings and decision pages, as the `pane-orchestration` skill's To-dos section says. The ledger and status page cross-reference T-n numbers; they don't replace them. Use host-provided durable state when available; otherwise `.agent/ledger.json` in the orchestrator workspace. It is a minimal cross-reference; ownership stays with the host. Read it when a coordination event arrives. See [references/ledger.md](references/ledger.md).
 
 Keep one status page (the workstream map) per Session, drawn by the renderer in `assets/status-page/` from a status JSON. How to fill and render it is in [references/status-board.md](references/status-board.md): before you first write it in a Session, and again before any rewrite, read status-board.md and write it from that, never from memory or from a summary such as this paragraph. Write it to `<Session folder>/session/index.html` at the times status-board.md lists. Record each item's `next`, `front_page` and each PR's `last_reviewed_head` in the ledger as they change. Every progress message to the person ends with "Next: …", naming who acts next, as the items' `next` lines do.
 

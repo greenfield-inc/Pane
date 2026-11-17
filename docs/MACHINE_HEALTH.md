@@ -149,6 +149,17 @@ list, "Update Pane on this machine to list its apps"), and an offline machine ke
 numbers with their age, with its buttons off. Each machine's cards also show
 on every linked machine, titled with their machine's name.
 
+## To-dos and machine load
+
+While any [to-do](TODOS.md) is in progress or queued, its load gate reads
+machine-wide CPU and the memory pressure level above every 10 seconds. While
+the machine is busy it holds new to-do agents (they read Queued, and agent
+starts from a to-do's Session are refused with `machine_busy`), and under heavy
+load that lasts it pauses in-progress to-dos one at a time and resumes them
+later in the same conversations. The thresholds and floors are in
+[The load gate](TODOS.md#the-load-gate). Turn it off with **Hold to-do agents
+when this machine is busy** in Settings › Machine health (on by default).
+
 ## For agents
 
 ```sh
@@ -183,4 +194,6 @@ compact the disk as Microsoft documents (`Optimize-VHD`, or `diskpart` with
 `PANE_AGENT_TEMP_DIRS` (a path list) replaces the agent temp folders Pane
 reads, and `PANE_MEMORY_PRESSURE_TEST_LEVEL` (`ok`, `warning` or `critical`)
 sets the memory level one Pane instance reads, without signalling every app on
-the machine. Use them only with an isolated `PANE_DIR`.
+the machine. `PANE_CPU_LOAD_TEST_PERCENT` (0 to 100) does the same for the
+machine-wide CPU the to-do load gate reads, and `PANE_TODOS_TIME_SCALE` speeds
+up the to-do clock in unpackaged builds ([To-dos](TODOS.md#testing)). Use them only with an isolated `PANE_DIR`.

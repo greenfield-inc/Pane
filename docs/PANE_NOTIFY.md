@@ -116,6 +116,21 @@ Session go under "Not in a Session". Items Autopilot asks itself go under
 Claude's permission prompts and chat tab prompts (below) still come straight
 from the asking tab, filed under its Session.
 
+### Questions about a to-do
+
+A question can be linked to a [to-do](TODOS.md): an agent adds `--todo T-n`
+to `runpane notify` or `runpane report --state blocked`, or Pane links it
+when the asking tab works on exactly one open to-do. A linked approval is
+labelled with the to-do ("T-14 · Build the sheet…") instead of its hidden
+Session's name, shows as a card in the to-do's chat, and makes the to-do
+and its parent read Waiting on you, which pauses the to-do's supervisor.
+Answering in Approvals or in the to-do's chat answers the same item. A
+to-do's orchestrator asks its requester first (`runpane todos ask`), so a
+question reaches you only when you are the requester or the requester can't
+settle it. Review cards (`runpane todos review`, with Accept and Ask for
+changes) and the supervisor's stuck cards are linked approvals too. Pane
+stores the link in the `todo_id` column of the `approvals` table.
+
 ## Claude's own prompts
 
 Claude tabs Pane starts also ask their permission and plan prompts in Approvals,
