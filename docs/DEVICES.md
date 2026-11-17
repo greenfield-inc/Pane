@@ -124,11 +124,35 @@ linked computers sync here. `runpane devices free --idle --yes` shuts down unuse
 devices; `--all` also deletes them and the checkouts no Pane holds a device for, and reports
 the disk freed.
 
+## The device tab
+
+The phone fills the tab at the screen's real shape, so a turned phone, an iPad or a folded
+device shows whole, and taps land where you click. On the desktop the screen streams live,
+sized to the tab, with its frame rate under the phone. The rail beside it holds:
+
+| Control | Shortcut | What it does |
+| --- | --- | --- |
+| Home | ⇧⌘H | Presses Home |
+| Rotate | ⌘→ | Turns the device a quarter turn |
+| Closed, Half open, Open | | Folds a foldable; shown only when the device has a hinge |
+| Screenshot to chat | ⌘S | Takes a full-resolution PNG and puts it in front of this Pane's agent, unsent: in a chat tab's message box, or as the file's path at a terminal agent's prompt. The card that follows offers Copy, Save and Mark up |
+| Record | ⌘R | Starts and stops a screen recording (MP4, saved with Pane's device files); a terminal agent gets its path at the prompt |
+| Mark up | | Freezes the screen so you can draw on it, then sends or copies the result |
+| Logs | | Shows the app's log live, with a filter; **To chat** sends the selected or matching lines |
+| More | | Copy screenshot, Save screenshot, Restart, Shut down |
+
+With the tab focused, typing goes to the device and the scroll wheel scrolls it.
+
+While an agent's `device_act` runs, the phone is outlined and the line under it says the agent
+is driving. **Take over** makes you the driver: the agent's `device_act` calls wait until you
+press **Hand to agent**, and fail after 10 minutes with `ERR_DEVICE_PERSON_DRIVING`.
+
 ## Phones and the browser app
 
-The device tab shows on the phone apps and in the browser app as frames, about two a second,
-with tap and Home. The live stream stays on the desktop. Chat tabs on the desktop and in the
-browser app show the device card; the native app shows an **Open** row.
+The device tab shows on the phone apps and in the browser app as frames, about two a second.
+The browser app has the same rail; the native app has tap and Home. The live stream stays on
+the desktop. Chat tabs on the desktop and in the browser app show the device card; the native
+app shows an **Open** row.
 
 ## Security
 
