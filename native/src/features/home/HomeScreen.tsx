@@ -81,8 +81,10 @@ export function HomeScreen() {
   // Approvals swiped to Archive leave the list and its counts while held for Undo.
   const listed = buildAllMachinesList(feeds, '');
   const board = { ...listed, waiting: listed.waiting.filter(row => !archiving.hidden.has(row.key)) };
+  // Their Panes still wait on those questions, not in the terminal.
+  const held = listed.waiting.filter(row => archiving.hidden.has(row.key));
   const loading = all ? feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined && feed.error === undefined) : here.loading;
-  const counts = loading ? undefined : boardCounts(board);
+  const counts = loading ? undefined : boardCounts(board, held);
   const machineOf = (key: string) => chipMachines.find(machine => machine.key === key);
   // On All, rows carry their machine's mark.
   const markOf = (key: string) => (all ? machineOf(key) : undefined);
@@ -187,7 +189,7 @@ export function HomeScreen() {
 
   // Needs you: Autopilot, the approvals in the chosen sort, Panes waiting in their terminal (D-81),
   // then the line that opens History.
-  const inTerminal = terminalWaiting(board);
+  const inTerminal = terminalWaiting(board, held);
   // The approvals card's amber: both lists wait on you.
   const needsTint = withAlpha(theme.colors.warning, 0.09);
   const autopilotSnapshot = autopilot.data?.enabled ? autopilot.data : undefined;

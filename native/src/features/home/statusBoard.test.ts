@@ -80,6 +80,16 @@ describe('terminalWaiting', () => {
     expect(boardCounts(list).needs).toBe(2);
   });
 
+  it('keeps a Pane whose question is held after an archive out of the terminal list, and out of the count', () => {
+    // "prompt" asked a question, and the person archived it: it is held for Undo, not in the terminal.
+    const list = buildAllMachinesList([{ ...box, snapshot: { ...box.snapshot!, notify: notify([{ id: 'q', createdAt: 1, source: { name: 'prompt', agent: 'Codex', paneId: 'prompt' } }]) } }], '');
+    const held = list.waiting.filter(row => row.type === 'question');
+    const board = { ...list, waiting: list.waiting.filter(row => row.type !== 'question') };
+    expect(terminalWaiting(board, held)).toEqual([]);
+    // Only "asked"'s permission request still needs you.
+    expect(boardCounts(board, held).needs).toBe(1);
+  });
+
   it('leaves out a machine that went offline, like its approvals', () => {
     const list = buildAllMachinesList([{ ...box, offlineSince: 1 }], '');
     expect(terminalWaiting(list)).toEqual([]);
