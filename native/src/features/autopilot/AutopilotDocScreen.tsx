@@ -1,6 +1,6 @@
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 
@@ -82,6 +82,7 @@ function FileDoc({ path }: { path: string }) {
     if (read.html === undefined) return <StateScreen testID="autopilot-doc-update" icon={{ ios: 'arrow.down.circle', android: 'system_update' }} title="Update Pane on the computer" message={`${profile.label}’s Pane is too old to send this page to the phone. Update it, or open the page in Pane there.`} />;
     return <WebView testID="autopilot-doc-page" originWhitelist={['*']} source={{ html: read.html }} style={[styles.fill, { backgroundColor: colors.surface }]} />;
   }
+  if (read.kind === 'image') return <Image testID="autopilot-doc-image" source={{ uri: read.dataUrl }} resizeMode="contain" style={styles.fill} accessibilityLabel={fileName(path)} />;
   return (
     <ScrollView testID="autopilot-doc-text" style={styles.fill} contentContainerStyle={styles.text}>
       <Text variant="footnote" selectable style={{ fontFamily: monoFontFamily, color: colors.text }}>{read.text}</Text>
