@@ -32,7 +32,8 @@ import {
   resolveExistingPanePath,
   shouldReuseExistingPane,
   spawnPane,
-  spawnPaneCaptured
+  spawnPaneCaptured,
+  unfinishedInstallError
 } from './installers';
 import {
   runAgentsDoctor,
@@ -759,6 +760,12 @@ export async function installOrUpdate(parsed: ParsedArgs, telemetryContext?: Wra
     context.failureStage = 'install';
     context.failureCategory = categorizeFailure(error);
     throw error;
+  }
+  const unfinished = unfinishedInstallError(installed, { format: resolved.format, target, fileName: artifact.fileName });
+  if (unfinished) {
+    context.failureStage = 'install';
+    context.failureCategory = categorizeFailure(unfinished);
+    throw unfinished;
   }
 
   if (target === 'daemon') {

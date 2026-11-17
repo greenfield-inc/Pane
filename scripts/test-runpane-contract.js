@@ -5966,6 +5966,211 @@ for platform_name in ["linux", "win32"]:
 `);
 }
 
+// The result of `runpane install` for each artifact kind, in both CLIs: a macOS dmg only opens in
+// Finder, so it must fail with ERR_RUNPANE_INSTALL_UNFINISHED instead of reporting Pane installed.
+const INSTALL_REPORT_CASES = [
+  { name: 'mac client dmg', os: 'darwin', target: 'client', format: 'dmg', fileName: 'Pane.dmg' },
+  // install daemon reuses an installed Pane, so it reaches the dmg only on a Mac without one.
+  { name: 'mac daemon dmg', os: 'darwin', target: 'daemon', format: 'dmg', fileName: 'Pane.dmg', noPane: true },
+  { name: 'mac client zip', os: 'darwin', target: 'client', format: 'zip', fileName: 'Pane-mac.zip' },
+  { name: 'linux client appimage', os: 'linux', target: 'client', format: 'appimage', fileName: 'Pane.AppImage' },
+  { name: 'linux daemon appimage', os: 'linux', target: 'daemon', format: 'appimage', fileName: 'Pane.AppImage' },
+  { name: 'linux client deb', os: 'linux', target: 'client', format: 'deb', fileName: 'Pane.deb' },
+];
+
+async function checkInstallReportsUnfinishedDmg() {
+  const dist = (name) => path.join(rootDir, 'packages', 'runpane', 'dist', name);
+  const releases = require(dist('releases.js'));
+  const download = require(dist('download.js'));
+  const installers = require(dist('installers.js'));
+  const platformModule = require(dist('platform.js'));
+  const { parseRunpaneArgs } = require(dist('commands.js'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-install-report-'));
+  const original = {
+    resolveRelease: releases.resolveRelease,
+    downloadArtifact: download.downloadArtifact,
+    launchPaneClient: installers.launchPaneClient,
+    spawnPane: installers.spawnPane,
+    detectPlatform: platformModule.detectPlatform,
+    spawnSync: childProcess.spawnSync,
+    execFileSync: childProcess.execFileSync,
+    existsSync: fs.existsSync,
+    log: console.log,
+    home: process.env.HOME,
+    userProfile: process.env.USERPROFILE,
+    localAppData: process.env.LOCALAPPDATA,
+    telemetry: process.env.RUNPANE_TELEMETRY_DISABLED,
+  };
+  const nodeResults = {};
+  // The installers place files by the host's own rules (os.homedir(), defaultInstallRoot()), so the
+  // expected paths come from the same rules while HOME, USERPROFILE and LOCALAPPDATA point at `home`.
+  // That keeps every write inside `home` on macOS, Linux and Windows runners alike. The Python run
+  // below inherits these variables.
+  process.env.USERPROFILE = home;
+  process.env.LOCALAPPDATA = home;
+  let expectedZipPath;
+  let expectedAppImagePath;
+  // An AppImage install copies into the host's own install root. On a Windows host that root is not
+  // a Linux one, and the npm and Python CLIs name it differently, so the AppImage cases run only on
+  // macOS and Linux hosts.
+  const installReportCases = INSTALL_REPORT_CASES.filter((scenario) => !(process.platform === 'win32' && scenario.format === 'appimage'));
+  try {
+    process.env.HOME = home;
+    process.env.RUNPANE_TELEMETRY_DISABLED = '1';
+    expectedZipPath = path.join(os.homedir(), 'Applications', 'Pane.app', 'Contents', 'MacOS', 'Pane');
+    expectedAppImagePath = path.join(platformModule.defaultInstallRoot(), 'pane');
+    delete require.cache[require.resolve(dist('cli.js'))];
+    const { installOrUpdate } = require(dist('cli.js'));
+    for (const scenario of installReportCases) {
+      const artifactPath = path.join(home, scenario.fileName);
+      fs.writeFileSync(artifactPath, 'fixture');
+      const result = { lines: [], commands: [], launched: false, spawned: false };
+      platformModule.detectPlatform = () => ({ os: scenario.os, arch: 'arm64' });
+      releases.resolveRelease = async () => ({
+        release: { tag_name: 'v2.2.8' },
+        artifact: { name: scenario.fileName },
+        format: scenario.format,
+        preferredDownloadUrl: 'https://runpane.com/api/download',
+        fallbackDownloadUrl: 'https://github.com/fixture',
+        checksumUrl: 'https://github.com/fixture.sha256',
+      });
+      download.downloadArtifact = async () => ({ path: artifactPath, fileName: scenario.fileName, usedFallback: false });
+      installers.launchPaneClient = () => { result.launched = true; };
+      installers.spawnPane = async () => { result.spawned = true; return 0; };
+      childProcess.spawnSync = (command) => {
+        // `command -v apt` is the npm CLI's lookup; the Python CLI uses shutil.which, stubbed below.
+        if (command !== 'command' && command !== 'where') result.commands.push(command);
+        return { status: 0 };
+      };
+      childProcess.execFileSync = (command) => { result.commands.push(command); return Buffer.from(''); };
+      // The extracted app, an older /Applications/Pane.app and the deb's /usr/bin/pane all "exist".
+      fs.existsSync = (candidate) => scenario.noPane ? false : scenario.format === 'appimage' ? original.existsSync(candidate) : true;
+      console.log = (...args) => result.lines.push(args.join(' '));
+      try {
+        result.code = await installOrUpdate(parseRunpaneArgs(['install', scenario.target, '--format', scenario.format]));
+      } catch (error) {
+        result.error = { name: error.name, code: error.code, message: error.message, next: error.next };
+      } finally {
+        console.log = original.log;
+        fs.existsSync = original.existsSync;
+      }
+      result.reported = result.lines.filter((line) => line.startsWith('Pane '));
+      delete result.lines;
+      nodeResults[scenario.name] = result;
+    }
+  } finally {
+    Object.assign(releases, { resolveRelease: original.resolveRelease });
+    download.downloadArtifact = original.downloadArtifact;
+    installers.launchPaneClient = original.launchPaneClient;
+    installers.spawnPane = original.spawnPane;
+    platformModule.detectPlatform = original.detectPlatform;
+    childProcess.spawnSync = original.spawnSync;
+    childProcess.execFileSync = original.execFileSync;
+    fs.existsSync = original.existsSync;
+    console.log = original.log;
+    if (original.home === undefined) delete process.env.HOME; else process.env.HOME = original.home;
+    if (original.telemetry === undefined) delete process.env.RUNPANE_TELEMETRY_DISABLED;
+    else process.env.RUNPANE_TELEMETRY_DISABLED = original.telemetry;
+    delete require.cache[require.resolve(dist('cli.js'))];
+  }
+
+  for (const target of ['client', 'daemon']) {
+    const result = nodeResults[`mac ${target} dmg`];
+    assert.strictEqual(result.code, undefined, `${target} dmg must not exit as installed`);
+    assert.deepStrictEqual(result.error, {
+      name: 'RunpaneError',
+      code: 'ERR_RUNPANE_INSTALL_UNFINISHED',
+      message: 'Pane was not installed (launched-installer): runpane opened Pane.dmg in Finder for someone at this Mac to drag Pane into Applications, and that has not happened, so /Applications/Pane.app is unchanged.',
+      next: `Drag Pane into Applications in the window that opened, then start Pane. With no one at this Mac, rerun \`runpane install ${target} --format zip\`, which installs Pane into ~/Applications without help.`,
+    });
+    assert.deepStrictEqual(result.commands, ['open'], `${target} dmg still opens the disk image for a person`);
+    assert.deepStrictEqual(result.reported, []);
+    assert.strictEqual(result.launched, false);
+    assert.strictEqual(result.spawned, false);
+  }
+  assert.strictEqual(nodeResults['mac client zip'].code, 0);
+  assert.deepStrictEqual(nodeResults['mac client zip'].reported, [`Pane installed: ${expectedZipPath}`]);
+  assert.strictEqual(nodeResults['mac client zip'].launched, true);
+  if (process.platform !== 'win32') {
+    assert.strictEqual(nodeResults['linux client appimage'].code, 0);
+    assert.deepStrictEqual(nodeResults['linux client appimage'].reported, [`Pane installed: ${expectedAppImagePath}`]);
+    assert.strictEqual(nodeResults['linux client appimage'].launched, true);
+    assert.strictEqual(nodeResults['linux daemon appimage'].code, 0);
+    assert.strictEqual(nodeResults['linux daemon appimage'].spawned, true);
+  }
+  assert.strictEqual(nodeResults['linux client deb'].code, 0);
+  assert.deepStrictEqual(nodeResults['linux client deb'].commands, ['sudo']);
+  assert.match(nodeResults['linux client deb'].reported.join('\n'), /^Pane installed: \S+$/);
+
+  const pythonOutput = runPythonSnippet(`
+import json
+import os
+import sys
+import runpane.cli as cli
+import runpane.installers as installers
+from runpane.cli import install_or_update, parse_args
+from runpane.download import DownloadedArtifact
+from runpane.platforms import PanePlatform
+from runpane.releases import ResolvedRelease
+
+payload = json.loads(sys.stdin.read())
+home = payload["home"]
+os.environ["HOME"] = home
+os.environ["RUNPANE_TELEMETRY_DISABLED"] = "1"
+real_exists = os.path.exists
+results = {}
+for scenario in payload["cases"]:
+    artifact_path = os.path.join(home, scenario["fileName"])
+    result = {"commands": [], "launched": False, "spawned": False}
+    cli.detect_platform = lambda scenario=scenario: PanePlatform(os=scenario["os"], arch="arm64")
+    cli.resolve_release = lambda scenario=scenario, **kwargs: ResolvedRelease(
+        release={"tag_name": "v2.2.8"},
+        artifact={"name": scenario["fileName"]},
+        format=scenario["format"],
+        preferred_download_url="https://runpane.com/api/download",
+        fallback_download_url="https://github.com/fixture",
+        checksum_url="https://github.com/fixture.sha256",
+    )
+    cli.download_artifact = lambda *args, artifact_path=artifact_path, scenario=scenario, **kwargs: DownloadedArtifact(path=artifact_path, file_name=scenario["fileName"], used_fallback=False)
+    cli.launch_pane_client = lambda executable, result=result: result.__setitem__("launched", True)
+    def spawn(executable, args, result=result):
+        result["spawned"] = True
+        return 0
+    cli.spawn_pane = spawn
+    installers.subprocess.call = lambda args, result=result, **kwargs: result["commands"].append(args[0]) or 0
+    installers.subprocess.check_call = lambda args, result=result, **kwargs: result["commands"].append(args[0]) or 0
+    installers.shutil.which = lambda command: "/fixture/apt"
+    installers.os.path.exists = (lambda path: False) if scenario.get("noPane") else real_exists if scenario["format"] == "appimage" else (lambda path: True)
+    import io
+    import contextlib
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(captured):
+            result["code"] = install_or_update(parse_args(["install", scenario["target"], "--format", scenario["format"]]))
+    except Exception as error:
+        result["error"] = {"name": type(error).__name__, "code": getattr(error, "code", None), "message": str(error), "next": getattr(error, "next", None)}
+    finally:
+        installers.os.path.exists = real_exists
+    result["reported"] = [line for line in captured.getvalue().splitlines() if line.startswith("Pane ")]
+    results[scenario["name"]] = result
+print(json.dumps(results))
+`, JSON.stringify({ home, cases: installReportCases }));
+  try {
+    const pythonResults = JSON.parse(pythonOutput.split(/\r?\n/).filter(Boolean).pop());
+    // deb resolves the installed executable by candidate paths; with every path "existing" each CLI
+    // picks its own first candidate, so compare the deb result's shape, not its path.
+    for (const results of [nodeResults, pythonResults]) {
+      results['linux client deb'].reported = results['linux client deb'].reported.map((line) => line.replace(/: .*/, ': <path>'));
+    }
+    assert.deepStrictEqual(pythonResults, nodeResults);
+  } finally {
+    for (const [name, value] of [['USERPROFILE', original.userProfile], ['LOCALAPPDATA', original.localAppData]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 async function checkDoctorExitStatus() {
   const doctor = require(path.join(rootDir, 'packages/runpane', 'dist', 'doctor.js'));
   const releases = require(path.join(rootDir, 'packages/runpane', 'dist', 'releases.js'));
@@ -7043,6 +7248,7 @@ async function runChecks() {
   checkFollowRequiresPositiveTimeout();
   await checkDoctorExitStatus();
   await checkInstallerFailures();
+  await checkInstallReportsUnfinishedDmg();
   await checkCreatePayloadErrorPaths();
   await checkPaneCreateResultFields();
   await checkDryRunMessages();

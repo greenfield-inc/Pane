@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import type { ArtifactFormat, InstallTarget, ParsedArgs } from './commands';
 import type { DownloadedArtifact } from './download';
+import { RunpaneError } from './errors';
 import { defaultInstallRoot, type PanePlatform } from './platform';
 
 export interface InstalledPane {
@@ -29,6 +30,22 @@ export function resolveExistingPanePath(panePath?: string): string | undefined {
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+/**
+ * A macOS disk image only opens in Finder: Pane is installed once someone drags it into Applications,
+ * which nobody does in a remote or headless install. The zip installs without help.
+ */
+export function unfinishedInstallError(
+  installed: InstalledPane,
+  { format, target, fileName }: { format: Exclude<ArtifactFormat, 'auto'>; target: InstallTarget; fileName: string }
+): RunpaneError | undefined {
+  if (installed.installKind !== 'launched-installer' || format !== 'dmg') return undefined;
+  return new RunpaneError(
+    'ERR_RUNPANE_INSTALL_UNFINISHED',
+    `Pane was not installed (launched-installer): runpane opened ${fileName} in Finder for someone at this Mac to drag Pane into Applications, and that has not happened, so /Applications/Pane.app is unchanged.`,
+    `Drag Pane into Applications in the window that opened, then start Pane. With no one at this Mac, rerun \`runpane install ${target} --format zip\`, which installs Pane into ~/Applications without help.`
+  );
 }
 
 export function shouldReuseExistingPane(parsed: Pick<ParsedArgs, 'command'>, target: InstallTarget): boolean {
