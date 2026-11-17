@@ -135,17 +135,31 @@ export function reportOutcome(run: ProfileRun, profile: Profile, panelId: string
   return takeEdge(run, profile, step, outcome, 'agent', { summary, panelId }, now);
 }
 
+/** How a step's tab ended: its exit code, and the signal that ended it, if one did. */
+export interface TabExit {
+  code?: number;
+  signal?: string;
+}
+
+/** Exit codes a shell gives a command killed by SIGHUP (its tab closed), SIGINT (Ctrl+C) or SIGTERM. */
+const INTERRUPTED_EXIT_CODES = new Set([129, 130, 143]);
+
+/** An exit the command didn't choose: a signal, no exit code at all (its tab was closed), or a shell's code for a signal. */
+function interrupted(exit: TabExit): boolean {
+  return exit.signal !== undefined || exit.code === undefined || INTERRUPTED_EXIT_CODES.has(exit.code);
+}
+
 /**
  * A step's tab exited. A command takes its first outcome on exit 0 and its second otherwise; one
  * with no outcomes ends the run. A command that was interrupted (Ctrl+C, its tab closed) didn't
  * finish, so like an agent step's tab closing without a report, it asks which outcome it had.
  * Undefined when the tab isn't the run's current step.
  */
-export function stepExited(run: ProfileRun, profile: Profile, panelId: string, exit: { code?: number; interrupted?: boolean }, now: string): RunTransition | undefined {
+export function stepExited(run: ProfileRun, profile: Profile, panelId: string, exit: TabExit, now: string): RunTransition | undefined {
   if (run.state !== 'running' || run.wait.kind !== 'step' || run.wait.panelId !== panelId) return undefined;
   const exitCode = exit.code;
   const step = stepOf(profile, run.step);
-  if (step.kind === 'agent' || (step.kind === 'command' && exit.interrupted && step.outcomes.length > 0)) {
+  if (step.kind === 'agent' || (step.kind === 'command' && interrupted(exit) && step.outcomes.length > 0)) {
     return { run: { ...run, wait: { kind: 'card', approvalId: '', card: 'set-outcome' }, updatedAt: now }, effect: { kind: 'ask-outcome', step } };
   }
   if (step.kind !== 'command') return undefined;
