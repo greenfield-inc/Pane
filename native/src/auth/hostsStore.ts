@@ -3,6 +3,8 @@ import { create } from 'zustand';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { queryClient } from '@/daemon/queryClient';
+import { createSavedState } from '@/daemon/savedState';
+import { savedStateFiles } from '@/daemon/savedStateFiles';
 import { DEMO_PROFILE, resetDemoHost } from '@/features/demo/demoHost';
 
 import { addHost, addHosts, EMPTY_HOSTS, loadHosts, removeHost, saveHosts, type SavedHosts } from './hosts';
@@ -25,6 +27,8 @@ interface HostsState extends SavedHosts {
 }
 
 export const useHostsStore = create<HostsState>((set, get) => {
+  // Saved computers keep their last-known lists on the phone; the demo never does.
+  const savedState = createSavedState(queryClient, savedStateFiles, { saves: id => get().profiles.some(profile => profile.id === id) });
   const commit = async (next: SavedHosts) => {
     const { profiles, activeId } = get();
     // Pairing or picking a real computer ends the demo.
@@ -38,12 +42,21 @@ export const useHostsStore = create<HostsState>((set, get) => {
     demo: false,
     async hydrate() {
       const hosts = await loadHosts(secureStore).catch(() => EMPTY_HOSTS);
+      // Every saved computer's lists paint from the first frame, the current one's and All's.
+      for (const profile of hosts.profiles) savedState.restore(profile.id);
       set({ ...hosts, hydrated: true });
     },
     add: profile => commit(addHost(get(), profile)),
     addMany: (added, paired) => commit(addHosts(get(), added, paired)),
-    remove: id => commit(removeHost(get(), id)),
-    setActive: id => commit({ profiles: get().profiles, activeId: id }),
+    remove: id => {
+      savedState.forget(id);
+      return commit(removeHost(get(), id));
+    },
+    setActive: id => {
+      // Lists dropped from memory since launch paint again from the file.
+      savedState.restore(id);
+      return commit({ profiles: get().profiles, activeId: id });
+    },
     startDemo: () => {
       // Every demo starts from the same sample data, with nothing cached from the last one.
       resetDemoHost();

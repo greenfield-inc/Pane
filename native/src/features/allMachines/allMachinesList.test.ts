@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSession';
 
-import { buildAllMachinesList, sinceLabel, type MachineFeed } from './allMachinesList';
+import { buildAllMachinesList, feedsAnswered, sinceLabel, type MachineFeed } from './allMachinesList';
 
 const notify = (items: Array<Pick<NotifyItem, 'id' | 'createdAt' | 'title'> & { paneId?: string }>): NotifySharedState => ({
   machine: 'host', epoch: 'e1', revision: 1, enabled: true, queue: [], hidden: [],
@@ -166,5 +166,27 @@ describe('sinceLabel', () => {
     expect(sinceLabel(Date.parse('2026-10-30T07:00:00Z'), now)).toBe('3 h');
     expect(sinceLabel(Date.parse('2026-10-29T09:00:00Z'), now)).toBe('1 day');
     expect(sinceLabel(Date.parse('2026-10-28T09:00:00Z'), now)).toBe('2 days');
+  });
+});
+
+describe('feedsAnswered', () => {
+  const unread: MachineFeed = { key: 'profile-new', name: 'new-mac', snapshot: undefined };
+
+  it('waits for every machine on All, not the first one to answer', () => {
+    expect(feedsAnswered([build, unread])).toEqual({ lists: false, approvals: false });
+    expect(feedsAnswered([build, studio])).toEqual({ lists: true, approvals: true });
+  });
+
+  it('counts an offline machine with its last-known rows', () => {
+    expect(feedsAnswered([build, { ...unread, offlineSince: 0 }])).toEqual({ lists: true, approvals: true });
+  });
+
+  it('holds approvals until the phone’s own machine has read them, while its Panes already count', () => {
+    const here = { ...studio, waiting: { lists: false, approvals: true } };
+    expect(feedsAnswered([here])).toEqual({ lists: true, approvals: false });
+  });
+
+  it('counts a machine whose Panes read failed as answered for lists only', () => {
+    expect(feedsAnswered([{ ...unread, error: 'Timed out' }])).toEqual({ lists: true, approvals: false });
   });
 });
