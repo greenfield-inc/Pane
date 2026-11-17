@@ -12,10 +12,10 @@ export type PaneRecentRow = Extract<RecentRow, { type: 'pane' }>;
  * terminal prompt (D-81). Working and Ready count Panes whose agent works or finished unseen,
  * leaving paused ones out. All panes counts every open Pane.
  */
-export function boardCounts(list: Pick<AllMachinesList, 'waiting' | 'recent'>): Record<BoardTile, number> {
+export function boardCounts(list: Pick<AllMachinesList, 'waiting' | 'recent'>, held: AllMachinesList['waiting'] = []): Record<BoardTile, number> {
   const panes = paneRows(list.recent);
   return {
-    needs: waitingCounts(list.waiting).total + terminalWaiting(list).length,
+    needs: waitingCounts(list.waiting).total + terminalWaiting(list, held).length,
     working: tilePanes(panes, 'working').length,
     ready: tilePanes(panes, 'ready').length,
     all: panes.length,
@@ -31,10 +31,11 @@ export function tilePanes(recent: readonly RecentRow[], tile: 'working' | 'ready
 /**
  * Panes whose agent waits at a prompt in its terminal with no approval behind it (Codex asking
  * "Allow this command?", for one): Needs you lists them after the approvals. A Pane with an
- * approval counts through that approval; paused Panes and machines that went offline stay out.
+ * approval counts through that approval, also one `held` for Undo after an archive; paused Panes
+ * and machines that went offline stay out.
  */
-export function terminalWaiting(list: Pick<AllMachinesList, 'waiting' | 'recent'>): PaneRecentRow[] {
-  const asked = new Set(list.waiting.flatMap(row => {
+export function terminalWaiting(list: Pick<AllMachinesList, 'waiting' | 'recent'>, held: AllMachinesList['waiting'] = []): PaneRecentRow[] {
+  const asked = new Set([...list.waiting, ...held].flatMap(row => {
     const paneId = row.type === 'question' ? row.item.source.paneId : row.request.sessionId;
     return paneId ? [`${row.machineKey}:${paneId}`] : [];
   }));

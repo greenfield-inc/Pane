@@ -104,6 +104,7 @@ export const REFERENCE_ROWS: readonly ReferenceRow[] = [
   { id: 'reference-approval-pick', label: 'Pick the focused option', chord: 'Space', group: 'approvals' },
   { id: 'reference-approval-question', label: 'Next / previous question', chord: 'Tab shift+Tab', group: 'approvals' },
   { id: 'reference-approvals-list', label: 'Approvals list: move, open, back', chord: 'ArrowDown ArrowUp Enter Escape', group: 'approvals' },
+  { id: 'reference-approvals-archive', label: 'Approvals list: archive the focused row (Undo on its toast)', chord: 'Backspace', group: 'approvals' },
   { id: 'reference-approvals-filter', label: 'Approvals list: Waiting / Done today (your tab keys)', chord: 'mod+shift+] mod+shift+[', group: 'approvals', follows: ['cycle-tab-next-d', 'cycle-tab-prev-a'] },
   { id: 'reference-approvals-back', label: 'Back to where you were', chord: 'Escape', group: 'approvals' },
   { id: 'reference-answer-all', label: 'Answer all, from any app', chord: 'ctrl+shift+Space', group: 'approvals', answerAll: true },
