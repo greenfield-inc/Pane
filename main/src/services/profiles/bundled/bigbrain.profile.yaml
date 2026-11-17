@@ -10,35 +10,35 @@ agents:
   designer:
     runs: claude/claude-opus-5-5
     effort: high
-    reads: [standing-rules, contract, glossary]
+    reads: [agents/designer, standing-rules, contract, glossary]
     skills: [design, verify-app, documents]
   implementer:
     runs: claude/claude-opus-5-5
     effort: medium
-    reads: [standing-rules, contract, glossary]
+    reads: [agents/implementer-opus, standing-rules, contract, glossary]
     skills: [implement-plan, tdd, codebase-design, quick-verify, investigate, prepare-pr, excalidraw-pr-diagrams, babysit-pr, documents]
   investigator:
     runs: claude/claude-opus-5-5
     effort: high
-    reads: [standing-rules, contract, glossary]
+    reads: [agents/investigator, standing-rules, contract, glossary]
     skills: [investigate-issues, investigate, documents]
   orchestrator:
     runs: claude/claude-opus-5-5
     effort: medium
-    reads: [standing-rules, contract, glossary]
+    reads: [agents/orchestrator, standing-rules, contract, glossary]
     skills: [orchestrate, session-trace, documents]
   planner:
     runs: claude/claude-opus-5-5
     effort: high
-    reads: [standing-rules, contract, glossary, planner-identity, planner-documents]
+    reads: [agents/planner, standing-rules, contract, glossary, planner-identity, planner-documents]
     skills: [explain, brief, options, spike, plan, interview, architecture-diagram, documents]
   reviewer:
     runs: codex/gpt-6.1-sol
     effort: high
-    reads: [standing-rules, contract, glossary]
+    reads: [agents/reviewer-codex, standing-rules, contract, glossary]
     skills: [review, documents]
   teacher:
     runs: claude/claude-opus-5-5
     effort: high
-    reads: [standing-rules, contract, glossary]
+    reads: [agents/teacher, standing-rules, contract, glossary]
     skills: [teach, documents]

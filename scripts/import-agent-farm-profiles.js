@@ -5,7 +5,8 @@
  * package Pane ships (@greenfieldco/agent-farm, pinned in package.json).
  *
  * - greenfield.profile.yaml: only the block between the `# BEGIN agents` and `# END agents`
- *   lines. Each agent's CLI, model, effort, instruction files and skills come from the
+ *   lines. Each agent's CLI, model, effort, role prompt (its definition file, read as
+ *   agents/<name>), instruction files and skills come from the
  *   greenfield plugin's profile variant and agent definition named in GREENFIELD_AGENTS. The
  *   flow, samples and example runs around it are written by hand and never touched here.
  * - orchestra, bigbrain and machine-security: whole team-only profiles (no flow), one agent per
@@ -45,12 +46,12 @@ function readYaml(file) {
   return yaml.load(fs.readFileSync(file, 'utf8'), { schema: yaml.CORE_SCHEMA });
 }
 
-/** An agent definition's YAML front matter (agents/<name>.md). */
+/** An agent definition (agents/<name>.md): its YAML front matter, and whether a role prompt follows it. */
 function agentDefinition(pluginRoot, name) {
   const text = fs.readFileSync(path.join(pluginRoot, 'agents', `${name}.md`), 'utf8');
   const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!match) throw new Error(`${name}.md in ${pluginRoot} has no front matter.`);
-  return yaml.load(match[1], { schema: yaml.CORE_SCHEMA });
+  return { ...yaml.load(match[1], { schema: yaml.CORE_SCHEMA }), hasPrompt: text.slice(match[0].length).trim() !== '' };
 }
 
 /** One profile agent from an Agent Farm profile's variant: runs, effort, reads and skills. */
@@ -63,9 +64,13 @@ function importAgent(pluginRoot, profileName, variantName) {
   const harness = variant.harness ?? definition.harness;
   const model = variant.model?.name ?? definition.model?.name;
   const effort = variant.model?.reasoning ?? definition.model?.reasoning;
-  const reads = (definition.instructions_files ?? [])
-    .filter((file) => /^\.\.\/instructions\/[^/]+\.md$/.test(file))
-    .map((file) => path.basename(file, '.md'));
+  // The definition's own body is the agent's role prompt; it is read from the plugin like its instruction files.
+  const reads = [
+    ...(definition.hasPrompt ? [`agents/${variant.agent}`] : []),
+    ...(definition.instructions_files ?? [])
+      .filter((file) => /^\.\.\/instructions\/[^/]+\.md$/.test(file))
+      .map((file) => path.basename(file, '.md')),
+  ];
   const agent = { runs: model ? `${harness}/${model}` : harness };
   if (effort) agent.effort = effort;
   if (reads.length) agent.reads = reads;
