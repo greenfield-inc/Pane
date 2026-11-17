@@ -10,7 +10,7 @@ export const PROFILE_FORMAT = 'pane-profile/1';
 export const PROFILE_END = 'end';
 /** Every outcome of an agent step needs this many samples, so its picture can show how results vary. */
 export const MIN_SAMPLES_PER_OUTCOME = 2;
-/** How many times a run may take one outcome edge before it pauses and asks. */
+/** How many times a run may take one loop edge (an outcome pointing back) before it pauses and asks. */
 export const DEFAULT_LOOP_LIMIT = 3;
 
 export interface ProfileAgent {
@@ -144,4 +144,104 @@ export interface LoadedProfile {
 /** A profile in the library: loaded, plus whether it is on. Bundled profiles are on when named in config `profiles.enabled`; yours are always on. */
 export interface LibraryProfile extends LoadedProfile {
   enabled: boolean;
+}
+
+/** Where a run is: a step is running, an ask waits for the person, a loop limit paused it, or it is over. */
+export type ProfileRunState = 'running' | 'asking' | 'paused' | 'ended' | 'failed';
+
+/** What the run waits on now. */
+export type ProfileRunWait =
+  /** A step's tab: an agent step waits for `runpane report --outcome`, a command for its exit. */
+  | { kind: 'step'; panelId: string }
+  /** An Approvals card: an ask, a loop-limit question or "set outcome" for a step whose tab closed. */
+  | { kind: 'card'; approvalId: string; card: 'ask' | 'loop' | 'set-outcome' }
+  | { kind: 'none' };
+
+/** One finished step of a run, in order. */
+export interface ProfileRunHistoryEntry {
+  step: string;
+  /** The outcome or choice it took; absent for a step that ended the run. */
+  took?: string;
+  /** The typed answer of an ask with `next`. */
+  answer?: string;
+  /** Who chose: the agent's report, the command's exit code, or you. */
+  by: 'agent' | 'command' | 'you';
+  panelId?: string;
+  summary?: string;
+  at: string;
+}
+
+/** A launched profile: the file Pane follows, where its steps run, and where it is now. */
+export interface ProfileRun {
+  id: string;
+  profile: string;
+  profileVersion: string;
+  /** The Session the run belongs to; its folder holds this run's file. */
+  sessionId: string;
+  repoId: number;
+  /** The Pane the first step opened; every later step is a tab in it. */
+  paneId?: string;
+  /** What the person asked for: the first agent step's request. */
+  prompt: string;
+  /** Agent id → the CLI (`cli` or `cli/model`) chosen at launch, over the file's `runs`. */
+  harness: Record<string, string>;
+  /** A CLI Pane doesn't know → the command that starts it (baseline: plain terminal). */
+  commands: Record<string, string>;
+  state: ProfileRunState;
+  /** The current step, or the last one once ended. */
+  step: string;
+  wait: ProfileRunWait;
+  /** The previous step's result, passed to the next step in its first message. */
+  carry?: string;
+  /** `from › outcome` → times this run took that loop edge (one pointing back in the file). */
+  edgeCounts: Record<string, number>;
+  /** When paused at a loop limit: the edge it would take on "go again". */
+  pending?: { from: string; took: string; to: string; by: 'agent' | 'command' | 'you'; summary?: string };
+  history: ProfileRunHistoryEntry[];
+  error?: string;
+  /** Something in a step's tab waits on the person, such as an agent's folder-trust prompt in a new worktree. Cleared on the next move. */
+  attention?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One profile from the person's own Agent Farm ("Your Agent Farm"), read-only. */
+export interface OwnAgentFarmProfileView {
+  name: string;
+  source: string;
+  harness?: string;
+  model?: string;
+}
+
+/** What the Profiles page lists. */
+export interface ProfileLibraryView {
+  profiles: LibraryProfile[];
+  /** The Agent Farm bundled in Pane: set up, setting up, or why not. */
+  agentFarm?: { state: 'missing' | 'installing' | 'ready' | 'failed'; version?: string; error?: string };
+}
+
+/** The person's own agent-farm on PATH ("Your Agent Farm"), listed through it; its own call, since running it is slow. */
+export interface OwnAgentFarmView {
+  profiles: OwnAgentFarmProfileView[];
+  error?: string;
+}
+
+/** One profile with its file's text, for the YAML tab. */
+export interface ProfileDetailView {
+  profile: LibraryProfile;
+  yaml: string;
+}
+
+/** A launch from the Profiles page or runpane. */
+export interface ProfileLaunchInput {
+  profile: string;
+  repoId: number;
+  /** An existing Session to run in; without it Pane makes a new one named `sessionName` (or after the profile and task). */
+  sessionId?: string;
+  sessionName?: string;
+  prompt: string;
+  /** Agent id → `cli` or `cli/model`, over the file's `runs`. */
+  harness?: Record<string, string>;
+  /** A CLI Pane doesn't know → the command that starts it. */
+  commands?: Record<string, string>;
 }
