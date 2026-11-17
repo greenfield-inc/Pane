@@ -75,7 +75,7 @@ test('turning the device mid-session reshapes the phone to landscape', async ({ 
   await expect.poll(async () => { const box = await screen.boundingBox(); return box ? box.height / box.width : 0; }).toBeGreaterThan(2);
   await page.evaluate(() => window.qaRotate());
   await expect.poll(async () => { const box = await screen.boundingBox(); return box ? box.width / box.height : 0; }).toBeGreaterThan(2);
-  await expect(page.getByTestId('device-reshape-mask')).toHaveClass(/opacity-0/);
+  await expect(page.getByTestId('device-turn-mask')).toHaveClass(/opacity-0/);
 });
 
 test('a chat shows the device it opened as a live card that opens the device tab', async ({ page }) => {

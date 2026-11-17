@@ -39,7 +39,7 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
   const lastFrame = useLastFrame(client, panel.id, state.deviceId, !live && state.phase !== 'booting' && state.phase !== 'installing');
   // The screen's shape as its frames show it, so landscape, an iPad or a folded phone fit uncropped.
   const [aspect, setAspect] = useState<number>(DEFAULT_ASPECT[state.platform]);
-  const onShape = useCallback((width: number, height: number) => {
+  const onScreenSize = useCallback((width: number, height: number) => {
     if (width <= 0 || height <= 0) return;
     const next = width / height;
     setAspect(current => (Math.abs(current - next) / current < 0.01 ? current : next));
@@ -102,9 +102,9 @@ export function DevicePanel({ panel, isActive }: DevicePanelProps) {
       <div className="flex min-h-0 flex-1 items-center justify-center gap-3 p-4">
         <div className="flex h-full min-w-0 flex-1 flex-col items-center justify-center">
           <PhoneFrame aspect={aspect} footer={<DeviceCaption state={state} frameRate={streaming ? frameRate : undefined} />}>
-            {live && isActive ? <LiveScreen client={client} panelId={panel.id} platform={state.platform} onShape={onShape} /> : (
+            {live && isActive ? <LiveScreen client={client} panelId={panel.id} platform={state.platform} onScreenSize={onScreenSize} /> : (
               <div className="absolute inset-0 bg-device-screen">
-                {lastFrame && <img src={lastFrame} alt="" className="h-full w-full object-contain opacity-60" onLoad={(event) => onShape(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />}
+                {lastFrame && <img src={lastFrame} alt="" className="h-full w-full object-contain opacity-60" onLoad={(event) => onScreenSize(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />}
               </div>
             )}
             <PhaseOverlay state={state} busy={busy} onBoot={() => run('boot', () => client.power(panel.id, 'boot'))} onTakeOver={() => run('take-over', () => client.takeOver(panel.id))} />
@@ -225,7 +225,7 @@ function useFrameRate(client: DeviceTabClient, panelId: string, enabled: boolean
 const FOOTER_PX = 32;
 
 /** How long a reshape (rotate, fold, another device) stays masked while the bezel moves to its new shape. */
-const RESHAPE_MS = 220;
+const TURN_MASK_MS = 220;
 
 /**
  * The phone: a bezel at the screen's aspect ratio (width over height), as large as its box allows,
@@ -236,7 +236,7 @@ function PhoneFrame({ aspect, children, dashed = false, footer }: { aspect: numb
   const box = useRef<HTMLDivElement>(null);
   const hasFooter = footer !== undefined;
   const [size, setSize] = useState<{ width: number; height: number }>();
-  const reshaping = useReshape(aspect);
+  const masking = useTurnMask(aspect);
   useEffect(() => {
     const element = box.current;
     if (!element) return;
@@ -258,12 +258,12 @@ function PhoneFrame({ aspect, children, dashed = false, footer }: { aspect: numb
       {size && (
         <>
         <div
-          className={cn('relative flex-shrink-0', reshaping && 'transition-[width,height] duration-200 ease-out', dashed ? 'border-2 border-dashed border-border-secondary' : 'bg-device-bezel shadow-lg ring-1 ring-border-secondary')}
+          className={cn('relative flex-shrink-0', masking && 'transition-[width,height] duration-200 ease-out', dashed ? 'border-2 border-dashed border-border-secondary' : 'bg-device-bezel shadow-lg ring-1 ring-border-secondary')}
           style={{ width: size.width, height: size.height, borderRadius: radius, padding: dashed ? 0 : Math.max(4, Math.round(short * 0.03)) }}
         >
           <div className="relative h-full w-full overflow-hidden" style={{ borderRadius: dashed ? radius : Math.round(radius * 0.86) }}>
             {children}
-            <div aria-hidden className={cn('pointer-events-none absolute inset-0 bg-device-screen transition-opacity duration-200', reshaping ? 'opacity-100' : 'opacity-0')} data-testid="device-reshape-mask" />
+            <div aria-hidden className={cn('pointer-events-none absolute inset-0 bg-device-screen transition-opacity duration-200', masking ? 'opacity-100' : 'opacity-0')} data-testid="device-turn-mask" />
           </div>
         </div>
         {footer}
@@ -274,17 +274,17 @@ function PhoneFrame({ aspect, children, dashed = false, footer }: { aspect: numb
 }
 
 /** True for a moment after `aspect` changes, while the frame moves to its new shape. */
-function useReshape(aspect: number): boolean {
+function useTurnMask(aspect: number): boolean {
   const shown = useRef(aspect);
-  const [reshaping, setReshaping] = useState(false);
+  const [masking, setReshaping] = useState(false);
   useEffect(() => {
     if (shown.current === aspect) return;
     shown.current = aspect;
     setReshaping(true);
-    const timer = window.setTimeout(() => setReshaping(false), RESHAPE_MS);
+    const timer = window.setTimeout(() => setReshaping(false), TURN_MASK_MS);
     return () => window.clearTimeout(timer);
   }, [aspect]);
-  return reshaping;
+  return masking;
 }
 
 /** Stream sizes step by this many pixels, so resizing the tab reconnects the stream only now and then. */
@@ -297,7 +297,7 @@ const STREAM_RESIZE_SETTLE_MS = 400;
  * renderer; on another computer it is frames read over the connection, about twice a second.
  * Pointer events become normalized touches on the drawn image; moves are sent once a frame.
  */
-function LiveScreen({ client, panelId, platform, onShape }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; onShape: (width: number, height: number) => void }) {
+function LiveScreen({ client, panelId, platform, onScreenSize }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; onScreenSize: (width: number, height: number) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const streamPx = useStreamPx(box);
   // Simulators stream MJPEG where the client can; an emulator's screen comes as frames.
@@ -309,7 +309,7 @@ function LiveScreen({ client, panelId, platform, onShape }: { client: DeviceTabC
   const src = stream ? (pageVisible ? stream : undefined) : polled;
   return (
     <div ref={box} className="absolute inset-0 bg-device-screen">
-      {src && <TouchScreen client={client} panelId={panelId} platform={platform} src={src} onShape={onShape} />}
+      {src && <TouchScreen client={client} panelId={panelId} platform={platform} src={src} onScreenSize={onScreenSize} />}
     </div>
   );
 }
@@ -355,10 +355,10 @@ function usePageVisible(): boolean {
 }
 
 /** How often the stream's frame size is checked: an MJPEG image changes size without an event. */
-const SHAPE_CHECK_MS = 250;
+const SIZE_CHECK_MS = 250;
 
 /** Where a pointer falls on the image as drawn (letterboxed, never cropped), from 0 to 1 on each axis. */
-function pointOnImage(image: HTMLImageElement, clientX: number, clientY: number): { x: number; y: number } {
+function pointOnImage(image: HTMLImageElement, clientX: number, clientY: number) {
   const rect = image.getBoundingClientRect();
   const natural = image.naturalWidth > 0 && image.naturalHeight > 0 ? image.naturalWidth / image.naturalHeight : rect.width / rect.height;
   const width = Math.min(rect.width, rect.height * natural);
@@ -368,14 +368,14 @@ function pointOnImage(image: HTMLImageElement, clientX: number, clientY: number)
   return { x: (clientX - left) / width, y: (clientY - top) / height };
 }
 
-function TouchScreen({ client, panelId, platform, src, onShape }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; src: string; onShape: (width: number, height: number) => void }) {
+function TouchScreen({ client, panelId, platform, src, onScreenSize }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; src: string; onScreenSize: (width: number, height: number) => void }) {
   const image = useRef<HTMLImageElement>(null);
   const down = useRef(false);
   const pendingMove = useRef<{ x: number; y: number }>(undefined);
   useEffect(() => {
-    const timer = window.setInterval(() => { const element = image.current; if (element) onShape(element.naturalWidth, element.naturalHeight); }, SHAPE_CHECK_MS);
+    const timer = window.setInterval(() => { const element = image.current; if (element) onScreenSize(element.naturalWidth, element.naturalHeight); }, SIZE_CHECK_MS);
     return () => window.clearInterval(timer);
-  }, [onShape]);
+  }, [onScreenSize]);
   const point = (event: ReactPointerEvent<HTMLImageElement>) => pointOnImage(event.currentTarget, event.clientX, event.clientY);
   const send = (phase: 'begin' | 'move' | 'end', at: { x: number; y: number }) => {
     void client.input(panelId, { kind: 'touch', phase, x: Math.min(1, Math.max(0, at.x)), y: Math.min(1, Math.max(0, at.y)) }).catch(() => undefined);
@@ -394,7 +394,7 @@ function TouchScreen({ client, panelId, platform, src, onShape }: { client: Devi
       draggable={false}
       data-testid="device-screen"
       className="absolute inset-0 h-full w-full touch-none select-none object-contain"
-      onLoad={(event) => onShape(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+      onLoad={(event) => onScreenSize(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
       onPointerDown={(event) => { down.current = true; event.currentTarget.setPointerCapture(event.pointerId); send('begin', point(event)); }}
       onPointerMove={(event) => {
         if (!down.current) return;
