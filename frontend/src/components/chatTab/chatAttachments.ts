@@ -16,7 +16,7 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export type SaveChatFile = (file: File, onProgress: (progress: UploadProgress) => void, signal: AbortSignal) => Promise<string>;
 
 /** One file's copy to the chat's machine, which every chip showing that file watches. */
-interface RunningCopy {
+interface FileCopy {
   controller: AbortController;
   done: Promise<string>;
   latest: UploadProgress;
@@ -24,20 +24,22 @@ interface RunningCopy {
 }
 
 /**
- * Copies still running, by file. A chat's draft keeps its attachments when the chat is left, and
- * re-adds the same File when it is back: that attachment watches the running copy instead of
- * starting a second one.
+ * Copies running or finished, by file. A chat's draft keeps its attachments when the chat is left,
+ * and re-adds the same File when it is back: that attachment watches the running copy, or gets the
+ * finished one's path at once, instead of copying again. A failed or stopped copy is forgotten.
  */
-const runningCopies = new Map<File, RunningCopy>();
+const fileCopies = new WeakMap<File, FileCopy>();
+/** Copies still running, by the chat tab that started them, so closing the tab stops them. */
+const panelCopies = new Map<string, Set<FileCopy>>();
 /** Which file each attachment still copying shows, so removing the chip can stop its copy. */
 const copyingFiles = new Map<string, File>();
 
-function startCopy(file: File, saveFile: SaveChatFile, watch: (progress: UploadProgress) => void): RunningCopy {
+function startCopy(file: File, saveFile: SaveChatFile, watch: (progress: UploadProgress) => void, panelId?: string): FileCopy {
   const controller = new AbortController();
   const stopped = new Promise<never>((_resolve, reject) => {
     controller.signal.addEventListener('abort', () => reject(new Error('Copy cancelled')), { once: true });
   });
-  const copy: RunningCopy = {
+  const copy: FileCopy = {
     controller,
     done: Promise.resolve(''),
     latest: { receivedBytes: 0, totalBytes: file.size, retrying: false, lastProgressAt: Date.now(), secondsLeft: null },
@@ -48,12 +50,25 @@ function startCopy(file: File, saveFile: SaveChatFile, watch: (progress: UploadP
     copy.latest = progress;
     for (const watch of copy.watchers) watch(progress);
   }, controller.signal);
+  const running = panelId === undefined ? undefined : panelCopies.get(panelId) ?? new Set<FileCopy>();
+  running?.add(copy);
+  if (panelId !== undefined && running) panelCopies.set(panelId, running);
   // Removing the chip ends the wait at once, even while a chunk is still in flight.
-  copy.done = Promise.race([saved, stopped]).finally(() => {
-    if (runningCopies.get(file) === copy) runningCopies.delete(file);
+  copy.done = Promise.race([saved, stopped]);
+  copy.done.then(
+    () => undefined,
+    () => { if (fileCopies.get(file) === copy) fileCopies.delete(file); },
+  ).finally(() => {
+    running?.delete(copy);
+    if (panelId !== undefined && running?.size === 0) panelCopies.delete(panelId);
   });
-  runningCopies.set(file, copy);
+  fileCopies.set(file, copy);
   return copy;
+}
+
+/** The chat tab was closed: stop the copies it started (the host deletes what arrived). */
+export function cancelChatCopies(panelId: string): void {
+  for (const copy of panelCopies.get(panelId) ?? []) copy.controller.abort();
 }
 
 export interface ChatAttachmentOptions {
@@ -61,6 +76,8 @@ export interface ChatAttachmentOptions {
   images: boolean;
   /** Copies other files to the chat's machine; without it only images can be attached. */
   saveFile?: SaveChatFile;
+  /** The chat tab adding files; closing it stops their copies (`cancelChatCopies`). */
+  panelId?: string;
   /** Told how a file's copy is going, by attachment id, and null once it is done or failed, so the composer can show it and wait for it. */
   onProgress?: (id: string, progress: UploadProgress | null) => void;
   readDataUrl?: (file: File) => Promise<string>;
@@ -105,12 +122,12 @@ export class ChatAttachmentAdapter implements AttachmentAdapter {
     const pending: PendingAttachment = { id, type: 'file', name: file.name, contentType: file.type, file, status: { type: 'running', reason: 'uploading', progress: 0 } };
     yield pending;
     const watch = (progress: UploadProgress) => this.options.onProgress?.(id, progress);
-    const running = runningCopies.get(file);
-    if (running) {
-      running.watchers.add(watch);
-      watch(running.latest);
+    const known = fileCopies.get(file);
+    if (known) {
+      known.watchers.add(watch);
+      watch(known.latest);
     }
-    const copy = running ?? startCopy(file, saveFile, watch);
+    const copy = known ?? startCopy(file, saveFile, watch, this.options.panelId);
     copyingFiles.set(id, file);
     try {
       const path = await copy.done;
@@ -138,7 +155,7 @@ export class ChatAttachmentAdapter implements AttachmentAdapter {
   /** A chip removed while its file copies stops the copy (the host deletes what arrived), which frees Send. */
   async remove(attachment: PendingAttachment): Promise<void> {
     const file = copyingFiles.get(attachment.id);
-    if (file) runningCopies.get(file)?.controller.abort();
+    if (file) fileCopies.get(file)?.controller.abort();
   }
 }
 

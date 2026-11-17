@@ -241,9 +241,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       else next.delete(id);
       return next;
     });
-    const options = { images: canAttachImages, saveFile, onProgress };
+    const options = { images: canAttachImages, saveFile, onProgress, panelId };
     return ChatAttachmentAdapter.available(options) ? new ChatAttachmentAdapter(options) : undefined;
-  }, [canAttachImages, saveFile]);
+  }, [canAttachImages, saveFile, panelId]);
   /** Why dropped, pasted or picked files were not attached; shown until dismissed or the next attempt. */
   const [attachProblems, setAttachProblems] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);

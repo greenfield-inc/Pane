@@ -392,7 +392,8 @@ composer marks it in amber like a mode that never asks.
   chip that shows how far its copy has got (and the time left when it is slow),
   can be removed before sending (which stops its copy), and sending waits until
   every file has finished copying. Leaving the chat keeps a copy running, and the
-  draft's chip picks it up again when you come back. The host refuses a file only when it would leave less free space than
+  draft's chip picks it up again when you come back (or takes the path of a copy
+  that finished meanwhile). Closing the chat tab stops its copies. The host refuses a file only when it would leave less free space than
   Machine health's critical level. Every refusal says why, and nothing is attached for it.
   The phone app keeps its **+** photo picker.
 - The composer does not show the machine: the window's machine picker does, and

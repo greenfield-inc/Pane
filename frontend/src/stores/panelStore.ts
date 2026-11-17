@@ -4,6 +4,7 @@ import { PanelStore } from '../types/panelStore';
 import { ToolPanel } from '../../../shared/types/panels';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { cancelPanelUploads } from '../hooks/useHostUploads';
+import { cancelChatCopies } from '../components/chatTab/chatAttachments';
 
 // FIX: Use immer for safe immutable updates
 export const usePanelStore = create<PanelStore>()(
@@ -65,8 +66,9 @@ export const usePanelStore = create<PanelStore>()(
     },
 
     removePanel: (sessionId, panelId) => {
-      // A closed terminal's file copies stop with it.
+      // A closed terminal's or chat's file copies stop with it.
       cancelPanelUploads(panelId);
+      cancelChatCopies(panelId);
       set((state) => {
         if (state.panels[sessionId]) {
           state.panels[sessionId] = state.panels[sessionId].filter((p: ToolPanel) => p.id !== panelId);
@@ -129,6 +131,7 @@ export const usePanelStore = create<PanelStore>()(
 
     forgetPanel: (panelId) => {
       cancelPanelUploads(panelId);
+      cancelChatCopies(panelId);
       set((state) => {
         // `removePanel` needs the session id to find the panel in the list;
         // this does not. A panel deleted anywhere — another session, RunPane,
