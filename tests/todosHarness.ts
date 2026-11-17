@@ -9,9 +9,9 @@ import { dismissDialogs, isolatedPane, launchIsolated, runpane, type IsolatedPan
 // To-dos journeys in a real, isolated Pane (D-288): shared by todos.spec.ts and todos-page.spec.ts. Every
 // Session's chat runs the scripted ACP agent, so no real agent or account is touched.
 
-export const SHOTS = process.env.TODOS_SHOTS_DIR;
+const SHOTS = process.env.TODOS_SHOTS_DIR;
 export const AGENT = path.resolve('main/src/services/chatTabs/testing/scriptedAgent.mjs');
-export const SCALE = 60;
+const SCALE = 60;
 
 export interface SessionRef { id: string; paneId: string; panelId: string }
 
