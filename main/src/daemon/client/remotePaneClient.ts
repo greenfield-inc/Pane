@@ -1656,7 +1656,7 @@ export class RemotePaneClientController extends EventEmitter {
         activeProfileId,
         activeProfileLabel: null,
         activeBaseUrl: null,
-        lastError: `Remote daemon connection profile "${activeProfileId}" does not exist`,
+        lastError: `The saved connection "${activeProfileId}" does not exist. Pick a computer in Settings > Remote Access > Computers, or pair it again.`,
         lastSeenAt: null,
       });
       return;
@@ -1887,7 +1887,7 @@ export class RemotePaneClientController extends EventEmitter {
           activeProfileId: profile.id,
           activeProfileLabel: profile.label,
           activeBaseUrl: profile.baseUrl,
-          lastError: getErrorMessage(error, `Failed to connect to remote daemon profile "${profile.label}"`),
+          lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
           lastSeenAt: null,
         });
         return;
@@ -1914,7 +1914,7 @@ export class RemotePaneClientController extends EventEmitter {
         activeProfileId: profile.id,
         activeProfileLabel: profile.label,
         activeBaseUrl: profile.baseUrl,
-        lastError: getErrorMessage(error, `Failed to connect to remote daemon profile "${profile.label}"`),
+        lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
         lastSeenAt: null,
       });
       throw error;

@@ -163,7 +163,7 @@ export function RemoteConnectionScreen({
             className="rounded-lg border border-border-primary bg-surface-primary p-5 shadow-lg sm:p-6"
           >
             <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-              {isConnecting ? connectingProfileId ? 'Connecting to saved profile' : 'Connecting to remote Pane' : ''}
+              {isConnecting ? connectingProfileId ? 'Connecting to saved connection' : 'Connecting to remote Pane' : ''}
             </div>
             {showBackToMenu && (
               <button
@@ -194,7 +194,7 @@ export function RemoteConnectionScreen({
                 <p>{error || clipboardError}</p>
                 {showConnectionTroubleshooting && (
                   <p className="mt-2 text-xs text-text-primary">
-                    If this profile uses Tailscale, install or open Tailscale on this device, sign in to the same tailnet as the host, then retry.
+                    If this connection uses Tailscale, install or open Tailscale on this device, sign in to the same tailnet as the host, then retry.
                   </p>
                 )}
               </div>
@@ -214,7 +214,7 @@ export function RemoteConnectionScreen({
 
             {savedProfiles.length > 0 && (
               <div className="mt-7 border-t border-border-primary pt-5">
-                <h2 className="mb-3 text-sm font-semibold text-text-secondary">Saved profiles</h2>
+                <h2 className="mb-3 text-sm font-semibold text-text-secondary">Saved connections</h2>
                 <div className="space-y-2">
                   {savedProfiles.map(profile => (
                     <div key={profile.id} className="flex flex-col gap-3 rounded-md border border-border-primary bg-surface-secondary px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
