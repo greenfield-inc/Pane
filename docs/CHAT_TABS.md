@@ -522,12 +522,15 @@ profile works on a fresh install. At each start
 package carries (greenfield, orchestra, bigbrain and machine-security) into
 that folder, when the package's version or plugin files differ from what
 `<PANE_DIR>/agent-farm/pane-manifest.json` records; an unchanged bundle installs
-nothing and the log says so. A failed install is logged and never blocks
-startup. Pane never writes to the person's `~/.config/agent-farm`. With the
-bundled copy, `run` writes its launch bundle to `<worktree>/.agent-farm/`, which
-Pane hides from git through `info/exclude` as it does `.pane/`, and Agent Farm
-keeps its own small caches under `~/.local/state/agent-farm` and
-`~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
+nothing and the log says so. An install that never finished (its lock or
+half-copied plugin files) is cleared before the next one, and a failed install
+is logged and never blocks startup. Pane never writes to the person's
+`~/.config/agent-farm`. With the bundled copy, `run` writes its launch bundle to
+`<worktree>/.agent-farm/generated`, which Pane hides from git through
+`info/exclude` as it does `.pane/`, and launch telemetry goes to
+`<PANE_DIR>/agent-farm/telemetry` (set in that folder's `settings.json`). Agent
+Farm still keeps small state of its own (workspace trust, launch records, MCP
+logins) under `~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
 `scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
 `app.asar`, carries no native binaries, and answers `--version` under Electron
 as Node.

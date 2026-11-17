@@ -1,0 +1,12 @@
+# expect: STEP_GOAL
+format: pane-profile/1
+name: no-goal
+version: 1.0.0
+agents:
+  writer: { runs: claude }
+flow:
+  start: draft
+  draft: { agent: writer, outcomes: { done: end } }
+samples:
+  draft:
+    done: ["Drafted.", "Drafted, with notes."]

@@ -114,6 +114,22 @@ describe('bundledAgentFarmProcess', () => {
   });
 });
 
+describe('installBundledAgentFarm with the pinned package', () => {
+  it('recovers from an install that was killed mid-way, and keeps telemetry in Pane\'s folder', async () => {
+    const paneDir = tempDir();
+    const configRoot = agentFarmConfigRoot(paneDir);
+    // What a killed `plugin install` leaves: its lock, and part of greenfield's files.
+    mkdirSync(path.join(configRoot, '.plugins', 'install.lock'), { recursive: true });
+    mkdirSync(path.join(configRoot, 'plugins', 'greenfield'), { recursive: true });
+    writeFileSync(path.join(configRoot, 'plugins', 'greenfield', 'plugin.yaml'), 'name: gre');
+    const status = await installBundledAgentFarm({ paneDir, log: () => undefined });
+    expect(status.error).toBeUndefined();
+    expect(status.state).toBe('ready');
+    expect(Object.keys(status.plugins)).toEqual([...BUNDLED_AGENT_FARM_PLUGINS]);
+    expect(JSON.parse(readFileSync(path.join(configRoot, 'settings.json'), 'utf8'))).toEqual({ telemetry: { directory: path.join(configRoot, 'telemetry') } });
+  }, 120_000);
+});
+
 describe('the pinned package', () => {
   it('resolves and answers --version with this Node', () => {
     const bundle = bundledAgentFarm();
