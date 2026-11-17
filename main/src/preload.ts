@@ -450,6 +450,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // System utilities
   openExternal: (url: string): Promise<IPCResponse> => invokeIpc('openExternal', url),
+  openLocalPage: (fileUrl: string): Promise<IPCResponse> => invokeIpc('openLocalPage', fileUrl),
 
   feedback: {
     submit: (request: SubmitFeedbackRequest): Promise<IPCResponse> => invokeIpc('feedback:submit', request),

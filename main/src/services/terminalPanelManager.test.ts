@@ -3092,6 +3092,34 @@ describe('TerminalPanelManager Agent Farm resume', () => {
     disposeFlowControlRecord(terminal.flowControl);
   });
 
+  // D-403: Agent Farm since #220 prints AGENT_FARM_SESSION_ID; older builds print PANE_AGENT_SESSION_ID.
+  it.each([
+    ['old name only', `PANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\n`],
+    ['new name only', `AGENT_FARM_SESSION_ID=${LAUNCH_ID}\r\n`],
+    ['new line, then an old one', `AGENT_FARM_SESSION_ID=${LAUNCH_ID}\r\nPANE_AGENT_SESSION_ID=other-launch\r\n`],
+    ['old line, then a new one', `PANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\nAGENT_FARM_SESSION_ID=other-launch\r\n`],
+  ])('captures an Agent Farm launch ID from the %s', (_case, output) => {
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const terminal = createTerminal();
+    terminal.agentType = 'claude';
+    mockFarmPanel({ initialCommand: FARM, agentType: 'claude' });
+    manager.captureAgentSessionId(terminal, output);
+    expect(terminal.capturedAgentSessionId).toBe(LAUNCH_ID);
+    expect(panelManager.getPanel('panel-1')?.state.customState).toMatchObject({ agentSessionId: LAUNCH_ID });
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it.each([
+    ['old name only', `PANE_AGENT_SESSION_ID=old-launch\r\n...\r\nPANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\n`],
+    ['new name only', `AGENT_FARM_SESSION_ID=old-launch\r\n...\r\nAGENT_FARM_SESSION_ID=${LAUNCH_ID}\r\n`],
+    ['both names, newest last', `PANE_AGENT_SESSION_ID=old-launch\r\n...\r\nAGENT_FARM_SESSION_ID=${LAUNCH_ID}\r\n`],
+  ])('recovers the last launch ID from a saved buffer with the %s', (_case, scrollback) => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    vi.spyOn(databaseService, 'getPanelBuffers').mockReturnValue({ scrollback: `$ ${FARM}\r\n${scrollback}working`, serialized: '', alternate: '' });
+    const result = manager.resolveCliLaunchCommand('panel-1', FARM, { initialCommand: FARM, agentType: 'claude' });
+    expect(result.commandToRun).toBe(`${FARM} --resume "${LAUNCH_ID}"`);
+  });
+
   it('records a SessionStart report for the running launch, and a later launch ID line does not undo it (D-269)', async () => {
     const manager = testAccess<AgentSessionCaptureAccess & { currentLaunchId(panelId: string): string | undefined; recordConversationReport(panelId: string, id: string, source?: string): Promise<boolean> }>(new TerminalPanelManager());
     const terminal = createTerminal({ launchId: 'launch-1' });

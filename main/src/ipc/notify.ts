@@ -33,6 +33,7 @@ import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type Not
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
+import type { LoopManager } from '../services/loops/loopManager';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
@@ -299,6 +300,8 @@ type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
   sessionInbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void; subscribeEnded(listener: (ended: SessionInboxEnded) => void): () => void; ack?(ids: readonly string[]): void };
   approvalStore?: ApprovalStore;
   approvalImport?: JsonStoreImportOutcome;
+  /** Names the loop a caller runs for, to warn a loop off info cards. */
+  loopManager?: Pick<LoopManager, 'loopFor'>;
 };
 
 /** Seconds since this computer was used (D-144); QA's profiles on one Mac read theirs from a file (J33). */
@@ -422,6 +425,11 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     wslDistros: () => (services.databaseService?.getAllProjects() ?? [])
       .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
     sessionOf: (paneId, panelId) => services.orchestrationSessionManager?.approvalSession(paneId, panelId),
+    sameLoop: (callerPaneId, askerPaneId) => {
+      const loopOf = (paneId: string) => services.loopManager?.loopFor({ paneId, sessionId: services.orchestrationSessionManager?.approvalSession(paneId)?.id })?.id;
+      const loop = loopOf(callerPaneId);
+      return loop !== undefined && loop === loopOf(askerPaneId);
+    },
     projectOf: (paneId) => {
       const projectId = services.databaseService?.getSession?.(paneId)?.project_id;
       return projectId === undefined || projectId === null ? undefined : services.databaseService?.getAllProjects().find(project => project.id === projectId)?.name;
@@ -478,12 +486,22 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   remotePaneClientController.on('state-changed', showActiveMachine);
   showActiveMachine();
 
+  /** An info card disappears, and a loop runs while the person is away, so they rarely see one (#1446). */
+  const loopInfoWarning = (request: NotifyRequest): string[] => {
+    const { paneId } = request.caller;
+    if (request.ui !== 'info' || request.update !== undefined || !paneId) return [];
+    const loop = services.loopManager?.loopFor({ paneId, sessionId: services.orchestrationSessionManager?.approvalSession(paneId)?.id });
+    return loop
+      ? [`The loop "${loop.name}" runs while the person is away, and an info card disappears, so they will likely never see this one. Post findings on a card that waits: --ui options (such as "Got it" / "Not interested") or --ui approve.`]
+      : [];
+  };
+
   commandRegistry.register('runpane:notify', async (request: PaneCommandValue): Promise<NotifyResult> => {
     const parsed = parseNotifyRequest(request);
     const teammate = teammatePaneCaller();
     // A secret card writes the owner's secret store, so a teammate cannot post one.
     if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
-    const warnings = admitNotifyCard(parsed);
+    const warnings = [...admitNotifyCard(parsed), ...loopInfoWarning(parsed)];
     const result = await notify.ask(parsed, paneCommandSignal());
     // A card that wasn't shown (a worker's, sent back to its orchestrator) has nothing to warn about.
     return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
@@ -793,7 +811,7 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.resume) return request;
   if (request.took !== undefined) {
     if (!request.took.trim()) throw invalid('took needs the approval\'s id or Q-n.');
-    if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> answer.');
+    if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> question.');
     if (request.ui !== undefined || request.update !== undefined) throw invalid('took goes on its own, without ui or update.');
     return request;
   }
@@ -801,9 +819,8 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.update !== undefined) {
     if (!request.update.trim()) throw invalid('update needs the approval\'s id or Q-n.');
     if (request.ui !== undefined) throw invalid('update keeps the approval\'s ui; leave ui out.');
-    if (!request.asked?.trim()) throw invalid('update needs asked: the person\'s question, as they asked it.');
     if (!request.whatChanged?.trim()) throw invalid('update needs whatChanged: one line per change.');
-    if ((request.title?.length ?? 0) > MAX_TEXT || request.asked.length > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, asked and whatChanged take up to ${MAX_TEXT} characters.`);
+    if ((request.title?.length ?? 0) > MAX_TEXT || (request.asked?.length ?? 0) > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, asked and whatChanged take up to ${MAX_TEXT} characters.`);
     if (request.choices && request.questions) throw invalid('pass choices or questions, not both.');
     if (request.choices) checkChoices(request.choices, 'choices');
     if (request.questions) checkQuestions(request.questions);
@@ -887,6 +904,16 @@ function readStatusContext(request: NotifyRequest, newCard: boolean): void {
     request.links = fitted.links;
     if (fitted.context !== undefined) request.context = fitted.context;
   }
+}
+
+/**
+ * `runpane report --state blocked --choices|--questions`: the same checks as an options card's,
+ * for a report sent by a CLI that did not check them. Neither given is fine.
+ */
+export function checkNotifyOptions(choices: NotifyRequest['choices'], questions: NotifyRequest['questions']): void {
+  if (choices && questions) throw invalid('pass choices or questions, not both.');
+  if (choices) checkChoices(choices, 'choices');
+  if (questions) checkQuestions(questions);
 }
 
 /** 1 to 9 choices with different labels. */

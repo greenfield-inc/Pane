@@ -115,13 +115,13 @@ describe('Approvals grouping', () => {
     expect(groupApprovals([request, itemEntry(item('q', 1), 'mac')], 'project').map(group => group.label)).toEqual(['Pane', NO_PROJECT]);
   });
 
-  it('reads a saved sort, and Most recent from anything else', () => {
+  it('reads a saved sort, and By Session from anything else', () => {
     expect(parseApprovalSort('session')).toBe('session');
     expect(parseApprovalSort('project')).toBe('project');
     expect(parseApprovalSort('recent')).toBe('recent');
-    expect(parseApprovalSort('nonsense')).toBe('recent');
-    expect(parseApprovalSort('toString')).toBe('recent');
-    expect(parseApprovalSort(null)).toBe('recent');
+    expect(parseApprovalSort('nonsense')).toBe('session');
+    expect(parseApprovalSort('toString')).toBe('session');
+    expect(parseApprovalSort(null)).toBe('session');
   });
 
   it('names who asked and its Session, for a row with no group header above it', () => {

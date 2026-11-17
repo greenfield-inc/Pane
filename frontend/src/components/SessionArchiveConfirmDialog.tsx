@@ -15,7 +15,10 @@ const BLOCK_REASONS = {
   'status-unknown': 'Pane could not check for unsaved work',
 } satisfies Record<RunpanePaneArchiveBlockCode, string>;
 
-/** Confirms archiving a Session, and asks what to do with its Panes that have work in progress. */
+/**
+ * Confirms archiving a Session: says what it does to the loops that send to it, and asks what to
+ * do with its Panes that have work in progress.
+ */
 export function SessionArchiveConfirmDialog() {
   const confirm = useSessionArchiveConfirmStore(state => state.confirm);
   const keepRef = useRef<HTMLButtonElement>(null);
@@ -26,6 +29,7 @@ export function SessionArchiveConfirmDialog() {
   const title = `Archive ${confirm.sessionName}?`;
 
   if (unsafe.length === 0) {
+    const panesLine = total === 0 ? 'It has no Panes.' : `Archiving this Session also archives its ${total === 1 ? 'Pane' : `${total} Panes`}.`;
     return (
       <ConfirmDialog
         isOpen
@@ -33,8 +37,8 @@ export function SessionArchiveConfirmDialog() {
         // No Pane has work in progress, so `keep` archives the Session with all its Panes.
         onConfirm={() => confirm.choose('keep')}
         title={title}
-        message={`${total === 0 ? 'It has no Panes.' : `Archiving this Session also archives its ${total === 1 ? 'Pane' : `${total} Panes`}.`} You can undo right after.`}
-        confirmText="Archive"
+        message={`${confirm.loopNote ? `${confirm.loopNote} ` : ''}${panesLine} You can undo right after.`}
+        confirmText={confirm.loopNote ? 'Archive and pause' : 'Archive'}
         variant="warning"
         icon={<Archive className="h-6 w-6 flex-shrink-0 text-status-warning" />}
       />
@@ -45,6 +49,7 @@ export function SessionArchiveConfirmDialog() {
     <Modal isOpen onClose={() => confirm.choose(null)} size="md" ariaLabel={title} initialFocusRef={keepRef}>
       <div className="p-6 pt-2">
         <h3 className="mb-3 text-lg font-medium text-text-primary">{title}</h3>
+        {confirm.loopNote && <p className="mb-3 text-text-secondary">{confirm.loopNote}</p>}
         <p className="mb-3 text-text-secondary">
           Archiving this Session also archives its {total === 1 ? 'Pane' : `${total} Panes`}.{' '}
           {unsafe.length === 1 ? 'This one has' : `These ${unsafe.length} have`} work in progress:

@@ -84,15 +84,19 @@ describe('Pane home skill', () => {
     const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
     expect(PANE_MANAGED_SKILL_MARKER).toBe('<!-- pane-managed-skill v4 -->');
     expect(skill).toContain("A worker in a Session** (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't");
-    expect(skill).toContain("doesn't call `notify`. Run `runpane report --state blocked --question \"<question>\"`");
+    expect(skill).toContain("doesn't call `notify`. Run `runpane report --state blocked --question '<question>'`");
+    expect(skill).toContain('Start the question with its Q-n when your orchestrator gave you one');
+    expect(skill).toContain('never double quotes or no quotes');
+    expect(skill).toContain('--tool-command "<launcher command>"');
     expect(skill).toContain('A Session orchestrator** (`PANE_ORCHESTRATION_SESSION_ID` is set) keeps each item that waits on the person posted once, as a background `runpane notify');
     expect(skill).toContain('Any other agent** calls `notify` as above.');
   });
 
-  it('tells an agent to read a typed reply as an answer or a question, and update instead of re-asking', () => {
+  it('tells an agent a typed reply is recorded as the answer, and to reopen and update instead of re-asking', () => {
     const skill = buildPaneHomeSkill().replace(/\s+/g, ' ');
     expect(skill).toContain('`reply: Q-n → "<their words>" (picked: <picks>) (by you)`');
-    expect(skill).toContain('run `runpane notify --took <id|Q-n> answer --json`, then act on it.');
+    expect(skill).toContain('Pane records the reply as the answer once it reaches you');
+    expect(skill).toContain('run `runpane notify --took <id|Q-n> question --json` at once. That reopens the approval');
     expect(skill).toContain('`runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>" --json`');
     expect(skill).toContain('never post a second approval for it.');
     expect(skill).toContain('`correction: Q-n → that was your answer: "…" (by you)` means it is recorded as the answer: act on it.');

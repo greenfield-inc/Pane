@@ -1,7 +1,7 @@
 import { getRunpaneShimState, withRunpaneOnPath } from './runpaneShim';
 import { sessionRuntimePath, sessionWSLContext } from './sessionRuntime';
 import { escapeForBash, windowsPathToWSLMount } from '../utils/wslUtils';
-import { validateCustomCommandResume, customResumeAgentType, effectiveCustomResume } from '../../../shared/types/customCommandResume';
+import { validateCustomCommandResume, customResumeAgentType, effectiveCustomResume, reportedSessionIdLinePattern, AGENT_FARM_HOST_ENV } from '../../../shared/types/customCommandResume';
 import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory, PANE_INSTANCE_ENV, paneInstanceTag } from '../utils/appDirectory';
@@ -88,8 +88,8 @@ const FORCED_REDRAW_TRANSITION_MS = 50;
 const FORCED_REDRAW_SETTLE_MS = 80;
 const SHELL_PROMPT_SETTLE_MS = 300;
 const SHELL_PROMPT_FALLBACK_MS = 5000;
-/** A launcher's `PANE_AGENT_SESSION_ID=<id>` line, on a line of its own. */
-const REPORTED_SESSION_ID_LINE = /(?:^|[\r\n])PANE_AGENT_SESSION_ID=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})(?=[\r\n])/g;
+/** A launcher's `AGENT_FARM_SESSION_ID=<id>` or `PANE_AGENT_SESSION_ID=<id>` line, on a line of its own. */
+const REPORTED_SESSION_ID_LINE = reportedSessionIdLinePattern();
 // Held initial input for an agent is staged, then submitted with its own
 // Enter once the agent has echoed it and gone quiet for a moment.
 const INPUT_SETTLE_POLL_MS = 50;
@@ -1130,12 +1130,12 @@ export class TerminalPanelManager extends EventEmitter {
     return true;
   }
 
-  /** The launch ID a wrapper such as Agent Farm printed as `PANE_AGENT_SESSION_ID=<id>`, if it did. */
+  /** The launch ID a wrapper such as Agent Farm printed as `AGENT_FARM_SESSION_ID=<id>` or `PANE_AGENT_SESSION_ID=<id>`, if it did. */
   getLaunchSessionId(panelId: string): string | undefined {
     const terminal = this.terminals.get(panelId);
     if (!terminal) return undefined;
     if (terminal.capturedAgentSessionId) return terminal.capturedAgentSessionId;
-    return Array.from(terminal.scrollbackBuffer.slice(-20_000).matchAll(/(?:^|[\r\n])PANE_AGENT_SESSION_ID=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})(?=[\r\n])/g)).at(-1)?.[1];
+    return Array.from(terminal.scrollbackBuffer.slice(-20_000).matchAll(REPORTED_SESSION_ID_LINE)).at(-1)?.[1];
   }
 
   /** Resolve once the terminal has output since `generation` and then a quiet window, or after a bound. */
@@ -2042,6 +2042,7 @@ export class TerminalPanelManager extends EventEmitter {
             'PANE_PORT',
             'PANE_SESSION_ID',
             'PANE_PANEL_ID',
+            AGENT_FARM_HOST_ENV.reportSessionId,
             'PANE_PANEL_KIND',
             'PANE_UPDATE_RESUME_NONCE',
             'PANE_ORCHESTRATION_SESSION_ID',
@@ -2091,6 +2092,8 @@ export class TerminalPanelManager extends EventEmitter {
       PANE_SESSION_ID: panel.sessionId,
       PANE_NOTES_FILE: isWSL || getRuntimeConfigManager().getConfig().notesEnabled !== true ? '' : noteContextPath(path.join(getAppDirectory(), 'notes'), panel.sessionId),
       PANE_PANEL_ID: panel.id,
+      // Agent Farm's host-neutral names (D-403): print the AGENT_FARM_SESSION_ID line for this tab.
+      [AGENT_FARM_HOST_ENV.reportSessionId]: '1',
       [PANE_INSTANCE_ENV]: paneInstanceTag(),
       PANE_PANEL_KIND: resolveTerminalPanelKind(panel, panelManager.getPanelsForSession(panel.sessionId)),
       PANE_UPDATE_RESUME_NONCE: updateResumeNonce ?? '',

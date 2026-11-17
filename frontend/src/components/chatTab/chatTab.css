@@ -193,6 +193,10 @@ dialog.chat-confirm { position:static; inset:auto; width:auto; max-width:none; m
 .chat-attachment-preview { width:24px; height:24px; flex-shrink:0; border-radius:4px; object-fit:cover; background:var(--chat-muted); }
 .chat-attachment-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--chat-foreground); }
 .chat-attachment-status { flex-shrink:0; color:var(--chat-muted-foreground); }
+/* A copying chip keeps one size while its numbers change: a fixed chip and a fixed, truncated status. */
+.chat-tab .chat-attachment[aria-busy="true"] { width:18rem; max-width:100%; }
+.chat-attachment[aria-busy="true"] .chat-attachment-name { flex:1; }
+.chat-attachment[aria-busy="true"] .chat-attachment-status { width:7rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums; }
 .chat-tab .chat-attachment > button { display:inline-flex; width:24px; height:24px; flex-shrink:0; align-items:center; justify-content:center; border-radius:999px; color:var(--chat-muted-foreground); }
 .chat-tab .chat-attachment > button:hover { background:var(--chat-muted); color:var(--chat-foreground); }
 .chat-spin { animation:chat-spin 1s linear infinite; }
