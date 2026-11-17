@@ -9,6 +9,7 @@ import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ConfigManager } from '../services/configManager';
 import { MachineConnections } from '../services/machineConnections';
+import { panelManager } from '../services/panelManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { NotifyItem, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
 import type { MachineConnectionsEvent, MachineState } from '../../../shared/types/machineConnections';
@@ -497,20 +498,27 @@ describe('Approvals items, through the registered handlers', () => {
     const ask = (paneId: string, title: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
       ui: 'options', caller: { paneId, panelId: `${paneId}-tab` }, title, context: 'Deals.', choices: [{ label: 'Got it' }, { label: 'Not interested' }], returnAfterMs: 1,
     }]);
-    // Two runs each asked a Q-1, both still waiting.
+    // Each caller's tab is a tab of its run's Pane, so a card is its asker's own by tab.
+    vi.spyOn(panelManager, 'getPanel').mockImplementation(panelId => ({
+      id: panelId, sessionId: panelId.replace(/-tab$/u, ''), type: 'terminal', title: panelId,
+      state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    }));
+    // Two runs each asked a Q-1, a minute apart, both still waiting.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-11-16T09:00:00Z') });
     await ask('run-1', 'Q-1: 3 new deals?');
+    vi.setSystemTime(Date.parse('2026-11-16T09:01:00Z'));
     await ask('run-2', 'Q-1: 4 new deals?');
     const update = (paneId: string, title: string) => pane.registry.invoke<NotifyResult>('runpane:notify', [{
       update: 'Q-1', whatChanged: 'More deals', title, caller: { paneId, panelId: `${paneId}-tab` }, returnAfterMs: 1,
     }]);
     const titles = () => pane.notify.snapshot().items.map(item => `${item.source.paneId}: ${item.title}`).sort();
 
-    // Run 2 updates its own Q-1, never run 1's older one.
-    await update('run-2', 'Q-1: 5 new deals?');
-    expect(titles()).toEqual(['run-1: Q-1: 3 new deals?', 'run-2: Q-1: 5 new deals?']);
+    // Run 1 updates its own Q-1, never run 2's newer one.
+    await update('run-1', 'Q-1: 5 new deals?');
+    expect(titles()).toEqual(['run-1: Q-1: 5 new deals?', 'run-2: Q-1: 4 new deals?']);
     // A run with no Q-1 of its own takes the newest one the loop posted.
     await update('run-3', 'Q-1: 6 new deals?');
-    expect(titles()).toEqual(['run-1: Q-1: 3 new deals?', 'run-2: Q-1: 6 new deals?']);
+    expect(titles()).toEqual(['run-1: Q-1: 5 new deals?', 'run-2: Q-1: 6 new deals?']);
     pane.notify.dispose();
   });
 

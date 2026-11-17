@@ -19,27 +19,26 @@ async function launch(paneDir: string, baseURL: string | undefined, extraEnv: Re
   const isMain = (candidate: Page): boolean => /^https?:|^file:/.test(candidate.url()) && !candidate.url().includes('notify.html');
   await expect.poll(() => app.windows().some(isMain), { timeout: 30_000 }).toBe(true);
   const page = app.windows().find(isMain)!;
-  await page.waitForFunction(() => !!window.electronAPI?.autopilot, undefined, { timeout: 30_000, polling: 250 });
-  // Size the real window: an emulated viewport does not reach <webview> guests.
-  await app.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows().find(candidate => !candidate.webContents.getURL().includes('notify.html'));
-    window?.setContentSize(1600, 1000);
+  const ready = () => page.waitForFunction(() => !!window.electronAPI?.autopilot, undefined, { timeout: 30_000, polling: 250 });
+  await ready();
+  // A fresh Pane opens its first-run dialogs (onboarding, welcome, the support prompt) once its
+  // analytics check is back from the network, so at any time. Marked done, they never open.
+  await page.evaluate(async () => {
+    for (const key of ['onboarding_repo_setup', 'hide_welcome', 'onboarding_gh_prompt_shown']) await window.electronAPI.preferences.set(key, 'true');
   });
+  await page.reload();
+  await ready();
+  await resize(app, page, 1600);
   return { app, page };
 }
 
-/** First-run dialogs (onboarding's agent picker, the welcome) can open a few seconds in. */
-async function dismissDialogs(page: Page): Promise<void> {
-  const deadline = Date.now() + 8_000;
-  while (Date.now() < deadline) {
-    let dismissed = false;
-    for (const name of ['No thanks', 'Get Started', 'Skip', 'Skip for now']) {
-      const button = page.getByRole('button', { name, exact: true });
-      if (await button.isVisible().catch(() => false)) { await button.click().catch(() => undefined); dismissed = true; }
-    }
-    if (!dismissed && !(await page.locator('[data-state="open"].fixed.inset-0').isVisible().catch(() => false)) && Date.now() > deadline - 5_000) return;
-    await page.waitForTimeout(250);
-  }
+/** Sizes the real window (an emulated viewport does not reach <webview> guests) and waits until the page has the new width. */
+async function resize(app: ElectronApplication, page: Page, width: number): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, w) => {
+    const window = BrowserWindow.getAllWindows().find(candidate => !candidate.webContents.getURL().includes('notify.html'));
+    window?.setContentSize(w, 1000);
+  }, width);
+  await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(width);
 }
 
 interface Asker { child: ChildProcess; output: Promise<string> }
@@ -68,7 +67,6 @@ test('Autopilot: switch, Start, the walk on the stack, answers by you, never by 
   const askers: Asker[] = [];
   let { app, page } = await launch(paneDir, baseURL);
   try {
-    await dismissDialogs(page);
     // Two Sessions, A listed above B.
     // Screenshots in a chosen theme (AUTOPILOT_THEME=dark); the journey itself is theme-free.
     const theme = process.env.AUTOPILOT_THEME;
@@ -121,7 +119,6 @@ test('Autopilot: switch, Start, the walk on the stack, answers by you, never by 
     await expect.poll(waitingCount, { timeout: 20_000 }).toBe(3);
 
     // J2: opening Autopilot shows Start and runs no agent turn.
-    await dismissDialogs(page);
     await page.getByTestId('autopilot-nav').click();
     await expect(page.getByTestId('autopilot-start')).toBeVisible();
     expect((await page.evaluate(() => window.electronAPI.autopilot.snapshot())).state).toBe('stopped');
@@ -148,22 +145,14 @@ test('Autopilot: switch, Start, the walk on the stack, answers by you, never by 
     await shot(page, '02-d1-first-message');
 
     // The header fits at any width: its last control stays inside the chat column (QA, 900–1600 px).
+    // It ends at 1600, the size the rest of the journey uses.
     for (const width of [900, 1280, 1600]) {
-      await app.evaluate(({ BrowserWindow }, w) => {
-        const window = BrowserWindow.getAllWindows().find(candidate => !candidate.webContents.getURL().includes('notify.html'));
-        window?.setContentSize(w, 1000);
-      }, width);
-      await page.waitForTimeout(300);
+      await resize(app, page, width);
       const column = (await page.getByRole('region', { name: 'Autopilot chat' }).boundingBox())!;
       const menu = (await page.getByTestId('autopilot-menu').boundingBox())!;
       expect(menu.x + menu.width, `menu inside the chat column at ${width}px`).toBeLessThanOrEqual(column.x + column.width);
       if (width === 900) await shot(page, '02b-narrow-900');
     }
-    await app.evaluate(({ BrowserWindow }) => {
-      const window = BrowserWindow.getAllWindows().find(candidate => !candidate.webContents.getURL().includes('notify.html'));
-      window?.setContentSize(1600, 1000);
-    });
-    await page.waitForTimeout(300);
 
     // J4: one entry at a time; ‹ › and ← → step; tabs never move (D-72) whatever the entry holds.
     await expect(page.getByTestId('autopilot-stack-position')).toHaveText('1 of 2');
@@ -274,7 +263,6 @@ test('Autopilot: switch, Start, the walk on the stack, answers by you, never by 
     const runBefore = (await page.evaluate(() => window.electronAPI.autopilot.snapshot())).run!.id;
     await app.close();
     ({ app, page } = await launch(paneDir, baseURL));
-    await dismissDialogs(page);
     await page.getByTestId('autopilot-nav').click();
     await expect(page.getByTestId('autopilot-start')).toBeVisible();
     const after = await page.evaluate(() => window.electronAPI.autopilot.snapshot());

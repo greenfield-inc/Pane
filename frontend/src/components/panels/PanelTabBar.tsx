@@ -810,7 +810,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                       setShowCustomInput(true);
                     }}
                     aria-label={`Rename ${cmd.name} shortcut`}
-                    title="Rename profile"
+                    title="Rename command"
                   >
                     <Pencil className="w-3 h-3" />
                   </button>

@@ -4,8 +4,13 @@ import { findCustomLinks } from '../../../../../shared/utils/customLinks';
 import type { CustomLinkMatchRequest } from '../../../utils/customLinkMatcher';
 import { createCustomLinkProvider } from './customLinkProvider';
 
-/** Answers like the real matcher worker, which runs findCustomLinks. */
+/** Answers like the real matcher worker, which says when it has loaded and then runs findCustomLinks. */
 class FakeWorker extends EventTarget {
+  constructor() {
+    super();
+    queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', { data: { ready: true } })));
+  }
+
   postMessage({ id, text, links }: CustomLinkMatchRequest): void {
     queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', { data: { id, matches: findCustomLinks(text, links) } })));
   }

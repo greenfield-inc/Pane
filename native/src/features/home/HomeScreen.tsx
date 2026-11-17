@@ -1,13 +1,16 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { router, useIsFocused } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { canClose } from '@shared/approvalReceipts';
 
 import { buildAllMachinesList, type RecentRow } from '@/features/allMachines/allMachinesList';
 import { AllMachinesNotes, allOffline, offlineAlert, openRecentRow, openWaitingRow, RecentRowView, waitingRowText } from '@/features/allMachines/AllMachinesRows';
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
 import { sessionKey, waitingCounts } from '@/features/approvals/approvals';
+import { ArchiveUndoBar, useArchiveHold } from '@/features/approvals/ArchiveUndo';
 import { approvalRowSpoken, ApprovalRowLines } from '@/features/approvals/ApprovalRowLines';
 import { AutopilotRow } from '@/features/autopilot/AutopilotRow';
 import { useAutopilot } from '@/features/autopilot/hooks';
@@ -23,6 +26,8 @@ import { PaneRow } from '@/features/panes/PaneRow';
 import { SidebarItemView, toggleMember, type SidebarItemContext } from '@/features/panes/SidebarItemView';
 import { useSidebarSections } from '@/features/panes/sidebarSections';
 import { usePaneActions } from '@/features/panes/usePaneActions';
+import { markNextFrame } from '@/features/perf/perfMarks';
+import { useLiveMarks, useValueMark } from '@/features/perf/usePerfMarks';
 import { useTheme, withAlpha } from '@/theme';
 import { Icon, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
@@ -73,10 +78,20 @@ export function HomeScreen() {
   const searching = query.trim().length > 0;
   // The archive is read for a search, or by its own screen; the All panes tile counts it only once cached.
   const archived = useArchivedProjects(!all && searching);
+  const archiving = useArchiveHold();
 
-  const board = buildAllMachinesList(feeds, '');
+  // Approvals swiped to Archive leave the list and its counts while held for Undo.
+  const listed = buildAllMachinesList(feeds, '');
+  const board = { ...listed, waiting: listed.waiting.filter(row => !archiving.hidden.has(row.key)) };
+  // Their Panes still wait on those questions, not in the terminal.
+  const held = listed.waiting.filter(row => archiving.hidden.has(row.key));
   const loading = all ? feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined && feed.error === undefined) : here.loading;
-  const counts = loading ? undefined : boardCounts(board);
+  const counts = loading ? undefined : boardCounts(board, held);
+  // One machine's Home dims while it isn't connected; All never dims as a whole.
+  const dimmed = !all && presence !== 'connected';
+  useValueMark('counts', counts ? `${counts.needs}/${counts.working}/${counts.ready}/${counts.all}` : '-');
+  useLiveMarks('home', !dimmed && !loading, Math.min(here.projects.dataUpdatedAt, here.statuses.dataUpdatedAt, here.notify.dataUpdatedAt));
+  useEffect(() => markNextFrame(['launch', 'switch'], 'home-frame'), []);
   const machineOf = (key: string) => chipMachines.find(machine => machine.key === key);
   // On All, rows carry their machine's mark.
   const markOf = (key: string) => (all ? machineOf(key) : undefined);
@@ -181,7 +196,7 @@ export function HomeScreen() {
 
   // Needs you: Autopilot, the approvals in the chosen sort, Panes waiting in their terminal (D-81),
   // then the line that opens History.
-  const inTerminal = terminalWaiting(board);
+  const inTerminal = terminalWaiting(board, held);
   // The approvals card's amber: both lists wait on you.
   const needsTint = withAlpha(theme.colors.warning, 0.09);
   const autopilotSnapshot = autopilot.data?.enabled ? autopilot.data : undefined;
@@ -228,9 +243,18 @@ export function HomeScreen() {
                   done={list === 'agent' || !row.waiting}
                   divided={divided}
                   onPress={() => openWaitingRow(row, list, profile.id)}
+                  // The card's Close with no reason, for this machine's questions it can close.
+                  onArchive={row.type === 'question' && list === 'waiting' && row.machineKey === profile.id && !row.stale && canClose(row.item) ? {
+                    swipeId: row.item.id,
+                    archive: () => archiving.archive({ key: row.key, id: row.item.id, title: row.item.title }),
+                  } : undefined}
+                  background={needsTint}
                 />
                 {row.type === 'question' && row.item.state === 'waiting' ? (
                   <AgentPromptActions item={row.item} inset={33} machine={row.machineKey === profile.id ? null : machine?.profile ?? null} />
+                ) : null}
+                {archiving.failed.has(row.key) ? (
+                  <Notice testID={`approvals-archive-error-${row.key}`} danger message={`Not archived: ${archiving.failed.get(row.key)}`} action={{ title: 'Dismiss', onPress: () => archiving.dismiss(row.key) }} />
                 ) : null}
               </>
             );
@@ -385,7 +409,7 @@ export function HomeScreen() {
       ) : (
         // The last screen stays, dimmed and untouchable, while the machine isn't connected, search and
         // + included. The pills above stay live, so you can switch away from a machine that is down.
-        <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
+        <Dimmed dimmed={dimmed} style={styles.fill}>
           {/* The Panes read failed: say why above the tiles, which still count what the other reads found. */}
           {here.projects.isError ? (
             <View style={styles.note}>
@@ -397,6 +421,7 @@ export function HomeScreen() {
         </Dimmed>
       )}
       {all ? <HomeBottomBar query={query} onQuery={setQuery} /> : null}
+      <ArchiveUndoBar held={archiving.held} onUndo={archiving.undo} bottom={bottomBarHeight(insets.bottom) + 8} />
     </View>
   );
 }

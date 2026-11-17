@@ -34,6 +34,8 @@ export const PANE_UNSNAPSHOTTED_FOLDERS = [
   'projects',
   // Agents' temporary files ($PANE_SCRATCH_DIR), which can hold whole clones; archive retention deletes them.
   'scratch',
+  // A Session move's staging on each machine; a move under way when Pane quits can't be finished.
+  'moves', 'moves-out',
   // Device tools Pane installs with npm, build checkouts for linked computers, and screenshots: fetched or rebuilt on the next device call.
   'devices',
   // The plugins Pane installs from its bundled Agent Farm, reinstalled at the next start when missing.

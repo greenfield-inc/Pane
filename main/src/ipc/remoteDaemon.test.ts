@@ -1103,7 +1103,7 @@ describe('remote daemon IPC', () => {
       transport: 'http+sse',
     })).resolves.toEqual({
       success: false,
-      error: 'Remote daemon connection profile is invalid',
+      error: 'This connection is not valid: it needs a name, a base URL, and a token or a Tailscale machine. Nothing was saved. Next: Fill in the connection name, base URL and token, then save it again.',
     });
   });
 

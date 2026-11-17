@@ -1,10 +1,11 @@
 import { createRoot } from 'react-dom/client';
+import { DEFAULT_AGENT_ID, agentLabel } from '../../shared/agents';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
 import { DevicePanel } from '../../frontend/src/components/panels/device/DevicePanel';
 import { DeviceClientContext, type DeviceTabClient } from '../../frontend/src/components/panels/device/deviceClient';
 import type { ChatTurnActions } from '../../frontend/src/components/chatTab/ChatTurns';
 import type { ChatTabClient, ChatTabView } from '../../shared/types/chatTab';
-import type { DeviceInput, DevicePanelPhase, DevicePanelState } from '../../shared/types/devices';
+import type { DeviceControls, DeviceInput, DeviceLogLine, DevicePanelPhase, DevicePanelState } from '../../shared/types/devices';
 import type { ToolPanel } from '../../shared/types/panels';
 import '../../frontend/src/index.css';
 
@@ -39,19 +40,64 @@ function screen(): string {
   return canvas.toDataURL('image/jpeg', 0.9);
 }
 
-declare global { interface Window { qaInputs: DeviceInput[]; qaPower: string[] } }
+/** The same phone turned to landscape: a sidebar, and a Pay button at the bottom right (x 0.70–0.95, y 0.78–0.92). */
+function landscapeScreen(): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 874;
+  canvas.height = 402;
+  const g = canvas.getContext('2d')!;
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 874, 402);
+  g.fillStyle = '#f2f2f7'; g.fillRect(0, 0, 260, 402);
+  g.fillStyle = '#111'; g.font = 'bold 26px -apple-system, sans-serif'; g.fillText('Checkout', 290, 60);
+  g.fillStyle = '#111'; g.beginPath(); g.roundRect(612, 314, 218, 56, 14); g.fill();
+  g.fillStyle = '#fff'; g.font = '600 17px -apple-system, sans-serif'; g.fillText('Pay $86.00', 676, 348);
+  return canvas.toDataURL('image/jpeg', 0.9);
+}
+
+declare global { interface Window { qaInputs: DeviceInput[]; qaPower: string[]; qaRotate: () => void; qaStaged: string[]; qaAttached: string[] } }
+window.qaStaged = [];
+window.qaAttached = [];
+// ?fold=1 is a foldable, half open; otherwise a phone that turns.
+const controls: DeviceControls = params.get('fold') ? { orientation: 'portrait', fold: { posture: 'half' } } : { orientation: 'portrait' };
 window.qaInputs = [];
 window.qaPower = [];
-const frame = screen();
+const landscape = landscapeScreen();
+const portrait = screen();
+// ?shape=landscape starts turned; qaRotate() turns the device mid-session.
+let frame = params.get('shape') === 'landscape' ? landscape : portrait;
+window.qaRotate = () => { frame = landscape; };
 const client: DeviceTabClient = {
   clientId: 'fixture',
-  streamUrl: () => undefined,
   frame: async () => frame,
+  controls: async () => controls,
+  capture: async (_panel, image) => ({ path: '/tmp/pane/devices/screenshots/pane-1.png', dataUrl: image ?? frame }),
+  stage: async (_panel, agentPanelId, text) => { window.qaStaged.push(`${agentPanelId}:${text}`); },
+  attachToChat: async (chatPanelId, file) => { window.qaAttached.push(`${chatPanelId}:${file.name}`); },
+  record: async (_panel, action) => (action === 'start' ? null : { path: '/tmp/pane/devices/recordings/pane-1.mp4' }),
+  recording: async () => null,
+  // ?logs=many sends 400 lines, as a chatty app does.
+  logs: async (_panel, since) => {
+    const lines = params.get('logs') === 'many' ? Array.from({ length: 400 }, (_, index) => ({ ...LOG_LINES[index % 3], seq: index + 1 })) : LOG_LINES;
+    return { lines: since > 0 ? [] : lines, next: lines.length };
+  },
+  driver: async (_panel, who) => { window.qaPower.push(`driver:${who}`); },
   input: async (_panel, input) => { window.qaInputs.push(input); },
   visible: async () => undefined,
   takeOver: async () => { window.qaPower.push('take-over'); },
   power: async (_panel, action) => { window.qaPower.push(action); },
 };
+
+const LOG_LINES: DeviceLogLine[] = [
+  { seq: 1, at: Date.parse('2026-11-16T19:04:11.208Z'), level: 'info', source: 'Shop', message: 'Checkout: mounted step 1 of 3' },
+  { seq: 2, at: Date.parse('2026-11-16T19:04:13.044Z'), level: 'warning', source: 'Shop', message: 'VirtualizedList is slow to update' },
+  { seq: 3, at: Date.parse('2026-11-16T19:04:15.020Z'), level: 'error', source: 'Shop', message: 'image cache miss for cover@3x.png' },
+];
+
+/** The Pane's agent tab beside the device: a chat (?agent=chat, the default) or a Claude Code terminal (?agent=terminal). */
+const agentPanel: ToolPanel = params.get('agent') === 'terminal'
+  ? { id: 'agent', sessionId: 'pane', type: 'terminal', title: agentLabel(DEFAULT_AGENT_ID), state: { isActive: false, customState: { agentType: DEFAULT_AGENT_ID } }, metadata: { createdAt: '2026-11-15T00:00:00.000Z', lastActiveAt: '2026-11-15T00:00:00.000Z', position: 0 } }
+  : { id: 'chat', sessionId: 'pane', type: 'chat', title: agentLabel(DEFAULT_AGENT_ID), state: { isActive: false, customState: { agent: DEFAULT_AGENT_ID } }, metadata: { createdAt: '2026-11-15T00:00:00.000Z', lastActiveAt: '2026-11-15T00:00:00.000Z', position: 0 } };
+const driver: DevicePanelState['driver'] = params.get('driver') === 'agent' ? { by: 'agent', agent: agentLabel(DEFAULT_AGENT_ID) } : params.get('driver') === 'person' ? { by: 'person', agentWaiting: agentLabel(DEFAULT_AGENT_ID) } : undefined;
 
 function devicePanel(id: string, state: Partial<DevicePanelState>): ToolPanel {
   const custom: DevicePanelState = { deviceId: 'SIM', platform: 'ios', name: 'iPhone 17 Pro', os: 'iOS 27', machine: 'This Mac', phase: 'live', ...state };
@@ -92,6 +138,18 @@ const actions: ChatTurnActions = {
   device: { openedHere: [], phase: () => chatPhase, frame: async () => frame, open: panelId => { window.qaPower.push(`open:${panelId}`); } },
 };
 
+/** The device tab beside the chat: ?mac runs it on a linked Mac, ?driver shows who drives, ?fold makes it a foldable. */
+const paneState: Partial<DevicePanelState> = {};
+if (params.get('mac')) {
+  paneState.machine = 'Studio MacBook Pro';
+  paneState.machineReason = { kind: 'automatic', text: 'Runs on Studio MacBook Pro. This PC has no Xcode.' };
+}
+if (driver) paneState.driver = driver;
+if (params.get('fold')) {
+  paneState.name = 'Pixel Fold';
+  paneState.os = 'Android 16';
+}
+
 const root = createRoot(document.getElementById('root')!);
 if (params.get('view') === 'states') {
   root.render(
@@ -106,12 +164,20 @@ if (params.get('view') === 'states') {
       </div>
     </DeviceClientContext.Provider>,
   );
+} else if (params.get('view') === 'phone') {
+  root.render(
+    <DeviceClientContext.Provider value={client}>
+      <div className="bg-bg-primary" style={{ width: 390, height: '100vh' }}>
+        <DevicePanel panel={devicePanel('device', driver ? { driver } : {})} panels={[agentPanel]} isActive />
+      </div>
+    </DeviceClientContext.Provider>,
+  );
 } else {
   root.render(
     <DeviceClientContext.Provider value={client}>
       <div className="flex bg-bg-primary" style={{ height: '100vh' }}>
         <div className="border-r border-border-primary" style={{ width: 560, height: '100%' }}><ChatTabPanel panelId="chat" client={chatClient} actions={actions} /></div>
-        <div className="flex-1"><DevicePanel panel={devicePanel('device', params.get('mac') ? { machine: "Studio MacBook Pro", machineReason: { kind: 'automatic', text: "Runs on Studio MacBook Pro. This PC has no Xcode." } } : {})} isActive /></div>
+        <div className="flex-1"><DevicePanel panel={devicePanel('device', paneState)} panels={[agentPanel]} isActive /></div>
       </div>
     </DeviceClientContext.Provider>,
   );

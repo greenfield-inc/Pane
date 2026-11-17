@@ -4,7 +4,7 @@ import type { TerminalPanelState, TerminalPausedMark, ToolPanel } from '../../..
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../../shared/types/appearance';
 import { Button } from '../ui/Button';
 import { useConfigStore } from '../../stores/configStore';
-import { pausedLabel, pausedReason, runPauseAction } from '../../utils/pause';
+import { pauseOffersResume, pausedLabel, pausedReason, runPauseAction } from '../../utils/pause';
 import { buildTerminalFontFamily, DEFAULT_TERMINAL_FONT_FAMILY } from '../../utils/terminalTheme';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 
@@ -16,7 +16,10 @@ const scrollbackSchema = boundary.object({
   data: boundary.optional(boundary.object({ content: boundary.string })),
 });
 
-/** The slim bar over a paused tab: when it paused, and Resume, which starts it again in its saved conversation. */
+/**
+ * The slim bar over a paused tab: when it paused, and Resume, which starts it again in its saved
+ * conversation. A tab its Session's move stopped says where the Session is going instead, with no Resume.
+ */
 function PausedBanner({ panelId, mark, detail }: { panelId: string; mark: TerminalPausedMark; detail?: string }) {
   const [resuming, setResuming] = useState(false);
   const reason = pausedReason(mark);
@@ -31,7 +34,7 @@ function PausedBanner({ panelId, mark, detail }: { panelId: string; mark: Termin
         <span className="font-semibold text-text-primary">{pausedLabel(mark)}</span>
         {detail && <span className="text-text-tertiary"> · {detail}</span>}
       </span>
-      <Button
+      {pauseOffersResume(mark) && <Button
         type="button"
         size="sm"
         variant="primary"
@@ -45,7 +48,7 @@ function PausedBanner({ panelId, mark, detail }: { panelId: string; mark: Termin
         }}
       >
         Resume
-      </Button>
+      </Button>}
     </div>
   );
 }

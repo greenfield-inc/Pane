@@ -231,7 +231,19 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   **Open on <machine>** for another machine's item). Below about 1,100px wide,
   the list stacks above the column. After a pick, the column shows "Sent:
   …" with **Undo** for 3 seconds; the item then moves to **Done today**,
-  which lists the last 24 hours, updates (`ui info`) included. Under Most
+  which lists the last 24 hours, updates (`ui info`) included. **Archive**
+  closes a waiting item without opening it: hover a row (or move the key
+  focus to it) and click the archive button where its age sits, press ⌫ on
+  the focused row, or choose **Archive all** on a group's header. Nothing
+  asks first: the items leave the list and every count at once, a toast
+  offers **Undo** for 5 seconds (it brings the items and the selection back),
+  and when it ends each asker is told the person closed it, as by the
+  column's **Close…** with no reason. Archiving again while the toast shows
+  joins it and starts it over, so one Undo brings back every one. The
+  selection moves to the next row. On the phone, swipe a Needs you row left
+  to **Archive**, with the same Undo; a close the computer refuses shows why
+  under its row until dismissed. Permission prompts, relayed questions
+  and items on an unreachable machine have no archive. Under Most
   recent, once a typed reply is with an agent, Waiting splits into **Waiting
   on you** and **With the agent**, each row naming who reads the reply. Inside Pane there is no
   floating strip and no Notify row in the sidebar.
@@ -264,7 +276,7 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   while Pane is in front. ⌘F finds text in Decide, the Summary (the frame
   shares Pane's origin so it can be searched, with scripts still off) and
   each reference. ⌘/ lists every key. The right
-  sidebar (Overview, Files, Changes) is never covered. The Session's title
+  sidebar (Files, Changes) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A
   Session's orchestrator chat docks one compact card above its composer:
@@ -463,7 +475,7 @@ An approval exists only while you can act on it and someone can take the answer
 | Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. One exception: when only its tab closed and the orchestrator that relayed it, or Autopilot, can still read a reply for it, it stays open. |
 | Pane restarts | Items whose asking tab still exists stay waiting. |
 | Unanswered for 3 days | Stale: moved to a collapsed **Stale** group at the bottom of Waiting. It never rings or pushes again. |
-| You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab. **Reopen** puts it back. |
+| You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab; several closes waiting for the same tab go as one line, `closed: Q-1, Q-2, Q-3 (by you)`. **Reopen** puts it back. |
 | You or Autopilot answered | Done today lists it for 24 hours. |
 
 The store keeps answered and closed items 7 days for the record and for
@@ -557,8 +569,8 @@ the agent:
   since its cards can't be answered; the agents keep waiting. After reconnecting
   the screen shows what is waiting there now. Autopilot says "<machine> offline".
 - **Your phone**: the Pane app lists approvals on home's **Needs you** tile, in
-  the same three sorts (chosen on its sort sheet), and an item opens above its
-  Session's tabs and chat. A question still waiting after
+  the same three sorts (chosen on its sort sheet), and an item opens as the
+  first tab, before its references and its Session's tabs and chat. A question still waiting after
   about 90 seconds sends one alert to every phone signed
   in to the host in the Pane app with notifications allowed and **Needs
   Input** on. The alert is titled with the Pane's name and says only "<Pane>

@@ -7,6 +7,7 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { requestSharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
 import { requestPushRegistration } from '@/features/notifications/usePushSetup';
+import { connectionMark, markNextFrame, startJourney } from '@/features/perf/perfMarks';
 
 import { createDaemonClient, streamingFetch } from './createClient';
 import { startDirectRoute } from './direct/directRoute';
@@ -19,6 +20,9 @@ interface DaemonContextValue {
 
 const DaemonContext = createContext<DaemonContextValue | null>(null);
 
+/** The first provider is the launch; every later one is a machine switch. */
+let providersMounted = 0;
+
 
 /**
  * Owns the connection to the active host. Render it with `key={profile.id}` so
@@ -26,7 +30,14 @@ const DaemonContext = createContext<DaemonContextValue | null>(null);
  */
 export function DaemonProvider({ profile, children }: { profile: RemotePaneConnectionProfile; children: ReactNode }) {
   const queryClient = useQueryClient();
-  const [binding, setBinding] = useState(() => ({ profile, client: createDaemonClient(profile) }));
+  const [binding, setBinding] = useState(() => {
+    providersMounted += 1;
+    if (providersMounted > 1) {
+      startJourney('switch');
+      markNextFrame(['switch']);
+    }
+    return { profile, client: createDaemonClient(profile) };
+  });
   // Updating a saved host's password must replace its authenticated connection too.
   if (binding.profile.baseUrl !== profile.baseUrl || binding.profile.token !== profile.token) {
     setBinding({ profile, client: createDaemonClient(profile) });
@@ -37,11 +48,15 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
   useEffect(() => {
     const unsubscribeRestore = client.onRestore(async signal => {
       await queryClient.refetchQueries({ queryKey: [profile.id], type: 'active' }, { throwOnError: true });
+      connectionMark('restored=workspace-lists', { repeat: true });
       if (signal.aborted) return;
       // A switch changed while this computer was away reaches it now.
       requestPushRegistration();
     }, 'workspace lists');
-    const unsubscribeStatus = client.onStatus(setConnection);
+    const unsubscribeStatus = client.onStatus(state => {
+      connectionMark(`status=${state.status}`, { changes: true });
+      setConnection(state);
+    });
     const connect = () => client.connect().catch(() => undefined);
     void connect();
     // Only a real trip to the background suspends. Control Center, Notification

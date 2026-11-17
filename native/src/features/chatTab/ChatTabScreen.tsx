@@ -9,6 +9,7 @@ import { chatTurns, waitingToolIds, type ChatWorkerLine } from '@shared/chatTabP
 import { rejectOption } from '@shared/chatTabPermissions';
 import type { ChatTabCommand, ChatTabSend } from '@shared/types/chatTab';
 
+import { useJourneyMark, useLiveMarks, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
 import { Text } from '@/ui';
 
@@ -23,6 +24,7 @@ import { ChatRowView, type ChatRowActions } from './ChatTabRows';
 import { chatRows } from './chatRows';
 import { chatImageAdapter, chatImageAttachment, chatSendFromComposer, chatThreadMessage, composedText, restorableAttachments } from './chatThread';
 import { pickChatImages } from './pickChatImages';
+import { onChatImageAdded, takeChatImages } from './chatAddedImages';
 import { useChatAgents, useChatTab } from './useChatTab';
 
 function newOperationId(): string {
@@ -59,6 +61,7 @@ export interface ChatTabScreenProps {
  */
 export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, onViewDiff, placeholder, blocks, userNotice, queuedLabel, settings: showSettings = true }: ChatTabScreenProps) {
   const theme = useTheme();
+  useScreenJourney('chat');
   const { chat, viewer, snapshot, connected } = useChatTab(panelId);
   const catalog = useChatAgents();
   const view = snapshot.view;
@@ -77,6 +80,9 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   }), [onViewDiff, onOpenWorker, onOpenDevice, blocks]);
   const agent = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
   const disabled = !connected || !view || view.status === 'stopped';
+  useJourneyMark('chat', 'messages', messages.length > 0);
+  useJourneyMark('chat', 'live', !disabled);
+  useLiveMarks('chat', !disabled);
   const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
   const pending = !!snapshot.pendingDelivery;
 
@@ -137,6 +143,12 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   });
   // The draft lives with the host's viewer (it survives leaving the tab); the composer starts from it.
   useEffect(() => { runtime.thread.composer.setText(viewer.snapshot().draft); }, [runtime, viewer]);
+  // Images the device tab's Screenshot to chat added go into the composer, unsent.
+  useEffect(() => {
+    const take = () => { for (const image of takeChatImages(panelId)) void runtime.thread.composer.addAttachment(chatImageAttachment(image)).catch(() => undefined); };
+    take();
+    return onChatImageAdded(take);
+  }, [runtime, panelId]);
 
   const pickCommand = (command: ChatTabCommand) => {
     const text = `/${command.name} `;

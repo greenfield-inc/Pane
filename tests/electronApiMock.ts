@@ -616,6 +616,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onPaneFocusRequested') {
           return (callback: MockEventCallback) => subscribe('pane:focus-requested', callback);
         }
+        if (prop === 'onPaneOpenLink') {
+          return (callback: MockEventCallback) => subscribe('pane:open-link', callback);
+        }
         if (prop === 'onRemoteDaemonResyncRequested') {
           return (callback: () => void) => subscribe('remote-daemon:resync-required', callback);
         }
@@ -1864,7 +1867,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             const activeComputer = remoteDaemonConfig.client.computers.find(
               (computer) => computer.id === remoteDaemonConfig.client.activeProfileId
             );
-            const failure = activeComputer ? mockOptions.remoteConnectError ?? null : 'Missing remote profile';
+            const failure = activeComputer ? mockOptions.remoteConnectError ?? null : 'Missing saved connection';
             setRemoteConnectionState({
               mode: 'remote',
               status: failure ? 'error' : 'connected',
@@ -2086,6 +2089,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitWindowFocusChanged(focused: boolean) {
           emit('window:focus-changed', focused);
+        },
+        /** A pane:// link main resolved to a Session or repo, as it sends it to the renderer. */
+        emitPaneOpenLink(target: JsonObject) {
+          emit('pane:open-link', clone(target));
         },
         emitSessionCreationFailed(name: string, error: string) {
           emit('session:creation-failed', { name, error });
