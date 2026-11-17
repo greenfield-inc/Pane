@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Copy, Eraser, MessageSquarePlus, Undo2, X } from 'lucide-react';
 import { cn } from '../../../utils/cn';
 
@@ -16,7 +16,7 @@ export interface DeviceMarkupProps {
 interface Point { x: number; y: number }
 type Stroke = Point[];
 
-/** The stroke color when the theme does not set `--color-interactive`. */
+/** The stroke color when the theme does not set `--color-interactive-primary`. */
 const FALLBACK_COLOR = '#e5484d';
 
 /** Draws strokes given in image pixels onto a context, multiplied by `scale`. */
@@ -54,7 +54,7 @@ export function DeviceMarkup({ image, canSendToChat, onDone, onCancel }: DeviceM
   const [natural, setNatural] = useState<{ width: number; height: number }>();
   const [box, setBox] = useState<{ width: number; height: number }>();
   const [strokes, setStrokes] = useState<Stroke[]>([]);
-  const [color] = useState(() => getComputedStyle(document.documentElement).getPropertyValue('--color-interactive').trim() || FALLBACK_COLOR);
+  const [color] = useState(() => getComputedStyle(document.documentElement).getPropertyValue('--color-interactive-primary').trim() || FALLBACK_COLOR);
   const strokeWidth = natural ? Math.max(natural.width, natural.height) * 0.006 : 0;
 
   // The displayed box is the largest one with the screenshot's shape that fits the area.
@@ -125,23 +125,22 @@ export function DeviceMarkup({ image, canSendToChat, onDone, onCancel }: DeviceM
     canvas.toBlob(blob => { if (blob) onDone(blob, action); }, 'image/png');
   }, [natural, strokes, strokeWidth, color, onDone]);
 
-  // Escape cancels, ⌘Z / Ctrl+Z undoes, ⌘Enter / Ctrl+Enter sends to chat (or copies without one).
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const mod = event.metaKey || event.ctrlKey;
-      if (event.key === 'Escape') onCancel();
-      else if (mod && !event.shiftKey && event.key.toLowerCase() === 'z') undo();
-      else if (mod && event.key === 'Enter') finish(canSendToChat ? 'chat' : 'copy');
-      else return;
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onCancel, undo, finish, canSendToChat]);
+  // Keys while Mark up has focus (it takes focus when it opens): Escape cancels, ⌘Z / Ctrl+Z
+  // undoes, ⌘Enter / Ctrl+Enter sends to chat (or copies without one).
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { rootRef.current?.focus(); }, []);
+  const onKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const mod = event.metaKey || event.ctrlKey;
+    if (event.key === 'Escape') onCancel();
+    else if (mod && !event.shiftKey && event.key.toLowerCase() === 'z') undo();
+    else if (mod && event.key === 'Enter') finish(canSendToChat ? 'chat' : 'copy');
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
   return (
-    <div className="absolute inset-0 z-10 flex flex-col gap-2 bg-bg-primary/90 p-4" data-testid="device-markup">
+    <div ref={rootRef} tabIndex={-1} onKeyDown={onKey} className="absolute inset-0 z-10 flex flex-col gap-2 bg-bg-primary/90 p-4 outline-none" data-testid="device-markup">
       <div ref={areaRef} className="flex min-h-0 flex-1 items-center justify-center">
         <div className="relative overflow-hidden rounded shadow-sm" style={box ? { width: box.width, height: box.height } : { visibility: 'hidden' }}>
           <img

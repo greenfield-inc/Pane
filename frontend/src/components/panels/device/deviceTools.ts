@@ -88,10 +88,12 @@ export function useRecording(client: DeviceTabClient, panelId: string) {
     return () => window.clearInterval(timer);
   }, [startedAt]);
   const recording = startedAt !== undefined;
-  // A tab that closes mid-recording stops it, so the next Record starts cleanly.
-  const active = useRef(false);
-  useEffect(() => { active.current = recording; }, [recording]);
-  useEffect(() => () => { if (active.current) void client.record(panelId, 'stop').catch(() => undefined); }, [client, panelId]);
+  // The recording lives in main: a tab shown again picks up its clock.
+  useEffect(() => {
+    let cancelled = false;
+    void client.recording(panelId).then((started) => { if (!cancelled && started !== null) setStartedAt(started); }, () => undefined);
+    return () => { cancelled = true; };
+  }, [client, panelId]);
   const start = useCallback(async () => {
     await client.record(panelId, 'start');
     setStartedAt(Date.now());

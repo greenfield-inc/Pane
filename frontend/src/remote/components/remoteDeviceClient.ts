@@ -17,6 +17,7 @@ export function remoteDeviceClient(adapter: RemoteRuntimeAdapter, clientId: stri
     stage: async (panelId, agentPanelId, text) => { await adapter.invoke('devices:stage', [panelId, agentPanelId, text]); },
     attachToChat: (chatPanelId, file) => addDraftAttachment(adapter.chatTab, chatPanelId, file),
     record: (panelId, action) => adapter.invoke<DeviceRecording | null>('devices:record', [panelId, action]),
+    recording: panelId => adapter.invoke<number | null>('devices:recording', [panelId]),
     logs: (panelId, since) => adapter.invoke<DeviceLogPage>('devices:logs', [panelId, since]),
     driver: async (panelId, who) => { await adapter.invoke('devices:driver', [panelId, who]); },
     input: async (panelId, input) => { await adapter.invoke('devices:input', [panelId, input]); },

@@ -74,6 +74,7 @@ const client: DeviceTabClient = {
   stage: async (_panel, agentPanelId, text) => { window.qaStaged.push(`${agentPanelId}:${text}`); },
   attachToChat: async (chatPanelId, file) => { window.qaAttached.push(`${chatPanelId}:${file.name}`); },
   record: async (_panel, action) => (action === 'start' ? null : { path: '/tmp/pane/devices/recordings/pane-1.mp4' }),
+  recording: async () => null,
   // ?logs=many sends 400 lines, as a chatty app does.
   logs: async (_panel, since) => {
     const lines = params.get('logs') === 'many' ? Array.from({ length: 400 }, (_, index) => ({ ...LOG_LINES[index % 3], seq: index + 1 })) : LOG_LINES;

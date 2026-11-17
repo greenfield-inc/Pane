@@ -72,20 +72,21 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
     }
   }, []);
 
-  const [controls, refreshControls] = useDeviceControls(client, panel.id, live && isActive);
+  const pageVisible = usePageVisible();
+  const shown = live && isActive && pageVisible;
+  const streaming = live && isActive && client.streamUrl !== undefined && state.platform === 'ios';
+  const [controls, frameRate, refreshControls] = useDeviceStatus(client, panel.id, shown, streaming);
   const send = useCallback((input: DeviceInput) => { void client.input(panel.id, input).catch(() => undefined); }, [client, panel.id]);
   const act = useCallback((input: DeviceInput) => run(input.kind, async () => {
     await client.input(panel.id, input);
     refreshControls();
   }), [client, panel.id, refreshControls, run]);
-  const streaming = live && isActive && client.streamUrl !== undefined && state.platform === 'ios';
-  const frameRate = useFrameRate(client, panel.id, streaming);
 
   const [notice, setNotice] = useState<CaptureNotice>();
   const closeNotice = useCallback(() => setNotice(undefined), []);
   const [markup, setMarkup] = useState<CaptureNotice>();
   const [logsOpen, setLogsOpen] = useState(false);
-  const logs = useDeviceLogs(client, panel.id, logsOpen && live);
+  const logs = useDeviceLogs(client, panel.id, logsOpen && shown);
   const recorder = useRecording(client, panel.id);
   const [recordingNote, setRecordingNote] = useState<string>();
   useEffect(() => {
@@ -127,10 +128,12 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
     setRecordingNote(`Recording saved${where}${staged ? `, path typed at ${agentTab.agent}'s prompt` : ''}: ${saved.path}`);
   }), [agentTab, client, panel.id, recorder, run]);
 
+  /** The screenshot on screen in the card, or a new one: Copy, Save and Mark up reuse one capture. */
+  const currentCapture = useCallback(async () => notice?.capture ?? client.capture(panel.id), [client, notice, panel.id]);
   const markUp = useCallback(() => run('markup', async () => {
-    const capture = await client.capture(panel.id);
+    const capture = await currentCapture();
     setMarkup({ capture, name: captureName(state.name, 'png'), title: '' });
-  }), [client, panel.id, run, state.name]);
+  }), [currentCapture, run, state.name]);
 
   /** Keys while the tab has focus: the simulator's shortcuts, then typing into the device. */
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -158,8 +161,8 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
 
   const showBanner = !bannerHidden && state.machineReason && state.machineReason.kind !== 'local';
   const moreItems: DropdownItem[] = [
-    { id: 'copy', label: 'Copy screenshot', icon: Copy, onClick: () => { void run('copy', async () => copyImage((await client.capture(panel.id)).dataUrl)); }, disabled: !live },
-    { id: 'save', label: 'Save screenshot', icon: Download, onClick: () => { void run('save', async () => saveImage((await client.capture(panel.id)).dataUrl, captureName(state.name, 'png'))); }, disabled: !live },
+    { id: 'copy', label: 'Copy screenshot', icon: Copy, onClick: () => { void run('copy', async () => copyImage((await currentCapture()).dataUrl)); }, disabled: !live },
+    { id: 'save', label: 'Save screenshot', icon: Download, onClick: () => { void run('save', async () => saveImage((await currentCapture()).dataUrl, captureName(state.name, 'png'))); }, disabled: !live },
     { id: 'restart', label: 'Restart', icon: RotateCcw, separatorBefore: true, onClick: () => { void run('restart', () => client.power(panel.id, 'restart')); }, disabled: !live },
     { id: 'shutdown', label: 'Shut down', icon: Power, onClick: () => { void run('shutdown', () => client.power(panel.id, 'shutdown')); }, disabled: !live },
   ];
@@ -341,25 +344,39 @@ function nextOrientation(orientation: DeviceOrientation | undefined): DeviceOrie
   return ORIENTATIONS[(ORIENTATIONS.indexOf(orientation ?? 'portrait') + 1) % ORIENTATIONS.length];
 }
 
-/** How often a live tab rereads the device's turn and fold, so a change an agent makes shows in the rail. */
-const CONTROLS_POLL_MS = 2_000;
+/** How often a shown, live tab rereads the device's turn and fold and its frame rate. */
+const STATUS_POLL_MS = 2_000;
 
-/** What the device can do and how it is turned and folded; the second value rereads it now. */
-function useDeviceControls(client: DeviceTabClient, panelId: string, enabled: boolean): [DeviceControls, () => void] {
+/**
+ * The device's turn and fold, and the stream's frame rate when `frameRate` is set, read every
+ * 2 s while `enabled` (the tab shown in a visible window), each read after the last answered.
+ * The second value rereads now.
+ */
+function useDeviceStatus(client: DeviceTabClient, panelId: string, enabled: boolean, frameRate: boolean): [DeviceControls, number | null, () => void] {
   const [controls, setControls] = useState<DeviceControls>({});
+  const [rate, setRate] = useState<number | null>(null);
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    const read = () => { void client.controls(panelId).then((next) => { if (!cancelled) setControls(current => (JSON.stringify(current) === JSON.stringify(next) ? current : next)); }, () => undefined); };
-    read();
-    const timer = window.setInterval(read, CONTROLS_POLL_MS);
+    let timer: number | undefined;
+    const tick = async () => {
+      const [next, fps] = await Promise.all([
+        client.controls(panelId).catch(() => undefined),
+        frameRate && client.frameRate ? client.frameRate(panelId).catch(() => null) : Promise.resolve(null),
+      ]);
+      if (cancelled) return;
+      if (next) setControls(current => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+      setRate(fps);
+      timer = window.setTimeout(() => { void tick(); }, STATUS_POLL_MS);
+    };
+    void tick();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
-  }, [client, panelId, enabled, generation]);
-  return [controls, useCallback(() => setGeneration(value => value + 1), [])];
+  }, [client, panelId, enabled, frameRate, generation]);
+  return [controls, enabled && frameRate ? rate : null, useCallback(() => setGeneration(value => value + 1), [])];
 }
 
 function RailDivider({ vertical = false }: { vertical?: boolean }) {
@@ -429,26 +446,6 @@ function useLastFrame(client: DeviceTabClient, panelId: string, deviceId: string
   return frame;
 }
 
-/** The stream's frame rate, read every second while `enabled`; null until known. */
-function useFrameRate(client: DeviceTabClient, panelId: string, enabled: boolean): number | null {
-  const [rate, setRate] = useState<number | null>(null);
-  useEffect(() => {
-    if (!enabled || !client.frameRate) {
-      setRate(null);
-      return;
-    }
-    const read = client.frameRate.bind(client);
-    let cancelled = false;
-    const tick = () => { void read(panelId).then((next) => { if (!cancelled) setRate(next); }, () => undefined); };
-    tick();
-    const timer = window.setInterval(tick, 1000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [client, panelId, enabled]);
-  return rate;
-}
 
 /** Room under the phone for its caption. */
 const FOOTER_PX = 32;

@@ -24,6 +24,8 @@ export interface DeviceTabClient {
   attachToChat(chatPanelId: string, file: File): Promise<void>;
   /** Starts a recording (answering null) or stops it (answering the saved recording). */
   record(panelId: string, action: 'start' | 'stop'): Promise<DeviceRecording | null>;
+  /** When the tab's recording started (epoch ms), or null. */
+  recording(panelId: string): Promise<number | null>;
   logs(panelId: string, since: number): Promise<DeviceLogPage>;
   /** Take over (`person`), or hand the device back to the agent. */
   driver(panelId: string, who: 'person' | 'agent'): Promise<void>;
@@ -55,6 +57,7 @@ export function desktopDeviceClient(remote: boolean): DeviceTabClient {
     stage: async (panelId, agentPanelId, text) => { await unwrap(devices.stage(panelId, agentPanelId, text)); },
     attachToChat: (chatPanelId, file) => addDraftAttachment(window.electronAPI.chatTab, chatPanelId, file),
     record: (panelId, action) => unwrap(devices.record(panelId, action)),
+    recording: panelId => unwrap(devices.recording(panelId)),
     logs: (panelId, since) => unwrap(devices.logs(panelId, since)),
     driver: async (panelId, who) => { await unwrap(devices.driver(panelId, who)); },
     input: async (panelId, input) => { await unwrap(devices.input(panelId, input)); },

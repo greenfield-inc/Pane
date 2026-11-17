@@ -6,6 +6,8 @@ const PAGE_LIMIT = 500;
 const ANDROID_BUFFER = 2_000;
 /** An emulator's log relay stops when no tab has read it for this long. */
 const ANDROID_IDLE_MS = 20_000;
+/** A failed relay keeps saying why this long before the next read starts another. */
+const RELAY_RETRY_MS = 5_000;
 
 const simPageSchema = boundary.object({
   latestSeq: boundary.optional(boundary.number),
@@ -125,10 +127,11 @@ export class EmulatorLogs {
       }
       throw new Error('the log stream ended');
     })().catch((cause: unknown) => {
-      // The next read starts a new relay; this one says why it stopped until then.
-      if (!relay.controller.signal.aborted) relay.problem = `The emulator's log stopped: ${cause instanceof Error ? cause.message : String(cause)}. Pane is reading it again.`;
       clearInterval(idle);
-      end();
+      if (relay.controller.signal.aborted) return end();
+      // The view shows why for a few seconds, then the next read starts a new relay.
+      relay.problem = `The emulator's log stopped: ${cause instanceof Error ? cause.message : String(cause)}. Pane will read it again.`;
+      setTimeout(end, RELAY_RETRY_MS).unref();
     });
     return relay;
   }

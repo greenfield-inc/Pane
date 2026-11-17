@@ -7,7 +7,7 @@ import type { MachineConnections } from '../services/machineConnections';
 import { DEFAULT_DEVICE_SETTINGS } from '../../../shared/types/devices';
 import type { ToolPanel } from '../../../shared/types/panels';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import { isRemotePaneCommand, paneCommandCaller, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
+import { isRemotePaneCommand, paneCommandCaller, paneCommandSignal, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { panelManager } from '../services/panelManager';
 import { defaultProbeEnvironment } from '../services/devices/deviceProbe';
 import { DeviceBusyError, DeviceService, type DeviceCaller, type DeviceChange } from '../services/devices/deviceService';
@@ -15,10 +15,11 @@ import { findExecutableInPath } from '../utils/shellPath';
 import { DeviceInputSockets, inputMessages } from '../services/devices/deviceInput';
 import { StreamFrameRates, hubUrl, sizeStream, streamSize } from '../services/devices/deviceStream';
 import { EmulatorLogs, simulatorLogs } from '../services/devices/deviceLogs';
+import { DeviceDriverGate } from '../services/devices/deviceDriverGate';
 import { terminalPanelManager } from '../services/terminalPanelManager';
-import { bracketedPaste, normalizePromptNewlines, stripTrailingNewlines } from '../services/agents/promptDelivery';
+import { stagedPromptText } from '../services/agents/promptDelivery';
 import { agentLabel } from '../../../shared/agents';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'fs/promises';
 import { refuseRetarget } from '../services/devices/deviceHelpers';
 import { MacUnavailableError, RemoteDevices } from '../services/devices/remoteDevices';
 import { registerMacDeviceHandler, remotePaneName } from './macDevices';
@@ -59,6 +60,9 @@ const emuOrientationSchema = boundary.object({ orientation: boundary.optional(bo
 const inputSockets = new DeviceInputSockets();
 const frameRates = new StreamFrameRates();
 const emulatorLogs = new EmulatorLogs();
+/** Recordings running, by device tab; each stops on its own at RECORDING_LIMIT_MS. */
+const recordings = new Map<string, { startedAt: number; cap: NodeJS.Timeout }>();
+const RECORDING_LIMIT_MS = 10 * 60_000;
 
 /** How device tabs and results name this machine. */
 function localMachineLabel(): string {
@@ -304,15 +308,6 @@ async function openOnMac(services: AppServices, caller: DeviceCaller, device: st
   }
 }
 
-/** How long an agent's device_act waits for the person to hand the device back before it gives up. */
-const PERSON_WAIT_MS = 10 * 60_000;
-const PERSON_POLL_MS = 500;
-/** The driver chip stays this long after an agent's last call, so a run of calls reads as one. */
-const AGENT_DRIVE_LINGER_MS = 2_000;
-const agentDriveTimers = new Map<string, NodeJS.Timeout>();
-/** Agent device calls running now, per device tab, so overlapping calls keep the chip until the last ends. */
-const agentCallsRunning = new Map<string, number>();
-
 /** The device tab of `paneId` for `platform`, or for the platform it opened last. */
 function deviceTabOf(paneId: string, platform: DevicePlatform | undefined): ToolPanel | undefined {
   const wanted = platform ?? lastPlatform.get(paneId);
@@ -327,43 +322,22 @@ function callerAgent(caller: DeviceCaller): string {
   return id ? agentLabel(id) : 'The agent';
 }
 
-function driverOf(panelId: string): DeviceDriver | undefined {
-  const panel = panelManager.getPanel(panelId);
-  return panel ? panelState(panel)?.driver : undefined;
-}
-
 /**
- * Runs an agent's device call as the driver: while the person has taken over, it waits until they
- * hand the device back; then the tab shows the agent driving until shortly after its last call.
+ * Who drives each device tab. An agent's device_act, device_run and device_close wait while the
+ * person has taken over, for 4 minutes: under runpane's 5-minute act timeout, so the agent hears why.
  */
-async function driving<Result>(caller: DeviceCaller, platform: DevicePlatform | undefined, work: () => Promise<Result>): Promise<Result> {
+const drivers = new DeviceDriverGate({
+  read: (tabId) => { const panel = panelManager.getPanel(tabId); return panel ? panelState(panel)?.driver : undefined; },
+  write: async (tabId, driver) => { const panel = panelManager.getPanel(tabId); if (panel) await setPanelState(panel, { driver }); },
+  waitMs: 4 * 60_000,
+  pollMs: 500,
+  lingerMs: 2_000,
+});
+
+/** Runs an agent's device call as the driver of its device tab (see `drivers`). */
+function driving<Result>(caller: DeviceCaller, platform: DevicePlatform | undefined, work: () => Promise<Result>): Promise<Result> {
   const tab = deviceTabOf(caller.paneId, platform);
-  if (!tab) return work();
-  const agent = callerAgent(caller);
-  const deadline = Date.now() + PERSON_WAIT_MS;
-  while (driverOf(tab.id)?.by === 'person') {
-    if (Date.now() > deadline) {
-      await setPanelState(tab, { driver: { by: 'person' } });
-      throw new PaneError('ERR_DEVICE_PERSON_DRIVING', `The person took over this device in its tab and has not handed it back in ${PERSON_WAIT_MS / 60_000} minutes. Nothing ran.`, 'Ask them to press Hand to agent in the device tab, then try again.');
-    }
-    const driver = driverOf(tab.id);
-    if (driver?.by === 'person' && driver.agentWaiting !== agent) await setPanelState(tab, { driver: { by: 'person', agentWaiting: agent } });
-    await new Promise(resolve => setTimeout(resolve, PERSON_POLL_MS));
-  }
-  clearTimeout(agentDriveTimers.get(tab.id));
-  agentCallsRunning.set(tab.id, (agentCallsRunning.get(tab.id) ?? 0) + 1);
-  if (driverOf(tab.id)?.by !== 'agent') await setPanelState(tab, { driver: { by: 'agent', agent } });
-  try {
-    return await work();
-  } finally {
-    const running = (agentCallsRunning.get(tab.id) ?? 1) - 1;
-    if (running > 0) agentCallsRunning.set(tab.id, running);
-    else agentCallsRunning.delete(tab.id);
-    if (running === 0) agentDriveTimers.set(tab.id, setTimeout(() => {
-      agentDriveTimers.delete(tab.id);
-      if (driverOf(tab.id)?.by === 'agent') void setPanelState(tab, { driver: undefined });
-    }, AGENT_DRIVE_LINGER_MS));
-  }
+  return tab ? drivers.run(tab.id, callerAgent(caller), paneCommandSignal(), work) : work();
 }
 
 export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices, commandRegistry: PaneCommandRegistry): void {
@@ -426,48 +400,54 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
   commandRegistry.register('runpane:devices:run', async (request: PaneCommandValue) => {
     const caller = deviceCaller(services);
     const { command, background, waitMs, platform } = decode(request, runSchema, 'devices run');
-    const session = services.sessionManager.getSession(caller.paneId);
-    const macLease = onMac(caller.paneId, platform) ? remote?.leaseOf(caller.paneId) : undefined;
-    if (macLease) {
-      // Builds for a Mac run in Pane's checkout there, synced from this worktree (uncommitted edits included).
-      const ran = await remoteDevices(services).run(caller.paneId, session?.worktreePath ?? process.cwd(), command, { background: background === true, waitMs: waitMs ?? RUN_WAIT_MS });
-      const result: DeviceRunResult = { ok: true, synced: ran.synced, machine: macLease.macName };
-      if (ran.job) {
-        result.cwd = ran.job.cwd;
-        result.jobId = ran.job.jobId;
-        result.state = ran.job.state;
-        result.logTail = ran.job.logTail;
-        if (ran.job.exitCode !== undefined) result.exitCode = ran.job.exitCode;
+    // Waits while the person has taken over this device, like device_act.
+    return driving(caller, platform, async () => {
+      const session = services.sessionManager.getSession(caller.paneId);
+      const macLease = onMac(caller.paneId, platform) ? remote?.leaseOf(caller.paneId) : undefined;
+      if (macLease) {
+        // Builds for a Mac run in Pane's checkout there, synced from this worktree (uncommitted edits included).
+        const ran = await remoteDevices(services).run(caller.paneId, session?.worktreePath ?? process.cwd(), command, { background: background === true, waitMs: waitMs ?? RUN_WAIT_MS });
+        const result: DeviceRunResult = { ok: true, synced: ran.synced, machine: macLease.macName };
+        if (ran.job) {
+          result.cwd = ran.job.cwd;
+          result.jobId = ran.job.jobId;
+          result.state = ran.job.state;
+          result.logTail = ran.job.logTail;
+          if (ran.job.exitCode !== undefined) result.exitCode = ran.job.exitCode;
+        }
+        return result;
       }
+      devices().held(caller.paneId, platform);
+      if (!command) return { ok: true, synced: false, cwd: session?.worktreePath };
+      const { jobId, state, exitCode, logTail } = await devices().run(caller.paneId, command, session?.worktreePath ?? process.cwd(), { background: background === true, waitMs: waitMs ?? RUN_WAIT_MS });
+      const result: DeviceRunResult = { ok: true, cwd: session?.worktreePath ?? process.cwd(), machine: localMachineName(), jobId, state, logTail };
+      if (exitCode !== undefined) result.exitCode = exitCode;
       return result;
-    }
-    devices().held(caller.paneId, platform);
-    if (!command) return { ok: true, synced: false, cwd: session?.worktreePath };
-    const { jobId, state, exitCode, logTail } = await devices().run(caller.paneId, command, session?.worktreePath ?? process.cwd(), { background: background === true, waitMs: waitMs ?? RUN_WAIT_MS });
-    const result: DeviceRunResult = { ok: true, cwd: session?.worktreePath ?? process.cwd(), machine: localMachineName(), jobId, state, logTail };
-    if (exitCode !== undefined) result.exitCode = exitCode;
-    return result;
+    });
   });
 
   commandRegistry.register('runpane:devices:close', async (request: PaneCommandValue) => {
     const caller = deviceCaller(services);
     const { platform } = decode(request, targetSchema, 'devices close');
-    // No platform closes every device the Pane holds, here and on a linked Mac.
-    const closed: string[] = [];
-    let jobsStopped = 0;
-    const macLease = remote?.leaseOf(caller.paneId);
-    if (macLease && (platform === undefined || platform === macLease.platform)) {
-      const onTheMac = await remoteDevices(services).close(caller.paneId);
-      closed.push(...onTheMac.closed);
-      jobsStopped += onTheMac.jobsStopped;
-      for (const panel of devicePanels(caller.paneId)) if (panelState(panel)?.machineId) await setPanelState(panel, { phase: 'closed' });
-    }
-    if (platform === undefined || !macLease || platform !== macLease.platform) {
-      const here = await devices().close(caller, platform);
-      closed.push(...here.closed);
-      jobsStopped += here.jobsStopped;
-    }
-    return { ok: true, closed, jobsStopped };
+    // Waits while the person has taken over this device, like device_act.
+    return driving(caller, platform, async () => {
+      // No platform closes every device the Pane holds, here and on a linked Mac.
+      const closed: string[] = [];
+      let jobsStopped = 0;
+      const macLease = remote?.leaseOf(caller.paneId);
+      if (macLease && (platform === undefined || platform === macLease.platform)) {
+        const onTheMac = await remoteDevices(services).close(caller.paneId);
+        closed.push(...onTheMac.closed);
+        jobsStopped += onTheMac.jobsStopped;
+        for (const panel of devicePanels(caller.paneId)) if (panelState(panel)?.machineId) await setPanelState(panel, { phase: 'closed' });
+      }
+      if (platform === undefined || !macLease || platform !== macLease.platform) {
+        const here = await devices().close(caller, platform);
+        closed.push(...here.closed);
+        jobsStopped += here.jobsStopped;
+      }
+      return { ok: true, closed, jobsStopped };
+    });
   });
 
   commandRegistry.register('runpane:devices:usage', async () => {
@@ -486,6 +466,7 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
   // Both read what they saved, so archiving after a restart still erases Pane's devices and cleans the Mac's checkout.
   services.sessionManager.on('session-deleted', ({ id }: { id: string }) => {
     lastPlatform.delete(id);
+    sweepCaptures(id).catch((cause) => console.warn(`[devices] removing ${id}'s screenshots and recordings failed: ${reasonOf(cause)}`));
     devices().paneArchived(id).catch((cause) => console.warn(`[devices] archive cleanup for ${id} failed: ${reasonOf(cause)}`));
     remoteDevices(services).archived(id).catch((cause) => console.warn(`[devices] archive cleanup on the Mac for ${id} failed: ${reasonOf(cause)}`));
   });
@@ -509,6 +490,39 @@ async function respond<Data>(work: () => Promise<Data> | Data): Promise<IpcRespo
  * own (agents reach runpane commands), so the person can drive any device their tab shows.
  * Settings > Devices is about this computer, so its channels stay local.
  */
+/** Deletes the screenshots and recordings of an archived Pane (their names start with its id). */
+async function sweepCaptures(paneId: string): Promise<void> {
+  for (const kind of ['screenshots', 'recordings']) {
+    const folder = path.join(getAppDirectory(), 'devices', kind);
+    const names = await readdir(folder).catch(() => []);
+    await Promise.all(names.filter(name => name.startsWith(`${paneId}-`)).map(name => rm(path.join(folder, name), { force: true })));
+  }
+}
+
+/** Android key codes (KeyEvent) for the named keys a person types into an emulator. */
+const ANDROID_KEYCODES = new Map([['Enter', 66], ['Backspace', 67], ['Delete', 112], ['Tab', 61], ['Escape', 111], ['ArrowUp', 19], ['ArrowDown', 20], ['ArrowLeft', 21], ['ArrowRight', 22]]);
+
+/** A scroll gathered per emulator until the wheel rests, so one flick is one swipe. */
+const SCROLL_SETTLE_MS = 120;
+/** Shorter swipes would land as taps. */
+const MIN_SWIPE = 0.03;
+const pendingScrolls = new Map<string, { x: number; y: number; dx: number; dy: number; timer: NodeJS.Timeout }>();
+
+function scrollEmulator(service: DeviceService, deviceId: string, input: Extract<DeviceInput, { kind: 'scroll' }>): void {
+  const pending = pendingScrolls.get(deviceId);
+  if (pending) clearTimeout(pending.timer);
+  const scroll = { x: pending?.x ?? input.x, y: pending?.y ?? input.y, dx: (pending?.dx ?? 0) + input.dx, dy: (pending?.dy ?? 0) + input.dy };
+  pendingScrolls.set(deviceId, { ...scroll, timer: setTimeout(() => {
+    pendingScrolls.delete(deviceId);
+    // The swipe runs the other way from the pointer, as a finger drags content.
+    const to = (from: number, delta: number) => Math.min(1, Math.max(0, from - delta));
+    const x2 = to(scroll.x, scroll.dx);
+    const y2 = to(scroll.y, scroll.dy);
+    if (Math.hypot(x2 - scroll.x, y2 - scroll.y) < MIN_SWIPE) return;
+    void service.emulatorCall(deviceId, 'swipe', { x1: scroll.x, y1: scroll.y, x2, y2 }).catch(() => undefined);
+  }, SCROLL_SETTLE_MS) });
+}
+
 /** Where each emulator's current touch began: a touch becomes a tap, or a swipe when it moved. */
 const touchStarts = new Map<string, { x: number; y: number }>();
 const TAP_SLOP = 0.02;
@@ -527,15 +541,14 @@ async function emulatorInput(service: DeviceService, deviceId: string, input: De
     return;
   }
   if (input.kind === 'key') {
-    // An emulator types text; Enter and Backspace have no key route there, so they are typed as text too.
-    const text = input.key === 'Enter' ? '\n' : input.key.length === 1 ? input.key : undefined;
-    if (text !== undefined) await service.emulatorCall(deviceId, 'text', { text });
+    // A character is typed as text; Enter, Backspace, arrows and the like are Android key codes.
+    const keycode = ANDROID_KEYCODES.get(input.key);
+    if (keycode !== undefined) await service.emulatorCall(deviceId, 'key', { keycode });
+    else if (input.key.length === 1) await service.emulatorCall(deviceId, 'text', { text: input.key });
     return;
   }
   if (input.kind === 'scroll') {
-    // An emulator scrolls by a swipe the other way, from the pointer.
-    const to = (from: number, delta: number) => Math.min(1, Math.max(0, from - delta));
-    await service.emulatorCall(deviceId, 'swipe', { x1: input.x, y1: input.y, x2: to(input.x, input.dx), y2: to(input.y, input.dy) });
+    scrollEmulator(service, deviceId, input);
     return;
   }
   if (input.phase === 'begin') {
@@ -692,29 +705,17 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     if (!target || target.sessionId !== panel.sessionId || target.type !== 'terminal' || content === undefined) {
       throw new PaneError('ERR_DEVICE_STAGE_TARGET', 'That agent tab is gone from this Pane, so nothing was typed.', 'Open the agent tab again, then try once more.');
     }
-    const staged = stripTrailingNewlines(normalizePromptNewlines(content));
-    terminalPanelManager.writeToTerminal(target.id, terminalPanelManager.isBracketedPasteEnabled(target.id) ? bracketedPaste(staged) : staged.replace(/\n+/gu, ' '));
+    terminalPanelManager.writeToTerminal(target.id, stagedPromptText(content, terminalPanelManager.isBracketedPasteEnabled(target.id)));
     return true;
   }));
 
   /** Starts a screen recording, or stops it and returns the MP4 (beside screenshots on the host, or on the linked Mac). */
-  commandRegistry.register('devices:record', (panelId: PaneCommandValue, action: PaneCommandValue) => respond(async (): Promise<DeviceRecording | null> => {
-    const { panel, state } = panelOf(panelId);
-    if (!state.deviceId || state.phase !== 'live') throw new PaneError('ERR_DEVICE_OFF', 'The device is not running, so there is nothing to record.', 'Boot it from the device tab.');
+  /** Stops the tab's recording and returns the MP4 (beside screenshots on the host, or on the linked Mac). */
+  const stopRecording = async (panel: ToolPanel, state: DevicePanelState): Promise<DeviceRecording> => {
+    clearTimeout(recordings.get(panel.id)?.cap);
+    recordings.delete(panel.id);
     const caller = ownerOf(panel);
-    const act = (args: string[]) => state.machineId ? remoteDevices(services).act(caller.paneId, args) : devices().act(caller, args, state.platform);
-    if (action === 'start') {
-      const args = ['record', 'start'];
-      if (!state.machineId) {
-        const folder = path.join(getAppDirectory(), 'devices', 'recordings');
-        await mkdir(folder, { recursive: true });
-        args.push(path.join(folder, `${caller.paneId}-${Date.now()}.mp4`));
-      }
-      const started = await act([...args, '--scope', 'device', '--hide-touches']);
-      if (started.exitCode !== 0) throw new PaneError('ERR_DEVICE_RECORD', `The recording did not start: ${lastLine(started.output)}.`, 'Try again; if an agent is recording this device, wait for it to stop.');
-      return null;
-    }
-    const stopped = await act(['record', 'stop', '--json']);
+    const stopped = state.machineId ? await remoteDevices(services).act(caller.paneId, ['record', 'stop', '--json']) : await devices().act(caller, ['record', 'stop', '--json'], state.platform);
     // The path is a JSON string in agent-device's --json output: decode its escapes (Windows backslashes).
     const quoted = /"(?:path|outPath|output)"\s*:\s*("(?:[^"\\]|\\.)+\.mp4")/.exec(stopped.output)?.[1];
     const file = quoted ? decodeOptionalBoundary(JSON.parse(quoted), boundary.string) : /(\S+\.mp4)/.exec(stopped.output)?.[1];
@@ -722,6 +723,35 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     const recording: DeviceRecording = { path: file };
     if (state.machineId) recording.machine = state.machine;
     return recording;
+  };
+
+  /**
+   * Starts a screen recording, or stops it and returns the MP4. A recording belongs to the tab in
+   * main, so it keeps going while the tab is not shown, and stops on its own after 10 minutes.
+   */
+  commandRegistry.register('devices:record', (panelId: PaneCommandValue, action: PaneCommandValue) => respond(async (): Promise<DeviceRecording | null> => {
+    const { panel, state } = panelOf(panelId);
+    if (!state.deviceId || state.phase !== 'live') throw new PaneError('ERR_DEVICE_OFF', 'The device is not running, so there is nothing to record.', 'Boot it from the device tab.');
+    if (action !== 'start') return stopRecording(panel, state);
+    const caller = ownerOf(panel);
+    const args = ['record', 'start'];
+    if (!state.machineId) {
+      const folder = path.join(getAppDirectory(), 'devices', 'recordings');
+      await mkdir(folder, { recursive: true });
+      args.push(path.join(folder, `${caller.paneId}-${Date.now()}.mp4`));
+    }
+    const started = state.machineId ? await remoteDevices(services).act(caller.paneId, [...args, '--scope', 'device', '--hide-touches']) : await devices().act(caller, [...args, '--scope', 'device', '--hide-touches'], state.platform);
+    if (started.exitCode !== 0) throw new PaneError('ERR_DEVICE_RECORD', `The recording did not start: ${lastLine(started.output)}.`, 'Try again; if an agent is recording this device, wait for it to stop.');
+    const cap = setTimeout(() => { void stopRecording(panel, state).catch((cause) => console.warn(`[devices] stopping a recording at its limit failed: ${reasonOf(cause)}`)); }, RECORDING_LIMIT_MS);
+    cap.unref();
+    recordings.set(panel.id, { startedAt: Date.now(), cap });
+    return null;
+  }));
+
+  /** When the tab's recording started (epoch ms), or null when it is not recording: a tab shown again picks up its clock. */
+  commandRegistry.register('devices:recording', (panelId: PaneCommandValue) => respond(() => {
+    const { panel } = panelOf(panelId);
+    return recordings.get(panel.id)?.startedAt ?? null;
   }));
 
   /** The device's app log after `since`, for the tab's Logs view. */
@@ -740,7 +770,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
   /** Take over (the person drives; the agent's device calls wait) and Hand to agent. */
   commandRegistry.register('devices:driver', (panelId: PaneCommandValue, who: PaneCommandValue) => respond(async () => {
     const { panel } = panelOf(panelId);
-    await setPanelState(panel, { driver: who === 'person' ? { by: 'person' } : undefined });
+    await drivers.set(panel.id, who === 'person' ? { by: 'person' } : undefined);
     return true;
   }));
 
@@ -752,6 +782,8 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
 
   commandRegistry.register('devices:visible', (panelId: PaneCommandValue, clientId: PaneCommandValue, visible: PaneCommandValue) => respond(async () => {
     const { panel, state } = panelOf(panelId);
+    // A driver saved before Pane restarted is stale: no call is running and no one has taken over.
+    await drivers.driver(panel.id);
     if (state.machineId) await remoteDevices(services).visible(panel.sessionId, visible === true);
     else if (state.deviceId && service) service.lifecycle.setVisible(panel.sessionId, state.deviceId, String(clientId), visible === true);
     return true;

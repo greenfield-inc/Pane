@@ -10,6 +10,10 @@ const ROTATE = 7;
 const SCROLL = 11;
 const POSTURE = 16;
 const COMMIT = 17;
+/** One key in the hub's key message: its HID usage, whether Shift makes it, and the character it types. */
+interface KeyPress { usage: number; shifted: boolean; key?: string }
+/** HID usage of the left Shift key. */
+const LEFT_SHIFT = 225;
 /** The hub's pose for each posture the tab offers. */
 const POSES = { closed: 'closed', half: 'laptop', open: 'open' } as const;
 const IDLE_CLOSE_MS = 60_000;
@@ -22,7 +26,7 @@ type InputBody =
   | { type: 'begin' | 'move' | 'end'; x: number; y: number }
   | { button: 'home' | 'back' }
   | { type: 'home' | 'back' }
-  | { type: 'down' | 'up'; usage: number; shifted: boolean }
+  | { type: 'down' | 'up'; usage: number; key?: string; shifted?: boolean }
   | { orientation: string }
   | { dx: number; dy: number; x: number; y: number }
   | { requestId: number; command: { control: 'pose'; value: string } };
@@ -69,7 +73,12 @@ export function inputMessages(input: DeviceInput, platform: 'ios' | 'android'): 
   if (input.kind === 'scroll') return [frame(SCROLL, { x: clamp(input.x), y: clamp(input.y), dx: input.dx, dy: input.dy })];
   const key = hidKey(input.key);
   if (!key) return [];
-  return [frame(KEY, { type: 'down', ...key }), frame(KEY, { type: 'up', ...key })];
+  // `key` lets the hub type the character itself when the simulator has no hardware keyboard;
+  // with one, Shift is pressed around the key so capitals and symbols arrive shifted.
+  const press: KeyPress = { usage: key.usage, shifted: key.shifted };
+  if (input.key.length === 1) press.key = input.key;
+  const keyPress = [frame(KEY, { type: 'down', ...press }), frame(KEY, { type: 'up', ...press })];
+  return key.shifted ? [frame(KEY, { type: 'down', usage: LEFT_SHIFT }), ...keyPress, frame(KEY, { type: 'up', usage: LEFT_SHIFT })] : keyPress;
 }
 
 function clamp(value: number): number {

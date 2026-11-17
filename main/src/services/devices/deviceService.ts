@@ -19,6 +19,8 @@ const SWEEP_MS = 30_000;
 const SHUTDOWN_WAIT_MS = 60_000;
 const JPEG_START = Buffer.from([0xff, 0xd8]);
 const JPEG_END = Buffer.from([0xff, 0xd9]);
+/** How long a device listing answers the device tab's frequent lookups. */
+const RECENT_LISTING_MS = 5_000;
 const PANE_DEVICE_NAMES = { ios: 'Pane iPhone', android: 'Pane_Android' } satisfies Record<DevicePlatform, string>;
 
 /** A Pane-made device, as the state file keeps it. */
@@ -107,6 +109,7 @@ export class DeviceService {
   private selectedEmulator?: string;
   /** The last frame read of each device, kept for its off and closed states. */
   private readonly lastFrames = new Map<string, Buffer>();
+  private listed?: { at: number; devices: Promise<HubDevice[]> };
   /** The platform each Pane opened last: calls without a platform act on it. */
   private readonly lastOpened = new Map<string, DevicePlatform>();
   /** The pick-and-lease in progress for each platform. */
@@ -383,7 +386,7 @@ export class DeviceService {
   /** Where main reads the device's screen and sends input. The token never leaves main. */
   async stream(id: string): Promise<DeviceStreamInfo> {
     const hub = await this.ensureHub();
-    const device = (await this.devices()).find(candidate => candidate.id === id);
+    const device = await this.recentDevice(id);
     if (!device) throw new PaneError('ERR_DEVICE_NOT_FOUND', 'That device is gone from this machine.', 'Open a device again with device_open.');
     const base = `127.0.0.1:${hub.port}`;
     if (device.platform === 'ios') {
@@ -419,7 +422,8 @@ export class DeviceService {
   /** An Android emulator's REST call on the hub (serve-emu), after selecting that emulator; a GET when `body` is undefined. */
   async emulatorCall(id: string, route: 'screenshot' | 'tap' | 'swipe' | 'key' | 'text' | 'orientation' | 'fold', body?: EmulatorRequest): Promise<Response> {
     const hub = await this.ensureHub();
-    const device = (await this.devices()).find(candidate => candidate.id === id && candidate.platform === 'android');
+    const found = await this.recentDevice(id);
+    const device = found?.platform === 'android' ? found : undefined;
     if (!device?.serial) throw new PaneError('ERR_DEVICE_OFF', 'That emulator is not running.', 'Boot it from the device tab or with device_open.');
     if (this.selectedEmulator !== device.serial) {
       await hub.post('/vendor/serve-emu/api/devices/select', { serial: device.serial });
@@ -688,6 +692,21 @@ export class DeviceService {
     return path.join(this.options.root, 'agent-device');
   }
 
+  /**
+   * A device from a listing at most a few seconds old: the device tab's controls, logs and frames
+   * ask several times a second, and each listing makes the hub ask simctl and adb. A device missing
+   * from it (one just booted) is looked up again.
+   */
+  private async recentDevice(id: string): Promise<HubDevice | undefined> {
+    const now = this.now();
+    if (!this.listed || now - this.listed.at > RECENT_LISTING_MS) this.listed = { at: now, devices: this.devices() };
+    const listing = this.listed;
+    const cached = (await listing.devices.catch((cause) => { if (this.listed === listing) this.listed = undefined; throw cause; })).find(candidate => candidate.id === id);
+    if (cached) return cached;
+    this.listed = { at: this.now(), devices: this.devices() };
+    return (await this.listed.devices).find(candidate => candidate.id === id);
+  }
+
   private ensureHub(onInstall?: () => void): Promise<RunningHub> {
     this.hub ??= (async () => {
       const paths = await this.helpers.ensure(() => { onInstall?.(); this.options.onInstall?.(); });
@@ -939,6 +958,7 @@ export type EmulatorRequest =
   | { x: number; y: number }
   | { x1: number; y1: number; x2: number; y2: number }
   | { key: 'home' | 'back' }
+  | { keycode: number }
   | { text: string }
   | { orientation: string }
   | { posture: 'closed' | 'opened' }

@@ -127,8 +127,8 @@ the disk freed.
 ## The device tab
 
 The phone fills the tab at the screen's real shape, so a turned phone, an iPad or a folded
-device shows whole, and taps land where you click. On the desktop the screen streams live,
-sized to the tab, with its frame rate under the phone. The rail beside it holds:
+device shows whole, and taps land where you click. On the desktop an iOS screen streams live,
+sized to the tab, with its frame rate under the phone; Android shows frames. The rail beside it holds:
 
 | Control | Shortcut | What it does |
 | --- | --- | --- |
@@ -136,16 +136,18 @@ sized to the tab, with its frame rate under the phone. The rail beside it holds:
 | Rotate | ⌘→ | Turns the device a quarter turn |
 | Closed, Half open, Open | | Folds a foldable; shown only when the device has a hinge |
 | Screenshot to chat | ⌘S | Takes a full-resolution PNG and puts it in front of this Pane's agent, unsent: in a chat tab's message box, or as the file's path at a terminal agent's prompt. The card that follows offers Copy, Save and Mark up |
-| Record | ⌘R | Starts and stops a screen recording (MP4, saved with Pane's device files); a terminal agent gets its path at the prompt |
+| Record | ⌘R | Starts and stops a screen recording (MP4, saved with Pane's device files). It keeps going while you look at another tab and stops on its own after 10 minutes. A terminal agent gets its path at the prompt; a chat tab does not get recordings |
 | Mark up | | Freezes the screen so you can draw on it, then sends or copies the result |
-| Logs | | Shows the app's log live, with a filter; **To chat** sends the selected or matching lines |
+| Logs | | Shows the log live, with a filter: on iOS the apps you installed, on Android the whole logcat. **To chat** sends the selected or matching lines |
 | More | | Copy screenshot, Save screenshot, Restart, Shut down |
 
 With the tab focused, typing goes to the device and the scroll wheel scrolls it.
 
 While an agent's `device_act` runs, the phone is outlined and the line under it says the agent
-is driving. **Take over** makes you the driver: the agent's `device_act` calls wait until you
-press **Hand to agent**, and fail after 10 minutes with `ERR_DEVICE_PERSON_DRIVING`.
+is driving. **Take over** makes you the driver: the agent's `device_act`, `device_run` and
+`device_close` calls wait until you press **Hand to** and the agent's name. A call that waits 4
+minutes fails with `ERR_DEVICE_PERSON_DRIVING`, before runpane's own 5-minute timeout, and one
+whose caller gives up never runs. Screenshots and recordings are deleted when the Pane is archived.
 
 ## Phones and the browser app
 

@@ -164,6 +164,7 @@ test('while the agent drives, the chip names it and Take over hands the device t
   await open(page, 'view=pane&driver=agent');
   await expect(page.getByTestId('device-driver')).toContainText('is driving');
   await page.getByTestId('device-driver').getByRole('button', { name: 'Take over' }).click();
+  await expect.poll(() => page.evaluate(() => window.qaPower)).toEqual(['driver:person']);
   await open(page, 'view=pane&driver=person');
   await expect(page.getByTestId('device-driver')).toContainText("You're driving");
   await page.getByTestId('device-driver').getByRole('button', { name: /Hand to/ }).click();

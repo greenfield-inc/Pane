@@ -17,16 +17,21 @@ describe('inputMessages for a simulator', () => {
     expect(message).toMatchObject({ byte: 16, body: { command: { control: 'pose', value: 'laptop' } } });
   });
 
-  it('types a capital letter as its HID key pressed and released with Shift', () => {
+  it('types a capital letter with Shift held around its key, naming the character for the hub', () => {
     expect(decoded(inputMessages({ kind: 'key', key: 'A' }, 'ios'))).toEqual([
-      { byte: 6, body: { type: 'down', usage: 4, shifted: true } },
-      { byte: 6, body: { type: 'up', usage: 4, shifted: true } },
+      { byte: 6, body: { type: 'down', usage: 225 } },
+      { byte: 6, body: { type: 'down', usage: 4, shifted: true, key: 'A' } },
+      { byte: 6, body: { type: 'up', usage: 4, shifted: true, key: 'A' } },
+      { byte: 6, body: { type: 'up', usage: 225 } },
     ]);
   });
 
   it('types Enter and a shifted symbol by their US keyboard usages, and ignores keys a phone has no use for', () => {
-    expect(decoded(inputMessages({ kind: 'key', key: 'Enter' }, 'ios'))[0]).toEqual({ byte: 6, body: { type: 'down', usage: 40, shifted: false } });
-    expect(decoded(inputMessages({ kind: 'key', key: '?' }, 'ios'))[0]).toEqual({ byte: 6, body: { type: 'down', usage: 56, shifted: true } });
+    expect(decoded(inputMessages({ kind: 'key', key: 'Enter' }, 'ios'))).toEqual([
+      { byte: 6, body: { type: 'down', usage: 40, shifted: false } },
+      { byte: 6, body: { type: 'up', usage: 40, shifted: false } },
+    ]);
+    expect(decoded(inputMessages({ kind: 'key', key: '?' }, 'ios'))[1]).toEqual({ byte: 6, body: { type: 'down', usage: 56, shifted: true, key: '?' } });
     expect(inputMessages({ kind: 'key', key: 'F5' }, 'ios')).toEqual([]);
   });
 
