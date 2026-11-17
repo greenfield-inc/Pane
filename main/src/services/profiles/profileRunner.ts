@@ -64,6 +64,8 @@ export interface ProfileRunnerPorts {
   /** Whether a tab still exists. */
   tabExists(panelId: string): boolean;
   postCard(card: RunCard): void;
+  /** Whether a card still waits in Approvals (one that closed while Pane was down does not). */
+  cardOpen(approvalId: string): boolean;
   /** The answer to a card; undefined when it was closed without one. Waits across restarts by id. */
   waitCard(approvalId: string): Promise<string | undefined>;
   log(message: string): void;
@@ -385,12 +387,13 @@ export class ProfileRunner {
       this.ports.log(`[Profiles] Run ${run.id} follows ${run.profile}, which is not valid now; it waits until the profile is fixed.`);
       return;
     }
-    if (run.wait.kind === 'card' && run.wait.approvalId) {
+    if (run.wait.kind === 'card' && run.wait.approvalId && this.ports.cardOpen(run.wait.approvalId)) {
       this.listen(run.id, run.wait.approvalId, profile.name);
       return;
     }
     if (run.wait.kind === 'card' || (run.wait.kind === 'step' && !run.wait.panelId)) {
-      // Pane stopped between saving a move and doing it: do it now, once.
+      // Pane stopped between saving a move and doing it, or its card closed with Pane (Approvals
+      // closes a card whose asker has no tab when it starts): do it now, once.
       await this.apply(run.id, profile, { run, effect: this.unfinishedEffect(run, profile) });
       return;
     }
