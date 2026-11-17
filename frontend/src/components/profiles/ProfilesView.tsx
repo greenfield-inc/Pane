@@ -95,6 +95,7 @@ function RunRow({ run, onChanged }: { run: ProfileRun; onChanged: () => void }) 
         {live && <Button size="sm" variant="secondary" onClick={() => void act(() => API.profiles.stop(run.id))}>Stop</Button>}
       </div>
       {(run.error || error) && <p className="text-xs text-status-error">{error ?? run.error}</p>}
+      {run.attention && <p className="text-xs text-status-warning" data-testid="profile-run-attention">{run.attention}</p>}
     </div>
   );
 }
