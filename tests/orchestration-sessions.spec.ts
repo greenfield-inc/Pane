@@ -700,7 +700,7 @@ test('Sessions create, rename, switch, and keep chat surfaces focused', async ({
   await expect(createDialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
   await createDialog.getByTestId('create-session-agent-codex').click();
   await expect(createDialog.getByRole('button', { name: 'Create Session', exact: true })).toBeInViewport();
-  await expect(createDialog.getByLabel('Session behavior profile')).toHaveCount(0);
+  await expect(createDialog.getByLabel('Session behavior', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: '/tmp/pane-session-create-compact.png' });
   await expect(createDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
   await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
@@ -1946,20 +1946,20 @@ test('Session launch settings preserve custom arguments, profile, and agent acro
   await createDialog.getByLabel('Session name (optional)').fill('Launch settings');
   await createDialog.getByText('Launch command and behavior', { exact: true }).click();
   await expect(createDialog.getByRole('button', { name: 'Create Session', exact: true })).toBeInViewport();
-  await expect(createDialog.getByLabel('Session behavior profile')).toHaveCount(0);
+  await expect(createDialog.getByLabel('Session behavior', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: '/tmp/pane-session-create-compact.png' });
   await expect(createDialog.getByRole('radio', { name: 'Codex', exact: true })).toBeChecked();
   await expect(createDialog.getByLabel('Custom command and arguments')).toHaveValue('codex --model default-model');
   await createDialog.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Discuss the goal before delegating.');
-  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile').fill('Discard this draft.');
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Discuss the goal before delegating.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true }).fill('Discard this draft.');
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
   await createDialog.getByLabel('Launch command', { exact: true }).selectOption({ label: 'Agent Farm' });
   await expect(createDialog.getByLabel('Custom command and arguments')).toHaveValue(savedCommand);
   await createDialog.getByLabel('Custom command and arguments').fill(launchCommand);
   await createDialog.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Discuss the goal before delegating.');
-  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile').fill('Use the requested workflow.\nReport blockers.');
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Discuss the goal before delegating.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true }).fill('Use the requested workflow.\nReport blockers.');
   await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior' })).toBeInViewport();
   await page.screenshot({ path: '/tmp/pane-session-behavior-editor.png' });
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
@@ -1972,13 +1972,13 @@ test('Session launch settings preserve custom arguments, profile, and agent acro
   const settings = page.getByRole('dialog', { name: 'Session settings', exact: true });
   await expect(settings.getByLabel('Custom command and arguments')).toHaveValue(launchCommand);
   await settings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Use the requested workflow.\nReport blockers.');
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Use the requested workflow.\nReport blockers.');
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
   await expect(settings.getByText(/Saved changes apply the next time/)).toBeVisible();
   await settings.getByLabel('Launch command', { exact: true }).selectOption('builtin');
   await expect(settings.getByLabel('Custom command and arguments')).toHaveValue('');
   await settings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile').fill('Keep implementation in associated Panes.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true }).fill('Keep implementation in associated Panes.');
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
   await settings.getByRole('button', { name: 'Save for next launch', exact: true }).click();
   await expect(settings).not.toBeVisible();
@@ -1988,7 +1988,7 @@ test('Session launch settings preserve custom arguments, profile, and agent acro
   await page.getByRole('button', { name: 'Session settings', exact: true }).click();
   await expect(settings.getByLabel('Custom command and arguments')).toHaveValue('');
   await settings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Keep implementation in associated Panes.');
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Keep implementation in associated Panes.');
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
 });
 
@@ -2065,7 +2065,7 @@ test('Session app defaults save for new Sessions without changing existing launc
   await appSettings.getByRole('button', { name: 'AI & Agents', exact: true }).click();
   await appSettings.getByLabel('Custom command and arguments').fill('af run coordinator --quiet');
   await appSettings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile').fill('Coordinate only the requested work.');
+  await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true }).fill('Coordinate only the requested work.');
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Save behavior', exact: true }).click();
   await appSettings.getByRole('button', { name: 'Apply Session defaults', exact: true }).click();
   await expect(appSettings.getByRole('button', { name: 'Apply Session defaults', exact: true })).toBeDisabled();
@@ -2076,7 +2076,7 @@ test('Session app defaults save for new Sessions without changing existing launc
   await createDialog.getByText('Launch command and behavior', { exact: true }).click();
   await expect(createDialog.getByLabel('Custom command and arguments')).toHaveValue('af run coordinator --quiet');
   await createDialog.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Coordinate only the requested work.');
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Coordinate only the requested work.');
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
   await createDialog.getByRole('button', { name: 'Create Session', exact: true }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'New chat', exact: true })).toBeAttached();
@@ -2084,14 +2084,14 @@ test('Session app defaults save for new Sessions without changing existing launc
   const sessionSettings = page.getByRole('dialog', { name: 'Session settings', exact: true });
   await expect(sessionSettings.getByLabel('Custom command and arguments')).toHaveValue('af run coordinator --quiet');
   await sessionSettings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Coordinate only the requested work.');
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Coordinate only the requested work.');
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
   await sessionSettings.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.getByTestId('orchestration-session-existing').click();
   await page.getByRole('button', { name: 'Session settings', exact: true }).click();
   await expect(sessionSettings.getByLabel('Custom command and arguments')).toHaveValue('codex --model existing');
   await sessionSettings.getByRole('button', { name: 'Edit behavior…', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior profile')).toHaveValue('Keep this Session profile.');
+  await expect(page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByLabel('Session behavior', { exact: true })).toHaveValue('Keep this Session profile.');
   await page.getByRole('dialog', { name: 'Edit Session behavior', exact: true }).getByRole('button', { name: 'Back', exact: true }).click();
 });
 

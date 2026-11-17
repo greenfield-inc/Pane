@@ -557,8 +557,8 @@ the agent:
   since its cards can't be answered; the agents keep waiting. After reconnecting
   the screen shows what is waiting there now. Autopilot says "<machine> offline".
 - **Your phone**: the Pane app lists approvals on home's **Needs you** tile, in
-  the same three sorts (chosen on its sort sheet), and an item opens above its
-  Session's tabs and chat. A question still waiting after
+  the same three sorts (chosen on its sort sheet), and an item opens as the
+  first tab, before its references and its Session's tabs and chat. A question still waiting after
   about 90 seconds sends one alert to every phone signed
   in to the host in the Pane app with notifications allowed and **Needs
   Input** on. The alert is titled with the Pane's name and says only "<Pane>

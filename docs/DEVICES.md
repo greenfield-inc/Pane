@@ -7,7 +7,7 @@ with no SSH setup.
 
 ## The tools
 
-Every agent gets six device tools through Pane's MCP server, and every terminal has the same
+Every agent gets eight device tools through Pane's MCP server, and every terminal has the same
 commands as `runpane devices`. Pane fills in the Pane, the device and the machine: after
 `device_open`, an agent never names them again.
 
@@ -19,6 +19,8 @@ commands as `runpane devices`. Pane fills in the Pane, the device and the machin
 | `device_act` | `runpane devices act -- snapshot -i` | Runs an [agent-device](https://github.com/callstack/agent-device) command on the device |
 | `device_run` | `runpane devices run -- npx expo run:ios` | Runs a command where the device runs, such as a build, or Metro with `--background` |
 | `device_close` | `runpane devices close` | Ends the lease and stops the commands `device_run` started |
+| `device_usage` | `runpane devices usage` | Every simulator and emulator on this machine, with the memory and disk they use (see below) |
+| `device_free` | `runpane devices free --idle` | Shuts down unused devices; `--all` also deletes Pane's unused devices and build checkouts |
 
 A Pane can hold an iPhone and an Android emulator at once. `device_screenshot`, `device_act`,
 `device_run` and `device_close` act on the device it opened last; pass `--platform ios` or
@@ -124,11 +126,37 @@ linked computers sync here. `runpane devices free --idle --yes` shuts down unuse
 devices; `--all` also deletes them and the checkouts no Pane holds a device for, and reports
 the disk freed.
 
+## The device tab
+
+The phone fills the tab at the screen's real shape, so a turned phone, an iPad or a folded
+device shows whole, and taps land where you click. On the desktop an iOS screen streams live,
+sized to the tab, with its frame rate under the phone; Android shows frames. The rail beside it holds:
+
+| Control | Shortcut | What it does |
+| --- | --- | --- |
+| Home | ⇧⌘H | Presses Home |
+| Rotate | ⌘→ | Turns the device a quarter turn |
+| Closed, Half open, Open | | Folds a foldable; shown only when the device has a hinge |
+| Screenshot to chat | ⌘S | Takes a full-resolution PNG and puts it in front of this Pane's agent, unsent: in a chat tab's message box, or as the file's path at a terminal agent's prompt. The card that follows offers Copy, Save and Mark up |
+| Record | ⌘R | Starts and stops a screen recording (MP4, saved with Pane's device files). It keeps going while you look at another tab and stops on its own after 10 minutes. A terminal agent gets its path at the prompt; a chat tab does not get recordings |
+| Mark up | | Freezes the screen so you can draw on it, then sends or copies the result |
+| Logs | | Shows the log live, with a filter: on iOS the apps you installed, on Android the whole logcat. **To chat** sends the selected or matching lines |
+| More | | Copy screenshot, Save screenshot, Restart, Shut down |
+
+With the tab focused, typing goes to the device and the scroll wheel scrolls it.
+
+While an agent's `device_act` runs, the phone is outlined and the line under it says the agent
+is driving. **Take over** makes you the driver: the agent's `device_act`, `device_run` and
+`device_close` calls wait until you press **Hand to** and the agent's name. A call that waits 4
+minutes fails with `ERR_DEVICE_PERSON_DRIVING`, before runpane's own 5-minute timeout, and one
+whose caller gives up never runs. Screenshots and recordings are deleted when the Pane is archived.
+
 ## Phones and the browser app
 
-The device tab shows on the phone apps and in the browser app as frames, about two a second,
-with tap and Home. The live stream stays on the desktop. Chat tabs on the desktop and in the
-browser app show the device card; the native app shows an **Open** row.
+The device tab shows on the phone apps and in the browser app as frames, about two a second.
+The browser app has the same rail; the native app has tap and Home. The live stream stays on
+the desktop. Chat tabs on the desktop and in the browser app show the device card; the native
+app shows an **Open** row.
 
 ## Security
 

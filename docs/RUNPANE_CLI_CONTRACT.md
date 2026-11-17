@@ -340,7 +340,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `devices list`: List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.
 - `devices open`: Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.
 - `devices screenshot`: Capture the screen of this Pane's open device as an image.
-- `devices act`: Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs.
+- `devices act`: Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs, orientation landscape-left, fold half-open, record start|stop. Waits while the person has taken over the device in its tab, up to 4 minutes, then fails with ERR_DEVICE_PERSON_DRIVING.
 - `devices run`: Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.
 - `devices close`: Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. The device stays warm for 10 minutes.
 - `devices usage`: Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.
