@@ -36,6 +36,8 @@ export const PANE_UNSNAPSHOTTED_FOLDERS = [
   'scratch',
   // Device tools Pane installs with npm, build checkouts for linked computers, and screenshots: fetched or rebuilt on the next device call.
   'devices',
+  // The plugins Pane installs from its bundled Agent Farm, reinstalled at the next start when missing.
+  'agent-farm',
 ] as const;
 
 const stateFolders = new Set<string>(PANE_STATE_FOLDERS);
