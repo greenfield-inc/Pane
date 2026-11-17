@@ -50,7 +50,7 @@ export function AttachSheet({ visible, onClose, onPick }: { visible: boolean; on
         ))}
       </View>
       <Text variant="footnote" tone="muted" style={styles.note}>
-        Any file type, several at once, up to 50 MB each. Each file's host path goes into your message.
+        Any file type and size, several at once. Each file's host path goes into your message.
       </Text>
     </ComposerSheet>
   );
