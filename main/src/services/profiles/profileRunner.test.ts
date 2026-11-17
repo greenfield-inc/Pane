@@ -194,6 +194,16 @@ describe('ProfileRunner', () => {
     expect(await runner.launch(launchRequest())).toMatchObject({ state: 'failed', error: 'the repository is gone.' });
   });
 
+  it('notes a step whose tab stopped at a prompt, and drops the note once the run moves on', async () => {
+    const pane = new FakePane();
+    const ports = pane.ports();
+    const prompt = 'Quick safety check: Is this a project you created or one you trust?';
+    const runner = new ProfileRunner({ ...ports, startTab: async (request) => ({ ...(await ports.startTab(request)), blocked: prompt }) });
+    const run = await runner.launch(launchRequest());
+    expect(run.attention).toBe(`Step plan's tab is waiting at a prompt: "${prompt}". Open the tab and answer it; the step's first message is typed once the agent is ready.`);
+    expect((await runner.reportOutcome('tab-1', 'plan ready')).attention).toBeUndefined();
+  });
+
   it('refuses a profile that is not loaded', async () => {
     const runner = new ProfileRunner(new FakePane().ports());
     await expect(runner.launch({ ...launchRequest(), profile: 'orchestra' })).rejects.toMatchObject({ code: 'PROFILE_NOT_LAUNCHABLE' });

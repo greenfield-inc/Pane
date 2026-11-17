@@ -16,7 +16,7 @@ import { panelManager } from '../panelManager';
 import { sessionWorkspacePath } from '../sessionWorkspace';
 import type { WorkspaceJournal } from '../workspaceJournal';
 import { listProfiles } from './profileLibrary';
-import { ProfileRunner, profileRunsFolder, type RunCard, type StepShell, type StepTabRequest } from './profileRunner';
+import { ProfileRunner, profileRunsFolder, type RunCard, type StartedTab, type StepShell, type StepTabRequest } from './profileRunner';
 
 let runner: ProfileRunner | undefined;
 
@@ -31,8 +31,10 @@ function currentProfiles(): LibraryProfile[] {
   return listProfiles({ paneDir: getAppDirectory(), enabled: getRuntimeConfigManager().getConfig().profiles?.enabled });
 }
 
-const createdPane = boundary.object({ items: boundary.array(boundary.object({ ok: boundary.boolean, paneId: boundary.optional(boundary.string), panelId: boundary.optional(boundary.string), error: boundary.optional(boundary.object({ message: boundary.string })) })) });
-const createdPanel = boundary.object({ paneId: boundary.string, panelId: boundary.string });
+/** `blocked` is Pane's own prompt detection (`detectPanelBlocker`), as `panels wait` reports it. */
+const readinessSchema = boundary.optional(boundary.object({ blocked: boundary.optional(boundary.object({ message: boundary.string })) }));
+const createdPane = boundary.object({ items: boundary.array(boundary.object({ ok: boundary.boolean, paneId: boundary.optional(boundary.string), panelId: boundary.optional(boundary.string), error: boundary.optional(boundary.object({ message: boundary.string })), readiness: readinessSchema })) });
+const createdPanel = boundary.object({ paneId: boundary.string, panelId: boundary.string, readiness: readinessSchema });
 
 function stepShell(): StepShell {
   const name = ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell()).name.toLowerCase();
@@ -86,10 +88,15 @@ export function startProfileRunner(services: AppServices, registry: PaneCommandR
       }]), createdPane);
       const item = result.items[0];
       if (!item?.paneId || !item.panelId) throw new PaneError('PROFILE_STEP_START_FAILED', `Pane couldn't open the run's first Pane: ${item?.error?.message ?? 'no Pane was created'}`, 'Check the repository in Pane, then launch the profile again.');
-      return { paneId: item.paneId, panelId: item.panelId };
+      const started: StartedTab = { paneId: item.paneId, panelId: item.panelId };
+      if (item.readiness?.blocked) started.blocked = item.readiness.blocked.message;
+      return started;
     }
     if (!request.run.paneId) throw new PaneError('PROFILE_STEP_START_FAILED', 'The run has no Pane for its next step.', 'Launch the profile again.');
-    return decodeBoundary(await registry.invoke('runpane:panels:create', [{ paneId: request.run.paneId, tool, source: 'agent', noFocus: true, waitReady }]), createdPanel);
+    const created = decodeBoundary(await registry.invoke('runpane:panels:create', [{ paneId: request.run.paneId, tool, source: 'agent', noFocus: true, waitReady }]), createdPanel);
+    const started: StartedTab = { paneId: created.paneId, panelId: created.panelId };
+    if (created.readiness?.blocked) started.blocked = created.readiness.blocked.message;
+    return started;
   };
   const postCard = (card: RunCard) => {
     const question: NotifyQuestion = { ui: card.ui, title: card.title, context: card.context };

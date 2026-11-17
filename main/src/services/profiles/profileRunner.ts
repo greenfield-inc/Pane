@@ -30,6 +30,14 @@ export interface StepTabRequest {
   newPane?: { name: string };
 }
 
+/** A step's new tab, and the prompt it stopped at when its agent wasn't ready. */
+export interface StartedTab {
+  paneId: string;
+  panelId: string;
+  /** What the tab's screen asks, such as a folder-trust prompt; Pane never answers it for the person. */
+  blocked?: string;
+}
+
 /** A card the run raises in Approvals. Resolves with its id at once; the answer comes from waitCard. */
 export interface RunCard {
   id: string;
@@ -51,7 +59,7 @@ export interface ProfileRunnerPorts {
   /** Every Session's runs folder, read at start to resume runs. */
   allRunsFolders(): string[];
   shell(): StepShell;
-  startTab(request: StepTabRequest): Promise<{ paneId: string; panelId: string }>;
+  startTab(request: StepTabRequest): Promise<StartedTab>;
   /** Whether a tab still exists. */
   tabExists(panelId: string): boolean;
   postCard(card: RunCard): void;
@@ -274,7 +282,9 @@ export class ProfileRunner {
 
   /** Saves the move first, then does its one effect, then saves what the effect made (a tab or a card). */
   private async apply(runId: string, profile: Profile, transition: RunTransition): Promise<void> {
-    let { run } = transition;
+    // A move leaves the old step's prompt behind, so what waited on the person there no longer does.
+    let run: ProfileRun = { ...transition.run };
+    delete run.attention;
     this.save(run);
     try {
       run = await this.perform(run, profile, transition.effect);
@@ -289,8 +299,10 @@ export class ProfileRunner {
     switch (effect.kind) {
       case 'none': return run;
       case 'start-step': {
-        const { paneId, panelId } = await this.ports.startTab(this.tabFor(run, profile, effect.step));
-        return { ...run, paneId: run.paneId ?? paneId, wait: { kind: 'step', panelId } };
+        const { paneId, panelId, blocked } = await this.ports.startTab(this.tabFor(run, profile, effect.step));
+        const started: ProfileRun = { ...run, paneId: run.paneId ?? paneId, wait: { kind: 'step', panelId } };
+        if (blocked) started.attention = `Step ${effect.step.id}'s tab is waiting at a prompt: "${blocked}". Open the tab and answer it; the step's first message is typed once the agent is ready.`;
+        return started;
       }
       case 'ask': {
         const step = effect.step;
