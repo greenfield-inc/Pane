@@ -224,6 +224,11 @@ macOS, `exe` on Windows, `appimage` on Linux).
 --verbose
 ```
 
+On macOS the client default, `dmg`, only opens in Finder for a person to drag
+Pane into Applications, so `install` exits 1 with `ERR_RUNPANE_INSTALL_UNFINISHED`
+instead of reporting Pane installed. On a remote or headless Mac, use
+`--format zip`, which installs into `~/Applications` without help.
+
 Daemon setup also forwards Pane remote-host options:
 
 ```bash
