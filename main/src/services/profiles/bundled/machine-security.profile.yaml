@@ -1,0 +1,14 @@
+# machine-security, team only: written by `node scripts/import-agent-farm-profiles.js` from Agent Farm's machine-security plugin 0.1.0; don't edit by hand.
+# It has no flow yet, so Pane lists and shows it but does not launch it.
+format: pane-profile/1
+name: machine-security
+version: 0.1.0
+title: machine-security (team only)
+description: Scan the Mac or Windows PC you're running on for security problems, explain what matters most, and fix items only after you approve each command.
+
+agents:
+  audit:
+    runs: claude/claude-opus-5-5
+    effort: high
+    reads: [agents/auditor]
+    skills: [mac-security-check, windows-security-check]

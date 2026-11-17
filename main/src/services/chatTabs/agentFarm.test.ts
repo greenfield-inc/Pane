@@ -108,5 +108,28 @@ describe('Agent Farm profiles in chat tabs', () => {
     await expect(profiles.print('old/agent-farm', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', next: expect.stringContaining('Update Agent Farm') });
     const absent = new AgentFarmProfiles({ executable: () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await expect(absent.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED' });
+    const unbundled = new AgentFarmProfiles({ executable: () => undefined, bundled: async () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    await expect(unbundled.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('reinstall Pane') });
+  });
+
+  it('runs the bundled Agent Farm when none is on PATH, and the person\'s own when one is', async () => {
+    const directory = scratch();
+    const bundledCalls: string[][] = [];
+    const bundled = async (args: string[], _cwd: string, env: Record<string, string>) => {
+      bundledCalls.push(args);
+      return { executable: process.execPath, args: [FAKE, ...args], env };
+    };
+    const withoutOwn = new AgentFarmProfiles({ executable: () => undefined, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const { ELECTRON_RUN_AS_NODE: _unset, ...env } = inherited();
+    const printed = await withoutOwn.print('greenfield/implementer:opus', {}, 'claude', directory, env);
+    expect(printed.harness).toBe('claude');
+    // It printed the runtime it ran on as the adapter's Node: in a packaged Pane that is Electron,
+    // which runs the adapter only as Node.
+    expect(printed.launch.command).toMatchObject({ executable: process.execPath, env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: '1' }) });
+    expect(bundledCalls).toEqual([['run', 'greenfield/implementer:opus', '--print-acp', '--acp-adapter', '/adapter.js']]);
+    const withOwn = new AgentFarmProfiles({ executable: () => fakeCli(directory), bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
+    const own = await withOwn.print('greenfield/implementer:opus', {}, 'claude', directory, env);
+    expect(bundledCalls).toHaveLength(1);
+    expect(own.launch.command.env?.ELECTRON_RUN_AS_NODE).toBeUndefined();
   });
 });

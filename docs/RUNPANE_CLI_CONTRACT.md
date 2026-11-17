@@ -145,6 +145,8 @@ runpane machine cleanup --kind update-snapshot --yes --json
 runpane loops create --repo active --name nightly-bug-sweep --cron "0 3 * * *" --agent claude --prompt "Fix one bug from yesterday's issues" --yes --json
 runpane loops list --json
 runpane loops run --loop <loop-id> --yes --json
+runpane profiles list --json
+runpane profiles launch greenfield --prompt "Add dark mode to settings" --yes --json
 runpane agents start --repo active --name fix-login --agent claude --prompt "Fix the login redirect" --yes --json
 runpane agents start --pane <pane-id> --agent codex --prompt "Review the PR from this branch and report findings" --yes --json
 runpane agents status --pane <pane-id> --json
@@ -271,9 +273,13 @@ The desktop app treats one consumer name specially: while a `runpane watch --as 
 
 `runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).
 
+`runpane profiles list|show|launch|runs` work with Pane profiles: a profile is one YAML file that defines a team of agents and a fixed workflow, and Pane runs a launched profile's workflow itself (see [PROFILES.md](PROFILES.md)). `list` prints each profile in the library with its version, origin (`bundled` or `yours`), whether it is on, and whether it can launch (`launchable`, `team only` for a profile with no workflow, or `invalid` with its first error); `--json` adds the bundled Agent Farm's state and the person's own Agent Farm profiles. `show <name>` prints its agents, steps and outcomes, and errors (`--yaml` prints the file text only; `--json` carries both as `profile` and `yaml`). `launch <name> --prompt <text> --yes` starts a run and prints it (`run`: id, Session, step, Pane): it runs in `--repo`, else the repo of the Pane the caller's terminal is in (`PANE_SESSION_ID`), else the active repo; in `--session`, else the caller's orchestrated Session (`PANE_ORCHESTRATION_SESSION_ID`), else a new Session. `--harness <cli[/model]>` picks one CLI for every agent, `--agent-harness <agent>=<cli[/model]>` one agent's CLI, and `--command <cli>=<command>` the command that starts a CLI Pane does not know (each repeatable, or one JSON object). A launch without `--prompt` fails with `ERR_PROFILES_PROMPT_REQUIRED`; Pane refuses a profile it cannot launch with `PROFILE_NOT_FOUND`, `PROFILE_NOT_LAUNCHABLE` or `PROFILE_TEAM_ONLY` and a next step. `runs` lists runs with their state (`running`, `asking`, `paused`, `ended`, `failed`) and current step. The MCP tools are `profiles_list`, `profiles_show`, `profiles_launch` and `profiles_runs`, in the `core`, `profiles` and `plugin` toolsets.
+
 `runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.
 
 `runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered, with its buttons as `--choices` or `--questions` in notify's JSON), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.
+
+`runpane report --outcome <name>` ends one step of a Pane profile workflow: it names which of the step's declared outcomes happened (`runpane report --outcome "plan ready" --summary-file status.json`) and sends `state: done` with `outcome`. `--state` is then optional and may only be `done` (otherwise `ERR_REPORT_OUTCOME_STATE`), and `--question` is refused (`ERR_REPORT_OUTCOME_QUESTION`): an outcome ends the step, a question would block it. Pane checks the outcome against the step the panel runs and refuses an undeclared one with an error that lists the allowed outcomes.
 
 `runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: "screen"|"inbox"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.
 
@@ -445,6 +451,10 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `loops pause`: Pause a loop: it starts no scheduled runs until resumed.
 - `loops resume`: Resume a paused loop from its next scheduled time.
 - `loops delete`: Delete a loop. It starts no more runs.
+- `profiles list`: List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.
+- `profiles show`: Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.
+- `profiles launch`: Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.
+- `profiles runs`: List profile runs: each run's profile, state and current step.
 
 ```bash
 runpane help [command]
@@ -556,7 +566,7 @@ runpane docs read --doc <path> [--json]
 runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]
 runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]
 runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> [--as-file-pointer] [--no-expect-report] --yes [--json] [--pane-dir <path>]
-runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]
+runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]
 runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]
 runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]
 runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]
@@ -598,6 +608,10 @@ runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops pause --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops resume --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops delete --loop <id> --yes [--json] [--pane-dir <path>]
+runpane profiles list [--json] [--pane-dir <path>]
+runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]
+runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]
+runpane profiles runs [--json] [--pane-dir <path>]
 ```
 
 ## Agent Context
@@ -672,6 +686,7 @@ When you need the person (a choice, an approval, a short answer), call the `noti
 To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).
 
 Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.
+Profiles: a profile is a team of agents and a fixed workflow in one file. `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `"$PANE_RUNPANE_BIN" report --outcome "<outcome>"`, using one of the outcomes its first message lists.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 
@@ -763,6 +778,7 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
+--outcome <name>
 --conversation <id>
 --cwd <path>
 --note-file <path|->
@@ -794,6 +810,9 @@ These flags are consumed by local daemon-control commands:
 --agent-farm <profile>
 --arg <key=value>
 --item <id>
+--harness <cli[/model]>
+--agent-harness <agent>=<cli[/model]>
+--command <cli>=<command>
 --relays <item>
 --about-session <id|name>
 --questions <json>
@@ -855,6 +874,7 @@ These flags are consumed by local daemon-control commands:
 --hook
 --background
 --idle
+--yaml
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, use Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane`), which reaches the Windows named-pipe daemon through WSL interop; older Pane builds need `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'`.

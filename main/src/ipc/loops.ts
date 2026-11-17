@@ -9,6 +9,7 @@ import { LOOP_AGENTS, LOOP_NEW_SESSION, isLoopAgent, loopInputSchema, loopSlug, 
 import { ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX } from '../../../shared/types/orchestrationSession';
 import type { RunpanePaneCreateRequest } from '../../../shared/types/runpaneOrchestration';
 import { PaneError } from '../../../shared/paneError';
+import { FOLDER_TRUST_PROMPT } from '../services/agents/folderTrustPrompt';
 import { isPlainAgentCommand, tokenizeShellCommand } from '../services/agents/agentIdentity';
 import { agentLabel, agentTerminalCommand, configuredAgentSchema } from '../../../shared/agents';
 
@@ -38,8 +39,6 @@ const paneCreateResultSchema = boundary.object({
     })),
   })),
 });
-/** The folder-trust prompts `detectPanelBlocker` recognises: Claude, Codex and Agent Farm. */
-const TRUST_PROMPT = /trust this folder|trust and continue|quick safety check|trust this repository workspace/i;
 
 const paneArchiveResultSchema = boundary.object({ blocked: failureSchema });
 const loopSessionSchema = boundary.object({
@@ -156,7 +155,7 @@ function readinessWarning(readiness: Readiness): string | null {
   const blocked = readiness?.blocked?.message;
   if (blocked !== undefined) {
     // Pane never answers trust prompts for an unattended run; the person decides.
-    return TRUST_PROMPT.test(blocked)
+    return FOLDER_TRUST_PROMPT.test(blocked)
       ? 'When it started, the run was stopped at the agent\'s folder-trust prompt in its new worktree. '
         + 'If it is still there, open the run and answer it, or trust the project folder in the agent once so later runs start on their own.'
       : 'When it started, the run was stopped at a prompt in its terminal. If it is still there, open the run and answer it.';

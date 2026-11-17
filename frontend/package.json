@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@assistant-ui/react": "0.15.31",
+    "@dagrejs/dagre": "3.1.3",
     "@excalidraw/excalidraw": "^0.18.1",
     "@git-diff-view/react": "^0.0.40",
     "@git-diff-view/shiki": "^0.0.40",

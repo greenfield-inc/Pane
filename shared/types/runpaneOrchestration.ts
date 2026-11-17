@@ -1441,6 +1441,8 @@ export interface RunpaneReportRequest {
   choices?: NotifyChoice[];
   /** `--state blocked` only, instead of choices: 2 to 4 questions, each with its own buttons. */
   questions?: NotifySubQuestion[];
+  /** `--outcome`: ends a profile step with one of its declared outcomes; the state is then done. */
+  outcome?: string;
 }
 
 export interface RunpaneReportResult {
