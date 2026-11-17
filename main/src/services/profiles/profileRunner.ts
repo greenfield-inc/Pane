@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { agentModelArgs, agentTerminalCommand, isConfiguredAgent } from '../../../../shared/agents';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
+import { FOLDER_TRUST_PROMPT } from '../agents/folderTrustPrompt';
 import type { NotifyChoice } from '../../../../shared/types/notify';
 import {
   type Profile,
@@ -204,39 +205,52 @@ export class ProfileRunner {
 
   /** `runpane report --outcome` from a step's tab. Throws when no run waits on the tab, or the outcome isn't declared. */
   async reportOutcome(panelId: string, outcome: string, summary?: string): Promise<ProfileRun> {
-    const run = this.list().find((candidate) => candidate.wait.kind === 'step' && candidate.wait.panelId === panelId);
-    if (!run) throw new PaneError('PROFILE_RUN_NONE', 'This tab is not the current step of any profile run, so --outcome has nothing to move.', 'Report with --state instead, or run the profile from Profiles.');
-    const profile = this.profileOf(run);
-    const transition = reportOutcome(run, profile, panelId, outcome, summary, this.ports.now());
-    await this.serialized(() => this.apply(run.id, profile, transition));
-    return this.mustGet(run.id);
+    // In the queue: a report that arrives while its step's tab is still starting waits for that start to finish.
+    return this.serialized(async () => {
+      const run = this.runOnTab(panelId);
+      if (!run) throw new PaneError('PROFILE_RUN_NONE', 'This tab is not the current step of any profile run, so --outcome has nothing to move.', 'Report with --state instead, or run the profile from Profiles.');
+      const profile = this.profileOf(run);
+      await this.apply(run.id, profile, reportOutcome(run, profile, panelId, outcome, summary, this.ports.now()));
+      return this.mustGet(run.id);
+    });
   }
 
   /** A tab exited: moves the run whose current step it is. */
   async tabExited(panelId: string, exitCode: number | undefined): Promise<void> {
-    const run = this.list().find((candidate) => candidate.wait.kind === 'step' && candidate.wait.panelId === panelId);
-    if (!run) return;
-    const profile = this.profileOf(run);
-    const transition = stepExited(run, profile, panelId, exitCode, this.ports.now());
-    if (transition) await this.serialized(() => this.apply(run.id, profile, transition));
+    await this.serialized(async () => {
+      const run = this.runOnTab(panelId);
+      if (!run) return;
+      const profile = this.profileOf(run);
+      const transition = stepExited(run, profile, panelId, exitCode, this.ports.now());
+      if (transition) await this.apply(run.id, profile, transition);
+    });
   }
 
   /** "Set outcome…" on a run whose agent step is running. */
   async setOutcome(runId: string, outcome: string): Promise<ProfileRun> {
-    const run = this.mustGet(runId);
-    const profile = this.profileOf(run);
-    await this.serialized(() => this.apply(runId, profile, setOutcome(run, profile, outcome, this.ports.now())));
-    return this.mustGet(runId);
+    return this.serialized(async () => {
+      const run = this.mustGet(runId);
+      const profile = this.profileOf(run);
+      await this.apply(runId, profile, setOutcome(run, profile, outcome, this.ports.now()));
+      return this.mustGet(runId);
+    });
   }
 
   /** Ends a run where it is. Its tabs stay open. */
   async stop(runId: string): Promise<ProfileRun> {
-    const run = this.mustGet(runId);
-    if (run.state === 'ended' || run.state === 'failed') return run;
-    const stopped: ProfileRun = { ...run, state: 'ended', wait: { kind: 'none' }, error: 'Stopped by you.', updatedAt: this.ports.now() };
-    delete stopped.pending;
-    await this.serialized(async () => this.save(stopped));
-    return stopped;
+    return this.serialized(async () => {
+      const run = this.mustGet(runId);
+      if (run.state === 'ended' || run.state === 'failed') return run;
+      const stopped: ProfileRun = { ...run, state: 'ended', wait: { kind: 'none' }, error: 'Stopped by you.', updatedAt: this.ports.now() };
+      delete stopped.pending;
+      delete stopped.attention;
+      this.save(stopped);
+      return stopped;
+    });
+  }
+
+  private runOnTab(panelId: string): ProfileRun | undefined {
+    return this.list().find((candidate) => candidate.wait.kind === 'step' && candidate.wait.panelId === panelId);
   }
 
   private mustGet(runId: string): ProfileRun {
@@ -252,9 +266,9 @@ export class ProfileRunner {
   }
 
   /** One move at a time, so two events never race on one run file. */
-  private serialized(task: () => Promise<void>): Promise<void> {
+  private serialized<T>(task: () => Promise<T>): Promise<T> {
     const next = this.queue.then(task, task);
-    this.queue = next.catch(() => undefined);
+    this.queue = next.then(() => undefined, () => undefined);
     return next;
   }
 
@@ -301,7 +315,9 @@ export class ProfileRunner {
       case 'start-step': {
         const { paneId, panelId, blocked } = await this.ports.startTab(this.tabFor(run, profile, effect.step));
         const started: ProfileRun = { ...run, paneId: run.paneId ?? paneId, wait: { kind: 'step', panelId } };
-        if (blocked) started.attention = `Step ${effect.step.id}'s tab is waiting at a prompt: "${blocked}". Open the tab and answer it; the step's first message is typed once the agent is ready.`;
+        if (blocked) started.attention = FOLDER_TRUST_PROMPT.test(blocked)
+          ? `Step ${effect.step.id}'s tab is waiting at the agent's folder-trust prompt in its new worktree. Open the tab and answer it, or trust the project folder in the agent once; the step starts when the agent is ready.`
+          : `Step ${effect.step.id}'s tab is waiting at a prompt in its terminal. Open the tab and answer it; the step starts when the agent is ready.`;
         return started;
       }
       case 'ask': {
@@ -345,14 +361,17 @@ export class ProfileRunner {
     this.waiting.add(approvalId);
     void this.ports.waitCard(approvalId).then(async (answer) => {
       this.waiting.delete(approvalId);
-      const run = this.runs.get(runId);
-      if (!run || run.wait.kind !== 'card' || run.wait.approvalId !== approvalId) return;
       if (answer === undefined) {
         this.ports.log(`[Profiles] The approval for ${profileName} run ${runId} closed without an answer; the run waits.`);
         return;
       }
-      const profile = this.profileOf(run);
-      await this.serialized(() => this.apply(runId, profile, answerCard(run, profile, approvalId, answer, this.ports.now())));
+      // In the queue: an answer that lands while its card's move is still being saved waits for it.
+      await this.serialized(async () => {
+        const run = this.runs.get(runId);
+        if (!run || run.wait.kind !== 'card' || run.wait.approvalId !== approvalId) return;
+        const profile = this.profileOf(run);
+        await this.apply(runId, profile, answerCard(run, profile, approvalId, answer, this.ports.now()));
+      });
     }).catch((error) => {
       this.waiting.delete(approvalId);
       this.ports.log(`[Profiles] Run ${runId}: ${reasonOf(error)}`);
