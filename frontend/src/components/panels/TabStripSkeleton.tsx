@@ -4,15 +4,17 @@ import { Bone, Skeleton, TextBone } from '../ui/Skeleton';
  * A tab strip row while its tabs load, with PanelTabStrip's tab geometry: a
  * status dot, the tab's icon and its title, then the "+" button when it has one.
  */
-export function TabStripSkeleton({ titles, addButton = true, chain }: {
+export function TabStripSkeleton({ titles, addButton = true, chain, inset = 'px-2' }: {
   /** The titles the tabs will show, which size their bones. */
   titles: readonly string[];
   addButton?: boolean;
   /** The Pane or Session being opened (Skeleton's `chain`). */
   chain?: string;
+  /** The real strip's padding: a workspace tab row has `px-2`, PanelTabBar `pr-2`. */
+  inset?: 'px-2' | 'pr-2';
 }) {
   return (
-    <Skeleton chain={chain} className="flex min-h-9 flex-shrink-0 items-center border-b border-border-primary bg-bg-chrome px-2">
+    <Skeleton chain={chain} className={`flex min-h-9 flex-shrink-0 items-center border-b border-border-primary bg-bg-chrome ${inset}`}>
       {titles.map((title, index) => (
         <div key={index} className="inline-flex h-[38px] min-w-[8rem] items-center gap-2 px-3 text-sm leading-none">
           <span className="inline-flex h-3 w-3 items-center justify-center"><Bone className="h-2 w-2 rounded-full" /></span>

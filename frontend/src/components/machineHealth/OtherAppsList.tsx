@@ -3,8 +3,9 @@ import { AppWindow, LoaderCircle, Lock, OctagonX } from 'lucide-react';
 import type { OtherApp } from '../../../../shared/types/machineHealth';
 import { formatMB } from '../../../../shared/utils/formatBytes';
 import { ConfirmDialog } from '../ConfirmDialog';
-import { Bone, Skeleton, TextBone, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from '../ui/Skeleton';
 import { showActionError } from '../../stores/errorStore';
+import { cn } from '../../utils/cn';
 import { healthReadProblem } from './healthReadError';
 import { readOtherApps, runHealthAction } from './useMachineHealth';
 
@@ -53,13 +54,15 @@ export function OtherAppsList({ machineId, readAt, readOnlyReason, onStopped }: 
     }
   };
 
+  const { holding, reveal } = useSkeletonHold(!apps && !problem);
+
   if (problem && !apps) return <p className="mt-3 text-sm text-text-secondary" role="status">{problem}</p>;
-  if (!apps) return <OtherAppsSkeleton />;
+  if (!apps || holding) return <OtherAppsSkeleton />;
   const shown = showAll ? apps : apps.slice(0, FIRST_ROWS);
   return (
     <>
     {problem && <p className="mt-3 text-sm text-status-error" role="status">{problem}</p>}
-    <div className="mt-3 overflow-hidden rounded-lg border border-border-primary" aria-label="Other apps">
+    <div className={cn('mt-3 overflow-hidden rounded-lg border border-border-primary', reveal && 'skeleton-reveal')} aria-label="Other apps">
       <div className="flex items-center gap-3 border-b border-border-primary px-3 py-1.5 text-xs text-text-secondary">
         <span className="min-w-0 flex-1">App</span>
         <span className="w-20 text-right">Memory</span>

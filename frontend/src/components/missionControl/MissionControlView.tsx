@@ -23,7 +23,7 @@ import { Button } from '../ui/Button';
 import { Dropdown, type DropdownItem } from '../ui/Dropdown';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui/Modal';
 import { MissionControlTile } from './MissionControlTile';
-import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from '../ui/Skeleton';
 import { MIN_TILE_FONT_SIZE, rowHeight } from '../../utils/terminalFit';
 import type {
   MissionControlAgentPanel,
@@ -216,12 +216,21 @@ function SegmentedControl<T extends string | number>({ legend, label, options, v
  * share a WebGL texture atlas, and a grid of live terminals would exhaust
  * Chromium's GL contexts (see `TerminalPanel`'s header comment).
  */
-/** One row of snapshot tiles, as MissionControlTile draws them, while the agent list loads. */
-function MissionControlSkeleton({ columns, fontFamily }: { columns: MissionControlDensity; fontFamily: string }) {
+/** A group header (when grouped) over one row of snapshot tiles, as the loaded grid draws them, while the agent list loads. */
+function MissionControlSkeleton({ columns, fontFamily, grouped }: { columns: MissionControlDensity; fontFamily: string; grouped: boolean }) {
   const bodyHeight = LINES_BY_DENSITY[columns] * rowHeight(MIN_TILE_FONT_SIZE, fontFamily);
   return <>
     <LoadingStatus label="Finding agents" />
-    <Skeleton className="grid items-start gap-2.5" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+    <Skeleton>
+    {grouped && <div className="mb-2 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider">
+      <span className="flex min-w-0 items-center gap-1.5 px-1 py-0.5">
+        <Bone className="h-3 w-3" />
+        <TextBone text="Project name" />
+        <span className="px-1.5 text-[10px]"><TextBone text="0" /></span>
+      </span>
+      <span className="h-px flex-1 bg-border-primary" />
+    </div>}
+    <div className="grid items-start gap-2.5" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
       {Array.from({ length: columns }, (_, index) => (
         <div key={index} className="flex min-w-0 flex-col overflow-hidden rounded-md border border-border-primary bg-surface-secondary">
           <div className="flex h-[23px] items-center gap-1.5 border-b border-border-primary py-1 pl-2.5 pr-2">
@@ -235,6 +244,7 @@ function MissionControlSkeleton({ columns, fontFamily }: { columns: MissionContr
           </div>
         </div>
       ))}
+    </div>
     </Skeleton>
   </>;
 }
@@ -928,13 +938,13 @@ export function MissionControlView() {
       </header>
 
       <div ref={gridScrollerRef} className="min-h-0 flex-1 overflow-auto p-3">
-        {loading ? (
-          <MissionControlSkeleton columns={fitColumns(density, gridWidth, tileWidth, density)} fontFamily={terminalFontFamily} />
-        ) : error ? (
+        {!loading && error ? (
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}
           </div>
-        ) : tiles.length === 0 ? (
+        ) : <SkeletonSwap loading={loading} skeleton={
+          <MissionControlSkeleton columns={fitColumns(density, gridWidth, tileWidth, density)} fontFamily={terminalFontFamily} grouped={grouping !== 'none'} />
+        }>{tiles.length === 0 ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-text-secondary">
             No agent panes yet. Start Claude or Codex in a session and it will appear here.
           </div>
@@ -1015,7 +1025,7 @@ export function MissionControlView() {
               </section>
             );
           })
-        )}
+        )}</SkeletonSwap>}
 
         {agents.length > MAX_MISSION_CONTROL_SNAPSHOT_PANELS && (
           <p className="pt-2 text-[11px] text-text-muted">

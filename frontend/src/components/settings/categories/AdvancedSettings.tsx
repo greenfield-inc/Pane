@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../../ui/Button';
 import { Textarea } from '../../ui/Input';
-import { Skeleton, TextBone, LoadingStatus } from '../../ui/Skeleton';
+import { Skeleton, SkeletonSwap, TextBone, LoadingStatus } from '../../ui/Skeleton';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
@@ -86,30 +86,7 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
           description="Time from your action to the result on screen, over the last 200 runs of each. Never leaves this device."
           align="start"
         >
-          {journeyTimings?.length ? (
-            <table className="text-xs text-text-secondary tabular-nums">
-              <thead className="text-text-tertiary">
-                <tr>
-                  <th className="pr-4 text-left font-medium">Journey</th>
-                  <th className="px-2 text-right font-medium">p50</th>
-                  <th className="px-2 text-right font-medium">p75</th>
-                  <th className="pl-2 text-right font-medium">Runs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {journeyTimings.map((timing) => (
-                  <tr key={timing.journey}>
-                    <td className="pr-4">{JOURNEY_LABELS[timing.journey]}</td>
-                    <td className="px-2 text-right">{formatDuration(timing.p50Ms)}</td>
-                    <td className="px-2 text-right">{formatDuration(timing.p75Ms)}</td>
-                    <td className="pl-2 text-right">{timing.count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : journeyTimings ? (
-            <span className="text-xs text-text-tertiary">No timings yet</span>
-          ) : (
+          <SkeletonSwap loading={!journeyTimings} skeleton={
             <>
               <Skeleton>
                 <table className="text-xs tabular-nums">
@@ -135,7 +112,32 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
               </Skeleton>
               <LoadingStatus label="Loading journey timings" />
             </>
-          )}
+          }>
+            {journeyTimings?.length ? (
+              <table className="text-xs text-text-secondary tabular-nums">
+                <thead className="text-text-tertiary">
+                  <tr>
+                    <th className="pr-4 text-left font-medium">Journey</th>
+                    <th className="px-2 text-right font-medium">p50</th>
+                    <th className="px-2 text-right font-medium">p75</th>
+                    <th className="pl-2 text-right font-medium">Runs</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {journeyTimings.map((timing) => (
+                    <tr key={timing.journey}>
+                      <td className="pr-4">{JOURNEY_LABELS[timing.journey]}</td>
+                      <td className="px-2 text-right">{formatDuration(timing.p50Ms)}</td>
+                      <td className="px-2 text-right">{formatDuration(timing.p75Ms)}</td>
+                      <td className="pl-2 text-right">{timing.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <span className="text-xs text-text-tertiary">No timings yet</span>
+            )}
+          </SkeletonSwap>
         </SettingRow>
       </SettingsSection>
 

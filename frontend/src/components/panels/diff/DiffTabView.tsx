@@ -10,7 +10,7 @@ import { API } from '../../../utils/api';
 import { subscribeToSessionGitChanges } from '../../../utils/session-git-events';
 import { diffRefLabel, isMutableScope, normalizeEditorDiffRef, scopeKey } from './diffScope';
 import { getShikiHighlighter } from './diffSource';
-import { Bone, Skeleton, LoadingStatus } from '../../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 import '@git-diff-view/react/styles/diff-view.css';
 
 interface DiffTabViewProps { sessionId: string; filePath: string; diffRef: EditorDiffRef }
@@ -128,12 +128,13 @@ export function DiffTabView({ sessionId, filePath, diffRef }: DiffTabViewProps) 
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {loading && !result ? <DiffSkeleton />
-          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
-            : !result || result.status === 'no-longer-changed' ? <div className="p-4 text-sm text-text-tertiary">{filePath} is no longer changed in {diffRefLabel(diffRef)}.</div>
+        {error && !(loading && !result) ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
+          : <SkeletonSwap loading={loading && !result} skeleton={<DiffSkeleton />}>{
+            !result || result.status === 'no-longer-changed' ? <div className="p-4 text-sm text-text-tertiary">{filePath} is no longer changed in {diffRefLabel(diffRef)}.</div>
               : result.file.isBinary ? <div data-find-empty="" className="p-4 text-sm text-text-secondary">Binary file</div>
                 : diffData ? <DiffView data={diffData} diffViewMode={viewType} diffViewTheme={isLightTheme(theme) ? 'light' : 'dark'} diffViewHighlight={Boolean(highlighter)} registerHighlighter={highlighter ?? undefined} diffViewWrap={true} diffViewFontSize={13} />
-                  : <div className="p-4 text-sm text-text-tertiary">{result.file.kind === 'renamed' ? `Renamed from ${result.file.previousPath} → ${result.file.path}, no content changes` : 'No content changes'}</div>}
+                  : <div className="p-4 text-sm text-text-tertiary">{result.file.kind === 'renamed' ? `Renamed from ${result.file.previousPath} → ${result.file.path}, no content changes` : 'No content changes'}</div>
+          }</SkeletonSwap>}
       </div>
     </div>
   );

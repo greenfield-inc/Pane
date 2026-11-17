@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, memo } from 'react';
 import { API } from '../utils/api';
 import { subscribeToSessionGitChanges } from '../utils/session-git-events';
 import { GitCommitHorizontal, FileText, Plus, Minus, User, Clock, Hash, GitFork } from 'lucide-react';
-import { Bone, Skeleton, LoadingStatus } from './ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from './ui/Skeleton';
 import { Tooltip } from './ui/Tooltip';
 import { CopyableField } from './ui/CopyableField';
 
@@ -226,9 +226,16 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
 
   useEffect(() => subscribeToSessionGitChanges(sessionId, fetchGraph, ['git:operation_completed']), [sessionId, fetchGraph]);
 
-  if (loading) {
-    // CommitRow's shape: the rail with its commit mark, a message line and a meta line.
+  if (error && !loading) {
     return (
+      <div className="text-xs text-text-tertiary px-1 py-2">
+        Unable to load commit history
+      </div>
+    );
+  }
+
+  // CommitRow's shape: the rail with its commit mark, a message line and a meta line.
+  const skeleton = (
       <>
         <LoadingStatus label="Loading commit history" />
         <Skeleton className="flex flex-col">
@@ -247,26 +254,15 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
           ))}
         </Skeleton>
       </>
-    );
-  }
+  );
 
-  if (error) {
-    return (
-      <div className="text-xs text-text-tertiary px-1 py-2">
-        Unable to load commit history
-      </div>
-    );
-  }
-
-  if (rawEntries.length === 0) {
-    return (
+  return (
+    <SkeletonSwap loading={loading} skeleton={skeleton}>
+    {rawEntries.length === 0 ? (
       <div className="text-xs text-text-tertiary px-1 py-2">
         No commits yet
       </div>
-    );
-  }
-
-  return (
+    ) : (
     <div>
       <div className="flex flex-col">
         {rawEntries.map((entry, i) => (
@@ -285,5 +281,7 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
         </div>
       )}
     </div>
+    )}
+    </SkeletonSwap>
   );
 }

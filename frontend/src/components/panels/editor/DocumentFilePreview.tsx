@@ -9,7 +9,7 @@ import { usePreviewUrl } from './usePreviewUrl';
 import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { fileExtension, getLanguageFromPath } from './fileKinds';
 import { parseDelimitedPreview, readPreviewText } from './documentPreviewData';
-import { Bone, Skeleton, TextBone, LoadingStatus } from '../../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from '../../ui/Skeleton';
 
 const Editor = lazy(() => import('@monaco-editor/react'));
 
@@ -94,10 +94,13 @@ function FontSpecimen({ url, sessionId, filePath }: { url: string; sessionId: st
   return (
     <div data-find-empty="" className="h-full overflow-auto p-6 space-y-6 text-text-primary">
       <label className="block text-sm">Specimen text<input className="mt-2 w-full rounded border border-border-primary bg-surface-secondary p-2" value={sample} onChange={event => setSample(event.target.value)} /></label>
-      {!family ? <><LoadingStatus label="Loading font" /><FontSpecimenSkeleton /></> : <div style={{ fontFamily: family }} className="space-y-6 break-words">
-        {[16, 24, 36, 48, 72].map(size => <p key={size} style={{ fontSize: size }}>{sample}</p>)}
-        <p className="text-2xl">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br />abcdefghijklmnopqrstuvwxyz<br />0123456789 !@#$%&amp;*()[]</p>
-      </div>}
+      <SkeletonSwap loading={!family} skeleton={<><LoadingStatus label="Loading font" /><FontSpecimenSkeleton /></>}>
+        {/* The swap's wrapper is display: contents, so the parent's space-y misses this div: mt-6 stands in. */}
+        <div style={{ fontFamily: family ?? undefined }} className="mt-6 space-y-6 break-words">
+          {[16, 24, 36, 48, 72].map(size => <p key={size} style={{ fontSize: size }}>{sample}</p>)}
+          <p className="text-2xl">ABCDEFGHIJKLMNOPQRSTUVWXYZ<br />abcdefghijklmnopqrstuvwxyz<br />0123456789 !@#$%&amp;*()[]</p>
+        </div>
+      </SkeletonSwap>
     </div>
   );
 }
@@ -132,7 +135,8 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
 
   const notice = (message: string) => <FilePreviewNotice sessionId={sessionId} filePath={filePath} message={message} />;
   if (urlError || error) return notice(urlError || error || 'Cannot preview this file.');
-  if (!url || (isText && !document) || ((kind === 'archive' || kind === 'sqlite') && !listing)) return (
+  const loading = !url || (isText && !document) || ((kind === 'archive' || kind === 'sqlite') && !listing);
+  const skeleton = (
     <div className="h-full flex flex-col bg-surface-primary">
       <LoadingStatus label="Loading preview" />
       <Skeleton className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-border-primary text-xs leading-none">
@@ -157,6 +161,7 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
     }
   }
   return (
+    <SkeletonSwap loading={loading} skeleton={skeleton}>{url && (
     <div className="h-full flex flex-col bg-surface-primary">
       <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-border-primary text-xs text-text-secondary">
         <span>Read-only preview</span>
@@ -183,5 +188,6 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
         )}
       </div>
     </div>
+    )}</SkeletonSwap>
   );
 }

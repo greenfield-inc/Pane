@@ -10,7 +10,7 @@ import { Button } from './ui/Button';
 import { EnhancedInput } from './ui/EnhancedInput';
 import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
-import { Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
+import { Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 import { Toggle } from './ui/Toggle';
 import { useConfigStore } from '../stores/configStore';
 import { BUILT_IN_IDES, nextDefaultIdeCommand } from '../../../shared/utils/ideCommands';
@@ -344,14 +344,14 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
               <Card variant="bordered" padding="md" className="bg-surface-secondary">
                 <div className="flex items-center gap-2">
                   <GitBranch className="w-4 h-4 text-text-tertiary" />
-                  {currentBranch ? (
-                    <span className="font-mono text-text-primary">{currentBranch}</span>
-                  ) : (
+                  <SkeletonSwap loading={!currentBranch} skeleton={
                     <>
                       <LoadingStatus label="Detecting the current branch" />
                       <Skeleton className="font-mono"><TextBone text="main" /></Skeleton>
                     </>
-                  )}
+                  }>
+                    <span className="font-mono text-text-primary">{currentBranch}</span>
+                  </SkeletonSwap>
                   <span className="ml-auto px-2 py-1 text-xs bg-surface-tertiary text-text-tertiary rounded">
                     Auto-detected
                   </span>

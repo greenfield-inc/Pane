@@ -10,7 +10,7 @@ import { formatKeyDisplay } from '../../../utils/hotkeyUtils';
 import { TerminalPopover, PopoverButton } from '../../terminal/TerminalPopover';
 import { areKeyboardShortcutsEnabled, htmlFileOpenModeOf, useConfigStore } from '../../../stores/configStore';
 import { LiveRegion } from '../../ui/LiveRegion';
-import { Bone, Skeleton } from '../../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap } from '../../ui/Skeleton';
 import { boundary, decodeBoundary } from '../../../../../shared/validation/boundaryDecoder';
 import { explorerOpenAction, isHtmlFile } from './htmlFile';
 import { previewHtmlFileInBrowser } from './previewHtmlFile';
@@ -957,14 +957,16 @@ export function HeadlessFileTree({
         {tree.getItems().map((item: ItemInstance<FileItem>) => {
           const data = item.getItemData();
           if (!data || item.getId() === ROOT_ID) return null;
-          // A row whose data is still loading: the file row it becomes.
-          if (item.isLoading() && !data.path) return (
-            <Skeleton key={item.getId()} className="flex h-7 items-center px-2 py-1" style={{ paddingLeft: `${item.getItemMeta().level * 16 + 8}px` }}>
+          // A row whose data is still loading: the file row it becomes. Both
+          // returns are one SkeletonSwap under the item's key, so it holds and fades.
+          const rowSkeleton = (
+            <Skeleton className="flex h-7 items-center px-2 py-1" style={{ paddingLeft: `${item.getItemMeta().level * 16 + 8}px` }}>
               <div className="w-4 h-4 mr-1" />
               <Bone className="w-4 h-4 mr-2" />
               <Bone className="h-3.5 w-28" />
             </Skeleton>
           );
+          if (item.isLoading() && !data.path) return <SkeletonSwap key={item.getId()} loading skeleton={rowSkeleton}>{null}</SkeletonSwap>;
 
           const isFolder = data.isDirectory;
           const level = item.getItemMeta().level;
@@ -974,8 +976,8 @@ export function HeadlessFileTree({
           const treeItemProps = item.getProps();
 
           return (
+            <SkeletonSwap key={item.getId()} loading={false} skeleton={rowSkeleton}>
             <div
-              key={item.getId()}
               {...treeItemProps}
               role={treeItemProps.role}
               ref={(element) => {
@@ -1127,6 +1129,7 @@ export function HeadlessFileTree({
                 <Trash2 className="w-3 h-3 text-status-error" />
               </button>
             </div>
+            </SkeletonSwap>
           );
         })}
       </div>

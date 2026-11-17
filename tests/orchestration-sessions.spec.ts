@@ -827,7 +827,9 @@ test('Session metadata refresh stays quiet and cannot steal a later selection', 
     }
   });
   await page.waitForTimeout(150);
-  await expect(page.getByText('Opening Sessions…', { exact: true })).toHaveCount(0);
+  // A list refresh must not swap the open Session back to its opening skeleton.
+  await expect(page.getByRole('status', { name: /^Opening / })).toHaveCount(0);
+  await expect(page.getByTestId('session-workspace-skeleton')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installSessionsFixture adds these controls before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { getOrchestrationSelectCalls: () => number } };
@@ -4244,37 +4246,39 @@ test('F-8: opened cold from the sidebar count, the approval waits for the saved 
   await expect(page.getByTestId('session-approval-split')).toHaveCount(0);
 });
 
-test('A Session opens behind a skeleton of its workspace that appears only for a slow open', async ({ page }) => {
+test('A Session opens behind one skeleton of its workspace: bones only past 150 ms, unbroken from record to layout', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await installSessionsFixture(page, [
     sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', '2026-09-16T12:00:00.000Z'),
     sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
   ]);
+  await page.clock.install();
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click();
   await expect(page.getByRole('heading', { level: 1, name: 'Alpha', exact: true })).toBeAttached({ timeout: 10_000 });
 
-  // Clicking Beta holds its record for 1.5 s; the frame right after the click shows the skeleton's surface with its bones still hidden.
-  const atClick = await page.evaluate(async () => {
+  // Beta's record takes 400 ms. Time only moves when the test moves it.
+  await page.clock.pauseAt(Date.now() + 60_000);
+  await page.evaluate(() => {
     // SAFETY: installSessionsFixture adds this control before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { setOrchestrationGetDelay: (delayMs: number) => void } };
-    mockWindow.__paneTestElectronMock.setOrchestrationGetDelay(1500);
+    mockWindow.__paneTestElectronMock.setOrchestrationGetDelay(400);
     document.querySelector<HTMLElement>('[data-testid="orchestration-session-beta"]')?.click();
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const skeleton = document.querySelector('[data-testid="session-workspace-skeleton"]');
-    return {
-      skeleton: Boolean(skeleton),
-      waiting: skeleton?.querySelectorAll('[data-skeleton="waiting"]').length ?? 0,
-      visible: skeleton?.querySelectorAll('[data-skeleton="visible"]').length ?? 0,
-    };
   });
-  expect(atClick).toEqual({ skeleton: true, waiting: 3, visible: 0 });
+  const bones = (state: 'waiting' | 'visible') => page.locator(`[data-testid="session-workspace-skeleton"] [data-skeleton="${state}"]`);
 
-  const skeleton = page.getByTestId('session-workspace-skeleton');
-  await expect(skeleton.locator('[data-skeleton="visible"]')).toHaveCount(3);
+  await page.clock.runFor(140);
+  await expect(bones('waiting')).toHaveCount(3);
+  await expect(bones('visible')).toHaveCount(0);
   await expect(page.getByRole('status', { name: 'Opening Beta' })).toBeAttached();
-  await expect(page.getByText('Opening Beta…')).toHaveCount(0);
-  await expect(page.getByRole('heading', { level: 1, name: 'Beta', exact: true })).toBeAttached({ timeout: 10_000 });
-  await expect(skeleton).toHaveCount(0);
+
+  await page.clock.runFor(20);
+  await expect(bones('visible')).toHaveCount(3);
+
+  // The record arrives and the layout step draws the same skeleton: its bones stay up, with no 150 ms gap.
+  await page.clock.runFor(260);
+  await expect(page.locator('[data-session-content-id]')).toBeAttached();
+  await expect(page.locator('[data-skeleton="waiting"]')).toHaveCount(0);
+  await expect(page.locator('[data-skeleton="visible"]').first()).toBeAttached();
 });

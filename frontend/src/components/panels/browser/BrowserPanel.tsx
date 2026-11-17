@@ -14,7 +14,7 @@ import { useListeningPorts } from '../../../hooks/useListeningPorts';
 import { useConfigStore } from '../../../stores/configStore';
 import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
 import { Dropdown } from '../../ui/Dropdown';
-import { Bone, Skeleton, LoadingStatus } from '../../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 import { PortsList } from './PortsList';
 import { RefusedFilesNotice, type FileRefusal } from './RefusedFilesNotice';
 import { FindBar } from '../../find/FindBar';
@@ -785,7 +785,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             <FindBar panelId={panel.id} className="pointer-events-auto" />
           </div>
           {/* Page webview */}
-          {target.kind === 'waiting' && (
+          <SkeletonSwap loading={target.kind === 'waiting'} skeleton={
             <>
               <LoadingStatus label="Connecting to the host's ports…" />
               {/* The page it loads is unknown: a generic page, a top bar over a heading and text. */}
@@ -797,7 +797,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
                 </div>
               </Skeleton>
             </>
-          )}
+          }>
           {target.kind === 'unreachable' && (
             <div role="status" className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
               <p className="text-sm text-text-secondary">
@@ -819,6 +819,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             className="flex-1 border-0"
             style={{ display: 'inline-flex' }}
           />}
+          </SkeletonSwap>
 
           {/* DevTools resize handle + placeholder div (overlaid by WebContentsView from main process) */}
           {devToolsOpen && (

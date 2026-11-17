@@ -651,7 +651,9 @@ body.understory {
   50% { opacity: 0.5; }
 }
 
-/* Content that replaces a visible skeleton fades in over it, in place. */
+/* Content that replaces a visible skeleton fades in over it, in place
+   (SkeletonSwap marks its content wrapper, which is display: contents). */
+[data-skeleton-reveal] > *,
 .skeleton-reveal {
   animation: pane-skeleton-reveal 120ms ease-out;
 }
@@ -676,6 +678,8 @@ body.understory {
    would hold the content invisible, so there it appears at once. */
 html.window-blurred .skeleton-reveal,
 html.window-hidden .skeleton-reveal,
+html.window-blurred [data-skeleton-reveal] > *,
+html.window-hidden [data-skeleton-reveal] > *,
 html.window-blurred .skeleton-fade-out,
 html.window-hidden .skeleton-fade-out {
   animation: none !important;
@@ -707,6 +711,7 @@ html.window-hidden .skeleton-fade-out {
   }
 
   /* Content replacing a skeleton appears without a fade. */
+  [data-skeleton-reveal] > *,
   .skeleton-reveal,
   .skeleton-fade-out {
     animation: none;

@@ -5,7 +5,7 @@ import { Button } from './ui/Button';
 import { EnhancedInput } from './ui/EnhancedInput';
 import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
-import { Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
+import { Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 import { API } from '../utils/api';
 import { showActionError } from '../stores/errorStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -163,15 +163,17 @@ export function AddProjectDialog({ isOpen, onClose }: AddProjectDialogProps) {
               <Card variant="bordered" padding="md">
                 <div className="flex items-center gap-2 text-sm text-text-secondary">
                   <GitBranch className="w-4 h-4" />
-                  {detectedBranch !== null || branchDetectionFailed ? (
-                    <span className={`font-mono ${branchDetectionFailed ? 'text-status-error' : ''}`}>
-                      {detectedBranch ?? 'Could not detect a git branch'}
-                    </span>
+                  {branchDetectionFailed ? (
+                    <span className="font-mono text-status-error">{detectedBranch ?? 'Could not detect a git branch'}</span>
                   ) : (
-                    <>
-                      <LoadingStatus label="Detecting the git branch" />
-                      <Skeleton className="font-mono"><TextBone text="main" /></Skeleton>
-                    </>
+                    <SkeletonSwap loading={detectedBranch === null} skeleton={
+                      <>
+                        <LoadingStatus label="Detecting the git branch" />
+                        <Skeleton className="font-mono"><TextBone text="main" /></Skeleton>
+                      </>
+                    }>
+                      <span className="font-mono">{detectedBranch}</span>
+                    </SkeletonSwap>
                   )}
                 </div>
               </Card>

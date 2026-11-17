@@ -62,8 +62,8 @@ import type { InterceptorState, TerminalSuggestion } from '../../services/termin
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import { onTerminalReflow } from '../../utils/terminalReflow';
 import { createMaskOwnership } from '../../utils/maskOwnership';
-import { readTerminalScreen, rememberTerminalScreen } from '../../utils/terminalScreens';
-import { TerminalSkeleton } from './TerminalSkeleton';
+import { markTerminalRevealed, wasTerminalRevealed } from '../../utils/revealedTerminals';
+import { noteTerminalCell, TerminalSkeleton } from './TerminalSkeleton';
 import { REVEAL_MS, useSkeletonHold } from '../ui/Skeleton';
 import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
@@ -73,8 +73,8 @@ interface DropdownPosition {
   y: number;
 }
 
-// Hold a refit's mask this long past ready so the terminal underneath
-// finishes painting before it is revealed.
+// Hold the mask this long past ready so the terminal underneath finishes
+// painting, and the activation's delayed refresh starts, before it is revealed.
 const TERMINAL_OVERLAY_LINGER_MS = 150;
 const TERMINAL_LOADING_TIMEOUT_MS = 30_000;
 
@@ -401,12 +401,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     return () => clearTimeout(timeout);
   }, [overlayActive, initAttempt]);
   const [overlayVisible, setOverlayVisible] = useState(true);
-  // Until this mount first reveals its terminal, the mask carries the loading
-  // skeleton (held so it never blinks); later refits get a plain mask.
-  // A retry, or a dock instance reused for another panel, loads afresh.
+  // Until a terminal is first revealed, its mask carries the loading skeleton
+  // (held so it never blinks). A terminal this window revealed before, in this
+  // mount or an earlier one, is cached content: its masks stay plain. A retry,
+  // or a dock instance reused for another panel, loads afresh.
   const loadKey = `${panel.id}:${initAttempt}`;
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
-  const revealed = revealedKey === loadKey;
+  const revealed = revealedKey === loadKey || (initAttempt === 0 && wasTerminalRevealed(panel.id));
   const firstLoad = useSkeletonHold(overlayActive && !revealed, panel.sessionId);
   const maskHeld = overlayActive || firstLoad.holding;
   // A skeleton the person saw stays up until the mask lifts, then fades out
@@ -421,6 +422,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   useEffect(() => {
     if (maskHeld) {
       setOverlayVisible(true);
+      setMaskFading(false);
       return;
     }
     let fadeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -428,24 +430,27 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       setMaskFading(false);
       setOverlayVisible(false);
       setRevealedKey(loadKey);
+      markTerminalRevealed(panel.id, panel.sessionId);
+      const terminal = xtermRef.current;
+      const screen = terminalRef.current?.querySelector('.xterm-screen');
+      if (terminal && screen) noteTerminalCell(terminal, screen);
       markPaneTerminalShown(panel.sessionId);
     };
     const lift = () => {
-      // Only a first load's skeleton fades; a refit's plain mask just lifts.
-      if (revealed || !skeletonSeen) { finish(); return; }
+      // Only a first load's skeleton fades, and only where animations run; a refit's plain mask just lifts.
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+        || document.documentElement.classList.contains('window-blurred')
+        || document.documentElement.classList.contains('window-hidden');
+      if (revealed || !skeletonSeen || still) { finish(); return; }
       setMaskFading(true);
       fadeTimer = setTimeout(finish, REVEAL_MS);
     };
-    if (!revealed) {
-      // A first load already waited for the terminal's paint before reporting
-      // ready; two more frames cover the replay's last write.
-      let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(lift); });
-      return () => { cancelAnimationFrame(frame); clearTimeout(fadeTimer); };
-    }
+    // The mask lingers past ready (a skeleton's hold counts toward it), so the
+    // activation's delayed full refresh starts behind it, then lifts or fades.
     const linger = Math.max(0, readyAt.current + TERMINAL_OVERLAY_LINGER_MS - performance.now());
     const lingerTimer = setTimeout(lift, linger);
-    return () => clearTimeout(lingerTimer);
-  }, [maskHeld, loadKey, skeletonSeen, revealed, panel.sessionId]);
+    return () => { clearTimeout(lingerTimer); clearTimeout(fadeTimer); };
+  }, [maskHeld, loadKey, skeletonSeen, revealed, panel.id, panel.sessionId]);
 
   // Listen for cliReady event (only for CLI panels that aren't already ready)
   useEffect(() => {
@@ -1896,11 +1901,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         paneLinksAddonRef.current = null;
       }
 
-      // Remember the screen's shape, for the skeleton when it mounts again.
-      if (xtermRef.current) {
-        try { rememberTerminalScreen(panel.id, terminalRuntimeRef.current.panelSessionId, readTerminalScreen(xtermRef.current)); } catch { /* disposed */ }
-      }
-
       // Save serialized terminal snapshot before disposing
       if (serializeAddonRef.current && xtermRef.current) {
         try {
@@ -2227,7 +2227,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           {initError ? <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-text-secondary">
             <p role="alert">Terminal could not load: {initError}</p>
             <button type="button" className="rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => setInitAttempt(attempt => attempt + 1)}>Retry</button>
-          </div> : !revealed && (firstLoad.holding || skeletonSeen) && <TerminalSkeleton panelId={panel.id} chain={panel.sessionId} />}
+          </div> : !revealed && (firstLoad.holding || skeletonSeen) && <TerminalSkeleton chain={panel.sessionId} />}
         </div>
       )}
 

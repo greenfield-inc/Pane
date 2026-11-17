@@ -11,7 +11,7 @@ import { AddProjectDialog } from './AddProjectDialog';
 import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
-import { Bone, Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 import { AgentStatusDot, PausedGlyph } from './ui/AgentStatusDot';
 import { resumeIfOpenResumes } from '../utils/pause';
 import type { DropdownItem } from './ui/Dropdown';
@@ -1447,7 +1447,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
 
       {showArchived && (
         <div id={archivedContentId} className="pb-2 max-h-[40vh] overflow-y-auto">
-          {isLoadingArchived ? (
+          <SkeletonSwap loading={isLoadingArchived} skeleton={
             <>
               <LoadingStatus label="Loading archived Sessions and Panes" />
               <Skeleton>
@@ -1470,7 +1470,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
                 ))}
               </Skeleton>
             </>
-          ) : (
+          }>
             <>
               <div data-testid="archived-orchestration-sessions" className="pb-1">
                 <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Sessions</p>
@@ -1563,7 +1563,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
                 );
               })}
             </>
-          )}
+          </SkeletonSwap>
         </div>
       )}
     </div>

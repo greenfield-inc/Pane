@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import type { PairingView } from '../../hooks/useRelayPairing';
 import { cn } from '../../utils/cn';
-import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { QR_PAPER, QrCode, TestFlightLine } from './QrCode';
 
 /** The code box and its caption keep this footprint in every state. */
@@ -20,9 +20,6 @@ function countdown(seconds: number): string {
 }
 
 function CodeBox({ view, onRetry }: { view: PairingView; onRetry: () => void }) {
-  if (view.step === 'code') {
-    return <div className={cn(CODE_BOX, QR_PAPER)}><QrCode url={view.url} label="Pairing code" /></div>;
-  }
   if (view.step === 'error') {
     return (
       <div className={cn(CODE_BOX, 'flex flex-col items-center justify-center gap-3 rounded-xl border border-border-secondary bg-surface-secondary p-4 text-center')}>
@@ -42,12 +39,16 @@ function CodeBox({ view, onRetry }: { view: PairingView; onRetry: () => void }) 
   }
   // The code's own footprint: a QR on its paper, while this computer gets ready.
   return (
-    <>
-      <LoadingStatus label="Getting this computer ready…" />
-      <Skeleton className={cn(CODE_BOX, 'rounded-xl border border-border-secondary p-2')}>
-        <Bone className="h-full w-full" />
-      </Skeleton>
-    </>
+    <SkeletonSwap loading={view.step === 'preparing'} skeleton={
+      <>
+        <LoadingStatus label="Getting this computer ready…" />
+        <Skeleton className={cn(CODE_BOX, 'rounded-xl border border-border-secondary p-2')}>
+          <Bone className="h-full w-full" />
+        </Skeleton>
+      </>
+    }>
+      {view.step === 'code' && <div className={cn(CODE_BOX, QR_PAPER)}><QrCode url={view.url} label="Pairing code" /></div>}
+    </SkeletonSwap>
   );
 }
 

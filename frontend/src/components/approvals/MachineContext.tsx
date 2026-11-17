@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
-import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { machineDocFailure, machineFileLinks, readMachineDoc, type MachineDoc } from './machineDoc';
 
 /**
@@ -9,7 +9,18 @@ import { machineDocFailure, machineFileLinks, readMachineDoc, type MachineDoc } 
  * why not, with Retry when the machine didn't answer.
  */
 export function MachineDocView({ doc, label, machine, onRetry }: { doc: MachineDoc | null; label: string; machine: string; onRetry?: () => void }) {
-  if (!doc) return (
+  const failure = doc && machineDocFailure(doc, label, machine);
+  if (doc && failure) {
+    return (
+      <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" role="status" data-testid="approvals-doc-failed">
+        <p>{failure}</p>
+        {doc.kind === 'unreachable' && onRetry && (
+          <button type="button" onClick={onRetry} className="mt-2 font-medium text-interactive hover:underline" data-testid="approvals-doc-retry">Retry</button>
+        )}
+      </div>
+    );
+  }
+  const skeleton = (
     <>
       <LoadingStatus label={`Opening ${label}`} />
       {/* The document's text, as the pre below lays it out. */}
@@ -20,25 +31,15 @@ export function MachineDocView({ doc, label, machine, onRetry }: { doc: MachineD
       </Skeleton>
     </>
   );
-  const failure = machineDocFailure(doc, label, machine);
-  if (failure) {
-    return (
-      <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" role="status" data-testid="approvals-doc-failed">
-        <p>{failure}</p>
-        {doc.kind === 'unreachable' && onRetry && (
-          <button type="button" onClick={onRetry} className="mt-2 font-medium text-interactive hover:underline" data-testid="approvals-doc-retry">Retry</button>
-        )}
-      </div>
-    );
-  }
-  if (doc.kind === 'html') {
-    // Another machine's page, sent as text: no scripts (Pane's own content policy would block them anyway), no forms, no navigation.
-    return <iframe title={label} srcDoc={doc.html} sandbox="" className="min-h-0 w-full flex-1 border-0" data-testid="approvals-machine-page" />;
-  }
   return (
-    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="approvals-machine-text">
-      {doc.kind === 'text' ? doc.text : ''}
-    </pre>
+    <SkeletonSwap loading={!doc} skeleton={skeleton}>
+      {doc?.kind === 'html'
+        // Another machine's page, sent as text: no scripts (Pane's own content policy would block them anyway), no forms, no navigation.
+        ? <iframe title={label} srcDoc={doc.html} sandbox="" className="min-h-0 w-full flex-1 border-0" data-testid="approvals-machine-page" />
+        : doc && <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="approvals-machine-text">
+          {doc.kind === 'text' ? doc.text : ''}
+        </pre>}
+    </SkeletonSwap>
   );
 }
 

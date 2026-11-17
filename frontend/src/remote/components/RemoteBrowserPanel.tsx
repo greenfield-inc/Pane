@@ -5,7 +5,7 @@ import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningP
 import { PortsList } from '../../components/panels/browser/PortsList';
 import { normalizeUrl } from '../../components/panels/browser/browserUrl';
 import { cn } from '../../utils/cn';
-import { Bone, Skeleton, LoadingStatus } from '../../components/ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../components/ui/Skeleton';
 import { phonePage, relayPreview, relayPreviewSrc, type PhonePage, type RelayPreview } from '../../../../shared/utils/phonePage';
 import { isNativeMobile, openNativeExternalUrl } from '../runtime/nativeMobile';
 
@@ -188,9 +188,13 @@ export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, o
           </div>
         </div>
       )}
-      {page?.kind === 'unavailable' && (isOpening(page) ? (
+      {page?.kind === 'unavailable' && !isOpening(page) ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <p className="max-w-sm text-center text-sm text-text-secondary">{page.reason}</p>
+        </div>
+      ) : <SkeletonSwap loading={page?.kind === 'unavailable'} skeleton={
         <>
-          <LoadingStatus label={page.reason} />
+          <LoadingStatus label={page?.kind === 'unavailable' ? page.reason : OPENING_PAGE} />
           {/* The page it loads is unknown: a generic page, a top bar over a heading and text. */}
           <Skeleton className="flex min-h-0 flex-1 flex-col">
             <div className="flex h-12 items-center gap-4 border-b border-border-primary px-4"><Bone className="h-5 w-20" /><Bone className="ml-auto h-5 w-5" /></div>
@@ -200,11 +204,7 @@ export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, o
             </div>
           </Skeleton>
         </>
-      ) : (
-        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-          <p className="max-w-sm text-center text-sm text-text-secondary">{page.reason}</p>
-        </div>
-      ))}
+      }>
       {src && (
         <iframe
           key={`${src}#${reloadKey}`}
@@ -217,6 +217,7 @@ export function RemoteBrowserPanel({ panel, ports, onRefreshPorts, onNavigate, o
           className="min-h-0 w-full flex-1 border-0"
         />
       )}
+      </SkeletonSwap>}
     </div>
   );
 }

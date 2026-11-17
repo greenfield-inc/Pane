@@ -6,7 +6,7 @@ import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { formatShare, formatTokens, formatUsd } from './ui/charts/chartScales';
 import { DAY_MS, rollingUsageRange } from './usage/usageDateRange';
 import { cn } from '../utils/cn';
-import { Bone, Skeleton } from './ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap } from './ui/Skeleton';
 import { DEFAULT_USAGE_RANGE_DAYS, type UsageIndexStatus, type UsageReport } from '../../../shared/types/usage';
 
 /** How often the card checks the index while a pass is still running. */
@@ -279,24 +279,29 @@ export function UsageSnapshotCard({ report, status = null, failed = false, host 
           Open Usage &amp; Limits →
         </button>
       </div>
-      {state.kind === 'loading' ? (
-        <Skeleton className={TILE_GRID}>
-          <ChartTile report={null} />
-          <ProjectsTile report={null} />
-          <ModelsTile report={null} />
-        </Skeleton>
-      ) : (
+      {state.kind === 'unavailable' ? (
         <div className={TILE_GRID}>
-          {state.kind === 'empty' && <EmptyTiles title={`No Claude Code or Codex history ${where} yet`} detail="Start an agent and each day's tokens chart here." />}
-          {state.kind === 'unavailable' && <EmptyTiles title="Pane couldn't read your agent history" detail="Open Usage & Limits to read it again." />}
-          {state.kind === 'ready' && (
-            <>
-              <ChartTile report={shown} />
-              <ProjectsTile report={shown} />
-              <ModelsTile report={shown} />
-            </>
-          )}
+          <EmptyTiles title="Pane couldn't read your agent history" detail="Open Usage & Limits to read it again." />
         </div>
+      ) : (
+        <SkeletonSwap loading={state.kind === 'loading'} skeleton={
+          <Skeleton className={TILE_GRID}>
+            <ChartTile report={null} />
+            <ProjectsTile report={null} />
+            <ModelsTile report={null} />
+          </Skeleton>
+        }>
+          <div className={TILE_GRID}>
+            {state.kind === 'empty' && <EmptyTiles title={`No Claude Code or Codex history ${where} yet`} detail="Start an agent and each day's tokens chart here." />}
+            {state.kind === 'ready' && (
+              <>
+                <ChartTile report={shown} />
+                <ProjectsTile report={shown} />
+                <ModelsTile report={shown} />
+              </>
+            )}
+          </div>
+        </SkeletonSwap>
       )}
       <div className="flex h-5 items-center justify-between gap-4 text-xs text-text-tertiary">
         <span className="flex min-w-0 items-center gap-1.5">

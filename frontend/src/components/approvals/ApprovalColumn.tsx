@@ -25,7 +25,7 @@ import { registerApprovalSend } from './approvalSend';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { useNow } from '../notify/useNow';
 import { FindBar } from '../find/FindBar';
-import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
 import {
   askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
@@ -680,7 +680,12 @@ export function SummaryView({ item, page, onRetry }: { item: NotifyItem; page: S
           {machine && <span className="min-w-0 shrink truncate" data-testid="approval-summary-machine">· on {machine}</span>}
           <span className="shrink-0">· sandboxed, no scripts</span>
         </div>
-        {page === null && <>
+        {page?.kind === 'failed' ? (
+          <div className="m-auto px-6 text-center text-[13px] text-text-secondary" role="status">
+            <p>{page.message}</p>
+            <button type="button" onClick={onRetry} className="mt-2 font-medium text-interactive hover:underline" data-testid="approval-summary-retry">Retry</button>
+          </div>
+        ) : <SkeletonSwap loading={page === null} skeleton={<>
           <LoadingStatus label="Loading the Summary" />
           {/* A Summary page: its title, a lead paragraph, then a section. */}
           <Skeleton className="flex min-h-0 w-full flex-1 flex-col gap-3 bg-surface-primary p-6">
@@ -689,18 +694,13 @@ export function SummaryView({ item, page, onRetry }: { item: NotifyItem; page: S
             <Bone className="mb-1 mt-4 h-4 w-1/3" />
             <Bone className="h-3.5 w-full" /><Bone className="h-3.5 w-4/5" />
           </Skeleton>
-        </>}
-        {page?.kind === 'failed' && (
-          <div className="m-auto px-6 text-center text-[13px] text-text-secondary" role="status">
-            <p>{page.message}</p>
-            <button type="button" onClick={onRetry} className="mt-2 font-medium text-interactive hover:underline" data-testid="approval-summary-retry">Retry</button>
-          </div>
-        )}
+        </>}>
         {(page?.kind === 'page' || page?.kind === 'template') && (
           // Sandboxed: no scripts, no forms, no navigation; the page's own policy blocks the network. Same origin (never
           // with scripts) only so Pane's find can read and highlight its text.
           <iframe title={`Summary: ${item.title}`} sandbox="allow-same-origin" srcDoc={withSummaryPolicy(page.html)} data-find-frame="" className="min-h-0 w-full flex-1 border-0 bg-surface-primary" data-testid="approval-summary-frame" />
         )}
+        </SkeletonSwap>}
       </div>
     </div>
   );

@@ -26,7 +26,7 @@ import { AutopilotStack } from './AutopilotStack';
 import { useObservedContentBox } from '../../hooks/useObservedContentBox';
 import { useOuterPanelResize } from '../../hooks/useOuterPanelResize';
 import { OuterResizeSeparator } from '../ui/OuterResizeSeparator';
-import { Bone, Skeleton, TextBone, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from '../ui/Skeleton';
 import { OUTER_PANEL_CONFIGS } from '../../utils/outerPanelSizing';
 import { AWAY_BLOCK, controlLine, ITEMS_BLOCK, LOG_BLOCK, queuedControlLabel } from '../../../../shared/autopilotTranscript';
 
@@ -300,6 +300,7 @@ const RENDERING: ChatRendering = {
 export function AutopilotView() {
   const snapshot = useAutopilotStore((state) => state.snapshot);
   const pending = useAutopilotStore((state) => state.pending);
+  const { holding, reveal } = useSkeletonHold(!snapshot);
   const machine = useActiveMachineStore((state) => state.machine);
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   const approvalOpen = useApprovalColumnStore((state) => state.open.autopilot !== undefined);
@@ -323,11 +324,11 @@ export function AutopilotView() {
   }, []);
   // Turning Autopilot off while it is open leaves for the Sessions home.
   useEffect(() => { if (snapshot && !snapshot.enabled) navigateToSessions(); }, [snapshot, navigateToSessions]);
-  if (!snapshot) return <AutopilotSkeleton />;
+  if (!snapshot || holding) return <AutopilotSkeleton />;
   const fresh = snapshot.state === 'stopped' && snapshot.stack.entries.length === 0;
 
   return (
-    <div ref={viewBox.ref} className="autopilot-view flex min-h-0 min-w-0 flex-1 bg-bg-primary" data-testid="autopilot-view" data-state={snapshot.state}>
+    <div ref={viewBox.ref} className={cn('autopilot-view flex min-h-0 min-w-0 flex-1 bg-bg-primary', reveal && 'skeleton-reveal')} data-testid="autopilot-view" data-state={snapshot.state}>
       <section aria-label="Autopilot chat"
         className={cn('relative flex min-h-0 flex-col border-r border-border-primary', chatSized ? 'shrink-0' : 'w-[44%] min-w-[340px] max-w-[720px]')}
         style={chatSized ? { width: chatResize.renderedPx } : undefined}>

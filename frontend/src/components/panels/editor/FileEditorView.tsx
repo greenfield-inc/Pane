@@ -20,7 +20,7 @@ import { restoreEditorPosition, trackEditorPosition, type PositionTracker } from
 import { FileEditorHeader } from './FileEditorHeader';
 import { MediaFilePreview, FilePreviewNotice } from './MediaFilePreview';
 import { CodeSkeleton, DocumentFilePreview } from './DocumentFilePreview';
-import { Bone, Skeleton, TextBone } from '../../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, TextBone } from '../../ui/Skeleton';
 import { isHtmlFile } from './htmlFile';
 import { previewHtmlFileInBrowser } from './previewHtmlFile';
 
@@ -266,29 +266,22 @@ export function FileEditorView({
     };
   }, [selectedFile?.path]);
 
-  if (!selectedFile) {
-    return (
-      <div ref={containerRef} className="h-full w-full min-w-0 flex flex-col overflow-hidden">
-        {loading && !error ? <>
-          <Skeleton className="flex items-center px-4 py-2 bg-surface-secondary border-b border-border-primary">
-            <div className="flex h-5 min-w-0 items-center gap-2 text-sm leading-none">
-              <Bone className="h-4 w-4 shrink-0" />
-              <TextBone text={filePath} className="min-w-0 truncate" />
-            </div>
-          </Skeleton>
-          <div className="flex-1 min-w-0 overflow-hidden"><CodeSkeleton label="Loading file" /></div>
-        </> : <div className="flex-1 flex items-center justify-center text-text-secondary">
-          {error ? `Error: ${error}` : 'Select a file to edit'}
-        </div>}
-      </div>
-    );
-  }
-
   const canToggleMode = !isReadOnlyPreview && isNotebookFile;
-  const fileName = selectedFile.path.split(/[\\/]/).pop() || 'Image';
+  const fileName = selectedFile?.path.split(/[\\/]/).pop() || 'Image';
 
+  // The root div stays mounted (the ⌘S listener is on it); the first file's load swaps inside it.
   return (
     <div ref={containerRef} className="h-full w-full min-w-0 flex flex-col overflow-hidden">
+      {!selectedFile && error ? <div className="flex-1 flex items-center justify-center text-text-secondary">Error: {error}</div>
+      : <SkeletonSwap loading={!selectedFile && loading} skeleton={<>
+        <Skeleton className="flex items-center px-4 py-2 bg-surface-secondary border-b border-border-primary">
+          <div className="flex h-5 min-w-0 items-center gap-2 text-sm leading-none">
+            <Bone className="h-4 w-4 shrink-0" />
+            <TextBone text={filePath} className="min-w-0 truncate" />
+          </div>
+        </Skeleton>
+        <div className="flex-1 min-w-0 overflow-hidden"><CodeSkeleton label="Loading file" /></div>
+      </>}>{!selectedFile ? <div className="flex-1 flex items-center justify-center text-text-secondary">Select a file to edit</div> : <>
       <FileEditorHeader
         filePath={selectedFile.path}
         hasUnsavedChanges={hasUnsavedChanges}
@@ -340,6 +333,7 @@ export function FileEditorView({
           </MonacoErrorBoundary>
         )}
       </div>
+      </>}</SkeletonSwap>}
     </div>
   );
 }

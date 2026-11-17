@@ -639,12 +639,12 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
         </div>
       ) : (
       <div ref={contentRef} className="relative min-h-0 flex-1 overflow-auto p-4">
-        {holding ? (
-          <UsageSkeleton />
-        ) : error ? (
+        {!loading && error ? (
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}
           </div>
+        ) : holding ? (
+          <UsageSkeleton />
         ) : noAgentTranscripts ? (
           <div className="mx-auto max-w-lg rounded border border-border-primary bg-surface-secondary p-6 text-center">
             <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>

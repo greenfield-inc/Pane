@@ -6,7 +6,7 @@ import { cn } from '../../utils/cn';
 import { formatBytes } from '../../../../shared/utils/formatBytes';
 import { healthReadProblem } from './healthReadError';
 import { readHealthSnapshot } from './useMachineHealth';
-import { Bone, Skeleton } from '../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap } from '../ui/Skeleton';
 
 const initials = (name: string) => name.split(/[\s._-]+/u).filter(Boolean).slice(0, 2).map(part => part[0]?.toUpperCase() ?? '').join('') || '?';
 const osLabel = (platform: string) => (platform === 'win32' ? 'Windows' : platform === 'linux' ? 'Linux' : platform === 'darwin' ? 'macOS' : platform);
@@ -93,9 +93,11 @@ export function MachineSwitcher({ machineId, hostname, onSelect }: {
                       {local && <span className="text-text-tertiary">{thisMachine(snapshot?.platform)}</span>}
                       {snapshot && !local && <span className="rounded bg-surface-secondary px-1.5 text-xs text-text-secondary">{osLabel(snapshot.platform)}</span>}
                     </span>
-                    {!summary || summary.kind === 'loading'
-                      ? <Skeleton className="flex h-5 items-center"><Bone className="h-3.5 w-36" /></Skeleton>
-                      : <span className={cn('block text-sm', level === 'critical' ? 'text-status-error' : level === 'warning' ? 'text-status-warning' : 'text-text-secondary')}>{summaryLine(summary)}</span>}
+                    <SkeletonSwap loading={!summary || summary.kind === 'loading'} skeleton={<Skeleton className="flex h-5 items-center"><Bone className="h-3.5 w-36" /></Skeleton>}>
+                      {summary && summary.kind !== 'loading' && (
+                        <span className={cn('block text-sm', level === 'critical' ? 'text-status-error' : level === 'warning' ? 'text-status-warning' : 'text-text-secondary')}>{summaryLine(summary)}</span>
+                      )}
+                    </SkeletonSwap>
                   </span>
                 </button>
               </li>

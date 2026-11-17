@@ -7,7 +7,7 @@ import {
   type ListeningPortsSnapshot,
 } from '../../../../../shared/types/listeningPorts';
 import { cn } from '../../../utils/cn';
-import { Bone, Skeleton, LoadingStatus } from '../../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 
 const GROUP_LABELS = {
   'pane-terminal': 'From Panes',
@@ -29,8 +29,7 @@ interface PortsListProps {
 
 /** The host's listening ports, grouped by who opened them. Web ports open in the tab. */
 export const PortsList: React.FC<PortsListProps> = ({ snapshot, currentPort, canOpen, tcpLabel, onOpen }) => {
-  if (!snapshot) {
-    return <>
+  return <SkeletonSwap loading={!snapshot} skeleton={<>
       <LoadingStatus label="Reading ports" />
       <Skeleton className="py-1">
         <div className="flex h-[25px] items-center justify-between px-3 pt-2 pb-1"><Bone className="h-2.5 w-16" /><Bone className="h-2.5 w-2" /></div>
@@ -42,12 +41,8 @@ export const PortsList: React.FC<PortsListProps> = ({ snapshot, currentPort, can
           <span className="flex w-10 flex-shrink-0 justify-end"><Bone className="h-3 w-8" /></span>
         </div>)}
       </Skeleton>
-    </>;
-  }
-  if (snapshot.ports.length === 0) {
-    return <p className="px-3 py-2 text-xs text-text-tertiary">No listening ports on {snapshot.host}</p>;
-  }
-  return (
+    </>}>
+    {!snapshot ? null : snapshot.ports.length === 0 ? <p className="px-3 py-2 text-xs text-text-tertiary">No listening ports on {snapshot.host}</p> : (
     <div className="py-1">
       {LISTENING_PORT_GROUP_ORDER.map(group => {
         const ports = snapshot.ports.filter(port => port.group === group);
@@ -65,7 +60,8 @@ export const PortsList: React.FC<PortsListProps> = ({ snapshot, currentPort, can
         );
       })}
     </div>
-  );
+    )}
+  </SkeletonSwap>;
 };
 
 const PortRow: React.FC<{ port: ListeningPort; isCurrent: boolean; canOpen: boolean; tcpLabel?: string; onOpen(port: number): void }> = ({ port, isCurrent, canOpen, tcpLabel, onOpen }) => {

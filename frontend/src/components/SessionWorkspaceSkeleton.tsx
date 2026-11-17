@@ -1,7 +1,8 @@
 import type { PanelLayoutNode, SessionPanelLayout, ToolPanel } from '../../../shared/types/panels';
 import { TerminalSkeleton } from './panels/TerminalSkeleton';
 import { TabStripSkeleton } from './panels/TabStripSkeleton';
-import { Bone, Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
+import { Bone, LoadingStatus, QuietSkeletons, Skeleton, TextBone } from './ui/Skeleton';
+import { wasTerminalRevealed } from '../utils/revealedTerminals';
 import { cn } from '../utils/cn';
 
 /**
@@ -29,7 +30,10 @@ export function SessionWorkspaceSkeleton({ name, tabTitle, agentPanelId, chain, 
   chromeInline?: boolean;
 }) {
   const split = layout?.root.type === 'split';
+  // A Session whose terminal this window showed before is cached content: no bones.
+  const quiet = Boolean(agentPanelId && wasTerminalRevealed(agentPanelId));
   return (
+    <QuietSkeletons quiet={quiet}>
     <div data-testid="session-workspace-skeleton" className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
       <LoadingStatus label={`Opening ${name}`} />
       {/* A split Session's tabs live in its groups' strips; the row stays only for tiled controls. */}
@@ -45,6 +49,7 @@ export function SessionWorkspaceSkeleton({ name, tabTitle, agentPanelId, chain, 
         </Skeleton>
       </div>
     </div>
+    </QuietSkeletons>
   );
 }
 

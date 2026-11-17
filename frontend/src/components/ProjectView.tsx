@@ -570,7 +570,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       {!activeMainRepoSession && isLoadingSession && (
         <div className="flex min-h-0 flex-1 flex-col">
           <LoadingStatus label="Loading main repository session" />
-          <TabStripSkeleton titles={['Terminal']} />
+          <TabStripSkeleton titles={['Terminal']} inset="pr-2" />
           <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]"><TerminalSkeleton /></div>
         </div>
       )}

@@ -11,7 +11,7 @@ import { usePanelStore } from '../../stores/panelStore';
 import { formatBytes, formatMB } from '../../../../shared/utils/formatBytes';
 import { CATEGORY_COLORS } from '../ui/charts/palette';
 import { MachineSwitcher } from './MachineSwitcher';
-import { Bone, Skeleton, TextBone, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from '../ui/Skeleton';
 import { OtherAppsList } from './OtherAppsList';
 import { runHealthAction, useMachineHealth, type FinishedPaneRow, type MachineHealthData } from './useMachineHealth';
 
@@ -605,34 +605,37 @@ export function ResourcesView() {
             {offline ? (data ? `Offline. Showing what it reported ${relativeTime(data.readAt, now)}.` : 'Offline. Pane has not read this machine\'s health yet.') : problem.message}
           </div>
         )}
-        {!data && !problem && (
-          <>
-            <LoadingStatus label="Reading this machine's health" />
-            <MeterSectionSkeleton title="Disk" legend={6} />
-            <MeterSectionSkeleton title="Memory" legend={5} />
-          </>
-        )}
-        {data && (
-          // Keyed by machine: switching machines starts every section fresh for the new one.
-          <div key={machineId} className={cn('flex flex-col gap-5', offline && 'opacity-60')}>
-            <DiskSection data={data} />
-            <MemorySection data={data} machineId={machineId} reload={() => { void reload(); }} hours={data.relief.idle.hours ?? (remote ? null : pauseHours)} runsOn={runsOn} readOnlyReason={readOnlyReason} busy={pausing} onPause={async () => {
-              setPausing(true);
-              try {
-                await runHealthAction(machineId, 'pause-idle', { source: 'ui' });
-                await reload();
-              } catch (error) {
-                showActionError('Could not pause idle Panes', error);
-              } finally {
-                setPausing(false);
-              }
-            }} />
-            <Recommendations data={data} machineId={machineId} reload={() => reload()} readOnlyReason={readOnlyReason} runsOn={runsOn} />
-            <PerPane data={data} machineId={machineId} />
-            <NotManaged data={data} />
-            <History data={data} />
-            {!data.inventory && !data.pending && !offline && <p className="text-sm text-text-secondary">Pane has not measured storage on this machine yet. <button type="button" className="underline" onClick={() => { void reload(true); }}>Measure now</button></p>}
-          </div>
+        {(data || !problem) && (
+          <SkeletonSwap loading={!data} skeleton={
+            <>
+              <LoadingStatus label="Reading this machine's health" />
+              <MeterSectionSkeleton title="Disk" legend={6} />
+              <MeterSectionSkeleton title="Memory" legend={5} />
+            </>
+          }>
+            {data && (
+            // Keyed by machine: switching machines starts every section fresh for the new one.
+            <div key={machineId} className={cn('flex flex-col gap-5', offline && 'opacity-60')}>
+              <DiskSection data={data} />
+              <MemorySection data={data} machineId={machineId} reload={() => { void reload(); }} hours={data.relief.idle.hours ?? (remote ? null : pauseHours)} runsOn={runsOn} readOnlyReason={readOnlyReason} busy={pausing} onPause={async () => {
+                setPausing(true);
+                try {
+                  await runHealthAction(machineId, 'pause-idle', { source: 'ui' });
+                  await reload();
+                } catch (error) {
+                  showActionError('Could not pause idle Panes', error);
+                } finally {
+                  setPausing(false);
+                }
+              }} />
+              <Recommendations data={data} machineId={machineId} reload={() => reload()} readOnlyReason={readOnlyReason} runsOn={runsOn} />
+              <PerPane data={data} machineId={machineId} />
+              <NotManaged data={data} />
+              <History data={data} />
+              {!data.inventory && !data.pending && !offline && <p className="text-sm text-text-secondary">Pane has not measured storage on this machine yet. <button type="button" className="underline" onClick={() => { void reload(true); }}>Measure now</button></p>}
+            </div>
+            )}
+          </SkeletonSwap>
         )}
       </div>
     </div>

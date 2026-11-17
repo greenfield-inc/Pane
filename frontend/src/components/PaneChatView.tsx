@@ -24,6 +24,7 @@ import { SessionWorkspacePanels } from './SessionWorkspacePanels';
 import { SessionTileLayout, type SessionTileContext } from './SessionTileLayout';
 import { Button } from './ui/Button';
 import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
+import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from './ui/Skeleton';
 import { Input } from './ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
@@ -1113,10 +1114,11 @@ function SessionOverviewPanel({ record, folderSessionId, overview, error, onRefr
 
         <div>
           <h3 className={OVERVIEW_HEADING}>Associated Panes</h3>
-          {!overview && !error && <p className="text-text-muted">Loading live state…</p>}
           {error && <div className="space-y-1"><p role="alert" className="text-status-error">{error}</p><button type="button" className="underline text-text-secondary" onClick={onRetry}>Retry</button></div>}
-          {overview?.panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
-          {overview?.panes.map(pane => <PaneOverviewCard key={pane.paneId} pane={pane} />)}
+          {!error && <SkeletonSwap loading={!overview} skeleton={<><LoadingStatus label="Loading the Session's Panes" /><PaneCardsSkeleton /></>}>
+            {overview?.panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
+            {overview?.panes.map(pane => <PaneOverviewCard key={pane.paneId} pane={pane} />)}
+          </SkeletonSwap>}
         </div>
 
         <div className="border-t border-border-primary pt-3">
@@ -1145,9 +1147,9 @@ function SessionChangesPanel({ overview, error, onRetry }: {
   const panes = overview?.panes ?? [];
 
   return (
-    <div className="space-y-2 p-3 text-[12px] text-text-secondary">
+    <div className="flex flex-col gap-2 p-3 text-[12px] text-text-secondary">
       {error && <div role="alert" className="space-y-1"><p className="text-status-error">{error}</p><button type="button" className="underline" onClick={onRetry}>Retry</button></div>}
-      {!overview && !error && <p className="text-text-muted">Loading Panes…</p>}
+      {!error && <SkeletonSwap loading={!overview} skeleton={<><LoadingStatus label="Loading the Session's Panes" /><PaneChangeRowsSkeleton /></>}>
       {overview && panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
       {panes.map(pane => (
         <div key={pane.paneId} className="rounded-md bg-surface-secondary px-2 py-2">
@@ -1169,7 +1171,36 @@ function SessionChangesPanel({ overview, error, onRetry }: {
           ) : null}
         </div>
       ))}
+      </SkeletonSwap>}
     </div>
+  );
+}
+
+/** Two of PaneOverviewCard's cards: the Pane's name and its branch line. */
+function PaneCardsSkeleton() {
+  return (
+    <Skeleton>
+      {[40, 55].map(width => (
+        <div key={width} className="mt-2 rounded border border-border-primary bg-surface-secondary p-2">
+          <div className="flex h-5 items-center"><Bone className="h-3" style={{ width: `${width}%` }} /></div>
+          <div className="flex h-[15px] items-center"><Bone className="h-2" style={{ width: `${width - 15}%` }} /></div>
+        </div>
+      ))}
+    </Skeleton>
+  );
+}
+
+/** Two of SessionChangesPanel's Pane rows: name and Open Pane, then the changes line. */
+function PaneChangeRowsSkeleton() {
+  return (
+    <Skeleton className="space-y-2">
+      {[45, 60].map(width => (
+        <div key={width} className="rounded-md bg-surface-secondary px-2 py-2">
+          <div className="flex h-[18px] items-center justify-between gap-2"><Bone className="h-3" style={{ width: `${width}%` }} /><Bone className="h-3 w-14" /></div>
+          <div className="mt-1 flex h-4 items-center"><Bone className="h-2.5 w-2/3" /></div>
+        </div>
+      ))}
+    </Skeleton>
   );
 }
 

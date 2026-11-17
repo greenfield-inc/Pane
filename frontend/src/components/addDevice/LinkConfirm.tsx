@@ -5,7 +5,7 @@ import { MachineMark } from '../machines/MachineMark';
 import { assignMachineLetters } from '../../../../shared/utils/machineMarks';
 import { preferredMachineColorSlot } from '../../../../shared/utils/machineColor';
 import { useAddDeviceStore, type LinkFlow } from './addDeviceStore';
-import { Bone, Skeleton, TextBone, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from '../ui/Skeleton';
 
 function useMarks(names: string[]) {
   const key = names.join('\n');
@@ -90,8 +90,13 @@ function ConfirmLinkSkeleton() {
 
 /** Every step of a link after it is pasted or opened: checking, the confirm, linking, the result, or why it failed. */
 export function LinkFlowView({ flow, onDone }: { flow: Exclude<LinkFlow, { step: 'idle' }>; onDone: () => void }) {
-  if (flow.step === 'confirm') return <ConfirmLink flow={flow} />;
-  if (flow.step === 'checking') return <ConfirmLinkSkeleton />;
+  if (flow.step === 'checking' || flow.step === 'confirm') {
+    return (
+      <SkeletonSwap loading={flow.step === 'checking'} skeleton={<ConfirmLinkSkeleton />}>
+        {flow.step === 'confirm' && <ConfirmLink flow={flow} />}
+      </SkeletonSwap>
+    );
+  }
   if (flow.step === 'linking') {
     return (
       <div role="status" className="flex flex-col items-center gap-3 py-8 text-center">

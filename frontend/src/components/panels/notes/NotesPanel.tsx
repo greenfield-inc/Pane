@@ -4,7 +4,7 @@ import { Plus, Settings, ChevronDown, Type, Pencil, Trash2, ArrowUpRight, Notebo
 import { Dropdown } from '../../ui/Dropdown';
 import { Button, IconButton } from '../../ui/Button';
 import { cn } from '../../../utils/cn';
-import { Bone, Skeleton, TextBone, LoadingStatus } from '../../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from '../../ui/Skeleton';
 import NotesDialog from './NotesDialog';
 import './notesEditor.css';
 import type { Note, NoteBlock, NoteContext, NoteExportResult, NoteScope } from '../../../../../shared/types/notes';
@@ -140,8 +140,9 @@ export default function NotesPanel({ paneId, capture, viewId = 'panel' }: NotesP
       </div>}
     </div>}
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {!scope && !capture ? <NoteSkeleton />
-        : current && context ? <NoteEditor key={current.id} paneId={paneId} note={current} context={context} flush={flush} draftKey={`pane-note-draft:${paneId}:${viewId}:${current.id}`} capture={capture}
+      {/* A failed context load says so in the alert above, with no skeleton under it. */}
+      {!scope && !capture && error ? null : <SkeletonSwap loading={!scope && !capture} skeleton={<NoteSkeleton />}>{
+        current && context ? <NoteEditor key={current.id} paneId={paneId} note={current} context={context} flush={flush} draftKey={`pane-note-draft:${paneId}:${viewId}:${current.id}`} capture={capture}
         viewedScope={scope} exports={exports} onExports={setExports} onRefresh={refresh} toolbar={toolbar} />
         : <div className="mx-auto mt-16 max-w-sm px-6 text-center">
           <span className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary text-text-secondary"><NotebookPen className="h-5 w-5" /></span>
@@ -150,7 +151,8 @@ export default function NotesPanel({ paneId, capture, viewId = 'panel' }: NotesP
             ? 'Start a note for this terminal excerpt.'
             : scope ? descriptions[scope.kind] : ''}</p>
           <Button className="mt-4" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => void create()} disabled={!scope}>New note</Button>
-        </div>}
+        </div>
+      }</SkeletonSwap>}
     </div>
   </section>;
 }
@@ -168,15 +170,15 @@ function NoteSkeleton() {
   </>;
 }
 
-/** NotesDrawing's dialog while its editor chunk loads: the header row and an empty canvas. */
-function DrawingSkeleton({ title }: { title: string }) {
+/** NotesDrawing's dialog while its editor chunk loads: the header row (with a working Cancel) and an empty canvas. */
+function DrawingSkeleton({ title, onCancel }: { title: string; onCancel: () => void }) {
   return <NotesDialog label="Edit drawing">
     <LoadingStatus label="Loading drawing editor" />
-    <Skeleton className="flex min-h-[50px] shrink-0 items-center gap-2 border-b border-border-primary px-4 py-2">
-      <span className="min-w-0 flex-1 px-1.5 py-1 text-[15px] font-semibold leading-none"><TextBone text={title || 'Drawing'} /></span>
-      <Bone className="h-8 w-16" />
-      <Bone className="h-8 w-28" />
-    </Skeleton>
+    <div className="flex min-h-[50px] shrink-0 items-center gap-2 border-b border-border-primary px-4 py-2">
+      <Skeleton className="min-w-0 flex-1 px-1.5 py-1 text-[15px] font-semibold leading-none"><TextBone text={title || 'Drawing'} /></Skeleton>
+      <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+      <Skeleton><Bone className="h-8 w-28" /></Skeleton>
+    </div>
     <div className="min-h-0 flex-1" />
   </NotesDialog>;
 }
@@ -322,7 +324,7 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
         trigger={<Button variant="ghost" size="sm" aria-label="Add block" icon={<Plus className="h-4 w-4" />} className="-ml-2.5">Add a block</Button>}
         items={[{ id: 'text', label: 'Text', icon: Type, onClick: () => addText() }, { id: 'drawing', label: 'Drawing', icon: Pencil, onClick: () => addDrawing() }]} />}
     </div>
-    {drawing && <Suspense fallback={<DrawingSkeleton title={drawing.title} />}><DrawingEditor block={drawing}
+    {drawing && <Suspense fallback={<DrawingSkeleton title={drawing.title} onCancel={() => setDrawing(undefined)} />}><DrawingEditor block={drawing}
       onCancel={() => setDrawing(undefined)}
       onSave={block => {
         const blocks = draftRef.current.blocks.slice();

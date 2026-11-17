@@ -6,7 +6,7 @@ import { cn } from '../../utils/cn';
 import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import { onSessionOverviewChange } from '../../utils/sessionOverviewEvents';
-import { Bone, Skeleton, TextBone, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from '../ui/Skeleton';
 
 /** One Pane's line: its state from its report or its tabs, with its PR. */
 interface PaneLine { tone: 'done' | 'waiting' | 'running' | 'idle'; text: string }
@@ -44,9 +44,10 @@ export function AutopilotSessionOverview({ sessionId }: { sessionId: string }) {
     const stop = onSessionOverviewChange(read);
     return () => { live = false; stop(); };
   }, [sessionId]);
+  const { holding, reveal } = useSkeletonHold(!overview && !error);
 
   if (error) return <p className="m-auto text-[13px] text-text-secondary" role="alert">{error}</p>;
-  if (!overview) {
+  if (!overview || holding) {
     return (
       <>
         <LoadingStatus label="Reading the Session" />
@@ -72,7 +73,7 @@ export function AutopilotSessionOverview({ sessionId }: { sessionId: string }) {
     ? [{ id: panel.panelId, label: `${panel.title} · ${pane.name}`, at: panel.report.reportedAt }]
     : []));
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4" data-testid="autopilot-session-overview">
+    <div className={cn('flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4', reveal && 'skeleton-reveal')} data-testid="autopilot-session-overview">
       <section>
         <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Panes</h3>
         {panes.length === 0 ? <p className="text-[13px] text-text-tertiary">No Panes in this Session.</p> : (

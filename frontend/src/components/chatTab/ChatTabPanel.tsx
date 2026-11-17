@@ -37,7 +37,7 @@ import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
 import { usePageTextFind } from '../find/usePageTextFind';
 import { takeLaunchDraft } from '../../utils/launchOutline';
-import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -568,12 +568,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {view?.clearedAt && (snapshot.transcript?.start ?? 0) === 0 && <ClearedDivider at={view.clearedAt} />}
-          {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view
-            ? <p role="status" className="chat-notice">Starting {agentName}…</p>
-            : <TurnsSkeleton />)}
-          <ChatBlocksContext.Provider value={rendering}>
-            {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
-          </ChatBlocksContext.Provider>
+          {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view) && <p role="status" className="chat-notice">Starting {agentName}…</p>}
+          <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting'} skeleton={<TurnsSkeleton />}>
+            <ChatBlocksContext.Provider value={rendering}>
+              {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
+            </ChatBlocksContext.Provider>
+          </SkeletonSwap>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
             {snapshot.loadingNewer ? 'Loading…' : 'Newer messages'}

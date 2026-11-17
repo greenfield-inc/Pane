@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft } from 'lucide-react';
 import { Button } from './ui/Button';
-import { Bone, Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SettingsLayout } from './settings/SettingsLayout';
 import { GeneralSettings } from './settings/categories/GeneralSettings';
@@ -269,7 +269,9 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
           </div>
         ) : (
           <SettingsLayout category={category} categories={autopilotOn ? SETTINGS_CATEGORIES : SETTINGS_WITHOUT_AUTOPILOT} onCategoryChange={changeCategory} onBack={requestClose} fullBleed={category === 'usage'}>
-            {persistence.config ? content() : <SettingsPageSkeleton title={SETTINGS_CATEGORIES.find((item) => item.id === category)?.label ?? 'Settings'} />}
+            <SkeletonSwap loading={!persistence.config} skeleton={<SettingsPageSkeleton title={SETTINGS_CATEGORIES.find((item) => item.id === category)?.label ?? 'Settings'} />}>
+              {persistence.config && content()}
+            </SkeletonSwap>
           </SettingsLayout>
         )}
       </div>

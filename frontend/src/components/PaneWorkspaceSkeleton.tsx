@@ -1,6 +1,7 @@
 import type { CSSProperties, Ref } from 'react';
 import { TerminalSkeleton } from './panels/TerminalSkeleton';
-import { Bone, Skeleton, TextBone, LoadingStatus } from './ui/Skeleton';
+import { Bone, LoadingStatus, QuietSkeletons, Skeleton, TextBone } from './ui/Skeleton';
+import { wasTerminalRevealed } from '../utils/revealedTerminals';
 
 const INSPECTOR_TABS = ['Details', 'Files', 'Changes'] as const;
 
@@ -35,6 +36,8 @@ export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidt
     </div>
   );
   return (
+    // A Pane whose stage terminal this window showed before is cached content: no bones.
+    <QuietSkeletons quiet={Boolean(stagePanelId && wasTerminalRevealed(stagePanelId))}>
     <div data-testid="pane-workspace-skeleton" className="flex flex-1 flex-col overflow-hidden bg-bg-primary">
       <LoadingStatus label={`Opening ${name}`} />
       <Skeleton chain={chain} className="flex min-h-[39px] flex-shrink-0 items-center border-b border-border-primary bg-bg-chrome pr-2">
@@ -62,6 +65,7 @@ export function PaneWorkspaceSkeleton({ name, swapped, dockHeight, inspectorWidt
           : inspectorWidth > 0 && <InspectorSkeleton chain={chain} className="border-l" style={{ width: inspectorWidth }} />}
       </div>
     </div>
+    </QuietSkeletons>
   );
 }
 

@@ -7,7 +7,7 @@ import { RoutePillView } from './settings/computers/RoutePills';
 import { useAddDeviceStore } from './addDevice/addDeviceStore';
 import { showActionError } from '../stores/errorStore';
 import { cn } from '../utils/cn';
-import { Bone, Skeleton } from './ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap } from './ui/Skeleton';
 import type { HostingSummary, MachineEntry, RoutePill } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 
@@ -64,9 +64,9 @@ function MachineLine({ machine, latencies }: { machine: MachineEntry; latencies:
     <span className="flex h-5 min-w-0 items-center gap-1.5">
       <RoutePillView route={route} />
       <span className="w-11 flex-none whitespace-nowrap tabular-nums text-text-secondary" data-testid="machine-latency">
-        {latency === undefined
-          ? <Skeleton className="flex h-5 items-center"><Bone className="h-3 w-9" /></Skeleton>
-          : <span aria-hidden="true">{text}</span>}
+        <SkeletonSwap loading={latency === undefined} skeleton={<Skeleton className="flex h-5 items-center"><Bone className="h-3 w-9" /></Skeleton>}>
+          <span aria-hidden="true">{text}</span>
+        </SkeletonSwap>
         <span className="sr-only">{spoken}</span>
       </span>
       {machine.os && <span className="truncate">{machine.os}</span>}

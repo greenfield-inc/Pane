@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { cn } from '../../utils/cn';
-import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 
 interface SshHost {
@@ -102,7 +102,7 @@ export function SshTab({ onClose }: { onClose: () => void }) {
       <div className="flex flex-col gap-4 sm:flex-row">
         <section className={CARD} aria-labelledby="add-device-ssh-hosts">
           <h3 id="add-device-ssh-hosts" className="text-sm font-semibold text-text-primary">Hosts in ~/.ssh/config</h3>
-          {hosts === null ? (
+          <SkeletonSwap loading={hosts === null} skeleton={
             <>
               <LoadingStatus label="Reading your SSH config" />
               <Skeleton className="space-y-1">
@@ -111,32 +111,34 @@ export function SshTab({ onClose }: { onClose: () => void }) {
                 ))}
               </Skeleton>
             </>
-          ) : hosts.length === 0 ? (
-            <p className="text-sm text-text-tertiary">No hosts in ~/.ssh/config. Type one below.</p>
-          ) : (
-            <ul className="space-y-1" role="listbox" aria-label="SSH hosts">
-              {hosts.map((host) => {
-                const isSelected = !typed.trim() && selected === host.alias;
-                const detail = hostDetail(host);
-                return (
-                  <li key={host.alias} role="option" aria-selected={isSelected}>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => { setSelected(host.alias); setTyped(''); }}
-                      className={cn(
-                        'flex w-full min-w-0 items-baseline gap-1.5 rounded-md px-3 py-2 text-left text-sm',
-                        isSelected ? 'bg-surface-secondary' : 'hover:bg-surface-hover',
-                      )}
-                    >
-                      <span className="text-text-primary">{host.alias}</span>
-                      {detail && <span className="truncate text-text-tertiary">· {detail}</span>}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          }>
+            {!hosts ? null : hosts.length === 0 ? (
+              <p className="text-sm text-text-tertiary">No hosts in ~/.ssh/config. Type one below.</p>
+            ) : (
+              <ul className="space-y-1" role="listbox" aria-label="SSH hosts">
+                {hosts.map((host) => {
+                  const isSelected = !typed.trim() && selected === host.alias;
+                  const detail = hostDetail(host);
+                  return (
+                    <li key={host.alias} role="option" aria-selected={isSelected}>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => { setSelected(host.alias); setTyped(''); }}
+                        className={cn(
+                          'flex w-full min-w-0 items-baseline gap-1.5 rounded-md px-3 py-2 text-left text-sm',
+                          isSelected ? 'bg-surface-secondary' : 'hover:bg-surface-hover',
+                        )}
+                      >
+                        <span className="text-text-primary">{host.alias}</span>
+                        {detail && <span className="truncate text-text-tertiary">· {detail}</span>}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </SkeletonSwap>
           <input
             aria-label="Another host"
             placeholder="user@host"

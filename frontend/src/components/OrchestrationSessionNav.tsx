@@ -20,6 +20,7 @@ import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '.
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { LoadingStatus } from './ui/Skeleton';
 import { Tooltip } from './ui/Tooltip';
 import { UndoToast } from './ui/UndoToast';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
@@ -679,13 +680,7 @@ export function OrchestrationSessionNav({
           >
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate">Sessions</span>
-              <span
-                className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center"
-                role={availability === 'loading' ? 'status' : undefined}
-                aria-label={availability === 'loading' ? 'Loading Sessions' : undefined}
-              >
-                {availability === 'loading' && <RefreshCw aria-hidden="true" className="h-3 w-3 animate-spin text-text-muted" />}
-              </span>
+              {availability === 'loading' && <LoadingStatus label="Loading Sessions" />}
             </span>
             <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
               {sectionExpanded ? (
