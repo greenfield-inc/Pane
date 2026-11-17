@@ -212,7 +212,7 @@ test('Session tool hydration hides cached tools and offers retry on failure', as
   await page.getByRole('button', { name: 'Open Session Session A', exact: true }).click();
   await resolve(page, 'select', 'a');
   await resolve(page, 'get', 'a');
-  await expect(page.getByTestId('session-workspace-tabs')).toHaveCount(0);
+  await expect(page.locator('.panel-group-tab-bar')).toHaveCount(0);
   await resolve(page, 'panels', 'internal-a', 'Session tools unavailable');
   await expect(page.getByRole('alert').filter({ hasText: 'Session tools unavailable' })).toBeVisible();
   await page.getByRole('button', { name: 'Retry', exact: true }).last().click();
@@ -272,7 +272,7 @@ test('Session tool layout transport failure stays in the Session with Retry', as
   await resolve(page, 'panels', 'internal-b');
   await expect.poll(() => page.evaluate(() => window.selectionTest.pending().some(request => request.kind === 'layout' && request.id === 'internal-b'))).toBe(true);
   await resolve(page, 'layout', 'internal-b');
-  await expect(page.getByTestId('session-workspace-tabs')).toBeVisible();
+  await expect(page.locator('.panel-group-tab-bar').first()).toBeVisible();
 });
 
 for (const oldError of [undefined, 'Outgoing host failed']) {

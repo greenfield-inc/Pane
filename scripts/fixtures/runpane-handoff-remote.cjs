@@ -123,5 +123,10 @@ process.on('uncaughtException', (error) => {
 `);
   process.exit(1);
 });
-server.listen(0, '127.0.0.1', () => fs.writeFileSync(config.ready, JSON.stringify({ port: server.address().port })));
+// The test polls for this file, so it appears whole: written aside, then renamed into place.
+function markReady(value) {
+  fs.writeFileSync(`${config.ready}.tmp`, JSON.stringify(value));
+  fs.renameSync(`${config.ready}.tmp`, config.ready);
+}
+server.listen(0, '127.0.0.1', () => markReady({ port: server.address().port }));
 process.on('SIGTERM', () => server.close(() => process.exit()));

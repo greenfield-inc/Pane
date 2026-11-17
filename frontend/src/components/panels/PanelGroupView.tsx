@@ -76,6 +76,8 @@ export interface PanelGroupViewProps {
   isHidden?: boolean;
   /** Maximize this group or restore it; absent where there is nothing to grow over. */
   onToggleMaximize?: (groupId: string) => void;
+  /** Content for a tab with no panel component of its own (a Session's Overview); undefined renders the panel. */
+  renderPanelContent?: (panel: ToolPanel) => React.ReactNode | undefined;
 }
 
 export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
@@ -105,6 +107,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   isMaximized = false,
   isHidden = false,
   onToggleMaximize,
+  renderPanelContent,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
   // A click inside a browser page reaches main, not this DOM: main says which
@@ -247,12 +250,14 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
                 pointerEvents: isActiveTab ? 'auto' : 'none',
               }}
             >
-              <PanelContainer
-                panel={panel}
-                isActive={isActiveTab && !isHidden}
-                autoFocus={isFocusedGroup && isActiveTab && !isHidden}
-                isMainRepo={isMainRepo}
-              />
+              {renderPanelContent?.(panel) ?? (
+                <PanelContainer
+                  panel={panel}
+                  isActive={isActiveTab && !isHidden}
+                  autoFocus={isFocusedGroup && isActiveTab && !isHidden}
+                  isMainRepo={isMainRepo}
+                />
+              )}
             </div>
           );
         })}

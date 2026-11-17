@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { AppState, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Animated, { useAnimatedKeyboard, useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
@@ -24,7 +25,11 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const keyboard = useAnimatedKeyboard();
-  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: -Math.max(0, keyboard.height.value - insets.bottom) }] }));
+  const returns = useReturnsToForeground();
+  // The keyboard closes while the app is in the background, and that last update never reaches
+  // the screen; reading it again on each return puts the bar back on the bottom edge. Listing
+  // deps replaces Reanimated's own, so the inset is listed too (a rotation changes it).
+  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: -Math.max(0, keyboard.height.value - insets.bottom) }] }), [returns, insets.bottom]);
   return (
     <Animated.View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 12) }, lift]}>
       <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -69,6 +74,23 @@ export function HomeBottomBar({ query, onQuery }: { query: string; onQuery: (que
       </Pressable>
     </Animated.View>
   );
+}
+
+/** Counts returns from the background. */
+function useReturnsToForeground(): number {
+  const [returns, setReturns] = useState(0);
+  useEffect(() => {
+    let backgrounded = false;
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'background') backgrounded = true;
+      else if (state === 'active' && backgrounded) {
+        backgrounded = false;
+        setReturns(count => count + 1);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+  return returns;
 }
 
 const styles = StyleSheet.create({
