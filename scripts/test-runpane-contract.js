@@ -1352,7 +1352,7 @@ async function checkProfiles() {
   const results = {
     'runpane:profiles:list': list,
     'runpane:profiles:show': { ok: true, profile: greenfield, yaml: 'format: pane-profile/1\nname: greenfield\n' },
-    'runpane:profiles:runs': { ok: true, runs: [run, { ...run, id: 'run-2', state: 'failed', step: 'approve', error: 'The tab closed.' }] },
+    'runpane:profiles:runs': { ok: true, runs: [{ ...run, attention: 'Answer the trust prompt.' }, { ...run, id: 'run-2', state: 'failed', step: 'approve', error: 'The tab closed.' }] },
     'runpane:profiles:launch': { ok: true, run },
     'runpane:panes:list': { ok: true, panes: [callerPane] },
   };
@@ -1466,7 +1466,7 @@ async function checkProfiles() {
     '',
   ].join('\n'));
   assertIncludes(brokenText, '  PROFILE_STEP_UNKNOWN: Step plan points to "nowhere". Fix: Point it at a step or end.');
-  assert.strictEqual(runsText, 'run-1 · greenfield · running · step plan\nrun-2 · greenfield · failed · step approve · The tab closed.\n');
+  assert.strictEqual(runsText, 'run-1 · greenfield · running · step plan · Answer the trust prompt.\nrun-2 · greenfield · failed · step approve · The tab closed.\n');
   assert.strictEqual(launchText, 'Started run run-1 of greenfield in Session sess-1: step plan in Pane pane-9.\n');
 }
 

@@ -102,7 +102,8 @@ def run_profiles_runs(parsed: Any) -> int:
         print("No profile runs. Start one with `runpane profiles launch <name> --prompt <text> --yes`.")
     for run in runs:
         error = f" · {run['error']}" if run.get("error") else ""
-        print(f"{run.get('id')} · {run.get('profile')} · {run.get('state')} · step {run.get('step')}{error}")
+        attention = f" · {run['attention']}" if run.get("attention") else ""
+        print(f"{run.get('id')} · {run.get('profile')} · {run.get('state')} · step {run.get('step')}{error}{attention}")
     return 0
 
 
@@ -181,4 +182,5 @@ def _describe_launch(run: Dict[str, Any]) -> str:
     if run.get("state") == "failed":
         return f"Run {run.get('id')} of {run.get('profile')} failed at step {run.get('step')}: {run.get('error') or 'no reason given'}"
     pane = f" in Pane {run['paneId']}" if run.get("paneId") else ""
-    return f"Started run {run.get('id')} of {run.get('profile')} in Session {run.get('sessionId')}: step {run.get('step')}{pane}."
+    attention = f" {run['attention']}" if run.get("attention") else ""
+    return f"Started run {run.get('id')} of {run.get('profile')} in Session {run.get('sessionId')}: step {run.get('step')}{pane}.{attention}"

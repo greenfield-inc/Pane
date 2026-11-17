@@ -66,6 +66,7 @@ const runSchema = boundary.object({
   state: boundary.string,
   step: boundary.string,
   error: boundary.optional(boundary.string),
+  attention: boundary.optional(boundary.string),
 });
 type RunView = ReturnType<typeof runSchema.decode>;
 const listViewSchema = boundary.object({
@@ -153,7 +154,7 @@ export async function runProfilesRuns(parsed: ParsedArgs): Promise<number> {
     return 0;
   }
   if (view.runs.length === 0) console.log('No profile runs. Start one with `runpane profiles launch <name> --prompt <text> --yes`.');
-  for (const run of view.runs) console.log(`${run.id} · ${run.profile} · ${run.state} · step ${run.step}${run.error ? ` · ${run.error}` : ''}`);
+  for (const run of view.runs) console.log(`${run.id} · ${run.profile} · ${run.state} · step ${run.step}${run.error ? ` · ${run.error}` : ''}${run.attention ? ` · ${run.attention}` : ''}`);
   return 0;
 }
 
@@ -222,7 +223,7 @@ function describeProfile(profile: LibraryProfileView): string[] {
 function describeLaunch(run: RunView): string {
   const pane = run.paneId ? ` in Pane ${run.paneId}` : '';
   if (run.state === 'failed') return `Run ${run.id} of ${run.profile} failed at step ${run.step}: ${run.error ?? 'no reason given'}`;
-  return `Started run ${run.id} of ${run.profile} in Session ${run.sessionId}: step ${run.step}${pane}.`;
+  return `Started run ${run.id} of ${run.profile} in Session ${run.sessionId}: step ${run.step}${pane}.${run.attention ? ` ${run.attention}` : ''}`;
 }
 
 function printJson(value: JsonObject): void {
