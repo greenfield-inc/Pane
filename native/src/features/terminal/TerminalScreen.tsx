@@ -277,7 +277,7 @@ function TabBody({ panel, title, panels }: { panel: ToolPanel; title: string; pa
     case 'logs':
       return <LogsTab key={panel.id} panel={panel} />;
     case 'device':
-      return <DeviceTab key={panel.id} panel={panel} />;
+      return <DeviceTab key={panel.id} panel={panel} panels={panels} />;
     default:
       return <PlaceholderTab panel={panel} />;
   }
