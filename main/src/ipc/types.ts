@@ -18,6 +18,7 @@ import type { MachineHealthService } from '../services/machineHealth/machineHeal
 import type { CleanupEngine } from '../services/machineHealth/cleanupEngine';
 import type { FinishedPaneMonitor } from '../services/machineHealth/finishedPanes';
 import type { MemoryRelief } from '../services/machineHealth/memoryRelief';
+import type { OtherApps } from '../services/machineHealth/otherApps';
 import type { ApprovalStore } from '../services/approvals/approvalStore';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 
@@ -50,6 +51,7 @@ export interface DaemonHostServices extends CoreServices {
   finishedPanes?: FinishedPaneMonitor;
   /** Early pause under memory pressure and leftover processes. */
   memoryRelief?: MemoryRelief;
+  otherApps?: OtherApps;
 }
 
 export interface AppServices extends DaemonHostServices {

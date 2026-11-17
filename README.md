@@ -126,19 +126,19 @@ Each of these is a small thing. Together they compound fast.
 | **Approvals** | Agents ask you through the `notify` MCP tool instead of waiting in their terminal. Inside Pane, an Approvals row in the sidebar opens everything that waits on you, newest first, or by Session or project, beside that Session's live tabs; over other apps a strip shows the question, and one click sends the answer back as the tool's result. ⌃⇧Space answers the whole queue by keyboard. In a Session, workers relay to their orchestrator, which posts for them. A Pane desktop shows the questions of every machine it has saved, and your phone gets an alert. | [Approvals](docs/PANE_NOTIFY.md) |
 | **Pane secrets** | An agent asks you for an API key on a masked card, then runs its command with `runpane secrets exec`; the value never enters chat. Secrets are shared by every agent and synced to every machine you have saved, and Project Settings variables can point at them. | [Pane secrets](docs/PANE_SECRETS.md) |
 | **Pane on Even G2 glasses** | See every Notify card from all your computers on Even Realities G2 glasses, answer with the R1 ring or your voice, and open any Pane's live terminal to read it and dictate into it. Pair once from the Pane phone app. | [Even G2 glasses](docs/EVEN_G2_GLASSES.md) |
-| **Machine health** | Pane watches free disk, memory pressure and every process it started, on this computer and each one you linked. It removes its own leftovers by itself, asks once before archiving finished Panes or clearing agent temp files, and warns about a likely memory leak. Resources, the gauge beside the machine switcher, shows what each Pane costs and frees it in one click; agents clean up with `runpane machine cleanup`. | [Machine health](docs/MACHINE_HEALTH.md) |
+| **Machine health** | Pane watches free disk, memory pressure and every process it started, on this computer and each one you linked. It removes its own leftovers by itself, asks once before archiving finished Panes or clearing agent temp files, and warns about a likely memory leak. Resources, the gauge beside the machine switcher, shows what each Pane costs and frees it in one click, and lists the other apps on the machine with a stop button for each; agents clean up with `runpane machine cleanup`. | [Machine health](docs/MACHINE_HEALTH.md) |
 | **Loops** | Run an agent or command on a cron schedule, such as a nightly bug sweep. Each run is a new Pane in a fresh worktree, ready to review. Loops are for large recurring jobs and run at most once an hour. | [Loops](docs/LOOPS.md) |
 | **@mention Terminals** | Type `@` in any terminal to pull the last 500 lines from another pane's terminal directly into your context, no copy-paste required. Turn it off in Settings → Terminal. | <img src="images/qol-at-mention.png" alt="Cross-terminal @mention picker" width="420"> |
 | **Clipboard Shortcuts** | `Cmd+Option+[key]` on macOS (`Ctrl+Alt+[key]` on Windows and Linux) pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
 | **Terminal Popover** | Highlight any text in a terminal and an intelligent popover offers the right action: copy, open in browser, or show in explorer. Right-click offers the same actions, plus Paste and Select All. Prefer copy on select? Turn it on in Settings → Terminal. | <img src="images/qol-terminal-popover.png" alt="Terminal text selection popover" width="420"> |
 | **Custom Links** | Turn any pattern in terminal output into a link: an issue key like `PROJ-123` opens your tracker, a build number opens CI. Set a regex and a URL with `$0`–`$9` in Settings → Links, then Ctrl/Cmd+Click. | |
-| **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. When a Pane's terminal or agent starts a web server, Pane offers to open a live preview of it beside the agent; the preview is that Pane's tab, so it follows the Pane. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Pane app opens the same ports and HTML pages through the computer's own address ([QR pairing](docs/QR_PAIRING.md)) or over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
+| **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. When a Pane's terminal or agent starts a web server, Pane offers to open a live preview of it beside the agent; the preview is that Pane's tab, so it follows the Pane. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Pane app opens the same ports and HTML pages through the computer's own address ([QR pairing](docs/QR_PAIRING.md)) or over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). To sign in with your password manager, use **Open in your browser**, or see which desktop apps may fill the tab ([Passwords in browser tabs](docs/BROWSER_PASSWORDS.md)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
 | **Status Cues** | Every AI pane reports its state at a glance — a red dot when an agent is blocked waiting on your approval, a blue cue while it works, and a "done" cue when it finishes while you're looking elsewhere. The same rollup colors the project dots and pane tabs, on the desktop and in the phone app, so a whole screen of parallel agents reads in one glance. Any program can also report its own state with the OSC 7501 escape sequence ([Program status](docs/PROGRAM_STATUS.md)). | <img src="images/qol-status-dots.png" alt="Session agent status dots: blocked, working, done" width="280"> |
 | **Jump + Refresh** | Jump to top, jump to bottom, or hard-refresh any terminal from the toolbar to unstick a frozen state in one click. | <img src="images/qol-jump-refresh.png" alt="Terminal jump and refresh controls" width="120"> |
 | **Auto Secrets Copy** | Every pane automatically mirrors `.env` files and secrets from your root project so your worktree is runnable the moment it's created. | |
 | **Isolated Ports** | Each pane runs on its own port range automatically, so you can spin up five dev servers in parallel without a single conflict. | |
 | **Terminal Rendering Patches** | Claude Code's scroll-jump bug (long conversations snapping to top when you scroll up) is fixed here, even though it's still broken in Claude Code itself. | |
-| **Drag and Drop** | Drop any file up to 50MB into a terminal and it lands exactly where you need it. | |
+| **Drag and Drop** | Drop a file of any size into a terminal and it lands exactly where you need it, with progress while it copies. | |
 
 ---
 
@@ -354,7 +354,8 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 | Shortcut | Action |
 |----------|--------|
 | `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command, and see or change its key |
-| `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Keyboard Shortcuts |
+| `⌘/` / `Ctrl+K Ctrl+/` | Show every key in a searchable sheet, your own keys marked (a writable file editor keeps `⌘/` for comments, and browser pages keep it; `Ctrl+/` stays with terminal programs) |
+| `⌘K ⌘S` / `Ctrl+K Ctrl+S` | Change keys (Settings → Shortcuts) |
 | `⌘0` / `Ctrl+0` | Focus the sidebar; then `↑` `↓` (or `k` `j`) move (up into the top buttons), `←` `→` collapse or expand, `Enter` opens, `Space` opens and stays, `Esc` goes back |
 | `Enter` | With a chat on screen and focus on no field or control, move into its message box |
 | `⌘⌥←→↑↓` / `Ctrl+Alt+arrows` | Move focus to the split, panel, approval column or sidebar in that direction; the focused split's active tab carries the accent underline |
@@ -365,12 +366,15 @@ Pane's keys follow VS Code, and every one can be changed: press `⌘K ⌘S` (`Ct
 | `⌘⌥B` / `Ctrl+Alt+B` | Toggle right panel |
 | `` ⌃` `` / `` Ctrl+` `` | Toggle terminal |
 | `⌘⇧[` `⌘⇧]` / `Ctrl+PgUp` `Ctrl+PgDn` | Previous / next tab in the focused split, or in a Session's approval column while it has focus (`Esc` there goes back to the chat) |
-| `⌃⇧Space` | Approvals, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
+| `⌃⇧Space` | Approvals from any app, and back to exactly where you were (also `Esc`); change it in Settings → Notify |
+| `⌘⇧A` / `Ctrl+Shift+A` | Open or close Approvals while Pane is in front; in its list `↑` `↓` move, `Enter` or `→` open, `Esc` goes back, and the tab keys switch Waiting / Done today |
+| `⌘⌥A` / `Ctrl+K Ctrl+A` | From a Session chat, open its approval; again (or `Esc`) goes back with your draft kept |
+| `↑` `↓` `Space` `Tab` `⌘↩` | In an approval: move and pick within a question, pick the focused option, next question (then the reply box), send from anywhere in it |
 | `⌘⌥O` / `Ctrl+Alt+O` | Machine switcher (then `0` for All machines, `1-9` for a machine) |
 | `⌃⌘]` `⌃⌘[` / `Ctrl+Alt+Shift+]` `[` | Next / previous machine |
 | `⌃⌘0` / `Ctrl+Alt+Shift+0` | All machines ⇄ the last machine |
 | `⌘K` / `Ctrl+K` | Clear the focused terminal |
-| `⌘F` / `Ctrl+F` | Find in the focused tab (terminal, browser, file preview, Logs) |
+| `⌘F` / `Ctrl+F` | Find in the focused tab (terminal, browser, file preview, Logs, a chat's loaded conversation), an approval and its Summary, or the Approvals screen |
 | `⌘G` / `Ctrl+G` | Find next |
 | `⌘⇧G` / `Ctrl+Shift+G` | Find previous |
 | `⌘N` / `Ctrl+N` | New pane |

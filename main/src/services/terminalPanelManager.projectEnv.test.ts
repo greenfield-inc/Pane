@@ -161,6 +161,8 @@ describe('terminal panels and project environment variables', () => {
     const spawned = await start(panel);
 
     expect(spawned.env.PANE_PANEL_ID).toBe(panel.id);
+    // Asks Agent Farm for its host-neutral session ID line (D-403).
+    expect(spawned.env.AGENT_FARM_REPORT_SESSION_ID).toBe('1');
   });
 
   it('opens the terminal without a variable whose secret cannot be read, and says so in the pane', async () => {

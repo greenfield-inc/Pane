@@ -20,8 +20,11 @@ export const APPROVAL_SORTS: ReadonlyArray<{ id: ApprovalSort; label: string; de
   { id: 'project', label: 'By project', description: 'One card per repository' },
 ];
 
+/** The sort until the person picks one. */
+export const DEFAULT_APPROVAL_SORT: ApprovalSort = 'session';
+
 export function parseApprovalSort(value: string | null): ApprovalSort {
-  return APPROVAL_SORTS.find(sort => sort.id === value)?.id ?? 'recent';
+  return APPROVAL_SORTS.find(sort => sort.id === value)?.id ?? DEFAULT_APPROVAL_SORT;
 }
 
 /** What Approvals groups: a Notify item or a permission request, on one machine. */

@@ -23,6 +23,7 @@ export const REMOTE_READ_CHANNELS = new Set([
   'resource-monitor:machine-finished-panes',
   'resource-monitor:machine-relief',
   'resource-monitor:machine-cleanup-history',
+  'resource-monitor:machine-apps',
   'config:get',
   'config:get-session-preferences',
   'ui-state:get-expanded',

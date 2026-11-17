@@ -127,7 +127,8 @@ export interface NotifyRequest extends Partial<NotifyQuestion> {
   resume?: string;
   /**
    * `runpane notify --took <id|Q-n> answer|question`: the reader of the person's reply says how it
-   * took it. `answer` records the reply as the answer; `question` shows "Getting more context…".
+   * took it. A delivered reply is already the answer, so `answer` changes nothing; `question`
+   * reopens the approval and shows "Getting more context…".
    */
   took?: string;
   tookAs?: 'answer' | 'question';
@@ -169,10 +170,10 @@ export type NotifyResultBody =
   /** `answers`: one pick per question, when the approval asks several (`answer` joins them with " · "). */
   | { answer: string; note?: string; answers?: string[] }
   /**
-   * The person typed a reply: it may be an answer or a question about it. The call ends; run
-   * `runpane notify --took <replyId> answer|question` (see `next`), and the approval keeps waiting
-   * meanwhile. `replyId` is given only to this call, so it lets its agent continue with --took and
-   * --update even from outside a Pane tab (D-294).
+   * The person typed a reply, and Pane recorded it as the answer. The call ends; when the reply
+   * asks a question instead, run `runpane notify --took <replyId> question` (see `next`), which
+   * reopens the approval. `replyId` is given only to this call, so it lets its agent continue with
+   * --took and --update even from outside a Pane tab (D-294).
    */
   | { reply: string; picks?: string[]; id: string; replyId: string; next: string }
   /** --took: how the reply was recorded. */
@@ -399,8 +400,8 @@ export interface NotifyItem extends NotifyQuestion {
 }
 
 /**
- * The person's typed reply on an approval (P1 of the approval card): the asker's agent (or the
- * next reader) reads it and says whether it was an answer or a question with `--took`.
+ * The person's typed reply on an approval (P1 of the approval card): it becomes the answer once
+ * the asker's agent (or the next reader) gets it, and the reader reopens it with `--took question`.
  */
 export interface NotifyReply {
   /** Each reply is delivered once, by id. */
@@ -411,8 +412,8 @@ export interface NotifyReply {
   /** Epoch ms. */
   at: number;
   /**
-   * reading: delivered (or waiting for a busy reader) until it runs --took. answer / question:
-   * how it was taken. unread: no agent can read replies right now. sent: a built-in question's
+   * reading: on its way to its reader (or waiting for a busy one). answer / question: how it was
+   * taken; delivery takes it as the answer. unread: no agent can read replies right now. sent: a built-in question's
    * answer, typed into the chat tab's paused turn.
    */
   state: 'reading' | 'answer' | 'question' | 'unread' | 'sent';

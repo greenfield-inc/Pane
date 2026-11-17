@@ -114,7 +114,7 @@ window.qaAnswers = [];
 const holdCopies = params.has('holdCopies');
 let release: Promise<void> = Promise.resolve();
 if (holdCopies) release = new Promise(resolve => { window.qaReleaseCopies = resolve; });
-const saveFile = params.has('files') ? async ({ name }: { name: string; dataUrl: string }) => {
+const saveFile = params.has('files') ? async ({ name }: File) => {
   await release;
   if (name.startsWith('fail')) throw new Error('the host is offline');
   window.qaCopied.push(name);

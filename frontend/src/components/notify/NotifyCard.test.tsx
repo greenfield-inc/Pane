@@ -21,6 +21,20 @@ function text(markup: string): string {
 }
 
 describe('NotifyCard', () => {
+  it('offers Dismiss on every floating and docked card, which hides it without answering', () => {
+    const cards: NotifyItem[] = [
+      { ...base, ui: 'approve', title: 'Apply migration 0042 to staging?' },
+      { ...base, ui: 'options', title: 'Which store?', choices: [{ label: 'Redis', recommended: true }, { label: 'Postgres' }] },
+      { ...base, ui: 'ask', title: 'What should the headline say?' },
+    ];
+    for (const item of cards) {
+      for (const form of ['strip', 'docked'] as const) {
+        expect(render(item, { form }), `${item.ui} ${form}`).toMatch(/<button[^>]*aria-label="Dismiss"[^>]*data-testid="notify-dismiss"/);
+      }
+    }
+    expect(render(cards[0], { view: 'expired' })).toContain('aria-label="Dismiss"');
+  });
+
   it("names the host machine on its question, and says an answer can't be sent while it is out of reach", () => {
     const visible = text(render({ ...base, ui: 'approve', title: 'Apply migration 0042 to staging?', machine: 'parsa-devbox', unreachable: true }));
     expect(visible).toContain('auth-refactor · Claude · parsa-devbox');

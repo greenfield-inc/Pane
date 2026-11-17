@@ -70,6 +70,8 @@ export interface NotifyServiceDependencies {
   wslDistros?: () => string[];
   /** The Session a Pane (and tab) works in; Approvals files each item under it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
+  /** Both Panes run for the same loop: a later run may --update or --took an earlier run's card. */
+  sameLoop?: (callerPaneId: string, askerPaneId: string) => boolean;
   /** The project a Pane belongs to. */
   projectOf?: (paneId: string) => string | undefined;
   /** Every open Session by id, read once per fallback refresh. */
@@ -158,6 +160,7 @@ export class NotifyService {
       machineId: deps.configManager.getConfig().machineId,
       secrets: deps.secrets,
       sessionOf: deps.sessionOf,
+      sameLoop: deps.sameLoop,
       savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.computers ?? []).map(computer => computer.id),
       projectOf: deps.projectOf,
       store: deps.store,
@@ -265,6 +268,8 @@ export class NotifyService {
         summaryPath: entry.report?.summaryPath,
         readStatusFile: entry.report?.summaryTruncated === true && !machine,
         statusLabel: `${entry.paneName} status`,
+        choices: entry.report?.choices,
+        questions: entry.report?.questions,
       });
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: machine ? `${entry.paneName} on ${machine}` : entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = { id: entry.sessionId, name: session.name, paneId: session.paneId };
@@ -288,7 +293,8 @@ export class NotifyService {
   private workerQuestionEnded({ id, how, decision, question, next }: SessionInboxEnded): void {
     if (decision) this.queue.recordDecision(id, decision);
     if (how === 'acked') {
-      this.queue.endWorkerQuestion(id, 'its orchestrator dealt with it');
+      // An ack records what the relay returned; a card the worker since reopened stays open.
+      this.queue.endWorkerQuestion(id, 'its orchestrator dealt with it', true);
       return;
     }
     const nextQuestion = next?.kind === 'report' && next.report?.state === 'blocked' ? next.report.question?.trim() : undefined;
@@ -296,7 +302,7 @@ export class NotifyService {
     if (next && question && nextQuestion && sameWorkerQuestion(question, nextQuestion) && this.queue.carryWorkerQuestion(id, next.id)) return;
     if (next && nextQuestion) {
       // A different question gets its own card, which the relaying call can take up.
-      this.queue.endWorkerQuestion(id, 'the worker asked a new question', `Relay its new question with \`runpane notify --relays ${next.id}\`.`);
+      this.queue.endWorkerQuestion(id, 'the worker asked a new question', false, `Relay its new question with \`runpane notify --relays ${next.id}\`.`);
       return;
     }
     this.queue.endWorkerQuestion(id, 'the worker moved on');

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { NotifyItem } from '../../../../shared/types/notify';
+import { NOTIFY_SUMMARY_CSP, type NotifyItem } from '../../../../shared/types/notify';
 import { MachineFileFrame, SummaryView } from './ApprovalColumn';
 import { MachineDocView } from './MachineContext';
 import { linkedFileReadsHere, readMachineDoc } from './machineDoc';
@@ -68,6 +68,17 @@ describe('an approval from another machine opens its files here', () => {
     const markup = renderToStaticMarkup(<SummaryView item={remote} page={page} onRetry={() => undefined} />);
     expect(text(markup)).toContain('summary.html · on tylers-mac-mini');
     expect(markup).toContain('data-testid="approval-summary-frame"');
+  });
+
+  it('Summary frame: shares Pane\'s origin for find, never with scripts, and holds the policy whatever the sending Pane did', () => {
+    // An older Pane on the holding machine let a commented-out <head> capture its policy.
+    const page = { kind: 'page' as const, path: '/work/s.html', html: '<!doctype html><!-- <head> --><html><head><script>x()</script></head></html>' };
+    const markup = renderToStaticMarkup(<SummaryView item={remote} page={page} onRetry={() => undefined} />);
+    const sandbox = /sandbox="([^"]*)"/.exec(markup)?.[1].split(/\s+/) ?? [];
+    expect(sandbox).toEqual(['allow-same-origin']);
+    expect(sandbox).not.toContain('allow-scripts');
+    const srcdoc = /srcDoc="([^"]*)"/i.exec(markup)?.[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, '&') ?? '';
+    expect(srcdoc).toBe(`<!doctype html><meta http-equiv="Content-Security-Policy" content="${NOTIFY_SUMMARY_CSP}"><!-- <head> --><html><head><script>x()</script></head></html>`);
   });
 
   it('remote Summary offline: the reason, with Retry', async () => {

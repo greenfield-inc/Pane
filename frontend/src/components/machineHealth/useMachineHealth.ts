@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CleanupRun, HealthProcess, MachineHealthSnapshot, StorageInventory } from '../../../../shared/types/machineHealth';
+import type { CleanupRun, HealthProcess, MachineHealthSnapshot, OtherApp, StorageInventory } from '../../../../shared/types/machineHealth';
 import { MACHINE_HEALTH_CHANGED_EVENT, MACHINE_HEALTH_INVENTORY_CHANGED_EVENT } from '../../../../shared/types/machineHealth';
 import type { MachineHealthAction, MachineReadChannel, MachineState } from '../../../../shared/types/machineConnections';
 import { healthReadProblem, type HealthReadProblem } from './healthReadError';
@@ -78,6 +78,11 @@ function readRest(machineId: string, refresh: boolean): Array<Promise<Partial<Ma
 /** Runs a machine health action on a machine (this one is `local`), through that machine's own checks. */
 export async function runHealthAction(machineId: string, action: MachineHealthAction, request: JsonObject): Promise<void> {
   await window.electronAPI.machines.run(machineId, { type: 'machine-health', action, request });
+}
+
+/** The apps running outside Pane on a machine, biggest memory first; icons only for keys not in `knownIcons`. */
+export async function readOtherApps(machineId: string, knownIcons: readonly string[]): Promise<OtherApp[]> {
+  return read<OtherApp[]>(machineId, 'resource-monitor:machine-apps', [{ knownIcons: [...knownIcons] }]);
 }
 
 /** One machine's latest health sample. */

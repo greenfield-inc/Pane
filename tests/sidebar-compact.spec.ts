@@ -350,6 +350,7 @@ test.describe('compact sidebar', () => {
     await expect(menu.getByRole('menuitem').nth(0)).toHaveText('Pin');
     await expect(menu.getByRole('menuitem', { name: 'Archive', exact: true })).toBeVisible();
     await menu.getByRole('menuitem', { name: 'Archive' }).click();
+    await page.getByRole('dialog', { name: 'Archive Regular work?' }).getByRole('button', { name: 'Archive', exact: true }).click();
 
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
     await expect.poll(() => page.evaluate(() => (

@@ -55,7 +55,7 @@ export function MachineHealthSettings({ persistence }: { persistence: SettingsPe
   return (
     <SettingsPage title="Machine health" description="Pane watches free disk, memory pressure and every process it started. It removes its own leftovers by itself and asks before anything else; each kind below can be switched to automatic.">
       <SettingsSection title="Thresholds">
-        <SettingRow settingId="machine-health-disk" label="Disk warning" description="Pane warns below the first figure and alerts below the second, on any volume holding its data, your worktrees or the temp folder." saveState={persistence.saveStates['machine-health-disk']}>
+        <SettingRow settingId="machine-health-disk" label="Disk warning" description="Pane warns below the first figure and alerts below the second, on any volume holding its data, your worktrees or the temp folder. Files sent to this computer (from the phone, a terminal or a chat) must leave the second figure free." saveState={persistence.saveStates['machine-health-disk']}>
           <div className="flex items-center gap-4">
             <NumberField label="Warn below" unit="GB free" saved={health.diskWarningGB ?? 20} min={1} max={10_000} onSave={value => { void save('machine-health-disk', { diskWarningGB: value }); }} />
             <NumberField label="Alert below" unit="GB free" saved={health.diskCriticalGB ?? 5} min={1} max={10_000} onSave={value => { void save('machine-health-disk', { diskCriticalGB: value }); }} />

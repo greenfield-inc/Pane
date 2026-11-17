@@ -356,6 +356,8 @@ export function Dropdown({
 
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        // The menu took this Esc: a view's own Esc (Approvals' "back") must not run as well.
+        event.preventDefault();
         handleClose();
       }
     };

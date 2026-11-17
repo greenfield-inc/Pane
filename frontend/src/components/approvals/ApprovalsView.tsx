@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, ChevronDown, ChevronRight, CircleCheck, CircleHelp, ExternalLink, Folder, GitBranch, Inbox, MessageSquare, MessagesSquare, Navigation, Send, ShieldAlert, WifiOff } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
-import { useNotifyStore } from '../../stores/notifyStore';
+import { runNotify, useNotifyStore } from '../../stores/notifyStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
@@ -24,9 +24,13 @@ import { MachineContext } from './MachineContext';
 import { handleApprovalsEscape } from './approvalsNavigation';
 import { toggleApprovals } from './approvalsNavigation';
 import { useSidebarSessionOrder } from './useSidebarSessionOrder';
+import { focusFirstQuestion, isTypingTarget, pressedCommand, whenShown } from './approvalKeys';
+import { showApprovalColumnTab } from '../../services/regionFocus';
 import { useObservedContentBox } from '../../hooks/useObservedContentBox';
 import { useOuterPanelResize } from '../../hooks/useOuterPanelResize';
 import { OuterResizeSeparator } from '../ui/OuterResizeSeparator';
+import { FindBar } from '../find/FindBar';
+import { APPROVALS_SCREEN_FIND_ID, useSurfaceFind } from '../find/surfaceFind';
 import { OUTER_PANEL_CONFIGS } from '../../utils/outerPanelSizing';
 
 /** Side by side from 1100px (the `min-[1100px]:` layout below); stacked under it. */
@@ -78,7 +82,7 @@ function GroupHeader({ group, mark, count }: { group: ApprovalGroup; mark: React
   );
 }
 
-function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; now: number; selected?: boolean; onSelect: (fromKeyboard: boolean) => void }) {
+function ItemRow({ item, now, selected = false, tabbable, onSelect }: { item: NotifyItem; now: number; selected?: boolean; tabbable: boolean; onSelect: (fromKeyboard: boolean) => void }) {
   const done = item.state === 'answered' || item.state === 'expired' || item.state === 'info';
   const { acted, origin } = approvalRowLines(item);
   const chip = cardChip(item);
@@ -90,6 +94,9 @@ function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; 
       // Enter or Space reports no clicks (detail 0): the card that replaces this row takes the focus.
       onClick={(event) => onSelect(event.detail === 0)}
       aria-current={selected || undefined}
+      // The list is one Tab stop; ↑↓ move through it (listKey below).
+      tabIndex={tabbable ? 0 : -1}
+      data-item-id={item.id}
       data-approval-selected={selected || undefined}
       data-testid="approvals-row"
       className={cn(
@@ -208,6 +215,11 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const [tab, setTab] = useState<ApprovalsTab>('waiting');
   // The list's width is the person's (drag the edge; double-click resets), side by side only.
   const inboxBox = useObservedContentBox<HTMLDivElement>();
+  // ⌘F searches the list and the open approval together.
+  const findRoot = useRef<HTMLDivElement | null>(null);
+  const setInboxBox = inboxBox.ref;
+  const screenRef = useCallback((element: HTMLDivElement | null) => { setInboxBox(element); findRoot.current = element; }, [setInboxBox]);
+  useSurfaceFind(APPROVALS_SCREEN_FIND_ID, findRoot);
   const sideBySide = useSideBySide();
   const listResize = useOuterPanelResize({ config: OUTER_PANEL_CONFIGS.approvalsList, containerPx: inboxBox.width, enabled: sideBySide });
   const listSized = listResize.separatorVisible;
@@ -226,8 +238,10 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   // An item opened from elsewhere (a link, the strip) shows even when its group is collapsed.
   const staleOpen = staleExpanded || stale.some((item) => item.id === selectedId);
   const shown = [...list, ...(staleOpen ? stale : [])];
+  // Dismiss closes the column without answering; the first item doesn't take over until a row is picked.
+  const [dismissed, setDismissed] = useState(false);
   // The selection follows its item into its Undo hold; once it leaves the tab, the first item takes over.
-  const selected = shown.find((item) => item.id === selectedId) ?? (tab === 'waiting' ? shown[0] : undefined);
+  const selected = shown.find((item) => item.id === selectedId) ?? (tab === 'waiting' && !dismissed ? shown[0] : undefined);
   // That first item is then the selection, so a newer item arriving on top doesn't take over from it.
   const firstToPin = selected && selected.id !== selectedId ? selected.id : undefined;
   useEffect(() => {
@@ -362,9 +376,64 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   );
 
   // The list stays compact rows; the selected approval opens in the column beside it (P4).
+  const stopId = selected?.id ?? shown[0]?.id;
   const renderItem = (item: NotifyItem) => (
-    <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} onSelect={(fromKeyboard) => { focusCard.current = fromKeyboard; selectApproval(item.id); }} />
+    <ItemRow key={item.id} item={item} now={now} selected={item.id === selected?.id} tabbable={item.id === stopId} onSelect={(fromKeyboard) => { focusCard.current = fromKeyboard; setDismissed(false); selectApproval(item.id); }} />
   );
+  // ↑↓ move through the list and the approval follows; ↩ or → go into it (D-381).
+  const listKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const row = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-testid="approvals-row"]') : null;
+    const id = row?.dataset.itemId;
+    if (!row || !id) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const rows = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-testid="approvals-row"]'));
+      const next = rows[rows.indexOf(row) + (event.key === 'ArrowDown' ? 1 : -1)];
+      if (!next?.dataset.itemId) return;
+      next.focus();
+      selectApproval(next.dataset.itemId);
+      return;
+    }
+    if (event.key === 'Enter' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      selectApproval(id);
+      whenShown(() => document.querySelector<HTMLElement>(`[data-testid="approvals-beside"] [data-testid="approval-column"][data-item-id="${CSS.escape(id)}"]`), focusFirstQuestion);
+    }
+  };
+  // Esc in the approval: back to its row (Esc on the list leaves Approvals). The tab keys switch
+  // Waiting and Done today while the list has focus, and walk the approval's tabs in it.
+  const screenKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target || event.defaultPrevented) return;
+    const column = target.closest<HTMLElement>('[data-testid="approvals-beside"] [data-testid="approval-column"]');
+    if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+      if (!column || isTypingTarget(target) || document.querySelector('[role="menu"], [role="listbox"], [aria-modal="true"]')) return;
+      const row = listRef.current?.querySelector<HTMLElement>('[data-approval-selected]');
+      if (!row) return;
+      event.preventDefault();
+      row.focus();
+      return;
+    }
+    const command = pressedCommand(event.nativeEvent, ['cycle-tab-next-d', 'cycle-tab-prev-a'] as const);
+    if (!command) return;
+    const direction = command === 'cycle-tab-next-d' ? 1 : -1;
+    if (target.closest('[data-testid="approvals-queue"]')) {
+      setTab((current) => (current === 'waiting' ? 'answered' : 'waiting'));
+      // Focus stays in the list: its row, else the tab now shown (the old rows are gone).
+      requestAnimationFrame(() => {
+        const queue = document.querySelector<HTMLElement>('[data-testid="approvals-queue"]');
+        (queue?.querySelector<HTMLElement>('[data-testid="approvals-row"][tabindex="0"]')
+          ?? queue?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))?.focus();
+      });
+    } else if (column) {
+      showApprovalColumnTab(column, (current, count) => (current + direction + count) % count);
+    } else {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
   // The pager follows the list as grouped (J14).
   const order = approvalIdsInListOrder({ list, stale: staleOpen ? stale : [] });
   const origin = (
@@ -392,7 +461,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const enabled = snapshot?.settings.enabled ?? true;
   const importError = snapshot?.importError;
   return (
-    <div ref={inboxBox.ref} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox" data-focus-region="approvals">
+    <div ref={screenRef} onKeyDown={screenKey} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary min-[1100px]:flex-row" data-testid="notify-inbox" data-focus-region="approvals">
       <section
         aria-label="Approvals"
         // Stacked (a narrow window), the list takes the height when nothing shows beside it.
@@ -438,7 +507,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         {/* The browser's own scroll anchoring would add to the compensation above. */}
         <div className="relative flex min-h-0 flex-1 flex-col">
         {rowsAbove > 0 && <RowsAbove count={rowsAbove} onTop={() => listRef.current?.scrollTo({ top: 0, behavior: 'smooth' })} />}
-        <div ref={listRef} onScroll={countAbove} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [overflow-anchor:none]">
+        <div ref={listRef} onScroll={countAbove} onKeyDown={listKey} className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 [overflow-anchor:none]">
           {shown.length === 0 && stale.length === 0 && offline.length === 0 && (
             <p className="px-3 pt-6 text-[13px] text-text-tertiary" data-testid="notify-empty">
               {!enabled ? 'Approvals are off. Turn them on in Settings → Approvals.' : tab === 'waiting' ? 'Nothing is waiting on you.' : 'Nothing answered yet today.'}
@@ -480,6 +549,8 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
       </section>
 
       <section aria-label="Beside the approval" className={cn('relative min-h-0 min-w-0 flex-1 flex-col', !selected ? 'hidden min-[1100px]:flex' : 'flex')} data-testid="approvals-beside">
+        {/* Below the approval's header and tabs, as in a Session's column. */}
+        <FindBar panelId={APPROVALS_SCREEN_FIND_ID} className={selected ? 'top-[5.5rem]' : undefined} />
         {/* On the list's edge (this section's left), above the list's own border. */}
         {listSized && (
           <OuterResizeSeparator label="Resize approvals list" orientation="vertical" value={listResize.effectivePx}
@@ -492,6 +563,13 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             order={order}
             onSelect={selectApproval}
             groupLabel={tab === 'waiting' ? 'Approvals' : 'Done today'}
+            // Dismiss answers nothing: the item stays in the list (and leaves the floating strip).
+            closeLabel="Dismiss"
+            onClose={() => {
+              if (selected.state === 'waiting') runNotify({ type: 'dismiss', id: selected.id });
+              setDismissed(true);
+              selectApproval(null);
+            }}
             inChat={undefined}
             renderOrigin={() => origin}
           />
