@@ -80,7 +80,7 @@ describe('same-network addresses', () => {
     expect(net.dialed.at(-1)).toBe(`${lan}/f`);
   });
 
-  it('moves to the relay when a same-network request gets no answer for 3 s', async () => {
+  it('moves to the relay when a same-network request gets no answer for 3 s and the address stops answering', async () => {
     vi.useFakeTimers();
     const lan = 'https://l192-168-1-40.ffff.runpane.net:42138';
     const net = network([lan, 'https://ffff.runpane.net']);
@@ -97,10 +97,30 @@ describe('same-network addresses', () => {
 
     silent = true;
     void fetch('https://ffff.runpane.net/c');
-    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(4_500);
     await fetch('https://ffff.runpane.net/d');
 
     expect(net.dialed.at(-1)).toBe('https://ffff.runpane.net/d');
+    vi.useRealTimers();
+  });
+
+  it('stays on the same network while a slow command runs, since the address still answers', async () => {
+    vi.useFakeTimers();
+    const lan = 'https://l192-168-1-41.abcd.runpane.net:42138';
+    const net = network([lan, 'https://abcd.runpane.net']);
+    // The host answers /invoke only once the command finishes, here after 5 s.
+    const fetch = sameNetworkFetch(computer('abcd', [`${lan}/`]), async url => (url.endsWith('/slow')
+      ? new Promise<Response>(resolve => setTimeout(() => resolve(Response.json({ ok: true })), 5_000))
+      : net.fetch(url)));
+    await fetch('https://abcd.runpane.net/a');
+    await vi.advanceTimersByTimeAsync(0);
+
+    const slow = fetch('https://abcd.runpane.net/slow');
+    await vi.advanceTimersByTimeAsync(5_000);
+    await slow;
+    await fetch('https://abcd.runpane.net/b');
+
+    expect(net.dialed.at(-1)).toBe(`${lan}/b`);
     vi.useRealTimers();
   });
 });

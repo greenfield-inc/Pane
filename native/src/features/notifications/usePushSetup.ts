@@ -59,7 +59,8 @@ function savePreferences(preferences: PushPreferences): void {
 }
 
 /** How long after a return to the app bookkeeping waits, so the screen's reads go first. */
-const AFTER_RETURN_MS = 3_000;
+/** A return to the app registers this long after, out of the way of the screen's own reads. */
+export const AFTER_RETURN_MS = 3_000;
 
 /** Orders Sign Out after any registration write to that computer. */
 const gate = createWriteGate();
@@ -69,12 +70,12 @@ let running = false;
 let pending = false;
 
 /** Registers this phone with every saved computer, sending the current switches. Debounced. */
-export function requestPushRegistration(): void {
+export function requestPushRegistration(delayMs = REGISTER_DEBOUNCE_MS): void {
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
     void run();
-  }, REGISTER_DEBOUNCE_MS);
+  }, delayMs);
 }
 
 async function run(): Promise<void> {

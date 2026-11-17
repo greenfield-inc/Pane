@@ -34,7 +34,7 @@ export interface TerminalSize {
 
 export class TerminalSession {
   private size: TerminalSize | null = null;
-  /** The size the host's PTY last took from this screen. */
+  /** The size the host's PTY took from this screen during the current restore. The desktop resizes the same PTY, so it isn't kept across restores. */
   private hostSize: TerminalSize | null = null;
   /** Bumped by every restore and by `detach`, so stale restores stop writing. */
   private generation = 0;
@@ -45,14 +45,20 @@ export class TerminalSession {
 
   constructor(private readonly options: TerminalSessionOptions) {}
 
+  /** The host's screen is drawn and new output streams in. */
+  get isLive(): boolean {
+    return this.live;
+  }
+
   /**
    * Shows the panel at `size` in two round trips: the start check, the PTY size and this viewer's
    * visibility go together, then the host's snapshot is read. Call again after reconnecting,
-   * since the event stream does not replay output. A return at the same size skips the resize.
+   * since the event stream does not replay output.
    */
   async restore(size: TerminalSize): Promise<void> {
     const generation = ++this.generation;
     this.size = size;
+    this.hostSize = null;
     this.live = false;
     const { invoke, panelId, sessionId, viewerId, sink } = this.options;
     // The screen can resize while the restore awaits the host; use the latest size.
@@ -62,7 +68,7 @@ export class TerminalSession {
       const [initialized] = await Promise.all([
         invoke('panels:checkInitialized', [panelId]),
         // Sized before the snapshot is read, so the host serializes it at the width this screen shows.
-        // An unstarted panel refuses it and starts at the size below instead.
+        // An unstarted panel ignores it and starts at the size below instead.
         this.sizeHostAt(cols(), rows()),
         invoke('terminal:setVisibility', [panelId, true, viewerId]),
       ]);
@@ -152,6 +158,7 @@ export class TerminalSession {
   /** Tells the host nobody is watching, so it stops pacing the PTY to this screen. */
   detach(): void {
     this.generation++;
+    this.hostSize = null;
     this.live = false;
     void this.options.invoke('terminal:setVisibility', [this.options.panelId, false, this.options.viewerId])
       .catch(() => undefined);

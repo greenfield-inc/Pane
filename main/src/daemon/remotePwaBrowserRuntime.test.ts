@@ -93,6 +93,7 @@ describe('Remote PWA browser runtime', () => {
         runtimeId: 'runtime-id-1',
         clientLabel: 'Pane PWA on TestOS',
       }),
+      signal: expect.any(AbortSignal),
     }));
   });
 

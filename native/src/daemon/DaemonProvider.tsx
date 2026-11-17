@@ -6,7 +6,7 @@ import type { RemoteDaemonClient, RemoteDaemonConnectionState } from '@shared/re
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { requestSharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
-import { requestPushRegistration } from '@/features/notifications/usePushSetup';
+import { AFTER_RETURN_MS, requestPushRegistration } from '@/features/notifications/usePushSetup';
 import { connectionMark, markNextFrame, startJourney } from '@/features/perf/perfMarks';
 
 import { createDaemonClient, streamingFetch } from './createClient';
@@ -47,9 +47,9 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
   const [connection, setConnection] = useState<RemoteDaemonConnectionState>(() => client.getState());
 
   useEffect(() => {
-    // When this connection, or the latest return to the app, began.
+    // When the connection last stopped being live: lists answered before then may have missed events.
     let since = Date.now();
-    const unsubscribeRestore = client.onRestore(async signal => {
+    const unsubscribeRestore = client.onRestore(async () => {
       // The stream replays nothing, so each open list reads again: once. A read already on its way
       // since the return (the focus refetch) is joined, a list answered since then is skipped, and
       // one list failing (a channel an older host lacks) fails only itself. Nothing here holds up
@@ -62,12 +62,16 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
         { queryKey: [profile.id], type: 'active', predicate: query => missed(query) && readOnScreen(query) },
         { cancelRefetch: false },
       ).then(() => connectionMark('restored=workspace-lists', { repeat: true }));
-      if (signal.aborted) return;
-      // A switch changed while this computer was away reaches it now.
-      requestPushRegistration();
+      // A switch changed while this computer was away reaches it, after the screen's own reads.
+      requestPushRegistration(AFTER_RETURN_MS);
     }, 'workspace lists');
+    let lastStatus = client.getState().status;
     const unsubscribeStatus = client.onStatus(state => {
       connectionMark(`status=${state.status}`, { changes: true });
+      // A trip to the background suspends the connection, and a drop with the app open (the host
+      // slept or restarted, the network changed) reconnects it: either way the stream missed events.
+      if (lastStatus === 'connected' && state.status !== 'connected') since = Date.now();
+      lastStatus = state.status;
       setConnection(state);
     });
     const connect = () => client.connect().catch(() => undefined);
@@ -77,7 +81,6 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
     const appState = AppState.addEventListener('change', status => {
       if (status === 'background') client.suspend();
       else if (status === 'active') {
-        since = Date.now();
         if (client.getState().status === 'local') void connect();
         else client.resume();
       }

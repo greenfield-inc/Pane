@@ -177,8 +177,15 @@ const MAX_FAILED_REQUESTS_IN_A_ROW = 3;
 const RECONNECT_GAVE_UP_MESSAGE = 'Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.';
 /** A resent write's attempt with no answer by then is sent again; a repeat of a slow write waits for the first on the host. */
 const RESENT_WRITE_ATTEMPT_TIMEOUT_MS = 30_000;
-/** A read's attempt with no answer by then is sent again, so a socket that died in the background fails fast. */
+/**
+ * A read's first attempt with no answer by then is sent again, so a socket that died in the
+ * background fails fast. Each later attempt waits twice as long, up to a minute, so a read the
+ * host takes long to answer (a large diff on a slow network) still gets through.
+ */
 const READ_ATTEMPT_TIMEOUT_MS = 15_000;
+const READ_ATTEMPT_TIMEOUT_MAX_MS = 60_000;
+/** Reads the host bills per call: no attempt deadline, so a slow one isn't sent again while the host still works on it. */
+const BILLED_READS = new Set(['voice:finalize-streaming']);
 /**
  * A tunnel such as Tailscale's takes a moment to come back after sleep, and a request sent before
  * it does may never answer. For the first seconds after a wake a fresh probe goes out every 250 ms,
@@ -252,7 +259,9 @@ export class RemoteDaemonClient {
   }
 
   /**
-   * Core state owners finish their reads before the connection becomes green.
+   * Runs on every connect and reconnect once the event stream is open. The connection turns
+   * `connected` when every listener's promise settles: a listener that must finish its reads first
+   * awaits them, and one that only starts them (the phone's lists) returns at once.
    * `label` names the step in the timing logs.
    */
   onRestore(listener: (signal: AbortSignal) => Promise<void>, label = 'restore'): () => void {
@@ -409,8 +418,16 @@ export class RemoteDaemonClient {
    * Resolves once the workspace is connected, or rejects after `timeoutMs`. A screen that lets
    * the person act while the connection comes back waits here, then sends the action once.
    */
-  whenConnected(timeoutMs: number): Promise<void> {
-    return this.waitUntilConnected(Date.now() + timeoutMs);
+  async whenConnected(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    try {
+      await this.waitUntilConnected(deadline);
+    } catch (error) {
+      const why = Date.now() >= deadline
+        ? `${this.profile.label} did not reconnect within ${Math.round(timeoutMs / 1000)} s`
+        : `${this.profile.label} is not connected (${error instanceof Error ? error.message : String(error)})`;
+      throw new PaneError('ERR_REMOTE_NOT_CONNECTED', `${why}, so nothing was sent.`, 'Send it again once it reconnects.');
+    }
   }
 
   async invoke<T = unknown>(channel: string, args: unknown[] = []): Promise<T> {
@@ -448,10 +465,13 @@ export class RemoteDaemonClient {
     const stream = this.streamController;
     const signal = inputSignal ?? connection?.signal;
     const retryableRead = REMOTE_READ_CHANNELS.has(channel);
+    const deadlinedRead = retryableRead && !BILLED_READS.has(channel);
     // Reads and de-duplicated writes retry with backoff; heartbeats, not their failures, decide liveness.
     // A timed read is sent once: its caller polls again.
     const retries = attemptTimeoutMs === undefined && (retryableRead || deduplicated || requestId !== undefined);
     let timedOut = false;
+    /** The deadline the last read attempt ran out of, or 0. */
+    let readDeadlineMs = 0;
     const started = Date.now();
     for (let attempt = 0; ; attempt += 1) {
       let attemptSignal: LinkedSignal = { signal, done: () => {} };
@@ -466,8 +486,8 @@ export class RemoteDaemonClient {
           attemptSignal = abortSignalAny([signal, this.resendAttempts.signal], this.schedule, RESENT_WRITE_ATTEMPT_TIMEOUT_MS);
         } else if (attemptTimeoutMs !== undefined) {
           attemptSignal = abortSignalAny([signal], this.schedule, attemptTimeoutMs);
-        } else if (retryableRead) {
-          attemptSignal = abortSignalAny([signal], this.schedule, READ_ATTEMPT_TIMEOUT_MS);
+        } else if (deadlinedRead) {
+          attemptSignal = abortSignalAny([signal], this.schedule, Math.min(READ_ATTEMPT_TIMEOUT_MS * 2 ** attempt, READ_ATTEMPT_TIMEOUT_MAX_MS));
         }
         const context = await this.requestContext();
         // A read sent before the first connection (a screen mounting) goes out on that connection.
@@ -527,6 +547,9 @@ export class RemoteDaemonClient {
         lastError = error instanceof Error ? error : new Error('Remote request failed');
         lostInTransit = true;
         timedOut = attemptTimeoutMs !== undefined && attemptSignal.signal?.aborted === true;
+        readDeadlineMs = deadlinedRead && attemptSignal.signal?.aborted === true
+          ? Math.min(READ_ATTEMPT_TIMEOUT_MS * 2 ** attempt, READ_ATTEMPT_TIMEOUT_MAX_MS)
+          : 0;
       } finally {
         attemptSignal.done();
       }
@@ -540,10 +563,10 @@ export class RemoteDaemonClient {
     if (lostInTransit && !retries && attemptTimeoutMs === undefined && !signal?.aborted && connection === this.abortController && !connection?.signal.aborted) {
       this.noteFailedRequest(lastError?.message ?? 'no response');
     }
-    if (timedOut) {
+    if (timedOut || readDeadlineMs > 0) {
       throw new PaneError(
         'ERR_REMOTE_READ_TIMEOUT',
-        `${this.profile.label} did not answer within ${Math.round((attemptTimeoutMs ?? 0) / 1000)} s. Nothing changed there.`,
+        `${this.profile.label} did not answer within ${Math.round((attemptTimeoutMs ?? readDeadlineMs) / 1000)} s. Nothing changed there.`,
         'Check that Pane is open on it and that this device can reach it; the next refresh tries again.',
       );
     }

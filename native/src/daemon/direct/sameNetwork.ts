@@ -5,7 +5,7 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 const PROBE_TIMEOUT_MS = 1_500;
 /** While on the relay, how often the same-network addresses are tried again. */
 const RECHECK_MS = 60_000;
-/** A same-network request with no answer by then means the phone left that network. */
+/** A same-network request with no answer by then has its address checked: the phone may have left that network. */
 const SAME_NETWORK_STALL_MS = 3_000;
 
 interface SameNetwork {
@@ -41,8 +41,9 @@ function sameNetworkBases(profile: RelayConnectionProfile): string[] {
 /**
  * Wraps `fetch` so a relay computer's requests go to its same-network address (`relay.local`)
  * once one has answered a short check, and through the relay otherwise. The check runs beside
- * the requests and never holds one up. A same-network request that fails, or gets no answer for
- * 3 s, sends the next ones through the relay; the same network is tried again after a minute.
+ * the requests and never holds one up. A same-network request that fails sends the next ones
+ * through the relay. One with no answer for 3 s does too when the address's own check then fails
+ * (a slow command still answers its check); the same network is tried again after a minute.
  */
 export function sameNetworkFetch(profile: RemotePaneConnectionProfile, fetch: RemoteFetch, now: () => number = Date.now): RemoteFetch {
   if (!isRelayProfile(profile)) return fetch;
@@ -69,8 +70,13 @@ export function sameNetworkFetch(profile: RemotePaneConnectionProfile, fetch: Re
       entry.base = null;
       entry.checkedAt = now();
     };
-    // Off that Wi-Fi, a request can hang rather than fail; stop sending new ones there.
-    const stalled = setTimeout(leave, SAME_NETWORK_STALL_MS);
+    // Off that Wi-Fi, a request can hang rather than fail. The host answers a command only when it
+    // finishes, so a slow one also looks stalled: leave only if the address stops answering too.
+    const stalled = setTimeout(() => {
+      void firstAnswering(fetch, [base]).then(answering => {
+        if (!answering) leave();
+      });
+    }, SAME_NETWORK_STALL_MS);
     return fetch(`${base}${url.slice(relayBase.length)}`, init).then(response => {
       clearTimeout(stalled);
       return response;
@@ -85,13 +91,17 @@ export function sameNetworkFetch(profile: RemotePaneConnectionProfile, fetch: Re
 /** The first address whose /health answers within the timeout, tried all at once. */
 async function firstAnswering(fetch: RemoteFetch, bases: string[]): Promise<string | null> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  // A request to an address that went away can ignore its abort; the check ends on time regardless.
+  const expired = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error('No same-network address answered in time')), PROBE_TIMEOUT_MS);
+  });
   try {
-    return await Promise.any(bases.map(async base => {
+    return await Promise.race([expired, Promise.any(bases.map(async base => {
       const response = await fetch(`${base}/health`, { signal: controller.signal, cache: 'no-store' });
       if (!response.ok) throw new Error(`${base} answered ${response.status}`);
       return base;
-    }));
+    }))]);
   } catch {
     return null;
   } finally {

@@ -68,17 +68,19 @@ describe('TerminalSession.restore', () => {
     expect(host.screen).toEqual(['[reset]$ ']);
   });
 
-  it('skips the resize on a return at the same size', async () => {
+  it('sizes the PTY to this screen again on a return, since the desktop may have resized it meanwhile', async () => {
     const host = fakeHost({
       'panels:checkInitialized': () => true,
       'terminal:getState': () => ({ scrollbackBuffer: '$ ' }),
     });
     await host.session.restore({ cols: 48, rows: 30 });
+    host.session.detach();
     host.calls.length = 0;
 
     await host.session.restore({ cols: 48, rows: 30 });
 
-    expect(host.channels()).toEqual(['panels:checkInitialized', 'terminal:setVisibility', 'terminal:getState']);
+    expect(host.calls.find(call => call.channel === 'terminal:resize')?.args).toEqual(['panel-1', 48, 30]);
+    expect(host.channels().indexOf('terminal:resize')).toBeLessThan(host.channels().indexOf('terminal:getState'));
   });
 
   it('starts an unstarted panel at the screen size and shows everything it prints from the first byte', async () => {

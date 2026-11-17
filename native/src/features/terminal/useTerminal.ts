@@ -38,6 +38,7 @@ export function useTerminal(panelId: string, sessionId: string) {
 
   // Output arrives in bursts of small events; hand it to xterm once per frame.
   const pending = useRef('');
+  const connectionWait = useRef<Promise<void> | null>(null);
   const frame = useRef<number | null>(null);
 
   const send = (command: TerminalCommand) => {
@@ -94,10 +95,18 @@ export function useTerminal(panelId: string, sessionId: string) {
   // Restore once the page has measured itself. A connection that comes back, after a drop or a
   // return to the app, restores through the listener above: the event stream does not replay
   // output missed while away, so the screen is read again once it is open, and only then.
+  // A screen opened during another restore (a tab switch right after a return) missed those
+  // listeners, so it restores when the connection turns live and it still shows nothing.
   const measured = size !== null;
   useEffect(() => {
-    if (measured && client.getState().status === 'connected') restore();
-  }, [measured, client]);
+    if (!measured) return undefined;
+    let status = client.getState().status;
+    if (status === 'connected') restore();
+    return client.onStatus(state => {
+      if (state.status === 'connected' && status !== 'connected' && !session.isLive) restore();
+      status = state.status;
+    });
+  }, [measured, client, session]);
 
   useEffect(() => {
     const keepAlive = setInterval(() => session.keepAlive(), VISIBILITY_REFRESH_MS);
@@ -186,7 +195,11 @@ export function useTerminal(panelId: string, sessionId: string) {
       if (size) void session.restore(size);
     },
     // Typed while the connection comes back: wait for it, up to the grace window, then send once.
-    sendInput: (data: string) => client.whenConnected(CONNECTION_GRACE_MS).then(() => session.sendInput(data)),
+    // Keys typed meanwhile share one wait, so they all go out in order or none do.
+    sendInput: (data: string) => {
+      const wait = connectionWait.current ??= client.whenConnected(CONNECTION_GRACE_MS).finally(() => { connectionWait.current = null; });
+      return wait.then(() => session.sendInput(data));
+    },
     /** Clears the scrollback on the host, then redraws the screen from the host's copy. */
     clearScrollback: async () => {
       await invokeChannel(client, 'terminal:clearScrollback', [panelId]);

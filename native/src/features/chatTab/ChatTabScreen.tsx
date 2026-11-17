@@ -97,9 +97,14 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   };
   /** One request per message; a lost answer is resolved by its receipt, never by sending again blind. */
   const deliver = async (request: ChatTabSend, retry: boolean) => {
-    viewer.setPendingDelivery(request);
     try {
       await whenConnected();
+    } catch (error) {
+      viewer.setError(`${errorText(error)} Your message is still in the box.`);
+      return;
+    }
+    viewer.setPendingDelivery(request);
+    try {
       const receipt = retry ? await chat.send(panelId, request) : await chat.receipt(panelId, request.operationId);
       if (!receipt) { viewer.setError('The computer has no record of that message yet. Retry sends it once, with the same ID.'); return; }
       viewer.setPendingDelivery(undefined);
