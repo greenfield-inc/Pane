@@ -101,6 +101,9 @@ others in `PANE_UNSNAPSHOTTED_FOLDERS`), git checkouts, and folders Pane does
 not know are left out. Preflight lists the last two in `snapshotSkipped`, so a
 dry run shows them; back them up yourself if they matter. A test fails when the
 code writes a top-level folder that is on neither list.
+The Electron profile is copied whole except Chromium's caches (`Cache`,
+`Code Cache`, `GPUCache` and the shader caches, `PROFILE_CACHE_FOLDERS`), which
+Chromium rebuilds on the next launch.
 
 The CLI that requested an update may be answering a remote
 `runpane workspace <machine> exec` through the Pane it is about to stop. The
