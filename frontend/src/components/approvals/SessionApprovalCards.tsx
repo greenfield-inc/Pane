@@ -11,7 +11,6 @@ import { useNow } from '../notify/useNow';
 import { dockApprovals, dockKey, latestReplied, questionsOf, referenceCount, statusKey } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 import { ApprovalKeyTip } from './ApprovalColumn';
-import { Tooltip } from '../ui/Tooltip';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 
