@@ -175,10 +175,27 @@ with tempfile.TemporaryDirectory() as directory:
 `));
   assert.deepEqual(output, [
     'Quit Pane completely, reopen Pane, then rerun runpane doctor --json',
-    'Open Pane, then rerun runpane doctor --json',
+    'Open Pane. If it is already open, wait 5 s for it to re-create its socket, or quit and reopen Pane. Then rerun runpane doctor --json',
     'Open Pane, then rerun runpane doctor --json',
     'Quit Pane completely, reopen Pane, then rerun runpane doctor --json',
   ]);
+  // Node gives the same hint for the same four cases.
+  const { resolveDaemonRecoveryCommand } = require(path.join(root, 'packages/runpane/dist/doctor.js'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-parity-doctor-'));
+  try {
+    const endpointPath = path.join(directory, 'stale.sock');
+    fs.writeFileSync(endpointPath, '');
+    const existing = resolveDaemonRecoveryCommand({ transport: 'unix', path: endpointPath }, 'daemon unavailable');
+    fs.rmSync(endpointPath);
+    assert.deepEqual([
+      existing,
+      resolveDaemonRecoveryCommand({ transport: 'unix', path: endpointPath }, 'daemon unavailable'),
+      resolveDaemonRecoveryCommand({ transport: 'pipe', path: endpointPath }, 'daemon unavailable'),
+      resolveDaemonRecoveryCommand({ transport: 'unix', path: endpointPath }, 'connect ECONNREFUSED'),
+    ], output);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 for (const kind of ['panes', 'panels']) {

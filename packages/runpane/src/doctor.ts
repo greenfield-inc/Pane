@@ -922,12 +922,17 @@ async function collectDaemonHealth(paneDir: string | undefined, endpoint: PaneDa
   }
 }
 
-function resolveDaemonRecoveryCommand(endpoint: PaneDaemonEndpoint, message: string): string {
+export function resolveDaemonRecoveryCommand(endpoint: PaneDaemonEndpoint, message: string): string {
   if (
     endpoint.transport === 'unix'
     && (message.includes('ECONNREFUSED') || fs.existsSync(endpoint.path))
   ) {
     return 'Quit Pane completely, reopen Pane, then rerun runpane doctor --json';
+  }
+
+  if (endpoint.transport === 'unix') {
+    // Not running, or a /tmp cleanup deleted the socket of a running Pane, which re-creates it.
+    return 'Open Pane. If it is already open, wait 5 s for it to re-create its socket, or quit and reopen Pane. Then rerun runpane doctor --json';
   }
 
   return 'Open Pane, then rerun runpane doctor --json';
