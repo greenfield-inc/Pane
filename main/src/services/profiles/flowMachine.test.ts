@@ -58,12 +58,12 @@ describe('flow machine: greenfield', () => {
     expect(run).toMatchObject({ step: 'build', state: 'running' });
     run = started(reportOutcome(run, profile, 'p2', 'PR ready', 'PR #91', NOW), 'p3');
     expect(run.step).toBe('checks');
-    run = started(must(stepExited(run, profile, 'p3', 0, NOW)), 'p4');
+    run = started(must(stepExited(run, profile, 'p3', { code: 0 }, NOW)), 'p4');
     expect(run.step).toBe('review');
     run = started(reportOutcome(run, profile, 'p4', 'approved', undefined, NOW), 'c2');
     run = started(answerCard(run, profile, 'c2', 'merge', NOW), 'p5');
     expect(run.step).toBe('merged');
-    const end = stepExited(run, profile, 'p5', 0, NOW);
+    const end = stepExited(run, profile, 'p5', { code: 0 }, NOW);
     expect(end?.run).toMatchObject({ state: 'ended', wait: { kind: 'none' } });
     expect(end?.run.history.map((entry) => entry.step)).toEqual(['plan', 'approve', 'build', 'checks', 'review', 'merge', 'merged']);
   });
@@ -81,6 +81,17 @@ describe('flow machine: greenfield', () => {
     expect(() => reportOutcome(run, profile, 'other-tab', 'plan ready', undefined, NOW)).toThrow(expect.objectContaining({ code: 'PROFILE_RUN_NOT_THIS_STEP' }));
   });
 
+  it('asks which outcome an interrupted command had instead of routing it as failed', () => {
+    let run = started(startRun(newRun(), profile, NOW), 'p');
+    run = started(reportOutcome(run, profile, 'p', 'plan ready', undefined, NOW), 'c');
+    run = started(answerCard(run, profile, 'c', 'approve', NOW), 'build');
+    run = started(reportOutcome(run, profile, 'build', 'PR ready', undefined, NOW), 'checks');
+    const interrupted = must(stepExited(run, profile, 'checks', { code: 130, interrupted: true }, NOW));
+    expect(interrupted.run).toMatchObject({ step: 'checks', wait: { kind: 'card', card: 'set-outcome' } });
+    expect(interrupted.effect).toMatchObject({ kind: 'ask-outcome', step: { id: 'checks' } });
+    expect(interrupted.run.history).toHaveLength(run.history.length);
+  });
+
   it('pauses on the fourth red build and asks to go again or stop', () => {
     let run = started(startRun(newRun(), profile, NOW), 'p');
     run = started(reportOutcome(run, profile, 'p', 'plan ready', undefined, NOW), 'c');
@@ -88,7 +99,7 @@ describe('flow machine: greenfield', () => {
     let transition: RunTransition | undefined;
     for (let failure = 1; failure <= 4; failure += 1) {
       run = started(reportOutcome(run, profile, 'build', 'PR ready', undefined, NOW), 'checks');
-      transition = stepExited(run, profile, 'checks', 1, NOW);
+      transition = stepExited(run, profile, 'checks', { code: 1 }, NOW);
       if (!transition) throw new Error('no transition');
       if (failure < 4) {
         expect(transition.run).toMatchObject({ step: 'build', state: 'running' });
@@ -118,7 +129,7 @@ describe('flow machine: greenfield', () => {
 
   it('asks for the outcome when an agent step\'s tab closes without a report, and takes the answer', () => {
     const run = started(startRun(newRun(), profile, NOW), 'p1');
-    const closed = stepExited(run, profile, 'p1', undefined, NOW);
+    const closed = stepExited(run, profile, 'p1', { code: undefined }, NOW);
     expect(closed?.run.wait).toEqual({ kind: 'card', approvalId: '', card: 'set-outcome' });
     expect(closed?.effect).toMatchObject({ kind: 'ask-outcome', step: { id: 'plan' } });
     const asked = started(must(closed), 'set');
@@ -142,7 +153,7 @@ describe('flow machine: greenfield', () => {
 
   it('ignores an exit from a tab that is not the current step', () => {
     const run = started(startRun(newRun(), profile, NOW), 'p1');
-    expect(stepExited(run, profile, 'someone-else', 0, NOW)).toBeUndefined();
+    expect(stepExited(run, profile, 'someone-else', { code: 0 }, NOW)).toBeUndefined();
   });
 
   it('refuses to start a team-only profile', () => {

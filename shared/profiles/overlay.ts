@@ -51,26 +51,39 @@ function parsePartial(value: string): { parts: Version; given: number } | undefi
   return { parts, given };
 }
 
+/** The first version past a partial one: `1` → 2.0.0, `1.2` → 1.3.0; a full version is its own bound. */
+function nextAfter(bound: { parts: Version; given: number }): Version | undefined {
+  const [major, minor] = bound.parts;
+  if (bound.given === 1) return [major + 1, 0, 0];
+  if (bound.given === 2) return [major, minor + 1, 0];
+  return undefined;
+}
+
 /**
  * Whether `version` is in an npm-style `range`: `*`, an exact or partial version
- * (`1.2.3`, `1.2`, `1.x`), `^…`, `~…`, or one comparison (`>=1.0.0`, `<2`, …).
+ * (`1.2.3`, `1.2`, `1.x`), `^…`, `~…`, or one comparison (`>=1.0.0`, `<2`, …). As in
+ * npm, a partial version stands for every version it covers (`<=1.2` is below 1.3.0),
+ * and a prerelease matches only a range that names it exactly.
  */
 export function satisfiesRange(version: string, range: string): boolean {
   const target = parseVersion(version);
   if (!target) return false;
   const trimmed = range.trim();
+  if (/^\d+\.\d+\.\d+-/u.test(version)) return trimmed.replace(/^=\s*/u, '') === version;
   if (trimmed === '' || trimmed === '*' || trimmed.toLowerCase() === 'x') return true;
   const comparison = /^(>=|<=|>|<|=)\s*(.+)$/u.exec(trimmed);
   if (comparison) {
     const bound = parsePartial(comparison[2]);
     if (!bound) return false;
-    const order = compare(target, bound.parts);
+    if (bound.given === 0) return comparison[1] === '>=' || comparison[1] === '<=' || comparison[1] === '=';
+    const next = nextAfter(bound);
+    const fromLower = compare(target, bound.parts);
     switch (comparison[1]) {
-      case '>=': return order >= 0;
-      case '<=': return order <= 0;
-      case '>': return order > 0;
-      case '<': return order < 0;
-      default: return order === 0;
+      case '>=': return fromLower >= 0;
+      case '<': return fromLower < 0;
+      case '>': return next ? compare(target, next) >= 0 : fromLower > 0;
+      case '<=': return next ? compare(target, next) < 0 : fromLower <= 0;
+      default: return next ? fromLower >= 0 && compare(target, next) < 0 : fromLower === 0;
     }
   }
   const operator = trimmed[0] === '^' || trimmed[0] === '~' ? trimmed[0] : '';
@@ -85,10 +98,10 @@ export function satisfiesRange(version: string, range: string): boolean {
     upper[firstNonZero] = lower[firstNonZero] + 1;
   } else if (operator === '~' && bound.given >= 2) {
     upper = [lower[0], lower[1] + 1, 0];
-  } else if (bound.given === 3) {
-    return compare(target, lower) === 0;
   } else {
-    upper = bound.given === 1 ? [lower[0] + 1, 0, 0] : [lower[0], lower[1] + 1, 0];
+    const next = nextAfter(bound);
+    if (!next) return compare(target, lower) === 0;
+    upper = next;
   }
   return compare(target, lower) >= 0 && compare(target, upper) < 0;
 }

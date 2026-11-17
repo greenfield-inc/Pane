@@ -10,4 +10,5 @@ agents:
   audit:
     runs: claude/claude-opus-5-5
     effort: high
+    reads: [agents/auditor]
     skills: [mac-security-check, windows-security-check]

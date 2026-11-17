@@ -137,13 +137,15 @@ export function reportOutcome(run: ProfileRun, profile: Profile, panelId: string
 
 /**
  * A step's tab exited. A command takes its first outcome on exit 0 and its second otherwise; one
- * with no outcomes ends the run. An agent step's tab closing without a report asks which outcome
- * it had. Undefined when the tab isn't the run's current step.
+ * with no outcomes ends the run. A command that was interrupted (Ctrl+C, its tab closed) didn't
+ * finish, so like an agent step's tab closing without a report, it asks which outcome it had.
+ * Undefined when the tab isn't the run's current step.
  */
-export function stepExited(run: ProfileRun, profile: Profile, panelId: string, exitCode: number | undefined, now: string): RunTransition | undefined {
+export function stepExited(run: ProfileRun, profile: Profile, panelId: string, exit: { code?: number; interrupted?: boolean }, now: string): RunTransition | undefined {
   if (run.state !== 'running' || run.wait.kind !== 'step' || run.wait.panelId !== panelId) return undefined;
+  const exitCode = exit.code;
   const step = stepOf(profile, run.step);
-  if (step.kind === 'agent') {
+  if (step.kind === 'agent' || (step.kind === 'command' && exit.interrupted && step.outcomes.length > 0)) {
     return { run: { ...run, wait: { kind: 'card', approvalId: '', card: 'set-outcome' }, updatedAt: now }, effect: { kind: 'ask-outcome', step } };
   }
   if (step.kind !== 'command') return undefined;
@@ -164,7 +166,10 @@ export function answerCard(run: ProfileRun, profile: Profile, approvalId: string
   if (run.wait.card === 'loop') {
     const pending = run.pending;
     if (!pending) throw new PaneError('PROFILE_RUN_NOT_PAUSED', `${profile.name} run ${run.id} has no loop waiting.`, 'Look at the run in Profiles.');
-    if (answer !== LOOP_GO_AGAIN) {
+    if (answer !== LOOP_GO_AGAIN && answer !== LOOP_STOP) {
+      throw new PaneError('PROFILE_CHOICE_UNKNOWN', `The loop card has no choice "${answer}"; it offers ${quoted([LOOP_GO_AGAIN, LOOP_STOP])}.`, 'Pick one of the card\'s buttons.');
+    }
+    if (answer === LOOP_STOP) {
       const stopped: ProfileRun = { ...run, state: 'ended', wait: { kind: 'none' }, error: `Stopped by you after ${pending.from} › ${pending.took} ran ${profile.loopLimit} times.`, updatedAt: now };
       delete stopped.pending;
       return { run: stopped, effect: { kind: 'none' } };
