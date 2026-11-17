@@ -1,9 +1,12 @@
 import { useEffect, useMemo } from 'react';
 import { create } from 'zustand';
-import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoRecord, TodosSnapshot } from '../../../shared/types/todos';
+import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoListRow, TodoRecord, TodosSnapshot } from '../../../shared/types/todos';
+import { isMac } from '../utils/platformUtils';
 import { LOCAL_MACHINE_ID, type MachineCommand, type MachineConnectionsEvent, type MachineEventChannel, type MachineState } from '../../../shared/types/machineConnections';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { showActionError } from './errorStore';
+import { useNotifyStore } from './notifyStore';
+import type { NotifySnapshot } from '../../../shared/types/notify';
 
 interface RemoteTodoAnswer {
   success: boolean;
@@ -79,7 +82,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     const generation = ++refreshGeneration;
     const response = await window.electronAPI.todos.snapshot().catch(() => null);
     if (generation !== refreshGeneration || !response?.success || !response.data) return;
-    set({ snapshot: response.data });
+    set({ snapshot: asThisMachine(response.data) });
     await Promise.all([...get().watched.keys()].map(number => get().loadDetail(number)));
   },
 
@@ -87,7 +90,7 @@ export const useTodosStore = create<TodosState>((set, get) => ({
     if (!window.electronAPI?.todos) return null;
     const response = await window.electronAPI.todos.detail(number).catch(() => null);
     if (!response?.success || !response.data) return null;
-    const detail = response.data;
+    const detail = detailAsThisMachine(response.data);
     set(state => ({ details: new Map(state.details).set(number, detail) }));
     return detail;
   },
@@ -285,6 +288,55 @@ export function useTodosRefresh(): void {
     if (!window.electronAPI?.todos) return;
     void refresh();
     const unsubscribe = window.electronAPI.events.onTodosChanged(() => { void refresh(); });
-    return unsubscribe;
+    // A to-do's status follows its approvals: reread once an approval's state settles (an answer ends
+    // the Undo hold as sent → answered), so the page never shows Waiting on you for an answered card.
+    let approvals = approvalStates(useNotifyStore.getState().snapshot);
+    let timer: number | undefined;
+    const unsubscribeNotify = useNotifyStore.subscribe(state => {
+      const next = approvalStates(state.snapshot);
+      if (next === approvals) return;
+      approvals = next;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { void refresh(); }, 300);
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeNotify();
+      window.clearTimeout(timer);
+    };
   }, [refresh]);
+}
+
+/** How this machine is named on its own screens, as the design shows it ("This Mac is busy"). */
+export const THIS_MACHINE_LABEL = isMac() ? 'This Mac' : 'This computer';
+
+/** The host names itself by hostname, for other machines' screens; here it reads "This Mac". */
+function relabel(text: string, host: string): string;
+function relabel(text: string | undefined, host: string): string | undefined;
+function relabel(text: string | undefined, host: string): string | undefined {
+  return text?.split(host).join(THIS_MACHINE_LABEL);
+}
+
+function rowAsThisMachine<Row extends TodoListRow>(row: Row, host: string): Row {
+  return { ...row, machine: THIS_MACHINE_LABEL, status: { ...row.status, reason: relabel(row.status.reason, host) } };
+}
+
+function asThisMachine(snapshot: TodosSnapshot): TodosSnapshot {
+  const host = snapshot.machine;
+  return { ...snapshot, machine: THIS_MACHINE_LABEL, gate: { ...snapshot.gate, line: relabel(snapshot.gate.line, host) }, rows: snapshot.rows.map(row => rowAsThisMachine(row, host)) };
+}
+
+function detailAsThisMachine(detail: TodoDetail): TodoDetail {
+  const host = detail.machine;
+  return {
+    ...rowAsThisMachine(detail, host),
+    subTodos: detail.subTodos.map(row => rowAsThisMachine(row, host)),
+    parent: detail.parent ? rowAsThisMachine(detail.parent, host) : undefined,
+    load: { ...detail.load, reason: relabel(detail.load.reason, host) },
+  };
+}
+
+/** Each approval linked to a to-do, with its state: what a to-do's status reads from Approvals. */
+function approvalStates(snapshot: NotifySnapshot | null): string {
+  return (snapshot?.items ?? []).filter(item => item.todo).map(item => `${item.id}:${item.state}`).join(',');
 }

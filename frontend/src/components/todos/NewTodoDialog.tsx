@@ -9,7 +9,7 @@ import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } f
 import { PortalContainerProvider } from '../../contexts/PortalContainerContext';
 import { useConfigStore } from '../../stores/configStore';
 import { useSessionStore } from '../../stores/sessionStore';
-import { useTodosStore, type CreatedTodo } from '../../stores/todosStore';
+import { THIS_MACHINE_LABEL, useTodosStore, type CreatedTodo } from '../../stores/todosStore';
 import { showActionError } from '../../stores/errorStore';
 import { visibleAgentPresets } from '../../utils/agentPresets';
 import { cn } from '../../utils/cn';
@@ -92,7 +92,7 @@ export function NewTodoDialog({ onClose, onCreated }: NewTodoDialogProps) {
   const machines = useTodosStore(state => state.machines);
   const [machineId, setMachineId] = useState(LOCAL_MACHINE_ID);
   const remote = machineId !== LOCAL_MACHINE_ID;
-  const thisMachine = useTodosStore(state => state.snapshot?.machine) ?? (isMac() ? 'This Mac' : 'This computer');
+  const thisMachine = THIS_MACHINE_LABEL;
   const config = useConfigStore(state => state.config);
   const activePaneProjectId = useSessionStore(state => state.sessions.find(pane => pane.id === state.activeSessionId)?.projectId ?? null);
 

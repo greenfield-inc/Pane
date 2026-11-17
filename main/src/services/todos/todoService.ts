@@ -371,7 +371,8 @@ export class TodoService extends EventEmitter {
     const requesterPanel = actor.kind === 'agent' && actor.panelId ? this.host.panel(actor.panelId) : null;
     const requester = parent
       ? parent.requester
-      : actor.kind === 'person'
+      // From a terminal outside any Pane tab, it is the person at their own shell.
+      : actor.kind === 'person' || !actor.panelId
         ? { kind: 'person' as const, name: 'you' }
         : { kind: 'orchestrator' as const, name: this.actorName(actor), sessionId: requesterPanel?.sessionId ?? undefined, panelId: actor.panelId };
     const todo = this.store.transaction(() => {
@@ -995,7 +996,9 @@ export class TodoService extends EventEmitter {
       if (tab && this.host.isMidTurn(tab)) this.pendingWork.set(todo.number, (this.pendingWork.get(todo.number) ?? 0) + elapsed);
     }
     await this.flush();
-    const digest = open.map(todo => `${todo.number}:${todo.updatedAt}`).join(',') + '|' + [...this.settled].sort().join(',') + '|' + this.gate.state;
+    // Waiting approvals too: an answer leaves them (sent → answered after Undo) without any event of its own.
+    const waiting = this.store.waitingApprovals().map(approval => approval.id).join(',');
+    const digest = open.map(todo => `${todo.number}:${todo.updatedAt}`).join(',') + '|' + [...this.settled].sort().join(',') + '|' + this.gate.state + '|' + waiting;
     if (digest !== this.statusDigest) {
       this.statusDigest = digest;
       this.changed();

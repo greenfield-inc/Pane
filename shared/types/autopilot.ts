@@ -185,6 +185,8 @@ export type AutopilotDocument =
   /** `html` is the page itself, only when asked for inline (the phone, which can't load the computer's file URL). */
   | { kind: 'html'; url: string; path: string; html?: string }
   | { kind: 'text'; text: string; path: string }
+  /** An image file, as a data URL. */
+  | { kind: 'image'; path: string; dataUrl: string }
   | { kind: 'missing'; path: string; message: string };
 
 /** The stack controls the person uses: ‹ › and ← →, a chip, or dismissing an entry. */

@@ -1,7 +1,7 @@
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import type { TodoDetail } from '../../../../../shared/types/todos';
-import { MarkdownPreview } from '../../MarkdownPreview';
+import { MarkdownPreview, type MarkdownImageProps } from '../../MarkdownPreview';
 import { useTodosStore } from '../../../stores/todosStore';
 import { cn } from '../../../utils/cn';
 import { COMPACT_MARKDOWN, SectionAction, SectionLabel, SubTodoRows } from './TodoPageParts';
@@ -113,6 +113,31 @@ function SubTodos({ detail, onOpenTodo, canAdd }: { detail: TodoDetail; onOpenTo
   );
 }
 
+/**
+ * One image in a description. A web or data URL shows as is; a file path (a pasted screenshot is
+ * saved as one and attached) is read through Pane, which serves files attached to a to-do.
+ */
+function DescriptionImage({ src, alt }: MarkdownImageProps) {
+  const direct = !src || /^(https?:|data:)/i.test(src);
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (direct || !src) return;
+    let live = true;
+    setLoaded(null);
+    setFailed(false);
+    void window.electronAPI.autopilot.readDoc(src)
+      .then(doc => { if (!live) return; if (doc.kind === 'image') setLoaded(doc.dataUrl); else setFailed(true); })
+      .catch(() => { if (live) setFailed(true); });
+    return () => { live = false; };
+  }, [direct, src]);
+  const label = alt || 'image';
+  if (failed) return <span className="text-[12px] text-text-tertiary">[{label} could not be opened]</span>;
+  const shown = direct ? src : loaded;
+  if (!shown) return <span className="inline-block h-[60px] w-[100px] animate-pulse rounded-lg bg-surface-secondary" aria-label={`Loading ${label}`} />;
+  return <img src={shown} alt={alt} tabIndex={0} role="button" aria-label={`Open ${label} beside the to-do`} />;
+}
+
 /** The description as Markdown; over 150 px it collapses with "Show more". Clicking an image opens it in the split. */
 function Description({ markdown, onOpenImage }: { markdown: string; onOpenImage: (src: string, label: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -154,7 +179,7 @@ function Description({ markdown, onOpenImage }: { markdown: string; onOpenImage:
         className={cn('relative', clamped && 'overflow-hidden')}
         style={clamped ? { maxHeight: DESCRIPTION_CLAMP_PX } : undefined}
       >
-        <MarkdownPreview content={markdown} className={DESCRIPTION_MARKDOWN} />
+        <MarkdownPreview content={markdown} className={DESCRIPTION_MARKDOWN} image={DescriptionImage} />
         {clamped && <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-b from-transparent to-surface-primary" aria-hidden="true" />}
       </div>
       {tall && (

@@ -86,6 +86,13 @@ export function AutopilotDocument({ path, label }: { path: string; label: string
 
   if (!content) return <p className="m-auto text-[13px] text-text-tertiary" role="status">Opening {label}…</p>;
   if (content.kind === 'html') return <AutopilotWebPage src={content.url} title={label} />;
+  if (content.kind === 'image') {
+    return (
+      <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto p-4" data-testid="autopilot-image-doc">
+        <img src={content.dataUrl} alt={label} className="max-w-full rounded-md border border-border-primary" />
+      </div>
+    );
+  }
   if (content.kind === 'text') {
     return (
       <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="autopilot-text-doc">

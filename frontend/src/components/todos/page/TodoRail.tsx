@@ -80,7 +80,7 @@ export function TodoRail({ detail, openAttachmentId, onOpenAttachment, onOpenTod
           {status.status === 'queued' ? (
             <>
               <span className="truncate text-text-secondary">held · {detail.load.reason ?? status.reason}</span>
-              <LinkButton onClick={() => void act({ kind: 'start', number: todo.number, anyway: true })} testId="todo-rail-start-anyway">Start anyway</LinkButton>
+              <span className="shrink-0"><LinkButton onClick={() => void act({ kind: 'start', number: todo.number, anyway: true })} testId="todo-rail-start-anyway">Start anyway</LinkButton></span>
             </>
           ) : closed ? <Muted>–</Muted> : (
             <>

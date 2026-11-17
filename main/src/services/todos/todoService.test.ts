@@ -54,6 +54,11 @@ describe('TodoService', () => {
       await expect(service.create({ title: 'Too deep', parentNumber: sub.number }, person)).rejects.toMatchObject({ code: 'ERR_TODO_TOO_DEEP' });
     });
 
+    it('records the person as requester for a to-do created from a terminal outside Pane', async () => {
+      const todo = await service.create({ title: 'From my shell', startNow: false }, { kind: 'agent' });
+      expect(todo.requester).toEqual({ kind: 'person', name: 'you' });
+    });
+
     it('rejects a to-do without a title', async () => {
       await expect(service.create({ title: '   ' }, person)).rejects.toMatchObject({ code: 'ERR_TODO_TITLE' });
     });
