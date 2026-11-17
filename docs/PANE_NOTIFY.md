@@ -237,7 +237,10 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   floating strip and no Notify row in the sidebar.
 - **The approval column**: one tabbed column for an approval, the same on
   every surface. Its header pages through what's waiting (‹ n of N ›, dots, ←
-  and → while it has focus) and ✕ closes it. Its tabs are **Decide** (the
+  and → while it has focus) and ✕ closes it. On the Approvals screen ✕ is
+  **Dismiss**: the column closes without answering, the item stays in the list
+  (and leaves the floating strip), and no other item opens until you pick a
+  row. Its tabs are **Decide** (the
   subtitle, each question with its why and options, recommended ones
   marked but none selected until you pick, the references and one reply box that grows up to half the
   column), **Summary** (one HTML page: the asker's own, an `.html` passed as a
@@ -260,7 +263,10 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   Session's orchestrator chat docks one compact card above its composer:
   who asks, the title and subtitle across the card, and a bottom row with ‹ n
   of m ›, the reference count, Summary and **Open**; its pager stays in step
-  with the column's. The chat's own AskUserQuestion isn't docked: the chat
+  with the column's. Its ✕ (**Dismiss**) takes the card out of that chat
+  without answering it (and closes the column if it was open there): it
+  keeps waiting in Approvals, and comes back to the chat only when it changes
+  (a new version, a reply or ready again). The chat's own AskUserQuestion isn't docked: the chat
   already shows Claude's card, and Approvals and the phone keep the copy.
   **Send** closes the column, and a status line in the chat names the agent
   reading the reply ("okta-sso-account is reading your reply to Q-42"), then
@@ -295,7 +301,7 @@ by accident. Keys work whatever Pane's keyboard-shortcuts setting says. On
 Approvals, **More** (or **Details**, when choices have notes) opens the card in
 place with every choice, its note and **Send**.
 
-✕ hides a question from the strip; it keeps waiting in Approvals.
+✕ (**Dismiss**) hides a question from the strip without answering it; it keeps waiting in Approvals.
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
 switch to Pane. The clock at the bottom right of a card snoozes it for 3, 5
 or 15 minutes: it leaves the strip, then comes back in its place in the
