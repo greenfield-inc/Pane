@@ -1,14 +1,15 @@
 # Profiles
 
 A profile is one YAML file that defines a team of agents and a fixed workflow.
-Pane draws the workflow, launches it on any terminal CLI, and runs it step by
-step from the file. greenfield is the first profile and ships with Pane, on by
-default.
+Pane draws the workflow, launches it on any agent CLI (Claude Code, Codex, or
+any other command), and runs it step by step from the file. greenfield is the
+first profile and ships with Pane, on by default. Its instructions and skills
+come from Agent Farm (`@greenfieldco/agent-farm`), which Pane bundles.
 
 ## The format: pane-profile/1
 
-Four primitives: **agent**, **step** (an agent step or a command), **outcome**
-and **ask**.
+A profile has agents and a flow of steps. A step is an agent step, a command or
+an ask, and moves on through its outcomes.
 
 ```yaml
 format: pane-profile/1
@@ -16,7 +17,7 @@ name: greenfield            # lowercase, digits, dashes; unique
 version: 1.0.0              # semver
 title: Plan, build and review, one Pane per feature
 # extends: greenfield@^1.0  # an overlay: only your changes to an installed profile
-# loop_limit: 3             # times a run may take one loop edge before it asks
+# loop_limit: 3             # times a run may take one loop edge before it asks (default 3)
 
 agents:                     # who does judgment work
   planner: { runs: claude/claude-opus-5-5, effort: high, reads: [standing-rules], skills: [plan] }
@@ -38,15 +39,19 @@ runs:                       # optional example runs the viewer lights up
   A: [ { plan: "plan ready #1" }, { approve: approve }, { build: green } ]
 ```
 
-- `runs:` on an agent is `cli/model` or a CLI alone; a CLI Pane doesn't know
-  is allowed and runs on the terminal baseline.
+- `runs:` on an agent is `cli/model` or a CLI alone. A CLI Pane doesn't know is
+  allowed: Pane starts it in a plain terminal tab and types the first message.
 - An agent step has a `goal` and at least one outcome. A command (`run:`) has
-  two outcomes, taken on exit 0 and on any other exit, or none, which ends the
-  run. An ask has `choices` (buttons) or `next` (a typed answer). Any outcome,
+  two outcomes or none: the first is taken on exit 0, the second on any other
+  exit, and with none the run ends after the command. An ask has `choices` (buttons) or `next` (a typed answer). Any outcome,
   choice or next may point to `end`.
 - `reads` are file ids in the profile's folder (`instructions/<id>.md` or
   `<id>.md`; for a bundled profile, the bundled Agent Farm plugin's folder).
   `skills` are skill names.
+- `samples` gives two or more example results for each outcome of an agent
+  step; the Profiles page shows them in the drawing.
+- Top-level `runs:` lists example paths through the flow, which the page
+  highlights; `plan ready #1` means that outcome with its first sample.
 - A profile without `flow` is **team only**: listed and viewable, not
   launchable.
 
@@ -60,7 +65,7 @@ can't launch.
 
 | Kind | Where | On |
 | --- | --- | --- |
-| Bundled | `main/src/services/profiles/bundled/`; greenfield's agents, and the team-only orchestra, bigbrain and machine-security, are written by `node scripts/import-agent-farm-profiles.js` from the pinned Agent Farm | greenfield by default; config `profiles.enabled` lists the bundled ones that are on |
+| Bundled | `main/src/services/profiles/bundled/`; greenfield's agents, and the team-only orchestra, bigbrain and machine-security, are written by `node scripts/import-agent-farm-profiles.js` from the pinned Agent Farm | greenfield by default; `profiles.enabled` in `<PANE_DIR>/config.json` lists the bundled ones that are on |
 | Yours | `<PANE_DIR>/profiles/*.profile.yaml` | always |
 | Your Agent Farm | your own `agent-farm profiles list`, when one is on PATH (read-only) | runs through your agent-farm (+ menu › Profile…) |
 
@@ -72,7 +77,7 @@ merge key by key and `null` removes one. Pane ships Agent Farm
 
 ## Running a profile
 
-Launch from the Profiles page (sidebar, under Loops), the + menu's
+Launch from the Profiles page (sidebar, above Loops), the + menu's
 **Profile…**, or `runpane profiles launch`. A run belongs to a Session (one you
 pick, or a new one). The first step opens a new Pane; every later step opens as
 a terminal tab in it.
@@ -85,11 +90,12 @@ a terminal tab in it.
 
 The first message names the goal, the request, the previous step's result, the
 files to read and the report command. A loop edge (one pointing back in the
-file) taken more than `loop_limit` times pauses the run with "This loop ran 3
-times: go again, or stop?". A step whose tab closed without an outcome asks
-which one it had; **Set outcome…** on the page does the same by hand.
+file) taken more than `loop_limit` times pauses the run with "This loop ran N
+times: go again, or stop?". When a step's tab closes without an outcome, Pane
+posts a card in Approvals asking which outcome it reached; **Set outcome…** on
+the page does the same by hand.
 
-Each run is `<Session folder>/profile-runs/<run id>.json`, written before every
+Each run is `<PANE_DIR>/sessions/<Session id>/profile-runs/<run id>.json`, written before every
 move, so a restart resumes runs without starting anything twice.
 Code: `main/src/services/profiles/` (`flowMachine.ts`, `profileRunner.ts`,
 `profileRunnerHost.ts`), `main/src/ipc/profiles.ts`,
@@ -101,11 +107,11 @@ Code: `main/src/services/profiles/` (`flowMachine.ts`, `profileRunner.ts`,
 runpane profiles list [--json]
 runpane profiles show <name> [--yaml] [--json]
 runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] \
-  [--harness <cli>] [--agent-harness <agent>=<cli>]… [--command <cli>=<command>]… [--json]
+  [--harness <cli>] [--agent-harness <agent>=<cli>]… [--command <cli>=<command>]… --yes [--json]
 runpane profiles runs [--json]
 runpane report --outcome "<name>" [--summary-file <file>]   # inside a step's tab
 ```
 
 The `pane` MCP server has `profiles_list`, `profiles_show`, `profiles_launch`
-and `profiles_runs`, with the same JSON. See
+and `profiles_runs`, with the same JSON; `profiles_launch` takes `yes: true`. See
 [RUNPANE_CLI_CONTRACT.md](RUNPANE_CLI_CONTRACT.md).
