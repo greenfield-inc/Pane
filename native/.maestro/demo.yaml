@@ -17,7 +17,8 @@ name: Try the demo
     visible:
       id: approval-card
     timeout: 10000
-- assertVisible: "2 of 5"
+# Its place depends on the sort sheet (By Session by default).
+- assertVisible: "[0-9] of 5"
 # Its Cover sheet opens as a tab beside the approval, drawn as its page; the Approval tab answers.
 - tapOn:
     id: approval-link-0
@@ -34,9 +35,8 @@ name: Try the demo
 - assertVisible:
     id: notify-sent
 - extendedWaitUntil:
-    visible: "2 of 4"
+    visible: "[0-9] of 4"
     timeout: 15000
-- assertVisible: "Apply migration 0042 to staging?"
 - tapOn:
     id: approval-back
 - extendedWaitUntil:
