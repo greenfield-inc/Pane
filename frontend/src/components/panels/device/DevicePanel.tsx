@@ -13,8 +13,9 @@ import { FRAME_POLL_MS, useDeviceFrames } from './deviceFrames';
 import { usePanelStore } from '../../../stores/panelStore';
 import { DeviceLogs } from './DeviceLogs';
 import { DeviceMarkup } from './DeviceMarkup';
-import { agentTabOf, captureName, clock, copyImage, deliverCapture, deliverText, saveImage, useDeviceLogs, useRecording, type CaptureNotice } from './deviceTools';
+import { captureName, clock, copyImage, deliverCapture, deliverText, saveImage, useDeviceLogs, useRecording, type CaptureNotice } from './deviceTools';
 import { CaptureCard, DriverChip } from './DeviceToolViews';
+import { agentTabOf } from '../../../../../shared/deviceAgentTab';
 import { DeviceClientContext, desktopDeviceClient, type DeviceTabClient } from './deviceClient';
 
 /** The tab's screen size when the device has not sent a frame yet (iPhone 17 Pro points). */
