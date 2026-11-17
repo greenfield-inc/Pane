@@ -1,4 +1,5 @@
 import { getChatTabManager } from '../services/chatTabs';
+import { savedFileExtension } from './savedFileExtension';
 import { reapplyMoveSnapshot, releaseMoveHolds } from '../services/sessionMove/restore';
 import { bringBackIgnoredFiles } from '../services/sessionMove/ignoredFiles';
 /**
@@ -1647,7 +1648,7 @@ export function registerSessionHandlers(
         // Generate unique filename
         const timestamp = Date.now();
         const randomStr = Math.random().toString(36).substring(2, 9);
-        const extension = image.type.split('/')[1] || 'png';
+        const extension = savedFileExtension(image.name ?? '', image.type ?? '');
         const filename = `${timestamp}_${randomStr}.${extension}`;
         const filePath = path.join(imagesDir, filename);
 

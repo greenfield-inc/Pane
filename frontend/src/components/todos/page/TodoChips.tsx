@@ -36,6 +36,15 @@ export interface TodoChipsProps {
   onOpenSession?: () => void;
 }
 
+/** A PR attached as a link when Pane hasn't seen it on a Pane (round 7 QA, R3): its number, from the URL. */
+function attachedPr(detail: TodoDetail): TodoDetail['pr'] {
+  const own = detail.attachments.find((group) => !group.from)?.attachments ?? [];
+  const link = own.find((attachment) => attachment.kind === 'pr');
+  if (!link) return undefined;
+  const number = Number(/\/pull\/(\d+)/.exec(link.target)?.[1] ?? 0);
+  return { number, label: number ? `#${number}` : link.label, url: link.target };
+}
+
 /**
  * The key details under the title (round 7, D-419): status (and its reason), agents, PR and checks,
  * sub-to-do progress and machine. Each chip opens what it names. While the split is hidden a
@@ -52,6 +61,7 @@ export function TodoChips({ detail, splitCount, splitLead, splitHidden, onOpenAp
   const worker = todo.assignee;
   const subTotal = detail.subTodos.length;
   const subDone = detail.subTodos.filter((row) => row.status.status === 'done').length;
+  const pr = detail.pr ?? attachedPr(detail);
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="todo-chips">
       <Chip
@@ -71,10 +81,10 @@ export function TodoChips({ detail, splitCount, splitLead, splitHidden, onOpenAp
         </span>
         <b className="font-medium text-text-primary">orchestrator</b>
       </Chip>
-      {detail.pr && (
-        <Chip label={`Open ${detail.pr.label}`} onClick={onOpenPr} testId="todo-chip-pr">
+      {pr && (
+        <Chip label={`Open ${pr.label}`} onClick={onOpenPr} testId="todo-chip-pr">
           <GitPullRequest className="h-3.5 w-3.5" aria-hidden="true" />
-          <PrLabel label={detail.pr.label} />
+          <PrLabel label={pr.label} />
         </Chip>
       )}
       {subTotal > 0 && (

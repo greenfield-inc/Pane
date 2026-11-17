@@ -64,3 +64,13 @@ export function routeParent(route: PhoneTodosRoute, parentNumber: number | null 
       return { screen: 'todo', number: route.number };
   }
 }
+
+/**
+ * The views under the current To-dos screen after a Back or Forward lands on `arrived` from `from`: Back pops
+ * the one it returns to; Forward pushes the one it left, so the next in-app back steps through the history
+ * instead of pushing a duplicate entry (round 7 QA, R28).
+ */
+export function stepTodosStack(stack: readonly string[], arrived: string, from: string | null): string[] {
+  if (stack[stack.length - 1] === arrived) return stack.slice(0, -1);
+  return from === null ? [...stack] : [...stack, from];
+}

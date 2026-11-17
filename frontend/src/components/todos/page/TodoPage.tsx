@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Columns2, MoreHorizontal, PanelRight, Play, Square } from 'lucide-react';
 import type { TodoAction, TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
 import { normalizeKeyboardShortcutOverrides, resolveEffectiveChord } from '../../../../../shared/utils/keyboardBindings';
 import { useTodoDetail, useTodosStore } from '../../../stores/todosStore';
+import { countsAsWaiting, notifyItem, useNotifyStore } from '../../../stores/notifyStore';
 import { todoApprovalSurface, useApprovalColumnStore } from '../../../stores/approvalColumnStore';
 import { useOrchestrationSessionStore } from '../../../stores/orchestrationSessionStore';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../../stores/configStore';
@@ -23,6 +24,11 @@ import { TodoDetailsSidebar, type TodoDetailsTab } from './TodoDetailsSidebar';
 import { TodoSplit, splitTabLabel, type TodoApprovalOpen } from './TodoSplit';
 import { openTodoSession } from './todoNavigation';
 import { initialSplit, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem } from './splitTabs';
+
+/** The thread's narrowest usable width beside the split and the details (round 7 QA, R8). */
+const THREAD_FLOOR_PX = 360;
+/** The split's narrowest useful width. */
+const SPLIT_FLOOR_PX = 240;
 import { pruneSplitMemory, readSplitHidden, todoSplitKey, writeSplitHidden } from './todoSplitMemory';
 
 export interface TodoPageProps {
@@ -44,7 +50,7 @@ export function TodoPage(props: TodoPageProps) {
 }
 
 function TodoPageView({ number, onBack, onOpenTodo }: TodoPageProps) {
-  const detail = useTodoDetail(number);
+  const detail = useAnsweredNow(useTodoDetail(number));
   const ref = useRef<HTMLDivElement>(null);
   const [areaPx, setAreaPx] = useState<number | null>(null);
   // Measured before paint, so a narrow window's first frame already has the split hidden.
@@ -73,6 +79,19 @@ function TodoPageView({ number, onBack, onOpenTodo }: TodoPageProps) {
 }
 
 /** The split's hidden state for this visit: remembered per to-do, except in a narrow window. */
+/**
+ * Answering an approval reads Working at once (round 7, section 5): the host keeps an answer waiting through
+ * its Undo hold, a few seconds, while Approvals here already shows it answered.
+ */
+function useAnsweredNow(detail: TodoDetail | null): TodoDetail | null {
+  const waitingId = detail?.status.status === 'waiting' ? detail.status.waitingApprovalId : undefined;
+  const answered = useNotifyStore((state) => {
+    const item = waitingId ? notifyItem(state.snapshot, waitingId) : undefined;
+    return item !== undefined && !countsAsWaiting(item);
+  });
+  return useMemo(() => (detail && answered ? { ...detail, status: { status: 'working', reason: '' } } : detail), [detail, answered]);
+}
+
 function useSplitMemory(detail: TodoDetail, areaPx: number) {
   const key = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, detail.todo.number);
   // A visit that opened under 1,000 px starts hidden, and showing the split lasts for that visit only.
@@ -147,7 +166,8 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
     setApproval(null);
     const target = returnFocus.current;
     returnFocus.current = null;
-    if (target?.isConnected) requestAnimationFrame(() => target.focus());
+    // The control you came from may be gone (an answered card redraws): the title keeps focus on the page.
+    requestAnimationFrame(() => (target?.isConnected ? target : titleRef.current)?.focus({ preventScroll: true }));
   }, []);
   const openItem = useCallback((item: TodoSplitItem) => {
     setApproval(null);
@@ -182,7 +202,16 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
   const splitContainer = Math.max(0, areaPx - (detailsOpen ? details.renderedPx : 0));
   const splitResize = useOuterPanelResize({ config: OUTER_PANEL_CONFIGS.todoSplit, containerPx: splitContainer, enabled: splitShown });
   // Too narrow for the split's floor beside the thread: it still shows, at most half of what is left.
-  const splitPx = splitResize.bodyActive ? splitResize.renderedPx : Math.min(320, Math.floor(splitContainer / 2));
+  // The thread keeps THREAD_FLOOR_PX; with the details open and no room for both, the split steps aside for
+  // this visit (its remembered state is untouched) and "Plan · N files" brings it back by closing the details.
+  const room = splitContainer - THREAD_FLOOR_PX;
+  const crowded = detailsOpen && room < SPLIT_FLOOR_PX && approval === null;
+  const splitHere = splitShown && !crowded;
+  const splitPx = Math.min(splitResize.bodyActive ? splitResize.renderedPx : Math.min(320, Math.floor(splitContainer / 2)), Math.max(SPLIT_FLOOR_PX, room));
+  const showSplit = () => {
+    dispatch({ type: 'set-hidden', hidden: false });
+    if (crowded) setDetailsOpen(false);
+  };
   const lead = split.items[0] ? splitTabLabel(split.items[0], split.items) : null;
 
   return (
@@ -205,12 +234,12 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
                 detail={detail}
                 splitCount={split.items.length}
                 splitLead={lead}
-                splitHidden={!splitShown}
+                splitHidden={!splitHere}
                 onOpenApproval={openApproval}
                 onOpenPr={openPr}
                 onScrollToSubTodos={scrollToSubTodos}
                 onOpenDetails={() => setDetailsOpen(true)}
-                onShowSplit={() => dispatch({ type: 'set-hidden', hidden: false })}
+                onShowSplit={showSplit}
                 onAttached={attached}
               />
               {notice && <p className="mt-2 text-[12.5px] text-text-secondary" role="status" data-testid="todo-page-notice">{notice}</p>}
@@ -225,7 +254,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
           </div>
           <TodoComposer key={detail.chatTarget.panelId ?? 'orchestrator'} detail={detail} />
         </div>
-        {splitShown && (
+        {splitHere && (
           <div className="relative flex min-h-0 shrink-0 border-l border-border-primary bg-bg-primary" style={{ width: splitPx }} data-testid="todo-page-split">
             {splitResize.separatorVisible && (
               <OuterResizeSeparator label="Resize the split" orientation="vertical" value={splitResize.effectivePx}

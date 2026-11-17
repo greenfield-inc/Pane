@@ -119,6 +119,9 @@ test('the to-do page: plan beside it, comments and replies reach the right tab, 
     const item = (await approvals(page)).items.find(entry => entry.todo?.number === 1 && entry.state === 'waiting');
     await page.evaluate(async id => { await window.electronAPI.notify.run({ type: 'answer', id, answer: { choice: 'EUR' } }); }, item?.id ?? '');
     await expect(overlay).toHaveCount(0, { timeout: 15_000 });
+    // Reads Working at once, through the answer's Undo hold, and focus stays on the page (round 7 QA, R9).
+    await expect(page.getByTestId('todo-chip-status')).toContainText('Working', { timeout: 1_500 });
+    await expect(page.getByTestId('todo-page-title')).toBeFocused();
     await expect.poll(async () => (await detail(page, 1)).status.status, { timeout: 15_000 }).not.toBe('waiting');
 
     // R7: hidden is remembered for this to-do across another to-do and a reload; ⌘\ shows it again.

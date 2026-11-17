@@ -53,7 +53,7 @@ import { DeviceClientContext } from '../components/panels/device/deviceClient';
 import { remoteDeviceClient } from './components/remoteDeviceClient';
 import { RemoteTodos } from './components/RemoteTodos';
 import { startRemoteTodos } from './runtime/remoteTodosHost';
-import { isOverlayRoute, parseRouteView, routeParent, routeView, type PhoneTodosRoute } from '../components/todos/phone/phoneRoute';
+import { isOverlayRoute, parseRouteView, routeParent, routeView, stepTodosStack, type PhoneTodosRoute } from '../components/todos/phone/phoneRoute';
 import { useTodosStore } from '../stores/todosStore';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
@@ -449,8 +449,7 @@ export function RemotePwaApp() {
       // A To-dos screen: back or forward through approval → to-do → list.
       const todos = parseRouteView(view);
       if (todos) {
-        const stack = todosStackRef.current;
-        if (stack[stack.length - 1] === view) stack.pop();
+        todosStackRef.current = stepTodosStack(todosStackRef.current, view ?? '', historyView);
         setTodosRoute(todos);
         return;
       }

@@ -356,6 +356,26 @@ test('R28: browser back steps out approval → to-do → list → the Pane', asy
   await expect(page.getByRole('tablist', { name: 'Remote tool panels' })).toBeVisible();
 });
 
+test('R28: after a back and forward, answering returns to the to-do and one back reaches the list', async ({ page }) => {
+  const todoHost = await openTodos(page);
+  await page.locator('[data-testid="phone-todo-row"][data-todo="12"]').click();
+  await page.getByTestId('todo-thread-answer').click();
+  const approval = page.getByTestId('phone-todo-approval');
+  await expect(approval).toBeVisible();
+  // Forward back into the approval: the web app must still know the to-do is under it.
+  await page.goBack();
+  await expect(page.getByTestId('phone-todo-page')).toBeVisible();
+  await page.goForward();
+  await expect(approval).toBeVisible();
+  await approval.getByText('EUR and USD', { exact: true }).click();
+  await approval.getByTestId('approval-send').click();
+  await expect.poll(() => todoHost.commands.length).toBe(1);
+  await hostChanged(page);
+  await expect(page.getByTestId('phone-todo-page')).toBeVisible();
+  await page.goBack();
+  await expect(page.getByTestId('phone-todos-list')).toBeVisible();
+});
+
 test('R29: New to-do and + Add create to-dos full screen, which appear in the list and under the parent', async ({ page }) => {
   const todoHost = await openTodos(page);
   await page.getByTestId('phone-todos-new').click();

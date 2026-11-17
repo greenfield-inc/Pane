@@ -322,6 +322,14 @@ test('R8: under 1,000 px opens hidden, showing lasts this visit, no horizontal s
   await page.getByTestId('todo-split-toggle').click();
   await expect(page.getByTestId('todo-page-split')).toBeVisible();
   await page.getByTestId('todo-details-toggle').click();
+  // No room for the split, the thread and the details at once: the thread keeps its width and the split
+  // steps aside for this visit; the files chip brings it back by closing the details (round 7 QA).
+  await expect(page.getByTestId('todo-page-split')).toHaveCount(0);
+  expect((await page.getByTestId('todo-page-main').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(300);
+  await page.getByTestId('todo-chip-plan').click();
+  await expect(page.getByTestId('todo-page-split')).toBeVisible();
+  await expect(page.getByTestId('todo-details-toggle')).toHaveAttribute('aria-expanded', 'false');
+  await page.getByTestId('todo-details-toggle').click();
   const overflow = await page.evaluate(() => {
     const el = document.querySelector('[data-testid="todo-page"]');
     return { doc: document.documentElement.scrollWidth - document.documentElement.clientWidth, page: el ? el.scrollWidth - el.clientWidth : 0 };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isOverlayRoute, parseRouteView, routeParent, routeView, type PhoneTodosRoute } from './phoneRoute';
+import { isOverlayRoute, parseRouteView, routeParent, routeView, stepTodosStack, type PhoneTodosRoute } from './phoneRoute';
 
 const list: PhoneTodosRoute = { screen: 'list' };
 const todo: PhoneTodosRoute = { screen: 'todo', number: 12 };
@@ -55,3 +55,16 @@ describe('back steps out one screen: approval or files → to-do → list', () =
     expect(routeParent({ screen: 'todo', number: 14 }, 12)).toEqual(todo);
   });
 });
+
+describe('stepTodosStack', () => {
+  it('pops on Back and pushes the view it came from on Forward, so an in-app back can use the history (round 7 QA, R28)', () => {
+    const stack = ['', 'todos'];
+    // Back from the to-do to the list.
+    expect(stepTodosStack(stack, 'todos', 'todos:12')).toEqual(['']);
+    // Forward from the to-do to its approval: the to-do is under it again.
+    expect(stepTodosStack(['', 'todos'], 'todos:12:approval:host:q11', 'todos:12')).toEqual(['', 'todos', 'todos:12']);
+    // Forward from outside To-dos records nothing to step back into.
+    expect(stepTodosStack([], 'todos', null)).toEqual([]);
+  });
+});
+

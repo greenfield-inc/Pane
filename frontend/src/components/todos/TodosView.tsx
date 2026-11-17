@@ -75,13 +75,16 @@ export function TodosView() {
   const selected = useNavigationStore(state => state.selectedTodoNumber);
   const selectTodo = useNavigationStore(state => state.selectTodo);
   useRemoteTodosPoll();
+  // Back on the list, the row you opened stays selected (round 7 QA, R1).
+  const [lastOpened, setLastOpened] = useState<number | null>(null);
+  useEffect(() => { if (selected !== null) setLastOpened(selected); }, [selected]);
   if (selected !== null) {
     return <TodoPage key={selected} number={selected} onBack={() => selectTodo(null)} onOpenTodo={number => selectTodo(number)} />;
   }
-  return <TodosList onOpen={number => selectTodo(number)} />;
+  return <TodosList onOpen={number => selectTodo(number)} lastOpened={lastOpened} />;
 }
 
-function TodosList({ onOpen }: { onOpen: (number: number) => void }) {
+function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; lastOpened: number | null }) {
   const entries = useTodoEntries();
   const loaded = useTodosStore(state => state.snapshot !== null);
   const gate = useTodosStore(state => state.snapshot?.gate);
@@ -90,7 +93,7 @@ function TodosList({ onOpen }: { onOpen: (number: number) => void }) {
   const now = useNow();
   const [tab, setTab] = useState<TodosTab>('open');
   const [grouping, setGroupingState] = useState<TodosGrouping>(readGrouping);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(lastOpened === null ? null : `${LOCAL_MACHINE_ID}:${lastOpened}`);
   const [confirm, setConfirm] = useState<TodoConfirmRequest | null>(null);
   const [creating, setCreating] = useState(false);
   const [flashKey, setFlashKey] = useState<string | null>(null);

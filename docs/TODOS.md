@@ -162,7 +162,9 @@ with its **plan beside it** in a split at half the width.
   Session, requester, who manages and works it, repo, machine, machine load
   with Never pause, keep moving, created and the sub-to-dos; its Attachments
   tab lists every attachment with who added it and when. Its width is
-  remembered; opening it narrows the split.
+  remembered; opening it narrows the split. When there isn't room for the
+  split, the thread and the details at once, the split steps aside until you
+  show it again, which closes the details.
 - **Approvals cover the split**, as in a Session: Answer, the status chip or an
   approval card in the thread shows the approval column over the split,
   headed "Back to Plan" (whatever tab was showing). ✕, Back or Esc returns to
