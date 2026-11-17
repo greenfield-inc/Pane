@@ -81,6 +81,9 @@ import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from '
 import { showActionError, useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
+import { ProfilesView } from './profiles/ProfilesView';
+import { LaunchProfileDialog } from './profiles/LaunchProfileDialog';
+import type { LibraryProfile } from '../../../shared/types/profiles';
 import { LivePreviewPrompt } from './LivePreviewPrompt';
 import { ApprovalsView } from './approvals/ApprovalsView';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
@@ -1296,6 +1299,7 @@ export const SessionView = memo(() => {
   }, [hotkeys]);
 
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [launchingProfile, setLaunchingProfile] = useState<LibraryProfile | null>(null);
   // The empty stage is the "+" menu laid out inline: one click (or the
   // shortcut beside it) from a running tool, instead of a placeholder.
   const emptyStage = useMemo(() => (
@@ -1312,7 +1316,7 @@ export const SessionView = memo(() => {
             onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.label} chat`, error)); },
           })) : []),
           ...(chatTabs && activeSession ? [
-            { key: 'chat-profile', label: 'Agent Farm profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) },
+            { key: 'chat-profile', label: 'Profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) },
             { key: 'chat-more', label: 'More agents…', icon: <Boxes className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => requestOpenSettings({ category: 'agents' }) },
           ] : []),
           { key: 'terminal', label: 'Terminal', icon: <Terminal className="h-3.5 w-3.5" />, hotkeyId: 'add-tool-terminal', onClick: () => handlePanelCreate('terminal') },
@@ -1348,10 +1352,14 @@ export const SessionView = memo(() => {
           onClose={() => setProfileDialogOpen(false)}
           // The new tab replaces this empty stage, so the parent closes the dialog itself.
           onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: activeSession.id, launch }); setProfileDialogOpen(false); }}
+          onLaunchProfile={profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); }}
         />
       )}
+      {launchingProfile && activeSession && (
+        <LaunchProfileDialog profile={launchingProfile} defaults={{ repoId: activeSession.projectId }} onClose={() => setLaunchingProfile(null)} onLaunched={() => setLaunchingProfile(null)} />
+      )}
     </div>
-  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
+  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen, launchingProfile]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1947,6 +1955,10 @@ export const SessionView = memo(() => {
 
   if (activeView === 'loops') {
     return <LoopsView />;
+  }
+
+  if (activeView === 'profiles') {
+    return <ProfilesView />;
   }
 
   if (activeView === 'autopilot') {

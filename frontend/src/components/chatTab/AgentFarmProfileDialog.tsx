@@ -1,4 +1,6 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import type { LibraryProfile } from '../../../../shared/types/profiles';
+import { API } from '../../utils/api';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from '../ui/Modal';
 import { Input, Textarea } from '../ui/Input';
 import { Button } from '../ui/Button';
@@ -9,14 +11,26 @@ interface AgentFarmProfileDialogProps {
   onClose: () => void;
   /** Creates the chat tab on the Pane's host; a rejection keeps the dialog open with the host's reason. */
   onCreate: (launch: ChatTabProfileLaunch) => Promise<void>;
+  /** Desktop: opens Launch for one of Pane's profiles. Without it the dialog lists none (the phone launches later). */
+  onLaunchProfile?: (profile: LibraryProfile) => void;
 }
 
 /**
- * "Agent Farm profile…" in the + menu and the PWA's Add Tool: a chat tab launched from
- * a profile, as `runpane panels create --agent-farm <profile> --arg key=value` does.
- * The profile is typed: `agent-farm profiles list` prints no machine-readable list.
+ * "Profile…" in the + menu and the PWA's Add Tool. On the desktop it lists Pane's profiles that
+ * are on, each launched with its workflow; below, any Agent Farm profile by name opens as a chat
+ * tab, as `runpane panels create --agent-farm <profile> --arg key=value` does. That name is typed:
+ * `agent-farm profiles list` prints no machine-readable list.
  */
-export function AgentFarmProfileDialog({ onClose, onCreate }: AgentFarmProfileDialogProps) {
+export function AgentFarmProfileDialog({ onClose, onCreate, onLaunchProfile }: AgentFarmProfileDialogProps) {
+  const [paneProfiles, setPaneProfiles] = useState<LibraryProfile[]>([]);
+  useEffect(() => {
+    if (!onLaunchProfile) return;
+    let cancelled = false;
+    void API.profiles.list().then((response) => {
+      if (!cancelled && response.success && response.data) setPaneProfiles(response.data.profiles.filter((profile) => profile.enabled && profile.launchable));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [onLaunchProfile]);
   const [profile, setProfile] = useState('');
   const [args, setArgs] = useState('');
   const [problem, setProblem] = useState<{ field: 'profile' | 'args' | 'host'; error: string } | null>(null);
@@ -40,10 +54,22 @@ export function AgentFarmProfileDialog({ onClose, onCreate }: AgentFarmProfileDi
   };
 
   return (
-    <Modal isOpen onClose={onClose} size="sm" ariaLabel="Agent Farm profile" initialFocusRef={profileRef} showCloseButton={false}>
+    <Modal isOpen onClose={onClose} size="sm" ariaLabel="Profile" initialFocusRef={profileRef} showCloseButton={false}>
       <form onSubmit={event => void submit(event)} className="flex min-h-0 flex-col">
-        <ModalHeader title="Agent Farm profile" description="Opens a chat tab running the profile on this Pane's machine." onClose={onClose} />
+        <ModalHeader title="Profile" description="Launch one of Pane's profiles, or open an Agent Farm profile as a chat tab on this Pane's machine." onClose={onClose} />
         <ModalBody className="space-y-4">
+          {paneProfiles.length > 0 && (
+            <div className="flex flex-col gap-1" data-testid="profile-picker-list">
+              <p className="text-xs text-text-secondary">Pane profiles</p>
+              {paneProfiles.map((paneProfile) => (
+                <button key={paneProfile.name} type="button" onClick={() => onLaunchProfile?.(paneProfile)} className="flex flex-col rounded-md border border-border-primary px-3 py-2 text-left hover:bg-surface-hover">
+                  <span className="text-[13px] font-medium text-text-primary">{paneProfile.name}</span>
+                  {paneProfile.title && <span className="text-xs text-text-secondary">{paneProfile.title}</span>}
+                </button>
+              ))}
+              <p className="pt-2 text-xs text-text-secondary">Or an Agent Farm profile, by name</p>
+            </div>
+          )}
           <Input ref={profileRef} label="Profile" fullWidth value={profile} placeholder="greenfield/implementer" autoComplete="off" spellCheck={false}
             onChange={event => setProfile(event.target.value)} error={problem?.field === 'profile' ? problem.error : undefined}
             helperText="A name from agent-farm profiles list." />

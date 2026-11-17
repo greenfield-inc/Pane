@@ -1,6 +1,6 @@
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat, Inbox } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat, Inbox, Workflow } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -457,6 +457,7 @@ export function ProjectSessionList({
         ) : null}
 
         <LoopsNavRow active={activeView === 'loops'} />
+        <ProfilesNavRow active={activeView === 'profiles'} />
         {/* Approvals sits right under Autopilot, which answers them for you (D-117). */}
         <AutopilotNavRow />
         <ApprovalsNavRow />
@@ -766,6 +767,31 @@ export function LoopsNavRow({ active }: { active: boolean }) {
           <span aria-label={running ? `${loops.length} loops, a run in progress` : `${loops.length} loops`}>{loops.length}</span>
         </span>
       )}
+    </button>
+  );
+}
+
+// --- Profiles nav entry ---
+
+/** Opens the Profiles page: teams of agents and the workflows Pane runs for them. */
+export function ProfilesNavRow({ active }: { active: boolean }) {
+  return (
+    <button
+      type="button"
+      data-testid="profiles-nav"
+      data-sidebar-item
+      data-sidebar-key="profiles"
+      onClick={() => useNavigationStore.getState().navigateToProfiles()}
+      className={cn(
+        SIDEBAR_ROW_BASE,
+        SIDEBAR_ROW_GAP,
+        SIDEBAR_ROW_PADDING,
+        'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+        active ? 'bg-surface-hover text-text-primary' : 'text-text-secondary',
+      )}
+    >
+      <Workflow className="h-3.5 w-3.5" />
+      <span>Profiles</span>
     </button>
   );
 }

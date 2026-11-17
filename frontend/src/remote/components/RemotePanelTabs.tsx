@@ -205,7 +205,7 @@ export function RemotePanelTabs({
               <AddToolMenuItem
                 buttonRef={(element) => { menuItemRefs.current[chatAgents.length] = element; }}
                 icon={<Sprout className="h-4 w-4" />}
-                title="Agent Farm profile…"
+                title="Profile…"
                 description="Chat with an Agent Farm profile on the remote host"
                 onClick={() => { onCreateProfileChat(); setShowAddMenu(false); }}
               />

@@ -17,6 +17,7 @@ import { machineLetter } from '../../../../shared/utils/machineMarks';
 import { AutopilotNavRow } from '../autopilot/AutopilotNavRow';
 import {
   LoopsNavRow,
+  ProfilesNavRow,
   ApprovalsNavRow,
   SIDEBAR_SECTION_LABEL,
   SIDEBAR_SECTION_ROW,
@@ -399,6 +400,7 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
       <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
       {/* Same order as the single-machine sidebar: Loops, Autopilot, Approvals (D-117, D-198). */}
       <LoopsNavRow active={activeView === 'loops'} />
+      <ProfilesNavRow active={activeView === 'profiles'} />
       <AutopilotNavRow />
       <ApprovalsNavRow />
 

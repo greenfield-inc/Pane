@@ -5,6 +5,7 @@ import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
 import type { LoopInput } from '../../../shared/types/loop';
+import type { ProfileLaunchInput } from '../../../shared/types/profiles';
 import { startOwnPaneCreation } from './ownPaneCreations';
 import type { MissionControlSnapshotRequest } from '../../../shared/types/missionControl';
 import type {
@@ -272,6 +273,37 @@ export class API {
     async preview(cron: string) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.loops.preview(cron);
+    },
+  };
+  // Profiles
+  static profiles = {
+    async list() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.profiles.list();
+    },
+    async get(name: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.profiles.get(name);
+    },
+    async setEnabled(name: string, enabled: boolean) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.profiles.setEnabled(name, enabled);
+    },
+    async launch(input: ProfileLaunchInput) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.profiles.launch(input);
+    },
+    async runs() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.profiles.runs();
+    },
+    async setOutcome(runId: string, outcome: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.profiles.setOutcome(runId, outcome);
+    },
+    async stop(runId: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.profiles.stop(runId);
     },
   };
   // Mission Control

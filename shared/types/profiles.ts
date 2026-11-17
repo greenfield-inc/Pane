@@ -200,3 +200,40 @@ export interface ProfileRun {
   createdAt: string;
   updatedAt: string;
 }
+
+/** One profile from the person's own Agent Farm ("Your Agent Farm"), read-only. */
+export interface OwnAgentFarmProfileView {
+  name: string;
+  source: string;
+  harness?: string;
+  model?: string;
+}
+
+/** What the Profiles page lists. */
+export interface ProfileLibraryView {
+  profiles: LibraryProfile[];
+  /** The Agent Farm bundled in Pane: set up, setting up, or why not. */
+  agentFarm?: { state: 'missing' | 'installing' | 'ready' | 'failed'; version?: string; error?: string };
+  /** The person's own agent-farm on PATH, listed through it; absent when none is installed. */
+  ownAgentFarm?: { profiles: OwnAgentFarmProfileView[]; error?: string };
+}
+
+/** One profile with its file's text, for the YAML tab. */
+export interface ProfileDetailView {
+  profile: LibraryProfile;
+  yaml: string;
+}
+
+/** A launch from the Profiles page or runpane. */
+export interface ProfileLaunchInput {
+  profile: string;
+  repoId: number;
+  /** An existing Session to run in; without it Pane makes a new one named `sessionName` (or after the profile and task). */
+  sessionId?: string;
+  sessionName?: string;
+  prompt: string;
+  /** Agent id → `cli` or `cli/model`, over the file's `runs`. */
+  harness?: Record<string, string>;
+  /** A CLI Pane doesn't know → the command that starts it. */
+  commands?: Record<string, string>;
+}

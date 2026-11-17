@@ -27,7 +27,7 @@ export function getProfileRunner(): ProfileRunner {
 }
 
 /** The library as config sets it now: bundled profiles on or off, and the person's own. */
-function currentProfiles(): LibraryProfile[] {
+export function currentProfiles(): LibraryProfile[] {
   return listProfiles({ paneDir: getAppDirectory(), enabled: getRuntimeConfigManager().getConfig().profiles?.enabled });
 }
 
