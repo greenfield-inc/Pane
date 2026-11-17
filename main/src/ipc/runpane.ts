@@ -340,6 +340,10 @@ const RUNPANE_CHANNELS = [
   'runpane:loops:set-enabled',
   'runpane:loops:run-now',
   'runpane:loops:preview',
+  'runpane:profiles:list',
+  'runpane:profiles:show',
+  'runpane:profiles:launch',
+  'runpane:profiles:runs',
   'runpane:secrets:list',
   'runpane:secrets:set',
   'runpane:secrets:delete',
@@ -6768,7 +6772,7 @@ function parseAttachments(value: PaneCommandValue, asFilePointer: boolean | unde
   return attachments;
 }
 
-function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector {
+export function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector {
   const selectorText = optionalString(value);
   if (selectorText !== undefined) return selectorText;
 
@@ -6789,7 +6793,7 @@ function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector {
   throw new Error('Repo selector must include id, path, name, active, or a string selector');
 }
 
-function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector): Project {
+export function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector): Project {
   const selectorText = optionalString(selector);
   if (selectorText !== undefined) {
     if (selectorText === 'active' || selectorText === 'default') {
