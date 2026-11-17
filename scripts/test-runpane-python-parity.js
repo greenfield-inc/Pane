@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const root = path.resolve(__dirname, '..');
@@ -128,6 +130,26 @@ print(json.dumps({"code": code, "requests": requests, "failure": json.loads(stdo
   assert.equal(output.code, 1);
   assert.deepEqual(output.failure, nodeFailure);
   assert.deepEqual(output.requests, [['runpane:sessions:create', payload]]);
+});
+
+test('a missing local socket reads the same from Python and Node, and names the re-create window', { skip: process.platform === 'win32' && 'Windows uses a named pipe, which a cleanup cannot delete' }, () => {
+  // Pane has run here (its data folder exists) but no socket answers: not running, or deleted by a /tmp cleanup (#1057).
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-parity-missing-socket-'));
+  try {
+    const env = { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1', PYTHONPATH: path.join(root, 'packages/runpane-py/src'), PYTHONDONTWRITEBYTECODE: '1' };
+    const args = ['repos', 'list', '--pane-dir', paneDir, '--json'];
+    const node = spawnSync(process.execPath, [path.join(root, 'packages/runpane/dist/cli.js'), ...args], { cwd: root, encoding: 'utf8', timeout: 10000, env });
+    const py = spawnSync(python, ['-m', 'runpane', ...args], { cwd: root, encoding: 'utf8', timeout: 10000, env });
+    assert.equal(node.status, 1, node.stderr);
+    assert.equal(py.status, 1, py.stderr);
+    assert.deepEqual(JSON.parse(py.stdout), JSON.parse(node.stdout));
+    const { error } = JSON.parse(node.stdout);
+    assert.equal(error.code, 'ENOENT');
+    assert.match(error.message, /^No Pane daemon socket at \/tmp\/pane-daemon-[^ ]+\/daemon\.sock \(ENOENT\)\. Pane is not running for .+, or its socket was deleted while it ran; a running Pane re-creates it within 5 s\. Nothing was changed\.$/);
+    assert.equal(error.next, `Open Pane on this machine. If it is already open, wait 5 s and try again; if it still fails, quit and reopen Pane. Then check the connection with \`runpane doctor --pane-dir ${paneDir}\`.`);
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
 });
 
 test('Python daemon diagnostics distinguish stale Unix sockets from unopened Pane', () => {
