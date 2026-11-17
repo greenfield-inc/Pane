@@ -47,11 +47,15 @@ export function captureName(device: string, extension: string): string {
 
 /**
  * Puts a screenshot in front of the agent, unsent: a chat tab gets it in its composer; a terminal
- * agent gets the PNG's path typed at its prompt.
+ * agent gets the PNG's path typed at its prompt. Answers what happened, for the card.
  */
-export async function deliverCapture(client: DeviceTabClient, devicePanelId: string, target: AgentTab, capture: DeviceCapture, name: string): Promise<void> {
-  if (target.kind === 'chat') await client.attachToChat(target.id, await dataUrlFile(capture.dataUrl, name));
-  else await client.stage(devicePanelId, target.id, `${capture.path} `);
+export async function deliverCapture(client: DeviceTabClient, devicePanelId: string, target: AgentTab, capture: DeviceCapture, name: string): Promise<string> {
+  if (target.kind === 'chat') {
+    await client.attachToChat(target.id, await dataUrlFile(capture.dataUrl, name));
+    return 'Added to chat';
+  }
+  await client.stage(devicePanelId, target.id, `${capture.path} `);
+  return `Typed at ${target.agent}'s prompt`;
 }
 
 /** Puts text (log lines) in front of the agent, unsent: a chat gets a text file; a terminal agent gets the text at its prompt. */
@@ -83,9 +87,13 @@ export function useRecording(client: DeviceTabClient, panelId: string) {
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, [startedAt]);
+  const recording = startedAt !== undefined;
+  // A tab that closes mid-recording stops it, so the next Record starts cleanly.
+  const active = useRef(false);
+  useEffect(() => { active.current = recording; }, [recording]);
+  useEffect(() => () => { if (active.current) void client.record(panelId, 'stop').catch(() => undefined); }, [client, panelId]);
   const start = useCallback(async () => {
     await client.record(panelId, 'start');
-    setElapsed(0);
     setStartedAt(Date.now());
   }, [client, panelId]);
   const stop = useCallback(async (): Promise<DeviceRecording> => {
@@ -97,7 +105,7 @@ export function useRecording(client: DeviceTabClient, panelId: string) {
       setStartedAt(undefined);
     }
   }, [client, panelId]);
-  return { recording: startedAt !== undefined, elapsed, start, stop };
+  return { recording, elapsed, start, stop };
 }
 
 export function clock(seconds: number): string {
@@ -119,9 +127,10 @@ export function useDeviceLogs(client: DeviceTabClient, panelId: string, open: bo
     const read = async () => {
       const page = await client.logs(panelId, next.current).catch((cause: unknown) => ({ lines: [], next: next.current, problem: cause instanceof Error ? cause.message : 'Pane could not read the log.' }));
       if (cancelled) return;
+      // A restarted log counts from a new start: lines already shown stay, and reading goes on from there.
       next.current = page.next;
       setProblem(page.problem);
-      if (page.lines.length > 0) setLines(current => [...current, ...page.lines].slice(-LOG_KEEP));
+      if (page.lines.length > 0) setLines(current => [...current, ...page.lines.filter(line => line.seq > (current.at(-1)?.seq ?? -1))].slice(-LOG_KEEP));
       timer = window.setTimeout(() => { void read(); }, LOG_POLL_MS);
     };
     void read();

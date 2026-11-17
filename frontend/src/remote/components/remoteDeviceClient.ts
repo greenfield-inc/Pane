@@ -1,5 +1,5 @@
 import type { DeviceTabClient } from '../../components/panels/device/deviceClient';
-import { addDraftAttachment } from '../../components/chatTab/ChatTabPanel';
+import { addDraftAttachment } from '../../components/chatTab/chatDrafts';
 import type { DeviceCapture, DeviceControls, DeviceLogPage, DeviceRecording } from '../../../../shared/types/devices';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 

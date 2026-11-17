@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { usePausableDismiss } from '../../../hooks/usePausableDismiss';
 import { Copy, Download, MessageSquareText, Pencil, ShipWheel, X } from 'lucide-react';
 import type { DeviceDriver } from '../../../../../shared/types/devices';
 import { cn } from '../../../utils/cn';
@@ -7,19 +7,14 @@ import type { CaptureNotice } from './deviceTools';
 const NOTICE_MS = 8_000;
 
 export function CaptureCard({ notice, onCopy, onSave, onMarkUp, onClose }: { notice: CaptureNotice; onCopy: () => void; onSave: () => void; onMarkUp: () => void; onClose: () => void }) {
-  const [hovered, setHovered] = useState(false);
-  useEffect(() => {
-    if (hovered) return;
-    const timer = window.setTimeout(onClose, NOTICE_MS);
-    return () => window.clearTimeout(timer);
-  }, [hovered, notice, onClose]);
+  // Closes itself after a while, paused while hovered or focused.
+  const dismiss = usePausableDismiss(onClose, NOTICE_MS);
   const action = 'flex items-center gap-1 rounded border border-border-primary px-2 py-0.5 text-xs text-text-primary hover:bg-surface-hover';
   return (
     <div
       className="absolute bottom-4 right-4 z-20 flex items-center gap-3 rounded-lg border border-border-primary bg-surface-primary p-2 pr-3 shadow-lg"
       data-testid="device-capture-card"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      {...dismiss}
     >
       <img src={notice.capture.dataUrl} alt="" className="h-14 w-auto max-w-[56px] rounded border border-border-primary object-contain" />
       <div className="flex flex-col gap-1.5">

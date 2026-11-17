@@ -1,5 +1,6 @@
 import type { DeviceLogLine, DeviceLogPage, DeviceStreamInfo } from '../../../../shared/types/devices';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { hubUrl } from './deviceStream';
 
 const PAGE_LIMIT = 500;
 const ANDROID_BUFFER = 2_000;
@@ -54,18 +55,13 @@ function emuLogLine(seq: number, line: string, at: string | undefined): DeviceLo
   return { seq, at: time, level, source: match[2], message: match[3] };
 }
 
-/** The hub's base URL (…/vendor/), from a device's stream URL. */
-function hubBase(info: DeviceStreamInfo): string {
-  const index = info.streamUrl.indexOf('/vendor/');
-  return index === -1 ? info.streamUrl : info.streamUrl.slice(0, index + '/vendor/'.length);
-}
 
 /**
  * A simulator's app log after `since`, from the hub, which keeps its own buffer of
  * `log stream` for the device. Only apps the person installed log here, not the system.
  */
 export async function simulatorLogs(info: DeviceStreamInfo, udid: string, since: number): Promise<DeviceLogPage> {
-  const url = `${hubBase(info)}serve-sim/logs?device=${encodeURIComponent(udid)}&scope=user-apps&snapshot=1&envelope=1&since=${since}&limit=${PAGE_LIMIT}`;
+  const url = `${hubUrl(info, '/vendor/serve-sim/logs')}?device=${encodeURIComponent(udid)}&scope=user-apps&snapshot=1&envelope=1&since=${since}&limit=${PAGE_LIMIT}`;
   const response = await fetch(url, { headers: { Authorization: `Bearer ${info.token}`, Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
   if (!response.ok) return { lines: [], next: since, problem: `The device hub answered ${response.status} for the log.` };
   const page = decodeOptionalBoundary(await response.json(), simPageSchema);
@@ -102,13 +98,15 @@ export class EmulatorLogs {
   }
 
   private start(serial: string, open: (signal: AbortSignal) => Promise<Response>): EmulatorRelay {
-    const relay: EmulatorRelay = { lines: [], seq: 0, controller: new AbortController(), lastRead: Date.now() };
+    // Sequence numbers start from the clock, so a restarted relay always counts past the last one.
+    const relay: EmulatorRelay = { lines: [], seq: Date.now() * 1000, controller: new AbortController(), lastRead: Date.now() };
+    const end = () => { if (this.relays.get(serial) === relay) this.relays.delete(serial); };
     this.relays.set(serial, relay);
     const idle = setInterval(() => {
       if (Date.now() - relay.lastRead < ANDROID_IDLE_MS) return;
       clearInterval(idle);
       relay.controller.abort();
-      if (this.relays.get(serial) === relay) this.relays.delete(serial);
+      end();
     }, 5_000);
     idle.unref();
     void (async () => {
@@ -125,8 +123,12 @@ export class EmulatorLogs {
         buffered = events.pop() ?? '';
         for (const event of events) this.accept(relay, event);
       }
+      throw new Error('the log stream ended');
     })().catch((cause: unknown) => {
-      if (!relay.controller.signal.aborted) relay.problem = `The emulator's log stopped: ${cause instanceof Error ? cause.message : String(cause)}.`;
+      // The next read starts a new relay; this one says why it stopped until then.
+      if (!relay.controller.signal.aborted) relay.problem = `The emulator's log stopped: ${cause instanceof Error ? cause.message : String(cause)}. Pane is reading it again.`;
+      clearInterval(idle);
+      end();
     });
     return relay;
   }

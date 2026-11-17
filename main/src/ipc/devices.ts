@@ -13,12 +13,12 @@ import { defaultProbeEnvironment } from '../services/devices/deviceProbe';
 import { DeviceBusyError, DeviceService, type DeviceCaller, type DeviceChange } from '../services/devices/deviceService';
 import { findExecutableInPath } from '../utils/shellPath';
 import { DeviceInputSockets, inputMessages } from '../services/devices/deviceInput';
-import { StreamFrameRates, sizeStream, streamSize } from '../services/devices/deviceStream';
+import { StreamFrameRates, hubUrl, sizeStream, streamSize } from '../services/devices/deviceStream';
 import { EmulatorLogs, simulatorLogs } from '../services/devices/deviceLogs';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { bracketedPaste, normalizePromptNewlines, stripTrailingNewlines } from '../services/agents/promptDelivery';
 import { agentLabel } from '../../../shared/agents';
-import { mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import { refuseRetarget } from '../services/devices/deviceHelpers';
 import { MacUnavailableError, RemoteDevices } from '../services/devices/remoteDevices';
 import { registerMacDeviceHandler, remotePaneName } from './macDevices';
@@ -310,6 +310,8 @@ const PERSON_POLL_MS = 500;
 /** The driver chip stays this long after an agent's last call, so a run of calls reads as one. */
 const AGENT_DRIVE_LINGER_MS = 2_000;
 const agentDriveTimers = new Map<string, NodeJS.Timeout>();
+/** Agent device calls running now, per device tab, so overlapping calls keep the chip until the last ends. */
+const agentCallsRunning = new Map<string, number>();
 
 /** The device tab of `paneId` for `platform`, or for the platform it opened last. */
 function deviceTabOf(paneId: string, platform: DevicePlatform | undefined): ToolPanel | undefined {
@@ -332,7 +334,7 @@ function driverOf(panelId: string): DeviceDriver | undefined {
 
 /**
  * Runs an agent's device call as the driver: while the person has taken over, it waits until they
- * hand the device back (D-100); then the tab shows the agent driving until shortly after the call.
+ * hand the device back; then the tab shows the agent driving until shortly after its last call.
  */
 async function driving<Result>(caller: DeviceCaller, platform: DevicePlatform | undefined, work: () => Promise<Result>): Promise<Result> {
   const tab = deviceTabOf(caller.paneId, platform);
@@ -349,11 +351,15 @@ async function driving<Result>(caller: DeviceCaller, platform: DevicePlatform | 
     await new Promise(resolve => setTimeout(resolve, PERSON_POLL_MS));
   }
   clearTimeout(agentDriveTimers.get(tab.id));
+  agentCallsRunning.set(tab.id, (agentCallsRunning.get(tab.id) ?? 0) + 1);
   if (driverOf(tab.id)?.by !== 'agent') await setPanelState(tab, { driver: { by: 'agent', agent } });
   try {
     return await work();
   } finally {
-    agentDriveTimers.set(tab.id, setTimeout(() => {
+    const running = (agentCallsRunning.get(tab.id) ?? 1) - 1;
+    if (running > 0) agentCallsRunning.set(tab.id, running);
+    else agentCallsRunning.delete(tab.id);
+    if (running === 0) agentDriveTimers.set(tab.id, setTimeout(() => {
       agentDriveTimers.delete(tab.id);
       if (driverOf(tab.id)?.by === 'agent') void setPanelState(tab, { driver: undefined });
     }, AGENT_DRIVE_LINGER_MS));
@@ -543,6 +549,11 @@ async function emulatorInput(service: DeviceService, deviceId: string, input: De
   else await service.emulatorCall(deviceId, 'swipe', { x1: start.x, y1: start.y, x2: input.x, y2: input.y });
 }
 
+/** The last line of agent-device's output: its error, when a command fails. */
+function lastLine(output: string): string {
+  return output.trim().split('\n').pop() || 'agent-device failed';
+}
+
 function orientationOf(value: string | undefined): DeviceOrientation | undefined {
   return value === 'portrait' || value === 'landscape_left' || value === 'portrait_upside_down' || value === 'landscape_right' ? value : undefined;
 }
@@ -570,6 +581,10 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     if (!panel || !state) throw new PaneError('ERR_DEVICE_TAB_GONE', 'That device tab is gone.', 'Close it and open the device again.');
     return { panel, state };
   };
+  /** Where the tab's device streams and takes input: this machine's hub, or a linked Mac's through its tunnel. */
+  const streamOf = (panel: ToolPanel, state: DevicePanelState & { deviceId: string }) => (state.machineId ? remoteDevices(services).stream(panel.sessionId) : devices().stream(state.deviceId));
+  /** The person's own tab acting for its Pane, as device calls name the caller. */
+  const ownerOf = (panel: ToolPanel): DeviceCaller => ({ paneId: panel.sessionId, paneName: paneNameOf(services, panel.sessionId) });
 
   /** The person's touches and buttons, sent from main so the hub token never reaches the renderer. */
   commandRegistry.register('devices:input', (panelId: PaneCommandValue, input: PaneCommandValue) => respond(async () => {
@@ -582,7 +597,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     }
     const deviceId = state.deviceId;
     // Asked once per input socket, not per touch, so a drag's moves keep their order.
-    const stream = () => state.machineId ? remoteDevices(services).stream(panel.sessionId) : devices().stream(deviceId);
+    const stream = () => streamOf(panel, { ...state, deviceId });
     inputSockets.send(`${state.machineId ?? 'local'}:${deviceId}`, inputMessages(decoded, state.platform), stream);
     return true;
   }));
@@ -597,7 +612,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     const deviceId = state.deviceId;
     if (!deviceId || state.phase !== 'live') return new Response(null, { status: 404 });
     // A linked Mac's hub is reached through the one-port tunnel; the token stays in main either way.
-    const info = state.machineId ? await remoteDevices(services).stream(panel.sessionId) : await devices().stream(deviceId);
+    const info = await streamOf(panel, { ...state, deviceId });
     const size = state.platform === 'ios' ? streamSize(url.searchParams.get('max')) : undefined;
     // A stream the hub could not size still plays, at the device's native size.
     if (size !== undefined) await sizeStream(info, size).catch((cause) => console.warn(`[devices] sizing the stream of ${deviceId} failed: ${reasonOf(cause)}`));
@@ -629,7 +644,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
       if (fold?.fold?.supported) controls.fold = withPosture(fold.fold.posture === 'closed' ? 'closed' : fold.fold.posture === 'half_opened' ? 'half' : fold.fold.posture === 'opened' ? 'open' : undefined);
       return controls;
     }
-    const info = state.machineId ? await remoteDevices(services).stream(panel.sessionId) : await devices().stream(deviceId);
+    const info = await streamOf(panel, { ...state, deviceId });
     const response = await fetch(info.streamUrl.replace(/\/stream\.mjpeg$/, '/config'), { headers: { Authorization: `Bearer ${info.token}` }, signal: AbortSignal.timeout(5_000) });
     if (!response.ok) return {};
     const config = decodeOptionalBoundary(await response.json(), simConfigSchema);
@@ -654,15 +669,15 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
       const png = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(drawn)?.[1];
       if (!png) throw new PaneError('ERR_DEVICE_INVALID_REQUEST', 'The marked-up screenshot is not a PNG, so nothing was saved.', 'Mark it up again.');
       const folder = path.join(getAppDirectory(), 'devices', 'screenshots');
-      mkdirSync(folder, { recursive: true });
+      await mkdir(folder, { recursive: true });
       const file = path.join(folder, `${panel.sessionId}-${Date.now()}-marked.png`);
-      writeFileSync(file, Buffer.from(png, 'base64'));
+      await writeFile(file, Buffer.from(png, 'base64'));
       return { path: file, dataUrl: drawn };
     }
     if (!state.deviceId || state.phase !== 'live') throw new PaneError('ERR_DEVICE_OFF', 'The device is not running, so there is no screen to capture.', 'Boot it from the device tab.');
-    const caller = { paneId: panel.sessionId, paneName: paneNameOf(services, panel.sessionId) };
+    const caller = ownerOf(panel);
     const shot = state.machineId ? await remoteDevices(services).screenshot(caller.paneId) : await devices().screenshot(caller, state.platform);
-    return { path: shot.path, dataUrl: `data:image/png;base64,${readFileSync(shot.path).toString('base64')}` };
+    return { path: shot.path, dataUrl: `data:image/png;base64,${(await readFile(shot.path)).toString('base64')}` };
   }));
 
   /**
@@ -686,22 +701,22 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
   commandRegistry.register('devices:record', (panelId: PaneCommandValue, action: PaneCommandValue) => respond(async (): Promise<DeviceRecording | null> => {
     const { panel, state } = panelOf(panelId);
     if (!state.deviceId || state.phase !== 'live') throw new PaneError('ERR_DEVICE_OFF', 'The device is not running, so there is nothing to record.', 'Boot it from the device tab.');
-    const caller = { paneId: panel.sessionId, paneName: paneNameOf(services, panel.sessionId) };
+    const caller = ownerOf(panel);
     const act = (args: string[]) => state.machineId ? remoteDevices(services).act(caller.paneId, args) : devices().act(caller, args, state.platform);
     if (action === 'start') {
       const args = ['record', 'start'];
       if (!state.machineId) {
         const folder = path.join(getAppDirectory(), 'devices', 'recordings');
-        mkdirSync(folder, { recursive: true });
+        await mkdir(folder, { recursive: true });
         args.push(path.join(folder, `${caller.paneId}-${Date.now()}.mp4`));
       }
       const started = await act([...args, '--scope', 'device', '--hide-touches']);
-      if (started.exitCode !== 0) throw new PaneError('ERR_DEVICE_RECORD', `The recording did not start: ${started.output.split('\n').pop() ?? 'agent-device failed'}.`, 'Try again; if an agent is recording this device, wait for it to stop.');
+      if (started.exitCode !== 0) throw new PaneError('ERR_DEVICE_RECORD', `The recording did not start: ${lastLine(started.output)}.`, 'Try again; if an agent is recording this device, wait for it to stop.');
       return null;
     }
     const stopped = await act(['record', 'stop', '--json']);
     const file = /"(?:path|outPath|output)"\s*:\s*"([^"]+\.mp4)"/.exec(stopped.output)?.[1] ?? /(\S+\.mp4)/.exec(stopped.output)?.[1];
-    if (stopped.exitCode !== 0 || !file) throw new PaneError('ERR_DEVICE_RECORD', `The recording did not save: ${stopped.output.split('\n').pop() ?? 'agent-device failed'}.`, 'Try recording again.');
+    if (stopped.exitCode !== 0 || !file) throw new PaneError('ERR_DEVICE_RECORD', `The recording did not save: ${lastLine(stopped.output)}.`, 'Try recording again.');
     const recording: DeviceRecording = { path: file };
     if (state.machineId) recording.machine = state.machine;
     return recording;
@@ -713,11 +728,11 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     const deviceId = state.deviceId;
     const after = decodeOptionalBoundary(since, boundary.number) ?? 0;
     if (!deviceId || state.phase !== 'live') return { lines: [], next: after, problem: 'The device is not running.' };
-    const info = state.machineId ? await remoteDevices(services).stream(panel.sessionId) : await devices().stream(deviceId);
+    const info = await streamOf(panel, { ...state, deviceId });
     if (state.platform === 'ios') return simulatorLogs(info, deviceId, after);
-    const serial = /\/serve-emu\/([^/]+)\//.exec(info.streamUrl)?.[1] ?? deviceId;
-    const base = info.streamUrl.slice(0, info.streamUrl.indexOf('/vendor/'));
-    return emulatorLogs.page(serial, after, signal => fetch(`${base}/vendor/serve-emu/api/logcat?device=${serial}`, { signal, headers: { Authorization: `Bearer ${info.token}`, Accept: 'text/event-stream' } }));
+    // The emulator's serial is the stream path's segment (…/serve-emu/<serial>/stream.mjpeg).
+    const serial = /\/serve-emu\/([^/]+)\//.exec(info.streamUrl)?.[1] ?? encodeURIComponent(deviceId);
+    return emulatorLogs.page(serial, after, signal => fetch(`${hubUrl(info, '/vendor/serve-emu/api/logcat')}?device=${serial}`, { signal, headers: { Authorization: `Bearer ${info.token}`, Accept: 'text/event-stream' } }));
   }));
 
   /** Take over (the person drives; the agent's device calls wait) and Hand to agent. */

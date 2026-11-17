@@ -1,6 +1,6 @@
 import { createContext } from 'react';
 import type { DeviceCapture, DeviceControls, DeviceInput, DeviceLogPage, DeviceRecording } from '../../../../../shared/types/devices';
-import { addDraftAttachment } from '../../chatTab/ChatTabPanel';
+import { addDraftAttachment } from '../../chatTab/chatDrafts';
 
 /** How a device tab reaches the device on the host its client shows. Each call throws on failure. */
 export interface DeviceTabClient {

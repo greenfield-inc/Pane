@@ -31,7 +31,7 @@ export interface DevicePanelProps {
 const NARROW_PX = 520;
 
 /**
- * A phone simulator or emulator's live screen (Rail+, D-100): the phone at full height, a grouped
+ * A phone simulator or emulator's live screen: the phone at full height, a grouped
  * rail beside it (Home and Rotate; the fold postures on a foldable; Screenshot to chat, Record and
  * Mark up; Logs; More), and under it the frame rate, the device's name and who is driving. Every
  * state covers the screen inside the same frame.
@@ -82,6 +82,7 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const frameRate = useFrameRate(client, panel.id, streaming);
 
   const [notice, setNotice] = useState<CaptureNotice>();
+  const closeNotice = useCallback(() => setNotice(undefined), []);
   const [markup, setMarkup] = useState<CaptureNotice>();
   const [logsOpen, setLogsOpen] = useState(false);
   const logs = useDeviceLogs(client, panel.id, logsOpen && live);
@@ -104,8 +105,7 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const screenshotToChat = useCallback(() => run('screenshot', async () => {
     const capture = await client.capture(panel.id);
     const name = captureName(state.name, 'png');
-    if (agentTab) await deliverCapture(client, panel.id, agentTab, capture, name);
-    const title = !agentTab ? 'Screenshot saved' : agentTab.kind === 'chat' ? 'Added to chat' : `Typed at ${agentTab.agent}'s prompt`;
+    const title = agentTab ? await deliverCapture(client, panel.id, agentTab, capture, name) : 'Screenshot saved';
     setNotice({ capture, name, title });
   }), [agentTab, client, panel.id, run, state.name]);
 
@@ -129,7 +129,8 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
 
   /** Keys while the tab has focus: the simulator's shortcuts, then typing into the device. */
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!live || markup || (event.target instanceof HTMLInputElement)) return;
+    // Only keys pressed on the tab itself: a focused button, the logs or a text field keep theirs.
+    if (!live || markup || event.target !== event.currentTarget) return;
     const mod = event.metaKey || event.ctrlKey;
     const shortcut = mod && event.shiftKey && event.key.toLowerCase() === 'h' ? () => send({ kind: 'button', button: 'home' })
       : mod && event.key === 'ArrowRight' && controls.orientation ? () => { void act({ kind: 'rotate', orientation: nextOrientation(controls.orientation) }); }
@@ -218,11 +219,12 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
         {rail}
         {notice && !markup && (
           <CaptureCard
+            key={notice.capture.dataUrl.length + notice.name}
             notice={notice}
             onCopy={() => { void run('copy', () => copyImage(notice.capture.dataUrl)); }}
             onSave={() => saveImage(notice.capture.dataUrl, notice.name)}
             onMarkUp={() => { setMarkup(notice); setNotice(undefined); }}
-            onClose={() => setNotice(undefined)}
+            onClose={closeNotice}
           />
         )}
         {markup && (
@@ -233,14 +235,14 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
             onDone={(png, action) => {
               setMarkup(undefined);
               void run('markup', async () => {
-                const dataUrl = await blobDataUrl(png);
                 if (action === 'copy' || !agentTab) {
-                  await copyImage(dataUrl);
+                  await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
                   return;
                 }
-                const capture = await client.capture(panel.id, dataUrl);
-                await deliverCapture(client, panel.id, agentTab, capture, markup.name);
-                setNotice({ capture, name: markup.name, title: agentTab.kind === 'chat' ? 'Added to chat' : `Typed at ${agentTab.agent}'s prompt` });
+                const dataUrl = await blobDataUrl(png);
+                // A terminal agent needs the image as a file on the host; a chat takes it directly.
+                const capture = agentTab.kind === 'terminal' ? await client.capture(panel.id, dataUrl) : { path: '', dataUrl };
+                setNotice({ capture, name: markup.name, title: await deliverCapture(client, panel.id, agentTab, capture, markup.name) });
               });
             }}
           />

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore, type Attachment as ComposerAttachment,
+  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
@@ -30,6 +30,7 @@ import { ChatAttachmentAdapter, dragHasFiles, MAX_IMAGE_BYTES, type SaveChatFile
 import { describeUpload } from '../../utils/hostUpload';
 import type { UploadProgress } from '../../../../shared/chunkedUpload';
 import { ChatCopyButton } from './ChatCopyButton';
+import { draftAttachments, shownComposers } from './chatDrafts';
 import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
@@ -181,26 +182,6 @@ export interface ChatTabPanelProps {
    * of `workers`; Autopilot passes the workers of every Session it walks.
    */
   working?: readonly WorkingAgent[];
-}
-
-/**
- * The attachments of each chat's unsent draft, kept with its viewer as the draft text is: the
- * composer is rebuilt when the tab or its Pane is shown again, and they go back into it then.
- */
-const draftAttachments = new WeakMap<ChatTabViewer, readonly ComposerAttachment[]>();
-/** The composer each shown chat has now, so another tab (the device tab's Screenshot to chat) can add to its draft. */
-const shownComposers = new Map<ChatTabViewer, { addAttachment(file: File): Promise<void> }>();
-
-/**
- * Adds `file` to a chat's unsent draft, never sending it: straight into its composer when the chat
- * is shown, else into its saved draft, which goes back into the composer when the chat shows.
- */
-export async function addDraftAttachment(client: ChatTabClient, panelId: string, file: File): Promise<void> {
-  const viewer = chatTabViewer(client, panelId);
-  const composer = shownComposers.get(viewer);
-  if (composer) return composer.addAttachment(file);
-  const pending: ComposerAttachment = { id: `added-${Date.now()}`, type: file.type.startsWith('image/') ? 'image' : 'file', name: file.name, contentType: file.type, file, status: { type: 'requires-action', reason: 'composer-send' } };
-  draftAttachments.set(viewer, [...(draftAttachments.get(viewer) ?? []), pending]);
 }
 
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
