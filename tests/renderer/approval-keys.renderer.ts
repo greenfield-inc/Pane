@@ -15,7 +15,8 @@ test.describe('the approval column (D-381)', () => {
   });
 
   test('each question is one Tab stop: ↑↓ move and pick, Tab goes to the next question, then the reply box', async ({ page }) => {
-    // The picked option (recommended, pre-selected) is the group's one stop.
+    // Nothing is picked at first (D-385), so the first option is the group's one stop.
+    await expect(question(page, 0).getByRole('radio', { checked: true })).toHaveCount(0);
     await expect(option(page, 0, '⌘/ everywhere Recommended')).toHaveAttribute('tabindex', '0');
     await expect(option(page, 0, 'Both')).toHaveAttribute('tabindex', '-1');
     await option(page, 0, '⌘/ everywhere Recommended').focus();
@@ -59,6 +60,9 @@ test.describe('the approval column (D-381)', () => {
   test('⌘↩ sends from an option, with the picks', async ({ page }) => {
     await option(page, 0, 'Both').focus();
     await page.keyboard.press('Space');
+    await page.keyboard.press('Tab');
+    await expect(option(page, 1, 'Yes, a small dot Recommended')).toBeFocused();
+    await page.keyboard.press('Space');
     await page.keyboard.press('ControlOrMeta+Enter');
     await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q12', answer: { picks: ['Both', 'Yes, a small dot'] } }]);
   });
@@ -77,7 +81,7 @@ test.describe('the approval column (D-381)', () => {
     for (const key of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']) await page.keyboard.press(key);
     await expect(box).toHaveValue('j k 1 r g ');
     await expect(page.getByTestId('approval-pager')).toHaveText('1 of 2');
-    await expect(option(page, 0, '⌘/ everywhere Recommended')).toHaveAttribute('aria-checked', 'true');
+    await expect(question(page, 0).getByRole('radio', { checked: true })).toHaveCount(0);
     const composer = page.getByLabel('Chat composer');
     await composer.click();
     await page.keyboard.type('j k 1 r g');
@@ -124,13 +128,13 @@ test.describe('the Approvals screen (D-381)', () => {
     const id = await row(page, 1).getAttribute('data-item-id');
     await expect(page.getByTestId('approvals-beside').getByTestId('approval-column')).toHaveAttribute('data-item-id', id ?? '');
     await page.keyboard.press('Enter');
-    await expect(page.getByTestId('approvals-beside').getByRole('radio', { checked: true }).first()).toBeFocused();
+    await expect(page.getByTestId('approvals-beside').getByRole('radio').first()).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(row(page, 1)).toBeFocused();
     await page.keyboard.press('ArrowUp');
     await expect(row(page, 0)).toBeFocused();
     await page.keyboard.press('ArrowRight');
-    await expect(page.getByTestId('approvals-beside').getByRole('radio', { checked: true }).first()).toBeFocused();
+    await expect(page.getByTestId('approvals-beside').getByRole('radio').first()).toBeFocused();
   });
 
   test('with the list focused, the tab keys switch Waiting and Done today; in the approval they walk its tabs', async ({ page }) => {
@@ -143,7 +147,7 @@ test.describe('the Approvals screen (D-381)', () => {
     await expect(page.getByRole('tab', { name: /Waiting/ })).toHaveAttribute('aria-selected', 'true');
     await expect(row(page, 0)).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.getByTestId('approvals-beside').getByRole('radio', { checked: true }).first()).toBeFocused();
+    await expect(page.getByTestId('approvals-beside').getByRole('radio').first()).toBeFocused();
     await page.keyboard.press('ControlOrMeta+Alt+BracketRight');
     await expect(page.getByRole('tab', { name: 'Summary' })).toHaveAttribute('aria-selected', 'true');
     // Focus moves to the tab shown, out of the Summary's frame, so the next tab key still reaches Pane.
