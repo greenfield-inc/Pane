@@ -1108,6 +1108,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         // Matches preload's Promise<IPCResponse> contract; callers await this result.
         return success();
       },
+      openLocalPage: (fileUrl: string) => {
+        openedExternalUrls.push(fileUrl);
+        return success();
+      },
       feedback: namespace({
         submit: (request: SubmitFeedbackRequest) => {
           feedbackSubmissions.push(clone(request));
