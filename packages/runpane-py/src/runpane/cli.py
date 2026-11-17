@@ -415,16 +415,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
 
+def hook_words(argv: List[str]) -> List[str]:
+    """The command words of an argv: everything but flags and the `--pane-dir` value."""
+    return [arg for index, arg in enumerate(argv) if not arg.startswith("-") and (index == 0 or argv[index - 1] != "--pane-dir")]
+
+
 def is_conversation_hook_argv(argv: List[str]) -> bool:
-    words = [arg for index, arg in enumerate(argv) if not arg.startswith("-") and (index == 0 or argv[index - 1] != "--pane-dir")]
-    return words[:2] == ["panels", "conversation"] and "--hook" in argv
+    return hook_words(argv)[:2] == ["panels", "conversation"] and "--hook" in argv
 
 
 def run_conversation_hook_from_argv(argv: List[str], env: Optional[Dict[str, str]] = None) -> Optional[int]:
     """`runpane panels conversation --hook` (or `runpane session-start`, its Agent Farm alias, D-403) straight from argv,
     before telemetry or any output. None for any other command line."""
-    if argv == ["session-start"]:
-        return run_panels_conversation_hook(env)
+    # The WSL Session bridge appends `--pane-dir <dir>`, so the alias keeps its other arguments.
+    if hook_words(argv)[:1] == ["session-start"]:
+        rest = list(argv)
+        rest.remove("session-start")
+        argv = ["panels", "conversation", "--hook"] + rest
     if not is_conversation_hook_argv(argv):
         return None
     try:

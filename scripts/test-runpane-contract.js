@@ -1415,6 +1415,12 @@ print(json.dumps([
       // Agent Farm's host-neutral hook (D-403): `"$AGENT_FARM_SESSION_HOOK" session-start`, with the same stdin.
       assert.deepStrictEqual(await hook('as session-start', { argv: ['session-start'], input: hookInput({ session_id: result.conversationId, source: 'clear' }) }),
         [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'clear' }]);
+      // The WSL Session bridge appends the instance flag to every call (sessionWSLBridge.ts).
+      assert.deepStrictEqual(await hook('as session-start from the WSL bridge', { argv: ['session-start', '--pane-dir', paneDir], input: hookInput({ session_id: result.conversationId, source: 'resume' }) }),
+        [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' }]);
+      assert.deepStrictEqual(await hook('as the old hook from the WSL bridge', { argv: ['panels', 'conversation', '--hook', '--pane-dir', paneDir], input: hookInput({ session_id: result.conversationId, source: 'resume' }) }),
+        [{ panelId: 'panel-1', paneId: 'session-1', conversationId: result.conversationId, source: 'resume' }]);
+      assert.deepStrictEqual(await hook('as session-start with an unknown flag', { argv: ['session-start', '--bogus'], input: hookInput({ session_id: 'abc' }) }), []);
       assert.deepStrictEqual(await hook('as session-start outside Pane', { argv: ['session-start'], env: {}, input: hookInput({ session_id: 'abc' }) }), []);
       assert.deepStrictEqual(await hook('drops an unknown source', { env: { PANE_PANEL_ID: 'panel-1' }, input: hookInput({ session_id: 'abc', source: 'later' }) }),
         [{ panelId: 'panel-1', conversationId: 'abc' }]);
