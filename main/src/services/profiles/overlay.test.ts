@@ -25,6 +25,15 @@ describe('satisfiesRange', () => {
     ['1.9.9', '<2', true],
     ['5.0.0', '*', true],
     ['not-semver', '*', false],
+    // Partial bounds and prereleases, as npm's semver package answers them.
+    ['1.2.5', '<=1.2', true],
+    ['1.3.0', '<=1.2', false],
+    ['1.5.0', '>1', false],
+    ['2.0.0', '>1', true],
+    ['1.2.9', '=1.2', true],
+    ['1.1.0-beta.1', '^1.0', false],
+    ['1.1.0-beta.1', '*', false],
+    ['1.1.0-beta.1', '1.1.0-beta.1', true],
   ])('%s in %s → %s', (version, range, expected) => {
     expect(satisfiesRange(version, range)).toBe(expected);
   });

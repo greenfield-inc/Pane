@@ -60,9 +60,17 @@ function StepNode({ node, faded }: { node: FlowNodeLayout; faded: boolean }) {
       {step.kind === 'agent' && <rect x={left} y={top} width={node.width} height={node.height} rx={14} className="fill-surface-secondary stroke-status-info" strokeWidth={1.5} />}
       {step.kind === 'command' && <rect x={left} y={top} width={node.width} height={node.height} rx={2} className={cn('fill-surface-primary', step.outcomes.length === 0 ? 'stroke-status-success' : 'stroke-text-secondary')} strokeWidth={1.25} />}
       {step.kind === 'ask' && <polygon points={hexagon(node)} className="fill-surface-secondary stroke-status-warning" strokeWidth={1.5} />}
-      {step.kind === 'command' ? (
+      {step.kind === 'command' && step.title === step.run && (
         <text x={node.x} y={node.y + 4} textAnchor="middle" className={cn('font-mono text-[12px]', step.outcomes.length === 0 ? 'fill-status-success' : 'fill-text-primary')}>{step.title}</text>
-      ) : (
+      )}
+      {step.kind === 'command' && step.title !== step.run && (
+        // A titled command still shows the command it runs.
+        <>
+          <text x={node.x} y={node.y - 3} textAnchor="middle" className={cn('text-[13px] font-semibold', step.outcomes.length === 0 ? 'fill-status-success' : 'fill-text-primary')}>{step.title}</text>
+          <text x={node.x} y={node.y + 14} textAnchor="middle" className="fill-text-secondary font-mono text-[11px]" data-testid="profile-flow-command">{step.run.length > Math.floor(node.width / 6.8) ? `${step.run.slice(0, Math.floor(node.width / 6.8) - 1)}…` : step.run}</text>
+        </>
+      )}
+      {step.kind !== 'command' && (
         <>
           <text x={node.x} y={node.y - 3} textAnchor="middle" className="fill-text-primary text-[13px] font-semibold">{step.kind === 'ask' ? step.ask : step.title}</text>
           <text x={node.x} y={node.y + 14} textAnchor="middle" className="fill-text-secondary text-[11px]">{subtitle.length > Math.floor(node.width / 6.2) ? `${subtitle.slice(0, Math.floor(node.width / 6.2) - 1)}…` : subtitle}</text>
@@ -143,8 +151,9 @@ export function ProfileFlow({ profile }: { profile: Profile }) {
         <li>arrow colour = who chose: <span className="text-status-info">agent</span> · <span className="text-status-warning">you</span> · <span className="text-text-secondary">command</span></li>
         <li className="flex items-center gap-1"><FileText className="h-3 w-3" aria-hidden="true" />= samples of what the agent produced</li>
       </ul>
-      <div className="flex justify-center overflow-x-auto rounded-lg border border-border-primary bg-surface-primary">
-        <svg className="flex-none" width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label={`${profile.name} workflow`} data-testid="profile-flow-svg">
+      {/* mx-auto centres a narrow drawing; a wide one starts at the left edge and scrolls, so none of it is out of reach. */}
+      <div className="overflow-x-auto rounded-lg border border-border-primary bg-surface-primary" data-testid="profile-flow-scroll">
+        <svg className="mx-auto block" width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label={`${profile.name} workflow`} data-testid="profile-flow-svg">
           <defs>
             {(['agent', 'you', 'command'] as const).map((chooser) => (
               <marker key={chooser} id={`profile-arrow-${chooser}`} viewBox="0 0 10 10" refX={9} refY={5} markerWidth={7} markerHeight={7} orient="auto-start-reverse">

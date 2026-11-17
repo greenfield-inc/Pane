@@ -674,6 +674,19 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   ))}
                 </>
               )}
+              {/* Profiles run in terminal tabs, so "Profile…" is there with chat tabs off too. */}
+              {!chatTabs && session && (
+                <button
+                  type="button"
+                  ref={itemRef()}
+                  role="menuitem"
+                  className={menuItemClass}
+                  onClick={() => { setShowDropdown(false); setProfileDialogOpen(true); }}
+                >
+                  <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="truncate">Profile…</span>
+                </button>
+              )}
               {/* Terminal - plain terminal */}
               {availablePanelTypes.includes('terminal') && (
                 <button
@@ -882,6 +895,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         onClose={() => setProfileDialogOpen(false)}
         onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: session.id, launch }); }}
         onLaunchProfile={profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); }}
+        byName={chatTabs}
       />
     )}
     {launchingProfile && session && (

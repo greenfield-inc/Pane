@@ -1,8 +1,8 @@
 import type { IpcMain } from 'electron';
 import { readFileSync } from 'fs';
 import { reasonOf, PaneError } from '../../../shared/paneError';
-import type { ProfileDetailView, ProfileLaunchInput, ProfileLibraryView, ProfileRun } from '../../../shared/types/profiles';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { OwnAgentFarmView, ProfileDetailView, ProfileLaunchInput, ProfileLibraryView, ProfileRun } from '../../../shared/types/profiles';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import { bundledAgentFarmStatus } from '../services/agentFarm/bundledAgentFarm';
 import { listOwnAgentFarmProfiles } from '../services/agentFarm/ownAgentFarm';
@@ -13,6 +13,7 @@ import { parseRepoSelector, resolveRepoSelector } from './runpane';
 
 const PROFILE_CHANNELS = [
   'profiles:list',
+  'profiles:own-agent-farm',
   'profiles:get',
   'profiles:set-enabled',
   'profiles:launch',
@@ -46,8 +47,8 @@ const launchSchema = boundary.object({
   commands: boundary.optional(boundary.record(boundary.nonEmptyString)),
 });
 
-/** The library, the bundled Agent Farm's state, and the person's own Agent Farm profiles when one is installed. */
-async function profileLibraryView(): Promise<ProfileLibraryView> {
+/** The library and the bundled Agent Farm's state. Reads files only, so every caller (the + menu included) gets it at once. */
+function profileLibraryView(): ProfileLibraryView {
   const view: ProfileLibraryView = { profiles: currentProfiles() };
   const status = bundledAgentFarmStatus();
   if (status) {
@@ -55,12 +56,15 @@ async function profileLibraryView(): Promise<ProfileLibraryView> {
     if (status.version) view.agentFarm.version = status.version;
     if (status.error) view.agentFarm.error = status.error;
   }
-  const own = findExecutableInPath('agent-farm');
-  if (own) {
-    try { view.ownAgentFarm = { profiles: await listOwnAgentFarmProfiles(own) }; }
-    catch (error) { view.ownAgentFarm = { profiles: [], error: reasonOf(error) }; }
-  }
   return view;
+}
+
+/** The person's own Agent Farm profiles, listed by running their agent-farm (up to 30 s); null when none is installed. */
+async function ownAgentFarmView(): Promise<OwnAgentFarmView | null> {
+  const own = findExecutableInPath('agent-farm');
+  if (!own) return null;
+  try { return { profiles: await listOwnAgentFarmProfiles(own) }; }
+  catch (error) { return { profiles: [], error: reasonOf(error) }; }
 }
 
 /** A run starts in the Session the launch names, or a new one, without starting that Session's own agent. */
@@ -123,6 +127,7 @@ async function runpaneLaunch(services: AppServices, value: PaneCommandValue): Pr
 /** The Profiles page's commands. Daemon-owned like `loops:`, so the desktop and paired clients share them. */
 export function registerProfileHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   commandRegistry.register('profiles:list', () => respond(profileLibraryView));
+  commandRegistry.register('profiles:own-agent-farm', () => respond(ownAgentFarmView));
   commandRegistry.register('profiles:get', (name: PaneCommandValue) => respond((): ProfileDetailView => {
     const wanted = decodeBoundary(name, boundary.nonEmptyString);
     const profile = currentProfiles().find((candidate) => candidate.name === wanted);
@@ -133,7 +138,7 @@ export function registerProfileHandlers(ipcMain: IpcMain, services: AppServices,
     const wanted = decodeBoundary(name, boundary.nonEmptyString);
     const on = decodeBoundary(enabled, boundary.boolean);
     await services.configManager.updateConfigWith((current) => {
-      const names = new Set(current.profiles?.enabled ?? ['greenfield']);
+      const names = new Set(decodeOptionalBoundary(current.profiles?.enabled, boundary.array(boundary.string)) ?? ['greenfield']);
       if (on) names.add(wanted);
       else names.delete(wanted);
       return { profiles: { ...current.profiles, enabled: [...names] } };

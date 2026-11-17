@@ -98,7 +98,10 @@ export class AgentFarmProfiles implements ChatProfileResolver {
     // The contract keeps MCP servers in each harness's own config so secrets stay references.
     if (decoded.session.mcpServers.length) throw new PaneError('CHAT_PROFILE_OUTPUT_INVALID', 'Agent Farm sent MCP servers as ACP session entries, which could carry secrets in plain text.', 'Update Agent Farm, then try again.');
     const [executable, ...rest] = decoded.argv;
-    const launchEnv = { ...env, ...decoded.env };
+    const launchEnv: ChatAgentEnv = { ...env, ...decoded.env };
+    // The bundled copy runs on Pane's Electron as Node and prints that runtime as the adapter's
+    // Node; without ELECTRON_RUN_AS_NODE it would start another Pane instead of the adapter.
+    if (bundled && executable === bundled.executable) launchEnv.ELECTRON_RUN_AS_NODE = '1';
     // Only now is it known which harness and CLI this launch runs, and where.
     await this.options.checkCli(decoded.harness, { cwd: decoded.cwd, env: launchEnv });
     const launch: ResolvedLaunch = { command: { executable, args: rest, cwd: decoded.cwd, env: launchEnv } };

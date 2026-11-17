@@ -71,7 +71,7 @@ describe('loadProfiles: one broken fixture per rule', () => {
   const files = readdirSync(INVALID).filter((file) => file.endsWith('.profile.yaml'));
 
   it('has a fixture for each rule', () => {
-    expect(files.length).toBeGreaterThanOrEqual(13);
+    expect(files.length).toBeGreaterThanOrEqual(19);
   });
 
   it.each(files)('%s is invalid with the error its header names', (file) => {
@@ -126,6 +126,45 @@ describe('loadProfiles: team-only, overlays, duplicates and unreadable files', (
     expect(reviewer).toMatchObject({ cli: 'claude', reads: ['standing-rules'] });
     expect(mine.profile?.flow?.steps).toHaveLength(11);
     expect(mine.profile?.extends).toBe('greenfield@^1.0');
+    // Its agents' reads resolve in its own folder first, then in greenfield's.
+    expect(mine.readsRoots).toEqual([FIXTURES, FIXTURES]);
+  });
+
+  it('resolves an overlay\'s inherited reads in its base\'s folder', () => {
+    const overlay = tempProfile('elsewhere', 'format: pane-profile/1\nname: elsewhere\nversion: 1.0.0\nextends: greenfield@^1\n');
+    const [, loaded] = loadProfiles([fixture('greenfield'), overlay], { skillExists: () => true });
+    expect(loaded.errors).toEqual([]);
+    expect(loaded.readsRoots).toEqual([dir, FIXTURES]);
+  });
+
+  it('refuses YAML aliases quickly, so a nested-alias file can\'t exhaust memory', () => {
+    const levels = ['a: &a ["x","x","x","x","x","x","x","x","x"]'];
+    for (let index = 1; index <= 9; index += 1) {
+      levels.push(`${String.fromCharCode(97 + index)}: &${String.fromCharCode(97 + index)} [${Array(9).fill(`*${String.fromCharCode(96 + index)}`).join(',')}]`);
+    }
+    const bomb = tempProfile('bomb', `format: pane-profile/1\nname: bomb\nversion: 1.0.0\n${levels.join('\n')}\n`);
+    const started = Date.now();
+    const [loaded] = loadProfiles([bomb]);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(loaded).toMatchObject({ name: 'bomb', valid: false });
+    expect(loaded.errors.map((error) => error.code)).toEqual(['PROFILE_YAML_ALIAS']);
+  });
+
+  it('refuses a file too large to be a profile, unread', () => {
+    const huge = tempProfile('huge', `format: pane-profile/1\nname: huge\nversion: 1.0.0\ndescription: "${'x'.repeat(600 * 1024)}"\n`);
+    expect(loadProfiles([huge])[0].errors.map((error) => error.code)).toEqual(['PROFILE_TOO_LARGE']);
+  });
+
+  it('flags a misspelt key instead of dropping it', () => {
+    const typo = tempProfile('typo', 'format: pane-profile/1\nname: typo\nversion: 1.0.0\nagents:\n  a: { runs: claude }\nflwo:\n  start: s\n');
+    const [loaded] = loadProfiles([typo]);
+    expect(loaded.valid).toBe(false);
+    expect(loaded.errors).toEqual([expect.objectContaining({ code: 'UNKNOWN_KEY', message: 'The profile has "flwo:", which Pane doesn\'t read.' })]);
+  });
+
+  it('refuses a reads id that leaves the profile\'s folder', () => {
+    const escape = tempProfile('escape', 'format: pane-profile/1\nname: escape\nversion: 1.0.0\nagents:\n  a: { runs: claude, reads: [../outside] }\n');
+    expect(loadProfiles([escape])[0].errors.map((error) => error.code)).toEqual(['READ_ID']);
   });
 
   it('refuses an overlay whose range excludes the installed version', () => {
@@ -159,11 +198,12 @@ describe('loadProfiles: team-only, overlays, duplicates and unreadable files', (
     const [loaded] = loadProfiles([broken]);
     expect(loaded).toMatchObject({ name: 'broken', valid: false });
     expect(loaded.errors[0].code).toBe('PROFILE_YAML');
-    expect(loaded.errors[0].message).toContain('broken.profile.yaml');
+    expect(loaded.errors[0].message).toMatch(/^broken\.profile\.yaml is not valid YAML: .+ at line \d+\.$/u);
   });
 
   it('finds only *.profile.yaml files, and none in a missing folder', () => {
     expect(findProfileFiles(join(FIXTURES, 'nowhere'), 'yours')).toEqual([]);
+    expect(findProfileFiles(join(FIXTURES, 'greenfield.profile.yaml'), 'yours')).toEqual([]);
     expect(findProfileFiles(FIXTURES, 'bundled').map((source) => source.file.replace(/\\/gu, '/').split('/').pop())).toEqual(['greenfield-mine.profile.yaml', 'greenfield.profile.yaml', 'team-only.profile.yaml']);
   });
 });

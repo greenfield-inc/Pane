@@ -321,7 +321,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   await skillCacheManager.syncHomeSkill(configManager.getConfig(), databaseService.getAllProjects());
   // Bundled profiles: set up greenfield and the other bundled plugins in Pane's own Agent Farm
   // config root, without delaying startup. It never touches the person's own Agent Farm.
-  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) });
+  // The Profiles page shows the install's state, so it reads the library again when it ends.
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) }).then(() => getPaneEventSink().send('profiles:changed'));
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();

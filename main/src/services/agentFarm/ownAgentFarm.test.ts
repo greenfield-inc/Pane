@@ -30,7 +30,7 @@ describe('parseOwnAgentFarmProfiles', () => {
     const stdout = [
       'greenfield/planner (claude: claude-opus-5-5 high · codex: gpt-6-astra high) -> planner [ambiguous bare name] | plugin greenfield 0.0.46 | claude | claude-opus-5-5 high | native default',
       'greenfield/product-researcher (astra: gpt-6-astra high fast · opus: claude-opus-5-5 high) -> astra-researcher | plugin greenfield 0.0.46 | codex | gpt-6-astra high | fast',
-      'my-helper -> helper | local | claude | claude-sonnet-5-5 low | native default',
+      'my-helper -> helper | plugin local - | claude | claude-sonnet-5-5 low | native default',
       '',
       'Some trailing note without fields',
     ].join('\n');

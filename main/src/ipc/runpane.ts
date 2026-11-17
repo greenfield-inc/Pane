@@ -1981,7 +1981,9 @@ export function registerRunpaneHandlers(
       const report = normalizeAgentReport(normalized, new Date().toISOString());
       // A profile step's outcome moves its run first: an undeclared one is refused and nothing is recorded.
       if (normalized.outcome !== undefined) {
-        if (normalized.state !== 'done' || normalized.question !== undefined) throw new PaneError('ERR_REPORT_OUTCOME_STATE', 'An outcome ends a profile step, so it goes with --state done and no --question. Nothing was recorded.', `Run runpane report --outcome "${normalized.outcome.trim()}" alone, or report the question with --state blocked.`);
+        // The same codes the CLIs refuse these with before sending.
+        if (normalized.state !== 'done') throw new PaneError('ERR_REPORT_OUTCOME_STATE', `An outcome ends a profile step as done, so it cannot be sent with --state ${normalized.state}. Nothing was recorded.`, `Run runpane report --outcome "${normalized.outcome.trim()}" without --state, or drop --outcome to report ${normalized.state}.`);
+        if (normalized.question !== undefined) throw new PaneError('ERR_REPORT_OUTCOME_QUESTION', 'An outcome ends a profile step, and a --question would block it instead. Nothing was recorded.', 'To ask something, run runpane report --state blocked --question "<text>"; once it is answered, run runpane report --outcome <name>.');
         await getProfileRunner().reportOutcome(panel.id, normalized.outcome.trim(), report.summary);
       }
       // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).

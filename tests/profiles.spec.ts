@@ -2,9 +2,11 @@ import { readdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { expect, test, type Page } from '@playwright/test';
 import { flowEdges } from '../shared/profiles/flowGraph';
-import type { LibraryProfile, ProfileLibraryView } from '../shared/types/profiles';
+import type { LibraryProfile, OwnAgentFarmView, ProfileLaunchInput, ProfileLibraryView } from '../shared/types/profiles';
 import { loadProfiles, type ProfileSource } from '../main/src/services/profiles/profileLoader';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
+
+type MockWindow = Window & { __paneTestElectronMock: { getInvokeCalls(channel: string): Array<{ args: unknown[] }> } };
 
 const REPO = path.join(__dirname, '..');
 const BUNDLED = path.join(REPO, 'main/src/services/profiles/bundled');
@@ -28,11 +30,12 @@ function library(): MockLibrary {
   return { view: { profiles }, yaml: Object.fromEntries(profiles.map((profile) => [profile.name, readFileSync(profile.file, 'utf8')])) };
 }
 
-async function openProfiles(page: Page, width = 1_440, theme = 'dark', own?: ProfileLibraryView['ownAgentFarm']) {
+async function openProfiles(page: Page, width = 1_440, theme = 'dark', own?: OwnAgentFarmView) {
   const { view, yaml } = library();
-  if (own) view.ownAgentFarm = own;
   await page.setViewportSize({ width, height: 900 });
-  await installElectronApiMock(page, { initialProjects: projects, initialSessions: [], initialConfig: { theme, appearanceMode: 'fixed' }, profileLibrary: view, profileYaml: yaml });
+  const options: ElectronApiMockOptions = { initialProjects: projects, initialSessions: [], initialConfig: { theme, appearanceMode: 'fixed' }, profileLibrary: view, profileYaml: yaml };
+  if (own) options.ownAgentFarm = own;
+  await installElectronApiMock(page, options);
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.getByTestId('profiles-nav').click();
   await expect(page.getByTestId('profiles-view')).toBeVisible();
@@ -48,8 +51,9 @@ test('J3: greenfield\'s flow has one box per step and one labelled arrow per out
   const flow = greenfield?.profile?.flow;
   if (!flow) throw new Error('greenfield has no flow');
   await expect(page.getByTestId('profile-viewer')).toHaveAttribute('data-profile', 'greenfield');
-  await expect(page.getByTestId('profile-flow-step')).toHaveCount(flow.steps.length);
-  await expect(page.getByTestId('profile-flow-edge')).toHaveCount(flowEdges(flow).length);
+  // greenfield.profile.yaml: 11 steps; 18 ways out (2 per agent step × 5, 2 for checks, 2 per choice ask × 2, 1 per next ask × 2).
+  await expect(page.getByTestId('profile-flow-step')).toHaveCount(11);
+  await expect(page.getByTestId('profile-flow-edge')).toHaveCount(18);
   for (const step of flow.steps) await expect(page.locator(`[data-testid="profile-flow-step"][data-step="${step.id}"]`)).toHaveAttribute('data-kind', step.kind);
   for (const edge of flowEdges(flow)) await expect(page.locator(`[data-testid="profile-flow-edge"][data-from="${edge.from}"][data-label="${edge.label}"]`)).toHaveCount(1);
   await shoot(page, 'j3-graph');
@@ -115,10 +119,16 @@ test('launch dialog: a CLI per agent, and "Other…" marks the run baseline only
   await dialog.getByLabel('CLI for implementer').selectOption({ label: 'Other…' });
   await dialog.getByLabel('Command for implementer').fill('node ./stub-agent.js');
   await expect(dialog.getByTestId('launch-baseline-note')).toContainText('implementer');
+  // The commands the profile runs on its own are listed before anything starts.
+  await expect(dialog.getByTestId('launch-commands')).toContainText('gh pr checks --watch');
+  await expect(dialog.getByTestId('launch-commands')).toContainText('gh pr merge --merge');
   await dialog.getByLabel('Task').fill('Export invoices as CSV');
   await shoot(page, 'launch-dialog');
   await page.getByTestId('launch-profile-submit').click();
   await expect(page.getByRole('alert')).toContainText('not available in this preview');
+  // SAFETY: installElectronApiMock installs __paneTestElectronMock before navigation.
+  const [[sent]] = await page.evaluate(() => (window as MockWindow).__paneTestElectronMock.getInvokeCalls('profiles:launch').map((call) => call.args));
+  expect(sent).toMatchObject<Partial<ProfileLaunchInput>>({ profile: 'greenfield', prompt: 'Export invoices as CSV', harness: { implementer: 'other-implementer' }, commands: { 'other-implementer': 'node ./stub-agent.js' } });
 });
 
 for (const theme of ['dark', 'light-rounded']) {
@@ -126,6 +136,14 @@ for (const theme of ['dark', 'light-rounded']) {
     test(`J12: the Profiles page at ${width}px (${theme}) has no horizontal page scroll and no text under 11px`, async ({ page }) => {
       await openProfiles(page, width, theme);
       await expect(page.getByTestId('profile-flow-svg')).toBeVisible();
+      // A drawing wider than its column scrolls from its left edge: none of it is cut off out of reach.
+      const clipped = await page.getByTestId('profile-flow-svg').evaluate((svg) => {
+        const scroller = svg.closest('[data-testid="profile-flow-scroll"]');
+        if (!scroller) return 'no scroller';
+        scroller.scrollLeft = 0;
+        return svg.getBoundingClientRect().left - scroller.getBoundingClientRect().left;
+      });
+      expect(clipped).toBeGreaterThanOrEqual(0);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow).toBeLessThanOrEqual(0);
       const tooSmall = await page.getByTestId('profiles-view').evaluate((root) => [...root.querySelectorAll<HTMLElement | SVGElement>('*')]

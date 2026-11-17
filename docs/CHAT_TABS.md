@@ -25,8 +25,10 @@ entries and new Sessions open their orchestrator in a terminal. Open chat tabs k
 - **Remote PWA** and **phone**: *Add Tool* lists the host's installed chat
   agents and **Profile…** first when the host has chat tabs on.
 - **Profile…** on the desktop first lists Pane's profiles that are on
-  ([PROFILES.md](PROFILES.md)); picking one opens its launch dialog. Below them, and as
-  all of it on the PWA and phone, it asks for an Agent Farm profile name and optional arguments, one
+  ([PROFILES.md](PROFILES.md)); picking one opens its launch dialog. Profiles run in
+  terminal tabs, so with chat tabs off the desktop + menu and empty Pane screen
+  still offer **Profile…**, with this list alone. Below the list when chat tabs
+  are on, and as all of it on the PWA and phone, it asks for an Agent Farm profile name and optional arguments, one
   `key=value` per line, and opens the chat tab on the Pane's machine exactly as
   `--agent-farm <profile> --arg key=value` does. The name is typed, not picked:
   `agent-farm profiles list` prints no machine-readable list. An unknown profile
@@ -524,12 +526,15 @@ profile works on a fresh install. At each start
 package carries (greenfield, orchestra, bigbrain and machine-security) into
 that folder, when the package's version or plugin files differ from what
 `<PANE_DIR>/agent-farm/pane-manifest.json` records; an unchanged bundle installs
-nothing and the log says so. A failed install is logged and never blocks
-startup. Pane never writes to the person's `~/.config/agent-farm`. With the
-bundled copy, `run` writes its launch bundle to `<worktree>/.agent-farm/`, which
-Pane hides from git through `info/exclude` as it does `.pane/`, and Agent Farm
-keeps its own small caches under `~/.local/state/agent-farm` and
-`~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
+nothing and the log says so. An install that never finished (its lock or
+half-copied plugin files) is cleared before the next one, and a failed install
+is logged and never blocks startup. Pane never writes to the person's
+`~/.config/agent-farm`. With the bundled copy, `run` writes its launch bundle to
+`<worktree>/.agent-farm/generated`, which Pane hides from git through
+`info/exclude` as it does `.pane/`, and launch telemetry goes to
+`<PANE_DIR>/agent-farm/telemetry` (set in that folder's `settings.json`). Agent
+Farm still keeps small state of its own (workspace trust, launch records, MCP
+logins) under `~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
 `scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
 `app.asar`, carries no native binaries, and answers `--version` under Electron
 as Node.

@@ -49,6 +49,7 @@ export function LaunchProfileDialog({ profile, defaults, onClose, onLaunched }: 
     const choice = choices[agent.id] ?? PROFILE_CHOICE;
     return choice === OTHER_CHOICE || (choice === PROFILE_CHOICE && !isConfiguredAgent(agent.cli));
   });
+  const commandSteps = (profile.profile?.flow?.steps ?? []).flatMap((step) => (step.kind === 'command' ? [step] : []));
   const missingCommand = agents.some((agent) => choices[agent.id] === OTHER_CHOICE && !others[agent.id]?.trim());
 
   const launch = async () => {
@@ -126,6 +127,19 @@ export function LaunchProfileDialog({ profile, defaults, onClose, onLaunched }: 
               );
             })}
           </fieldset>
+          {commandSteps.length > 0 && (
+            <div className="flex flex-col gap-1 rounded-md border border-border-primary p-3" data-testid="launch-commands">
+              <p className="text-xs text-text-secondary">This profile runs these commands itself, in the new Pane's worktree:</p>
+              <ul className="flex flex-col gap-1">
+                {commandSteps.map((step) => (
+                  <li key={step.id} className="flex flex-wrap items-baseline gap-x-2 text-xs">
+                    <span className="text-text-secondary">{step.id}</span>
+                    <code className="break-all font-mono text-text-primary">{step.run}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {baseline.length > 0 && (
             <p className="rounded-md border border-status-warning px-3 py-2 text-xs text-text-secondary" data-testid="launch-baseline-note">
               <span className="font-medium text-status-warning">Baseline only:</span> {baseline.map((agent) => agent.id).join(', ')} {baseline.length === 1 ? 'runs' : 'run'} on a CLI Pane doesn't know, in a plain terminal tab. Pane types the first message when the tab is quiet; the agent ends its step with runpane report --outcome.

@@ -130,6 +130,8 @@ export interface LoadedProfile {
   title?: string;
   origin: ProfileOrigin;
   file: string;
+  /** The folders an agent's `reads` resolve in, first match wins: an overlay's own folder, then its base's. */
+  readsRoots: string[];
   valid: boolean;
   /** Valid and has a flow. */
   launchable: boolean;
@@ -216,8 +218,12 @@ export interface ProfileLibraryView {
   profiles: LibraryProfile[];
   /** The Agent Farm bundled in Pane: set up, setting up, or why not. */
   agentFarm?: { state: 'missing' | 'installing' | 'ready' | 'failed'; version?: string; error?: string };
-  /** The person's own agent-farm on PATH, listed through it; absent when none is installed. */
-  ownAgentFarm?: { profiles: OwnAgentFarmProfileView[]; error?: string };
+}
+
+/** The person's own agent-farm on PATH ("Your Agent Farm"), listed through it; its own call, since running it is slow. */
+export interface OwnAgentFarmView {
+  profiles: OwnAgentFarmProfileView[];
+  error?: string;
 }
 
 /** One profile with its file's text, for the YAML tab. */

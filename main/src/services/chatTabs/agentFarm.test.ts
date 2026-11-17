@@ -120,11 +120,16 @@ describe('Agent Farm profiles in chat tabs', () => {
       return { executable: process.execPath, args: [FAKE, ...args], env };
     };
     const withoutOwn = new AgentFarmProfiles({ executable: () => undefined, bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
-    const printed = await withoutOwn.print('greenfield/implementer:opus', {}, 'claude', directory, inherited());
+    const { ELECTRON_RUN_AS_NODE: _unset, ...env } = inherited();
+    const printed = await withoutOwn.print('greenfield/implementer:opus', {}, 'claude', directory, env);
     expect(printed.harness).toBe('claude');
+    // It printed the runtime it ran on as the adapter's Node: in a packaged Pane that is Electron,
+    // which runs the adapter only as Node.
+    expect(printed.launch.command).toMatchObject({ executable: process.execPath, env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: '1' }) });
     expect(bundledCalls).toEqual([['run', 'greenfield/implementer:opus', '--print-acp', '--acp-adapter', '/adapter.js']]);
     const withOwn = new AgentFarmProfiles({ executable: () => fakeCli(directory), bundled, adapter: async () => '/adapter.js', checkCli: async () => undefined });
-    await withOwn.print('greenfield/implementer:opus', {}, 'claude', directory, inherited());
+    const own = await withOwn.print('greenfield/implementer:opus', {}, 'claude', directory, env);
     expect(bundledCalls).toHaveLength(1);
+    expect(own.launch.command.env?.ELECTRON_RUN_AS_NODE).toBeUndefined();
   });
 });
