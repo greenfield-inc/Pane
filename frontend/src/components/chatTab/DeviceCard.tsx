@@ -56,18 +56,21 @@ export function DeviceCard({ marker, device }: { marker: DeviceOpenMarker; devic
     };
   }, [marker.panelId, visible, live, read]);
 
+  // The card takes the screen's shape from its frame, so a turned or folded device shows whole.
+  const [ratio, setRatio] = useState({ width: 402, height: 874 });
+  const landscape = ratio.width > ratio.height;
   return (
     <button
       ref={ref}
       type="button"
       onClick={() => device.open(marker.panelId)}
       className="chat-device-card relative mt-1 block overflow-hidden rounded-[22px] border-[5px] border-device-bezel bg-device-screen text-left"
-      style={{ width: 132, aspectRatio: '402 / 874' }}
+      style={{ width: landscape ? 240 : 132, aspectRatio: `${ratio.width} / ${ratio.height}` }}
       aria-label={`Open ${marker.name}`}
       data-testid="chat-device-card"
       data-live={live}
     >
-      {frame && <img src={frame} alt="" className={cn('h-full w-full object-cover', !live && 'opacity-50 grayscale')} />}
+      {frame && <img src={frame} alt="" className={cn('h-full w-full object-contain', !live && 'opacity-50 grayscale')} onLoad={(event) => { const { naturalWidth: width, naturalHeight: height } = event.currentTarget; if (width > 0 && height > 0 && (width !== ratio.width || height !== ratio.height)) setRatio({ width, height }); }} />}
       <span className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-surface-primary px-2 py-0.5 text-[11px] text-text-primary shadow-sm">
         <span className={cn('h-1.5 w-1.5 rounded-full', live ? 'bg-status-success' : 'bg-status-neutral')} />
         {live ? 'Live' : 'Closed'}

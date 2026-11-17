@@ -9,7 +9,6 @@ import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 export function remoteDeviceClient(adapter: RemoteRuntimeAdapter, clientId: string): DeviceTabClient {
   return {
     clientId,
-    streamUrl: () => undefined,
     frame: panelId => adapter.invoke<string>('devices:frame', [panelId]),
     input: async (panelId, input) => { await adapter.invoke('devices:input', [panelId, input]); },
     visible: async (panelId, visible) => { await adapter.invoke('devices:visible', [panelId, clientId, visible]); },

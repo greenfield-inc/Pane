@@ -48,6 +48,36 @@ test('a tap on the screen reaches the device as a touch, and Take over and Boot 
   await expect.poll(() => page.evaluate(() => window.qaPower)).toEqual(['take-over', 'boot']);
 });
 
+test('a turned device fits its frame uncropped, and a tap lands where it is clicked', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, 'view=pane&shape=landscape');
+  const screen = page.getByTestId('device-screen');
+  await expect.poll(async () => { const box = await screen.boundingBox(); return box ? box.width / box.height : 0; }).toBeGreaterThan(2);
+  const box = await screen.boundingBox();
+  if (!box) throw new Error('No screen');
+  // The Pay button's centre in the frame: x 0.825, y 0.85.
+  await page.mouse.click(box.x + box.width * 0.825, box.y + box.height * 0.85);
+  await expect.poll(() => page.evaluate(() => window.qaInputs.length)).toBe(2);
+  const tap = await page.evaluate(() => window.qaInputs[0]);
+  expect(tap.kind === 'touch' && Math.abs(tap.x - 0.825) < 0.02 && Math.abs(tap.y - 0.85) < 0.02).toBe(true);
+  for (const theme of ['light', 'dark']) {
+    if (theme === 'dark') await open(page, 'view=pane&shape=landscape&theme=dark');
+    await expect.poll(async () => { const next = await page.getByTestId('device-screen').boundingBox(); return next ? next.width / next.height : 0; }).toBeGreaterThan(2);
+    await page.waitForTimeout(300);
+    await shoot(page, `device-tab-landscape-${theme}`);
+  }
+});
+
+test('turning the device mid-session reshapes the phone to landscape', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, 'view=pane');
+  const screen = page.getByTestId('device-screen');
+  await expect.poll(async () => { const box = await screen.boundingBox(); return box ? box.height / box.width : 0; }).toBeGreaterThan(2);
+  await page.evaluate(() => window.qaRotate());
+  await expect.poll(async () => { const box = await screen.boundingBox(); return box ? box.width / box.height : 0; }).toBeGreaterThan(2);
+  await expect(page.getByTestId('device-turn-mask')).toHaveClass(/opacity-0/);
+});
+
 test('a chat shows the device it opened as a live card that opens the device tab', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   for (const theme of ['light', 'dark']) {

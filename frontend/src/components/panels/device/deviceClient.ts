@@ -5,8 +5,13 @@ import type { DeviceInput } from '../../../../../shared/types/devices';
 export interface DeviceTabClient {
   /** Names this client's view of the tab, so the lease knows where the tab is on screen. */
   clientId: string;
-  /** A URL that streams the screen, when this client can stream; else the tab polls frames. */
-  streamUrl(panelId: string): string | undefined;
+  /**
+   * A URL that streams the screen sized so its longest side is `maxPx` device pixels. Clients
+   * that cannot stream leave it out, and the tab polls frames.
+   */
+  streamUrl?(panelId: string, maxPx: number): string;
+  /** Frames per second the stream delivers now, for clients that stream; null when unknown. */
+  frameRate?(panelId: string): Promise<number | null>;
   frame(panelId: string): Promise<string>;
   input(panelId: string, input: DeviceInput): Promise<void>;
   visible(panelId: string, visible: boolean): Promise<void>;
@@ -28,7 +33,8 @@ export function desktopDeviceClient(remote: boolean): DeviceTabClient {
   const devices = window.electronAPI.devices;
   return {
     clientId: 'desktop',
-    streamUrl: panelId => (remote ? undefined : `pane-media://device/${panelId}`),
+    streamUrl: remote ? undefined : (panelId, maxPx) => `pane-media://device/${panelId}?max=${maxPx}`,
+    frameRate: remote ? undefined : panelId => unwrap(devices.frameRate(panelId)),
     frame: panelId => unwrap(devices.frame(panelId)),
     input: async (panelId, input) => { await unwrap(devices.input(panelId, input)); },
     visible: async (panelId, visible) => { await unwrap(devices.visible(panelId, 'desktop', visible)); },

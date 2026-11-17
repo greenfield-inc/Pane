@@ -389,6 +389,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   devices: {
     input: (panelId: string, input: DeviceInput): Promise<IPCResponse> => invokeIpc('devices:input', panelId, input),
     frame: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame', panelId),
+    frameRate: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame-rate', panelId),
     visible: (panelId: string, clientId: string, visible: boolean): Promise<IPCResponse> => invokeIpc('devices:visible', panelId, clientId, visible),
     takeOver: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:take-over', panelId),
     power: (panelId: string, action: 'boot' | 'restart' | 'shutdown'): Promise<IPCResponse> => invokeIpc('devices:power', panelId, action),

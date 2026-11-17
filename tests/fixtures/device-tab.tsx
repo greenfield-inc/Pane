@@ -39,13 +39,30 @@ function screen(): string {
   return canvas.toDataURL('image/jpeg', 0.9);
 }
 
-declare global { interface Window { qaInputs: DeviceInput[]; qaPower: string[] } }
+/** The same phone turned to landscape: a sidebar, and a Pay button at the bottom right (x 0.70–0.95, y 0.78–0.92). */
+function landscapeScreen(): string {
+  const canvas = document.createElement('canvas');
+  canvas.width = 874;
+  canvas.height = 402;
+  const g = canvas.getContext('2d')!;
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 874, 402);
+  g.fillStyle = '#f2f2f7'; g.fillRect(0, 0, 260, 402);
+  g.fillStyle = '#111'; g.font = 'bold 26px -apple-system, sans-serif'; g.fillText('Checkout', 290, 60);
+  g.fillStyle = '#111'; g.beginPath(); g.roundRect(612, 314, 218, 56, 14); g.fill();
+  g.fillStyle = '#fff'; g.font = '600 17px -apple-system, sans-serif'; g.fillText('Pay $86.00', 676, 348);
+  return canvas.toDataURL('image/jpeg', 0.9);
+}
+
+declare global { interface Window { qaInputs: DeviceInput[]; qaPower: string[]; qaRotate: () => void } }
 window.qaInputs = [];
 window.qaPower = [];
-const frame = screen();
+const landscape = landscapeScreen();
+const portrait = screen();
+// ?shape=landscape starts turned; qaRotate() turns the device mid-session.
+let frame = params.get('shape') === 'landscape' ? landscape : portrait;
+window.qaRotate = () => { frame = landscape; };
 const client: DeviceTabClient = {
   clientId: 'fixture',
-  streamUrl: () => undefined,
   frame: async () => frame,
   input: async (_panel, input) => { window.qaInputs.push(input); },
   visible: async () => undefined,
