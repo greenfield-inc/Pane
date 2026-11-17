@@ -308,11 +308,13 @@ Open connections stay open.
 
 - Per computer and client address: 500 Mbit/s and 100 new client connections
   a minute (`--limit-mbit-per-sec`, `--limit-conns-per-min`).
-- Per client address across all computers: 2,000 Mbit/s and 400 new
-  connections a minute (`--limit-ip-mbit-per-sec`, `--limit-ip-conns-per-min`).
-  Connections for a computer that is not connected count too.
+- Per client address across all computers and the iroh relay: 1,000 Mbit/s
+  and 400 new connections a minute (`--limit-ip-mbit-per-sec`,
+  `--limit-ip-conns-per-min`), half of what a small relay VM sends, so one
+  address cannot fill a relay. Connections for a computer that is not
+  connected count too.
 - Per client address on the iroh relay: 500 Mbit/s and 100 new connections a
-  minute (the per-computer flags).
+  minute (the per-computer flags), inside the address's rate above.
 - Per computer, its own control connection: past 1,200 frames a minute the
   relay closes it with `over-limit` and refuses it until the minute ends.
 - Per computer address, control connections: 60 a minute

@@ -174,9 +174,10 @@ pub struct Config {
     #[arg(long, hide = true, default_value_t = 600)]
     pub txt_ttl_secs: u64,
 
-    /// Per client address across all computers: sustained traffic in Mbit/s; past it the
-    /// address is slowed to this rate, never cut off.
-    #[arg(long, env = "PANE_RELAY_LIMIT_IP_MBIT_PER_SEC", default_value_t = 2000)]
+    /// Per client address across all computers and the iroh relay: sustained traffic in
+    /// Mbit/s; past it the address is slowed to this rate, never cut off. The default is
+    /// half of an e2-small relay's 2 Gbit/s, so one address cannot fill a relay.
+    #[arg(long, env = "PANE_RELAY_LIMIT_IP_MBIT_PER_SEC", default_value_t = 1000)]
     pub limit_ip_mbit_per_sec: u64,
 
     /// Per client address across all computers: new connections a minute before

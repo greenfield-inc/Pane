@@ -357,13 +357,12 @@ impl State {
         pair.max(self.take(format!("source {source}"), cfg.limit_ip_mbit_per_sec, bytes))
     }
 
-    /// Like `pace_client`, for a client of the iroh relay.
+    /// Like `pace_client`, for a client of the iroh relay: its own rate, inside the
+    /// source's rate across all computers.
     pub fn pace_direct(&self, source: &str, bytes: u64) -> Duration {
-        self.take(
-            format!("direct {source}"),
-            self.cfg.limit_mbit_per_sec,
-            bytes,
-        )
+        let cfg = &self.cfg;
+        let own = self.take(format!("direct {source}"), cfg.limit_mbit_per_sec, bytes);
+        own.max(self.take(format!("source {source}"), cfg.limit_ip_mbit_per_sec, bytes))
     }
 
     fn take(&self, key: String, mbit_per_sec: u64, bytes: u64) -> Duration {

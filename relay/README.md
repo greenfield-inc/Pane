@@ -77,7 +77,7 @@ Every flag also reads the environment variable in brackets.
 | `--max-connections` | 20000 | Total open client connections |
 | `--limit-mbit-per-sec` | 500 | Sustained traffic per computer and client address, and per client address on the iroh relay; past it that address is slowed to this rate, never cut off |
 | `--limit-conns-per-min` | 100 | New connections, counted like `--limit-mbit-per-sec`; slowed above it, refused above twice it |
-| `--limit-ip-mbit-per-sec` | 2000 | Sustained traffic per client address across all computers; slowed to this rate past it |
+| `--limit-ip-mbit-per-sec` | 1000 | Sustained traffic per client address across all computers and the iroh relay; slowed to this rate past it. Half of an `e2-small` relay's 2 Gbit/s, so one address cannot fill a relay |
 | `--limit-ip-conns-per-min` | 400 | New connections per client address across all computers; slowed above it, refused above twice it |
 | `--limit-agent-conns-per-min` | 60 | Control connections per address (IPv6 per /56); slowed above it, refused above twice it |
 | `--limit-new-ids-per-hour` | 20 | Computers new to this relay per address (IPv6 per /56); refused above it |
