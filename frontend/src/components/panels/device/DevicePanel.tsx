@@ -89,6 +89,7 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const logs = useDeviceLogs(client, panel.id, logsOpen && shown);
   const recorder = useRecording(client, panel.id);
   const [recordingNote, setRecordingNote] = useState<string>();
+  useEffect(() => { if (recorder.capped) setRecordingNote('The recording stopped at its 10-minute limit and was saved with Pane\'s device files.'); }, [recorder.capped]);
   useEffect(() => {
     if (!recordingNote) return;
     const timer = window.setTimeout(() => setRecordingNote(undefined), 10_000);

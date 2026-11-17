@@ -484,12 +484,6 @@ async function respond<Data>(work: () => Promise<Data> | Data): Promise<IpcRespo
   }
 }
 
-/**
- * The person's device tab. `devices:*` are host channels, so a desktop switched to another
- * computer, the browser app and phones reach the device on the Pane they show. They are the UI's
- * own (agents reach runpane commands), so the person can drive any device their tab shows.
- * Settings > Devices is about this computer, so its channels stay local.
- */
 /** Deletes the screenshots and recordings of an archived Pane (their names start with its id). */
 async function sweepCaptures(paneId: string): Promise<void> {
   for (const kind of ['screenshots', 'recordings']) {
@@ -581,6 +575,12 @@ function imageDataUrl(frame: Buffer): string {
   return `data:image/${png ? 'png' : 'jpeg'};base64,${frame.toString('base64')}`;
 }
 
+/**
+ * The person's device tab. `devices:*` are host channels, so a desktop switched to another
+ * computer, the browser app and phones reach the device on the Pane they show. They are the UI's
+ * own (agents reach runpane commands), so the person can drive any device their tab shows.
+ * Settings > Devices is about this computer, so its channels stay local.
+ */
 function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   const devices = () => deviceService(services);
   const panelOf = (panelId: PaneCommandValue) => {
@@ -675,7 +675,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
    * A full-resolution screenshot for Copy, Save, Mark up and Screenshot to chat, saved as a PNG on
    * the host. Given `image` (a marked-up screenshot as a PNG data URL), it saves that instead.
    */
-  commandRegistry.register('devices:capture', (panelId: PaneCommandValue, image: PaneCommandValue) => respond(async (): Promise<DeviceCapture> => {
+  commandRegistry.register('devices:capture', (panelId: PaneCommandValue, image: PaneCommandValue, pathOnly: PaneCommandValue) => respond(async (): Promise<DeviceCapture> => {
     const { panel, state } = panelOf(panelId);
     const drawn = decodeOptionalBoundary(image, boundary.string);
     if (drawn !== undefined) {
@@ -690,6 +690,8 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     if (!state.deviceId || state.phase !== 'live') throw new PaneError('ERR_DEVICE_OFF', 'The device is not running, so there is no screen to capture.', 'Boot it from the device tab.');
     const caller = ownerOf(panel);
     const shot = state.machineId ? await remoteDevices(services).screenshot(caller.paneId) : await devices().screenshot(caller, state.platform);
+    // A client that only types the path (a phone, for a terminal agent) skips the image's bytes.
+    if (pathOnly === true) return { path: shot.path, dataUrl: '' };
     return { path: shot.path, dataUrl: `data:image/png;base64,${(await readFile(shot.path)).toString('base64')}` };
   }));
 
@@ -709,7 +711,6 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     return true;
   }));
 
-  /** Starts a screen recording, or stops it and returns the MP4 (beside screenshots on the host, or on the linked Mac). */
   /** Stops the tab's recording and returns the MP4 (beside screenshots on the host, or on the linked Mac). */
   const stopRecording = async (panel: ToolPanel, state: DevicePanelState): Promise<DeviceRecording> => {
     clearTimeout(recordings.get(panel.id)?.cap);
@@ -733,6 +734,13 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     const { panel, state } = panelOf(panelId);
     if (!state.deviceId || state.phase !== 'live') throw new PaneError('ERR_DEVICE_OFF', 'The device is not running, so there is nothing to record.', 'Boot it from the device tab.');
     if (action !== 'start') return stopRecording(panel, state);
+    // A tab closed while recording leaves its recording running; stop it so this one can start.
+    for (const [tabId, running] of recordings) {
+      if (panelManager.getPanel(tabId)) continue;
+      clearTimeout(running.cap);
+      recordings.delete(tabId);
+      await (state.machineId ? remoteDevices(services).act(ownerOf(panel).paneId, ['record', 'stop']) : devices().act(ownerOf(panel), ['record', 'stop'], state.platform)).catch(() => undefined);
+    }
     const caller = ownerOf(panel);
     const args = ['record', 'start'];
     if (!state.machineId) {

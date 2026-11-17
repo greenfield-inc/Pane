@@ -94,8 +94,31 @@ export function useRecording(client: DeviceTabClient, panelId: string) {
     void client.recording(panelId).then((started) => { if (!cancelled && started !== null) setStartedAt(started); }, () => undefined);
     return () => { cancelled = true; };
   }, [client, panelId]);
+  // Main stops a recording at its 10-minute limit: while one runs, check it is still going.
+  const [capped, setCapped] = useState(false);
+  useEffect(() => {
+    if (!recording) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const check = async () => {
+      const started = await client.recording(panelId).catch(() => undefined);
+      if (cancelled) return;
+      if (started === null) {
+        setStartedAt(undefined);
+        setCapped(true);
+        return;
+      }
+      timer = window.setTimeout(() => { void check(); }, RECORDING_CHECK_MS);
+    };
+    timer = window.setTimeout(() => { void check(); }, RECORDING_CHECK_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [client, panelId, recording]);
   const start = useCallback(async () => {
     await client.record(panelId, 'start');
+    setCapped(false);
     setStartedAt(Date.now());
   }, [client, panelId]);
   const stop = useCallback(async (): Promise<DeviceRecording> => {
@@ -107,8 +130,11 @@ export function useRecording(client: DeviceTabClient, panelId: string) {
       setStartedAt(undefined);
     }
   }, [client, panelId]);
-  return { recording, elapsed, start, stop };
+  return { recording, elapsed, start, stop, capped };
 }
+
+/** How often a running recording checks it has not stopped at its limit. */
+const RECORDING_CHECK_MS = 5_000;
 
 export function clock(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
