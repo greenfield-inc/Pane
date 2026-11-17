@@ -1,7 +1,6 @@
-import { closeFindWithin } from './find/findController';
 import { createPortal } from 'react-dom';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronUp, PanelRight, Terminal } from 'lucide-react';
 import type { PanelLayoutNode, SessionPanelLayout, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { panelApi } from '../services/panelApi';
@@ -28,6 +27,8 @@ import {
   showApprovalColumnTab,
   useFocusRegionStore,
 } from '../services/regionFocus';
+import { SplitApprovalOverlay } from './approvals/SplitApprovalOverlay';
+import { escapeApprovalColumn, useLeaveOnClose } from './approvals/useSplitOverlay';
 import { useProjectViewActionsStore, type ProjectViewActions } from '../stores/projectViewActionsStore';
 import { announceTerminalReflow } from '../utils/terminalReflow';
 import {
@@ -72,9 +73,6 @@ function rightSplit(layout: SessionPanelLayout | null | undefined): PanelLayoutN
   return layout?.root.type === 'split' && layout.root.direction === 'row' ? layout.root.children.at(-1) : undefined;
 }
 
-/** Where the approval column sits (P4): over the right split, measured so nothing under it resizes. */
-interface Overlay { left: number; top: number; width: number; height: number }
-
 /**
  * The approval column for a Session's stage (D-261): it lays over the right split view, or opens
  * a split of its own when there is none. ✕ shows the split again, or collapses the one it opened.
@@ -84,17 +82,6 @@ export interface StageApproval {
   /** `focused`: keyboard focus is in the column, so its active tab carries the accent (D-335). */
   render: (closeLabel: string, onClose: () => void, focused: boolean) => ReactNode;
   onClose: () => void;
-}
-
-/** Esc in a Session's approval column (not while typing a reply) goes back to the chat beside it (D-336). */
-function escapeApprovalColumn(event: ReactKeyboardEvent): void {
-  if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
-  const target = event.target instanceof HTMLElement ? event.target : null;
-  if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName))) return;
-  event.preventDefault();
-  // An open find bar in the column closes first; the next Esc goes back to the chat.
-  if (closeFindWithin(event.currentTarget)) return;
-  leaveApprovalColumn();
 }
 
 function layoutPanelIds(layout: SessionPanelLayout | null | undefined): Set<string> {
@@ -613,41 +600,13 @@ export function SessionWorkspacePanels({
   // active tab carries the accent and the chat's dims, as a split's would (D-249, D-335).
   const approvalFocused = useFocusRegionStore(state => state.region === 'approvals') && focusWithin;
   // The column going away (✕, Esc on ✕, an answer) with focus in it would leave focus on nothing: it goes to the chat.
-  const approvalWasOpen = useRef(approvalOpen);
-  useEffect(() => {
-    const closed = approvalWasOpen.current && !approvalOpen;
-    approvalWasOpen.current = approvalOpen;
-    if (!closed || !focusWithin) return;
-    requestAnimationFrame(() => {
-      if (!document.activeElement || document.activeElement === document.body) leaveApprovalColumn();
-    });
-  }, [approvalOpen, focusWithin]);
-  const [overlay, setOverlay] = useState<Overlay | null>(null);
-  const rightGroupIds = useMemo(() => (right ? groupsIn(right).map(group => group.id) : []), [right]);
-  useLayoutEffect(() => {
-    const stage = stageRef.current;
-    if (placement !== 'over' || !stage || rightGroupIds.length === 0) { setOverlay(null); return; }
-    const elements = () => rightGroupIds.flatMap(id => {
-      const element = stage.querySelector(`[data-panel-group-id="${CSS.escape(id)}"]`);
-      return element ? [element] : [];
-    });
-    const measure = () => {
-      const found = elements();
-      if (found.length === 0) { setOverlay(null); return; }
-      const base = stage.getBoundingClientRect();
-      const rects = found.map(element => element.getBoundingClientRect());
-      const left = Math.min(...rects.map(rect => rect.left)) - base.left;
-      const top = Math.min(...rects.map(rect => rect.top)) - base.top;
-      const next = { left, top, width: Math.max(...rects.map(rect => rect.right)) - base.left - left, height: Math.max(...rects.map(rect => rect.bottom)) - base.top - top };
-      setOverlay(previous => (previous && previous.left === next.left && previous.top === next.top && previous.width === next.width && previous.height === next.height ? previous : next));
-    };
-    measure();
-    // It follows the split as it is dragged or the window resizes; it never resizes the split itself.
-    const observer = new ResizeObserver(measure);
-    observer.observe(stage);
-    for (const element of elements()) observer.observe(element);
-    return () => observer.disconnect();
-  }, [placement, rightGroupIds]);
+  useLeaveOnClose(approvalOpen, focusWithin, leaveApprovalColumn);
+  // It covers the right split's groups, found by id on the stage, and follows them as they resize.
+  const rightGroupKey = useMemo(() => (right ? groupsIn(right).map(group => group.id).join('|') : ''), [right]);
+  const rightGroups = useCallback((stage: HTMLElement) => (rightGroupKey ? rightGroupKey.split('|') : []).flatMap(id => {
+    const element = stage.querySelector(`[data-panel-group-id="${CSS.escape(id)}"]`);
+    return element ? [element] : [];
+  }), [rightGroupKey]);
   // ✕ names what the split shows underneath.
   const underneath = useMemo(() => {
     if (!right) return undefined;
@@ -680,10 +639,11 @@ export function SessionWorkspacePanels({
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden" inert={asideMaximized ? true : undefined}>
           <div ref={stageRef} data-focus-region="main" className="relative min-h-0 flex-1">
             {stageNotice}
-            {approval && placement === 'over' && overlay && (
-              <div className="absolute z-30 flex min-h-0 min-w-0 border-l border-border-primary bg-bg-primary" style={overlay} data-testid="session-approval-overlay" data-focus-region="approvals" onKeyDown={escapeApprovalColumn}>
-                {approval.render(underneath ? `Back to ${underneath}` : 'Back', approval.onClose, approvalFocused)}
-              </div>
+            {approval && (
+              <SplitApprovalOverlay open={placement === 'over' && rightGroupKey !== ''} baseRef={stageRef} targets={rightGroups} targetsKey={rightGroupKey}
+                underneath={underneath} testId="session-approval-overlay">
+                {closeLabel => approval.render(closeLabel, approval.onClose, approvalFocused)}
+              </SplitApprovalOverlay>
             )}
             {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
               hidden={hidden} onToggleMaximize={toggleMaximize}
@@ -708,7 +668,7 @@ export function SessionWorkspacePanels({
           </div>
         </div>
         {approval && placement === 'split' && (
-          <div className="flex min-h-0 w-1/2 min-w-[360px] flex-shrink-0 flex-col border-l border-border-primary" data-testid="session-approval-split" data-focus-region="approvals" onKeyDown={escapeApprovalColumn}>
+          <div className="flex min-h-0 w-1/2 min-w-[360px] flex-shrink-0 flex-col border-l border-border-primary" data-testid="session-approval-split" data-focus-region="approvals" onKeyDown={event => escapeApprovalColumn(event)}>
             {approval.render('Close split', approval.onClose, approvalFocused)}
           </div>
         )}
