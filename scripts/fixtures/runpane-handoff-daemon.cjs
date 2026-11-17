@@ -85,8 +85,13 @@ const server = net.createServer(socket => {
     }
   });
 });
-server.on('error', error => { fs.writeFileSync(config.ready, JSON.stringify({ error: error.message })); process.exit(1); });
-server.listen(endpoint.path, () => fs.writeFileSync(config.ready, '{}'));
+// The test polls for this file, so it appears whole: written aside, then renamed into place.
+function markReady(value) {
+  fs.writeFileSync(`${config.ready}.tmp`, JSON.stringify(value));
+  fs.renameSync(`${config.ready}.tmp`, config.ready);
+}
+server.on('error', error => { markReady({ error: error.message }); process.exit(1); });
+server.listen(endpoint.path, () => markReady({}));
 process.on('SIGTERM', () => server.close(() => {
   if (endpoint.transport === 'unix') fs.rmSync(path.dirname(endpoint.path), { recursive: true, force: true });
   process.exit();

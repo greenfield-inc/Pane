@@ -2,8 +2,8 @@
 
 Sessions are named, ongoing Pane Chats where work intent lives. Each Session
 opens one chat, and its sidebar row can expand to show associated Panes. The
-optional overview keeps the Session name, associated Panes, and recent
-activity together while the chat remains the focused work surface. A tab
+**Overview** tab beside the chat keeps the Session name, associated Panes, and
+recent activity together while the chat remains the focused work surface. A tab
 shares its parent Pane's worktree.
 
 In the sidebar, `+` opens an agent picker, an optional Session name field, and
@@ -12,7 +12,7 @@ Pane remembers the chosen agent as the default for future Sessions while
 existing Sessions keep their own agent. A blank name starts as `New chat` or
 `New chat 2`, and the Session agent renames it once, in 3 to 5 words, when it
 replies to your first task. A name you type or set later is kept. Each new Session opens as one Pane
-Chat and can be renamed later from the optional read-only overview. Expand a Session to see
+Chat and can be renamed later from its Overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
 With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new
@@ -367,12 +367,18 @@ until its agent works again. The row under the Inbox counts the hidden Panes
 ("3 running · 1 idle") and **Show all** lists every Pane. Pinned rows are
 unchanged, and ⌘1–9 number the Inbox rows while it is shown.
 
-The right sidebar has Overview, Files, and Changes tabs. When the Session
+Every Session opens with a split view: the conversation on the left and, on
+the right, the **Overview** tab first, before any page, file or browser tab
+opened beside the chat. A Session with no split yet gets one; an existing
+right split gains Overview as its leftmost tab and keeps the tab that was
+selected there. Overview can be dragged like any tab and stays where you put
+it on this computer, but it has no close button. A `pane://open?session=` link
+opens the Session with Overview selected. When the Session
 folder holds a status page at `session/index.html` (an orchestrator renders it
 there from a status JSON with the `orchestrate-sessions` skill's bundled
 renderer), Overview shows that page under a header with the Session name, Rename,
-**Open beside chat** (the page full-size in the split, in the tab already
-showing it) and **Show Session details** (the record described next). Pane checks for
+**Open as a browser tab** (the page in a browser tab beside chat, in the tab
+already showing it) and **Show Session details** (the record described next). Pane checks for
 the page each time the Session refreshes. Links in the page to
 `pane://open?pane=<id>&panel=<id>` open that tab and show its oldest waiting
 question in Approvals, as Open in Pane does; other links open as a browser tab beside chat. A client connected to
@@ -386,7 +392,8 @@ machine ([workers on another machine](RUNPANE_WORKSPACES.md#workers-on-another-m
 shows "On <machine>" with its tabs' states as that machine reports them, or
 "unreachable" when it doesn't answer, or "needs a Pane update" when its Pane is
 too old to report here; its card is read-only and opens from All machines. Agent state changes stay out
-of Activity; the status dot shows them. Files browses the Session workspace.
+of Activity; the status dot shows them. The right sidebar has Files and
+Changes tabs. Files browses the Session workspace.
 Changes summarizes the Session's Panes and opens a Pane for detailed review. The upper-right sidebar
 button shows or hides the selected tab. A single Session uses two rows at the
 top: the window title bar shows its name and controls, and the tab strip sits

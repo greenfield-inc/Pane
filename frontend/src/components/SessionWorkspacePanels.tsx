@@ -41,6 +41,8 @@ import {
   primaryGroup,
   applyPanelReplacements,
   placeCreatedPanel,
+  placeLeadingSideTab,
+  sessionOverviewTabId,
   reconcile,
   removePanelFromLayout,
   showPanelInSplit,
@@ -51,8 +53,29 @@ import {
 } from '../utils/panelLayout';
 
 const EMPTY_PANELS: ToolPanel[] = [];
-const SESSION_INSPECTOR_TABS = ['overview', 'files', 'changes'] as const;
+const SESSION_INSPECTOR_TABS = ['files', 'changes'] as const;
 type SessionInspectorTab = typeof SESSION_INSPECTOR_TABS[number];
+
+/** The Overview tab as the tab strip sees it: a permanent tab named Overview. */
+function sessionOverviewTab(sessionId: string): ToolPanel {
+  return {
+    id: sessionOverviewTabId(sessionId),
+    sessionId,
+    type: 'dashboard',
+    title: 'Overview',
+    state: { isActive: false },
+    metadata: { createdAt: '', lastActiveAt: '', position: 0, permanent: true },
+  };
+}
+
+/**
+ * A layout with the Overview tab in it: first in the right split, opening one beside the
+ * conversation when there is none. Wherever the person moved it, it stays.
+ */
+function withOverviewTab(layout: SessionPanelLayout, overviewId: string, chatId: string): SessionPanelLayout {
+  const root = placeLeadingSideTab(layout.root, overviewId, chatId);
+  return root === layout.root ? layout : { ...layout, root };
+}
 /** Panels that always live on the Session stage as tabs; Files docks in the inspector. */
 const STAGE_PANEL_TYPES = new Set<ToolPanel['type']>(['editor', 'browser', 'notes', 'device']);
 
@@ -153,7 +176,7 @@ export function SessionWorkspacePanels({
   const layout = usePanelStore(state => state.layouts[sessionId]);
   const [showTerminal, setShowTerminal] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<SessionInspectorTab>('overview');
+  const [sidebarTab, setSidebarTab] = useState<SessionInspectorTab>('changes');
   const showSidebar = sidebarVisible;
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(960);
@@ -177,11 +200,18 @@ export function SessionWorkspacePanels({
   // terminal subscribes. Use the live record after this visit's load finishes;
   // until then the store may still contain a previous visit or host's record.
   const currentAgentPanel = (loaded && panels.find(panel => panel.id === agentPanel.id)) || agentPanel;
+  const overviewTab = useMemo(() => sessionOverviewTab(sessionId), [sessionId]);
+  const overviewId = overviewTab.id;
   const tabs = useMemo(
-    () => [currentAgentPanel, ...panels.filter(panel => isStagePanel(panel, agentPanelIdSet, inLayout))],
-    [currentAgentPanel, panels, agentPanelIdSet, inLayout],
+    () => [currentAgentPanel, overviewTab, ...panels.filter(panel => isStagePanel(panel, agentPanelIdSet, inLayout))],
+    [currentAgentPanel, overviewTab, panels, agentPanelIdSet, inLayout],
   );
   const agentPanelId = agentPanel.id;
+  // With no tab left but the conversation, the layout still holds the Overview beside it.
+  const freshLayout = useCallback(
+    () => withOverviewTab(createSingleGroupLayout([agentPanelId], agentPanelId), overviewId, agentPanelId),
+    [agentPanelId, overviewId],
+  );
   // The panel events below outlive the render that subscribed them, so they read
   // the agent ids through a ref that the commit keeps current.
   const agentPanelIdsRef = useRef(agentPanelIdSet);
@@ -238,7 +268,8 @@ export function SessionWorkspacePanels({
     store.setLayout(sessionId, repaired);
     store.setFocusedGroup(sessionId, focusedGroupId);
     const focusedPanelId = findGroup(repaired.root, focusedGroupId)?.activePanelId;
-    if (focusedPanelId && store.activePanels[sessionId] !== focusedPanelId) {
+    // The Overview has no panel record, so the host keeps the last real tab as the active one.
+    if (focusedPanelId && focusedPanelId !== sessionOverviewTabId(sessionId) && store.activePanels[sessionId] !== focusedPanelId) {
       store.setActivePanel(sessionId, focusedPanelId);
       void panelApi.setActivePanel(sessionId, focusedPanelId).catch(() => {});
     }
@@ -265,7 +296,9 @@ export function SessionWorkspacePanels({
       const base = stored?.version === 1
         ? { ...stored, root: applyPanelReplacements(stored.root, live.filter(panel => panel.id !== replaced)) }
         : createSingleGroupLayout([agentPanelId], agentPanelId);
-      const storedIds = layoutPanelIds(base);
+      // The Overview goes first in the right split unless this layout already places it.
+      const withOverview = withOverviewTab(base, overviewId, agentPanelId);
+      const storedIds = layoutPanelIds(withOverview);
       const stage = live
         .filter(panel => isStagePanel(panel, agentPanelIdsRef.current, storedIds));
       // Agent pages this desktop has never placed (opened while it showed
@@ -273,7 +306,7 @@ export function SessionWorkspacePanels({
       // its remembered layout keep their place.
       const splitIds = new Set<string>();
       for (const panel of stage) if (panel.metadata?.openPlacement === 'split') splitIds.add(panel.id);
-      applyLayout(reconcile(base, [agentPanelId, ...stage.map(panel => panel.id)], splitIds).layout);
+      applyLayout(reconcile(withOverview, [agentPanelId, overviewId, ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
     }).catch(error => {
       if (!cancelled) setError(error instanceof Error ? error.message : 'Could not load Session tools');
@@ -304,7 +337,7 @@ export function SessionWorkspacePanels({
       const current = usePanelStore.getState().layouts[sessionId];
       if (!current) return;
       const root = removePanelFromLayout(current.root, event.panelId);
-      applyLayout(root ? { ...current, root } : createSingleGroupLayout([agentPanelId], agentPanelId));
+      applyLayout(root ? { ...current, root } : freshLayout());
     });
     return () => {
       cancelled = true;
@@ -313,7 +346,7 @@ export function SessionWorkspacePanels({
       deleted();
       activation();
     };
-  }, [sessionId, agentPanelId, applyLayout, retry]);
+  }, [sessionId, agentPanelId, overviewId, freshLayout, applyLayout, retry]);
 
   const activationRequest = usePanelStore(state => state.activationRequests[sessionId]);
   useEffect(() => {
@@ -321,6 +354,11 @@ export function SessionWorkspacePanels({
     const store = usePanelStore.getState();
     store.clearActivationRequest(sessionId);
     const current = store.layouts[sessionId];
+    // A Session link asks for the Overview, which has no panel record.
+    if (current && activationRequest.panelId === overviewId) {
+      applyLayout(activatePanelInLayout(withOverviewTab(current, overviewId, agentPanelId), overviewId));
+      return;
+    }
     const panel = store.panels[sessionId]?.find(saved => saved.id === activationRequest.panelId);
     if (!current || !panel) return;
     if (panel.id !== agentPanelId && !isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) return;
@@ -330,7 +368,7 @@ export function SessionWorkspacePanels({
       ? showPanelInSplit(current.root, panel.id)
       : addPanelToGroup(current.root, focused.id, panel.id);
     applyLayout(activatePanelInLayout({ ...current, root }, panel.id));
-  }, [activationRequest, loaded, sessionId, agentPanelId, applyLayout]);
+  }, [activationRequest, loaded, sessionId, agentPanelId, overviewId, applyLayout]);
 
   async function toggleTool(type: 'terminal' | 'explorer') {
     if (!loaded || creating.current) return;
@@ -393,17 +431,17 @@ export function SessionWorkspacePanels({
   };
 
   const closePanel = useCallback(async (panel: ToolPanel) => {
-    if (panel.id === agentPanelId) return;
+    if (panel.id === agentPanelId || panel.id === overviewId) return;
     try {
       await panelApi.deletePanel(panel.id);
       usePanelStore.getState().removePanel(sessionId, panel.id);
       const current = usePanelStore.getState().layouts[sessionId];
       const root = current && removePanelFromLayout(current.root, panel.id);
-      if (current) applyLayout(root ? { ...current, root } : createSingleGroupLayout([agentPanelId], agentPanelId));
+      if (current) applyLayout(root ? { ...current, root } : freshLayout());
     } catch {
       setError('Could not close tab. Please try again.');
     }
-  }, [sessionId, agentPanelId, applyLayout]);
+  }, [sessionId, agentPanelId, overviewId, freshLayout, applyLayout]);
 
   const sidebarToggle = (
       <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded text-text-secondary hover:bg-surface-hover" disabled={!loaded}
@@ -425,6 +463,19 @@ export function SessionWorkspacePanels({
     if (current) applyLayout({ ...current, root: updateSizes(current.root, splitNodeId, sizes) });
   }, [sessionId, applyLayout]);
   const handleClose = useCallback((panel: ToolPanel) => { void closePanel(panel); }, [closePanel]);
+  // The Overview tab's content portals into a host its group draws, so a new overview from
+  // the parent repaints only the Overview, never the split's terminals.
+  const [overviewHost, setOverviewHost] = useState<HTMLDivElement | null>(null);
+  const renderPanelContent = useCallback(
+    (panel: ToolPanel) => (panel.id === overviewId ? <div ref={setOverviewHost} className="h-full" /> : undefined),
+    [overviewId],
+  );
+  // A portal's events bubble through this component, not the group around it, so a click in the Overview focuses its group here.
+  const focusOverviewGroup = useCallback(() => {
+    const current = usePanelStore.getState().layouts[sessionId];
+    const group = current && findGroupContainingPanel(current.root, overviewId);
+    if (group) focusGroup(group.id);
+  }, [sessionId, overviewId, focusGroup]);
 
   // Maximize (P4): the split takes the Session's stage, and a tiled Session's
   // tile takes the window, so a chat fills the whole main area. Restoring
@@ -503,7 +554,7 @@ export function SessionWorkspacePanels({
         const index = cycleIndex(panels.findIndex(panel => panel.id === focused?.group.activePanelId), panels.length, direction);
         if (focused && index !== -1) selectPanel(focused.group.id, panels[index]);
       },
-      canCloseActiveTab: () => Boolean(activePanel()) && activePanel()?.id !== agentPanelId,
+      canCloseActiveTab: () => Boolean(activePanel()) && activePanel()?.id !== agentPanelId && activePanel()?.metadata.permanent !== true,
       closeActiveTab: () => { const panel = activePanel(); if (panel) handleClose(panel); },
       canSplit: () => {
         const focused = focusedGroup();
@@ -626,6 +677,8 @@ export function SessionWorkspacePanels({
   return (
     <div ref={containerRef} className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
       {trailingSlot && createPortal(titleBarActions, trailingSlot)}
+      {/* Portal events reach this component, not the group's PanelGroupView, so the Overview syncs its own group's focus. */}
+      {overviewHost && createPortal(<div data-testid="session-overview" className="h-full" onMouseDownCapture={focusOverviewGroup} onFocusCapture={focusOverviewGroup}>{overviewContent}</div>, overviewHost)}
       {(!isSplit || !trailingSlot) && <div className="flex min-h-9 items-center border-b border-border-primary bg-bg-chrome">
         <div className="flex min-w-0 flex-1 items-center overflow-hidden px-2">
           {!isSplit && tabStrip}
@@ -652,7 +705,8 @@ export function SessionWorkspacePanels({
               renderAddTool={renderGroupAddTool}
               isTabDragging={draggedPanelId !== null} draggedPanelId={draggedPanelId} dropZones={dropZones}
               onDropZoneChange={handleDropZoneChange} onDropTab={handleDropTab} onDragStart={setDraggedPanelId}
-              onDragEnd={endTabDrag} onStripDrop={handleStripDrop} />}
+              onDragEnd={endTabDrag} onStripDrop={handleStripDrop}
+              renderPanelContent={renderPanelContent} />}
           </div>
           <div ref={terminalRegionRef} data-focus-region="terminal" data-region-open={showTerminal && Boolean(terminal)} className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height: showTerminal ? '35%' : 32 }}>
             <button type="button" disabled={!loaded} aria-label={showTerminal ? 'Collapse terminal' : 'Expand terminal'}
@@ -672,7 +726,7 @@ export function SessionWorkspacePanels({
             {approval.render('Close split', approval.onClose, approvalFocused)}
           </div>
         )}
-        {showSidebar && <aside ref={asideRef} data-focus-region="right-panel" aria-label={sidebarTab === 'overview' ? 'Session overview' : sidebarTab === 'files' ? 'Session files' : 'Session changes'}
+        {showSidebar && <aside ref={asideRef} data-focus-region="right-panel" aria-label={sidebarTab === 'files' ? 'Session files' : 'Session changes'}
           // Maximized, it covers the stage and terminal, which keep their size underneath (P4).
           className={asideMaximized
             ? 'absolute inset-0 z-20 flex min-w-0 flex-col bg-bg-primary'
@@ -692,13 +746,12 @@ export function SessionWorkspacePanels({
                   selectSidebarTab(SESSION_INSPECTOR_TABS[(index + offset) % SESSION_INSPECTOR_TABS.length]);
                 }}
                 className={`flex flex-1 items-center justify-center rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${sidebarTab === tab ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover'}`}>
-                {tab === 'overview' ? 'Overview' : tab === 'files' ? 'Files' : 'Changes'}
+                {tab === 'files' ? 'Files' : 'Changes'}
               </button>
             ))}
             {asideMaximized && <RestoreRegionButton className="my-0.5 ml-1 h-7" onRestore={() => setAsideMaximized(false)} />}
           </div>
           <div className="relative min-h-0 flex-1 overflow-y-auto">
-            {sidebarTab === 'overview' && overviewContent}
             {sidebarTab === 'files' && explorer && <PanelContainer panel={explorer} isActive />}
             {sidebarTab === 'changes' && changesContent}
           </div>

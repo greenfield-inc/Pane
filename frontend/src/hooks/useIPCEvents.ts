@@ -11,6 +11,7 @@ import { openPaneTarget } from '../components/terminal/openPaneLink';
 import { restoreHostNavigation, withHostNavigationWritesPaused } from '../utils/hostNavigationMemory';
 import { API } from '../utils/api';
 import { rememberPaneLayout } from '../utils/paneLayoutMemory';
+import { sessionOverviewTabId } from '../utils/panelLayout';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { restoreRemoteTerminals, restoreRemoteWorkspace } from '../utils/remoteRestoration';
 import { devLog } from '../utils/console';
@@ -324,7 +325,11 @@ export function useIPCEvents() {
         return;
       }
       useNavigationStore.getState().navigateToPaneChat();
-      void useOrchestrationSessionStore.getState().select({ sessionId: target.sessionId });
+      void useOrchestrationSessionStore.getState().select({ sessionId: target.sessionId }).then(() => {
+        // A Session link lands on the Session's Overview, which its workspace selects once loaded.
+        const internal = useOrchestrationSessionStore.getState().sessions.find(session => session.id === target.sessionId)?.internalSessionId;
+        if (internal) usePanelStore.getState().requestActivation({ sessionId: internal, panelId: sessionOverviewTabId(internal) });
+      }, () => undefined);
     });
     unsubscribeFunctions.push(unsubscribePaneOpenLink);
 

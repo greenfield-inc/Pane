@@ -1,6 +1,6 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { router, useIsFocused } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -23,6 +23,8 @@ import { PaneRow } from '@/features/panes/PaneRow';
 import { SidebarItemView, toggleMember, type SidebarItemContext } from '@/features/panes/SidebarItemView';
 import { useSidebarSections } from '@/features/panes/sidebarSections';
 import { usePaneActions } from '@/features/panes/usePaneActions';
+import { markNextFrame } from '@/features/perf/perfMarks';
+import { useLiveMarks, useValueMark } from '@/features/perf/usePerfMarks';
 import { useTheme, withAlpha } from '@/theme';
 import { Icon, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
@@ -77,6 +79,11 @@ export function HomeScreen() {
   const board = buildAllMachinesList(feeds, '');
   const loading = all ? feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined && feed.error === undefined) : here.loading;
   const counts = loading ? undefined : boardCounts(board);
+  // One machine's Home dims while it isn't connected; All never dims as a whole.
+  const dimmed = !all && presence !== 'connected';
+  useValueMark('counts', counts ? `${counts.needs}/${counts.working}/${counts.ready}/${counts.all}` : '-');
+  useLiveMarks('home', !dimmed && !loading, Math.min(here.projects.dataUpdatedAt, here.statuses.dataUpdatedAt, here.notify.dataUpdatedAt));
+  useEffect(() => markNextFrame(['launch', 'switch'], 'home-frame'), []);
   const machineOf = (key: string) => chipMachines.find(machine => machine.key === key);
   // On All, rows carry their machine's mark.
   const markOf = (key: string) => (all ? machineOf(key) : undefined);
@@ -385,7 +392,7 @@ export function HomeScreen() {
       ) : (
         // The last screen stays, dimmed and untouchable, while the machine isn't connected, search and
         // + included. The pills above stay live, so you can switch away from a machine that is down.
-        <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
+        <Dimmed dimmed={dimmed} style={styles.fill}>
           {/* The Panes read failed: say why above the tiles, which still count what the other reads found. */}
           {here.projects.isError ? (
             <View style={styles.note}>

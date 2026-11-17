@@ -246,12 +246,11 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
               setMarkup(undefined);
               void run('markup', async () => {
                 if (action === 'copy' || !agentTab) {
-                  await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+                  await copyImage(png);
                   return;
                 }
-                const dataUrl = await blobDataUrl(png);
                 // A terminal agent needs the image as a file on the host; a chat takes it directly.
-                const capture = agentTab.kind === 'terminal' ? await client.capture(panel.id, dataUrl) : { path: '', dataUrl };
+                const capture = agentTab.kind === 'terminal' ? await client.capture(panel.id, png) : { path: '', dataUrl: png };
                 setNotice({ capture, name: markup.name, title: await deliverCapture(client, panel.id, agentTab, capture, markup.name) });
               });
             }}
@@ -275,15 +274,6 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
 
 /** Keys with names that type into the device; other named keys (F1, Shift…) stay with Pane. */
 const TYPED_KEYS = new Set(['Enter', 'Backspace', 'Tab', 'Escape', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
-
-function blobDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => (reader.result instanceof ArrayBuffer || reader.result === null ? reject(new Error('The image could not be read')) : resolve(reader.result));
-    reader.onerror = () => reject(new Error('The image could not be read'));
-    reader.readAsDataURL(blob);
-  });
-}
 
 /** Whether `root` is narrower than NARROW_PX, so the rail becomes a bar under the phone. */
 function useNarrow(root: RefObject<HTMLDivElement | null>): boolean {

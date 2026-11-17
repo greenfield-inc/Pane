@@ -5,6 +5,8 @@ import type { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { invokeChannel, useDaemon, useDaemonEvent } from '@/daemon';
 import { useTheme } from '@/theme';
 
+import { connectionMark, perfMark } from '../perf/perfMarks';
+
 import { parsePageEvent, type TerminalCommand } from './bridge';
 import { TerminalSession, type TerminalSize } from './terminalSession';
 
@@ -57,6 +59,9 @@ export function useTerminal(panelId: string, sessionId: string) {
         if (pending.current) session.ack(pending.current.length);
         pending.current = '';
         send({ type: 'reset', data });
+        // A screen read after a return, open or switch: the terminal now matches the computer.
+        connectionMark('terminal-screen', { repeat: true });
+        perfMark('terminal', 'screen', { repeat: true });
         setHasContent(true);
         setStatus('ready');
         setError(null);

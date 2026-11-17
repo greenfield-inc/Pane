@@ -1,0 +1,10 @@
+# Taps the element with test id ID once it is on screen, for the perf journeys
+# (scripts/perf/journeys.sh). A machine switch rebuilds Home, so a pill can take a moment to return.
+appId: com.dcouple.pane.mobile
+---
+- extendedWaitUntil:
+    visible:
+      id: ${ID}
+    timeout: 15000
+- tapOn:
+    id: ${ID}
