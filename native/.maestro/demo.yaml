@@ -12,6 +12,10 @@ name: Try the demo
 # has it, the screen steps to the next one and the question leaves home's Needs you.
 - tapOn:
     id: home-tile-needs
+# By Session lists the sample Session's questions first.
+- scrollUntilVisible:
+    element: "add-dark-mode.*Which colors.*"
+    timeout: 10000
 - tapOn: "add-dark-mode.*Which colors.*"
 - extendedWaitUntil:
     visible:
