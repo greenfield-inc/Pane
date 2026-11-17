@@ -25,7 +25,7 @@ export function CustomCommandForm({ existing, onSave, onCancel }: CustomCommandF
   return (
     <form
       className="px-3 py-2 border-b border-border-primary space-y-2"
-      aria-label={existing ? 'Rename profile' : 'Add custom command'}
+      aria-label={existing ? 'Rename command' : 'Add custom command'}
       onKeyDown={(event) => {
         // Keep typing and Tab navigation inside the form out of the menu handler.
         event.stopPropagation();
@@ -43,7 +43,7 @@ export function CustomCommandForm({ existing, onSave, onCancel }: CustomCommandF
           if (resume) validateCustomCommandResume(resume);
           await onSave(name.trim() || command.trim().split(/\s+/).slice(0, 3).join(' '), command.trim(), resume);
         } catch (cause) {
-          setError(cause instanceof Error ? cause.message : 'Could not save profile. Please try again.');
+          setError(cause instanceof Error ? cause.message : 'Could not save command. Please try again.');
         } finally {
           setSaving(false);
         }

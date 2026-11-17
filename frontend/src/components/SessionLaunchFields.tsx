@@ -72,7 +72,7 @@ export function SessionLaunchFields({ resume, onResumeChange, command, profile, 
         <ModalBody className="min-h-0 space-y-3">
           <p className="text-sm text-text-secondary">These instructions guide the agent when you send a message. The Session waits for you before starting work.</p>
           <Textarea
-            label="Session behavior profile"
+            label="Session behavior"
             value={draftProfile}
             onChange={event => setDraftProfile(event.target.value)}
             rows={12}

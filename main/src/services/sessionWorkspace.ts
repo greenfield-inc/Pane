@@ -170,7 +170,7 @@ function sessionInstructions(
     delegationRules(sessionId, record),
     todosSection(),
     sessionTidyRules(sessionId, record),
-    '## Session behavior profile',
+    '## Session behavior',
     profile,
     `## Plans and documents
 When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html, and update it in place. Link it from the Session's status document (see Keep the Session tidy) instead of opening a tab for it. Open it beside the user only when they need to look at it now, with runpane panels open --url <file-url> --source agent --yes --json; it opens as a live browser in split view beside this conversation. Use --file <path> to open its editable source instead. Rerunning the command for the same target reuses its tab. The Session's status page is the exception: from the first time you dispatch work to a Pane, render it to session/index.html in this Session folder with the orchestrate-sessions skill's renderer, never by hand, and again at each change its references/status-board.md lists. The Overview tab shows it, so do not open it with panels open. Its links to pane://open?pane=<pane-id>&panel=<panel-id> open that tab and show its waiting question in Approvals.

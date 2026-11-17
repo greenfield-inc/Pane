@@ -143,7 +143,8 @@ export async function runDevicesRun(parsed: ParsedArgs): Promise<number> {
 }
 
 export async function runDevicesClose(parsed: ParsedArgs): Promise<number> {
-  const result = await invokeDaemon('runpane:devices:close', [targetPlatform(parsed, 'close')], boundary.json, { paneDir: parsed.paneDir });
+  // Close waits while the person has taken over the device (up to 4 minutes), as act does.
+  const result = await invokeDaemon('runpane:devices:close', [targetPlatform(parsed, 'close')], boundary.json, { paneDir: parsed.paneDir, timeoutMs: ACT_TIMEOUT_MS });
   return print(parsed, result, 'Closed. The device stays warm for 10 minutes.');
 }
 
