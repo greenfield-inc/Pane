@@ -10,7 +10,7 @@ async function dataUrlFile(dataUrl: string, name: string): Promise<File> {
 
 /** A file name for a capture of `device` now, such as "iPhone 17 Pro 19.04.12.png". */
 export function captureName(device: string, extension: string): string {
-  const time = new Date().toTimeString().slice(0, 8).replaceAll(':', '.');
+  const time = new Date().toTimeString().slice(0, 8).replace(/:/g, '.');
   return `${device} ${time}.${extension}`;
 }
 
