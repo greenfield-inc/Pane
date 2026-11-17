@@ -1265,6 +1265,9 @@ async function checkReportOutcome() {
         assert.strictEqual(frames[0].args[0].state, 'done', `${runtime} report ${args.join(' ')} sends state done`);
         assert.strictEqual(frames[0].args[0].outcome, 'plan ready', `${runtime} report ${args.join(' ')} sends the trimmed outcome`);
       }
+      const text = await withFakeDaemon(paneDir, () => ({ result }),
+        () => runCliOnce(runtime, ['report', '--outcome', 'plan ready', '--panel', 'panel-1'], paneDir));
+      assertIncludes(text.stdout, 'Reported outcome "plan ready" (done) for panel panel-1.', `${runtime} report --outcome names the outcome in its text`);
       const plain = [];
       await withFakeDaemon(paneDir, () => ({ result }),
         () => runCliOnce(runtime, ['report', '--state', 'done', '--panel', 'panel-1', '--json'], paneDir),

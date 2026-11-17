@@ -456,8 +456,9 @@ export function ProjectSessionList({
           </button>
         ) : null}
 
-        <LoopsNavRow active={activeView === 'loops'} />
+        {/* Profiles sits above Loops: Loops, Autopilot and Approvals stay together (D-117). */}
         <ProfilesNavRow active={activeView === 'profiles'} />
+        <LoopsNavRow active={activeView === 'loops'} />
         {/* Approvals sits right under Autopilot, which answers them for you (D-117). */}
         <AutopilotNavRow />
         <ApprovalsNavRow />
