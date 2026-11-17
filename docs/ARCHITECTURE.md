@@ -43,7 +43,9 @@ remote PWA / mobile ──HTTP + SSE──▶ daemon ◀──socket── runpa
   chat takes over as it mounts (`frontend/src/utils/launchOutline.ts`).
 - **Daemon** (`main/src/daemon`) serves the command registry over a local
   socket (a `pane-daemon-*` directory under the system temp directory, or a
-  named pipe on Windows). The `runpane` CLI talks to it. For Remote Pane it also
+  named pipe on Windows). The `runpane` CLI talks to it. If something deletes
+  the socket or its directory while Pane runs, Pane re-creates both within
+  5 s (`PANE_DAEMON_SOCKET_CHECK_INTERVAL_MS` in `server.ts`). For Remote Pane it also
   serves HTTP and SSE (`httpApiServer.ts`), and the same server, behind
   `tailscale serve` on port 8443, gives your other machines `runpane workspace`
   and codeless desktop remote mode (`workspaceHost.ts`,
