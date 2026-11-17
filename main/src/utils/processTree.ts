@@ -185,13 +185,9 @@ export async function readProcessTable(): Promise<ProcessTableRow[]> {
       const match = /^(\d+)\t(\d+)\t(\d*)\t(.*)$/u.exec(line);
       if (!match) continue;
       const [, pid, parentPid, born, executable] = match;
-      rows.push({
-        pid: Number.parseInt(pid, 10),
-        parentPid: Number.parseInt(parentPid, 10),
-        uid: null,
-        executable: executable.trim(),
-        ...(born ? { born: BigInt(born) } : {}),
-      });
+      const row: ProcessTableRow = { pid: Number.parseInt(pid, 10), parentPid: Number.parseInt(parentPid, 10), uid: null, executable: executable.trim() };
+      if (born) row.born = BigInt(born);
+      rows.push(row);
       continue;
     }
     const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s?(.*)$/u.exec(line);
