@@ -67,7 +67,7 @@ async function ownAgentFarmView(): Promise<OwnAgentFarmView | null> {
   catch (error) { return { profiles: [], error: reasonOf(error) }; }
 }
 
-/** Profiles is opt-in (D-106): launching and `runpane profiles` wait for Settings › Advanced › Profiles. Runs already started keep moving. */
+/** Profiles is opt-in (D-106): launching and `runpane profiles list|show|launch` wait for Settings › Advanced › Profiles. Runs already started keep moving, and `runs` still lists them. */
 function requireProfilesOn(services: AppServices): void {
   if (services.configManager.getConfig().profilesEnabled === true) return;
   throw new PaneError('PROFILES_OFF', 'Profiles is off in this Pane, so nothing was listed or launched.', 'Turn it on in Settings › Advanced › Profiles, then run this again. Runs already started keep going.');
@@ -182,8 +182,5 @@ export function registerProfileHandlers(ipcMain: IpcMain, services: AppServices,
     return { ok: true, profile, yaml: readFileSync(profile.file, 'utf8') };
   });
   commandRegistry.register('runpane:profiles:launch', async (value: PaneCommandValue) => ({ ok: true, run: await runpaneLaunch(services, value) }));
-  commandRegistry.register('runpane:profiles:runs', () => {
-    requireProfilesOn(services);
-    return { ok: true, runs: getProfileRunner().list() };
-  });
+  commandRegistry.register('runpane:profiles:runs', () => ({ ok: true, runs: getProfileRunner().list() }));
 }

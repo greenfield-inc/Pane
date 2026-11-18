@@ -9,10 +9,12 @@ which Pane bundles too.
 
 Profiles is off until you turn it on in **Settings › Advanced › Profiles**
 (`profilesEnabled` in `<PANE_DIR>/config.json`). While it is off, the Profiles
-page, its sidebar entry and the + menu's **Profile…** are hidden, and `runpane
-profiles` and the profile MCP tools fail with `PROFILES_OFF` and say how to
-turn it on. Runs already started keep going. Turning it on shows everything at
-once, with no restart.
+page and its sidebar entry are hidden, the + menu's **Profile…** lists none of
+Pane's profiles (and appears only with chat tabs on, to open an Agent Farm
+profile by name), and `runpane profiles list|show|launch` and their MCP tools
+fail with `PROFILES_OFF` and say how to turn it on. Runs already started keep
+going, and `runpane profiles runs` still lists them. Turning it on shows
+everything at once, with no restart.
 
 ## The format: pane-profile/1
 
@@ -87,8 +89,8 @@ no flow, so each is bundled as `dcouple-<profile>`: its default variant's agent
 in one step that ends the run when the agent reports `done`.
 
 Your own Agent Farm profiles (`agent-farm profiles list`, when one is on PATH)
-aren't on the Profiles page: open one by name from + menu › **Profile…**, and
-`runpane profiles list --json` lists them.
+aren't on the Profiles page: with chat tabs on, open one by name from + menu ›
+**Profile…**, and `runpane profiles list --json` lists them.
 
 An overlay (`extends: <name>@<range>`) holds only its changes; agents and steps
 merge key by key and `null` removes one. Pane ships Agent Farm
@@ -104,7 +106,8 @@ Launch does, and its flow; **Details** shows its version, the Team and YAML
 tabs, the example runs, the key and each outcome's samples.
 
 Launch from the Profiles page, the + menu's
-**Profile…** (there with chat tabs off too), or `runpane profiles launch`. A
+**Profile…** (there with chat tabs off too, once Profiles is on), or
+`runpane profiles launch`. A
 bundled profile launches once it is on. The launch dialog lists the commands
 the profile runs on its own. A run belongs to a Session (one you pick, or a new
 one). The first step opens a new Pane; every later step opens as
