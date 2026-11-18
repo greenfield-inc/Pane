@@ -66,8 +66,14 @@ export function useConnectionPresence() {
     return () => { cancelled = true; clearInterval(timer); };
   }, [askRelay, relay]);
   const notice = connectionNotice(connection, downForMs, profile.label, relay ? { asleepSince: askRelay && asleepSince ? formatTime(asleepSince) : null } : undefined);
+  const presence = connectionPresence(connection.status, downForMs);
   return {
-    presence: connectionPresence(connection.status, downForMs),
+    presence,
+    /**
+     * The screen stays at full strength and takes input while the connection comes back; it
+     * dims once the grace window passes. Actions wait for the connection (`whenConnected`).
+     */
+    live: presence === 'connected' || presence === 'reconnecting',
     notice: notice && connection.updateIntent ? { ...notice, message: `Updating Pane on ${profile.label} · ${connection.updateIntent.id}` } : notice,
     retry: () => client.retryNow(),
   };

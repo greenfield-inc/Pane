@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { canClose } from '@shared/approvalReceipts';
 
-import { buildAllMachinesList, type RecentRow } from '@/features/allMachines/allMachinesList';
+import { buildAllMachinesList, feedsAnswered, type RecentRow } from '@/features/allMachines/allMachinesList';
 import { AllMachinesNotes, allOffline, offlineAlert, openRecentRow, openWaitingRow, RecentRowView, waitingRowText } from '@/features/allMachines/AllMachinesRows';
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
 import { sessionKey, waitingCounts } from '@/features/approvals/approvals';
@@ -63,7 +63,7 @@ export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
   const home = useHomeFeeds({ active: focused });
-  const { here, all, feeds, chipMachines, current, presence, notice, retry } = home;
+  const { here, all, feeds, chipMachines, current, presence, live, notice, retry } = home;
   const profile = here.profile;
   const autopilot = useAutopilot();
   const actions = usePaneActions();
@@ -85,11 +85,16 @@ export function HomeScreen() {
   const board = { ...listed, waiting: listed.waiting.filter(row => !archiving.hidden.has(row.key)) };
   // Their Panes still wait on those questions, not in the terminal.
   const held = listed.waiting.filter(row => archiving.hidden.has(row.key));
+  // The board paints as soon as any machine answers, so a slow one never holds up the others.
   const loading = all ? feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined && feed.error === undefined) : here.loading;
-  const counts = loading ? undefined : boardCounts(board, held);
-  // One machine's Home dims while it isn't connected; All never dims as a whole.
-  const dimmed = !all && presence !== 'connected';
-  useValueMark('counts', counts ? `${counts.needs}/${counts.working}/${counts.ready}/${counts.all}` : '-');
+  // Counts, and the cards that say a list is empty, wait for every machine, so no zero shows that a
+  // slower machine's answer would contradict. Needs you waits for the approvals too.
+  const answered = feedsAnswered(feeds);
+  const tally = boardCounts(board, held);
+  const counts = loading || !answered.lists ? undefined : { ...tally, needs: answered.approvals ? tally.needs : undefined };
+  // One machine's Home dims once its connection has been down past the grace window; All never dims as a whole.
+  const dimmed = !all && !live;
+  useValueMark('counts', counts ? `${counts.needs ?? '-'}/${counts.working}/${counts.ready}/${counts.all}` : '-');
   useLiveMarks('home', !dimmed && !loading, Math.min(here.projects.dataUpdatedAt, here.statuses.dataUpdatedAt, here.notify.dataUpdatedAt));
   useEffect(() => markNextFrame(['launch', 'switch'], 'home-frame'), []);
   const machineOf = (key: string) => chipMachines.find(machine => machine.key === key);
@@ -268,9 +273,9 @@ export function HomeScreen() {
           <View style={styles.flush}>{inTerminal.map((row, index) => activityRow(row, index === 0, index === inTerminal.length - 1, needsTint))}</View>
         </View>
       ) : null}
-      {board.waiting.length + board.offline.length + inTerminal.length === 0 ? (
+      {board.waiting.length + board.offline.length + inTerminal.length > 0 ? null : !answered.approvals ? <LoadingRows /> : (
         <EmptyCard testID="approvals-empty" title="Nothing needs you" detail="Questions, permission requests and agents waiting in their terminal land here." />
-      ) : null}
+      )}
       <HistoryLine stale={board.staleQuestions.length} done={board.answered.length} onPress={() => router.push('/history')} />
     </>
   );
@@ -348,6 +353,7 @@ export function HomeScreen() {
   );
   const empty = loading ? (searching ? <LoadingRows /> : null)
     : searching ? <Notice testID="panes-no-results" message={all ? `No panes match “${query}” on any machine.` : `No panes match “${query}”.`} />
+    : !answered.lists ? null
     : tile === 'working' ? <EmptyCard testID="board-working-empty" title="Nothing working" detail="Panes show here while their agent works." />
     : tile === 'ready' ? <EmptyCard testID="board-ready-empty" title="Nothing ready" detail="Panes show here when their agent finishes, until you open them." />
     : null;

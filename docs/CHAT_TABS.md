@@ -24,10 +24,12 @@ entries and new Sessions open their orchestrator in a terminal. Open chat tabs k
   same.
 - **Remote PWA** and **phone**: *Add Tool* lists the host's installed chat
   agents and **Profile…** first when the host has chat tabs on.
-- **Profile…** on the desktop first lists Pane's profiles that are on
+- **Profile…** on the desktop, once Profiles is on (Settings › Advanced ›
+  Profiles), first lists Pane's profiles that are on
   ([PROFILES.md](PROFILES.md)); picking one opens its launch dialog. Profiles run in
   terminal tabs, so with chat tabs off the desktop + menu and empty Pane screen
-  still offer **Profile…**, with this list alone. Below the list when chat tabs
+  still offer **Profile…** while Profiles is on, with this list alone. With
+  Profiles off it appears only when chat tabs are on, without the list. Below the list when chat tabs
   are on, and as all of it on the PWA and phone, it asks for an Agent Farm profile name and optional arguments, one
   `key=value` per line, and opens the chat tab on the Pane's machine exactly as
   `--agent-farm <profile> --arg key=value` does. The name is typed, not picked:
@@ -523,7 +525,7 @@ with its Electron as Node and `--config-root <PANE_DIR>/agent-farm`, so a
 profile works on a fresh install. At each start
 (`main/src/services/agentFarm/bundledAgentFarm.ts`, called from
 `main/src/daemon/bootstrap.ts` without waiting) Pane installs the plugins that
-package carries (greenfield, orchestra, bigbrain and machine-security) into
+package carries for bundled profiles (greenfield and dcouple) into
 that folder, when the package's version or plugin files differ from what
 `<PANE_DIR>/agent-farm/pane-manifest.json` records; an unchanged bundle installs
 nothing and the log says so. An install that never finished (its lock or
@@ -575,4 +577,4 @@ is a scripted ACP agent (each prompt's first word picks a behaviour: `permission
 prints a `--print-acp` launch for it. An unpackaged Pane started with
 `PANE_CHAT_TEST_AGENT=<path to scriptedAgent.mjs>` runs it in every chat tab;
 `tests/chat-tabs.spec.ts` uses that for journeys J1 and J5: run it with
-`pnpm build:main && pnpm test:chat-tabs` (CI runs it in Functional Smoke (Electron)).
+`pnpm build:main && pnpm test:chat-tabs` (CI runs it in Functional Smoke (Electron journeys)).

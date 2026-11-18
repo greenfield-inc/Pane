@@ -81,7 +81,7 @@ export function enterStep(run: ProfileRun, profile: Profile, stepId: string, now
 
 /** A new run at the profile's start step. */
 export function startRun(run: ProfileRun, profile: Profile, now: string): RunTransition {
-  if (!profile.flow) throw new PaneError('PROFILE_TEAM_ONLY', `${profile.name} is team only: it has no workflow to run.`, 'Launch a profile that has a flow, or add one to this profile.');
+  if (!profile.flow) throw new PaneError('PROFILE_TEAM_ONLY', `${profile.name} has no flow, so there is nothing to run.`, 'Launch a profile that has a flow, or add one to this profile.');
   return enterStep(run, profile, profile.flow.start, now);
 }
 

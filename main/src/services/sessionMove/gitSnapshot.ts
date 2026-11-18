@@ -125,10 +125,22 @@ async function withTempDir<T>(work: (dir: string) => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Copies an index file with its mtime rounded down to the second. Git trusts an entry's stat data only
+ * when the entry is older than the index file, so a fresh mtime would hide same-size edits made in the
+ * index's own timestamp granule; an older mtime only makes git hash a few more files. The mtime is read
+ * before copying, so an index written in between can only make the copy look older than its content.
+ */
+async function copyIndexFile(from: string, to: string): Promise<void> {
+  const seconds = Math.floor((await fs.promises.stat(from)).mtimeMs / 1000);
+  await fs.promises.copyFile(from, to);
+  await fs.promises.utimes(to, seconds, seconds);
+}
+
 /** Copies the worktree's real index to `copy`, or seeds `copy` from HEAD when there is no index yet. */
 async function copyIndex(worktreePath: string, copy: string): Promise<void> {
   const indexPath = path.resolve(worktreePath, await gitOut(worktreePath, ['rev-parse', '--git-path', 'index']));
-  if (fs.existsSync(indexPath)) await fs.promises.copyFile(indexPath, copy);
+  if (fs.existsSync(indexPath)) await copyIndexFile(indexPath, copy);
   else await git(worktreePath, ['read-tree', 'HEAD'], { env: { GIT_INDEX_FILE: copy } });
 }
 
@@ -147,7 +159,7 @@ async function currentTrees(worktreePath: string): Promise<{ indexTree: string; 
     }
     const indexTree = await gitOut(worktreePath, ['write-tree'], { env: { GIT_INDEX_FILE: indexCopy } });
     const worktreeIndex = path.join(dir, 'worktree-index');
-    await fs.promises.copyFile(indexCopy, worktreeIndex);
+    await copyIndexFile(indexCopy, worktreeIndex);
     const env = { GIT_INDEX_FILE: worktreeIndex };
     await git(worktreePath, ['add', '-A', '--', '.'], { env });
     const worktreeTree = await gitOut(worktreePath, ['write-tree'], { env });

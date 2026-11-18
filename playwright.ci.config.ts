@@ -15,8 +15,8 @@ export default defineConfig({
   fullyParallel: true,
   // Fail the build on CI if you accidentally left test.only in the source code
   forbidOnly: true,
-  // Reduce retries to save time
-  retries: 1,
+  // A failed test fails the run; nothing is retried
+  retries: 0,
   // Use more workers on CI for parallel execution
   workers: 2,
   // Reporter optimized for CI

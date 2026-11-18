@@ -46,7 +46,8 @@ export function listProfiles(options: ProfileLibraryOptions): LibraryProfile[] {
   const plugins = options.agentFarmPlugins ?? defaultAgentFarmPlugins();
   const userDir = userProfilesDir(options.paneDir);
   const bundled: ProfileSource[] = findProfileFiles(options.bundledDir ?? BUNDLED_PROFILES_DIR, 'bundled').map((source) => {
-    const plugin = plugins ? path.join(plugins, path.basename(source.file).replace(/\.profile\.yaml$/u, '')) : undefined;
+    // <plugin>.profile.yaml or <plugin>.<profile>.profile.yaml: its files live in that Agent Farm plugin.
+    const plugin = plugins ? path.join(plugins, path.basename(source.file).split('.')[0]) : undefined;
     return plugin && existsSync(plugin) ? { ...source, filesRoot: plugin } : source;
   });
   const folders = skillFolders(plugins, userDir);

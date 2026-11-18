@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import { AppState } from 'react-native';
 
-import { RemoteRequestError, type RemoteDaemonClient } from '@shared/remoteClient';
+import { CONNECTION_GRACE_MS, RemoteRequestError, type RemoteDaemonClient } from '@shared/remoteClient';
 import { olderHostAgents } from '@shared/chatAgentMenu';
 import { ChatTabViewerRegistry, type ChatTabViewer } from '@shared/chatTabViewer';
 import type { ChatAgentEntry, ChatTabClient } from '@shared/types/chatTab';
@@ -40,7 +40,7 @@ export function useChatTab(panelId: string) {
     const subscription = AppState.addEventListener('change', state => { if (state === 'active') void viewer.refresh(); });
     return () => subscription.remove();
   }, [viewer]);
-  return { chat, viewer, snapshot, connected: connection.status === 'connected' };
+  return { chat, viewer, snapshot, connected: connection.status === 'connected', whenConnected: () => client.whenConnected(CONNECTION_GRACE_MS) };
 }
 
 /** How long the phone reuses the host's agent catalog; the new-tab sheet reads it again on every open. */
