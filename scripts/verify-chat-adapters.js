@@ -9,6 +9,9 @@
  *      person's own claude and codex instead), and
  *   3. start each adapter the way Pane does and complete ACP `initialize`.
  * Step 3 runs only for apps this machine can execute (same OS and arch).
+ *
+ * It checks the bundled Agent Farm the same way (main/src/services/agentFarm/bundledAgentFarm.ts):
+ * inside app.asar, with no native binaries, and answering `--version` under Electron as Node.
  * scripts/after-pack.js runs it for every packed app, before signing or
  * publishing; run it by hand on a dist-electron folder too.
  *
@@ -30,6 +33,8 @@ const ADAPTERS = Object.values(require('../contracts/runpane/contract.json').age
   .flatMap(agent => agent.chat?.adapter ? [{ packageName: agent.chat.adapter.package, env: agent.chat.adapter.executableEnv }] : []);
 const FORBIDDEN = [/\/node_modules\/@anthropic-ai\/claude-agent-sdk-[^/]+\//, /\/node_modules\/@openai\/codex-[^/]+\//];
 const INITIALIZE_TIMEOUT_MS = 30_000;
+const AGENT_FARM = '@greenfieldco/agent-farm';
+const AGENT_FARM_NATIVE = /\.(?:node|exe|dll|dylib|so)$/;
 // codex-acp starts `codex app-server` before it answers initialize. This stand-in
 // answers every request, which is all initialize needs; no real agent runs.
 const STUB_APP_SERVER = "let b='';process.stdin.on('data',c=>{b+=c;let e;while((e=b.indexOf('\\n'))>=0){const m=JSON.parse(b.slice(0,e));b=b.slice(e+1);if(m.id!==undefined)process.stdout.write(JSON.stringify({id:m.id,result:{}})+'\\n');}});";
@@ -77,6 +82,40 @@ function initialize(app, adapter, entry, cli) {
   });
 }
 
+/** Runs the bundled Agent Farm's CLI as Pane does (Electron as Node, entry inside app.asar) and reads `--version`. */
+function agentFarmVersion(app, entry) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(app.executable, [entry, '--version'], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => { child.kill(); reject(new Error(`no answer within ${INITIALIZE_TIMEOUT_MS / 1000}s`)); }, INITIALIZE_TIMEOUT_MS);
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('exit', code => {
+      clearTimeout(timer);
+      if (code === 0 && stdout.trim()) resolve(stdout.trim());
+      else reject(new Error(`exited with ${code}. stderr: ${stderr.slice(-2000)}`));
+    });
+  });
+}
+
+/** Checks the bundled Agent Farm in one packed app; returns its log line. */
+async function verifyAgentFarm(app, files, runnable) {
+  const root = `/node_modules/${AGENT_FARM}/`;
+  if (!files.includes(`${root}package.json`)) throw new Error(`${app.asar} is missing ${AGENT_FARM}, so bundled profiles would fail on every install. Check it is a dependency in package.json.`);
+  const native = files.filter(file => file.startsWith(root) && AGENT_FARM_NATIVE.test(file));
+  if (native.length) throw new Error(`${app.asar} carries native binaries inside ${AGENT_FARM}, for example ${native[0]}. Pane runs it as plain JavaScript; check the package before bumping it.`);
+  const { version } = JSON.parse(asar.extractFile(app.asar, path.join('node_modules', ...AGENT_FARM.split('/'), 'package.json')).toString('utf8'));
+  if (!runnable) return `${AGENT_FARM}@${version} present (not started: built for another platform)`;
+  const entry = path.join(app.asar, 'node_modules', ...AGENT_FARM.split('/'), 'dist', 'cli.js');
+  let answered;
+  try { answered = await agentFarmVersion(app, entry); }
+  catch (error) { throw new Error(`${AGENT_FARM}@${version} did not start from ${app.asar}: ${error.message}`); }
+  if (answered !== version) throw new Error(`${AGENT_FARM} in ${app.asar} answered --version with "${answered}", expected ${version}.`);
+  return `${AGENT_FARM}@${version} answered --version under Electron as Node`;
+}
+
 /** The packed app in an electron-builder appOutDir: its app.asar and the Electron executable beside it. */
 function packedApp(appOutDir, platform) {
   if (platform === 'darwin') {
@@ -114,6 +153,7 @@ async function verifyChatAdapters(appOutDir, platform, arch) {
         throw new Error(`${adapter.packageName}@${version} did not start from ${app.asar}: ${error.message}`);
       }
     }
+    lines.push(await verifyAgentFarm(app, files, runnable));
   } finally { fs.rmSync(stub.dir, { recursive: true, force: true }); }
   for (const line of lines) console.log(`[verify-chat-adapters] ${path.basename(appOutDir)}: ${line}`);
   return lines;

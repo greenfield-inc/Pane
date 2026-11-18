@@ -8,6 +8,7 @@ import { Toggle } from './ui/Toggle';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 import { useSessionPreferencesStore, type SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -431,185 +432,193 @@ export function CreatePaneForm({
           <form id="create-session-form" onSubmit={handleSubmit}>
             {repositoryPicker}
             {/* 1. Base Branch (select first, auto-populates session name) */}
-            {isLoadingBranches && branches.length === 0 ? (
-              <div className="px-6 pt-6 pb-5 border-b border-border-primary animate-skeleton">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-4 h-4 bg-surface-tertiary rounded" />
-                  <div className="w-24 h-4 bg-surface-tertiary rounded" />
-                </div>
-                <div className="w-full h-9 bg-surface-tertiary rounded-md" />
-                <div className="w-64 h-3 bg-surface-tertiary rounded mt-2" />
-              </div>
-            ) : branches.length > 0 ? (
-              <div className="px-6 pt-6 pb-5 border-b border-border-primary">
-                <div className="flex items-center gap-2 mb-2">
-                  <GitBranch className="w-4 h-4 text-text-tertiary" />
-                  <label htmlFor="baseBranch" className="text-sm font-medium text-text-primary">
-                    Base Branch
-                  </label>
-                </div>
-                <div ref={branchDropdownRef} className="relative">
-                  <div
-                    className={`flex items-center w-full border rounded-md bg-bg-primary ${
-                      isBranchDropdownOpen
-                        ? 'border-interactive ring-2 ring-interactive'
-                        : 'border-border-primary'
-                    } ${isLoadingBranches ? 'opacity-50 pointer-events-none' : ''}`}
-                  >
-                    <Search className="w-4 h-4 text-text-tertiary ml-3 shrink-0" />
-                    <input
-                      ref={branchInputRef}
-                      id="baseBranch"
-                      type="text"
-                      role="combobox"
-                      aria-autocomplete="list"
-                      aria-expanded={isBranchDropdownOpen}
-                      aria-controls={branchListboxId}
-                      aria-activedescendant={isBranchDropdownOpen && flatFilteredBranches[highlightedBranchIndex]
-                        ? `${branchListboxId}-option-${highlightedBranchIndex}`
-                        : undefined}
-                      value={isBranchDropdownOpen ? branchSearch : (formData.baseBranch || '')}
-                      onChange={(e) => {
-                        setBranchSearch(e.target.value);
-                        setHighlightedBranchIndex(0);
-                        if (!isBranchDropdownOpen) {
+            <SkeletonSwap loading={isLoadingBranches && branches.length === 0} skeleton={
+              <>
+                <LoadingStatus label="Loading branches" />
+                <Skeleton className="px-6 pt-6 pb-5 border-b border-border-primary">
+                  <div className="flex items-center gap-2 mb-2 text-sm font-medium leading-5">
+                    <Bone className="w-4 h-4" />
+                    <TextBone text="Base Branch" />
+                  </div>
+                  <div className="flex h-[38px] items-center gap-2 rounded-md border border-border-primary px-3">
+                    <Bone className="w-4 h-4 shrink-0" />
+                    <Bone className="h-3.5 w-28" />
+                  </div>
+                  <p className="mt-2 text-xs"><TextBone text="Remote branches will automatically track the remote for git pull/push." /></p>
+                </Skeleton>
+              </>
+            }>
+              {branches.length > 0 && (
+                <div className="px-6 pt-6 pb-5 border-b border-border-primary">
+                  <div className="flex items-center gap-2 mb-2">
+                    <GitBranch className="w-4 h-4 text-text-tertiary" />
+                    <label htmlFor="baseBranch" className="text-sm font-medium text-text-primary">
+                      Base Branch
+                    </label>
+                  </div>
+                  <div ref={branchDropdownRef} className="relative">
+                    <div
+                      className={`flex items-center w-full border rounded-md bg-bg-primary ${
+                        isBranchDropdownOpen
+                          ? 'border-interactive ring-2 ring-interactive'
+                          : 'border-border-primary'
+                      } ${isLoadingBranches ? 'opacity-50 pointer-events-none' : ''}`}
+                    >
+                      <Search className="w-4 h-4 text-text-tertiary ml-3 shrink-0" />
+                      <input
+                        ref={branchInputRef}
+                        id="baseBranch"
+                        type="text"
+                        role="combobox"
+                        aria-autocomplete="list"
+                        aria-expanded={isBranchDropdownOpen}
+                        aria-controls={branchListboxId}
+                        aria-activedescendant={isBranchDropdownOpen && flatFilteredBranches[highlightedBranchIndex]
+                          ? `${branchListboxId}-option-${highlightedBranchIndex}`
+                          : undefined}
+                        value={isBranchDropdownOpen ? branchSearch : (formData.baseBranch || '')}
+                        onChange={(e) => {
+                          setBranchSearch(e.target.value);
+                          setHighlightedBranchIndex(0);
+                          if (!isBranchDropdownOpen) {
+                            setBranchDropdownOpen(true);
+                          }
+                        }}
+                        onFocus={() => {
                           setBranchDropdownOpen(true);
-                        }
-                      }}
-                      onFocus={() => {
-                        setBranchDropdownOpen(true);
-                        setBranchSearch('');
-                        setHighlightedBranchIndex(0);
-                      }}
-                      onKeyDown={handleBranchKeyDown}
-                      placeholder={isBranchDropdownOpen ? 'Search branches...' : 'Select a branch'}
-                      className="w-full px-2 py-2 bg-transparent text-text-primary text-sm focus:outline-none"
-                      autoComplete="off"
-                      disabled={isLoadingBranches}
-                    />
-                    <button
-                      type="button"
-                      tabIndex={-1}
-                      aria-label={isBranchDropdownOpen ? 'Close branch options' : 'Open branch options'}
-                      onClick={() => {
-                        setBranchDropdownOpen(!isBranchDropdownOpen);
-                        if (!isBranchDropdownOpen) {
                           setBranchSearch('');
                           setHighlightedBranchIndex(0);
-                          branchInputRef.current?.focus();
-                        }
-                      }}
-                      className="px-2 py-2 text-text-tertiary hover:text-text-primary shrink-0"
-                    >
-                      <ChevronDown className={`w-4 h-4 transition-transform ${isBranchDropdownOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                  </div>
-
-                  {isBranchDropdownOpen && (
-                    <div
-                      id={branchListboxId}
-                      ref={branchListRef}
-                      role="listbox"
-                      aria-label="Branches"
-                      className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto rounded-md border border-border-primary bg-surface-secondary shadow-lg"
-                    >
-                      {flatFilteredBranches.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-text-tertiary">
-                          No branches match &ldquo;{branchSearch}&rdquo;
-                        </div>
-                      ) : (
-                        <>
-                          {/* Remote branches group */}
-                          {filteredBranches.some(b => b.isRemote) && (
-                            <>
-                              <div role="presentation" className="px-3 py-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider bg-surface-primary sticky top-0">
-                                Remote Branches
-                              </div>
-                              {filteredBranches.filter(b => b.isRemote).map(branch => {
-                                const flatIndex = flatFilteredBranches.indexOf(branch);
-                                return (
-                                  <div
-                                    id={`${branchListboxId}-option-${flatIndex}`}
-                                    key={branch.name}
-                                    data-branch-item
-                                    role="option"
-                                    aria-selected={formData.baseBranch === branch.name}
-                                    className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-default ${
-                                      flatIndex === highlightedBranchIndex
-                                        ? 'bg-interactive/10 text-text-primary'
-                                        : 'text-text-secondary hover:bg-surface-hover'
-                                    }`}
-                                    onMouseEnter={() => setHighlightedBranchIndex(flatIndex)}
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      selectBranch(branch.name);
-                                    }}
-                                  >
-                                    <GitBranch className="w-3.5 h-3.5 shrink-0 text-text-tertiary" />
-                                    <span className="truncate flex-1">{branch.name}</span>
-                                    {formData.baseBranch === branch.name && (
-                                      <Check className="w-3.5 h-3.5 shrink-0 text-interactive" />
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </>
-                          )}
-
-                          {/* Local branches group */}
-                          {filteredBranches.some(b => !b.isRemote) && (
-                            <>
-                              <div role="presentation" className="px-3 py-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider bg-surface-primary sticky top-0">
-                                Local Branches
-                              </div>
-                              {filteredBranches.filter(b => !b.isRemote).map(branch => {
-                                const flatIndex = flatFilteredBranches.indexOf(branch);
-                                return (
-                                  <div
-                                    id={`${branchListboxId}-option-${flatIndex}`}
-                                    key={branch.name}
-                                    data-branch-item
-                                    role="option"
-                                    aria-selected={formData.baseBranch === branch.name}
-                                    className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-default ${
-                                      flatIndex === highlightedBranchIndex
-                                        ? 'bg-interactive/10 text-text-primary'
-                                        : 'text-text-secondary hover:bg-surface-hover'
-                                    }`}
-                                    onMouseEnter={() => setHighlightedBranchIndex(flatIndex)}
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      selectBranch(branch.name);
-                                    }}
-                                  >
-                                    <GitBranch className="w-3.5 h-3.5 shrink-0 text-text-tertiary" />
-                                    <span className="truncate flex-1">
-                                      {branch.name}
-                                      {branch.isCurrent && (
-                                        <span className="ml-1.5 text-xs text-text-tertiary">(current)</span>
-                                      )}
-                                      {branch.hasWorktree && (
-                                        <span className="ml-1.5 text-xs text-text-tertiary">(has worktree)</span>
-                                      )}
-                                    </span>
-                                    {formData.baseBranch === branch.name && (
-                                      <Check className="w-3.5 h-3.5 shrink-0 text-interactive" />
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </>
-                          )}
-                        </>
-                      )}
+                        }}
+                        onKeyDown={handleBranchKeyDown}
+                        placeholder={isBranchDropdownOpen ? 'Search branches...' : 'Select a branch'}
+                        className="w-full px-2 py-2 bg-transparent text-text-primary text-sm focus:outline-none"
+                        autoComplete="off"
+                        disabled={isLoadingBranches}
+                      />
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        aria-label={isBranchDropdownOpen ? 'Close branch options' : 'Open branch options'}
+                        onClick={() => {
+                          setBranchDropdownOpen(!isBranchDropdownOpen);
+                          if (!isBranchDropdownOpen) {
+                            setBranchSearch('');
+                            setHighlightedBranchIndex(0);
+                            branchInputRef.current?.focus();
+                          }
+                        }}
+                        className="px-2 py-2 text-text-tertiary hover:text-text-primary shrink-0"
+                      >
+                        <ChevronDown className={`w-4 h-4 transition-transform ${isBranchDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
                     </div>
-                  )}
+
+                    {isBranchDropdownOpen && (
+                      <div
+                        id={branchListboxId}
+                        ref={branchListRef}
+                        role="listbox"
+                        aria-label="Branches"
+                        className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto rounded-md border border-border-primary bg-surface-secondary shadow-lg"
+                      >
+                        {flatFilteredBranches.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-text-tertiary">
+                            No branches match &ldquo;{branchSearch}&rdquo;
+                          </div>
+                        ) : (
+                          <>
+                            {/* Remote branches group */}
+                            {filteredBranches.some(b => b.isRemote) && (
+                              <>
+                                <div role="presentation" className="px-3 py-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider bg-surface-primary sticky top-0">
+                                  Remote Branches
+                                </div>
+                                {filteredBranches.filter(b => b.isRemote).map(branch => {
+                                  const flatIndex = flatFilteredBranches.indexOf(branch);
+                                  return (
+                                    <div
+                                      id={`${branchListboxId}-option-${flatIndex}`}
+                                      key={branch.name}
+                                      data-branch-item
+                                      role="option"
+                                      aria-selected={formData.baseBranch === branch.name}
+                                      className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-default ${
+                                        flatIndex === highlightedBranchIndex
+                                          ? 'bg-interactive/10 text-text-primary'
+                                          : 'text-text-secondary hover:bg-surface-hover'
+                                      }`}
+                                      onMouseEnter={() => setHighlightedBranchIndex(flatIndex)}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        selectBranch(branch.name);
+                                      }}
+                                    >
+                                      <GitBranch className="w-3.5 h-3.5 shrink-0 text-text-tertiary" />
+                                      <span className="truncate flex-1">{branch.name}</span>
+                                      {formData.baseBranch === branch.name && (
+                                        <Check className="w-3.5 h-3.5 shrink-0 text-interactive" />
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </>
+                            )}
+
+                            {/* Local branches group */}
+                            {filteredBranches.some(b => !b.isRemote) && (
+                              <>
+                                <div role="presentation" className="px-3 py-1.5 text-xs font-semibold text-text-tertiary uppercase tracking-wider bg-surface-primary sticky top-0">
+                                  Local Branches
+                                </div>
+                                {filteredBranches.filter(b => !b.isRemote).map(branch => {
+                                  const flatIndex = flatFilteredBranches.indexOf(branch);
+                                  return (
+                                    <div
+                                      id={`${branchListboxId}-option-${flatIndex}`}
+                                      key={branch.name}
+                                      data-branch-item
+                                      role="option"
+                                      aria-selected={formData.baseBranch === branch.name}
+                                      className={`flex items-center gap-2 px-3 py-1.5 text-sm cursor-default ${
+                                        flatIndex === highlightedBranchIndex
+                                          ? 'bg-interactive/10 text-text-primary'
+                                          : 'text-text-secondary hover:bg-surface-hover'
+                                      }`}
+                                      onMouseEnter={() => setHighlightedBranchIndex(flatIndex)}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        selectBranch(branch.name);
+                                      }}
+                                    >
+                                      <GitBranch className="w-3.5 h-3.5 shrink-0 text-text-tertiary" />
+                                      <span className="truncate flex-1">
+                                        {branch.name}
+                                        {branch.isCurrent && (
+                                          <span className="ml-1.5 text-xs text-text-tertiary">(current)</span>
+                                        )}
+                                        {branch.hasWorktree && (
+                                          <span className="ml-1.5 text-xs text-text-tertiary">(has worktree)</span>
+                                        )}
+                                      </span>
+                                      {formData.baseBranch === branch.name && (
+                                        <Check className="w-3.5 h-3.5 shrink-0 text-interactive" />
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-text-tertiary mt-2">
+                    Remote branches will automatically track the remote for git pull/push.
+                  </p>
                 </div>
-                <p className="text-xs text-text-tertiary mt-2">
-                  Remote branches will automatically track the remote for git pull/push.
-                </p>
-              </div>
-            ) : null}
+              )}
+            </SkeletonSwap>
 
             {/* 2. Pane Name (empty uses the name suggested from the branch) */}
             <div className="px-6 pt-6 pb-5 border-b border-border-primary">

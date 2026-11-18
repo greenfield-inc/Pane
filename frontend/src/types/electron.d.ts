@@ -68,6 +68,7 @@ import type {
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../../../shared/types/loop';
+import type { ProfileDetailView, ProfileLaunchInput, OwnAgentFarmView, ProfileLibraryView, ProfileRun } from '../../../shared/types/profiles';
 import type { SetupExportResult, SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../../../shared/types/setupTransfer';
 import type { MissionControlAgentPanel, MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../shared/types/missionControl';
 import type { CreateSessionRequest } from './session';
@@ -342,6 +343,16 @@ interface ElectronAPI {
     detail: (number: number) => Promise<IPCResponse<TodoDetail>>;
     create: (input: TodoCreateInput) => Promise<IPCResponse<TodoRecord>>;
     act: (action: TodoAction) => Promise<IPCResponse<TodoActionResult>>;
+  };
+  profiles: {
+    list: () => Promise<IPCResponse<ProfileLibraryView>>;
+    ownAgentFarm: () => Promise<IPCResponse<OwnAgentFarmView | null>>;
+    get: (name: string) => Promise<IPCResponse<ProfileDetailView>>;
+    setEnabled: (name: string, enabled: boolean) => Promise<IPCResponse<ProfileLibraryView>>;
+    launch: (input: ProfileLaunchInput) => Promise<IPCResponse<ProfileRun>>;
+    runs: () => Promise<IPCResponse<ProfileRun[]>>;
+    setOutcome: (runId: string, outcome: string) => Promise<IPCResponse<ProfileRun>>;
+    stop: (runId: string) => Promise<IPCResponse<ProfileRun>>;
   };
   // Mission Control — every agent pane across all sessions
   missionControl: {
@@ -618,6 +629,7 @@ interface ElectronAPI {
     /** Loops or their runs changed; read them again with `loops.list`. */
     onLoopsChanged: (callback: () => void) => () => void;
     onTodosChanged: (callback: () => void) => () => void;
+    onProfilesChanged: (callback: () => void) => () => void;
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;

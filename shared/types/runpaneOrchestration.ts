@@ -1444,6 +1444,8 @@ export interface RunpaneReportRequest {
   questions?: NotifySubQuestion[];
   /** To-dos (D-408): "T-14"; links a blocked question to that to-do. */
   todo?: string;
+  /** `--outcome`: ends a profile step with one of its declared outcomes; the state is then done. */
+  outcome?: string;
 }
 
 export interface RunpaneReportResult {

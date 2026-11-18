@@ -669,6 +669,13 @@
       "/tmp/pane"
     ],
     [
+      "report",
+      "--outcome",
+      " plan ready ",
+      "--summary-file",
+      "status.json"
+    ],
+    [
       "panels",
       "resume",
       "--all-stopped",
@@ -1195,6 +1202,47 @@
     ],
     [
       "loops",
+      "--help"
+    ],
+    [
+      "profiles",
+      "list",
+      "--json"
+    ],
+    [
+      "profiles",
+      "show",
+      "greenfield",
+      "--yaml"
+    ],
+    [
+      "profiles",
+      "launch",
+      "greenfield",
+      "--prompt",
+      "Add dark mode",
+      "--repo",
+      "active",
+      "--session",
+      "Nightly",
+      "--harness",
+      "claude/opus",
+      "--agent-harness",
+      "planner=codex",
+      "--agent-harness={\"reviewer\":\"claude\"}",
+      "--command",
+      "aider=aider --yes-always",
+      "--yes",
+      "--json"
+    ],
+    [
+      "profiles",
+      "runs",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "profiles",
       "--help"
     ],
     [

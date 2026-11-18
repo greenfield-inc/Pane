@@ -1408,7 +1408,7 @@ async function readSubagentDefinitions(directory: string): Promise<SubagentDefin
 }
 
 /** Hashes every file's relative path and contents, in a stable order. */
-async function hashDirectory(root: string): Promise<string> {
+export async function hashDirectory(root: string): Promise<string> {
   const files: string[] = [];
   const visit = async (relative: string): Promise<void> => {
     const absolute = path.join(root, relative);

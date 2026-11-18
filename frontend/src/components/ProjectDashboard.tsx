@@ -13,6 +13,7 @@ import { StatusSummaryCards } from './dashboard/StatusSummaryCards';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { LiveRegion } from './ui/LiveRegion';
+import { useSkeletonHold } from './ui/Skeleton';
 
 interface ProjectDashboardProps {
   projectId: number;
@@ -311,6 +312,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
         return dashboardData.sessionBranches;
     }
   }, [dashboardData, filterType]);
+  const { holding, reveal } = useSkeletonHold(isLoading && !dashboardData && !error);
 
   if (error) {
     return (
@@ -331,12 +333,12 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
     );
   }
 
-  if (isLoading && !dashboardData) {
-    return <div><LiveRegion>{statusAnnouncement}</LiveRegion><ProjectDashboardSkeleton /></div>;
+  if (holding) {
+    return <ProjectDashboardSkeleton projectName={projectName} status={<LiveRegion>{statusAnnouncement}</LiveRegion>} />;
   }
 
   return (
-    <Card className="flex flex-col h-full">
+    <Card className={`flex flex-col h-full${reveal ? ' skeleton-reveal' : ''}`}>
       <LiveRegion>{statusAnnouncement}</LiveRegion>
       <div className="px-6 py-4 border-b border-border-primary">
         <div className="flex items-center justify-between">

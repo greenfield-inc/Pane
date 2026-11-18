@@ -19,6 +19,7 @@ import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, ru
 import { runDevicesAct, runDevicesClose, runDevicesFree, runDevicesList, runDevicesOpen, runDevicesRun, runDevicesScreenshot, runDevicesUsage } from './devices';
 import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runMachineCleanup, runMachineHealth } from './machine';
+import { runProfilesLaunch, runProfilesList, runProfilesRuns, runProfilesShow } from './profiles';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo } from './daemonClient';
@@ -350,6 +351,10 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'todos archive': async (parsed) => runTodos(parsed),
   'todos start': async (parsed) => runTodos(parsed),
   'todos stop': async (parsed) => runTodos(parsed),
+  'profiles list': async (parsed) => runProfilesList(parsed),
+  'profiles show': async (parsed) => runProfilesShow(parsed),
+  'profiles launch': async (parsed) => runProfilesLaunch(parsed),
+  'profiles runs': async (parsed) => runProfilesRuns(parsed),
   'workspace state': async (parsed, telemetryContext) => {
     return runWorkspaceState(parsed);
   },

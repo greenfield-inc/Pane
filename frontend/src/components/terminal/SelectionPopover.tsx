@@ -5,6 +5,7 @@ import { Copy, ExternalLink, FolderOpen, Globe, FileText, X } from 'lucide-react
 import { TerminalPopover, PopoverButton } from './TerminalPopover';
 import { InterceptorToast } from './InterceptorToast';
 import NotesDialog from '../panels/notes/NotesDialog';
+import { Bone, Skeleton, LoadingStatus } from '../ui/Skeleton';
 import type { TerminalFilePath } from './resolveTerminalPath';
 import {
   findSelectionTargets,
@@ -20,6 +21,18 @@ import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 
 const NotesPanel = lazy(() => import('../panels/notes/NotesPanel'));
+
+/** NotesPanel's header row (note, scope and new-note controls) while its chunk loads. */
+function NotesPanelSkeleton() {
+  return <>
+    <LoadingStatus label="Loading notes" />
+    <Skeleton className="flex min-h-[50px] items-center gap-x-2.5 border-b border-border-primary px-4 py-2">
+      <Bone className="h-7 w-20" />
+      <Bone className="h-[27px] w-44 rounded-[9px]" />
+      <Bone className="ml-auto h-6 w-6" />
+    </Skeleton>
+  </>;
+}
 
 export interface SelectionPopoverProps {
   visible: boolean;
@@ -253,7 +266,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         <h2 className="text-[15px] font-semibold text-text-primary">Add to notes</h2>
         <button type="button" aria-label="Close" title="Close" className="rounded-md p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus" onClick={() => setCapture(undefined)}><X className="h-4 w-4" /></button>
       </div>
-      <div className="min-h-0 flex-1"><Suspense fallback={<p className="p-5 text-[13px] text-text-tertiary">Loading notes…</p>}><NotesPanel paneId={sessionId} capture={capture} viewId="capture" /></Suspense></div>
+      <div className="min-h-0 flex-1"><Suspense fallback={<NotesPanelSkeleton />}><NotesPanel paneId={sessionId} capture={capture} viewId="capture" /></Suspense></div>
     </NotesDialog>}
     {errorToast && createPortal(
       <div className="fixed inset-0 z-[10002] pointer-events-none">

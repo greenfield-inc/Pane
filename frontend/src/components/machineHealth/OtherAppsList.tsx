@@ -3,7 +3,9 @@ import { AppWindow, LoaderCircle, Lock, OctagonX } from 'lucide-react';
 import type { OtherApp } from '../../../../shared/types/machineHealth';
 import { formatMB } from '../../../../shared/utils/formatBytes';
 import { ConfirmDialog } from '../ConfirmDialog';
+import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from '../ui/Skeleton';
 import { showActionError } from '../../stores/errorStore';
+import { cn } from '../../utils/cn';
 import { healthReadProblem } from './healthReadError';
 import { readOtherApps, runHealthAction } from './useMachineHealth';
 
@@ -52,13 +54,15 @@ export function OtherAppsList({ machineId, readAt, readOnlyReason, onStopped }: 
     }
   };
 
+  const { holding, reveal } = useSkeletonHold(!apps && !problem);
+
   if (problem && !apps) return <p className="mt-3 text-sm text-text-secondary" role="status">{problem}</p>;
-  if (!apps) return <p className="mt-3 text-sm text-text-secondary" role="status">Reading the apps on this machine…</p>;
+  if (!apps || holding) return <OtherAppsSkeleton />;
   const shown = showAll ? apps : apps.slice(0, FIRST_ROWS);
   return (
     <>
     {problem && <p className="mt-3 text-sm text-status-error" role="status">{problem}</p>}
-    <div className="mt-3 overflow-hidden rounded-lg border border-border-primary" aria-label="Other apps">
+    <div className={cn('mt-3 overflow-hidden rounded-lg border border-border-primary', reveal && 'skeleton-reveal')} aria-label="Other apps">
       <div className="flex items-center gap-3 border-b border-border-primary px-3 py-1.5 text-xs text-text-secondary">
         <span className="min-w-0 flex-1">App</span>
         <span className="w-20 text-right">Memory</span>
@@ -106,6 +110,35 @@ export function OtherAppsList({ machineId, readAt, readOnlyReason, onStopped }: 
         message={confirming ? stopMessage(confirming) : ''}
         confirmText={confirming ? `Stop ${confirming.name}` : 'Stop'} />
     </div>
+    </>
+  );
+}
+
+/** The apps table while the list is read: header, the first rows, and Show all. */
+function OtherAppsSkeleton() {
+  return (
+    <>
+      <LoadingStatus label="Reading the apps on this machine" />
+      <Skeleton className="mt-3 rounded-lg border border-border-primary">
+        <div className="flex items-center gap-3 border-b border-border-primary px-3 py-1.5 text-xs">
+          <span className="min-w-0 flex-1"><TextBone text="App" /></span>
+          <span className="w-20 text-right"><TextBone text="Memory" /></span>
+          <span className="w-14 text-right"><TextBone text="CPU" /></span>
+          <span className="w-7" />
+        </div>
+        <div className="divide-y divide-border-primary text-sm">
+          {Array.from({ length: FIRST_ROWS }, (_, index) => (
+            <div key={index} className="flex items-center gap-3 px-3 py-1.5">
+              <Bone className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 flex-1"><Bone className="h-3.5" style={{ width: `${[36, 24, 44, 30, 20, 38][index % 6]}%` }} /></span>
+              <span className="flex w-20 justify-end"><TextBone text="000 MB" /></span>
+              <span className="flex w-14 justify-end"><TextBone text="0%" /></span>
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center"><Bone className="h-4 w-4" /></span>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-border-primary px-3 py-1.5 text-sm"><TextBone text="Show all 00 apps" /></div>
+      </Skeleton>
     </>
   );
 }

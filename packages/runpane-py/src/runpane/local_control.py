@@ -1675,6 +1675,7 @@ def run_report(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
         **optional_value("summary", summary[:MAX_SENT_SUMMARY_LENGTH] if summary is not None else None),
         **optional_value("summaryPath", summary_path),
         **optional_value("question", parsed.question),
+        **optional_value("outcome", parsed.report_outcome),
         **(options or {}),
         **optional_value("todo", parsed.todo),
     }
@@ -1682,12 +1683,12 @@ def run_report(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
     if parsed.json:
         print_json(result)
     else:
-        for line in describe_report_delivery(result):
+        for line in describe_report_delivery(result, parsed.report_outcome):
             print(line)
     return 0
 
 
-def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
+def describe_report_delivery(result: Dict[str, Any], outcome: Optional[str] = None) -> List[str]:
     """What `runpane report` prints: the report, who recorded it, and how many watches were waiting.
 
     Zero waiting watchers means nobody is waiting right now, not that the report is lost.
@@ -1698,7 +1699,11 @@ def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
     watchers = live_watchers or 0
     delivered = f" Delivered to {watchers} waiting watcher{'' if watchers == 1 else 's'}." if watchers > 0 else ""
     panel_id = result.get("panelId")
-    lines = [f"Reported {describe_report(result.get('report') or {})} for panel {panel_id}.{sessions}{delivered}"]
+    reported = describe_report(result.get('report') or {})
+    # A profile step's outcome is what moved its run, so the line names it.
+    if outcome:
+        reported = f'outcome "{sanitize_watch_value(outcome)}" ({reported})'
+    lines = [f"Reported {reported} for panel {panel_id}.{sessions}{delivered}"]
     # The blocked question's card check: posted anyway, but worth fixing next time.
     warnings = [f"Warning: {warning}" for warning in result.get("warnings") or [] if isinstance(warning, str)]
     if session_ids or watchers > 0:

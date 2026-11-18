@@ -1,6 +1,7 @@
 import type { DeviceInput } from '../../shared/types/devices';
 import type { LoopInput } from '../../shared/types/loop';
 import type { TodoAction, TodoCreateInput } from '../../shared/types/todos';
+import type { ProfileLaunchInput } from '../../shared/types/profiles';
 import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
@@ -631,6 +632,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     detail: (number: number): Promise<IPCResponse> => invokeIpc('todos:detail', number),
     create: (input: TodoCreateInput): Promise<IPCResponse> => invokeIpc('todos:create', input),
     act: (action: TodoAction): Promise<IPCResponse> => invokeIpc('todos:act', action),
+  };
+  // Profiles: the library, launches and runs (docs/PROFILES.md)
+  profiles: {
+    list: (): Promise<IPCResponse> => invokeIpc('profiles:list'),
+    ownAgentFarm: (): Promise<IPCResponse> => invokeIpc('profiles:own-agent-farm'),
+    get: (name: string): Promise<IPCResponse> => invokeIpc('profiles:get', name),
+    setEnabled: (name: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('profiles:set-enabled', name, enabled),
+    launch: (input: ProfileLaunchInput): Promise<IPCResponse> => invokeIpc('profiles:launch', input),
+    runs: (): Promise<IPCResponse> => invokeIpc('profiles:runs'),
+    setOutcome: (runId: string, outcome: string): Promise<IPCResponse> => invokeIpc('profiles:set-outcome', runId, outcome),
+    stop: (runId: string): Promise<IPCResponse> => invokeIpc('profiles:stop', runId),
   },
   // Mission Control — live overview of every agent pane across all sessions
   missionControl: {
@@ -1052,6 +1064,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = () => callback();
       ipcRenderer.on('remote:settings-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('remote:settings-changed', wrappedCallback);
+    },
+    onProfilesChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('profiles:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('profiles:changed', wrappedCallback);
     },
     onLoopsChanged: (callback: () => void) => {
       const wrappedCallback = () => callback();

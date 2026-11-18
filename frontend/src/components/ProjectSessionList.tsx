@@ -1,6 +1,6 @@
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat, Inbox } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat, Inbox, Workflow } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -11,6 +11,7 @@ import { AddProjectDialog } from './AddProjectDialog';
 import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 import { AgentStatusDot, PausedGlyph } from './ui/AgentStatusDot';
 import { resumeIfOpenResumes } from '../utils/pause';
 import type { DropdownItem } from './ui/Dropdown';
@@ -459,6 +460,8 @@ export function ProjectSessionList({
           </button>
         ) : null}
 
+        {/* Profiles sits above Loops: Loops, Autopilot and Approvals stay together (D-117). */}
+        <ProfilesNavRow active={activeView === 'profiles'} />
         <LoopsNavRow active={activeView === 'loops'} />
         {/* Approvals sits right under Autopilot, which answers them for you (D-117). */}
         <AutopilotNavRow />
@@ -770,6 +773,31 @@ export function LoopsNavRow({ active }: { active: boolean }) {
           <span aria-label={running ? `${loops.length} loops, a run in progress` : `${loops.length} loops`}>{loops.length}</span>
         </span>
       )}
+    </button>
+  );
+}
+
+// --- Profiles nav entry ---
+
+/** Opens the Profiles page: teams of agents and the workflows Pane runs for them. */
+export function ProfilesNavRow({ active }: { active: boolean }) {
+  return (
+    <button
+      type="button"
+      data-testid="profiles-nav"
+      data-sidebar-item
+      data-sidebar-key="profiles"
+      onClick={() => useNavigationStore.getState().navigateToProfiles()}
+      className={cn(
+        SIDEBAR_ROW_BASE,
+        SIDEBAR_ROW_GAP,
+        SIDEBAR_ROW_PADDING,
+        'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+        active ? 'bg-surface-hover text-text-primary' : 'text-text-secondary',
+      )}
+    >
+      <Workflow className="h-3.5 w-3.5" />
+      <span>Profiles</span>
     </button>
   );
 }
@@ -1448,13 +1476,30 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
 
       {showArchived && (
         <div id={archivedContentId} className="pb-2 max-h-[40vh] overflow-y-auto">
-          {isLoadingArchived ? (
-            <div className="px-4 py-2 space-y-2 animate-skeleton">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-7 bg-surface-tertiary rounded" />
-              ))}
-            </div>
-          ) : (
+          <SkeletonSwap loading={isLoadingArchived} skeleton={
+            <>
+              <LoadingStatus label="Loading archived Sessions and Panes" />
+              <Skeleton>
+                <div className="pb-1">
+                  <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide"><TextBone text="Sessions" /></p>
+                  {[44, 32].map(width => (
+                    <div key={width} className="flex h-8 items-center gap-2 pl-8 pr-1">
+                      <Bone className="h-3 w-3 flex-shrink-0" />
+                      <Bone className="h-3" style={{ width: `${width}%` }} />
+                    </div>
+                  ))}
+                </div>
+                <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide"><TextBone text="Panes" /></p>
+                {[38, 50].map(width => (
+                  <div key={width} className="flex h-7 items-center gap-2 pl-5 pr-4">
+                    <Bone className="h-3 w-3 flex-shrink-0" />
+                    <Bone className="h-3" style={{ width: `${width}%` }} />
+                    <Bone className="ml-auto h-2.5 w-2" />
+                  </div>
+                ))}
+              </Skeleton>
+            </>
+          }>
             <>
               <div data-testid="archived-orchestration-sessions" className="pb-1">
                 <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Sessions</p>
@@ -1547,7 +1592,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
                 );
               })}
             </>
-          )}
+          </SkeletonSwap>
         </div>
       )}
     </div>

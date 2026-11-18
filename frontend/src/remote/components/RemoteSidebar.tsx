@@ -13,6 +13,7 @@ import { pausedLabel, pausedReason } from '../../utils/pause';
 import { createProjectById, getPinnedSessions } from '../../utils/sessionOrdering';
 import { useRemoteSessionStore } from '../stores/remoteSessionStore';
 import { useRemoteSidebarSectionsStore, type RemoteSidebarSection } from '../stores/remoteSidebarSectionsStore';
+import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from '../../components/ui/Skeleton';
 import { useRemoteExpandedSessionsStore } from '../stores/remoteExpandedSessionsStore';
 import { RemoteTodosEntry } from './RemoteTodos';
 
@@ -371,9 +372,13 @@ export function RemoteSidebar({
           onToggle={toggleSection}
           count={archivedPaneCount + archivedSessions.length}
         >
-          {archivedProjects === null ? (
-            <p className="px-2 py-1 text-xs text-text-muted">Loading archived panes…</p>
-          ) : archivedPaneCount + archivedSessions.length === 0 ? (
+          <SkeletonSwap loading={archivedProjects === null} skeleton={<>
+            <LoadingStatus label="Loading archived Panes" />
+            <Skeleton>
+              {[50, 35].map(width => <div key={width} className="flex h-8 items-center gap-2 px-2"><Bone className="h-3.5 w-3.5" /><Bone className="h-3" style={{ width: `${width}%` }} /></div>)}
+            </Skeleton>
+          </>}>
+          {archivedProjects === null ? null : archivedPaneCount + archivedSessions.length === 0 ? (
             <p className="px-2 py-1 text-xs text-text-muted">Nothing archived</p>
           ) : (
             <>
@@ -400,6 +405,7 @@ export function RemoteSidebar({
               )))}
             </>
           )}
+          </SkeletonSwap>
         </SidebarSection>
       </div>
 
