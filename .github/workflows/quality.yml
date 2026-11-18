@@ -218,7 +218,7 @@ jobs:
         --exclude-path node_modules --exclude-path dist-electron
         './**/*.md'
 
-  # The smoke suites run beside quality-checks in five jobs. The two browser
+  # The smoke suites run beside quality-checks in ten jobs. The seven browser
   # shards split the minimal suite, which loads the renderer from Vite with a
   # mocked Electron API; the two renderer selection race shards also run from
   # Vite alone. The Electron job launches main/dist in real Electron and runs the
@@ -226,12 +226,12 @@ jobs:
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke-browser:
-    name: Functional Smoke (browser ${{ matrix.shard }}/2)
+    name: Functional Smoke (browser ${{ matrix.shard }}/7)
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4, 5, 6, 7]
 
     steps:
     - name: Checkout code
@@ -247,7 +247,7 @@ jobs:
       run: pnpm exec playwright install --with-deps chromium
 
     - name: Run maintained functional smoke tests
-      run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/2
+      run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/7
 
   # One worker per shard: the tests are CPU-bound, so four workers on one
   # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
