@@ -347,7 +347,7 @@ The Glassly build is [`glasses/glassly/`](../glasses/glassly): the same app in G
 background runtime. `pnpm --filter @pane/glasses-glassly build` bundles it with esbuild and runs
 Glassly's own manifest check and runtime guard over every repo module it bundles (Glassly checks
 only a project's own `src/`); `pnpm --filter @pane/glasses-glassly run pack` writes
-`glasses/glassly/build/com.runpane.glasses-<version>.zip`. For a phone, run `bun x glassly dev` in
+`glasses/glassly/build/to.greenfield.pane-<version>.zip`. For a phone, run `bun x glassly dev` in
 `glasses/glassly` on a computer on the phone's Wi-Fi and scan its QR in the Glassly app. Glassly's
 CLI and device profiles are read from pinned npm tarballs (`glasses/glassly/scripts/pinned.ts`);
 `glasses/test/glassly.test.ts` checks every screen against Glassly's own G2 profile, and

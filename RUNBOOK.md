@@ -21,7 +21,7 @@ each computer its `runpane.net` address for QR pairing.
 | Relays | `Deploy Pane relays` (`relay-deploy.yml`) | manual only | Builds `relay/`, pushes the image to Google Artifact Registry, and creates or updates the three relay VMs; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
 | PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux, macOS and Windows, the glasses tests and the Glassly miniapp build on Linux, the runpane wrapper matrix, and the Playwright smoke suite |
-| Glasses app on Glassly | none: published by hand (see [Glassly release](#glassly-release)) | a person, after QA on real G2 | Submits `com.runpane.glasses` to the Glassly store for review |
+| Glasses app on Glassly | none: published by hand (see [Glassly release](#glassly-release)) | a person, after QA on real G2 | Submits `to.greenfield.pane` to the Glassly store for review |
 | React review | `React Doctor` (`react-doctor.yml`) | pull requests that touch `frontend/` | Comments on new React findings; advisory, never blocks |
 | Traffic snapshot | `GitHub traffic → PostHog` (`traffic-snapshot.yml`) | daily 06:00 UTC | Copies GitHub traffic and release download counts into PostHog |
 
@@ -278,13 +278,13 @@ first deploy creates it.
 ## Glassly release
 
 The glasses app's Glassly build ([`glasses/glassly/`](glasses/glassly)) goes to the Glassly store
-by hand, from a computer with [Bun](https://bun.sh) and a Glassly account in the `com.runpane`
-developer org. Submitting is public, so ask first.
+by hand, from a computer with [Bun](https://bun.sh) and a Glassly account in the Greenfield
+developer org (package prefix `to.greenfield`). Submitting is public, so ask first.
 
 1. Raise `version` in `glasses/glassly/miniapp.json`. Set `minHostVersion` to the first Glassly
    app release that posts notifications, once Glassly ships it.
 2. `pnpm --filter @pane/glasses-glassly run pack` builds, checks and writes
-   `glasses/glassly/build/com.runpane.glasses-<version>.zip`.
+   `glasses/glassly/build/to.greenfield.pane-<version>.zip`.
 3. In `glasses/glassly`: `bun x glassly login` once, then `bun x glassly publish`. It signs the
    bundle with this computer's key, uploads it and submits it for Glassly's review.
 4. For a test install without the store, `bun x glassly release` serves the zip on the local
