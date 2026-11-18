@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import { create } from 'zustand';
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
@@ -29,8 +30,14 @@ interface HostsState extends SavedHosts {
 export const useHostsStore = create<HostsState>((set, get) => {
   // Saved computers keep their last-known lists on the phone; the demo never does.
   const savedState = createSavedState(queryClient, savedStateFiles, { saves: id => get().profiles.some(profile => profile.id === id) });
+  // A change still waiting to be written goes to disk before the app can be killed in the background.
+  AppState.addEventListener('change', status => {
+    if (status === 'background') savedState.flush();
+  });
   const commit = async (next: SavedHosts) => {
     const { profiles, activeId } = get();
+    // A computer removed, signed out or paired again under a new id leaves its saved lists behind.
+    for (const profile of profiles) if (!next.profiles.some(kept => kept.id === profile.id)) savedState.forget(profile.id);
     // Pairing or picking a real computer ends the demo.
     set({ ...next, demo: false });
     await saveHosts(secureStore, next, { profiles, activeId });
@@ -43,15 +50,14 @@ export const useHostsStore = create<HostsState>((set, get) => {
     async hydrate() {
       const hosts = await loadHosts(secureStore).catch(() => EMPTY_HOSTS);
       // Every saved computer's lists paint from the first frame, the current one's and All's.
+      // Files of computers no longer saved (a backup restored, an older sign-out) are deleted.
+      savedState.keepOnly(hosts.profiles.map(profile => profile.id));
       for (const profile of hosts.profiles) savedState.restore(profile.id);
       set({ ...hosts, hydrated: true });
     },
     add: profile => commit(addHost(get(), profile)),
     addMany: (added, paired) => commit(addHosts(get(), added, paired)),
-    remove: id => {
-      savedState.forget(id);
-      return commit(removeHost(get(), id));
-    },
+    remove: id => commit(removeHost(get(), id)),
     setActive: id => {
       // Lists dropped from memory since launch paint again from the file.
       savedState.restore(id);

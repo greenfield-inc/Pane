@@ -177,8 +177,9 @@ describe('feedsAnswered', () => {
     expect(feedsAnswered([build, studio])).toEqual({ lists: true, approvals: true });
   });
 
-  it('counts an offline machine with its last-known rows', () => {
-    expect(feedsAnswered([build, { ...unread, offlineSince: 0 }])).toEqual({ lists: true, approvals: true });
+  it('counts an offline machine with its last-known rows, and not one it has never seen', () => {
+    expect(feedsAnswered([build, { ...studio, offlineSince: 1_000, waiting: { lists: true, approvals: true } }])).toEqual({ lists: true, approvals: true });
+    expect(feedsAnswered([{ ...unread, offlineSince: 0 }])).toEqual({ lists: false, approvals: false });
   });
 
   it('holds approvals until the phone’s own machine has read them, while its Panes already count', () => {

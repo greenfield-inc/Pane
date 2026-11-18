@@ -50,14 +50,19 @@ export interface KeyValueStore {
 
 const INDEX_KEY = 'pane.hosts.index';
 
-// Each profile lives under its own key: iOS Keychain items over ~2 KB can fail,
-// and a profile with a tunnel note is already ~0.5 KB.
-function profileKey(id: string): string {
+/** A short name for a saved host that carries nothing of its token, for storage keys and file names. */
+export function hostIdHash(id: string): string {
   let hash = 0x811c9dc5;
   for (let index = 0; index < id.length; index += 1) {
     hash = Math.imul(hash ^ id.charCodeAt(index), 0x01000193);
   }
-  return `pane.host.${(hash >>> 0).toString(16)}`;
+  return (hash >>> 0).toString(16);
+}
+
+// Each profile lives under its own key: iOS Keychain items over ~2 KB can fail,
+// and a profile with a tunnel note is already ~0.5 KB.
+function profileKey(id: string): string {
+  return `pane.host.${hostIdHash(id)}`;
 }
 
 export async function loadHosts(store: KeyValueStore): Promise<SavedHosts> {
