@@ -140,16 +140,23 @@ jobs:
     - name: Start type checking
       run: scripts/ci-background.sh start typecheck pnpm typecheck
 
-    - name: Start consolidated lint harness
-      run: scripts/ci-background.sh start lint pnpm lint
+    - name: Start lint
+      run: scripts/ci-background.sh start lint pnpm lint:code
+
+    - name: Start dead-code check
+      run: scripts/ci-background.sh start deadcode pnpm deadcode
 
     - name: Finish type checking
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait typecheck
 
-    - name: Finish consolidated lint harness
+    - name: Finish lint
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait lint
+
+    - name: Finish dead-code check
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh wait deadcode
 
     # CI result's gate and its contract with this file (expected jobs, needs,
     # skip manifest). Here rather than in CI result, which runs it every time
