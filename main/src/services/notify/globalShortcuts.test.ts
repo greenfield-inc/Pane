@@ -22,7 +22,7 @@ describe('system-wide keys', () => {
     }
     configManager = new FakeConfigManager();
     // SAFETY: navigate() reads only these members of the main window.
-    const window = { isDestroyed: () => false, isMinimized: () => false, restore: vi.fn(), show: vi.fn(), focus: vi.fn(), webContents: { send: sent } } as unknown as BrowserWindow;
+    const window = { isDestroyed: () => false, isMinimized: () => false, restore: vi.fn(), show: vi.fn(), focus: vi.fn(), webContents: { send: sent } } as BrowserWindow;
     service = new NotifyService({
       // SAFETY: NotifyService reads only getConfig() and 'config-updated' from its ConfigManager.
       configManager: configManager as ConfigManager,
