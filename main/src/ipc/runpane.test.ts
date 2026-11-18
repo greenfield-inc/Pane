@@ -7,6 +7,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { getRemoteDaemonExecutableCandidates } from '../daemon/remoteDaemonService';
 import { pathToFileURL } from 'url';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
@@ -54,6 +55,7 @@ const memoryDatabase = () => new Database(':memory:');
 
 // Transcript reads are real file I/O; these tests script what the transcript says.
 const findUserTurnSince = vi.spyOn(agentTranscripts, 'findUserTurnSince');
+
 
 vi.spyOn(panelManager, 'createPanel');
 vi.spyOn(panelManager, 'getPanel');
@@ -333,6 +335,30 @@ function configStub(value: Partial<ConfigManager>): ConfigManager {
   // SAFETY: chat tab creation reads only getConfig() from the config manager;
   // any other method call fails at its own site.
   return value as ConfigManager;
+}
+
+/**
+ * Runs `run` with a stand-in installed Pane at one of its fixed install paths, as `runpane:doctor` looks for one. With none
+ * installed, as on CI, doctor looks Pane up on PATH with `where`/`sh -lc` (5 s each), which a busy
+ * runner can stretch past a test's 5 s.
+ */
+async function withInstalledPane<T>(run: () => Promise<T>): Promise<T> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-doctor-'));
+  const key = process.platform === 'win32' ? 'LOCALAPPDATA' : 'HOME';
+  const saved = process.env[key];
+  process.env[key] = root;
+  try {
+    const installed = getRemoteDaemonExecutableCandidates().find(candidate => candidate.startsWith(root));
+    if (!installed) throw new Error(`No install path under ${key} for ${process.platform}`);
+    fs.mkdirSync(path.dirname(installed), { recursive: true });
+    fs.writeFileSync(installed, '');
+    fs.chmodSync(installed, 0o755);
+    return await run();
+  } finally {
+    if (saved === undefined) delete process.env[key];
+    else process.env[key] = saved;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 function createRegistry(services = createServices()): PaneCommandRegistry {
@@ -1357,7 +1383,7 @@ describe('runpane IPC handlers', () => {
   it('reports top-level runpane doctor health', async () => {
     const registry = createRegistry();
 
-    const result = await registry.invoke('runpane:doctor');
+    const result = await withInstalledPane(() => registry.invoke('runpane:doctor'));
 
     expect(result).toMatchObject({
       ok: true,
@@ -10064,7 +10090,7 @@ describe('runpane IPC handlers', () => {
 
     it('exposes the lock channels to runpane doctor', async () => {
       const registry = createRegistry(createLockServices());
-      const result = await registry.invoke('runpane:doctor');
+      const result = await withInstalledPane(() => registry.invoke('runpane:doctor'));
       // SAFETY: The doctor result carries a daemon.channels string array.
       const daemon = (result as { daemon: { channels: string[] } }).daemon;
       expect(daemon.channels).toEqual(expect.arrayContaining(['runpane:locks:acquire', 'runpane:locks:release', 'runpane:locks:list']));
