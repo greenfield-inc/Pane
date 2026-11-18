@@ -137,6 +137,9 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
+    - name: ESLint and Oxlint side by side (throwaway)
+      run: node scripts/lint-parity.mjs
+
     - name: Start type checking
       run: scripts/ci-background.sh start typecheck pnpm typecheck
 
