@@ -5,9 +5,15 @@ use without the value showing up in chat. A secret is addressed as
 `<project>/<NAME>`: the agent picks the project (`stripe`, `qa`, a repo's name) and
 the name follows environment-variable rules, so it can be injected as-is.
 
-Every host Pane syncs keys with keeps its own copy, so a secret works offline and on
-every machine. Values stay in the OS store, never in `config.json`, the database,
-logs, chat or MCP output.
+A secret is one of two kinds:
+
+| Kind | Where the value lives | Who sets it |
+| --- | --- | --- |
+| Typed | Saved in Pane on every host it syncs to, until you replace or delete it. | You in Settings → Secrets, an agent with `runpane secrets set`, or you on a `secrets request` card. |
+| From 1Password | 1Password. Pane keeps only the reference, `op://vault/item/field`, and holds the value only during a [lease](#leases) you approve. | Only you, in Settings → Secrets. |
+
+Values stay in the OS store, never in `config.json`, the database, logs, chat or MCP
+output.
 
 ## Use a secret
 
@@ -25,6 +31,10 @@ The values are read at call time, so a secret set a moment ago works in a runnin
 agent without a restart. Injected names override the caller's environment. `PATH`,
 `WORKTREE_PATH` and `PANE_*` are refused. A `--file` secret is written to a private
 temp file that is deleted when the command exits.
+
+A secret from 1Password works the same way while it has a live lease on that
+machine. Without one, `exec` runs nothing and fails with `SECRET_LEASE_ENDED`; its
+next step is the command to ask for a lease.
 
 No command prints a raw value: there is no `secrets get`. A value reaches a
 transcript only if the command you run prints it.
@@ -55,17 +65,119 @@ showing that host, and in the phone app, which uses a secure text field. A
 lock-screen alert only opens the app: it has no Reply field, because the system's
 reply input is not a secure field. Glasses show "Answer on your phone or computer".
 
+## Secrets from 1Password
+
+### Add a reference
+
+In Settings → Secrets, choose **Add from 1Password**, then give the project, the
+name and the reference. To get the reference, open the item in 1Password and choose
+**Copy Secret Reference** on the field. It looks like `op://Dev/Stripe/secret key`.
+
+Agents can't add or change a reference. `runpane secrets set` on a name that comes
+from 1Password fails with `SECRET_IS_REFERENCE`.
+
+### Move a typed secret to 1Password
+
+**Move to 1Password** on a typed secret writes its value into 1Password, turns the
+secret into a reference to that new item, and deletes the typed copies on every
+host. The first move asks which vault to use; later moves use the same vault.
+
+## Leases
+
+A secret from 1Password has no value on any machine until you approve a lease.
+
+### Asking for one
+
+An agent asks with `runpane secrets lease` (MCP: `secrets_lease`):
+
+```sh
+runpane secrets lease --project stripe STRIPE_LIVE_KEY WEBHOOK_KEY --reason "Run the webhook tests."
+```
+
+One card shows:
+
+- the names and their 1Password references
+- the machines that will hold the values: by default your desktop and the machine
+  the agent runs on
+- the length and the time the lease ends
+
+Press **Start lease** on your computer. Pane reads 1Password once, which asks for
+Touch ID or Windows Hello, and sends the values to each machine on the card. The
+agent gets back the lease id, end time and machines, never a value:
+
+```text
+Leased stripe/STRIPE_LIVE_KEY, WEBHOOK_KEY until 2026-11-05T12:00:00.000Z on studio, devbox. Lease lease_3f9a2c. Use them with `runpane secrets exec --project stripe -- <command>`.
+```
+
+**Decline** ends the card and the agent reads "The person declined the lease."
+
+Only you approve a lease, and only on a computer, since only a computer can show
+1Password's prompt. Agents can ask for a lease and end one, never grant or extend
+one. Autopilot and teammates can't answer a lease card. The phone shows the card,
+says to approve it on your computer, and can Decline.
+
+You can also start a lease yourself in Settings → Secrets.
+
+### Machines
+
+A machine shared with "Everyone on tailnet" can't receive a lease: its teammates'
+commands run as you there and could use it. Settings → Secrets shows why a machine
+can't take one (that sharing, an offline machine, or a Pane too old for leases).
+
+### Length and renewal
+
+A lease lasts 24 hours by default. Change the length per project in Settings →
+Secrets, from 1 hour to 7 days.
+
+<!-- P0: renewal -->
+About an hour before a lease ends, Pane renews it without asking if 1Password's
+approval is still live. Otherwise it posts an **Extend** card. If you ignore the
+card, the lease ends on time.
+
+### Ending a lease
+
+Settings → Secrets lists the live leases on each machine, with **End now** for one
+and **End all**. An agent can end a lease it no longer needs:
+
+```sh
+runpane secrets lease end --id lease_3f9a2c --yes
+```
+
+When a lease ends, on time or early, each machine deletes its copy of the values.
+After that, `secrets exec` and project variables can't read them. A command that is
+already running keeps the environment it started with, and Pane can't take a value
+back from a process, a file it wrote, or a transcript it printed to.
+
+If Pane was closed when a lease expired, it deletes the values the next time it
+starts.
+
+### Machines without an OS keyring
+
+A Linux machine with no keyring can't encrypt at rest, so it holds a lease in memory
+only. The lease ends there if Pane restarts; when the desktop reconnects, it sends
+the lease again until it expires. The card and Settings → Secrets say when a machine
+holds a lease in memory.
+
+### Lease log
+
+Every lease event (granted, renewed, ended, expired, swept) adds one JSON line to
+`secret-leases.log` in the Pane data directory. A line names the lease, project,
+secrets and machine, never a value. The live lease records are in
+`secret-leases.json` in the same directory, also without values.
+
+Leases never travel with [shared key sync](SHARED_CREDENTIALS.md). A lease reaches a
+machine only when you start it.
+
 ## Manage secrets
 
 | Where | What |
 | --- | --- |
-| Settings → Secrets | List by project with when and where each was set; Add, Replace and Delete. Values are never shown again. |
-| `runpane secrets list [--project P] [--json]` | Project, name, updated time and machine. MCP: `secrets_list` in the `secrets` toolset. |
+| Settings → Secrets | Typed secrets and references by project, with when and where each was set; Add, Add from 1Password, Replace, Move to 1Password and Delete; live leases per machine with End now and End all; lease length per project. Values are never shown again. |
+| `runpane secrets list [--project P] [--json]` | Typed secrets with their updated time and machine, then references with when their lease ends, such as `stripe/STRIPE_LIVE_KEY  from 1Password (op://Dev/Stripe/live key)  leased until <time>` or `no lease`. MCP: `secrets_list` in the `secrets` toolset. |
 | `runpane secrets set --project P --name N --yes` | Reads the value from stdin only, so it never lands in your shell history or a process list. There is no MCP tool for it. |
 | `runpane secrets delete --project P --name N --yes` | MCP: `secrets_delete` in the `secrets` toolset. |
-
-A missing secret fails with `SECRET_NOT_FOUND` and the next step: request it, or
-open Pane on a desktop connected to that machine so it syncs.
+| `runpane secrets lease --project P NAME...` | Asks for a lease on a card. MCP: `secrets_lease`, in the default toolset. |
+| `runpane secrets lease end --id ID --yes` | Ends a lease on this machine. MCP: `secrets_lease_end` in the `secrets` toolset. |
 
 Secrets are managed on the machine itself: `runpane workspace <machine> secrets …`
 is refused. From your own devices, run `runpane workspace <machine> exec -- runpane secrets …`
@@ -74,41 +186,59 @@ instead.
 A project's environment variables can point at a Pane secret instead of holding
 their own copy: see [Project environment variables](PROJECT_ENV_VARS.md).
 
+## Errors
+
+| Code | What happened | Next step |
+| --- | --- | --- |
+| `SECRET_NOT_FOUND` | No secret by that name on this machine. | Request it, or open Pane on a desktop connected to that machine so it syncs. |
+| `SECRET_LEASE_ENDED` | The secret comes from 1Password and has no live lease on this machine. Nothing was run. | Run `runpane secrets lease --project <p> <NAME...>`, and the person approves it on the card. |
+| `SECRET_IS_REFERENCE` | `secrets set` named a secret that comes from 1Password. Nothing was saved. | Change it in Settings → Secrets. |
+| `SECRET_LEASE_UNSUPPORTED` | `secrets lease end` reached a Pane from before leases. | Update Pane. |
+| `SECRET_OWNER_REQUIRED` | A teammate's command asked for a secret. | The owner does it on their own devices. |
+
 ## Where values are stored
 
-| Host | Store |
-| --- | --- |
-| macOS | The login keychain: service `Pane` (or `Pane (<data directory>)` for a dev build's `PANE_DIR`), account `secret:<project>/<NAME>`. A value over 1 KB is kept in part items `secret:<project>/<NAME>#<id>.<n>`, which that account lists. |
-| Windows, desktop Linux | `secrets.json` in the Pane data directory, mode 0600, each value encrypted with the OS (DPAPI, or the desktop keyring) through Electron's safeStorage |
-| Linux without a keyring (a headless server) | The same 0600 file, as plain text. `runpane secrets list` on that host says so. |
+| Host | Typed secrets | Lease values |
+| --- | --- | --- |
+| macOS | The login keychain: service `Pane` (or `Pane (<data directory>)` for a dev build's `PANE_DIR`), account `secret:<project>/<NAME>`. A value over 1 KB is kept in part items `secret:<project>/<NAME>#<id>.<n>`, which that account lists. | The same keychain service, one item per leased name, deleted when the lease ends. |
+| Windows, desktop Linux | `secrets.json` in the Pane data directory, mode 0600, each value encrypted with the OS (DPAPI, or the desktop keyring) through Electron's async safeStorage API | The same file, encrypted the same way, deleted when the lease ends. |
+| Linux without a keyring (a headless server) | The same 0600 file, as plain text. `runpane secrets list` on that host says so. | Memory only, never on disk. |
 
-The index of names, times and machines lives in `config.json` under `paneSecrets`.
-A delete removes the stored value first. If the keychain refuses, the secret stays
-saved and listed, and the delete can be run again once the keychain is unlocked.
+The index of names, times and machines lives in `config.json` under `paneSecrets`,
+and references under `paneSecretReferences`. A delete removes the stored value first. If the keychain refuses, the
+secret stays saved and listed, and the delete can be run again once the keychain is
+unlocked.
 
 ## How secrets sync
 
-Secrets travel with [shared integration keys](SHARED_CREDENTIALS.md), under the same
-rules: a desktop or the phone that has more than one host saved carries them between
-hosts, in memory. The copy set most recently wins, and a deletion is recorded so an
-older copy cannot bring the secret back. Sync runs when a secret changes and when a
-saved host reconnects. A host that was offline keeps its copy until a device that
-carries keys reaches it. Hosts from before secrets ignore them.
+Typed secrets and references travel with [shared integration keys](SHARED_CREDENTIALS.md),
+under the same rules: a desktop or the phone that has more than one host saved
+carries them between hosts, in memory. The copy set most recently wins, and a
+deletion is recorded so an older copy cannot bring the secret back. Sync runs when a
+secret changes and when a saved host reconnects. A host that was offline keeps its
+copy until a device that carries keys reaches it. Hosts from before secrets ignore
+them.
+
+A reference syncs, but its value never does: only a lease you start sends values,
+and only to the machines on its card. An older host or phone ignores references and
+never receives a lease value.
 
 ## Who can read a secret
 
-Any agent, and any program running as you, on any of your hosts, can use every Pane
-secret. That is the point: agents keep and share their own secrets across projects.
-The safeguards stop accidental exposure; they don't sandbox anything. Setting "Everyone on tailnet" on
-any host gives everyone on the tailnet the same access.
+Any agent, and any program running as you, on any of your hosts, can use every typed
+Pane secret, and every secret from 1Password while its lease is live on that host.
+That is the point: agents keep and share their own secrets across projects. The
+safeguards stop accidental exposure; they don't sandbox anything. Setting "Everyone
+on tailnet" on any host gives everyone on the tailnet the same access to typed
+secrets.
 
 | Who or where | Can read values? | Why |
 | --- | --- | --- |
 | Any agent or process running as you on a host | Yes | runpane's local socket is mode 0600 with no token. On macOS, items trust `/usr/bin/security`. |
-| Every host Pane syncs to | Yes, holds a copy | Each saved host keeps a copy for offline use. |
-| Your paired phone | Relays, never stores | The same rule as shared keys: a paired device can already open terminals on the host. |
-| Teammates (other Tailscale logins on your tailnet), when any one of your hosts is set to "Everyone on tailnet" | Yes | Their `workspace exec` commands and the terminals they open there run as you, so they can read the keychain or `secrets.json`, run `runpane`, and reach every secret. Each synced host keeps a copy of your secrets, so that setting on any one host exposes them all. Pane refuses only their direct secret requests: secret cards, secret variables, chat tab keys, chat tab sign-in and [shared key sync](SHARED_CREDENTIALS.md), and their terminals and chat tabs start without secret variables or chat tab keys, including after the owner switches one of their terminals to chat. Keep "Only me" on every host unless you trust everyone on the tailnet with all your secrets. |
-| A Linux host without a keyring | At rest in a 0600 file, unencrypted | `runpane secrets list` on that host says so. |
-| Chat, MCP output, Notify history and broadcasts, push payloads, Pane logs, analytics, `sessions.db`, `config.json` | No | Pane never writes or returns a value to any of them. |
+| Every host Pane syncs to | Typed secrets: yes, holds a copy. From 1Password: only during a lease that names that host. | Each saved host keeps a copy of typed secrets for offline use. |
+| Your paired phone | Relays, never stores | The same rule as shared keys: a paired device can already open terminals on the host. It never receives a lease value. |
+| Teammates (other Tailscale logins on your tailnet), when any one of your hosts is set to "Everyone on tailnet" | Typed secrets: yes. From 1Password: no, since that host can't receive a lease. | Their `workspace exec` commands and the terminals they open there run as you, so they can read the keychain or `secrets.json`, run `runpane`, and reach every typed secret. Each synced host keeps a copy of your typed secrets, so that setting on any one host exposes them all. Pane refuses only their direct secret requests: secret and lease cards, secret variables, chat tab keys, chat tab sign-in and [shared key sync](SHARED_CREDENTIALS.md), and their terminals and chat tabs start without secret variables or chat tab keys, including after the owner switches one of their terminals to chat. Keep "Only me" on every host unless you trust everyone on the tailnet with all your typed secrets. |
+| A Linux host without a keyring | Typed secrets at rest in a 0600 file, unencrypted. Lease values in memory only. | `runpane secrets list` on that host says so. |
+| Chat, MCP output, Notify history and broadcasts, push payloads, Pane logs (including the lease log), analytics, `sessions.db`, `config.json` | No | Pane never writes or returns a value to any of them. |
 | An agent's transcript and Pane's saved terminal scrollback | Only if the agent prints it | `exec` puts the value in a child's environment; if that command echoes it, the output goes wherever its output goes. |
-| Running processes | Yes, through the environment | `ps eww` shows a process's environment to the same user. |
+| Running processes | Yes, through the environment | `ps eww` shows a process's environment to the same user, and a process keeps it after a lease ends. |

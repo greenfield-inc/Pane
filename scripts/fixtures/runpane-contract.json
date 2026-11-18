@@ -1362,6 +1362,26 @@
       "--json"
     ],
     [
+      "secrets",
+      "lease",
+      "--project",
+      "stripe",
+      "STRIPE_SECRET_KEY",
+      "--reason",
+      "- for the webhook tests",
+      "WEBHOOK_SECRET",
+      "--json"
+    ],
+    [
+      "secrets",
+      "lease",
+      "end",
+      "--id",
+      "lease_3f9a2c",
+      "--yes",
+      "--json"
+    ],
+    [
       "repos",
       "update",
       "--repo",

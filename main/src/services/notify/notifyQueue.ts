@@ -575,12 +575,13 @@ export class NotifyQueue extends EventEmitter {
     }
   }
 
-  /** Why a desktop could not start the lease this card asks for; the card keeps waiting with it shown. Null clears it. */
+  /** Why this desktop could not start the lease a card asks for; the card keeps waiting with it shown. Null clears it. */
   noteLeaseError(id: string, text: string | null): void {
-    const entry = this.entries.get(id);
-    if (!entry?.item.lease || entry.item.state !== 'waiting') return;
-    if (text === null) delete entry.item.leaseError;
-    else entry.item.leaseError = text;
+    // Another machine's card too: this screen shows the error until that machine's next state replaces the item.
+    const item = this.find(id);
+    if (!item?.lease || item.state !== 'waiting') return;
+    if (text === null) delete item.leaseError;
+    else item.leaseError = text;
     this.changed();
   }
 

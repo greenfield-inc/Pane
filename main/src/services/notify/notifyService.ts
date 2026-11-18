@@ -447,11 +447,11 @@ export class NotifyService {
     if (!this.deps.startLease) {
       throw new PaneError('SECRET_LEASE_NEEDS_DESKTOP', 'This Pane can\'t start leases, because it has no 1Password access here. Nothing was leased.', 'Press Start lease in Pane on your Mac or PC.');
     }
-    if (!machineId) this.queue.noteLeaseError(command.id, null);
+    this.queue.noteLeaseError(command.id, null);
     try {
       return { ...command, answer: { ...answer, lease: await this.deps.startLease(item, machineId) } };
     } catch (error) {
-      if (!machineId) this.queue.noteLeaseError(command.id, error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : String(error));
+      this.queue.noteLeaseError(command.id, error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : String(error));
       throw error;
     }
   }
