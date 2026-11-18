@@ -14,8 +14,8 @@ process prints its own report.
 
 `.oxlintrc.json` turns on every Oxlint category except `nursery`
 (`correctness`, `suspicious`, `perf`, `pedantic`, `restriction`, `style`) for
-the `eslint`, `typescript`, `unicorn`, `oxc`, `react`, `jsx-a11y`, `import`,
-`promise`, `node`, `vitest` and `react-perf` plugins, plus the 15 anti-slop
+the `eslint`, `typescript`, `unicorn`, `oxc`, `react`, `jsx-a11y`, `promise`,
+`node`, `vitest` and `react-perf` plugins, plus the 15 anti-slop
 rules ([anti-slop.md](anti-slop.md)). Every rule is an error except the two
 renderer warnings below.
 
@@ -43,6 +43,10 @@ does not look inside comments or regular expression literals.
 
 ## Why a rule is off
 
+The `import` plugin is off as a whole. With it on, Oxlint resolves every
+import into a module graph before linting, which doubled lint time, and the
+type check already rejects missing exports and unresolved paths.
+
 `pedantic`, `restriction` and `style` rules are off where the code follows a
 different convention (for example `sort-keys`, `no-magic-numbers`, `curly`,
 `func-style`). Adopting one is a codebase-wide rewrite.
@@ -52,7 +56,6 @@ The `correctness`, `suspicious` and `perf` rules that are off:
 | Rule | Reason |
 | --- | --- |
 | `react/react-in-jsx-scope` | The renderer uses the automatic JSX runtime. |
-| `import/default` | Reports Vite `?worker` imports, which have a default export at build time. |
 | `jsx-a11y/*` (12 rules) | Each fix changes markup or focus behaviour; needs its own UI change. |
 | `react/exhaustive-deps`, `react/only-export-components` | Warnings in `frontend/src`, as before; fixing a dependency list changes when an effect runs. |
 | `vitest/require-mock-type-parameters`, `no-conditional-expect`, `require-to-throw-message`, `valid-expect`, `expect-expect`, `no-standalone-expect` | Test style; `no-standalone-expect` also reports expectations in hooks and helpers. |
@@ -65,7 +68,6 @@ The `correctness`, `suspicious` and `perf` rules that are off:
 | `eslint/no-await-in-loop` | Most loops are deliberately sequential. |
 | `eslint/no-shadow`, `no-underscore-dangle`, `no-unmodified-loop-condition`, `preserve-caught-error` | Naming and error-wrapping conventions the code does not follow yet. |
 | `promise/always-return`, `no-callback-in-promise`, `no-multiple-resolved`, `no-promise-in-callback` | Callback-style code that a rewrite to `async` would fix. |
-| `import/no-unassigned-import`, `no-named-as-default`, `no-named-as-default-member` | Side-effect imports and default-export packages the code uses on purpose. |
 | `typescript/no-extraneous-class` | Static-only classes are part of existing APIs. |
 | `react/no-unstable-nested-components`, `no-array-index-key`, `no-object-type-as-default-prop`, `jsx-no-constructed-context-values`, `iframe-missing-sandbox` | Each fix changes rendering; needs its own UI change. |
 | `react-perf/*`, `oxc/no-map-spread` | Allocation advice the renderer does not follow; React Compiler territory. |
