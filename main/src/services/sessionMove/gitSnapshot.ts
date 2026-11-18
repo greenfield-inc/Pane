@@ -128,11 +128,12 @@ async function withTempDir<T>(work: (dir: string) => Promise<T>): Promise<T> {
 /**
  * Copies an index file with its mtime rounded down to the second. Git trusts an entry's stat data only
  * when the entry is older than the index file, so a fresh mtime would hide same-size edits made in the
- * index's own timestamp granule; an older mtime only makes git hash a few more files.
+ * index's own timestamp granule; an older mtime only makes git hash a few more files. The mtime is read
+ * before copying, so an index written in between can only make the copy look older than its content.
  */
 async function copyIndexFile(from: string, to: string): Promise<void> {
-  await fs.promises.copyFile(from, to);
   const seconds = Math.floor((await fs.promises.stat(from)).mtimeMs / 1000);
+  await fs.promises.copyFile(from, to);
   await fs.promises.utimes(to, seconds, seconds);
 }
 

@@ -366,6 +366,8 @@ describe('gitSnapshot', () => {
     git(a, ['add', 'other.txt']);
     write(file, 'other unstaged\n');
     fs.utimesSync(file, stamp, stamp);
+    // A valid cache tree means write-tree leaves the first copy alone, so the second copy is checked too.
+    git(a, ['write-tree']);
     fs.utimesSync(path.join(a, '.git', 'index'), stamp, stamp);
     expect(git(a, ['diff', '--name-only'])).toBe('other.txt\n');
 
