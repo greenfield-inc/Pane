@@ -2,8 +2,10 @@ import type { NotifyAnswer, NotifyItem, NotifySharedState, NotifySource, NotifyU
 
 /** The part of a computer's Notify state (`notify:remote-snapshot`, `notify:shared-changed`) the glasses read. */
 export interface NotifyCardState extends Pick<NotifySharedState, 'machine' | 'epoch' | 'revision'> {
+  /** Someone used this computer in the last 2 minutes (a Pane new enough to say). */
+  inUse?: boolean;
   items: Array<Pick<NotifyItem, 'id' | 'ui' | 'title' | 'context' | 'suggestions' | 'state' | 'createdAt'> & {
-    choices?: Array<{ label: string }>;
+    choices?: Array<{ label: string; recommended?: boolean }>;
     source: Pick<NotifySource, 'name' | 'paneId' | 'panelId'>;
   }>;
 }
@@ -23,6 +25,8 @@ export interface Card {
   context?: string;
   /** options: the choice labels. */
   choices: string[];
+  /** The index in `choices` the asker recommends, if any. */
+  recommended?: number;
   /** ask: suggested answers. */
   suggestions: string[];
   /** The asking Pane's name. */
@@ -90,6 +94,8 @@ export interface PaneEntry {
   panelId: string;
   /** Epoch ms of its last activity on its computer, when known. */
   activityAt?: number;
+  /** Its branch's pull request, as the computer last read it from GitHub. */
+  pr?: { number: number; state: string; title?: string };
 }
 
 /** A menu choice's number: Claude Code and Codex pick that choice when it is pressed. */
@@ -188,6 +194,8 @@ export function cardsFromNotify(computerId: string, state: NotifyCardState): Car
       paneName: item.source.name,
       createdAt: item.createdAt,
     };
+    const recommended = (item.choices ?? []).findIndex((choice) => choice.recommended === true);
+    if (recommended >= 0) card.recommended = recommended;
     if (item.context) card.context = item.context;
     if (item.source.paneId) card.paneId = item.source.paneId;
     if (item.source.panelId) card.panelId = item.source.panelId;

@@ -29,7 +29,7 @@ import { checkCard, fitLinks } from '../services/notify/cardCheck';
 import { summaryPage } from '../services/notify/summaryPage';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import type { MachineHealthCard } from '../../../shared/types/machineHealth';
-import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySnapshotUnchanged, type NotifySummaryPage } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
@@ -39,6 +39,9 @@ import type { AgentState } from '../../../shared/types/agentStatus';
 import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore } from '../services/paneSecrets';
 import { agentLabel } from '../../../shared/agents';
+
+/** A snapshot reader's version, to skip a state it already holds. */
+const snapshotSinceSchema = boundary.object({ since: boundary.optional(boundary.object({ epoch: boundary.string, revision: boundary.number })) });
 
 const MAX_CHOICES = 9;
 const MAX_TEXT = 4_000;
@@ -508,7 +511,15 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
   });
 
-  commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
+  // Only the read carries `inUse`: in the published state it would churn events and echo between machines.
+  // A reader that names the version it holds (the glasses poll every few seconds) gets that version alone while nothing changed.
+  commandRegistry.register('notify:remote-snapshot', async (options?: PaneCommandValue): Promise<NotifySharedState | NotifySnapshotUnchanged> => {
+    const state = notify.sharedState();
+    const inUse = notify.inUse();
+    const since = decodeOptionalBoundary(options ?? {}, snapshotSinceSchema)?.since;
+    if (since && since.epoch === state.epoch && since.revision === state.revision) return { unchanged: true, epoch: state.epoch, revision: state.revision, inUse };
+    return { ...state, inUse };
+  });
   // An approval's Summary (P4): the asker's page or Pane's template, served with no scripts or network.
   commandRegistry.register('notify:summary-page', async (id: PaneCommandValue, options?: PaneCommandValue): Promise<NotifySummaryPage> => {
     const wanted = decodeBoundary(id, boundary.nonEmptyString);

@@ -1,20 +1,9 @@
 // Adapted from GlanceCode (https://github.com/sousyllc/glancecode), MIT License, Copyright (c) 2026 Sousy LLC. See LICENSE.
 // Turns Even Hub events into the gesture map: swipe, press, double press, hold and release.
 import { OsEventTypeList, type EvenHubEvent } from '@evenrealities/even_hub_sdk';
+import type { Gesture } from './platform';
 
-export type Gesture =
-  | { type: 'press' }
-  /** A press on a native list row. */
-  | { type: 'select'; index: number }
-  | { type: 'double' }
-  | { type: 'up' }
-  | { type: 'down' }
-  | { type: 'hold' }
-  | { type: 'release' }
-  | { type: 'audio'; pcm: Uint8Array }
-  | { type: 'foreground' }
-  | { type: 'background' }
-  | { type: 'exit' };
+export type { Gesture } from './platform';
 
 /** A long swipe can arrive as several scroll events; they count as one until the ring is quiet this long. */
 const SWIPE_QUIET_MS = 300;

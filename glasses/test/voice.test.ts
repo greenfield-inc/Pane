@@ -35,6 +35,10 @@ function voiceHost(sockets: FakeSocket[], calls: string[]): VoiceHost {
     baseUrl: 'https://studio.tail1.ts.net:8443',
     token: 'pgt_secret',
     now: () => 1_000,
+    later: (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      return { cancel: () => clearTimeout(timer) };
+    },
     openSocket: (url, protocols) => {
       const socket = new FakeSocket(url, protocols);
       sockets.push(socket);

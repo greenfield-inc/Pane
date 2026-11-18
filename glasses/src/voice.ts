@@ -6,6 +6,7 @@ import type { VoiceTranscriptionMode } from '../../shared/types/voiceTranscripti
 import { parseDeepgramLiveMessage, type VoiceStreamErrorCode } from '../../shared/voice/deepgramLive';
 import { GLASSES_WEBSOCKET_PROTOCOL } from '../../shared/types/glasses';
 import { GlassesError, type Dictation } from './model';
+import type { Cancel } from './platform';
 
 const SAMPLE_RATE = 16_000;
 const OPEN_TIMEOUT_MS = 8_000;
@@ -27,11 +28,12 @@ export function voiceMode(voice: HostVoice): VoiceTranscriptionMode | null {
 
 /** The host's voice WebSocket URL under its base URL. Never carries a credential. */
 export function voiceStreamUrl(baseUrl: string): string {
-  const url = new URL(baseUrl);
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}/voice/deepgram-stream`;
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  return url.toString();
+  // No URL class: Glassly's background runtime has none.
+  return `${baseUrl.replace(/\/+$/, '').replace(/^http(s?):/i, 'ws$1:')}/voice/deepgram-stream`;
 }
+
+/** WebSocket.OPEN, which not every runtime defines as a global. */
+const OPEN = 1;
 
 function writeWavHeader(view: DataView, sampleRate: number, dataBytes: number): void {
   const text = (offset: number, value: string) => {
@@ -99,6 +101,7 @@ export interface VoiceHost {
   finalizeStreaming(rawText: string, durationMs: number): Promise<string>;
   transcribe(audioDataUrl: string, durationMs: number): Promise<string>;
   now(): number;
+  later(fn: () => void, ms: number): Cancel;
   openSocket(url: string, protocols: string[]): VoiceSocket;
 }
 
@@ -131,17 +134,17 @@ function openStream(host: VoiceHost, onText: (data: string) => void): Promise<Vo
   return new Promise((resolve, reject) => {
     const ws = host.openSocket(voiceStreamUrl(host.baseUrl), [GLASSES_WEBSOCKET_PROTOCOL, host.token]);
     ws.binaryType = 'arraybuffer';
-    const timeout = setTimeout(() => {
+    const timeout = host.later(() => {
       ws.close();
       reject(new Error('The voice service on this computer did not answer.'));
     }, OPEN_TIMEOUT_MS);
     ws.onopen = () => {
-      clearTimeout(timeout);
+      timeout.cancel();
       ws.send(wavStreamHeader());
       resolve(ws);
     };
     ws.onerror = () => {
-      clearTimeout(timeout);
+      timeout.cancel();
       reject(new Error("Couldn't reach the voice service on this computer."));
     };
     ws.onmessage = (event) => {
@@ -174,14 +177,14 @@ function streamFailure(name: string, error: LiveTranscript['error']): GlassesErr
 
 /** The computer's cleanup of `words`, or the words as heard when cleanup fails or takes too long. */
 async function cleanedUp(host: VoiceHost, words: string, durationMs: number): Promise<string> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const gaveUp = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), CLEANUP_WAIT_MS); });
+  let timer: Cancel | undefined;
+  const gaveUp = new Promise<null>((resolve) => { timer = host.later(() => resolve(null), CLEANUP_WAIT_MS); });
   try {
     return (await Promise.race([host.finalizeStreaming(words, durationMs), gaveUp])) ?? words;
   } catch {
     return words;
   } finally {
-    clearTimeout(timer);
+    timer?.cancel();
   }
 }
 
@@ -205,13 +208,13 @@ export async function streamingDictation(host: VoiceHost, onPreview: (text: stri
   return {
     push(pcm) {
       // A copy, so the frame is backed by a plain ArrayBuffer.
-      if (!dropped && ws.readyState === WebSocket.OPEN) ws.send(new Uint8Array(pcm));
+      if (!dropped && ws.readyState === OPEN) ws.send(new Uint8Array(pcm));
     },
     async finish() {
-      if (!dropped && ws.readyState === WebSocket.OPEN) {
+      if (!dropped && ws.readyState === OPEN) {
         ws.send(JSON.stringify({ type: 'Finalize' }));
-        await new Promise((resolve) => setTimeout(resolve, FINALIZE_WAIT_MS));
-        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'CloseStream' }));
+        await new Promise<void>((resolve) => { host.later(resolve, FINALIZE_WAIT_MS); });
+        if (ws.readyState === OPEN) ws.send(JSON.stringify({ type: 'CloseStream' }));
       }
       ending = true;
       ws.close();

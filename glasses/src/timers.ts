@@ -10,6 +10,10 @@
 // This module must be imported before the SDK. It captures the browser's own
 // timers, and every helper schedules through both the native and the SDK timer,
 // running the callback on whichever fires first.
+import type { Cancel } from './platform';
+
+export type { Cancel } from './platform';
+
 const g = globalThis;
 const native = {
   setTimeout: g.setTimeout.bind(g),
@@ -18,9 +22,6 @@ const native = {
   clearInterval: g.clearInterval.bind(g),
 };
 
-export interface Cancel {
-  cancel(): void;
-}
 
 /** Run `fn` once after `ms`. */
 export function later(fn: () => void, ms: number): Cancel {

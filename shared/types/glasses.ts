@@ -141,8 +141,10 @@ export function decodeGlassesPairingCode(input: string): GlassesPairingCode {
   }
   const code = decodeBoundary(parsed, pairingCodeSchema);
   for (const computer of code.computers) {
-    const url = new URL(computer.url);
-    if (url.protocol !== 'https:' || !(url.hostname.endsWith('.ts.net') || url.hostname.endsWith(`.${DEFAULT_RELAY_DOMAIN}`))) {
+    // No URL class: the glasses' Glassly runtime has none. Plain host characters only, since a
+    // fetch reads `\` as `/` and would leave a host like `evil.com\.ts.net` at evil.com.
+    const host = /^https:\/\/([a-z0-9.-]+)(?::\d{1,5})?(?:[/?#]|$)/i.exec(computer.url)?.[1]?.toLowerCase();
+    if (!host || !(host.endsWith('.ts.net') || host.endsWith(`.${DEFAULT_RELAY_DOMAIN}`))) {
       throw new Error(`The code names ${computer.url}, which is not a Tailscale or Pane relay address. Copy it again from the Pane app.`);
     }
     if (!computer.secret.startsWith(GLASSES_PAIRING_SECRET_PREFIX)) {

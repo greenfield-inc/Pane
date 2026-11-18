@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Pane</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #ffffff; --fg: #111111; --muted: #666666; --line: #dddddd; --accent: #2f6fed; --bad: #c0392b; --ok: #1e8e3e; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111111; --fg: #f2f2f2; --muted: #9a9a9a; --line: #333333; --accent: #6d9bff; --bad: #ff6b5e; --ok: #4cc26b; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: calc(16px + var(--glassly-safe-top, 0px)) 16px calc(16px + var(--glassly-safe-bottom, 0px)); background: var(--bg); color: var(--fg); font: 16px/1.4 -apple-system, system-ui, sans-serif; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    p { margin: 8px 0; }
+    .muted { color: var(--muted); font-size: 14px; }
+    textarea { width: 100%; min-height: 72px; font: 14px ui-monospace, monospace; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--fg); }
+    button { font: inherit; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--fg); }
+    button.primary { background: #2f6fed; border-color: #2f6fed; color: #ffffff; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    ul { list-style: none; padding: 0; margin: 8px 0; }
+    li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .state { float: right; font-size: 14px; color: var(--muted); }
+    .state.live { color: var(--ok); }
+    .state.refused, .state.not-paired { color: var(--bad); }
+    .why { margin: 4px 0 0; font-size: 14px; color: var(--muted); }
+    .frame svg { display: block; width: 100%; height: auto; border-radius: 8px; margin-bottom: 8px; }
+    pre { white-space: pre-wrap; font: 13px ui-monospace, monospace; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+    label { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>Pane</h1>
+  <p id="status" class="muted">Starting…</p>
+  <section id="pairing">
+    <p>Pair your computers: in the Pane app on this phone, open Settings › Glasses › Pair glasses, then paste the code here.</p>
+    <textarea id="code" placeholder="pane-glasses://…" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="pair" class="primary">Pair</button>
+      <button id="demo">Try the demo</button>
+    </div>
+  </section>
+  <ul id="computers"></ul>
+  <label><input id="ambient" type="checkbox"> Ambient mode: the glasses go quiet after 30&nbsp;s and show new cards as banners</label>
+  <label><input id="read-aloud" type="checkbox"> Read new questions aloud from the phone or Bluetooth headphones</label>
+  <div class="row"><button id="forget" hidden>Forget these computers</button></div>
+  <section id="mirror-section" hidden>
+    <p class="muted">On the glasses</p>
+    <div id="frame" class="frame"></div>
+    <pre id="mirror"></pre>
+  </section>
+  <script src="./main.js"></script>
+</body>
+</html>

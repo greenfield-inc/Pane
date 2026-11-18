@@ -4,6 +4,9 @@ import { homeListPage, homeRows, outlineRowAt } from '../src/homeList';
 import type { Card, Computer, PaneEntry } from '../src/model';
 import { FakeBridge } from './fakeBridge';
 
+/** The WebView's canvas draws the logo strips; Node has none, so each draws as an empty image. */
+const blankStrip = async () => new Uint8Array([1]);
+
 const clock = (epochMs: number) => (epochMs === 9_12 ? '9:12' : '9:40');
 
 const pane = (id: string, activityAt: number, extra: Partial<PaneEntry> = {}): PaneEntry => ({
@@ -65,11 +68,12 @@ describe('the merged rows', () => {
       ['studio|pane:add-dark-mode', 'live'],
       ['laptop|computer', 'offline'],
     ]);
-    expect(shownRows(homeListPage(rows, { selected: 0 }, clock))).toEqual([
-      '> studi  fix-checkout · Claude · idle',
-      '   trave  trip-notes · offline since 9:12',
-      '   studi  add-dark-mode · Claude · idle',
-      '   lapto  laptop · offline since 9:12',
+    // An hour after add-dark-mode's last activity; an away row says since when instead of an age.
+    expect(shownRows(homeListPage(rows, { selected: 0, now: 3_600_100 }, clock))).toEqual([
+      '> ○ studi  fix-checkout · Claude · 59m',
+      '   × trave  trip-notes · offline since 9:12',
+      '   ○ studi  add-dark-mode · Claude · 1h',
+      '   × lapto  laptop · offline since 9:12',
       ' ',
       ' ',
     ]);
@@ -90,8 +94,24 @@ describe('the logo list page', () => {
     const page = homeListPage(rows, { selected: 1 }, clock);
     const header = page.boxes[0];
     expect(header?.kind === 'text' && header.lines).toEqual(['All computers · 1 needs you']);
-    expect(shownRows(page).slice(0, 2)).toEqual(['   build  b0 · needs you', '> studi  s0 · Claude · idle']);
+    expect(shownRows(page).slice(0, 2)).toEqual(['   ● build  b0 · needs you', '> ○ studi  s0 · Claude']);
     expect(page.boxes.slice(1, 4).map((box) => (box.kind === 'text' ? box.brightness : null))).toEqual([2, 4, 2]);
+  });
+
+  it('marks each row with its status, in glyphs the glasses\' font draws, and its age', () => {
+    const now = 2 * 86_400_000;
+    const statuses = homeRows([computer('studio', 'studio-mac', [
+      pane('working', now - 30_000, { status: 'working' }),
+      pane('waiting', now - 5 * 60_000, { status: 'needs you' }),
+      pane('stopped', now - 3 * 3_600_000, { status: 'stopped' }),
+      pane('idle', now - 2 * 86_400_000, { status: 'idle' }),
+    ])], []);
+    expect(shownRows(homeListPage(statuses, { selected: 0, now }, clock)).slice(0, 4)).toEqual([
+      '> ◐ studi  working · Claude · now',
+      '   ● studi  waiting · Claude · 5m',
+      '   ■ studi  stopped · Claude · 3h',
+      '   ○ studi  idle · Claude · 2d',
+    ]);
   });
 
   it('draws each row\'s logo, dimmed for an away computer and a plain monitor for an unknown OS', () => {
@@ -112,15 +132,11 @@ describe('the logo list page', () => {
 
 describe('the logo list on the glasses', () => {
   const rows = homeRows([computer('studio', 'studio-mac', Array.from({ length: 8 }, (_, index) => pane(`s${index}`, 100 - index)))], []);
-  /** The page with its logo strips drawn as empty images, as the WebView's canvas would draw them. */
-  const page = (selected: number): Page => {
-    const built = homeListPage(rows, { selected }, clock);
-    return { boxes: built.boxes.map((box) => (box.kind === 'image' ? { ...box, draw: async () => new Uint8Array([1]) } : box)) };
-  };
+  const page = (selected: number): Page => homeListPage(rows, { selected }, clock);
 
   it('redraws only the two rows that change on a swipe, and resends the logos on a page turn', async () => {
     const bridge = new FakeBridge();
-    const display = new Display(bridge);
+    const display = new Display(bridge, blankStrip);
     await display.show(page(0));
     expect(bridge.calls.map((call) => call.method)).toEqual(['create', 'image', 'image']);
 

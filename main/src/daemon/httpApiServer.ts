@@ -93,7 +93,8 @@ interface ConnectedRemoteEventClient {
   workspaceCredentials: WorkspaceCredentials | null;
   /**
    * Set for the Pane glasses app to the origin it came in with: its stream carries only
-   * GLASSES_EVENT_CHANNELS, and ends when that origin is no longer allowed.
+   * GLASSES_EVENT_CHANNELS, and ends when that origin is no longer allowed. Empty for a glasses
+   * voice socket that came in without an Origin, which no origin setting ends.
    */
   glassesOrigin: string | null;
 }
@@ -107,8 +108,9 @@ interface WorkspaceRefusal {
 }
 
 /**
- * A request the glasses path admitted: owner identity, an allowed origin, no Funnel, and the
- * source not locked out. `client` is the device its token names, or null for a pairing call.
+ * A request the glasses path admitted: owner identity, an allowed origin (or none, on a token
+ * WebSocket), no Funnel, and the source not locked out. `client` is the device its token names,
+ * or null for a pairing call; its `origin` is empty when the socket sent none.
  */
 interface GlassesAdmission {
   client: { id: string; tokenHash: string; label: string; origin: string } | null;
@@ -605,7 +607,7 @@ export class PaneRemoteHttpApiServer {
   }
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
-    const refusal = this.workspace ? this.admitWorkspace(request, this.workspace.pathSecret) : this.admitPairedGlasses(request);
+    const refusal = this.workspace ? this.admitWorkspace(request, this.workspace.pathSecret, true) : this.admitPairedGlasses(request, true);
     if (refusal) {
       writeRawHttpError(socket, refusal.statusCode, refusal.error.message, refusal.error.code);
       return;
@@ -1241,7 +1243,7 @@ export class PaneRemoteHttpApiServer {
    * Strips Serve's secret path prefix, or returns why the request is refused: direct loopback
    * callers and every browser request are.
    */
-  private admitWorkspace(request: IncomingMessage, pathSecret: string): WorkspaceRefusal | null {
+  private admitWorkspace(request: IncomingMessage, pathSecret: string, upgrade = false): WorkspaceRefusal | null {
     const prefix = `/${pathSecret}`;
     const rawUrl = request.url ?? '/';
     if (rawUrl !== prefix && !rawUrl.startsWith(`${prefix}/`) && !rawUrl.startsWith(`${prefix}?`)) {
@@ -1251,7 +1253,7 @@ export class PaneRemoteHttpApiServer {
     const origin = request.headers.origin;
     const glassesToken = readGlassesToken(request);
     if (glasses && (glassesToken !== null || glasses.allowsOrigin(origin))) {
-      const refusal = this.admitGlasses(request, glasses, glassesToken, rawUrl);
+      const refusal = this.admitGlasses(request, glasses, glassesToken, rawUrl, upgrade);
       if (refusal) return refusal;
       request.url = rawUrl.slice(prefix.length) || '/';
       return null;
@@ -1275,19 +1277,20 @@ export class PaneRemoteHttpApiServer {
    * On the paired listener, a request carrying a glasses token takes the glasses path; every other
    * request takes the paired transport's.
    */
-  private admitPairedGlasses(request: IncomingMessage): WorkspaceRefusal | null {
+  private admitPairedGlasses(request: IncomingMessage, upgrade = false): WorkspaceRefusal | null {
     if (!this.glasses || request.method === 'OPTIONS') return null;
     const token = readGlassesToken(request);
-    return token === null ? null : this.admitGlasses(request, this.glasses, token, request.url ?? '/');
+    return token === null ? null : this.admitGlasses(request, this.glasses, token, request.url ?? '/', upgrade);
   }
 
   /**
-   * The glasses path: a request is admitted only with an Even app origin, no credential in the URL,
-   * a source that is not locked out, and a valid device token (or, for pairing alone, no token).
-   * On the workspace listener it also needs the owner's Tailscale identity and no Funnel. Every
-   * refusal past the lockout is logged (see `glassesRefused`).
+   * The glasses path: a request is admitted only with an allowed app origin, no credential in the
+   * URL, a source that is not locked out, and a valid device token (or, for pairing alone, no
+   * token). On the workspace listener it also needs the owner's Tailscale identity and no Funnel.
+   * A WebSocket upgrade with a token and no Origin needs no origin: browsers always send one, so it
+   * is a native glasses runtime. Every refusal past the lockout is logged (see `glassesRefused`).
    */
-  private admitGlasses(request: IncomingMessage, glasses: GlassesAccess, token: string | null, rawUrl: string): WorkspaceRefusal | null {
+  private admitGlasses(request: IncomingMessage, glasses: GlassesAccess, token: string | null, rawUrl: string, upgrade = false): WorkspaceRefusal | null {
     const origin = getSingleHeaderValue(request.headers.origin);
     if (request.method === 'OPTIONS') {
       // A preflight carries no credentials: an allowed origin gets CORS headers and no data.
@@ -1323,11 +1326,12 @@ export class PaneRemoteHttpApiServer {
         'Tailscale Funnel is on for this computer\'s workspace port, so it is reachable from the internet; glasses work only inside your tailnet.',
         'Turn Funnel off for this port with "tailscale funnel reset" (or "tailscale funnel --https=8443 off"); glasses reconnect on their own.');
     }
-    if (!glasses.allowsOrigin(origin ?? undefined)) {
+    const nonBrowserSocket = upgrade && token !== null && request.headers.origin === undefined;
+    if (!nonBrowserSocket && !glasses.allowsOrigin(origin ?? undefined)) {
       if (origin) glasses.noteRefusedOrigin(origin);
       return refuse('origin', 403, 'ERR_GLASSES_ORIGIN_REFUSED',
-        `This computer accepts glasses tokens only from the Even app; this request came from ${origin ?? 'no origin'}.`,
-        'Open Pane from the Even app. If this is the Even app, allow this origin on the computer in Settings › Remote Access › Phones and glasses.',
+        `This computer accepts glasses requests only from an allowed app origin; this request came from ${origin ?? 'no origin'}.`,
+        'Open Pane from your glasses app. If this is your glasses app, allow this origin on the computer in Settings › Remote Access › Phones and glasses.',
         `origin ${origin ?? 'none'}`);
     }
     if (new URL(rawUrl, 'http://localhost').searchParams.has('access_token')) {
@@ -1643,10 +1647,12 @@ export class PaneRemoteHttpApiServer {
   private isStillAdmitted(client: AdmittedIdentity): boolean {
     const { remoteClientId, remoteClientTokenHash, workspaceCredentials } = client;
     if (client.glassesOrigin !== null) {
-      // A revoked device, an origin the owner removed, or Funnel turned on ends the stream.
+      // A revoked device, an origin the owner removed, or Funnel turned on ends the stream; a
+      // socket admitted without an Origin has no origin to remove.
       const glasses = this.glasses;
       return Boolean(glasses && remoteClientId && remoteClientTokenHash && !this.funnelRefusesGlasses(glasses)
-        && glasses.isCurrent(remoteClientId, remoteClientTokenHash) && glasses.allowsOrigin(client.glassesOrigin));
+        && glasses.isCurrent(remoteClientId, remoteClientTokenHash)
+        && (client.glassesOrigin === '' || glasses.allowsOrigin(client.glassesOrigin)));
     }
     if (this.workspace) {
       // Narrower visibility or a new password applies to clients that are already connected.

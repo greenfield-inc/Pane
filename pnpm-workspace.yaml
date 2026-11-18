@@ -4,6 +4,7 @@ packages:
   - 'mobile'
   - 'native'
   - 'glasses'
+  - 'glasses/glassly'
   - 'packages/runpane'
   - 'shared'
 onlyBuiltDependencies:
@@ -67,6 +68,9 @@ minimumReleaseAgeExclude:
   - '@capacitor/ios'
   - '@capacitor/keyboard'
   - '@capacitor/push-notifications'
+  # The Glassly SDK the glasses app's Glassly build bundles (glasses/glassly).
+  - '@glassly/miniapp@0.4.0'
+  - '@glassly/cloud-protocol@0.4.0'
 # The chat adapters run the person's installed claude and codex
 # (CLAUDE_CODE_EXECUTABLE, CODEX_PATH), never these bundled native binaries.
 ignoredOptionalDependencies:

@@ -98,8 +98,11 @@ describe('relayGlassesComputers', () => {
   });
 
   it('is refused by the glasses app when a code names any other address', () => {
-    const code = encodeGlassesPairingCode({ v: 1, expiresAt: '2026-10-28T08:10:00.000Z', computers: [{ name: 'x', url: 'https://x.attacker.example', secret: 'pgs_x' }] });
-    expect(() => decodeGlassesPairingCode(code)).toThrow('not a Tailscale or Pane relay address');
+    // A fetch reads `\` as `/`, so the first two reach attacker.example.
+    for (const url of ['https://x.attacker.example', 'https://attacker.example\\.ts.net', 'https://attacker.example\\x.runpane.net', 'https://attacker.example%2f.ts.net', 'https://x.runpane.net.attacker.example']) {
+      const code = encodeGlassesPairingCode({ v: 1, expiresAt: '2026-10-28T08:10:00.000Z', computers: [{ name: 'x', url, secret: 'pgs_x' }] });
+      expect(() => decodeGlassesPairingCode(code), url).toThrow('not a Tailscale or Pane relay address');
+    }
   });
 });
 

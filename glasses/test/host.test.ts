@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { encodeGlassesPairingCode } from '../../shared/types/glasses';
 import type { NotifyItem, NotifySharedState } from '../../shared/types/notify';
-import { boundary, decodeBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
+import type { VoiceSocket } from '../src/voice';
 import { HostHub, STORAGE_KEY, pairComputers, pairedSaver, readPaired, type HostDeps, type PairedComputer } from '../src/host';
 import type { Cancel } from '../src/timers';
+import { POLL_FRONT_MS, PollClock } from '../src/polling';
 
 interface Seen {
   url: string;
@@ -129,7 +131,7 @@ function memoryStorage() {
 }
 
 /** A hub paired with `hosts`; it can reach those and `others`, which it isn't paired with. */
-function hub(hosts: FakeHost[], timers = manualTimers(), storage = memoryStorage(), others: FakeHost[] = []) {
+function hub(hosts: FakeHost[], timers = manualTimers(), storage = memoryStorage(), others: FakeHost[] = [], polling?: PollClock, extra: Partial<HostDeps> = {}) {
   const paired: PairedComputer[] = hosts.map((fake, index) => ({ name: `computer-${index}`, url: fake.url, token: `pgt_token${index}`, deviceLabel: 'Even G2 · iPhone' }));
   storage.values.set(STORAGE_KEY, JSON.stringify(paired));
   const deps: HostDeps = {
@@ -146,7 +148,8 @@ function hub(hosts: FakeHost[], timers = manualTimers(), storage = memoryStorage
     origin: 'https://even.example',
     savePaired: pairedSaver(storage),
   };
-  const result = new HostHub(paired, deps);
+  if (polling) deps.polling = polling;
+  const result = new HostHub(paired, { ...deps, ...extra });
   result.start();
   return { hub: result, timers };
 }
@@ -642,5 +645,165 @@ describe('HostHub', () => {
     timers.advance(1_000);
     await until(() => one.computers()[0]?.status === 'live');
     one.stop();
+  });
+});
+
+describe("Glassly's own speech-to-text", () => {
+  const glassly = { push() {}, finish: async () => 'heard by Glassly', cancel() {} };
+  /** A socket that fails to open, as on a network blip, Funnel or a lockout. */
+  const failingSocket = (): VoiceSocket => {
+    const socket: VoiceSocket = { binaryType: 'arraybuffer', readyState: 3, send() {}, close() {}, onopen: null, onclose: null, onmessage: null, onerror: null };
+    setTimeout(() => socket.onerror?.(new Event('error')), 0);
+    return socket;
+  };
+
+  it('listens with Glassly only for a computer with no speech key', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('remote:pwa-affordances', () => ({ voiceTranscription: { availableModes: [], defaultMode: 'streaming' } }));
+    const { hub: one } = hub([a], manualTimers(), memoryStorage(), [], undefined, { fallbackDictation: () => glassly });
+    await until(() => one.computers()[0]?.status === 'live');
+    const computer = one.computers()[0];
+    if (!computer) throw new Error('paired');
+    expect(await (await one.dictate(computer.id, () => {})).finish()).toBe('heard by Glassly');
+    one.stop();
+  });
+
+  it("shows why a keyed computer's voice connection failed, and never hands the words to Glassly", async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('remote:pwa-affordances', () => ({ voiceTranscription: { availableModes: ['streaming'], defaultMode: 'streaming' } }));
+    let fellBack = false;
+    const { hub: one } = hub([a], manualTimers(), memoryStorage(), [], undefined, { fallbackDictation: () => { fellBack = true; return glassly; }, openSocket: failingSocket });
+    await until(() => one.computers()[0]?.status === 'live');
+    const computer = one.computers()[0];
+    if (!computer) throw new Error('paired');
+    await expect(one.dictate(computer.id, () => {})).rejects.toMatchObject({ code: 'ERR_GLASSES_VOICE_UNREACHABLE' });
+    expect(fellBack).toBe(false);
+    one.stop();
+  });
+});
+
+describe('polling mode (a host without streaming fetch)', () => {
+  function polled(fake: FakeHost) {
+    const timers = manualTimers();
+    let front = true;
+    const clock = new PollClock(timers.later, () => front);
+    const { hub: polledHub } = hub([fake], timers, memoryStorage(), [], clock);
+    return { polledHub, timers, clock, setFront: (value: boolean) => { front = value; } };
+  }
+  const reads = (fake: FakeHost, channel: string) => fake.seen.filter((seen) => seen.body.includes(`"channel":"${channel}"`)).length;
+
+  it('never opens the event stream, and shows a new card after the next read', async () => {
+    let items: NotifyItem[] = [];
+    const studio = host('https://studio.tail1.ts.net:8443');
+    let revision = 1;
+    studio.handlers.set('notify:remote-snapshot', () => notifyState('studio', revision, items));
+    const { polledHub, timers } = polled(studio);
+    await until(() => polledHub.computers()[0]?.status === 'live');
+    expect(polledHub.cards()).toEqual([]);
+
+    items = [item('q1', 5)];
+    revision = 2;
+    timers.advance(POLL_FRONT_MS);
+    await until(() => polledHub.cards().length === 1);
+    expect(polledHub.cards()[0]?.title).toBe('question q1');
+    expect(studio.seen.some((seen) => seen.url.endsWith('/events'))).toBe(false);
+  });
+
+  it('names the version it holds, so an unchanged computer answers in a few bytes, and still follows inUse', async () => {
+    const studio = host('https://studio.tail1.ts.net:8443');
+    let inUse = false;
+    const asked: JsonValue[] = [];
+    studio.handlers.set('notify:remote-snapshot', (args) => {
+      const since = decodeOptionalBoundary(args[0] ?? {}, boundary.object({ since: boundary.optional(boundary.object({ epoch: boundary.string, revision: boundary.number })) }))?.since;
+      asked.push(since ?? null);
+      return since?.revision === 1 ? { unchanged: true, epoch: 'e1', revision: 1, inUse } : { ...notifyState('studio', 1, [item('q1', 5)]), inUse };
+    });
+    const { polledHub, timers } = polled(studio);
+    await until(() => polledHub.cards().length === 1);
+    timers.advance(POLL_FRONT_MS);
+    await until(() => asked.some((since) => since !== null));
+    expect(asked.find((since) => since !== null)).toEqual({ epoch: 'e1', revision: 1 });
+    expect(polledHub.cards().map((card) => card.title)).toEqual(['question q1']);
+
+    inUse = true;
+    timers.advance(POLL_FRONT_MS);
+    await until(() => polledHub.inUse());
+    expect(polledHub.cards().map((card) => card.title)).toEqual(['question q1']);
+  });
+
+  it('reads at once on wake or touch, without waiting out the interval', async () => {
+    const studio = host('https://studio.tail1.ts.net:8443');
+    const { polledHub, clock } = polled(studio);
+    await until(() => polledHub.computers()[0]?.status === 'live');
+    const before = reads(studio, 'notify:remote-snapshot');
+    clock.now();
+    await until(() => reads(studio, 'notify:remote-snapshot') > before);
+  });
+
+  it('updates a status from the workspace state, and reads the full lists again only when a panel comes or goes', async () => {
+    const studio = host('https://studio.tail1.ts.net:8443');
+    let generation = 1;
+    let entries: JsonValue[] = [{ panelId: 'panel-a', to: 'idle', running: true }];
+    studio.handlers.set('runpane:workspace:state', () => ({ ok: true, epoch: 'w1', generation, entries }));
+    studio.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: [{ id: 'a', name: 'nightly-backup' }] }] }));
+    studio.handlers.set('panels:list', () => ({ success: true, data: [{ id: 'panel-a', type: 'terminal', title: 'Claude', state: { customState: { agentType: 'claude' } } }] }));
+    const { polledHub, timers } = polled(studio);
+    await until(() => polledHub.computers()[0]?.entries.length === 1);
+    timers.advance(POLL_FRONT_MS);
+    await until(() => reads(studio, 'runpane:workspace:state') >= 2);
+    const listReads = reads(studio, 'sessions:get-all-with-projects');
+
+    generation = 2;
+    entries = [{ panelId: 'panel-a', to: 'blocked', running: true }];
+    timers.advance(POLL_FRONT_MS);
+    await until(() => polledHub.computers()[0]?.entries[0]?.status === 'needs you');
+    timers.advance(2_000);
+    expect(reads(studio, 'sessions:get-all-with-projects')).toBe(listReads);
+
+    generation = 3;
+    entries = [...entries, { panelId: 'panel-b', to: 'idle', running: true }];
+    timers.advance(POLL_FRONT_MS);
+    await until(() => reads(studio, 'runpane:workspace:state') >= 4);
+    timers.advance(1_000);
+    await until(() => reads(studio, 'sessions:get-all-with-projects') > listReads);
+  });
+
+  it('reads only the Notify snapshot while Pane is behind another miniapp', async () => {
+    const studio = host('https://studio.tail1.ts.net:8443');
+    const { polledHub, timers, setFront } = polled(studio);
+    await until(() => polledHub.computers()[0]?.status === 'live');
+    setFront(false);
+    timers.advance(POLL_FRONT_MS);
+    await until(() => reads(studio, 'notify:remote-snapshot') >= 2);
+    const workspaceReads = reads(studio, 'runpane:workspace:state');
+    timers.advance(5_000);
+    await until(() => reads(studio, 'notify:remote-snapshot') >= 3);
+    expect(reads(studio, 'runpane:workspace:state')).toBe(workspaceReads);
+  });
+
+  it('shows a computer that stops answering as offline, and live again once it answers', async () => {
+    const studio = host('https://studio.tail1.ts.net:8443');
+    const { polledHub, timers } = polled(studio);
+    await until(() => polledHub.computers()[0]?.status === 'live');
+    studio.unreachable = true;
+    timers.advance(POLL_FRONT_MS);
+    await until(() => polledHub.computers()[0]?.status === 'offline');
+    studio.unreachable = false;
+    for (let step = 0; step < 20 && polledHub.computers()[0]?.status !== 'live'; step += 1) {
+      timers.advance(1_000);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(polledHub.computers()[0]?.status).toBe('live');
+  });
+
+  it("carries a computer's in-use flag from its snapshot", async () => {
+    const studio = host('https://studio.tail1.ts.net:8443');
+    let inUse = true;
+    studio.handlers.set('notify:remote-snapshot', () => ({ ...notifyState('studio', 1, []), inUse }));
+    const { polledHub, timers } = polled(studio);
+    await until(() => polledHub.inUse());
+    inUse = false;
+    timers.advance(POLL_FRONT_MS);
+    await until(() => !polledHub.inUse());
   });
 });

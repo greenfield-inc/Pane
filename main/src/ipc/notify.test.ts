@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcMain } from 'electron';
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
@@ -97,6 +99,32 @@ describe('Notify across machines, through the registered handlers', () => {
     await vi.advanceTimersByTimeAsync(3_000);
     vi.useRealTimers();
     expect(await call).toEqual({ approved: true });
+    host.notify.dispose();
+  });
+
+  it('tells a reader whether someone used the computer in the last 2 minutes', async () => {
+    const host = await startPane();
+    const idleFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pane-idle-')), 'idle-seconds');
+    vi.stubEnv('PANE_TEST_IDLE_SECONDS_FILE', idleFile);
+    const inUseAfter = async (idleSeconds: number) => {
+      fs.writeFileSync(idleFile, String(idleSeconds));
+      return (await host.registry.invoke<NotifySharedState>('notify:remote-snapshot', [])).inUse;
+    };
+
+    expect(await inUseAfter(30)).toBe(true);
+    expect(await inUseAfter(10 * 60)).toBe(false);
+    host.notify.dispose();
+  });
+
+  it('answers a reader that names the version it holds with that version alone, until something changes', async () => {
+    const host = await startPane();
+    const first = await host.registry.invoke<NotifySharedState>('notify:remote-snapshot', []);
+    const since = { epoch: first.epoch, revision: first.revision };
+    expect(await host.registry.invoke('notify:remote-snapshot', [{ since }])).toEqual({ unchanged: true, ...since, inUse: first.inUse });
+    void host.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Apply migration 0042?', caller: { cwd: '/repo/api' } }]);
+    await flush();
+    const next = await host.registry.invoke<NotifySharedState>('notify:remote-snapshot', [{ since }]);
+    expect(next.items).toMatchObject([{ title: 'Apply migration 0042?' }]);
     host.notify.dispose();
   });
 
