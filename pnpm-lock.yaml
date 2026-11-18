@@ -361,6 +361,9 @@ importers:
 
   glasses/glassly:
     dependencies:
+      '@evenrealities/pretext':
+        specifier: 0.1.4
+        version: 0.1.4
       '@glassly/miniapp':
         specifier: 0.4.0
         version: 0.4.0(react@19.2.3)

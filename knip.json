@@ -140,6 +140,7 @@
     "glasses/glassly": {
       "entry": ["src/background/index.ts", "src/ui/main.ts", "build.ts", "scripts/*.ts"],
       "project": ["src/**/*.ts", "build.ts", "scripts/*.ts"],
+      "ignoreDependencies": ["@evenrealities/pretext"],
       "ignoreBinaries": ["glassly"]
     },
     "shared": {

@@ -294,7 +294,8 @@ developer org (package prefix `to.greenfield`). Submitting is public, so ask fir
 
 1. Raise `version` in `glasses/glassly/miniapp.json`. Set `minHostVersion` to the first Glassly
    app release that posts notifications, once Glassly ships it.
-2. `pnpm --filter @pane/glasses-glassly run pack` builds, checks and writes
+2. From the repo root, `pnpm install --filter @pane/glasses-glassly` (a full `pnpm install` also
+   works), then `pnpm --filter @pane/glasses-glassly run pack` builds, checks and writes
    `glasses/glassly/build/to.greenfield.pane-<version>.zip`.
 3. In `glasses/glassly`: `bun x glassly login` once, then `bun x glassly publish`. It signs the
    bundle with this computer's key, uploads it and submits it for Glassly's review.
