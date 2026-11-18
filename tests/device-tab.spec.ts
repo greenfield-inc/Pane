@@ -37,8 +37,8 @@ test('every state covers the screen inside the same phone, with the words for th
 test('a booting device shows a phone-shaped skeleton until its first frame, then the screen', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   for (const theme of ['light', 'dark']) {
-    // Boots for 1.2 s, then its first frame takes 0.8 s more, as over a linked computer.
-    await open(page, `view=boot&boot=1200&firstFrame=2000${theme === 'dark' ? '&theme=dark' : ''}`);
+    // The test moves the device from booting to live to its first frame, so a slow runner can't skip a state.
+    await open(page, `view=boot&holdFirstFrame=1${theme === 'dark' ? '&theme=dark' : ''}`);
     const skeleton = page.getByTestId('device-screen-skeleton');
     await expect(skeleton).toHaveAttribute('data-skeleton', 'visible');
     await expect(page.getByTestId('device-panel')).toHaveAttribute('data-phase', 'booting');
@@ -46,10 +46,12 @@ test('a booting device shows a phone-shaped skeleton until its first frame, then
     await expect(page.getByRole('status', { name: 'Booting iPhone 17 Pro' })).toHaveCount(1);
     await shoot(page, `device-tab-booting-${theme}`);
     // Live, but no frame yet: the same skeleton stays.
+    await page.evaluate(() => window.qaFinishBoot());
     await expect(page.getByTestId('device-panel')).toHaveAttribute('data-phase', 'live');
     await expect(skeleton).toBeVisible();
     await expect(page.getByRole('status', { name: 'Connecting to iPhone 17 Pro' })).toHaveCount(1);
     await shoot(page, `device-tab-first-frame-wait-${theme}`);
+    await page.evaluate(() => window.qaSendFirstFrame());
     await expect(page.getByTestId('device-screen')).toBeVisible();
     await expect(skeleton).toHaveCount(0);
     await shoot(page, `device-tab-booted-${theme}`);
