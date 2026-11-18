@@ -74,7 +74,7 @@ import { requestOpenSettings } from '../utils/openSettings';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
-import { isChatTabsEnabled, isMissionControlEnabled, useConfigStore } from '../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isProfilesEnabled, useConfigStore } from '../stores/configStore';
 import { configuredIde } from '../../../shared/utils/ideCommands';
 import { cycleIndex } from '../utils/arrayUtils';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
@@ -134,6 +134,11 @@ export const SessionView = memo(() => {
   useEffect(() => {
     if (config && !missionControlEnabled && activeView === 'mission-control') navigateToSessions();
   }, [activeView, config, missionControlEnabled, navigateToSessions]);
+  // Profiles is opt-in the same way (D-106).
+  const profilesOn = isProfilesEnabled(config);
+  useEffect(() => {
+    if (config && !profilesOn && activeView === 'profiles') navigateToSessions();
+  }, [activeView, config, profilesOn, navigateToSessions]);
   const customCommands = useMemo(
     () => (config?.customCommands ?? []).filter(cmd => cmd?.name && cmd?.command),
     [config?.customCommands]
@@ -1319,7 +1324,8 @@ export const SessionView = memo(() => {
             onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.label} chat`, error)); },
           })) : []),
           // Profiles run in terminal tabs, so "Profile…" is here with chat tabs off too.
-          ...(activeSession ? [{ key: 'chat-profile', label: 'Profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
+          // With Profiles off it still opens an Agent Farm profile by name as a chat tab.
+          ...(activeSession && (profilesOn || chatTabs) ? [{ key: 'chat-profile', label: 'Profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
           ...(chatTabs && activeSession ? [
             { key: 'chat-more', label: 'More agents…', icon: <Boxes className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => requestOpenSettings({ category: 'agents' }) },
           ] : []),
@@ -1356,7 +1362,7 @@ export const SessionView = memo(() => {
           onClose={() => setProfileDialogOpen(false)}
           // The new tab replaces this empty stage, so the parent closes the dialog itself.
           onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: activeSession.id, launch }); setProfileDialogOpen(false); }}
-          onLaunchProfile={profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); }}
+          onLaunchProfile={profilesOn ? profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); } : undefined}
           byName={chatTabs}
         />
       )}
@@ -1364,7 +1370,7 @@ export const SessionView = memo(() => {
         <LaunchProfileDialog profile={launchingProfile} defaults={{ repoId: activeSession.projectId }} onClose={() => setLaunchingProfile(null)} onLaunched={() => setLaunchingProfile(null)} />
       )}
     </div>
-  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen, launchingProfile]);
+  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen, launchingProfile, profilesOn]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1965,7 +1971,7 @@ export const SessionView = memo(() => {
     return <LoopsView />;
   }
 
-  if (activeView === 'profiles') {
+  if (activeView === 'profiles' && profilesOn) {
     return <ProfilesView />;
   }
 

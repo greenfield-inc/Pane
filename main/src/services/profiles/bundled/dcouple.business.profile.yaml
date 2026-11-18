@@ -1,0 +1,24 @@
+# dcouple/business: written by `node scripts/import-agent-farm-profiles.js` from Agent Farm's dcouple plugin 0.1.27; don't edit by hand.
+# A single agent step: the run ends when the agent reports done.
+format: pane-profile/1
+name: dcouple-business
+version: 0.1.27
+title: Create a business document, such as a proposal, plan, or memo, from research and discussion through to a reviewed final draft.
+
+agents:
+  business:
+    runs: claude/claude-opus-5-5
+    effort: high
+    reads: [agents/business]
+    skills: [business-agent-skills, business-discussion, business-spec, business-artifact, business-prepare-release]
+
+flow:
+  start: work
+  work:
+    agent: business
+    goal: Create a business document, such as a proposal, plan, or memo, from research and discussion through to a reviewed final draft
+    outcomes: {done: end}
+
+samples:
+  work:
+    done: ["Done: what it did, with links to what it made.", "Done: what it found, and what is left for you to decide."]

@@ -38,7 +38,7 @@ import { databaseService } from '../database';
 import { locateConversation } from './conversations';
 import { createBundle, createSnapshot, ignoredPaths } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
-import { agentFarmProfileOf, heldBackChecks } from './rules';
+import { agentFarmProfileOf, heldBackChecks, sessionOpenApprovals } from './rules';
 import { keepIgnoredFiles } from './ignoredFiles';
 import { runpaneWaits } from '../agentStatus/midTurn';
 import { readTabFields, sessionMoveCheckSchema, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab, type PackageFile } from './manifest';
@@ -288,11 +288,7 @@ export class MoveCoordinator {
   private openApprovals(record: OrchestrationSessionRecord, paneIds: string[]): JsonObject[] {
     const store = this.services.approvalStore;
     if (!store) return [];
-    const ids = new Set([record.id, ...paneIds]);
-    return store.openItems().filter(item => {
-      const text = JSON.stringify(item);
-      return [...ids].some(id => text.includes(id));
-    }).map(item => toJsonObject(item));
+    return sessionOpenApprovals(store.openItems(), [record.id, ...paneIds]).map(item => toJsonObject(item));
   }
 
   // ── Preflight ──────────────────────────────────────────────────────────

@@ -234,6 +234,7 @@ const notifyItemSchema = boundary.object({
   answerSummary: boundary.optional(boundary.string),
   answeredOn: boundary.optional(boundary.string),
   snoozedUntil: boundary.optional(boundary.number),
+  dismissedAt: boundary.optional(boundary.number),
   originKind: boundary.optional(boundary.enumeration('orchestrator', 'worker', 'autopilot', 'claude-prompt', 'pane', 'agent')),
   connected: boundary.optional(boundary.union(
     boundary.object({ kind: boundary.literal('session'), id: boundary.string, name: boundary.string, paneId: boundary.string }),

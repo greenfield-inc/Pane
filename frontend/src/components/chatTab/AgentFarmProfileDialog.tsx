@@ -58,7 +58,7 @@ export function AgentFarmProfileDialog({ onClose, onCreate, onLaunchProfile, byN
   return (
     <Modal isOpen onClose={onClose} size="sm" ariaLabel="Profile" initialFocusRef={profileRef} showCloseButton={false}>
       <form onSubmit={event => void submit(event)} className="flex min-h-0 flex-col">
-        <ModalHeader title="Profile" description={byName ? 'Launch one of Pane\'s profiles, or open an Agent Farm profile as a chat tab on this Pane\'s machine.' : 'Launch one of Pane\'s profiles. Turn on chat tabs to open an Agent Farm profile by name.'} onClose={onClose} />
+        <ModalHeader title="Profile" description={!onLaunchProfile ? 'Open an Agent Farm profile as a chat tab on this Pane\'s machine.' : byName ? 'Launch one of Pane\'s profiles, or open an Agent Farm profile as a chat tab on this Pane\'s machine.' : 'Launch one of Pane\'s profiles. Turn on chat tabs to open an Agent Farm profile by name.'} onClose={onClose} />
         <ModalBody className="space-y-4">
           {paneProfiles.length > 0 && (
             <div className="flex flex-col gap-1" data-testid="profile-picker-list">

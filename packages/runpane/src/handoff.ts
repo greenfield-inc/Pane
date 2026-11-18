@@ -317,7 +317,7 @@ interface Destination {
 async function remoteDestination(machine: TailnetMachine): Promise<Destination> {
   const target = workspaceTarget(machine);
   const probe = await invokeRemoteDaemon(target, 'runpane:machine:exec', [{ command: 'echo runpane-handoff', timeoutMs: 20_000 }], execResultSchema);
-  if (probe.exitCode !== 0) throw new Error(`Could not execute on ${machine.name}: ${probe.stderr || probe.stdout}`);
+  if (probe.exitCode !== 0) throw new Error(`Could not execute on ${machine.name}: ${probe.stderr || probe.stdout || (probe.exitCode === null ? 'its shell gave no exit code within 20 s' : `exit ${probe.exitCode}`)}`);
   if (machine.self && probe.os !== 'Windows') throw new Error(`Expected the Windows host, but ${machine.name} reports ${probe.os}. Nothing was committed or sent.`);
   const shell = probe.shell;
   // cmd has expansion rules that cannot safely represent arbitrary terminal prompts.

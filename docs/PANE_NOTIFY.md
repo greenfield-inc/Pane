@@ -264,7 +264,11 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   it was asked, left out when you're already in it. In a **Session**, the
   column lays over the Session's right split view without resizing it, and ✕
   ("Back to <tab>") shows the split again as it was; with no split open it
-  opens a split of its own, and ✕ ("Close split") collapses it. There it is a
+  opens a split of its own, and ✕ ("Close split") collapses it. A new
+  approval asked while the Session is shown opens there on its own, once,
+  unless the column already shows one; it never moves keyboard focus. A
+  worker's question waits while its orchestrator may answer it and opens when
+  relayed, and the chat's own prompts stay in the chat. There it is a
   focus stop of its own: Focus Right (⌘⌥→) and F6 move into it from the chat,
   the tab keys (⌘⇧[ ⌘⇧], ⌘⇧1-9) walk its tabs while it has focus, Focus Left
   or Esc go back to the chat's message box, and its active tab carries the
@@ -321,6 +325,9 @@ Approvals, **More** (or **Details**, when choices have notes) opens the card in
 place with every choice, its note and **Send**.
 
 ✕ (**Dismiss**) hides a question from the strip without answering it; it keeps waiting in Approvals.
+A dismissed question no longer counts as open for its Session: the Session's
+count and badge leave it out, and it doesn't hold back a move to another
+machine. It counts again when it changes (a new version, Undo or a reopen).
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
 switch to Pane. The clock at the bottom right of a card snoozes it for 3, 5
 or 15 minutes: it leaves the strip, then comes back in its place in the

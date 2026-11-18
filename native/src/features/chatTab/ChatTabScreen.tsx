@@ -103,7 +103,10 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     try {
       await whenConnected();
     } catch (error) {
-      viewer.setError(`${errorText(error)} Your message is still in the box.`);
+      // A send that never left keeps its text; a delivery check only couldn't run, and the message may be on the host.
+      viewer.setError(retry
+        ? `${errorText(error)} Your message is still in the box.`
+        : 'Delivery could not be checked: the connection is not back. The message is still unconfirmed; check again once it reconnects.');
       return;
     } finally {
       setAwaitingConnection(false);
