@@ -139,6 +139,37 @@ test('Profiles is hidden until Settings turns it on, and appears without a resta
   await expect(page.getByTestId('profiles-nav')).toBeVisible();
 });
 
+const now = new Date(0).toISOString();
+const plusMenuSession = {
+  id: 'profiles-plus-menu', name: 'Plus menu', worktreePath: '/tmp/pane/plus-menu', prompt: '',
+  status: 'stopped', createdAt: now, lastActivity: now, output: [], jsonMessages: [], isRunning: false,
+  permissionMode: 'ignore', projectId: projects[0].id, displayOrder: 0, isFavorite: false, toolType: 'none', archived: false,
+  gitStatus: { state: 'clean', ahead: 0, behind: 0, hasUncommittedChanges: false, hasUntrackedFiles: false, filesChanged: 0 },
+};
+const plusMenuPanel = {
+  id: 'profiles-plus-menu-terminal', sessionId: plusMenuSession.id, type: 'terminal', title: 'Terminal',
+  state: { isActive: true, hasBeenViewed: true, customState: { isInitialized: false } },
+  metadata: { createdAt: now, lastActiveAt: now, position: 0, permanent: true },
+};
+
+for (const profilesEnabled of [false, true]) {
+  test(`with chat tabs off, the + menu offers Profile… only when Profiles is on (${profilesEnabled ? 'on' : 'off'})`, async ({ page }) => {
+    await installElectronApiMock(page, {
+      initialProjects: projects, initialSessions: [plusMenuSession], initialPanels: [plusMenuPanel], activeProjectId: projects[0].id,
+      initialConfig: { theme: 'dark', appearanceMode: 'fixed', profilesEnabled }, profileLibrary: library().view,
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: /^Expand project Pane$/ }).click();
+    await page.getByRole('button', { name: 'Plus menu', exact: true }).click();
+    await page.getByRole('button', { name: 'Add tool', exact: true }).click();
+    await expect(page.getByRole('menuitem', { name: /^Terminal/ }).first()).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Profile…', exact: true })).toHaveCount(profilesEnabled ? 1 : 0);
+    if (!profilesEnabled) return;
+    await page.getByRole('menuitem', { name: 'Profile…', exact: true }).click();
+    await expect(page.getByTestId('profile-picker-list')).toContainText('greenfield');
+  });
+}
+
 test('launch dialog: a CLI per agent, and "Other…" marks the run baseline only', async ({ page }) => {
   await openProfiles(page);
   await page.getByTestId('profile-launch').click();

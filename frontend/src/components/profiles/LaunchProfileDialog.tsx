@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CONFIGURED_AGENT_IDS, agentLabel, isConfiguredAgent } from '../../../../shared/agents';
-import type { LibraryProfile, ProfileLaunchInput, ProfileRun } from '../../../../shared/types/profiles';
+import type { LibraryProfile, Profile, ProfileLaunchInput, ProfileRun } from '../../../../shared/types/profiles';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { API } from '../../utils/api';
 import { Button } from '../ui/Button';
@@ -12,6 +12,19 @@ const OTHER_CHOICE = '__other__';
 const NEW_SESSION = '';
 
 const FIELD = 'w-full rounded-md border border-border-primary bg-surface-primary px-2 py-1.5 text-[13px] text-text-primary focus:border-border-focus focus:outline-none';
+
+/** A one-step profile (each bundled dcouple agent) is one agent, not a team. */
+function isOneStep(profile: Profile | undefined): boolean {
+  return profile?.flow?.steps.length === 1;
+}
+
+/** What Launch does for this profile, in one sentence: on the Profiles page and in this dialog. */
+export function launchSentence(profile: Profile): string {
+  if (isOneStep(profile)) return 'Launch runs this agent on your request in a new Pane.';
+  return profile.flow?.steps.some((step) => step.kind === 'ask')
+    ? 'Launch runs this flow in a new Pane, one tab per step, and asks you at each of its questions.'
+    : 'Launch runs this flow in a new Pane, one tab per step.';
+}
 
 export interface LaunchProfileDefaults {
   repoId?: number;
@@ -49,8 +62,7 @@ export function LaunchProfileDialog({ profile, defaults, onClose, onLaunched }: 
     const choice = choices[agent.id] ?? PROFILE_CHOICE;
     return choice === OTHER_CHOICE || (choice === PROFILE_CHOICE && !isConfiguredAgent(agent.cli));
   });
-  // A one-step profile (each bundled dcouple agent) is one agent, not a team.
-  const oneStep = profile.profile?.flow?.steps.length === 1;
+  const oneStep = isOneStep(profile.profile);
   const commandSteps = (profile.profile?.flow?.steps ?? []).flatMap((step) => (step.kind === 'command' ? [step] : []));
   const missingCommand = agents.some((agent) => choices[agent.id] === OTHER_CHOICE && !others[agent.id]?.trim());
 
@@ -85,7 +97,7 @@ export function LaunchProfileDialog({ profile, defaults, onClose, onLaunched }: 
 
   return (
     <Modal isOpen onClose={onClose} size="lg" ariaLabel={`Launch ${profile.name}`} showCloseButton={false}>
-      <ModalHeader title={`Launch ${profile.name}`} description={oneStep ? 'Its agent starts in a new Pane.' : 'The first step opens in a new Pane; every later step opens as a tab in it.'} onClose={onClose} />
+      <ModalHeader title={`Launch ${profile.name}`} description={profile.profile ? launchSentence(profile.profile) : undefined} onClose={onClose} />
       <ModalBody>
         <div className="flex flex-col gap-3" data-testid="launch-profile-dialog">
           <label className="flex flex-col gap-1 text-xs text-text-secondary">

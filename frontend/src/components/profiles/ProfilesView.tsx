@@ -5,7 +5,7 @@ import { agentLabel } from '../../../../shared/agents';
 import { API } from '../../utils/api';
 import { cn } from '../../utils/cn';
 import { Button } from '../ui/Button';
-import { LaunchProfileDialog } from './LaunchProfileDialog';
+import { LaunchProfileDialog, launchSentence } from './LaunchProfileDialog';
 import { ProfileFlow } from './ProfileFlow';
 
 type ViewerTab = 'flow' | 'team' | 'yaml';
@@ -104,15 +104,6 @@ function RunRow({ run, profile, onChanged }: { run: ProfileRun; profile?: Profil
       {run.attention && <p className="text-xs text-status-warning" data-testid="profile-run-attention">{run.attention}</p>}
     </div>
   );
-}
-
-/** What Launch does for this profile, in one sentence. */
-function launchSentence(profile: Profile): string {
-  const steps = profile.flow?.steps ?? [];
-  if (steps.length === 1) return 'Launch runs this agent on your request in a new Pane.';
-  return steps.some((step) => step.kind === 'ask')
-    ? 'Launch runs this flow in a new Pane, one tab per step, and asks you at each of its questions.'
-    : 'Launch runs this flow in a new Pane, one tab per step.';
 }
 
 /** The Profiles page: bundled profiles and yours, one opened on its flow and Launch (Team, YAML and samples under Details), and launched runs. */
@@ -243,7 +234,7 @@ export function ProfilesView() {
                 </>
               )}
             </div>
-            {tab === 'flow' && selected.profile && <ProfileFlow key={selected.name} profile={selected.profile} details={details} />}
+            {tab === 'flow' && selected.profile && <ProfileFlow key={`${selected.name}-${details}`} profile={selected.profile} details={details} />}
             {tab === 'team' && <TeamTab profile={selected} />}
             {tab === 'yaml' && <pre className="overflow-x-auto rounded-lg border border-border-primary bg-surface-secondary p-3 font-mono text-xs text-text-primary" data-testid="profile-yaml">{detail?.profile.name === selected.name ? detail.yaml : 'Loading…'}</pre>}
             {runs.length > 0 && (

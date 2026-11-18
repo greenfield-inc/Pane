@@ -55,13 +55,18 @@ function agentDefinition(pluginRoot, name) {
   return { ...yaml.load(match[1], { schema: yaml.CORE_SCHEMA }), hasPrompt: text.slice(match[0].length).trim() !== '' };
 }
 
-/** One profile agent from an Agent Farm profile's variant: runs, effort, reads and skills. */
-function importAgent(pluginRoot, profileName, variantName) {
+/** An Agent Farm profile's variant (its default when none is named) and the agent definition it runs. */
+function resolveVariant(pluginRoot, profileName, variantName) {
   const profile = readYaml(path.join(pluginRoot, 'profiles', `${profileName}.yaml`));
   const chosen = variantName ?? profile.default ?? Object.keys(profile.variants ?? {})[0];
   const variant = profile.variants?.[chosen] ?? profile;
   if (!variant?.agent) throw new Error(`${path.basename(pluginRoot)}/${profileName} has no variant "${chosen}" with an agent.`);
-  const definition = agentDefinition(pluginRoot, variant.agent);
+  return { variant, definition: agentDefinition(pluginRoot, variant.agent) };
+}
+
+/** One profile agent from an Agent Farm profile's variant: runs, effort, reads and skills. */
+function importAgent(pluginRoot, profileName, variantName) {
+  const { variant, definition } = resolveVariant(pluginRoot, profileName, variantName);
   const harness = variant.harness ?? definition.harness;
   const model = variant.model?.name ?? definition.model?.name;
   const effort = variant.model?.reasoning ?? definition.model?.reasoning;
@@ -98,17 +103,10 @@ function greenfieldProfile(current, pluginRoot) {
   return `${current.slice(0, start)}${block}${current.slice(end + END.length)}`;
 }
 
-/** The agent definition a profile's default variant runs. */
-function defaultDefinition(pluginRoot, profileName) {
-  const profile = readYaml(path.join(pluginRoot, 'profiles', `${profileName}.yaml`));
-  const variant = profile.variants?.[profile.default] ?? Object.values(profile.variants ?? {})[0] ?? profile;
-  return agentDefinition(pluginRoot, variant.agent);
-}
-
 /** One Agent Farm profile as a launchable Pane profile: its agent, in one step that ends the run. */
 function singleStepProfile(pluginRoot, profileName) {
   const plugin = readYaml(path.join(pluginRoot, 'plugin.yaml'));
-  const description = String(defaultDefinition(pluginRoot, profileName).description ?? `Run ${plugin.name}/${profileName}`).trim();
+  const description = String(resolveVariant(pluginRoot, profileName).definition.description ?? `Run ${plugin.name}/${profileName}`).trim();
   const header = {
     format: 'pane-profile/1',
     name: `${plugin.name}-${profileName}`,
