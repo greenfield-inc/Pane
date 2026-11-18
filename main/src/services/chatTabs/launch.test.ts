@@ -7,7 +7,6 @@ import { getAppDirectory } from '../../utils/appDirectory';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_FARM_RESUME } from '../../../../shared/types/customCommandResume';
 import { withSessionFolderAccess } from '../agents/sessionFolderAccess';
-import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 import { agentTerminalCommand } from '../../../../shared/agents';
 
 describe('which terminal launches a chat tab can run', () => {

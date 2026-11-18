@@ -115,10 +115,11 @@ export const THEME_COLOR_TOKENS = [
   '--color-autopilot-subtle',
   '--color-autopilot-border',
   '--color-autopilot-on-tint',
-  // A phone's bezel and dark screen in a device tab.
+  // A phone's bezel, dark screen and loading skeleton in a device tab.
   '--color-device-bezel',
   '--color-device-screen',
   '--color-device-screen-text',
+  '--color-device-bone',
   '--color-text-on-primary',
   '--color-text-on-secondary',
   '--color-text-on-tertiary',

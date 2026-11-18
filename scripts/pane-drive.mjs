@@ -24,13 +24,13 @@ const consoleLog = []; page.on('console', (m) => { if (['error','warning'].inclu
 await page.setViewportSize({ width: 1400, height: 900 });
 await page.waitForLoadState('domcontentloaded');
 await page.waitForTimeout(2500);
-const gs = page.getByRole('button', { name: 'Get Started' }); try { await gs.waitFor({ timeout: 6000 }); await gs.click(); await page.waitForTimeout(800); } catch {}
+const gs = page.getByRole('button', { name: 'Get Started' }); try { await gs.waitFor({ timeout: 6000 }); await gs.click(); await page.waitForTimeout(800); } catch { /* the welcome screen is optional */ }
 for (let i = 0; i < 5; i++) { const b = page.getByRole('dialog').getByRole('button', { name: /^(Get Started|No thanks|Skip|Don't show this again|Close)$/ }).first(); try { await b.waitFor({ timeout: 2500 }); await b.click(); await page.waitForTimeout(800); } catch { break; } }
 await shot(page, 'e1-home.png');
 const steps = (process.env.STEPS || '').split(',').filter(Boolean);
 try {
   for (const s of steps) {
-    if (s === 'open') { const side = page.locator('.pane-sidebar-shell'); const proj = side.getByText('pane', { exact: true }).first(); try { await proj.waitFor({ timeout: 8000 }); } catch {}
+    if (s === 'open') { const side = page.locator('.pane-sidebar-shell'); const proj = side.getByText('pane', { exact: true }).first(); try { await proj.waitFor({ timeout: 8000 }); } catch { /* the project may not be listed yet */ }
       if (await proj.count()) { const main = side.getByText('pane (Main)').first(); if (!(await main.count())) { await proj.dispatchEvent('click'); await page.waitForTimeout(1500); } if (await main.count()) await main.dispatchEvent('click'); await page.waitForTimeout(3000); await shot(page, 'e2-opened.png'); continue; }
       await page.getByText('Open Project', { exact: true }).first().click(); await page.waitForTimeout(800); await page.getByText('Add Repository').first().click(); await page.waitForTimeout(800); await shot(page,'e2a-dialog.png');
       const pathIn = page.getByPlaceholder('/path/to/your/repository'); await pathIn.fill(REPO); await page.waitForTimeout(500);
@@ -57,7 +57,6 @@ try {
     if (s === 'tabs') { console.log('TABS', await page.evaluate(() => Array.from(document.querySelectorAll('[role=tab]')).map(t => { const span = t.parentElement?.querySelector('span.truncate'); const italic = span ? getComputedStyle(span).fontStyle : '?'; return `${(t.getAttribute('aria-label') || '').trim()}[${italic}${t.getAttribute('aria-selected')==='true'?',active':''}]`; }).join(' | '))); }
     if (s === 'sidemenu') { await page.getByRole('button', { name: 'Sidebar menu' }).click(); await page.waitForTimeout(500); await shot(page, 'e11-sidemenu.png'); await page.keyboard.press('Escape'); }
     if (s === 'focus') { await page.locator('.xterm').first().click({ position: { x: 300, y: 200 } }); await page.waitForTimeout(300); }
-    let n = 0;
     if (s.startsWith('type:')) { await page.keyboard.type(s.slice(5)); await page.keyboard.press('Enter'); await page.waitForTimeout(2500); await shot(page, `e5-typed-${s.slice(5).replace(/[^a-z0-9]/gi,'_').slice(0,20)}.png`); }
     if (s.startsWith('resize:')) { const [w,h] = s.slice(7).split('x').map(Number); await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(1500); await shot(page, `e6-resize-${w}x${h}.png`); }
     if (s === 'sidebar') { await page.keyboard.press('Meta+b'); await page.waitForTimeout(1500); await shot(page, `e7-sidebar-${Math.random().toString(36).slice(2,6)}.png`); await page.keyboard.press('Meta+b'); await page.waitForTimeout(1500); await shot(page, `e8-sidebar-back-${Math.random().toString(36).slice(2,6)}.png`); }

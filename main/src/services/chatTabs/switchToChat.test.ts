@@ -4,7 +4,6 @@ import type { ChatPanelState, ChatTabSwitchBanner } from '../../../../shared/typ
 import { PaneError } from '../../../../shared/paneError';
 import { switchToChat, terminalConversation, terminalRestored, type SessionAdoption, type SwitchToChatPorts, type TerminalConversation } from './switchToChat';
 import { withSessionFolderAccess } from '../agents/sessionFolderAccess';
-import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 import { agentTerminalCommand } from '../../../../shared/agents';
 
 interface World {

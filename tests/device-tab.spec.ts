@@ -20,7 +20,8 @@ test('every state covers the screen inside the same phone, with the words for th
   await open(page, 'view=states');
   await expect(page.getByTestId('state-Live').getByTestId('device-screen')).toBeVisible();
   await expect(page.getByTestId('state-Installing')).toContainText('Installing device tools');
-  await expect(page.getByTestId('state-Booting')).toContainText('Booting iPhone 17 Pro');
+  await expect(page.getByTestId('state-Booting').getByTestId('device-screen-skeleton')).toHaveAttribute('data-skeleton', 'visible');
+  await expect(page.getByTestId('state-Booting').getByTestId('device-overlay')).toHaveCount(0);
   await expect(page.getByTestId('state-Off after idle')).toContainText('Shut down after 10 minutes idle');
   await expect(page.getByTestId('state-In use by another Pane')).toContainText('In use by onboarding-copy');
   await expect(page.getByTestId('state-Runs on a linked Mac')).toContainText("Runs on Studio MacBook Pro. This PC has no Xcode.");
@@ -30,6 +31,28 @@ test('every state covers the screen inside the same phone, with the words for th
     if (theme === 'dark') await open(page, 'view=states&theme=dark');
     await expect(page.getByTestId('state-Live').getByTestId('device-screen')).toBeVisible();
     await shoot(page, `device-tab-states-${theme}`);
+  }
+});
+
+test('a booting device shows a phone-shaped skeleton until its first frame, then the screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  for (const theme of ['light', 'dark']) {
+    // Boots for 1.2 s, then its first frame takes 0.8 s more, as over a linked computer.
+    await open(page, `view=boot&boot=1200&firstFrame=2000${theme === 'dark' ? '&theme=dark' : ''}`);
+    const skeleton = page.getByTestId('device-screen-skeleton');
+    await expect(skeleton).toHaveAttribute('data-skeleton', 'visible');
+    await expect(page.getByTestId('device-panel')).toHaveAttribute('data-phase', 'booting');
+    await expect(page.getByTestId('device-overlay')).toHaveCount(0);
+    await expect(page.getByRole('status', { name: 'Booting iPhone 17 Pro' })).toHaveCount(1);
+    await shoot(page, `device-tab-booting-${theme}`);
+    // Live, but no frame yet: the same skeleton stays.
+    await expect(page.getByTestId('device-panel')).toHaveAttribute('data-phase', 'live');
+    await expect(skeleton).toBeVisible();
+    await expect(page.getByRole('status', { name: 'Connecting to iPhone 17 Pro' })).toHaveCount(1);
+    await shoot(page, `device-tab-first-frame-wait-${theme}`);
+    await expect(page.getByTestId('device-screen')).toBeVisible();
+    await expect(skeleton).toHaveCount(0);
+    await shoot(page, `device-tab-booted-${theme}`);
   }
 });
 

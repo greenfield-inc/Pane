@@ -16,7 +16,6 @@ import { toPaneDaemonError } from '../../../shared/paneError';
 import type { PaneDaemonError } from '../../../shared/types/daemon';
 import type { FirstRunAgent, FirstStepsState } from '../../../shared/types/onboarding';
 import { agentPresetsForPlatform } from '../../../shared/constants/agentLaunchPresets';
-import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import { getDefaultWSLDistribution } from '../utils/wslUtils';
 import { checkRepoFolder, findHostRepoContext, findWslRepos } from '../services/repoFinder';
 import { samePath } from '../services/paneChatMigrateOffer';

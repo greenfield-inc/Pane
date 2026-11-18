@@ -5,6 +5,14 @@ import { PaneError, paneErrorText } from '../../../../shared/paneError';
 
 const fileResponseSchema = boundary.object({ data: boundary.string, contentType: boundary.string });
 
+/** One file of a browser tab's host page, read from the connected host within the page's folder. */
+export async function readHostBrowserFile(panelId: string, url: string) {
+  const result = await remotePaneClientController.invoke('panels:read-browser-file', [panelId, url], async () => {
+    throw new Error('Remote host is disconnected');
+  });
+  return decodeBoundary(result, fileResponseSchema);
+}
+
 /** A remote file webview must never fall back to reading the client's disk. */
 export function prepareRemoteBrowserFiles(panelId: string) {
   const controller = remotePaneClientController;
@@ -23,10 +31,7 @@ export function prepareRemoteBrowserFiles(panelId: string) {
       try {
         if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
         if (!onSameHost()) return new Response('The connected host has changed', { status: 403 });
-        const result = await controller.invoke('panels:read-browser-file', [panelId, request.url], async () => {
-          throw new Error('Remote host is disconnected');
-        });
-        const file = decodeBoundary(result, fileResponseSchema);
+        const file = await readHostBrowserFile(panelId, request.url);
         if (!onSameHost()) return new Response('The connected host has changed', { status: 403 });
         return new Response(new Uint8Array(Buffer.from(file.data, 'base64')), {
           headers: { 'Content-Type': file.contentType, 'Cache-Control': 'no-store' },

@@ -1,8 +1,7 @@
-import fs from 'fs';
 import path from 'path';
 import type { FoundSession, ReaderContext, SourceReader } from './types';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
-import { absent, claudeConfigDir, codexHome, exists, findClaudeTranscript, findCodexTranscript, hasColumns, isRecord, listDir, readJson, stringField, toMs, type SqliteDatabase, unreadable, withSqliteCopy } from './common';
+import { absent, claudeConfigDir, codexHome, exists, findClaudeTranscript, findCodexTranscript, hasColumns, isRecord, readJson, stringField, toMs, type SqliteDatabase, unreadable, withSqliteCopy } from './common';
 
 const SOURCE = 't3code';
 
