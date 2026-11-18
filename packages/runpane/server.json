@@ -9,12 +9,12 @@
     "source": "github",
     "subfolder": "packages/runpane"
   },
-  "version": "2.4.241",
+  "version": "2.4.242",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "runpane",
-      "version": "2.4.241",
+      "version": "2.4.242",
       "transport": {
         "type": "stdio"
       },
