@@ -172,7 +172,10 @@ function pageScript(limit: number) {
     if (el instanceof HTMLInputElement && el.type === 'hidden') return true;
     // A file input styled away still takes browser_upload, so it stays in the tree.
     if (el instanceof HTMLInputElement && el.type === 'file') return false;
-    return !el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true });
+    // Computed style, not checkVisibility(): that also hides content-visibility: auto sections
+    // (GitHub's conversation) until they scroll into view. The walk stops at a hidden parent.
+    const style = getComputedStyle(el);
+    return style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse';
   }
 
   function quote(text: string): string {
