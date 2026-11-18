@@ -43,7 +43,7 @@ test('a chat tab streams, asks for approval, and comes back after a restart with
   try {
     await page.evaluate(async repoPath => {
       const api = window.electronAPI;
-      await api.config.update({ chatTabsEnabled: true });
+      await api.config.update({ chatTabsEnabled: true, profilesEnabled: true });
       const project = await api.projects.create({ name: 'demo', path: repoPath, active: true });
       await api.sessions.create({ prompt: '', projectId: project.data?.id, isMainRepo: true, toolType: 'none' });
     }, repo);
