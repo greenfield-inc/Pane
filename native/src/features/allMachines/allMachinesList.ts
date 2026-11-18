@@ -35,12 +35,14 @@ export interface MachineFeed {
 
 /**
  * Whether every machine's lists, and every machine's approvals, have answered. An offline machine
- * counts with its last-known rows, but not with none, and one whose lists failed counts its lists.
- * Until then a count shows a dash and "Nothing needs you" waits, so a list on its way, or one never
- * seen from a machine that is offline, never reads as zero.
+ * counts with its last-known rows; with none it counts as unreachable, adding nothing, once another
+ * machine has rows, so one asleep computer never holds up All. One whose lists failed counts its
+ * lists. Until then a count shows a dash and "Nothing needs you" waits, so a list on its way, or a
+ * lone machine that is offline and never seen, never reads as zero.
  */
 export function feedsAnswered(feeds: readonly MachineFeed[]): { lists: boolean; approvals: boolean } {
-  const answered = (feed: MachineFeed, part: 'lists' | 'approvals') => (feed.offlineSince !== undefined && feed.snapshot !== undefined)
+  const anyRows = feeds.some(feed => feed.snapshot !== undefined);
+  const answered = (feed: MachineFeed, part: 'lists' | 'approvals') => (feed.offlineSince !== undefined && anyRows)
     || (part === 'lists' && feed.error !== undefined)
     || (feed.snapshot !== undefined && !feed.waiting?.[part]);
   return {

@@ -177,8 +177,16 @@ describe('feedsAnswered', () => {
     expect(feedsAnswered([build, studio])).toEqual({ lists: true, approvals: true });
   });
 
-  it('counts an offline machine with its last-known rows, and not one it has never seen', () => {
+  it('counts an offline machine with its last-known rows', () => {
     expect(feedsAnswered([build, { ...studio, offlineSince: 1_000, waiting: { lists: true, approvals: true } }])).toEqual({ lists: true, approvals: true });
+  });
+
+  it('lets All count once an asleep machine with nothing saved is known to be unreachable', () => {
+    expect(feedsAnswered([build, unread])).toEqual({ lists: false, approvals: false });
+    expect(feedsAnswered([build, { ...unread, offlineSince: 0 }])).toEqual({ lists: true, approvals: true });
+  });
+
+  it('keeps a lone machine that is offline and never seen at dashes, not zeros', () => {
     expect(feedsAnswered([{ ...unread, offlineSince: 0 }])).toEqual({ lists: false, approvals: false });
   });
 
