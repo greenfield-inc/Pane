@@ -6,6 +6,6 @@ export { ListRow } from './ListRow';
 export { ListSection } from './ListSection';
 export { Screen } from './Screen';
 export { Sheet } from './Sheet';
-export { Skeleton } from './Skeleton';
+export { Skeleton, SkeletonSwap } from './Skeleton';
 export { Text } from './Text';
 export { TextField } from './TextField';
