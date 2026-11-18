@@ -396,7 +396,7 @@ class PanelManager {
   /**
    * Sets or clears a tab's pause mark. Normal panel updates keep the saved mark, so a
    * stale renderer or remote snapshot can never pause or resume a tab by accident.
-   * Pausing also clears `wasInterrupted`: the launch Resume dialog never lists a paused tab.
+   * Pausing also clears `wasInterrupted` and `agentLive`: the launch Resume dialog never lists a paused tab.
    */
   async commitPaused(panelId: string, mark: TerminalPausedMark | undefined): Promise<void> {
     await withLock(`panel-update-${panelId}`, async () => {
@@ -405,7 +405,7 @@ class PanelManager {
       // SAFETY: The terminal panel type was checked above; customState is its persisted terminal state.
       const previous = (panel.state.customState ?? {}) as TerminalPanelState;
       const customState: TerminalPanelState = { ...previous, paused: mark };
-      if (mark) customState.wasInterrupted = false;
+      if (mark) Object.assign(customState, { wasInterrupted: false, agentLive: false });
       const state = { ...panel.state, customState };
       if (!databaseService.updatePanel(panelId, { state })) throw new PaneError('ERR_PANEL_PAUSE_NOT_SAVED', `Tab ${panel.title} could not be ${mark ? 'paused' : 'resumed'}: its saved state was not written.`, 'Check the Pane log for a storage error, then try again.');
       panel.state = splitPanelBufferState(state).state;
