@@ -2838,7 +2838,7 @@ export const RUNPANE_CONTRACT = {
       "name": "todos list",
       "summary": "List open to-dos on this machine with the status the person sees.",
       "usage": [
-        "runpane todos list [--all] [--json] [--pane-dir <path>]"
+        "runpane todos list [--all] [--status <status>] [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
         "core",
@@ -2998,6 +2998,41 @@ export const RUNPANE_CONTRACT = {
       "summary": "Stop a to-do: Pane stops keeping it moving until it is started again.",
       "usage": [
         "runpane todos stop <todo> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos snooze",
+      "summary": "Snooze a to-do until a time: its agents stop after their current step, and Pane wakes them then with your note.",
+      "usage": [
+        "runpane todos snooze <todo> --until <time> [--note <text>] [--remind-me] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "core",
+        "todos",
+        "plugin"
+      ],
+      "jsonSchemas": [
+        "todoResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "todos wake",
+      "summary": "Wake a snoozed to-do now, as its time arriving would.",
+      "usage": [
+        "runpane todos wake <todo> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "idempotent": true,
@@ -3782,6 +3817,11 @@ export const RUNPANE_CONTRACT = {
         "description": "todos done: the person's own words telling you to close it."
       },
       {
+        "name": "--until",
+        "value": "<time>",
+        "description": "todos snooze only: when to wake it, read in this machine's zone (2026-11-18T09:00, 2026-11-18, 2h, tomorrow, monday 14:30)."
+      },
+      {
         "name": "--todo",
         "value": "<T-n>",
         "description": "notify, report and agents start: the to-do this card, report or agent works on."
@@ -3979,6 +4019,10 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--escalate",
         "description": "todos comment only: from the requester, have Pane ask the person instead."
+      },
+      {
+        "name": "--remind-me",
+        "description": "todos snooze only: at the time, raise a reminder card for the person instead of waking its agents."
       },
       {
         "name": "--yaml",
@@ -6293,7 +6337,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "todos": [
         "Usage:",
-        "  runpane todos <create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop> [options]",
+        "  runpane todos <create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop|snooze|wake> [options]",
         "",
         "To-dos are the person's list of agent work. Each started to-do gets its own Session and",
         "orchestrator, and Pane keeps it moving until it is done. Attach every plan, mock-up, design,",
@@ -6305,7 +6349,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane todos attach <todo> <target> [--kind <plan|mockup|design|pr|findings|decision|doc|image|link>] [--label <label>] [--note <text>] [--json] [--pane-dir <path>]",
         "  runpane todos detach <todo> <attachment> [--json] [--pane-dir <path>]",
         "  runpane todos show <todo> [--json] [--pane-dir <path>]",
-        "  runpane todos list [--all] [--json] [--pane-dir <path>]",
+        "  runpane todos list [--all] [--status <status>] [--json] [--pane-dir <path>]",
         "  runpane todos assign <todo> [--panel <tab-id>] [--json] [--pane-dir <path>]",
         "  runpane todos ask <todo> <question> [--json] [--pane-dir <path>]",
         "  runpane todos comment <todo> <text> [--escalate] [--json] [--pane-dir <path>]",
@@ -6314,14 +6358,16 @@ export const RUNPANE_CONTRACT = {
         "  runpane todos drop <todo> [--reason <text>] [--json] [--pane-dir <path>]",
         "  runpane todos archive <todo> [--json] [--pane-dir <path>]",
         "  runpane todos start <todo> [--json] [--pane-dir <path>]",
-        "  runpane todos stop <todo> [--json] [--pane-dir <path>]"
+        "  runpane todos stop <todo> [--json] [--pane-dir <path>]",
+        "  runpane todos snooze <todo> --until <time> [--note <text>] [--remind-me] [--json] [--pane-dir <path>]",
+        "  runpane todos wake <todo> [--json] [--pane-dir <path>]"
       ],
       "todos create": [
         "Usage:",
         "  runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--agent <agent>] [--attach <file|url>]... [--no-start] [--json] [--pane-dir <path>]",
         "",
         "Create a to-do: one piece of work with a title, a summary and what done means. By default Pane starts it at once in its own Session, through the load gate.",
-        "A to-do is the unit of agent work the person tracks on the To-dos screen. Started, it gets its own Session and orchestrator agent, which keeps it moving until it is done. With --parent it is a sub-to-do in the parent's Session, for a piece of the parent's work. The caller's tab is recorded as its requester: questions about it come back to you first. Returns the to-do; `status` is what the person sees (waiting, working, queued, idle, done, dropped) and `reason` says why.",
+        "A to-do is the unit of agent work the person tracks on the To-dos screen. Started, it gets its own Session and orchestrator agent, which keeps it moving until it is done. With --parent it is a sub-to-do in the parent's Session, for a piece of the parent's work. The caller's tab is recorded as its requester: questions about it come back to you first. Returns the to-do; `status` is what the person sees (waiting, working, queued, snoozed, idle, done, dropped) and `reason` says why.",
         "",
         "Rules:",
         "  - Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments.",
@@ -6409,7 +6455,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane todos show <todo> [--json] [--pane-dir <path>]",
         "",
         "Show one to-do: its attachments first, then the to-do, its sub-to-dos and recent activity.",
-        "Read the attachments before you start: they hold the plan, designs and decisions the work follows. Attachments inherited from the parent or a sub-to-do carry `from`. Activity is newest last: the person's messages, agent replies and Pane's events.",
+        "Read the attachments before you start: they hold the plan, designs and decisions the work follows. Attachments inherited from the parent or a sub-to-do carry `from`. Activity is newest last: the person's messages, agent replies and Pane's events. A snoozed to-do also shows when it wakes, what happens then, who snoozed it and its wake-up note.",
         "",
         "Options:",
         "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
@@ -6421,13 +6467,14 @@ export const RUNPANE_CONTRACT = {
       ],
       "todos list": [
         "Usage:",
-        "  runpane todos list [--all] [--json] [--pane-dir <path>]",
+        "  runpane todos list [--all] [--status <status>] [--json] [--pane-dir <path>]",
         "",
         "List open to-dos on this machine with the status the person sees.",
-        "Each line is the to-do, its status (Waiting on you, Working, Queued, Idle) and its title, then why. --all adds to-dos done or dropped in the last 7 days.",
+        "Each line is the to-do, its status (Waiting on you, Working, Queued, Snoozed, Idle) and its title, then why. --all adds to-dos done or dropped in the last 7 days. --status lists only the to-dos with that status; `--status snoozed` lists them soonest first.",
         "",
         "Options:",
         "  --all                          Also list to-dos done or dropped in the last 7 days.",
+        "  --status <status>              Only to-dos with this status: waiting, working, queued, snoozed, idle, done, dropped.",
         "  --json                         Print machine-readable output.",
         "  --pane-dir <path>              Connect to a specific Pane data directory.",
         "",
@@ -6593,6 +6640,43 @@ export const RUNPANE_CONTRACT = {
         "",
         "Example:",
         "  runpane todos stop T-12 --json"
+      ],
+      "todos snooze": [
+        "Usage:",
+        "  runpane todos snooze <todo> --until <time> [--note <text>] [--remind-me] [--json] [--pane-dir <path>]",
+        "",
+        "Snooze a to-do until a time: its agents stop after their current step, and Pane wakes them then with your note.",
+        "Use it to check something later (after a deploy, or for a reply) instead of waiting in a turn. At the time Pane sets the to-do back to In progress, restarts its orchestrator in the same conversation if it is down, and types the note. With --remind-me, or when the to-do has no Session, Pane raises a reminder card for the person instead. Snoozing a snoozed to-do changes its time and note. A time without an offset is read in this machine's zone; `snooze.until` is ISO 8601 with its offset in `snooze.zone`.",
+        "",
+        "Rules:",
+        "  - Snooze only a top-level to-do that is To do, In progress or Stopped. A sub-to-do, or one In review, Accepted, Done or Dropped, is refused with `todo_snooze_state`; a past time with `todo_snooze_past`; text runpane can't read, or a time more than a year out, with `todo_snooze_time`.",
+        "  - Comments on a snoozed to-do are held and go with the wake-up message. Writing to it (comment, attach, check) doesn't wake it; `runpane todos wake` does.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --until <time>                 When to wake it: an ISO 8601 time (2026-11-18T09:00, with or without an offset), a date alone (9:00 AM that day), a duration (45m, 2h, 3d, or \"in 2h\"), or tomorrow or a weekday (monday), the next one, at 9:00 AM or at a time after it (\"tomorrow 14:30\"). At most a year away.",
+        "  --note <text>                  The wake-up note: what to check or do at the time. Pane types it to the orchestrator, or shows it on the reminder card.",
+        "  --remind-me                    At the time, raise a reminder card for the person instead of waking its agents.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos snooze T-12 --until tomorrow --note \"Check Sentry for new errors after the deploy\" --json"
+      ],
+      "todos wake": [
+        "Usage:",
+        "  runpane todos wake <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Wake a snoozed to-do now, as its time arriving would.",
+        "Its orchestrator restarts in the same conversation if it is down and gets the wake-up note and any held comments; a reminder raises its card now. The thread logs who woke it early.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  runpane todos wake T-12 --json"
       ],
       "profiles": [
         "Usage:",
@@ -8791,7 +8875,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "todos": [
         "Usage:",
-        "  python -m runpane todos <create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop> [options]",
+        "  python -m runpane todos <create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop|snooze|wake> [options]",
         "",
         "To-dos are the person's list of agent work. Each started to-do gets its own Session and",
         "orchestrator, and Pane keeps it moving until it is done. Attach every plan, mock-up, design,",
@@ -8803,7 +8887,7 @@ export const RUNPANE_CONTRACT = {
         "  python -m runpane todos attach <todo> <target> [--kind <plan|mockup|design|pr|findings|decision|doc|image|link>] [--label <label>] [--note <text>] [--json] [--pane-dir <path>]",
         "  python -m runpane todos detach <todo> <attachment> [--json] [--pane-dir <path>]",
         "  python -m runpane todos show <todo> [--json] [--pane-dir <path>]",
-        "  python -m runpane todos list [--all] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos list [--all] [--status <status>] [--json] [--pane-dir <path>]",
         "  python -m runpane todos assign <todo> [--panel <tab-id>] [--json] [--pane-dir <path>]",
         "  python -m runpane todos ask <todo> <question> [--json] [--pane-dir <path>]",
         "  python -m runpane todos comment <todo> <text> [--escalate] [--json] [--pane-dir <path>]",
@@ -8812,14 +8896,16 @@ export const RUNPANE_CONTRACT = {
         "  python -m runpane todos drop <todo> [--reason <text>] [--json] [--pane-dir <path>]",
         "  python -m runpane todos archive <todo> [--json] [--pane-dir <path>]",
         "  python -m runpane todos start <todo> [--json] [--pane-dir <path>]",
-        "  python -m runpane todos stop <todo> [--json] [--pane-dir <path>]"
+        "  python -m runpane todos stop <todo> [--json] [--pane-dir <path>]",
+        "  python -m runpane todos snooze <todo> --until <time> [--note <text>] [--remind-me] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos wake <todo> [--json] [--pane-dir <path>]"
       ],
       "todos create": [
         "Usage:",
         "  python -m runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--agent <agent>] [--attach <file|url>]... [--no-start] [--json] [--pane-dir <path>]",
         "",
         "Create a to-do: one piece of work with a title, a summary and what done means. By default Pane starts it at once in its own Session, through the load gate.",
-        "A to-do is the unit of agent work the person tracks on the To-dos screen. Started, it gets its own Session and orchestrator agent, which keeps it moving until it is done. With --parent it is a sub-to-do in the parent's Session, for a piece of the parent's work. The caller's tab is recorded as its requester: questions about it come back to you first. Returns the to-do; `status` is what the person sees (waiting, working, queued, idle, done, dropped) and `reason` says why.",
+        "A to-do is the unit of agent work the person tracks on the To-dos screen. Started, it gets its own Session and orchestrator agent, which keeps it moving until it is done. With --parent it is a sub-to-do in the parent's Session, for a piece of the parent's work. The caller's tab is recorded as its requester: questions about it come back to you first. Returns the to-do; `status` is what the person sees (waiting, working, queued, snoozed, idle, done, dropped) and `reason` says why.",
         "",
         "Rules:",
         "  - Attach every plan, mock-up, design, PR, findings or decision page to its to-do with `runpane todos attach` as soon as it exists, not at the end: the person reviews the to-do from its attachments.",
@@ -8907,7 +8993,7 @@ export const RUNPANE_CONTRACT = {
         "  python -m runpane todos show <todo> [--json] [--pane-dir <path>]",
         "",
         "Show one to-do: its attachments first, then the to-do, its sub-to-dos and recent activity.",
-        "Read the attachments before you start: they hold the plan, designs and decisions the work follows. Attachments inherited from the parent or a sub-to-do carry `from`. Activity is newest last: the person's messages, agent replies and Pane's events.",
+        "Read the attachments before you start: they hold the plan, designs and decisions the work follows. Attachments inherited from the parent or a sub-to-do carry `from`. Activity is newest last: the person's messages, agent replies and Pane's events. A snoozed to-do also shows when it wakes, what happens then, who snoozed it and its wake-up note.",
         "",
         "Options:",
         "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
@@ -8919,13 +9005,14 @@ export const RUNPANE_CONTRACT = {
       ],
       "todos list": [
         "Usage:",
-        "  python -m runpane todos list [--all] [--json] [--pane-dir <path>]",
+        "  python -m runpane todos list [--all] [--status <status>] [--json] [--pane-dir <path>]",
         "",
         "List open to-dos on this machine with the status the person sees.",
-        "Each line is the to-do, its status (Waiting on you, Working, Queued, Idle) and its title, then why. --all adds to-dos done or dropped in the last 7 days.",
+        "Each line is the to-do, its status (Waiting on you, Working, Queued, Snoozed, Idle) and its title, then why. --all adds to-dos done or dropped in the last 7 days. --status lists only the to-dos with that status; `--status snoozed` lists them soonest first.",
         "",
         "Options:",
         "  --all                          Also list to-dos done or dropped in the last 7 days.",
+        "  --status <status>              Only to-dos with this status: waiting, working, queued, snoozed, idle, done, dropped.",
         "  --json                         Print machine-readable output.",
         "  --pane-dir <path>              Connect to a specific Pane data directory.",
         "",
@@ -9091,6 +9178,43 @@ export const RUNPANE_CONTRACT = {
         "",
         "Example:",
         "  python -m runpane todos stop T-12 --json"
+      ],
+      "todos snooze": [
+        "Usage:",
+        "  python -m runpane todos snooze <todo> --until <time> [--note <text>] [--remind-me] [--json] [--pane-dir <path>]",
+        "",
+        "Snooze a to-do until a time: its agents stop after their current step, and Pane wakes them then with your note.",
+        "Use it to check something later (after a deploy, or for a reply) instead of waiting in a turn. At the time Pane sets the to-do back to In progress, restarts its orchestrator in the same conversation if it is down, and types the note. With --remind-me, or when the to-do has no Session, Pane raises a reminder card for the person instead. Snoozing a snoozed to-do changes its time and note. A time without an offset is read in this machine's zone; `snooze.until` is ISO 8601 with its offset in `snooze.zone`.",
+        "",
+        "Rules:",
+        "  - Snooze only a top-level to-do that is To do, In progress or Stopped. A sub-to-do, or one In review, Accepted, Done or Dropped, is refused with `todo_snooze_state`; a past time with `todo_snooze_past`; text runpane can't read, or a time more than a year out, with `todo_snooze_time`.",
+        "  - Comments on a snoozed to-do are held and go with the wake-up message. Writing to it (comment, attach, check) doesn't wake it; `runpane todos wake` does.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --until <time>                 When to wake it: an ISO 8601 time (2026-11-18T09:00, with or without an offset), a date alone (9:00 AM that day), a duration (45m, 2h, 3d, or \"in 2h\"), or tomorrow or a weekday (monday), the next one, at 9:00 AM or at a time after it (\"tomorrow 14:30\"). At most a year away.",
+        "  --note <text>                  The wake-up note: what to check or do at the time. Pane types it to the orchestrator, or shows it on the reminder card.",
+        "  --remind-me                    At the time, raise a reminder card for the person instead of waking its agents.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos snooze T-12 --until tomorrow --note \"Check Sentry for new errors after the deploy\" --json"
+      ],
+      "todos wake": [
+        "Usage:",
+        "  python -m runpane todos wake <todo> [--json] [--pane-dir <path>]",
+        "",
+        "Wake a snoozed to-do now, as its time arriving would.",
+        "Its orchestrator restarts in the same conversation if it is down and gets the wake-up note and any held comments; a reminder raises its card now. The thread logs who woke it early.",
+        "",
+        "Options:",
+        "  <todo>                         The to-do, as T-12 or 12. Find it with `runpane todos list`.",
+        "  --json                         Print machine-readable output.",
+        "  --pane-dir <path>              Connect to a specific Pane data directory.",
+        "",
+        "Example:",
+        "  python -m runpane todos wake T-12 --json"
       ],
       "profiles": [
         "Usage:",
@@ -9283,6 +9407,7 @@ export const RUNPANE_CONTRACT = {
       "runpane todos attach T-12 tmp/plan/cover-sheet.html --kind plan --json",
       "runpane todos ask T-12 \"Should the sheet list chat shortcuts too?\" --json",
       "runpane todos review T-12 --summary \"Ready; see the PR.\" --json",
+      "runpane todos snooze T-12 --until tomorrow --note \"Check Sentry after the deploy\" --json",
       "runpane profiles list --json",
       "runpane profiles launch greenfield --prompt \"Add dark mode to settings\" --yes --json",
       "runpane agents start --repo active --name fix-login --agent claude --prompt \"Fix the login redirect\" --yes --json",
@@ -11129,6 +11254,37 @@ export const RUNPANE_CONTRACT = {
         "T-12",
         "--pane-dir",
         "/tmp/pane",
+        "--json"
+      ],
+      [
+        "todos",
+        "snooze",
+        "T-12",
+        "--until",
+        "tomorrow 14:30",
+        "--note",
+        "Check Sentry",
+        "--remind-me",
+        "--json"
+      ],
+      [
+        "todos",
+        "snooze",
+        "12",
+        "--until=in 2h",
+        "--json"
+      ],
+      [
+        "todos",
+        "wake",
+        "T-12",
+        "--json"
+      ],
+      [
+        "todos",
+        "list",
+        "--status",
+        "snoozed",
         "--json"
       ],
       [
@@ -21564,6 +21720,7 @@ export const RUNPANE_CONTRACT = {
             "waiting",
             "working",
             "queued",
+            "snoozed",
             "idle",
             "done",
             "dropped"
@@ -21612,6 +21769,10 @@ export const RUNPANE_CONTRACT = {
         "updatedAt": {
           "type": "string",
           "description": "ISO 8601."
+        },
+        "snooze": {
+          "$ref": "#/jsonSchemas/todoSnooze",
+          "description": "Set while the to-do is snoozed (its stored state is then stopped); absent otherwise."
         }
       },
       "additionalProperties": false
@@ -21628,6 +21789,43 @@ export const RUNPANE_CONTRACT = {
         },
         "met": {
           "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "todoSnooze": {
+      "type": "object",
+      "description": "When a snoozed to-do wakes and what happens then.",
+      "required": [
+        "until",
+        "zone",
+        "note",
+        "action",
+        "by"
+      ],
+      "properties": {
+        "until": {
+          "type": "string",
+          "description": "The wake time, ISO 8601 with its offset in `zone`."
+        },
+        "zone": {
+          "type": "string",
+          "description": "The IANA time zone it was set in, such as America/Los_Angeles."
+        },
+        "note": {
+          "type": "string",
+          "description": "The wake-up note; may be empty."
+        },
+        "action": {
+          "enum": [
+            "agents",
+            "remind"
+          ],
+          "description": "`agents`: wake its agents with the note. `remind`: raise a reminder card for the person."
+        },
+        "by": {
+          "type": "string",
+          "description": "\"you\", or the agent that snoozed it."
         }
       },
       "additionalProperties": false
@@ -29494,7 +29692,7 @@ export const RUNPANE_CONTRACT = {
       "todos create": {
         "name": "todos create",
         "summary": "Create a to-do: one piece of work with a title, a summary and what done means. By default Pane starts it at once in its own Session, through the load gate.",
-        "details": "A to-do is the unit of agent work the person tracks on the To-dos screen. Started, it gets its own Session and orchestrator agent, which keeps it moving until it is done. With --parent it is a sub-to-do in the parent's Session, for a piece of the parent's work. The caller's tab is recorded as its requester: questions about it come back to you first. Returns the to-do; `status` is what the person sees (waiting, working, queued, idle, done, dropped) and `reason` says why.",
+        "details": "A to-do is the unit of agent work the person tracks on the To-dos screen. Started, it gets its own Session and orchestrator agent, which keeps it moving until it is done. With --parent it is a sub-to-do in the parent's Session, for a piece of the parent's work. The caller's tab is recorded as its requester: questions about it come back to you first. Returns the to-do; `status` is what the person sees (waiting, working, queued, snoozed, idle, done, dropped) and `reason` says why.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -29766,7 +29964,7 @@ export const RUNPANE_CONTRACT = {
       "todos show": {
         "name": "todos show",
         "summary": "Show one to-do: its attachments first, then the to-do, its sub-to-dos and recent activity.",
-        "details": "Read the attachments before you start: they hold the plan, designs and decisions the work follows. Attachments inherited from the parent or a sub-to-do carry `from`. Activity is newest last: the person's messages, agent replies and Pane's events.",
+        "details": "Read the attachments before you start: they hold the plan, designs and decisions the work follows. Attachments inherited from the parent or a sub-to-do carry `from`. Activity is newest last: the person's messages, agent replies and Pane's events. A snoozed to-do also shows when it wakes, what happens then, who snoozed it and its wake-up note.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -29798,7 +29996,7 @@ export const RUNPANE_CONTRACT = {
       "todos list": {
         "name": "todos list",
         "summary": "List open to-dos on this machine with the status the person sees.",
-        "details": "Each line is the to-do, its status (Waiting on you, Working, Queued, Idle) and its title, then why. --all adds to-dos done or dropped in the last 7 days.",
+        "details": "Each line is the to-do, its status (Waiting on you, Working, Queued, Snoozed, Idle) and its title, then why. --all adds to-dos done or dropped in the last 7 days. --status lists only the to-dos with that status; `--status snoozed` lists them soonest first.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -29806,6 +30004,24 @@ export const RUNPANE_CONTRACT = {
             "name": "--all",
             "required": false,
             "description": "Also list to-dos done or dropped in the last 7 days."
+          },
+          {
+            "name": "--status",
+            "value": "<status>",
+            "required": false,
+            "description": "Only to-dos with this status: waiting, working, queued, snoozed, idle, done, dropped.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "waiting",
+                "working",
+                "queued",
+                "snoozed",
+                "idle",
+                "done",
+                "dropped"
+              ]
+            }
           },
           {
             "name": "--json",
@@ -30173,6 +30389,91 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": []
       },
+      "todos snooze": {
+        "name": "todos snooze",
+        "summary": "Snooze a to-do until a time: its agents stop after their current step, and Pane wakes them then with your note.",
+        "details": "Use it to check something later (after a deploy, or for a reply) instead of waiting in a turn. At the time Pane sets the to-do back to In progress, restarts its orchestrator in the same conversation if it is down, and types the note. With --remind-me, or when the to-do has no Session, Pane raises a reminder card for the person instead. Snoozing a snoozed to-do changes its time and note. A time without an offset is read in this machine's zone; `snooze.until` is ISO 8601 with its offset in `snooze.zone`.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--until",
+            "value": "<time>",
+            "required": true,
+            "description": "When to wake it: an ISO 8601 time (2026-11-18T09:00, with or without an offset), a date alone (9:00 AM that day), a duration (45m, 2h, 3d, or \"in 2h\"), or tomorrow or a weekday (monday), the next one, at 9:00 AM or at a time after it (\"tomorrow 14:30\"). At most a year away."
+          },
+          {
+            "name": "--note",
+            "value": "<text>",
+            "required": false,
+            "description": "The wake-up note: what to check or do at the time. Pane types it to the orchestrator, or shows it on the reminder card."
+          },
+          {
+            "name": "--remind-me",
+            "required": false,
+            "description": "At the time, raise a reminder card for the person instead of waking its agents."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos snooze T-12 --until tomorrow --note \"Check Sentry for new errors after the deploy\" --json",
+          "runpane todos snooze T-12 --until 2h --remind-me --json"
+        ],
+        "jsonSchemas": [
+          "todoResult"
+        ],
+        "notes": [
+          "Snooze only a top-level to-do that is To do, In progress or Stopped. A sub-to-do, or one In review, Accepted, Done or Dropped, is refused with `todo_snooze_state`; a past time with `todo_snooze_past`; text runpane can't read, or a time more than a year out, with `todo_snooze_time`.",
+          "Comments on a snoozed to-do are held and go with the wake-up message. Writing to it (comment, attach, check) doesn't wake it; `runpane todos wake` does."
+        ]
+      },
+      "todos wake": {
+        "name": "todos wake",
+        "summary": "Wake a snoozed to-do now, as its time arriving would.",
+        "details": "Its orchestrator restarts in the same conversation if it is down and gets the wake-up note and any held comments; a reminder raises its card now. The thread logs who woke it early.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<todo>",
+            "required": true,
+            "description": "The to-do, as T-12 or 12. Find it with `runpane todos list`."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane todos wake T-12 --json"
+        ],
+        "jsonSchemas": [
+          "todoResult"
+        ],
+        "notes": []
+      },
       "profiles list": {
         "name": "profiles list",
         "summary": "List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.",
@@ -30380,7 +30681,7 @@ export const RUNPANE_CONTRACT = {
       "Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.",
       "Profiles: a profile is a team of agents and a fixed workflow in one file. `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `\"$PANE_RUNPANE_BIN\" report --outcome \"<outcome>\"`, using one of the outcomes its first message lists.",
       "",
-      "To-dos: `runpane todos` (or the `todos_*` MCP tools) is a work list Pane keeps moving. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists, with `runpane todos attach <T-n> <file|url>`; ask questions about a to-do with `--todo <T-n>`; `runpane docs read --doc docs/TODOS.md` has the rest.",
+      "To-dos: `runpane todos` (or the `todos_*` MCP tools) is a work list Pane keeps moving. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists, with `runpane todos attach <T-n> <file|url>`; ask questions about a to-do with `--todo <T-n>`; to check back later (after a deploy, or for a reply), snooze it with `runpane todos snooze <T-n> --until <time> --note <text>` instead of waiting in a turn; `runpane docs read --doc docs/TODOS.md` has the rest.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",

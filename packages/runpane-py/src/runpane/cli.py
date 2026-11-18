@@ -181,7 +181,7 @@ FLAG_OWNERS = {
     "--outcome": ("report",),
     "--took": ("notify",),
     "--took-as": ("notify",),
-    "--status": ("notify", "update"),
+    "--status": ("notify", "update", "todos list"),
     "--update": ("notify",),
     "--asked": ("notify",),
     "--what-changed": ("notify",),
@@ -201,6 +201,8 @@ FLAG_OWNERS = {
     "--escalate": ("todos comment",),
     "--no-attachments": ("todos review",),
     "--person-said": ("todos done",),
+    "--until": ("todos snooze",),
+    "--remind-me": ("todos snooze",),
     "--todo": ("notify", "report", "agents start"),
     "--conversation": ("panels conversation",),
     "--hook": ("panels conversation",),
@@ -402,6 +404,12 @@ class ParsedArgs:
     escalate: bool = False
     no_attachments: Optional[str] = None
     person_said: Optional[str] = None
+    # todos snooze --until <time>, as typed; the CLI reads it in its own zone.
+    snooze_until: Optional[str] = None
+    # todos snooze --remind-me: a reminder card for the person instead of waking the agents.
+    remind_me: bool = False
+    # todos list --status <status>.
+    todo_status: Optional[str] = None
     # notify, report and agents start --todo <T-n>: the to-do it belongs to.
     todo: Optional[str] = None
     loop_id: Optional[str] = None
@@ -1223,6 +1231,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--escalate":
         parsed.escalate = True
         return
+    if flag == "--remind-me":
+        parsed.remind_me = True
+        return
     if flag == "--next":
         if parsed.command != "autopilot stack push":
             raise ValueError("--next is only valid with runpane autopilot stack push.")
@@ -1277,6 +1288,12 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--person-said":
         parsed.person_said = value
+        return
+    if flag == "--until":
+        parsed.snooze_until = value
+        return
+    if flag == "--status" and parsed.command == "todos list":
+        parsed.todo_status = value
         return
     if flag == "--todo":
         parsed.todo = value
@@ -1997,6 +2014,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "todos archive": lambda parsed, context: run_todos(parsed),
     "todos start": lambda parsed, context: run_todos(parsed),
     "todos stop": lambda parsed, context: run_todos(parsed),
+    "todos snooze": lambda parsed, context: run_todos(parsed),
+    "todos wake": lambda parsed, context: run_todos(parsed),
     "profiles list": lambda parsed, context: run_profiles_list(parsed),
     "profiles show": lambda parsed, context: run_profiles_show(parsed),
     "profiles launch": lambda parsed, context: run_profiles_launch(parsed),

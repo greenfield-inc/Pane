@@ -1727,6 +1727,37 @@
       "--json"
     ],
     [
+      "todos",
+      "snooze",
+      "T-12",
+      "--until",
+      "tomorrow 14:30",
+      "--note",
+      "Check Sentry",
+      "--remind-me",
+      "--json"
+    ],
+    [
+      "todos",
+      "snooze",
+      "12",
+      "--until=in 2h",
+      "--json"
+    ],
+    [
+      "todos",
+      "wake",
+      "T-12",
+      "--json"
+    ],
+    [
+      "todos",
+      "list",
+      "--status",
+      "snoozed",
+      "--json"
+    ],
+    [
       "notify",
       "--ui",
       "ask",

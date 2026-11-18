@@ -15,6 +15,9 @@ answer its questions and accept the result on the to-do's page.
 - **Kept moving.** A plain-code supervisor on each machine notices a to-do
   that has gone quiet, reminds its orchestrator, restarts it, and then asks
   you. See [The supervisor](#the-supervisor).
+- **Snooze it for later.** A to-do can sleep until a time with a wake-up
+  note; then Pane wakes its agents with the note, or shows you a reminder.
+  See [Snoozing and reminders](#snoozing-and-reminders).
 - **Kind to the machine.** A load gate stops starting to-do agents while
   the machine is busy, and pauses some under heavy load that lasts. See
   [The load gate](#the-load-gate).
@@ -47,7 +50,8 @@ mid-turn, so it never goes stale. The first that applies wins:
 
 | Status | When |
 | --- | --- |
-| Waiting on you | An approval linked to the to-do, or to one of its open sub-to-dos, waits on you. A review counts. |
+| Waiting on you | An approval linked to the to-do, or to one of its open sub-to-dos, waits on you. A review counts. A snoozed to-do with a waiting approval reads Waiting on you, with "snoozed until …" after it. |
+| Snoozed | It is snoozed until a time. The reason reads "until Wed 9:00 AM" and the note's first line, or ends "· machine offline" when its machine can't be reached. See [Snoozing and reminders](#snoozing-and-reminders). |
 | Working | It is in progress or accepted, and the tab working it (or an open sub-to-do's) has been mid-turn for 10 seconds, by the same test as the Session spinner. |
 | Queued | The load gate is holding its start, or paused it. The reason says which, such as "devbox is busy · starts when load comes down". |
 | Idle | Anything else that is open, with a reason: not started, stopped, waiting for a usage limit, machine offline, or quiet. A to-do quiet for 10 minutes reads red. |
@@ -138,6 +142,35 @@ every sub-to-do at once.
 Every message Pane types to start or restart a to-do's agents, or to assign a
 sub-to-do, lists the attachments (own and inherited) and says to read them
 first. `runpane todos show T-n` lists them first too.
+
+## The list
+
+The To-dos screen has a tab for each view (Open, Waiting on you, Snoozed and
+Closed) and groups each by status, requester, repo or machine. By status the
+groups read Waiting on you, Working, Queued, Idle, then Snoozed, soonest
+first.
+
+### Folding groups
+
+Every group folds, in every grouping, on the desktop and in the web app.
+
+- Click or tap a group's header: its chevron turns and its rows hide. The
+  header keeps its count; a folded Snoozed header also reads "next wakes Wed
+  9:00 AM".
+- With the keyboard, ← on a row folds its group and selects the header. →,
+  Enter or Space on a folded header opens it and selects its first row. J and
+  K stop once on a folded header and never on the rows inside it. The footer
+  reads "← → fold · open group".
+- Folds are remembered for each pair of tab and grouping: folding Idle in
+  Open by status doesn't fold it in Open by repo. The desktop keeps them in
+  each window's saved state; the web app keeps them in that device's
+  browser storage.
+- Snoozed starts folded wherever there are other groups, until you open it.
+  In the Snoozed tab, where it is the only group, it starts open.
+- A row's group comes from its status, so a to-do that wakes leaves Snoozed
+  and joins its usual group, folded or not; a selected row keeps its
+  selection. Snoozing a row into a folded Snoozed moves the selection to the
+  next row and shows "Snoozed T-14 until Wed 9:00 AM · Show".
 
 ## The page
 
@@ -283,6 +316,102 @@ forced. Once every Pane is archived, Pane archives the Session too.
 **Reopen** restores the Session and its archived Panes. Archiving a sub-to-do
 archives nothing: its Panes belong to the parent's Session.
 
+## Snoozing and reminders
+
+A to-do can be **snoozed** until a time, with a wake-up note. While it is
+snoozed it stays quiet: no reminders, restarts or stuck cards. At the time,
+Pane wakes it.
+
+**Snoozing it.** Press Z on its row or page, or use the page's header button
+(it reads "Snoozed · Wed 9:00 AM ▾" while snoozed). The menu offers In an
+hour, Tomorrow morning, Next Monday, or a date and time, each showing the time
+it resolves to; then the note, and **Wake its agents** or **Just remind me**
+(the default for a to-do with no Session). **Remind me…** in New to-do makes a
+pure reminder: a to-do that isn't started and is snoozed from the start. An
+agent snoozes from the CLI:
+
+```bash
+runpane todos snooze T-12 --until tomorrow --note "Check Sentry for new errors" --json
+runpane todos snooze T-12 --until 2h --remind-me
+runpane todos wake T-12
+runpane todos list --status snoozed
+```
+
+Orchestrators are told to snooze to check something later (after a deploy,
+or waiting on a reply) instead of waiting in a turn.
+
+**Times** for `--until` are a small fixed set:
+
+- ISO 8601, with or without an offset: `2026-11-18T09:00`,
+  `2026-11-18 09:00-08:00`, `2026-11-18T17:00Z`.
+- A date alone, meaning 9:00 AM that day: `2026-11-18`.
+- A duration, optionally after "in": `45m`, `2h`, `3d`, `in 2h`.
+- `tomorrow` or a weekday name (`monday`, `fri`), meaning the next one and
+  never today, at 9:00 AM or at a time after it: `tomorrow 14:30`,
+  `fri 10am`.
+
+A time without an offset is read in the zone of the machine running the CLI,
+and the instant is fixed before it is sent, so "9:00" means 9:00 where the
+agent runs even when the to-do's host is elsewhere. The CLI prints it back
+with its zone: "Snoozed T-14 until Wed 18 Nov 2026, 9:00 AM PST (in 17h). Its
+agents stop after their current step." `--json` gives `snooze.until` as ISO
+8601 with its offset, and `snooze.zone`. Errors say what to do next:
+
+| Code | When |
+| --- | --- |
+| `todo_snooze_time` | Text the CLI can't read (the message lists the forms above), or a time more than a year away. |
+| `todo_snooze_past` | A time that has already passed. |
+| `todo_snooze_state` | A sub-to-do, or a to-do that is In review, Accepted, Done or Dropped; the message names what to do instead, such as snoozing its parent. |
+
+**While it is snoozed**, its stored state is Stopped with a wake time, so the
+supervisor, launch resume and the load gate leave it alone (and a Pane build
+that doesn't know snoozing reads it as Stopped). If its agents were working,
+Pane types the snooze message to the orchestrator after its current turn:
+finish your step, tell workers to stop after theirs, then wait. It isn't typed
+to the tab that ran the command. Agents may still comment, attach and check
+done-when items as they finish; none of that wakes it. **Comments you write
+while it is snoozed are held**: the thread shows "Held: goes to the
+orchestrator with the wake-up note", and the composer's "Wake now and send"
+wakes it and delivers them at once.
+
+**At the time:**
+
+- With a Session and Wake its agents, it goes back to In progress as a new
+  episode (the supervisor's ladder starts again). Pane restarts the
+  orchestrator and its assigned tabs in their same conversations if they are
+  down, through the load gate and three at a time (a held one reads Queued,
+  and Never pause is respected), then types the wake message:
+  `[From Pane, To-dos] Reminder for T-12 "…" (snoozed until Wed 9:00 AM): <note>`,
+  then the held comments and the attachments.
+- With no Session, or Just remind me, Pane raises a **reminder card** linked
+  to the to-do, and the to-do returns to the state it had before (To do stays
+  To do). The card shows when it was due, how late, and the note, with
+  **Done**, **Hand to an agent** (starts it as Start does, with the note in
+  the orchestrator's first message), **Snooze 1 hour**, **Snooze to the next
+  morning** (9:00 AM tomorrow in the zone it was set in, or Monday instead of
+  a weekend day) and "Snooze to another time…", which opens the to-do with
+  the menu. It is in Approvals and the floating strip like any card, covers
+  the to-do's split, and opens full screen on the phone.
+
+**Waking early.** Wake now, R on a snoozed row, `runpane todos wake`, Resume
+and Start all wake it as its time arriving would; the thread logs who woke it.
+Stop, Done and Drop clear the snooze (held comments stay in the thread,
+undelivered). Snoozing it again changes the time and note.
+
+**Missed wakes.** The wake check runs on the host's 2-second housekeeping
+tick against the wall clock, with no timer per to-do, and only after launch
+resume has run. A to-do whose time passed while Pane was closed or the Mac
+slept wakes on the first tick after Pane runs again, and its event and
+message say "overdue by 14h" (only a delay over 2 minutes counts). A clock
+set forward wakes due to-dos early; one set back wakes them later. A to-do
+wakes on its own host's clock, and a desktop that can't reach the host shows
+"snoozed until … · machine offline" until it reconnects. Launch raises a
+reminder card again if one went missing.
+
+**Time zones.** The wake time is stored as an instant with the zone it was
+set in. Every surface shows it in the viewer's zone; when that differs, the
+tooltip says where it was set ("9:00 AM in Europe/London, where it was set").
+
 ## The supervisor
 
 While a to-do is In progress or Accepted, Pane keeps an agent working on it
@@ -315,7 +444,7 @@ minutes.
 | Per stuck episode | 2 reminders and 1 restart, then a card to you. |
 | Per machine | 12 reminders and 4 restarts an hour, attachment reminders and launch restarts included. Past either, the rest go straight to a card. |
 | Repeat stalls | A to-do stuck 3 times in a day goes straight to a card at its next stall. |
-| Never | While an agent in the Session is mid-turn, while you have unsent text in the orchestrator's tab, or while the to-do waits on you, is queued or is stopped. |
+| Never | While an agent in the Session is mid-turn, while you have unsent text in the orchestrator's tab, or while the to-do waits on you, is queued, is stopped or is snoozed. |
 | Usage limit | When Pane knows the orchestrator is at its usage limit, the ladder pauses, and at the reset Pane sends one reminder. |
 | Machine offline | Nothing runs; the desktop shows the to-do as Idle · machine offline. The supervisor lives on the machine. |
 
@@ -383,7 +512,7 @@ prompt and nobody has unsent text there. Each line names where it came from:
 
 | Line starts with | From |
 | --- | --- |
-| `[From Pane, To-dos]` | Pane itself: a new orchestrator's first message, a sub-to-do assignment, a reminder or restart, a pause for load, capacity back, an attachment reminder, or an update for a requester. |
+| `[From Pane, To-dos]` | Pane itself: a new orchestrator's first message, a sub-to-do assignment, a reminder or restart, a pause for load, capacity back, an attachment reminder, a snooze or wake-up message, or an update for a requester. |
 | `[From the person, via To-dos T-n]` | Your own words from the to-do's page: a chat message, Accept, Ask for changes, Stop, Resume or Drop. A chat message ends by telling the agent to answer with `runpane todos comment T-n "…"`, because a reply typed only in its tab never reaches the to-do's chat. |
 | `[From <name>, via To-dos T-n]` | A reply in the to-do's chat from its requester or a worker, delivered to its orchestrator. |
 | `[From To-dos T-n, asked by its orchestrator]` | A question for the requester, with how to answer it. |
@@ -393,8 +522,11 @@ prompt and nobody has unsent text there. Each line names where it came from:
 To-dos live in the host machine's `sessions.db`, in three tables added on
 upgrade (`main/src/database/todosSchema.ts`):
 
-- `todos`: one row per to-do, with its state, requester, assignee and the
-  supervisor's and gate's counters.
+- `todos`: one row per to-do, with its state, requester, assignee, the
+  supervisor's and gate's counters, and while it is snoozed its wake time,
+  zone, note, action, who snoozed it, the state it came from and its
+  reminder card (seven nullable columns from `snoozed_until` to
+  `reminder_card_id`, with an index on `snoozed_until`).
 - `todo_attachments`: one row per attachment, with its kind, target, machine,
   who attached it and how (`attached`, `pr`, `approval` or `opened`).
 - `todo_activity`: the chat's messages and events; `reply_to` names the row a
@@ -402,7 +534,7 @@ upgrade (`main/src/database/todosSchema.ts`):
 
 Approvals gain a `todo_id` column. All of it is additive (`reply_to` is added
 to databases from earlier to-do builds when they open), so an older Pane
-opening the same database still starts. Done and dropped to-dos, their
+opening the same database still starts. The snooze columns are added the same way. Done and dropped to-dos, their
 attachments and activity are deleted 30 days after they close.
 
 ## From the CLI
@@ -417,7 +549,7 @@ runpane todos update T-n [--title <title>] [--summary <md>] [--done-when <text>]
 runpane todos attach T-n <file|url> [--kind plan|mockup|design|pr|findings|decision|doc|image|link] [--label <label>] [--note <text>]
 runpane todos detach T-n <attachment-id>
 runpane todos show T-n
-runpane todos list [--all]
+runpane todos list [--all] [--status waiting|working|queued|snoozed|idle|done|dropped]
 runpane todos assign T-n [--panel <tab-id>]
 runpane todos ask T-n "<question>"
 runpane todos comment T-n "<text>" [--escalate]
@@ -427,11 +559,17 @@ runpane todos drop T-n [--reason <text>]
 runpane todos archive T-n
 runpane todos start T-n
 runpane todos stop T-n
+runpane todos snooze T-n --until <time> [--note <text>] [--remind-me]
+runpane todos wake T-n
 ```
 
 - `update --done-when` replaces the list; lines that stay keep their checks.
   `--check` and `--uncheck` take 1-based line numbers.
 - `list` shows open to-dos; `--all` adds those closed in the last 7 days.
+  `--status` lists only those with that status; `--status snoozed` lists
+  them soonest first. `show` prints a snoozed to-do's wake time, what
+  happens then, who snoozed it and its note.
+- `snooze` and `wake`: see [Snoozing and reminders](#snoozing-and-reminders).
 - `assign` without `--panel` hands the to-do back to its Session's
   orchestrator.
 - `--todo T-n` on `runpane notify`, `runpane report` and `runpane agents start`

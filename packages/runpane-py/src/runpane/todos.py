@@ -4,22 +4,28 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from .daemon_client import invoke_daemon
 from .notify import RunpaneError
+from .todo_times import cli_time_zone, format_snooze_time, format_until, read_snooze_time
 
 TODO_KEYS = ["ref", "number", "title", "state", "status", "reason", "parent", "sessionId", "requester", "assignee", "summary", "doneWhen", "attachmentCount", "updatedAt"]
 ATTACHMENT_KEYS = ["id", "kind", "label", "target", "machine", "note", "addedBy", "source", "from", "addedAt"]
+SNOOZE_KEYS = ["until", "zone", "note", "action", "by"]
 ACTIVITY_KEYS = ["id", "kind", "author", "body", "at"]
 STATUS_LABELS = {
     "waiting": "Waiting on you",
     "working": "Working",
     "queued": "Queued",
+    "snoozed": "Snoozed",
     "idle": "Idle",
     "done": "Done",
     "dropped": "Dropped",
 }
+SHOWN_STATUSES = list(STATUS_LABELS)
 ATTACH_KINDS = ["plan", "mockup", "design", "pr", "findings", "decision", "doc", "image", "link"]
 URL_PATTERN = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://")
 TODO_REF_PATTERN = re.compile(r"\s*(?:[tT]-?)?([0-9]+)\s*")
@@ -80,6 +86,8 @@ def one_line(text: str, limit: int = 200) -> str:
 def _todo_json(todo: Dict[str, Any]) -> Dict[str, Any]:
     result = {key: todo.get(key) for key in TODO_KEYS}
     result["doneWhen"] = [{"text": item.get("text"), "met": item.get("met")} for item in todo.get("doneWhen") or []]
+    if todo.get("snooze") is not None:
+        result["snooze"] = {key: todo["snooze"].get(key) for key in SNOOZE_KEYS}
     return result
 
 
@@ -172,6 +180,51 @@ def text_after_todo(parsed: Any, what: str, example: str) -> str:
     if not text:
         raise invalid(f"runpane {parsed.command} needs the {what} after the to-do, such as `{example}`.", f"Pass the {what} in quotes after the to-do.")
     return text
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def build_snooze(parsed: Any, now: int) -> Dict[str, Any]:
+    """`--until` read in this machine's zone, so the host gets an instant it never reinterprets."""
+    todo = todo_ref_from(parsed, "none")
+    if parsed.snooze_until is None:
+        raise invalid(
+            "runpane todos snooze needs --until, the time to wake it.",
+            'Pass a time, such as `runpane todos snooze T-12 --until tomorrow --note "Check Sentry"`.',
+        )
+    zone = cli_time_zone()
+    request: Dict[str, Any] = {"todo": todo, "until": read_snooze_time(parsed.snooze_until, now, zone), "zone": zone}
+    _set(request, "note", parsed.note)
+    if parsed.remind_me:
+        request["remindMe"] = True
+    return with_caller(request)
+
+
+def _iso_ms(text: str) -> int:
+    """ISO 8601 with an offset (or Z) as ms since epoch."""
+    moment = datetime.fromisoformat(text.replace("Z", "+00:00").replace("z", "+00:00"))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return int(moment.timestamp() * 1000)
+
+
+def snooze_when(snooze: Dict[str, Any], now: int) -> str:
+    """The wake time, "Wed 18 Nov 2026, 9:00 AM PST (in 17h)", in this machine's zone, naming the zone it was set in when that differs."""
+    at = _iso_ms(snooze["until"])
+    zone = cli_time_zone()
+    set_in = "" if snooze.get("zone") == zone else f", set in {snooze.get('zone')}"
+    return f"{format_snooze_time(at, zone)} ({format_until(at, now)}{set_in})"
+
+
+def describe_snoozed(todo: Dict[str, Any], now: int) -> str:
+    """The snooze line: "Snoozed T-14 until Wed 18 Nov 2026, 9:00 AM PST (in 17h). Its agents stop after their current step."."""
+    snooze = todo.get("snooze")
+    if not snooze:
+        return f"Snoozed {format_todo_line(todo)}"
+    then = "Pane raises a reminder card for you then." if snooze["action"] == "remind" else "Its agents stop after their current step."
+    return f"Snoozed {todo['ref']} until {snooze_when(snooze, now)}. {then}"
 
 
 def ref_request(parsed: Any) -> Dict[str, Any]:
@@ -277,6 +330,11 @@ def run_todos(parsed: Any) -> int:
         return _emit(parsed, result, [f"{'Queued' if result['queued'] else 'Started'} {format_todo_line(result['todo'])}"])
     if command == "todos stop":
         return _print_todo(parsed, "Stopped", _call(parsed, "stop", ref_request(parsed)))
+    if command == "todos snooze":
+        result = _todo_result(_call(parsed, "snooze", build_snooze(parsed, _now_ms())))
+        return _emit(parsed, result, [describe_snoozed(result["todo"], _now_ms())])
+    if command == "todos wake":
+        return _print_todo(parsed, "Woke", _call(parsed, "wake", ref_request(parsed)))
     raise ValueError(f"Unsupported command: {command}")
 
 
@@ -284,9 +342,17 @@ def run_list(parsed: Any) -> int:
     if parsed.todo_args:
         raise invalid(f"runpane todos list takes no words, but got: {' '.join(parsed.todo_args)}.", "Show one to-do with `runpane todos show <todo>`.")
     request: Dict[str, Any] = {"all": True} if parsed.all else {}
+    if parsed.todo_status is not None:
+        if parsed.todo_status not in SHOWN_STATUSES:
+            raise invalid(f'--status must be one of: {", ".join(SHOWN_STATUSES)}; got "{parsed.todo_status}".', "Pick one, such as `runpane todos list --status snoozed`.")
+        request["status"] = parsed.todo_status
     raw = _call(parsed, "list", request)
     result = {"ok": True, "todos": [_todo_json(item) for item in raw.get("todos") or []]}
-    empty = f"{'No to-dos.' if parsed.all else 'No open to-dos.'} Create one with `runpane todos create \"<title>\"`."
+    if parsed.todo_status is None:
+        none = "No to-dos." if parsed.all else "No open to-dos."
+    else:
+        none = f"No to-dos are {STATUS_LABELS[parsed.todo_status]}."
+    empty = f"{none} Create one with `runpane todos create \"<title>\"`."
     return _emit(parsed, result, [format_todo_line(todo) for todo in result["todos"]] or [empty])
 
 
@@ -307,6 +373,12 @@ def describe_show(result: Dict[str, Any]) -> List[str]:
     lines.append(format_todo_line(todo))
     parent = f" · sub-to-do of {todo['parent']}" if todo.get("parent") else ""
     lines.append(f"  Requested by {todo['requester']} · working: {todo['assignee'] or 'its Session' + chr(39) + 's orchestrator'}{parent}")
+    snooze = todo.get("snooze")
+    if snooze:
+        then = "raises a reminder card" if snooze["action"] == "remind" else "wakes its agents"
+        lines.append(f"  Snoozed until {snooze_when(snooze, _now_ms())} · {then} · set by {snooze['by']}")
+        if (snooze.get("note") or "").strip():
+            lines.append(f"  Wake-up note: {one_line(snooze['note'])}")
     for line in (todo.get("summary") or "").split("\n"):
         if line.strip():
             lines.append(f"  {line}")

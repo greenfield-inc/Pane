@@ -236,6 +236,12 @@ export interface ParsedArgs {
   noAttachments?: string;
   /** todos done `--person-said <words>`. */
   personSaid?: string;
+  /** todos snooze `--until <time>`, as typed; the CLI reads it in its own zone. */
+  snoozeUntil?: string;
+  /** todos snooze `--remind-me`: a reminder card for the person instead of waking the agents. */
+  remindMe?: boolean;
+  /** todos list `--status <status>`. */
+  todoStatus?: string;
   /** notify, report and agents start `--todo <T-n>`: the to-do it belongs to. */
   todo?: string;
   /** `runpane profiles show|launch <name>`: the profile's name. */
@@ -326,7 +332,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--outcome', ['report']],
   ['--took', ['notify']],
   ['--took-as', ['notify']],
-  ['--status', ['notify', 'update']],
+  ['--status', ['notify', 'update', 'todos list']],
   ['--update', ['notify']],
   ['--asked', ['notify']],
   ['--what-changed', ['notify']],
@@ -354,6 +360,8 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--escalate', ['todos comment']],
   ['--no-attachments', ['todos review']],
   ['--person-said', ['todos done']],
+  ['--until', ['todos snooze']],
+  ['--remind-me', ['todos snooze']],
   ['--todo', ['notify', 'report', 'agents start']],
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
@@ -1106,6 +1114,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.escalate = true;
     return;
   }
+  if (flag === '--remind-me') {
+    parsed.remindMe = true;
+    return;
+  }
   if (flag === '--next') {
     if (parsed.command !== 'autopilot stack push') throw new Error('--next is only valid with runpane autopilot stack push.');
     parsed.stackNext = true;
@@ -1176,6 +1188,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--person-said') {
     parsed.personSaid = value;
+    return;
+  }
+  if (flag === '--until') {
+    parsed.snoozeUntil = value;
+    return;
+  }
+  if (flag === '--status' && parsed.command === 'todos list') {
+    parsed.todoStatus = value;
     return;
   }
   if (flag === '--todo') {

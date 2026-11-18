@@ -3,12 +3,22 @@ import { boundary, type BoundarySchema } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { invokeDaemon } from './daemonClient';
 import { RunpaneError } from './errors';
+import { cliTimeZone, formatSnoozeTime, formatUntil, readSnoozeTime } from './todoTimes';
 
 // The CLI's copy of the `runpane todos` wire contract in shared/types/todos.ts, which this package cannot import.
 
 interface TodoDoneWhenItem {
   text: string;
   met: boolean;
+}
+
+/** While a to-do is snoozed: `until` is ISO 8601 with its offset in `zone`. */
+interface TodoSnooze {
+  until: string;
+  zone: string;
+  note: string;
+  action: string;
+  by: string;
 }
 
 /** One to-do in `--json`, in the field order both CLIs print. */
@@ -27,6 +37,7 @@ interface Todo {
   doneWhen: TodoDoneWhenItem[];
   attachmentCount: number;
   updatedAt: string;
+  snooze?: TodoSnooze;
 }
 
 interface TodoAttachment {
@@ -106,6 +117,15 @@ interface TodoDetachRequest extends TodoRefRequest {
 
 interface TodoListRequest {
   all?: boolean;
+  status?: string;
+}
+
+interface TodoSnoozeRequest extends TodoRefRequest {
+  /** ms since epoch (UTC), read in this CLI's zone. */
+  until: number;
+  zone: string;
+  note?: string;
+  remindMe?: boolean;
 }
 
 interface TodoAssignRequest extends TodoRefRequest {
@@ -137,6 +157,13 @@ interface TodoDropRequest extends TodoRefRequest {
 type TodoRequest = TodoCreateRequest | TodoRefRequest | TodoListRequest;
 
 const nullableString = boundary.nullable(boundary.string);
+const snoozeSchema: BoundarySchema<TodoSnooze> = boundary.object({
+  until: boundary.string,
+  zone: boundary.string,
+  note: boundary.string,
+  action: boundary.string,
+  by: boundary.string,
+});
 const doneWhenSchema: BoundarySchema<TodoDoneWhenItem> = boundary.object({ text: boundary.string, met: boundary.boolean });
 const todoSchema: BoundarySchema<Todo> = boundary.object({
   ref: boundary.string,
@@ -153,6 +180,7 @@ const todoSchema: BoundarySchema<Todo> = boundary.object({
   doneWhen: boundary.array(doneWhenSchema),
   attachmentCount: boundary.number,
   updatedAt: boundary.string,
+  snooze: boundary.optional(snoozeSchema),
 });
 const attachmentSchema: BoundarySchema<TodoAttachment> = boundary.object({
   id: boundary.number,
@@ -202,10 +230,12 @@ const STATUS_LABELS = new Map([
   ['waiting', 'Waiting on you'],
   ['working', 'Working'],
   ['queued', 'Queued'],
+  ['snoozed', 'Snoozed'],
   ['idle', 'Idle'],
   ['done', 'Done'],
   ['dropped', 'Dropped'],
 ]);
+const SHOWN_STATUSES = [...STATUS_LABELS.keys()];
 const ATTACH_KINDS = ['plan', 'mockup', 'design', 'pr', 'findings', 'decision', 'doc', 'image', 'link'];
 const URL_PATTERN = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 const TODO_REF_PATTERN = /^\s*(?:[tT]-?)?([0-9]+)\s*$/;
@@ -354,6 +384,37 @@ function textAfterTodo(parsed: ParsedArgs, what: string, example: string): strin
   return text;
 }
 
+/** `--until` read in this machine's zone, so the host gets an instant it never reinterprets. */
+function buildSnooze(parsed: ParsedArgs, now: number): TodoSnoozeRequest {
+  const todo = todoRefFrom(parsed, 'none');
+  if (parsed.snoozeUntil === undefined) {
+    throw invalid(
+      'runpane todos snooze needs --until, the time to wake it.',
+      'Pass a time, such as `runpane todos snooze T-12 --until tomorrow --note "Check Sentry"`.',
+    );
+  }
+  const zone = cliTimeZone();
+  const request: TodoSnoozeRequest = { todo, until: readSnoozeTime(parsed.snoozeUntil, now, zone), zone };
+  if (parsed.note !== undefined) request.note = parsed.note;
+  if (parsed.remindMe) request.remindMe = true;
+  return withCaller(request);
+}
+
+/** "Snoozed T-14 until Wed 18 Nov 2026, 9:00 AM PST (in 17h). Its agents stop after their current step." */
+function describeSnoozed(todo: Todo, now: number): string {
+  if (!todo.snooze) return `Snoozed ${formatTodoLine(todo)}`;
+  const then = todo.snooze.action === 'remind' ? 'Pane raises a reminder card for you then.' : 'Its agents stop after their current step.';
+  return `Snoozed ${todo.ref} until ${snoozeWhen(todo.snooze, now)}. ${then}`;
+}
+
+/** "Wed 18 Nov 2026, 9:00 AM PST (in 17h)", in this machine's zone, naming the zone it was set in when that differs. */
+function snoozeWhen(snooze: TodoSnooze, now: number): string {
+  const at = Date.parse(snooze.until);
+  const zone = cliTimeZone();
+  const setIn = snooze.zone === zone ? '' : `, set in ${snooze.zone}`;
+  return `${formatSnoozeTime(at, zone)} (${formatUntil(at, now)}${setIn})`;
+}
+
 function refRequest(parsed: ParsedArgs): TodoRefRequest {
   return withCaller<TodoRefRequest>({ todo: todoRefFrom(parsed, 'none') });
 }
@@ -422,6 +483,11 @@ export async function runTodos(parsed: ParsedArgs): Promise<number> {
       return print(parsed, result, [`${result.queued ? 'Queued' : 'Started'} ${formatTodoLine(result.todo)}`]);
     }
     case 'todos stop': return printTodo(parsed, 'Stopped', await call(parsed, 'stop', refRequest(parsed), todoResultSchema));
+    case 'todos snooze': {
+      const result = await call(parsed, 'snooze', buildSnooze(parsed, Date.now()), todoResultSchema);
+      return print(parsed, result, [describeSnoozed(result.todo, Date.now())]);
+    }
+    case 'todos wake': return printTodo(parsed, 'Woke', await call(parsed, 'wake', refRequest(parsed), todoResultSchema));
     default: throw new Error(`Unsupported command: ${parsed.command}`);
   }
 }
@@ -432,8 +498,15 @@ async function runList(parsed: ParsedArgs): Promise<number> {
   }
   const request: TodoListRequest = {};
   if (parsed.all) request.all = true;
+  if (parsed.todoStatus !== undefined) {
+    if (!SHOWN_STATUSES.includes(parsed.todoStatus)) {
+      throw invalid(`--status must be one of: ${SHOWN_STATUSES.join(', ')}; got "${parsed.todoStatus}".`, 'Pick one, such as `runpane todos list --status snoozed`.');
+    }
+    request.status = parsed.todoStatus;
+  }
   const result = await call(parsed, 'list', request, todoListResultSchema);
-  const empty = `${parsed.all ? 'No to-dos.' : 'No open to-dos.'} Create one with \`runpane todos create "<title>"\`.`;
+  const none = parsed.todoStatus === undefined ? (parsed.all ? 'No to-dos.' : 'No open to-dos.') : `No to-dos are ${statusLabel(parsed.todoStatus)}.`;
+  const empty = `${none} Create one with \`runpane todos create "<title>"\`.`;
   return print(parsed, result, result.todos.length === 0 ? [empty] : result.todos.map(formatTodoLine));
 }
 
@@ -465,6 +538,11 @@ function describeShow(result: TodoShowResult): string[] {
   lines.push(formatTodoLine(todo));
   const parent = todo.parent ? ` · sub-to-do of ${todo.parent}` : '';
   lines.push(`  Requested by ${todo.requester} · working: ${todo.assignee ?? "its Session's orchestrator"}${parent}`);
+  if (todo.snooze) {
+    const then = todo.snooze.action === 'remind' ? 'raises a reminder card' : 'wakes its agents';
+    lines.push(`  Snoozed until ${snoozeWhen(todo.snooze, Date.now())} · ${then} · set by ${todo.snooze.by}`);
+    if (todo.snooze.note.trim()) lines.push(`  Wake-up note: ${oneLine(todo.snooze.note)}`);
+  }
   for (const line of todo.summary.split('\n')) if (line.trim()) lines.push(`  ${line}`);
   if (todo.doneWhen.length > 0) {
     lines.push('  Done when:');

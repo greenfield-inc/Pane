@@ -210,7 +210,7 @@ test('todos tools need no yes, take the to-do and text as inputs, and pass lists
   const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
   const { parseRunpaneArgs } = require(dist('commands.js'));
   const tools = buildMcpTools().filter((tool) => tool.name.startsWith('todos_'));
-  assert.equal(tools.length, 15);
+  assert.equal(tools.length, 17);
   for (const tool of tools) {
     assert.ok(!('yes' in tool.inputSchema.properties), `${tool.name} must run without yes`);
     if (tool.name !== 'todos_list') assert.ok(tool.inputSchema.required.includes(tool.name === 'todos_create' ? 'title' : 'todo'), tool.name);
@@ -225,6 +225,13 @@ test('todos tools need no yes, take the to-do and text as inputs, and pass lists
   const parsed = parseRunpaneArgs(argv);
   assert.deepEqual([parsed.todoArgs, parsed.doneWhen, parsed.noStart], [['- Fix the sheet'], ['Opens with ?', 'Approvals work'], true]);
   assert.deepEqual(buildToolArgv(byName('todos_comment'), { todo: 'T-12', text: '- done', escalate: true }), ['todos', 'comment', 'T-12', '- done', '--escalate', '--json']);
+  // todos_snooze takes the same --until text as the CLI, which reads it in its own zone (round 9, T-17).
+  assert.deepEqual(byName('todos_snooze').inputSchema.required.sort(), ['todo', 'until']);
+  assert.equal(byName('todos_snooze').annotations.destructiveHint, true);
+  assert.deepEqual(buildToolArgv(byName('todos_snooze'), { todo: 'T-12', until: 'tomorrow 14:30', note: '- check Sentry', remindMe: true }),
+    ['todos', 'snooze', 'T-12', '--until=tomorrow 14:30', '--note=- check Sentry', '--remind-me', '--json']);
+  assert.deepEqual(buildToolArgv(byName('todos_wake'), { todo: 'T-12' }), ['todos', 'wake', 'T-12', '--json']);
+  assert.deepEqual(byName('todos_list').inputSchema.properties.status.enum, ['waiting', 'working', 'queued', 'snoozed', 'idle', 'done', 'dropped']);
   const notify = buildMcpTools().find((tool) => tool.name === 'notify');
   assert.equal(notify.inputSchema.properties.todo.type, 'string');
 });
@@ -854,7 +861,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'theme_read', 'theme_set',
     'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
-    'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_start', 'todos_stop', 'todos_update',
+    'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_snooze', 'todos_start', 'todos_stop', 'todos_update', 'todos_wake',
     'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
   ]);
   const devices = await names(['--toolsets', 'devices']);
@@ -869,7 +876,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   const todos = await names(['--toolsets', 'todos']);
   assert.deepEqual(todos.map((tool) => tool.name).sort(), [
     'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
-    'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_start', 'todos_stop', 'todos_update',
+    'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_snooze', 'todos_start', 'todos_stop', 'todos_update', 'todos_wake',
   ]);
   const secrets = await names(['--toolsets', 'secrets']);
   assert.deepEqual(secrets.map((tool) => tool.name).sort(), ['secrets_delete', 'secrets_list']);
@@ -889,7 +896,7 @@ test('the plugin toolset is core without the tools that reach other machines', a
     'profiles_launch', 'profiles_list', 'profiles_runs', 'profiles_show',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'todos_archive', 'todos_ask', 'todos_assign', 'todos_attach', 'todos_comment', 'todos_create', 'todos_detach', 'todos_done',
-    'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_start', 'todos_stop', 'todos_update',
+    'todos_drop', 'todos_list', 'todos_review', 'todos_show', 'todos_snooze', 'todos_start', 'todos_stop', 'todos_update', 'todos_wake',
     'workspace_state',
   ]);
 });

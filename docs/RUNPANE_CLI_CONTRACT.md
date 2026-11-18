@@ -149,6 +149,7 @@ runpane todos create "Keyboard sheet" --done-when "Sheet opens with ?" --repo pa
 runpane todos attach T-12 tmp/plan/cover-sheet.html --kind plan --json
 runpane todos ask T-12 "Should the sheet list chat shortcuts too?" --json
 runpane todos review T-12 --summary "Ready; see the PR." --json
+runpane todos snooze T-12 --until tomorrow --note "Check Sentry after the deploy" --json
 runpane profiles list --json
 runpane profiles launch greenfield --prompt "Add dark mode to settings" --yes --json
 runpane agents start --repo active --name fix-login --agent claude --prompt "Fix the login redirect" --yes --json
@@ -472,6 +473,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `todos archive`: Archive a closed to-do's Panes and Session, keeping any Pane with unsaved work.
 - `todos start`: Start a to-do that is not running: its Session and orchestrator, through the load gate.
 - `todos stop`: Stop a to-do: Pane stops keeping it moving until it is started again.
+- `todos snooze`: Snooze a to-do until a time: its agents stop after their current step, and Pane wakes them then with your note.
+- `todos wake`: Wake a snoozed to-do now, as its time arriving would.
 - `profiles list`: List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.
 - `profiles show`: Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.
 - `profiles launch`: Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.
@@ -634,7 +637,7 @@ runpane todos update <todo> [--title <title>] [--summary <markdown>] [--done-whe
 runpane todos attach <todo> <target> [--kind <plan|mockup|design|pr|findings|decision|doc|image|link>] [--label <label>] [--note <text>] [--json] [--pane-dir <path>]
 runpane todos detach <todo> <attachment> [--json] [--pane-dir <path>]
 runpane todos show <todo> [--json] [--pane-dir <path>]
-runpane todos list [--all] [--json] [--pane-dir <path>]
+runpane todos list [--all] [--status <status>] [--json] [--pane-dir <path>]
 runpane todos assign <todo> [--panel <tab-id>] [--json] [--pane-dir <path>]
 runpane todos ask <todo> <question> [--json] [--pane-dir <path>]
 runpane todos comment <todo> <text> [--escalate] [--json] [--pane-dir <path>]
@@ -644,6 +647,8 @@ runpane todos drop <todo> [--reason <text>] [--json] [--pane-dir <path>]
 runpane todos archive <todo> [--json] [--pane-dir <path>]
 runpane todos start <todo> [--json] [--pane-dir <path>]
 runpane todos stop <todo> [--json] [--pane-dir <path>]
+runpane todos snooze <todo> --until <time> [--note <text>] [--remind-me] [--json] [--pane-dir <path>]
+runpane todos wake <todo> [--json] [--pane-dir <path>]
 runpane profiles list [--json] [--pane-dir <path>]
 runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]
 runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]
@@ -724,7 +729,7 @@ To free disk or memory, run `runpane machine health` and delete only with `runpa
 Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.
 Profiles: a profile is a team of agents and a fixed workflow in one file. `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `"$PANE_RUNPANE_BIN" report --outcome "<outcome>"`, using one of the outcomes its first message lists.
 
-To-dos: `runpane todos` (or the `todos_*` MCP tools) is a work list Pane keeps moving. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists, with `runpane todos attach <T-n> <file|url>`; ask questions about a to-do with `--todo <T-n>`; `runpane docs read --doc docs/TODOS.md` has the rest.
+To-dos: `runpane todos` (or the `todos_*` MCP tools) is a work list Pane keeps moving. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists, with `runpane todos attach <T-n> <file|url>`; ask questions about a to-do with `--todo <T-n>`; to check back later (after a deploy, or for a reply), snooze it with `runpane todos snooze <T-n> --until <time> --note <text>` instead of waiting in a turn; `runpane docs read --doc docs/TODOS.md` has the rest.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 
@@ -874,6 +879,7 @@ These flags are consumed by local daemon-control commands:
 --label <label>
 --no-attachments <why>
 --person-said <words>
+--until <time>
 --todo <T-n>
 --outcome <name>
 --harness <cli[/model]>
@@ -922,6 +928,7 @@ These flags are consumed by local daemon-control commands:
 --idle
 --no-start
 --escalate
+--remind-me
 --yaml
 ```
 

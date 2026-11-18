@@ -1702,7 +1702,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
-  todoArgs: [], noStart: false, escalate: false,
+  todoArgs: [], noStart: false, escalate: false, remindMe: false,
   answerApprove: false, answerDeny: false, hook: false, yaml: false,
 };
 
@@ -5297,6 +5297,14 @@ async function checkTodosParity() {
   const attachment = { id: 3, kind: 'plan', label: 'Plan', target: '/repo/plan.html', machine: 'mac', note: 'Read section 2', addedBy: 'you', source: 'attached', from: null, addedAt: '2026-11-16T09:00:00.000Z' };
   const inherited = { ...attachment, id: 4, kind: 'link', target: 'https://example.com/x', machine: null, note: null, from: 'T-11' };
   const activity = { id: 1, kind: 'message', author: 'claude', body: 'Sheet   done.\nApprovals next.', at: '2026-11-16T09:30:00.000Z' };
+  // Snooze times are read in the CLI machine's zone: both CLIs run in Los Angeles here. Two days out at 9:00 AM
+  // is always in the future; the daemon's answers carry a past time so "(due now)" prints the same in both.
+  const originalTz = process.env.TZ;
+  process.env.TZ = 'America/Los_Angeles';
+  const laDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(Date.now() + 2 * 24 * 60 * 60 * 1000);
+  const snoozeAt = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'todoTimes.js')).readSnoozeTime(`${laDate}T09:00`, Date.now(), 'America/Los_Angeles');
+  const snooze = { by: 'Orchestrator', until: '2026-01-01T09:00:00.000-08:00', zone: 'America/Los_Angeles', note: 'Check Sentry\nfor new errors', action: 'agents' };
+  const snoozed = { ...todo, state: 'stopped', status: 'snoozed', reason: 'until Thu 9:00 AM · Check Sentry', snooze };
   const scripted = [
     { ok: true, todo },
     { ok: true, todo },
@@ -5317,6 +5325,12 @@ async function checkTodosParity() {
     { ok: true, todo: { ...todo, state: 'stopped', status: 'idle', reason: 'stopped' } },
     { ok: true, todo: { ...todo, title: 'Renamed' } },
     { ok: true, todo: 'T-12', routedTo: 'requester', approvalId: null },
+    { ok: true, todo: snoozed },
+    { ok: true, todo: { ...snoozed, snooze: { ...snooze, action: 'remind', zone: 'Europe/London', note: '' } } },
+    { ok: true, todo: { ...todo, state: 'in_progress', status: 'working' } },
+    { ok: true, todos: [snoozed] },
+    { ok: true, todos: [] },
+    { ok: true, todo: snoozed, attachments: [], subTodos: [], activity: [] },
     { throws: 'No to-do T-99. Nothing was changed.' },
   ];
   const argvs = [
@@ -5339,6 +5353,12 @@ async function checkTodosParity() {
     ['todos', 'stop', 'T-12', '--json'],
     ['todos', 'update', 'T-12', '--title', 'Renamed'],
     ['todos', 'ask', 'T-12', 'Which?'],
+    ['todos', 'snooze', 'T-12', '--until', `${laDate}T09:00`, '--note', 'Check Sentry', '--json'],
+    ['todos', 'snooze', 'T12', '--until', `${laDate} 09:00`, '--remind-me'],
+    ['todos', 'wake', 'T-12'],
+    ['todos', 'list', '--status', 'snoozed'],
+    ['todos', 'list', '--status', 'waiting'],
+    ['todos', 'show', 'T-12'],
   ];
   const invalidArgvs = [
     ['todos', 'start', 'T-99'],
@@ -5350,11 +5370,19 @@ async function checkTodosParity() {
     ['todos', 'detach', 'T-12', 'x'],
     ['todos', 'ask', 'T-12'],
     ['todos', 'list', 'T-12'],
+    ['todos', 'snooze', 'T-12', '--note', 'No time'],
+    ['todos', 'snooze', 'T-12', '--until', 'next blue moon'],
+    ['todos', 'snooze', 'T-12', '--until', '2020-01-01'],
+    ['todos', 'snooze', 'T-12', '--until', '400d'],
+    ['todos', 'list', '--status', 'sleepy'],
   ];
   const parseErrors = [
     ['todos', 'update', 'T-12', '--check', '0'],
     ['todos', 'show', 'T-12', '--reason', 'x'],
     ['report', '--state', 'ready', '--parent', 'T-1'],
+    ['todos', 'show', 'T-12', '--until', '2h'],
+    ['todos', 'wake', 'T-12', '--remind-me'],
+    ['todos', 'show', 'T-12', '--status', 'snoozed'],
   ];
   const originalInvokeDaemon = daemonClient.invokeDaemon;
   const originalConsoleLog = console.log;
@@ -5429,6 +5457,27 @@ async function checkTodosParity() {
   assert.ok(lines.includes('No to-dos. Create one with `runpane todos create "<title>"`.'));
   assert.ok(lines.includes('Asked the requester about T-12.'));
   assert.ok(lines.includes('Kept focus-ring: unpushed commits'));
+  // runpane todos snooze, wake and list --status (round 9, T-17).
+  const snoozeCalls = calls.slice(19, 25);
+  assert.deepStrictEqual(snoozeCalls[0], { channel: 'runpane:todos:snooze', args: [{ todo: 'T-12', until: snoozeAt, zone: 'America/Los_Angeles', note: 'Check Sentry', callerPanelId: 'panel-caller' }] });
+  assert.deepStrictEqual(snoozeCalls[1], { channel: 'runpane:todos:snooze', args: [{ todo: 'T-12', until: snoozeAt, zone: 'America/Los_Angeles', remindMe: true, callerPanelId: 'panel-caller' }] });
+  assert.deepStrictEqual(snoozeCalls[2], { channel: 'runpane:todos:wake', args: [{ todo: 'T-12', callerPanelId: 'panel-caller' }] });
+  assert.deepStrictEqual(snoozeCalls[3], { channel: 'runpane:todos:list', args: [{ status: 'snoozed' }] });
+  assert.deepStrictEqual(snoozeCalls[5].channel, 'runpane:todos:show');
+  const snoozeJson = JSON.parse(lines.find((line) => line.includes('"snooze"')));
+  assert.deepStrictEqual(Object.keys(snoozeJson.todo.snooze), ['until', 'zone', 'note', 'action', 'by']);
+  assert.ok(lines.includes('Snoozed T-12 until Thu 1 Jan 2026, 9:00 AM PST (due now, set in Europe/London). Pane raises a reminder card for you then.'), lines.join('\n'));
+  assert.ok(lines.includes('Woke T-12  Working  Keyboard sheet — approvals'));
+  assert.ok(lines.includes('T-12  Snoozed  Keyboard sheet — approvals · until Thu 9:00 AM · Check Sentry'));
+  assert.ok(lines.includes('No to-dos are Waiting on you. Create one with `runpane todos create "<title>"`.'));
+  assert.ok(lines.includes('  Snoozed until Thu 1 Jan 2026, 9:00 AM PST (due now) · wakes its agents · set by Orchestrator'));
+  assert.ok(lines.includes('  Wake-up note: Check Sentry for new errors'));
+  const snoozeErrors = errors.slice(-5);
+  assert.match(snoozeErrors[0], /needs --until/);
+  assert.match(snoozeErrors[1], /is not a time runpane reads\. It reads an ISO 8601 time/);
+  assert.match(snoozeErrors[2], /has already passed/);
+  assert.match(snoozeErrors[3], /more than a year away/);
+  assert.match(snoozeErrors[4], /--status must be one of: waiting, working, queued, snoozed, idle, done, dropped/);
 
   const python = JSON.parse(runPythonSnippet(`
 import contextlib
@@ -5475,6 +5524,8 @@ for argv in data["parseErrors"]:
 sys.stdout.buffer.write(json.dumps({"calls": calls, "codes": codes, "errors": errors, "parseErrors": parse_errors, "stdout": stdout.getvalue()}).encode("utf-8"))
 `, JSON.stringify({ scripted, argvs, invalidArgvs, parseErrors })));
   process.chdir(originalCwd);
+  if (originalTz === undefined) delete process.env.TZ;
+  else process.env.TZ = originalTz;
   if (originalPanel === undefined) delete process.env.PANE_PANEL_ID;
   else process.env.PANE_PANEL_ID = originalPanel;
 
@@ -7577,6 +7628,7 @@ async function runChecks() {
   await checkMachineParity();
   await checkLoopsParity();
   await checkTodosParity();
+  require('./test-runpane-todo-times.js').checkTodoSnoozeTimes();
   await checkOverviewReportsAndLocks();
   await checkSessionRuntime();
   checkBoundaryDecoderCollectsEveryIssue();
