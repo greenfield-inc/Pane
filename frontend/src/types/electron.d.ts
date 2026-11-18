@@ -208,8 +208,8 @@ interface ElectronAPI {
 
   // System utilities
   openExternal: (url: string) => Promise<IPCResponse>;
-  /** Opens a local `.html` or `.htm` page, given as a `file:` URL, in the default browser. */
-  openLocalPage: (fileUrl: string) => Promise<IPCResponse>;
+  /** Opens a `.html` or `.htm` page, given as a `file:` URL, in the default browser. On a remote desktop, `panelId` names the tab whose host page this computer copies and opens. */
+  openLocalPage: (fileUrl: string, panelId?: string) => Promise<IPCResponse>;
 
   feedback: {
     submit: (request: import('../../../shared/types/feedback').SubmitFeedbackRequest) => Promise<IPCResponse<

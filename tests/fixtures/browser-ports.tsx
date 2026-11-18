@@ -72,8 +72,8 @@ Object.assign(window, {
       portsTest.openedExternally.push(target);
       return portsTest.openExternalError === null ? { success: true } : { success: false, error: portsTest.openExternalError };
     },
-    openLocalPage: async (fileUrl: string) => {
-      portsTest.openedLocally.push(fileUrl);
+    openLocalPage: async (fileUrl: string, panelId?: string) => {
+      portsTest.openedLocally.push(panelId === undefined ? fileUrl : `${fileUrl} ${panelId}`);
       return { success: true };
     },
     invoke: (channel: string) => {
