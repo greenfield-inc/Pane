@@ -10,7 +10,7 @@ import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../share
 import { isRemotePaneCommand, paneCommandCaller, paneCommandSignal, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { panelManager } from '../services/panelManager';
 import { defaultProbeEnvironment, type ProbeEnvironment } from '../services/devices/deviceProbe';
-import { DeviceBusyError, DeviceService, type DeviceCaller, type DeviceChange } from '../services/devices/deviceService';
+import { DeviceBusyError, DeviceService, type DeviceCaller, type DeviceChange, type DeviceServiceOptions } from '../services/devices/deviceService';
 import { findExecutableInPath } from '../utils/shellPath';
 import { DeviceInputSockets, inputMessages } from '../services/devices/deviceInput';
 import { StreamFrameRates, hubUrl, sizeStream, streamSize } from '../services/devices/deviceStream';
@@ -139,6 +139,7 @@ function deviceService(services: AppServices): DeviceService {
     machineLabel: localMachineLabel,
     findExecutable: findExecutableInPath,
     probeEnvironment: () => (deviceOptions.probeEnvironment ?? defaultProbeEnvironment)(findExecutableInPath),
+    ...(deviceOptions.bootIdentity ? { bootIdentity: deviceOptions.bootIdentity } : {}),
     maxBooted: () => deviceSettings(services).maxBooted,
     paneName: (paneId) => paneNameOf(services, paneId),
     onChange: (change) => { void followDeviceChange(change); },
@@ -437,9 +438,10 @@ function driving<Result>(caller: DeviceCaller, platform: DevicePlatform | undefi
   return tab ? drivers.run(tab.id, callerAgent(caller), paneCommandSignal(), work) : work();
 }
 
-/** How the device handlers probe what this machine can run; tests pass a stand-in machine. */
+/** How the device handlers probe what this machine can run and tell a device's boot; tests pass a stand-in machine. */
 export interface DeviceHandlerOptions {
   probeEnvironment?: (findExecutable: (name: string) => string | null) => ProbeEnvironment;
+  bootIdentity?: DeviceServiceOptions['bootIdentity'];
 }
 let deviceOptions: DeviceHandlerOptions = {};
 

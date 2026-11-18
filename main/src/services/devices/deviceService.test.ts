@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,10 +12,13 @@ const hub = (booted: boolean, stuck = false) => `
 const fs = require('fs');
 const http = require('http');
 const file = require('path').join(__dirname, 'booted.json');
+const bootFile = require('path').join(__dirname, 'boot.json');
+const bootNumber = (add) => { const next = (fs.existsSync(bootFile) ? Number(fs.readFileSync(bootFile, 'utf8')) : 0) + add; fs.writeFileSync(bootFile, String(next)); return next; };
 if (!fs.existsSync(file)) fs.writeFileSync(file, '${booted}');
 const server = http.createServer((request, response) => {
   response.setHeader('content-type', 'application/json');
-  if (request.url === '/api/devices/boot') fs.writeFileSync(file, 'true');
+  // Each boot is a new boot: tests read its number as the device's boot identity.
+  if (request.url === '/api/devices/boot') { fs.writeFileSync(file, 'true'); bootNumber(1); }
   if (request.url === '/api/devices/shutdown' && !${stuck}) fs.writeFileSync(file, 'false');
   const booted = JSON.parse(fs.readFileSync(file, 'utf8'));
   response.end(request.url === '/api/devices'
@@ -59,11 +62,22 @@ function setup(options: { booted?: boolean; root?: string; stuck?: boolean } = {
     maxBooted: () => 1,
     paneName: (paneId) => paneId,
     onChange: (change) => changes.push(change),
+    // The stand-in hub's boot number, while the device runs.
+    bootIdentity: async () => {
+      if (!existsSync(path.join(helpers, 'booted.json')) || readFileSync(path.join(helpers, 'booted.json'), 'utf8') !== 'true') return undefined;
+      return existsSync(path.join(helpers, 'boot.json')) ? `boot-${readFileSync(path.join(helpers, 'boot.json'), 'utf8')}` : 'boot-before-tests';
+    },
   });
   services.push(service);
   /** Why each shutdown and release happened, in order. */
   const stops = () => changes.flatMap(change => change.kind === 'shutdown' ? [`shutdown by ${change.by}`] : change.kind === 'released' ? [`released ${change.reason}${change.by ? ` by ${change.by}` : ''}`] : []);
-  return { service, clock, root, stops };
+  /** Someone outside Pane shuts the device down and boots it again (Simulator, a script, another Pane). */
+  const rebootOutsidePane = () => {
+    writeFileSync(path.join(helpers, 'booted.json'), 'true');
+    const next = existsSync(path.join(helpers, 'boot.json')) ? Number(readFileSync(path.join(helpers, 'boot.json'), 'utf8')) + 1 : 1;
+    writeFileSync(path.join(helpers, 'boot.json'), String(next));
+  };
+  return { service, clock, root, stops, rebootOutsidePane };
 }
 
 const paneA = { paneId: 'pane-a', paneName: 'pane-a' };
@@ -171,10 +185,29 @@ describe('devices Pane booted, when Pane stops', () => {
     expect(next.stops()).toEqual(['shutdown by quit']);
   }, 20_000);
 
-  it('shuts down a Pane-made device an earlier version left running, whose state file has no list yet', async () => {
+  it('leaves running a Pane-made device an earlier version left, whose boot Pane never recorded', async () => {
     const { service, stops } = setup({ booted: true });
-    expect(await service.shutDownLeftovers()).toEqual(['D1']);
-    expect(stops()).toEqual(['shutdown by quit']);
+    expect(await service.shutDownLeftovers()).toEqual([]);
+    expect(stops()).toEqual([]);
+  }, 20_000);
+
+  it('never shuts down a device Pane booted once that someone else has booted again since', async () => {
+    const { service, rebootOutsidePane, stops } = setup({ booted: false });
+    await service.open(paneA, { platform: 'ios' });
+    await service.close(paneA);
+    // The perf job reboots it for its own run; Pane's quit must leave it running.
+    rebootOutsidePane();
+    await service.dispose();
+    expect(stops()).toEqual(['released closed by agent']);
+  }, 20_000);
+
+  it('leaves a crashed run\'s device running when it was booted again before the next start', async () => {
+    const first = setup({ booted: false });
+    await first.service.open(paneA, { platform: 'ios' });
+    first.rebootOutsidePane();
+    const next = setup({ root: first.root });
+    expect(await next.service.shutDownLeftovers()).toEqual([]);
+    expect(next.stops()).toEqual([]);
   }, 20_000);
 
   it('keeps a device that would not shut down on its list, so the next start tries again', async () => {

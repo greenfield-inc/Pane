@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { IpcMain } from 'electron';
@@ -76,7 +76,9 @@ const serviceFixture = {
   configManager: { getConfig: () => ({ devices: { enabled: true } }) },
 };
 // SAFETY: the fixture supplies the AppServices members the device channels read.
-registerDeviceHandlers({ handle: vi.fn() } as Pick<IpcMain, 'handle'>, serviceFixture as AppServices, registry, { probeEnvironment: machine });
+// The stand-in simulator stays in one boot for these tests while it runs.
+const bootIdentity = async () => (readFileSync(path.join(helpers, 'booted.json'), 'utf8') === 'true' ? 'boot-1' : undefined);
+registerDeviceHandlers({ handle: vi.fn() } as Pick<IpcMain, 'handle'>, serviceFixture as AppServices, registry, { probeEnvironment: machine, bootIdentity });
 afterAll(async () => {
   await disposeDevices();
   vi.restoreAllMocks();

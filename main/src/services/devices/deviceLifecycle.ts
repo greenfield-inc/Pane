@@ -18,8 +18,8 @@ export type DevicePick =
 
 interface EndedLease { paneId: string; id: string }
 
-/** What a sweep decided: leases that idled out, and devices to shut down now. */
-export interface SweepResult { ended: EndedLease[]; shutdown: string[] }
+/** What a sweep decided: leases that idled out, devices to shut down now, and devices Pane no longer owes a shutdown. */
+export interface SweepResult { ended: EndedLease[]; shutdown: string[]; forgotten: string[] }
 
 /** What archiving a Pane decided: devices to erase, leases it ended, and devices Pane booted to shut down now. */
 export interface ArchiveResult { erase: string[]; ended: EndedLease[]; shutdown: string[] }
@@ -158,23 +158,31 @@ export class DeviceLifecycle {
     const now = this.options.now();
     const ended: EndedLease[] = [];
     const shutdown: string[] = [];
+    const forgotten: string[] = [];
+    const running = (id: string) => devices.some(device => device.id === id && device.booted);
     for (const lease of [...this.leases.values()]) {
       if (lease.visibleIn.size === 0 && now - lease.lastCallAt >= DEVICE_IDLE_MS) {
         this.leases.delete(lease.id);
         ended.push({ paneId: lease.paneId, id: lease.id });
-        if (this.bootedByPane.has(lease.id)) shutdown.push(lease.id);
+        if (this.bootedByPane.has(lease.id) && running(lease.id)) shutdown.push(lease.id);
       }
     }
     for (const device of devices) {
-      if (!device.booted || this.leases.has(device.id) || shutdown.includes(device.id)) continue;
-      if (!this.bootedByPane.has(device.id)) continue;
+      if (this.leases.has(device.id) || shutdown.includes(device.id) || !this.bootedByPane.has(device.id)) continue;
+      // Off with no Pane holding it: whatever boots it next (Simulator, a script, the person) is not
+      // Pane's boot, so Pane forgets it and its warm deadline.
+      if (!device.booted) {
+        this.shutDown(device.id);
+        forgotten.push(device.id);
+        continue;
+      }
       const until = this.warmUntil.get(device.id);
       if (until === undefined) this.warmUntil.set(device.id, now + DEVICE_WARM_MS);
       else if (now >= until) shutdown.push(device.id);
     }
     // The mark that Pane booted it stays until the shutdown is seen to work, so a failed one is tried again.
     for (const id of shutdown) this.warmUntil.delete(id);
-    return { ended, shutdown };
+    return { ended, shutdown, forgotten };
   }
 
   /**

@@ -61,9 +61,9 @@ describe('DeviceLifecycle', () => {
     const { life, advance } = setup();
     life.lease('pane-a', 'D1', 'ios', { bootedByPane: true });
     advance(9 * MINUTE);
-    expect(life.sweep([iphone('D1', { booted: true })])).toEqual({ ended: [], shutdown: [] });
+    expect(life.sweep([iphone('D1', { booted: true })])).toEqual({ ended: [], shutdown: [], forgotten: [] });
     advance(2 * MINUTE);
-    expect(life.sweep([iphone('D1', { booted: true })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'D1' }], shutdown: ['D1'] });
+    expect(life.sweep([iphone('D1', { booted: true })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'D1' }], shutdown: ['D1'], forgotten: [] });
     expect(life.holderOf('D1')).toBeUndefined();
   });
 
@@ -71,7 +71,7 @@ describe('DeviceLifecycle', () => {
     const { life, advance } = setup();
     life.lease('pane-a', 'MINE');
     advance(11 * MINUTE);
-    expect(life.sweep([iphone('MINE', { paneMade: false, booted: true })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'MINE' }], shutdown: [] });
+    expect(life.sweep([iphone('MINE', { paneMade: false, booted: true })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'MINE' }], shutdown: [], forgotten: [] });
   });
 
   it('keeps a lease whose device tab is on screen, however long since the last call', () => {
@@ -105,11 +105,33 @@ describe('DeviceLifecycle', () => {
     expect(life.booted()).toEqual(['D1']);
   });
 
+  it('forgets a device Pane booted once it is seen off, so a later boot by someone else is never shut down', () => {
+    // The mobile perf job's case: an agent boots the iPhone and closes it, a script shuts it down,
+    // and the perf job boots it again half an hour later.
+    const { life, advance } = setup();
+    life.lease('pane-a', 'IPHONE12', 'ios', { bootedByPane: true });
+    life.release('pane-a', 'IPHONE12');
+    advance(2 * MINUTE);
+    expect(life.sweep([iphone('IPHONE12', { paneMade: false, booted: false })])).toEqual({ ended: [], shutdown: [], forgotten: ['IPHONE12'] });
+    expect(life.booted()).toEqual([]);
+    advance(28 * MINUTE);
+    expect(life.sweep([iphone('IPHONE12', { paneMade: false, booted: true })]).shutdown).toEqual([]);
+    advance(60 * MINUTE);
+    expect(life.sweep([iphone('IPHONE12', { paneMade: false, booted: true })]).shutdown).toEqual([]);
+  });
+
+  it('never lists an idled-out device for shutdown when it is already off', () => {
+    const { life, advance } = setup();
+    life.lease('pane-a', 'D1', 'ios', { bootedByPane: true });
+    advance(11 * MINUTE);
+    expect(life.sweep([iphone('D1', { booted: false })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'D1' }], shutdown: [], forgotten: ['D1'] });
+  });
+
   it('leaves a Pane-made device running when the person booted it, even after a lease idles out', () => {
     const { life, advance } = setup();
     life.lease('pane-a', 'D1', 'ios', { bootedByPane: false });
     advance(60 * MINUTE);
-    expect(life.sweep([iphone('D1', { booted: true })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'D1' }], shutdown: [] });
+    expect(life.sweep([iphone('D1', { booted: true })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'D1' }], shutdown: [], forgotten: [] });
     advance(60 * MINUTE);
     expect(life.sweep([iphone('D1', { booted: true })]).shutdown).toEqual([]);
   });
