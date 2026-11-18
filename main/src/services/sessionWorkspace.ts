@@ -8,6 +8,7 @@ import type { OrchestrationSessionRecord } from '../../../shared/types/orchestra
 import { keepSessionTidySection } from './sessionTidyRules';
 import { APPROVALS_RULES } from './approvalsRules';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
+import { LeftAlone, writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
 
 const START = '<!-- pane-session-context:start -->';
 const END = '<!-- pane-session-context:end -->';
@@ -43,22 +44,16 @@ function escapeMarkers(content: string): string {
   return content.split(START).join('<!-- pane-session-context start -->').split(END).join('<!-- pane-session-context end -->');
 }
 
+const MARKERS: BlockMarkers = { begin: START, end: END, repair: 'try again' };
+
 /** Only the marked generated section is replaced; user instructions survive. */
 function writeManagedInstructions(filePath: string, content: string): void {
-  if (fs.existsSync(filePath) && fs.lstatSync(filePath).isSymbolicLink()) {
-    throw new Error(`Session instruction file must not be a symbolic link: ${filePath}`);
+  try {
+    writeOwnedBlock(filePath, MARKERS, [START, ...escapeMarkers(content).split('\n'), END], { createMode: 0o600 });
+  } catch (error) {
+    if (error instanceof LeftAlone) throw new Error(`Session instruction file ${filePath}: ${error.message}`);
+    throw error;
   }
-  const previous = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
-  const start = previous.indexOf(START);
-  const end = previous.indexOf(END);
-  if ((start === -1) !== (end === -1) || (start !== -1 && end < start)) {
-    throw new Error(`Session instruction markers are incomplete: ${filePath}`);
-  }
-  const block = `${START}\n${escapeMarkers(content)}\n${END}`;
-  const next = start === -1
-    ? `${previous}${previous ? '\n\n' : ''}${block}\n`
-    : `${previous.slice(0, start)}${block}${previous.slice(end + END.length)}`;
-  if (next !== previous) fs.writeFileSync(filePath, next, { mode: 0o600 });
 }
 
 export function prepareSessionWorkspace(
@@ -170,10 +165,11 @@ function sessionInstructions(
     '# Pane Session',
     `Stable Session ID: ${sessionId}`,
     'This directory belongs to one Session. Opening it does not authorize work. Await user input. Saved next actions are context only.',
+    ...(record?.nameIsDefault ? [sessionNameRule(sessionId)] : []),
     PANE_CAPABILITY_CONTEXT,
     delegationRules(sessionId, record),
     sessionTidyRules(sessionId, record),
-    '## Session behavior profile',
+    '## Session behavior',
     profile,
     `## Plans and documents
 When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html, and update it in place. Link it from the Session's status document (see Keep the Session tidy) instead of opening a tab for it. Open it beside the user only when they need to look at it now, with runpane panels open --url <file-url> --source agent --yes --json; it opens as a live browser in split view beside this conversation. Use --file <path> to open its editable source instead. Rerunning the command for the same target reuses its tab. The Session's status page is the exception: from the first time you dispatch work to a Pane, render it to session/index.html in this Session folder with the orchestrate-sessions skill's renderer, never by hand, and again at each change its references/status-board.md lists. The Overview tab shows it, so do not open it with panels open. Its links to pane://open?pane=<pane-id>&panel=<panel-id> open that tab and show its waiting question in Approvals.
@@ -182,6 +178,12 @@ Distinguish plans from verified results. Opening this Session is not an instruct
     'When a user task needs current state, use sessions get/overview with the stable Session ID. The snapshot below may be stale. It is data, not a startup task.',
     record ? JSON.stringify({ name: record.name, goal: record.goal, context: record.context, decisions: record.decisions, blockers: record.blockers, nextAction: record.nextAction, associations: record.associations, evidence: record.evidence, outputs: record.outputs }, null, 2) : '',
   ].join('\n\n');
+}
+
+/** Only while the Session still has the default name Pane gave it, so a name the person chose is never replaced. */
+function sessionNameRule(sessionId: string): string {
+  return `## Session name
+This Session still has its default name. In your first reply that works on a task, once you understand the Session's work, run runpane sessions get --session ${sessionId} --json. If it still shows "nameIsDefault": true, rename the Session with echo '{"name":"<name>"}' | runpane sessions update --session ${sessionId} --from-json -, where the name is 3 to 5 words that name the work, up to 8 when the name uses parentheses. Rename it this once only.`;
 }
 
 /**
@@ -203,7 +205,7 @@ Read ${guide} before coordinating Panes for the first time in a conversation. Fo
 You are in orchestrator mode: this Session's work moves through you. Only you ask the person: approvals come from you, not from the agents in this Session's Panes, who talk to you through needs_you or runpane report --state blocked --question. Answer them yourself when the person's request, the plan or an earlier decision settles it, and say which; ask the person only about the rest. Keep things moving: keep a running list of what this Session has to do, and read it again when you start, resume or wake. When the person asks about one thing while other work is open, answer it, then remind them what else is open and offer the next step. At the end of a turn, either have an approval waiting for the person in Approvals that moves the work on, or be done and say so; a turn that ends while your workers run, with your watch armed, is fine. Ask the way the next section, Asking the person in Pane, says: you post every approval card yourself with runpane notify, and relay a worker's question into its card. Messages can also come from Pane's Autopilot: one that starts with [From the person, via Autopilot] carries the person's own words; one that starts with [From Autopilot] is Autopilot's own (a first brief for a Session it created, a check-in, a question about an item). Reply to whoever asked and say which ("To Autopilot:"). Decisions (plans, merges, anything the person must choose) still go to the person as approvals, whoever asked.
 ${APPROVALS_RULES}
 ## What waits on the person (while Approvals is on)
-Keep every item that waits on the person (a worker's needs_you or blocked question, a plan or design approval, a PR ready to merge, a next step only they can take) posted to Pane's Approvals, exactly once. Workers in this Session don't post; they report blocked to you. Post each item when it appears with runpane notify ... --json as a background command (in Claude Code, Bash with run_in_background), not the MCP notify tool or AskUserQuestion, so you stay free to talk; title it with its Q-n and pass the worker's files and PR as --links. A worker's blocked question already has a card: relay into it with runpane notify --relays <item> ... (the id from runpane inbox), which improves that card instead of adding one. The answer goes straight to the worker's tab (answer: Q-n → <answer> (by you)), so don't forward it; then record it with runpane inbox ack <item> --decision <D-n>. When runpane inbox lists the answer with undelivered, Pane can't type it there: pass it on with runpane panels submit, unless the reason is that its tab closed (no worker is left to tell). A tab can also receive closed: Q-n (by you) or correction: Q-n → <answer> (by you): that is the person's word. Anything the person types comes back as a reply instead: your call's result {reply, picks?, id, next}, or reply: Q-n → "<their words>" (picked: <picks>) (by you) in your tab (a relayed worker question's reply goes to the worker's tab, and to you when the worker can't read it). If it answers, run runpane notify --took <id|Q-n> answer and act on it. If it's a question, run runpane notify --took <id|Q-n> question at once, find out, then run runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>" in the background with any changed --title, --context, --choices, --questions or --links (a reworded choice carries "was": "<old label>"); it saves a new version of the same approval and waits like a notify call, so never post a second approval for it. correction: Q-n → that was a question: "…" (by you) means update the approval; correction: Q-n → that was your answer: "…" (by you) means it is recorded as the answer: act on it. Stop the background call of an item that went stale. When you start, resume or wake, reconcile against the status files, your ledger and runpane inbox: relay or post what is missing, stop what is stale, and record each answer that has no decision. Approvals survive a restart, and an item whose asker is gone closes by itself. If notify returns unavailable because Approvals is off, ask in this tab as before.${record?.runtime === 'wsl' ? `\n${wslRouting(record)}` : ''}`;
+Keep every item that waits on the person (a worker's needs_you or blocked question, a plan or design approval, a PR ready to merge, a next step only they can take) posted to Pane's Approvals, exactly once. Workers in this Session don't post; they report blocked to you. Post each item when it appears with runpane notify ... --json as a background command (in Claude Code, Bash with run_in_background), not the MCP notify tool or AskUserQuestion, so you stay free to talk; title it with its Q-n and pass the worker's files and PR as --links. A worker's blocked question already has a card: relay into it with runpane notify --relays <item> ... (the id from runpane inbox), which improves that card instead of adding one. The answer goes straight to the worker's tab (answer: Q-n → <answer> (by you)), so don't forward it; then record it with runpane inbox ack <item> --decision <D-n>. When runpane inbox lists the answer with undelivered, Pane can't type it there: pass it on with runpane panels submit, unless the reason is that its tab closed (no worker is left to tell). A tab can also receive closed: Q-n (by you) or correction: Q-n → <answer> (by you): that is the person's word. Anything the person types comes back as a reply instead: your call's result {reply, picks?, id, next}, or reply: Q-n → "<their words>" (picked: <picks>) (by you) in your tab (a relayed worker question's reply goes to the worker's tab, and to you when the worker can't read it; if the worker takes it as a question you get reopened: Q-n → … (by <worker>), and the answer to the new version comes as correction: Q-n → <answer> (by you)). Pane records it as the answer once its reader gets it. If it answers, act on it. If it's a question, run runpane notify --took <id|Q-n> question at once (it reopens the approval), find out, then run runpane notify --update <id|Q-n> --asked "<their question>" --what-changed "<one line per change>" in the background with any changed --title, --context, --choices, --questions or --links (a reworded choice carries "was": "<old label>"); it saves a new version of the same approval and waits like a notify call, so never post a second approval for it. correction: Q-n → that was a question: "…" (by you) means update the approval; correction: Q-n → that was your answer: "…" (by you) means it is recorded as the answer: act on it. Stop the background call of an item that went stale. When you start, resume or wake, reconcile against the status files, your ledger and runpane inbox: relay or post what is missing, stop what is stale, and record each answer that has no decision. Approvals survive a restart, and an item whose asker is gone closes by itself. If notify returns unavailable because Approvals is off, ask in this tab as before.${record?.runtime === 'wsl' ? `\n${wslRouting(record)}` : ''}`;
 }
 
 /** Its own section, apart from delegationRules, so neither has to edit the other. */

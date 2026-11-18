@@ -139,9 +139,14 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name testing-account --ttl 30m --wait 1800000 --note "call QA" --json
 runpane lock release --name testing-account --json
 runpane lock list --json
+runpane machine health --json
+runpane machine cleanup --kind update-snapshot --json
+runpane machine cleanup --kind update-snapshot --yes --json
 runpane loops create --repo active --name nightly-bug-sweep --cron "0 3 * * *" --agent claude --prompt "Fix one bug from yesterday's issues" --yes --json
 runpane loops list --json
 runpane loops run --loop <loop-id> --yes --json
+runpane profiles list --json
+runpane profiles launch greenfield --prompt "Add dark mode to settings" --yes --json
 runpane agents start --repo active --name fix-login --agent claude --prompt "Fix the login redirect" --yes --json
 runpane agents start --pane <pane-id> --agent codex --prompt "Review the PR from this branch and report findings" --yes --json
 runpane agents status --pane <pane-id> --json
@@ -264,13 +269,19 @@ The desktop app treats one consumer name specially: while a `runpane watch --as 
 
 `runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.
 
+`runpane machine health` shows this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free by tier. `runpane machine cleanup --kind <kind>` lists one kind of tier 1 or 2 item (a dry run) and deletes them with `--yes`; tier 3 items are not Pane's, so it refuses them and says how to free them. Agents free disk only through this command, never with rm.
+
 `runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).
+
+`runpane profiles list|show|launch|runs` work with Pane profiles: a profile is one YAML file that defines a team of agents and a fixed workflow, and Pane runs a launched profile's workflow itself (see [PROFILES.md](PROFILES.md)). `list` prints each profile in the library with its version, origin (`bundled` or `yours`), whether it is on, and whether it can launch (`launchable`, `team only` for a profile with no workflow, or `invalid` with its first error); `--json` adds the bundled Agent Farm's state and the person's own Agent Farm profiles. `show <name>` prints its agents, steps and outcomes, and errors (`--yaml` prints the file text only; `--json` carries both as `profile` and `yaml`). `launch <name> --prompt <text> --yes` starts a run and prints it (`run`: id, Session, step, Pane): it runs in `--repo`, else the repo of the Pane the caller's terminal is in (`PANE_SESSION_ID`), else the active repo; in `--session`, else the caller's orchestrated Session (`PANE_ORCHESTRATION_SESSION_ID`), else a new Session. `--harness <cli[/model]>` picks one CLI for every agent, `--agent-harness <agent>=<cli[/model]>` one agent's CLI, and `--command <cli>=<command>` the command that starts a CLI Pane does not know (each repeatable, or one JSON object). A launch without `--prompt` fails with `ERR_PROFILES_PROMPT_REQUIRED`; Pane refuses a profile it cannot launch with `PROFILE_NOT_FOUND`, `PROFILE_NOT_LAUNCHABLE` or `PROFILE_TEAM_ONLY` and a next step. `runs` lists runs with their state (`running`, `asking`, `paused`, `ended`, `failed`) and current step. The MCP tools are `profiles_list`, `profiles_show`, `profiles_launch` and `profiles_runs`, in the `core`, `profiles` and `plugin` toolsets.
 
 `runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.
 
-`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.
+`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered, with its buttons as `--choices` or `--questions` in notify's JSON), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.
 
-`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: "screen"|"inbox"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab): the reply may answer the question or ask one. `runpane notify --took <id|Q-n> answer` records it as the answer; `--took <id|Q-n> question [--status <text>]` shows that the agent is getting more context, and `runpane notify --update <id|Q-n> --asked <text> --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.
+`runpane report --outcome <name>` ends one step of a Pane profile workflow: it names which of the step's declared outcomes happened (`runpane report --outcome "plan ready" --summary-file status.json`) and sends `state: done` with `outcome`. `--state` is then optional and may only be `done` (otherwise `ERR_REPORT_OUTCOME_STATE`), and `--question` is refused (`ERR_REPORT_OUTCOME_QUESTION`): an outcome ends the step, a question would block it. Pane checks the outcome against the step the panel runs and refuses an undeclared one with an error that lists the allowed outcomes.
+
+`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), or with 2 to 4 `--questions` (`[{title, choices}]`) one pick each, as `{answer, answers}`, `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: "screen"|"inbox"}` at once. Any ui takes up to 6 `--links` (`{label, path}`, `{label, url}` or `{label, approval}` for another approval), shown as chips on the card. When the person types a reply it returns `{reply, picks?, id, next}` (or, with no open call, types a `reply:` line into the asking tab), and Pane records the reply as the answer once it is delivered. If the reply asks something instead, `--took <id|Q-n> question [--status <text>]` reopens the approval and shows that the agent is getting more context (`--took <id|Q-n> answer` confirms it, and changes nothing), and `runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text>` with any changed `--title`, `--context`, `--choices`, `--questions` or `--links` saves a new version and waits on it. `--took` prints `{took, id, next?}`. Only the reply's reader (the asker, the orchestrator that relayed it, or Autopilot) may run them. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. A Session orchestrator adds `--relays <item>` (an id from `runpane inbox`) to relay a worker's question: the same card gains the choices, context and links, the call waits on it as usual, and the answer also goes straight to the worker's tab. Autopilot's own item takes `--about-session <id|name>`, the Session it is about. It needs no `--yes`: asking the person is the point.
 
 Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.
 
@@ -280,7 +291,7 @@ The orchestrator guide prescribes submit without `--wait`, followed by its named
 
 `runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: "already-running"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: "resumed"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: "command-exited"` and the error line it printed. `--panel` also resumes a paused tab. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope and skips paused ones, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.
 
-`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does, without asking, keeps its agent's conversation, and marks it paused. Pause leaves a chat tab running: `panels pause --panel` on one fails with `ERR_RUNPANE_CHAT_NOT_PAUSABLE`, and `panes pause` and `sessions pause` leave its agent running and count it in `chatTabsNotPaused`. A paused terminal tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, chatTabsNotPaused, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: "manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal output or input or chat agent activity in its tabs, or the last time the person selected it; `panels list` reports each tab's `paused`. Auto-pause also stops the agent of a chat tab idle for `chatIdleReleaseMinutes` (30 by default); opening the tab or sending it a message resumes it, and it reports no `panel.paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.
+`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does, without asking, keeps its agent's conversation, and marks it paused. Pause leaves a chat tab running: `panels pause --panel` on one fails with `ERR_RUNPANE_CHAT_NOT_PAUSABLE`, and `panes pause` and `sessions pause` leave its agent running and count it in `chatTabsNotPaused`. A paused terminal tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, chatTabsNotPaused, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: "manual" | "auto" | "move", idleHours?, machine? }`; `move` while its Session moves to another machine) and `inactiveSince`, the latest terminal output or input or chat agent activity in its tabs, or the last time the person selected it; `panels list` reports each tab's `paused`. Auto-pause also stops the agent of a chat tab idle for `chatIdleReleaseMinutes` (30 by default); opening the tab or sending it a message resumes it, and it reports no `panel.paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.
 
 `runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: "transcript-unavailable" }` and exits 1.
 
@@ -292,7 +303,7 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 
 `runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.
 
-`runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex, Cursor or OpenCode session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. An OpenCode session travels as its export: `opencode export` on this machine, then `opencode import` inside the receiving repository there, and an OpenCode receiver is accepted only to continue an OpenCode session. A Cursor session is carried only to another machine, best effort since Cursor's store is undocumented: Cursor has no fork, and a copied chat still writes to the original, so on this machine the result is `not-continued` and nothing is started. A destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`); a copy already there is replaced only when the sender's holds all of it and no agent there runs it, otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent (`ERR_HANDOFF_RESUME_UNSUPPORTED`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session resumes the sender's conversation when first opened. The receiver reports back to the sender's panel.
+`runpane handoff` hands a task to another agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. When the sender is a Pane tab running a Claude, Codex, Cursor or OpenCode session and the receiver is the same agent, the handoff carries that session: on another machine its files are copied into that machine's agent store and the receiver resumes the same id; on this machine the receiver resumes a fork, because two agents never resume one session on one machine. The receiver starts with no prompt, and the CLI runs the continuity check and reports JSON `continuity.result` `continued`, `inconclusive` (exit 0; `next` gives a probe question) or `not-continued` (exit 1; the receiver is kept and `next` gives the `--note-only` command). `--note-only`, a different agent, or a tab with no carried session starts a fresh agent with the note (`fresh-agent`). JSON `continuity` is `{ carried, result, agent, sessionId, resumedId, fork, files, bytes, checks: { resumedById, restartResumes, historyLoaded, originalUntouched?, originalAppended? }, reason, next }`: `sessionId` is the sender's session, `resumedId` the id the receiver resumes (the fork's on this machine), `checks` are the continuity checks (`historyLoaded` is null when there was nothing to compare; `originalUntouched` is set for forks), and a dry run sets `carried`, `sessionId`, `fork`, `files` and `bytes` with no `result`. After `continued` or `inconclusive` the sending agent ends its turn and makes no more changes on the branch. An OpenCode session travels as its export: `opencode export` on this machine, then `opencode import` inside the receiving repository there, and an OpenCode receiver is accepted only to continue an OpenCode session. A Cursor session is carried only to another machine, best effort since Cursor's store is undocumented: Cursor has no fork, and a copied chat still writes to the original, so on this machine the result is `not-continued` and nothing is started. A destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`); a copy already there is replaced only when the sender's holds all of it and no agent there runs it, otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent (`ERR_HANDOFF_RESUME_UNSUPPORTED`). From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead; a same-agent Session starts on the sender's conversation. The receiver reports back to the sender's panel.
 
 `runpane ask --agent <agent> --prompt "<question>"` asks one agent one read-only question and prints its answer, with no tab left behind: the agent's own headless mode runs once, on this machine or another one (`--machine`), in a saved repository (`--repo`, a WSL repository runs in WSL) or a Pane's worktree (`--pane`), with any model it accepts (`--model`). It can read files but not edit them or run shell commands; an agent with no such mode is refused (`ERR_ASK_UNSUPPORTED`). A missing agent, a sign-in error, an unknown model and a timeout each fail with the agent's own words and the next step. Use it for a second opinion or a question to another model; work that edits files goes to a tab.
 
@@ -332,6 +343,14 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `secrets delete`: Delete a Pane secret from this machine and, through sync, from your other machines.
 - `secrets exec`: Run a command with Pane secrets in its environment. Nothing prints a value.
 - `secrets request`: Ask the person for a secret on a masked card. Pane saves what they type as a Pane secret and never returns it.
+- `devices list`: List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.
+- `devices open`: Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.
+- `devices screenshot`: Capture the screen of this Pane's open device as an image.
+- `devices act`: Run an agent-device command on this Pane's open device: open an app, snapshot -i for element refs, press @e3, fill, swipe, install, logs, orientation landscape-left, fold half-open, record start|stop. Waits while the person has taken over the device in its tab, up to 4 minutes, then fails with ERR_DEVICE_PERSON_DRIVING.
+- `devices run`: Run a command where this Pane's device runs, such as a build (npx expo run:ios) or Metro with --background.
+- `devices close`: Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. The device stays warm for 10 minutes.
+- `devices usage`: Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.
+- `devices free`: Shut down unused devices (--idle), or also delete every unused device Pane made and the build checkouts no Pane holds (--all).
 - `theme read`: Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.
 - `theme set`: Restyle Pane itself, only when the person asks to change Pane's look: write the Custom theme (a base theme, colour tokens and CSS) and select it, or switch to another theme. Pane restyles within a second.
 - `theme reset`: Delete the Custom theme and go back to the theme it was built on.
@@ -416,6 +435,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock acquire`: Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.
 - `lock release`: Release a named lock you hold, or force-release another owner's lock.
 - `lock list`: List held named locks, optionally only one Session's.
+- `machine health`: Show this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free, by tier.
+- `machine cleanup`: Free disk space that Pane made: list one kind of tier 1 or 2 item with its size (a dry run), or delete them with --yes.
 - `sessions unpin`: Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.
 - `sessions pin`: Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.
 - `sessions pause`: Pause a Session: stop the terminal tabs of its chat and every Pane in it, keeping their conversations. Chat tabs keep running.
@@ -430,6 +451,10 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `loops pause`: Pause a loop: it starts no scheduled runs until resumed.
 - `loops resume`: Resume a paused loop from its next scheduled time.
 - `loops delete`: Delete a loop. It starts no more runs.
+- `profiles list`: List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.
+- `profiles show`: Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.
+- `profiles launch`: Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.
+- `profiles runs`: List profile runs: each run's profile, state and current step.
 
 ```bash
 runpane help [command]
@@ -460,6 +485,14 @@ runpane secrets set --project <project> --name <name> --yes [--json] [--pane-dir
 runpane secrets delete --project <project> --name <name> --yes [--json] [--pane-dir <path>]
 runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... [--pane-dir <path>] -- <command>...
 runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json] [--pane-dir <path>]
+runpane devices list [--json] [--pane-dir <path>]
+runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]
+runpane devices screenshot [--platform <ios|android>] [--json] [--pane-dir <path>]
+runpane devices act [--platform <ios|android>] [--json] [--pane-dir <path>] -- <command>
+runpane devices run [--platform <ios|android>] [--background] [--wait-ms <milliseconds>] [--json] [--pane-dir <path>] -- <command>
+runpane devices close [--platform <ios|android>] [--json] [--pane-dir <path>]
+runpane devices usage [--json] [--pane-dir <path>]
+runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]
 runpane theme read [--json] [--pane-dir <path>]
 runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json] [--pane-dir <path>]
 runpane theme set --theme <id> [--json] [--pane-dir <path>]
@@ -533,10 +566,10 @@ runpane docs read --doc <path> [--json]
 runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]
 runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]
 runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> [--as-file-pointer] [--no-expect-report] --yes [--json] [--pane-dir <path>]
-runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]
+runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]
 runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]
 runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]
-runpane notify --update <id|Q-n> --asked <text> --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]
+runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]
 runpane notify --resume <id> [--json] [--pane-dir <path>]
 runpane inbox [--session <id|name>] [--json] [--pane-dir <path>]
 runpane inbox ack <item-id>... [--decision <D-n>] [--session <id|name>] [--json] [--pane-dir <path>]
@@ -559,6 +592,8 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+runpane machine health [--json] [--pane-dir <path>]
+runpane machine cleanup --kind <kind> [--yes] [--json] [--pane-dir <path>]
 runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions pause --session <id|name> [--json] [--pane-dir <path>]
@@ -573,6 +608,10 @@ runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops pause --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops resume --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops delete --loop <id> --yes [--json] [--pane-dir <path>]
+runpane profiles list [--json] [--pane-dir <path>]
+runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]
+runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]
+runpane profiles runs [--json] [--pane-dir <path>]
 ```
 
 ## Agent Context
@@ -644,7 +683,14 @@ Pane: one per feature (one worktree, one branch). Before creating one, find the 
 
 When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question "<question>"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.
 
+To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).
+
+Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.
+Profiles: a profile is a team of agents and a fixed workflow in one file. `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `"$PANE_RUNPANE_BIN" report --outcome "<outcome>"`, using one of the outcomes its first message lists.
+
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
+
+Devices: the `device_*` MCP tools (or `runpane devices`) open an iOS simulator or Android emulator as a tab in the calling Pane, then drive it. `runpane docs read --doc docs/DEVICES.md` has the rest.
 
 MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = "npx"` and `args = ["--yes", "runpane@latest", "mcp"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too.
 ```
@@ -732,6 +778,7 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
+--outcome <name>
 --conversation <id>
 --cwd <path>
 --note-file <path|->
@@ -763,6 +810,9 @@ These flags are consumed by local daemon-control commands:
 --agent-farm <profile>
 --arg <key=value>
 --item <id>
+--harness <cli[/model]>
+--agent-harness <agent>=<cli[/model]>
+--command <cli>=<command>
 --relays <item>
 --about-session <id|name>
 --questions <json>
@@ -779,6 +829,10 @@ These flags are consumed by local daemon-control commands:
 --css <text>
 --theme <id>
 --search <text>
+--platform <ios|android>
+--device <name-or-id>
+--wait-ms <milliseconds>
+--kind <kind>
 --json
 --wait-ready
 --no-focus
@@ -818,6 +872,9 @@ These flags are consumed by local daemon-control commands:
 --approve
 --deny
 --hook
+--background
+--idle
+--yaml
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, use Pane's own `runpane` (on PATH in Pane's WSL terminals, or `/mnt/c/Users/<you>/.pane/bin/runpane`), which reaches the Windows named-pipe daemon through WSL interop; older Pane builds need `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'`.

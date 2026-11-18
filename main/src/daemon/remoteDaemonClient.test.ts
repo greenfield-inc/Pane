@@ -386,6 +386,114 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
 });
 
 describe('RemoteDaemonClient when the phone leaves and returns', () => {
+  it('answers a read sent while the first connection is being made, sending it once', async () => {
+    const host = createFakeHost();
+    let attempts = 0;
+    host.onInvoke(() => { attempts += 1; return Response.json({ ok: true, result: ['pane'] }); });
+    const client = createClient(host, 600_000);
+
+    // A screen reads as it mounts, before its provider connects the client.
+    let answer: unknown;
+    void client.invoke('sessions:get-all-with-projects').then(result => { answer = result; });
+    await client.connect();
+    await flush();
+
+    expect(answer).toEqual(['pane']);
+    expect(attempts).toBe(1);
+    client.disconnect();
+  });
+
+  it('sends a read again when an attempt gets no answer for 15 s, as on a socket that died in the background', async () => {
+    const host = createFakeHost();
+    let attempts = 0;
+    host.onInvoke(() => (++attempts === 1 ? new Promise<Response>(() => {}) : Response.json({ ok: true, result: ['pane'] })));
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+
+    let answer: unknown;
+    void client.invoke('sessions:get-all-with-projects').then(result => { answer = result; });
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(answer).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(answer).toEqual(['pane']);
+    expect(attempts).toBe(2);
+    client.disconnect();
+  });
+
+  it('gives a slow read a longer deadline on each attempt, so one that takes 20 s still answers', async () => {
+    const host = createFakeHost();
+    let attempts = 0;
+    host.onInvoke(() => { attempts += 1; return new Promise<Response>(resolve => setTimeout(() => resolve(Response.json({ ok: true, result: 'diff' })), 20_000)); });
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+
+    let answer: unknown;
+    void client.invoke('sessions:get-diff-manifest').then(result => { answer = result; });
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(answer).toBe('diff');
+    expect(attempts).toBe(2);
+    client.disconnect();
+  });
+
+  it('says how long it waited when a read never answers', async () => {
+    const host = createFakeHost();
+    host.onInvoke(() => new Promise<Response>(() => {}));
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+
+    const read = client.invoke('sessions:get-diff-manifest');
+    const failed = expect(read).rejects.toThrow(/did not answer within 60 s/);
+    await vi.advanceTimersByTimeAsync(400_000);
+    await failed;
+    client.disconnect();
+  });
+
+  it('waits for a slow dictation cleanup instead of sending it again, since each one is billed', async () => {
+    const host = createFakeHost();
+    let attempts = 0;
+    host.onInvoke(() => { attempts += 1; return new Promise<Response>(resolve => setTimeout(() => resolve(Response.json({ ok: true, result: 'text' })), 40_000)); });
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+
+    let answer: unknown;
+    void client.invoke('voice:finalize-streaming').then(result => { answer = result; });
+    await vi.advanceTimersByTimeAsync(41_000);
+
+    expect(answer).toBe('text');
+    expect(attempts).toBe(1);
+    client.disconnect();
+  });
+
+  it('lets a screen wait for the connection to come back, up to a limit', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+    await expect(client.whenConnected(10_000)).resolves.toBeUndefined();
+
+    client.suspend();
+    let back = false;
+    void client.whenConnected(10_000).then(() => { back = true; });
+    client.resume();
+    await flush();
+    expect(back).toBe(true);
+
+    client.suspend();
+    host.dropTunnel(true);
+    const waiting = client.whenConnected(10_000);
+    const gaveUp = expect(waiting).rejects.toThrow(/did not reconnect within 10 s, so nothing was sent/);
+    client.resume();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await gaveUp;
+    client.disconnect();
+  });
+
   it('reconnects on return after more than five minutes in the background', async () => {
     const host = createFakeHost();
     // No heartbeats in these tests; keep the stale-stream timer out of the way.

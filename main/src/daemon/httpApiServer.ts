@@ -1,3 +1,4 @@
+import { isDeviceHubPort } from '../services/devices/deviceHubPorts';
 import http, { type IncomingMessage, type ServerResponse } from 'http';
 import { pipeline as pipelineCallback, Readable, type Duplex, type Writable } from 'stream';
 import type { ReadableStream as NodeReadableStream } from 'stream/web';
@@ -333,7 +334,9 @@ const GLASSES_OWNER_REQUIRED = {
  * Commands that act on the whole machine. On the paired listener, only a linked computer runs
  * machine commands, and only a paired phone or linked computer manages glasses.
  */
-const WORKSPACE_ONLY_CHANNEL_PREFIXES = ['runpane:machine:', 'runpane:glasses:'];
+// A Session move (the target's `runpane:move:` and the source's `runpane:sessions:move*`) reaches a
+// machine only from the owner's own machines, never a paired phone or code.
+const WORKSPACE_ONLY_CHANNEL_PREFIXES = ['runpane:machine:', 'runpane:glasses:', 'runpane:move:', 'runpane:sessions:move'];
 
 const WORKSPACE_LISTEN_HOST = '127.0.0.1';
 
@@ -668,7 +671,9 @@ export class PaneRemoteHttpApiServer {
     socket.on('error', ignoreReset);
     let forwarded: boolean;
     try {
-      forwarded = await this.isForwardedPort(port);
+      // A linked computer (or the owner) may also reach this machine's device hub, to show its simulators.
+      const ownDevice = auth.client ? auth.client.kind === 'computer' : Boolean(this.workspace && this.workspaceOwnerLogin(request));
+      forwarded = (ownDevice && isDeviceHubPort(port)) || await this.isForwardedPort(port);
     } finally {
       socket.removeListener('error', ignoreReset);
     }

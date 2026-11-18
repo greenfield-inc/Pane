@@ -9,6 +9,7 @@ import { invokeDaemon, PaneDaemonClientError, routedOtherMachine } from './daemo
 import { confirmMutation } from './daemonActions';
 import { RunpaneError, describeFailure } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
+import { parseReportOptions, type NotifyChoice, type NotifySubQuestion } from './notify';
 import {
   CONVERSATION_ID_PATTERN,
   CONVERSATION_SOURCES,
@@ -21,7 +22,7 @@ import {
 } from './commands';
 import type { BoundarySchema, JsonObject, JsonValue } from './boundaryDecoder';
 import { parseSessionCreatePayload, parseSessionUpdatePayload } from './sessionPayload';
-import { describeReport, effectiveWatchHeartbeatMs, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
+import { describeReport, effectiveWatchHeartbeatMs, sanitizeName, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
 
 interface OrchestrationLink {
   label: string;
@@ -63,6 +64,8 @@ interface OrchestrationSessionRecord {
   wslDistribution?: string;
   id: string;
   name: string;
+  /** The name is still the default `New chat`; the Session agent renames it once. */
+  nameIsDefault?: boolean;
   archived?: boolean;
   isPinned?: boolean;
   /** Set while the Session's chat and every Pane in it are paused. */
@@ -461,9 +464,12 @@ interface PaneSummary {
 
 interface PausedMark {
   at: string;
-  by: 'manual' | 'auto';
+  by: 'manual' | 'auto' | 'move';
   idleHours?: number;
   runScript?: boolean;
+  machine?: string;
+  arriving?: boolean;
+  interrupted?: boolean;
 }
 
 interface PauseResult {
@@ -745,6 +751,10 @@ export interface AgentReport {
   summaryTruncated?: true;
   summaryPath?: string;
   question?: string;
+  /** A blocked report's buttons (`--choices`). */
+  choices?: NotifyChoice[];
+  /** A blocked report's several questions (`--questions`). */
+  questions?: NotifySubQuestion[];
   reportedAt: string;
 }
 
@@ -1220,9 +1230,12 @@ const repoAddPreviewSchema: BoundarySchema<RepoAddPreview> = boundary.object({
 });
 const pausedMarkSchema: BoundarySchema<PausedMark> = boundary.object({
   at: boundary.string,
-  by: boundary.enumeration('manual', 'auto'),
+  by: boundary.enumeration('manual', 'auto', 'move'),
   idleHours: boundary.optional(boundary.number),
   runScript: boundary.optional(boundary.boolean),
+  machine: boundary.optional(boundary.string),
+  arriving: boundary.optional(boundary.boolean),
+  interrupted: boundary.optional(boundary.boolean),
 });
 const pauseResultSchema: BoundarySchema<PauseResult> = boundary.object({
   ok: boundary.boolean,
@@ -1350,6 +1363,11 @@ const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.obj
     kind: boundary.enumeration('composer', 'editor'),
   }))),
 });
+const reportChoiceSchema = boundary.object({
+  label: boundary.nonEmptyString,
+  detail: boundary.optional(boundary.string),
+  recommended: boundary.optional(boundary.boolean),
+});
 const agentReportFields = {
   state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
   pr: boundary.optional(boundary.number),
@@ -1358,6 +1376,12 @@ const agentReportFields = {
   summaryTruncated: boundary.optional(boundary.literal(true)),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  choices: boundary.optional(boundary.array(reportChoiceSchema)),
+  questions: boundary.optional(boundary.array(boundary.object({
+    title: boundary.string,
+    choices: boundary.array(reportChoiceSchema),
+    why: boundary.optional(boundary.string),
+  }))),
   reportedAt: boundary.string,
 };
 const agentReportSchema: BoundarySchema<AgentReport> = boundary.object(agentReportFields);
@@ -1535,6 +1559,7 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   id: boundary.nonEmptyString,
   name: boundary.nonEmptyString,
+  nameIsDefault: boundary.optional(boundary.boolean),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
   paused: boundary.optional(pausedMarkSchema),
@@ -3713,7 +3738,12 @@ export async function runPanelsOutput(parsed: ParsedArgs): Promise<number> {
   if (result.text && !result.text.endsWith('\n')) {
     output.write('\n');
   }
+  if (result.hasMore) console.error(olderOutputNote(result.limit));
   return 0;
+}
+
+function olderOutputNote(limit: number): string {
+  return `(older output not shown; raise --limit above ${limit} to see more)`;
 }
 
 export async function runPanelsInput(parsed: ParsedArgs): Promise<number> {
@@ -3755,6 +3785,7 @@ export async function runPanelsScreen(parsed: ParsedArgs): Promise<number> {
   if (text && !text.endsWith('\n')) {
     output.write('\n');
   }
+  if (result.hasMore) console.error(olderOutputNote(result.limit));
   return 0;
 }
 
@@ -3884,11 +3915,19 @@ async function runPanelsConversationHook(
   return 0;
 }
 
+/** The one argument Agent Farm's SessionStart hook passes to the host's `AGENT_FARM_SESSION_HOOK`. */
+const AGENT_FARM_SESSION_START = 'session-start';
+
 /**
- * `runpane panels conversation --hook` straight from argv, before anything else in the CLI runs (no
+ * `runpane panels conversation --hook` (or `runpane session-start`, its Agent Farm alias) straight from argv, before anything else in the CLI runs (no
  * managed-CLI handoff, no telemetry, no output). Returns null for any other command line.
  */
-export async function runConversationHookFromArgv(argv: string[], env: NodeJS.ProcessEnv = process.env): Promise<0 | null> {
+export async function runConversationHookFromArgv(rawArgv: string[], env: NodeJS.ProcessEnv = process.env): Promise<0 | null> {
+  // Agent Farm's host-neutral hook runs `"$AGENT_FARM_SESSION_HOOK" session-start`, and Pane points that at runpane (D-403).
+  // The WSL Session bridge appends `--pane-dir <dir>`, so the alias keeps its other arguments.
+  const argv = hookWords(rawArgv)[0] === AGENT_FARM_SESSION_START
+    ? ['panels', 'conversation', '--hook', ...rawArgv.filter((_arg, index) => index !== rawArgv.indexOf(AGENT_FARM_SESSION_START))]
+    : rawArgv;
   if (!isConversationHookArgv(argv)) return null;
   let paneDir: string | undefined;
   try {
@@ -3901,8 +3940,13 @@ export async function runConversationHookFromArgv(argv: string[], env: NodeJS.Pr
   return runPanelsConversationHook(env, process.stdin, paneDir);
 }
 
+/** The command words of an argv: everything but flags and the `--pane-dir` value. */
+function hookWords(argv: string[]): string[] {
+  return argv.filter((arg, index) => !arg.startsWith('-') && argv[index - 1] !== '--pane-dir');
+}
+
 function isConversationHookArgv(argv: string[]): boolean {
-  const words = argv.filter((arg, index) => !arg.startsWith('-') && argv[index - 1] !== '--pane-dir');
+  const words = hookWords(argv);
   return words[0] === 'panels' && words[1] === 'conversation' && argv.includes('--hook');
 }
 
@@ -3957,6 +4001,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
   const summaryPath = parsed.summaryFile !== undefined && parsed.summaryFile !== '-'
     ? path.resolve(parsed.summaryFile)
     : undefined;
+  const options = parseReportOptions(parsed.question ?? '', parsed.notifyChoices, parsed.notifyQuestions);
   const result = await invokeDaemon('runpane:report', [{
     ...identity,
     state: parsed.reportState,
@@ -3965,6 +4010,8 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
     summary: summaryText?.slice(0, MAX_SENT_SUMMARY_LENGTH),
     summaryPath,
     question: parsed.question,
+    outcome: parsed.reportOutcome,
+    ...options,
   }], reportResultSchema, {
     paneDir: parsed.paneDir,
   });
@@ -3972,7 +4019,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
   if (parsed.json) {
     printJson(result);
   } else {
-    for (const line of describeReportDelivery(result)) console.log(line);
+    for (const line of describeReportDelivery(result, parsed.reportOutcome)) console.log(line);
   }
   return 0;
 }
@@ -3981,11 +4028,13 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
  * What `runpane report` prints: the report, who recorded it, and how many watches were waiting.
  * Zero waiting watchers means nobody is waiting right now, not that the report is lost.
  */
-function describeReportDelivery(result: ReportResult): string[] {
+function describeReportDelivery(result: ReportResult, outcome?: string): string[] {
   const sessions = result.sessionIds.length > 0 ? ` Recorded on Session ${result.sessionIds.join(', ')}.` : '';
   const watchers = result.liveWatchers ?? 0;
   const delivered = watchers > 0 ? ` Delivered to ${watchers} waiting watcher${watchers === 1 ? '' : 's'}.` : '';
-  const lines = [`Reported ${describeReport(result.report)} for panel ${result.panelId}.${sessions}${delivered}`];
+  // A profile step's outcome is what moved its run, so the line names it.
+  const reported = outcome ? `outcome "${sanitizeName(outcome)}" (${describeReport(result.report)})` : describeReport(result.report);
+  const lines = [`Reported ${reported} for panel ${result.panelId}.${sessions}${delivered}`];
   // The blocked question's card check: posted anyway, but worth fixing next time.
   const warnings = (result.warnings ?? []).map(warning => `Warning: ${warning}`);
   if (result.sessionIds.length > 0 || watchers > 0) return [...lines, ...warnings];

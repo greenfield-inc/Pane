@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   closeFind,
+  closeFindWithin,
   getFindBar,
   openFind,
+  refreshFind,
   registerFindTarget,
   reportFindResult,
   resetFindForTests,
@@ -253,5 +255,53 @@ describe('find controller', () => {
     register('browser', second);
 
     expect(second.calls).toEqual(['search:needle']);
+  });
+
+  it('searches the open query again from scratch when the content is replaced (a frame reloads)', () => {
+    const adapter = fakeAdapter(4);
+    register('summary', adapter);
+    openFind('summary');
+    setFindQuery('summary', 'key');
+    adapter.calls.length = 0;
+    refreshFind('summary');
+    expect(adapter.calls).toEqual(['clear', 'search:key']);
+    expect(getFindBar('summary').result).toEqual({ current: 1, total: 4 });
+  });
+
+  it('leaves a closed bar, an empty query or a tab without text alone on refresh', () => {
+    const adapter = fakeAdapter(4);
+    register('summary', adapter);
+    refreshFind('summary');
+    openFind('summary');
+    refreshFind('summary');
+    adapter.currentMode = 'none';
+    setFindQuery('summary', 'key');
+    adapter.calls.length = 0;
+    syncFindMode('summary');
+    refreshFind('summary');
+    expect(adapter.calls.filter(call => call.startsWith('search'))).toEqual([]);
+  });
+});
+
+describe('closeFindWithin', () => {
+  beforeEach(() => resetFindForTests());
+
+  it('closes an open bar whose content sits inside the container, and only that one', () => {
+    const column = { contains: (node: Element) => node === inside };
+    // SAFETY: the controller only compares roots by identity through `contains`; no DOM runs here.
+    const inside = {} as Element;
+    // SAFETY: as above, an identity-only stand-in for an element outside the column.
+    const outside = {} as Element;
+    const columnAdapter = fakeAdapter();
+    registerFindTarget('column', { adapter: columnAdapter, root: () => inside });
+    registerFindTarget('split', { adapter: fakeAdapter(), root: () => outside });
+    openFind('column');
+    openFind('split');
+    expect(closeFindWithin(column)).toBe(true);
+    expect(getFindBar('column').open).toBe(false);
+    expect(columnAdapter.calls).toContain('clear');
+    expect(getFindBar('split').open).toBe(true);
+    // Nothing left open inside: the next Esc may leave the column.
+    expect(closeFindWithin(column)).toBe(false);
   });
 });

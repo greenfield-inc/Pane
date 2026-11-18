@@ -435,6 +435,21 @@ describe('PaneRemoteHttpApiServer', () => {
     });
   });
 
+  it('refuses every Session move call, source and target, from a paired phone', async () => {
+    const registry = new PaneCommandRegistry();
+    for (const channel of ['runpane:sessions:move', 'runpane:sessions:move-check', 'runpane:sessions:move-cancel', 'runpane:move:abort', 'runpane:move:status']) {
+      registry.register(channel, async () => ({ ran: channel }));
+    }
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+
+    for (const channel of ['runpane:sessions:move', 'runpane:sessions:move-check', 'runpane:sessions:move-cancel', 'runpane:move:abort', 'runpane:move:status']) {
+      await expect(requestJson(server, 'POST', '/invoke', { channel, args: [{ sessionId: 's', moveId: 'm' }] }, 'secret-token'))
+        .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
+    }
+  });
+
   it('runs machine commands for a computer linked by QR pairing, and refuses them for a paired phone', async () => {
     const registry = new PaneCommandRegistry();
     registry.register('runpane:machine:info', async () => ({ hostname: 'travel-laptop' }));

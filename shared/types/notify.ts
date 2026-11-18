@@ -1,3 +1,4 @@
+import type { MachineHealthCard } from './machineHealth';
 /**
  * Pane Notify: agents call the `notify` MCP tool (or `runpane notify`) and Pane shows the
  * question wherever the person is, then returns the answer as the tool result.
@@ -100,6 +101,8 @@ export interface NotifyQuestion {
    * or `summary` in its needs_you). Absent: Pane writes the Summary from the card (P4).
    */
   summaryPage?: string;
+  /** Set by Pane for its own machine health cards: the data their dialog shows. */
+  machineHealth?: MachineHealthCard;
   /** Set by the host for a worker's card: its status file, read for "where it stands" on the Summary. */
   statusFile?: string;
   /**
@@ -124,7 +127,8 @@ export interface NotifyRequest extends Partial<NotifyQuestion> {
   resume?: string;
   /**
    * `runpane notify --took <id|Q-n> answer|question`: the reader of the person's reply says how it
-   * took it. `answer` records the reply as the answer; `question` shows "Getting more context…".
+   * took it. A delivered reply is already the answer, so `answer` changes nothing; `question`
+   * reopens the approval and shows "Getting more context…".
    */
   took?: string;
   tookAs?: 'answer' | 'question';
@@ -166,10 +170,10 @@ export type NotifyResultBody =
   /** `answers`: one pick per question, when the approval asks several (`answer` joins them with " · "). */
   | { answer: string; note?: string; answers?: string[] }
   /**
-   * The person typed a reply: it may be an answer or a question about it. The call ends; run
-   * `runpane notify --took <replyId> answer|question` (see `next`), and the approval keeps waiting
-   * meanwhile. `replyId` is given only to this call, so it lets its agent continue with --took and
-   * --update even from outside a Pane tab (D-294).
+   * The person typed a reply, and Pane recorded it as the answer. The call ends; when the reply
+   * asks a question instead, run `runpane notify --took <replyId> question` (see `next`), which
+   * reopens the approval. `replyId` is given only to this call, so it lets its agent continue with
+   * --took and --update even from outside a Pane tab (D-294).
    */
   | { reply: string; picks?: string[]; id: string; replyId: string; next: string }
   /** --took: how the reply was recorded. */
@@ -336,6 +340,11 @@ export interface NotifyItem extends NotifyQuestion {
   /** Epoch ms when a snoozed question comes back to the strip. */
   snoozedUntil?: number;
   /**
+   * Epoch ms the person dismissed it (Dismiss on a card). It still waits in Approvals, but no longer
+   * counts as open for its Session (`isOpenForSession`) until it changes: a new version, Undo or a reopen.
+   */
+  dismissedAt?: number;
+  /**
    * Snapshot only, with `machine`: `local` (this computer) or the saved machine's id. A saved
    * machine's card has the id `<machineId>:<its id there>`, as the glasses key cards.
    */
@@ -391,8 +400,8 @@ export interface NotifyItem extends NotifyQuestion {
 }
 
 /**
- * The person's typed reply on an approval (P1 of the approval card): the asker's agent (or the
- * next reader) reads it and says whether it was an answer or a question with `--took`.
+ * The person's typed reply on an approval (P1 of the approval card): it becomes the answer once
+ * the asker's agent (or the next reader) gets it, and the reader reopens it with `--took question`.
  */
 export interface NotifyReply {
   /** Each reply is delivered once, by id. */
@@ -403,8 +412,8 @@ export interface NotifyReply {
   /** Epoch ms. */
   at: number;
   /**
-   * reading: delivered (or waiting for a busy reader) until it runs --took. answer / question:
-   * how it was taken. unread: no agent can read replies right now. sent: a built-in question's
+   * reading: on its way to its reader (or waiting for a busy one). answer / question: how it was
+   * taken; delivery takes it as the answer. unread: no agent can read replies right now. sent: a built-in question's
    * answer, typed into the chat tab's paused turn.
    */
   state: 'reading' | 'answer' | 'question' | 'unread' | 'sent';
@@ -591,6 +600,8 @@ export type NotifyCommand =
   /** Round →: move to the back of the queue. */
   | { type: 'skip'; id: string }
   | { type: 'open-in-pane'; id: string }
+  /** A machine health card's Ask an agent from a floating window: the main window runs it. */
+  | { type: 'ask-agent'; id: string }
   /** Approvals: open the item's link `index` as a tab of `paneId` (the Pane shown beside it), else of the asking Pane. */
   | { type: 'open-link'; id: string; index: number; paneId?: string }
   | { type: 'hover-info'; id: string; hovering: boolean }
@@ -622,7 +633,7 @@ export interface NotifyFixCommand {
  * Where main asks the window to go. `toggle-inbox` is the Notify shortcut
  * pressed while Pane is in front: Approvals, or back to where you were (D-251).
  */
-export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string };
+export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string } | { askAgent: string };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {

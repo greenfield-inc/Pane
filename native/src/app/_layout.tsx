@@ -110,10 +110,8 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
         />
         <Stack.Screen name="session/[sessionId]" options={{ headerShown: false }} />
-        {/* The card above its Session's tabs; draws its own bar. */}
+        {/* An approval as the first tab of its Session's tabs; draws its own bar. */}
         <Stack.Screen name="approval/[notifyId]" options={{ headerShown: false }} />
-        {/* An approval's Summary page (P4), full screen with its own bar. */}
-        <Stack.Screen name="approval/summary/[notifyId]" options={{ headerShown: false }} />
         {/* Autopilot: its chat, an approval full screen, and a document full screen; each draws its own bar. */}
         <Stack.Screen name="autopilot/index" options={{ headerShown: false }} />
         <Stack.Screen name="autopilot/item/[notifyId]" options={{ headerShown: false }} />
@@ -122,6 +120,14 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           name="new"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.8, 1], sheetGrabberVisible: true, headerShown: false }}
         />
+        <Stack.Screen
+          name="sort-approvals"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: 'fitToContents', sheetGrabberVisible: true, headerShown: false }}
+        />
+        {/* Home's Stale and Done today. */}
+        <Stack.Screen name="history" options={{ title: 'History', headerLargeTitle: true, headerBackTitle: 'Home', headerBackButtonDisplayMode: 'default' }} />
+        {/* Home's Sessions, Repositories and Archived, from the All panes tile. Rows leave the left edge to swipe-back. */}
+        <Stack.Screen name="panes/[section]" options={{ title: '' }} />
         <Stack.Screen name="hosts/new" options={{ title: 'Add a computer', ...grouped }} />
         <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add with a code' }} />
         <Stack.Screen name="computers" options={{ title: 'Your computers', ...grouped }} />

@@ -527,10 +527,20 @@ function fileStore(file: string): KeyStore {
 
 const PRIVATE_V4 = [/^10\./u, /^192\.168\./u, /^172\.(1[6-9]|2\d|3[01])\./u, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./u];
 
-/** This computer's private IPv4 addresses, Tailscale's 100.x CGNAT range excluded for the LAN path. */
-function privateAddresses(): string[] {
+/**
+ * Adapters only this computer can reach: Hyper-V's internal switches (WSL, Default Switch) on
+ * Windows, and container and VM bridges. Their addresses never answer from another computer.
+ */
+const HOST_ONLY_ADAPTER = /^(?:vEthernet \((?:WSL|Default Switch)|docker|br-|veth|virbr|vmnet|vboxnet|VirtualBox Host-Only|VMware Network Adapter)/u;
+
+/**
+ * This computer's private IPv4 addresses that another computer on its network can reach: Tailscale's
+ * 100.x range and host-only adapters are left out.
+ */
+export function privateAddresses(interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces()): string[] {
   const seen = new Set<string>();
-  for (const entries of Object.values(os.networkInterfaces())) {
+  for (const [name, entries] of Object.entries(interfaces)) {
+    if (HOST_ONLY_ADAPTER.test(name)) continue;
     for (const entry of entries ?? []) {
       if (entry.family !== 'IPv4' || entry.internal) continue;
       if (PRIVATE_V4.slice(0, 3).some((pattern) => pattern.test(entry.address))) seen.add(entry.address);

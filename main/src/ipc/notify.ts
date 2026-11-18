@@ -25,13 +25,15 @@ import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { statusCard } from '../services/notify/workerContext';
 import { admitCard } from '../services/notify/cardAdmit';
-import { checkCard } from '../services/notify/cardCheck';
+import { checkCard, fitLinks } from '../services/notify/cardCheck';
 import { summaryPage } from '../services/notify/summaryPage';
-import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import type { MachineHealthCard } from '../../../shared/types/machineHealth';
 import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, NOTIFY_QUESTIONS_MAX, type NotifyCommand, type NotifyItem, type NotifyLink, type NotifyQuestion, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState, type NotifySummaryPage } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { SessionInboxEnded } from '../services/sessionInbox';
 import { thisMachineName, type ApprovalStore } from '../services/approvals/approvalStore';
+import type { LoopManager } from '../services/loops/loopManager';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
@@ -112,6 +114,7 @@ const notifyCommandSchema = boundary.union(
   idCommand('dismiss'),
   idCommand('skip'),
   idCommand('open-in-pane'),
+  idCommand('ask-agent'),
   boundary.object({ type: boundary.literal('open-link'), id: boundary.nonEmptyString, index: boundary.number, paneId: boundary.optional(boundary.nonEmptyString) }),
   boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h', 'pane') }),
   boundary.object({ type: boundary.literal('hover-info'), id: boundary.nonEmptyString, hovering: boundary.boolean }),
@@ -168,6 +171,32 @@ const replySchema = boundary.object({
   fixed: boundary.optional(boundary.enumeration('answer', 'question')),
 });
 const revisionSchema = boundary.object({ asked: boundary.string, whatChanged: boundary.array(boundary.string), by: boundary.string, at: boundary.number });
+const healthCardRowSchema = boundary.object({
+  label: boundary.string, detail: boundary.string, bytes: boundary.number,
+  note: boundary.optional(boundary.string), skipped: boundary.optional(boundary.boolean), command: boundary.optional(boundary.string),
+});
+const machineHealthCardSchema = boundary.object({
+  kind: boundary.enumeration('disk', 'memory', 'leak', 'finished', 'leftovers'),
+  level: boundary.enumeration('ok', 'warning', 'critical'),
+  hostname: boundary.string,
+  freeBytes: boundary.optional(boundary.number),
+  totalBytes: boundary.optional(boundary.number),
+  usedBytes: boundary.optional(boundary.number),
+  swapUsedBytes: boundary.optional(boundary.nullable(boundary.number)),
+  rows: boundary.array(healthCardRowSchema),
+  pauseOffer: boundary.optional(boundary.object({ paneCount: boundary.number, memoryMB: boundary.number, hours: boundary.number })),
+  leak: boundary.optional(boundary.object({
+    pid: boundary.number, started: boundary.string, growthMB: boundary.number, windowMs: boundary.number,
+    series: boundary.array(boundary.number), canRestart: boundary.boolean,
+  })),
+  freesBytes: boundary.optional(boundary.number),
+  agentPrompt: boundary.string,
+});
+/**
+ * A machine health card's dialog data, decoded on its own: one this Pane cannot read (a newer
+ * kind, a changed field) is dropped, and the item shows as a plain card whose choices still answer it.
+ */
+const machineHealthField: BoundarySchema<MachineHealthCard | undefined> = { decode: current => decodeOptionalBoundary(current.value, machineHealthCardSchema) };
 const notifyItemSchema = boundary.object({
   id: boundary.nonEmptyString,
   ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
@@ -178,6 +207,7 @@ const notifyItemSchema = boundary.object({
   replyIsAnswer: boundary.optional(boundary.boolean),
   asSent: boundary.optional(boundary.object({ title: boundary.string, context: boundary.optional(boundary.string) })),
   summaryPage: boundary.optional(boundary.string),
+  machineHealth: machineHealthField,
   statusFile: boundary.optional(boundary.string),
   optionsOnly: boundary.optional(boundary.boolean),
   detail: boundary.optional(boundary.string),
@@ -204,6 +234,7 @@ const notifyItemSchema = boundary.object({
   answerSummary: boundary.optional(boundary.string),
   answeredOn: boundary.optional(boundary.string),
   snoozedUntil: boundary.optional(boundary.number),
+  dismissedAt: boundary.optional(boundary.number),
   originKind: boundary.optional(boundary.enumeration('orchestrator', 'worker', 'autopilot', 'claude-prompt', 'pane', 'agent')),
   connected: boundary.optional(boundary.union(
     boundary.object({ kind: boundary.literal('session'), id: boundary.string, name: boundary.string, paneId: boundary.string }),
@@ -270,6 +301,8 @@ type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
   sessionInbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void; subscribeEnded(listener: (ended: SessionInboxEnded) => void): () => void; ack?(ids: readonly string[]): void };
   approvalStore?: ApprovalStore;
   approvalImport?: JsonStoreImportOutcome;
+  /** Names the loop a caller runs for, to warn a loop off info cards. */
+  loopManager?: Pick<LoopManager, 'loopFor'>;
 };
 
 /** Seconds since this computer was used (D-144); QA's profiles on one Mac read theirs from a file (J33). */
@@ -393,6 +426,11 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     wslDistros: () => (services.databaseService?.getAllProjects() ?? [])
       .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
     sessionOf: (paneId, panelId) => services.orchestrationSessionManager?.approvalSession(paneId, panelId),
+    sameLoop: (callerPaneId, askerPaneId) => {
+      const loopOf = (paneId: string) => services.loopManager?.loopFor({ paneId, sessionId: services.orchestrationSessionManager?.approvalSession(paneId)?.id })?.id;
+      const loop = loopOf(callerPaneId);
+      return loop !== undefined && loop === loopOf(askerPaneId);
+    },
     projectOf: (paneId) => {
       const projectId = services.databaseService?.getSession?.(paneId)?.project_id;
       return projectId === undefined || projectId === null ? undefined : services.databaseService?.getAllProjects().find(project => project.id === projectId)?.name;
@@ -449,12 +487,22 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   remotePaneClientController.on('state-changed', showActiveMachine);
   showActiveMachine();
 
+  /** An info card disappears, and a loop runs while the person is away, so they rarely see one (#1446). */
+  const loopInfoWarning = (request: NotifyRequest): string[] => {
+    const { paneId } = request.caller;
+    if (request.ui !== 'info' || request.update !== undefined || !paneId) return [];
+    const loop = services.loopManager?.loopFor({ paneId, sessionId: services.orchestrationSessionManager?.approvalSession(paneId)?.id });
+    return loop
+      ? [`The loop "${loop.name}" runs while the person is away, and an info card disappears, so they will likely never see this one. Post findings on a card that waits: --ui options (such as "Got it" / "Not interested") or --ui approve.`]
+      : [];
+  };
+
   commandRegistry.register('runpane:notify', async (request: PaneCommandValue): Promise<NotifyResult> => {
     const parsed = parseNotifyRequest(request);
     const teammate = teammatePaneCaller();
     // A secret card writes the owner's secret store, so a teammate cannot post one.
     if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
-    const warnings = admitNotifyCard(parsed);
+    const warnings = [...admitNotifyCard(parsed), ...loopInfoWarning(parsed)];
     const result = await notify.ask(parsed, paneCommandSignal());
     // A card that wasn't shown (a worker's, sent back to its orchestrator) has nothing to warn about.
     return warnings.length && !('unavailable' in result) ? { ...result, warnings } : result;
@@ -764,7 +812,7 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.resume) return request;
   if (request.took !== undefined) {
     if (!request.took.trim()) throw invalid('took needs the approval\'s id or Q-n.');
-    if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> answer.');
+    if (!request.tookAs) throw invalid('took needs answer or question: --took <id|Q-n> question.');
     if (request.ui !== undefined || request.update !== undefined) throw invalid('took goes on its own, without ui or update.');
     return request;
   }
@@ -772,9 +820,8 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.update !== undefined) {
     if (!request.update.trim()) throw invalid('update needs the approval\'s id or Q-n.');
     if (request.ui !== undefined) throw invalid('update keeps the approval\'s ui; leave ui out.');
-    if (!request.asked?.trim()) throw invalid('update needs asked: the person\'s question, as they asked it.');
     if (!request.whatChanged?.trim()) throw invalid('update needs whatChanged: one line per change.');
-    if ((request.title?.length ?? 0) > MAX_TEXT || (request.context?.length ?? 0) > MAX_TEXT || request.asked.length > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, context, asked and whatChanged take up to ${MAX_TEXT} characters.`);
+    if ((request.title?.length ?? 0) > MAX_TEXT || (request.asked?.length ?? 0) > MAX_TEXT || request.whatChanged.length > MAX_TEXT) throw invalid(`title, asked and whatChanged take up to ${MAX_TEXT} characters.`);
     if (request.choices && request.questions) throw invalid('pass choices or questions, not both.');
     if (request.choices) checkChoices(request.choices, 'choices');
     if (request.questions) checkQuestions(request.questions);
@@ -795,7 +842,7 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
     throw invalid(`secret only goes with ui: secret, not ${ui}.`);
   }
   if (!request.title?.trim()) throw invalid('title is required.');
-  if (request.title.length > MAX_TEXT || (request.context?.length ?? 0) > MAX_TEXT) throw invalid(`title and context take up to ${MAX_TEXT} characters.`);
+  if (request.title.length > MAX_TEXT) throw invalid(`title takes up to ${MAX_TEXT} characters.`);
   if ((request.detail?.length ?? 0) > MAX_DETAIL) throw invalid(`detail takes up to ${MAX_DETAIL} characters.`);
   if (ui === 'options' && request.questions) {
     if (request.choices) throw invalid('pass choices or questions, not both.');
@@ -818,6 +865,11 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   return request;
 }
 
+/** The sender's context as the card shows it: checked after a status file becomes its card, before Pane adds a line. */
+function checkContext(request: NotifyRequest): void {
+  if ((request.context?.length ?? 0) > MAX_TEXT) throw invalid(`context takes up to ${MAX_TEXT} characters.`);
+}
+
 /**
  * A context sent as a status file or a needs_you block (JSON) becomes the card it describes:
  * its question and why as the context, its options as choices on a question that has none, its
@@ -826,7 +878,10 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
 function readStatusContext(request: NotifyRequest, newCard: boolean): void {
   if (!request.context) return;
   const card = statusCard(request.context, request.title ?? '');
-  if (!card) return;
+  if (!card) {
+    checkContext(request);
+    return;
+  }
   const buttons = newCard && request.ui === 'ask' && !request.suggestions?.length;
   // Questions that can't get buttons here are written out in the context instead.
   const context = card.questions && !buttons ? card.questionsContext : card.context;
@@ -834,6 +889,7 @@ function readStatusContext(request: NotifyRequest, newCard: boolean): void {
   if (context) request.context = context;
   else if (newCard) delete request.context;
   else request.context = '';
+  checkContext(request);
   if (!newCard) return;
   if (buttons && card.questions) {
     request.ui = 'options';
@@ -845,8 +901,20 @@ function readStatusContext(request: NotifyRequest, newCard: boolean): void {
   if (card.summaryPage) request.summaryPage = request.caller.cwd && !path.isAbsolute(card.summaryPage) ? path.resolve(request.caller.cwd, card.summaryPage) : card.summaryPage;
   if (card.links) {
     const files = card.links.map(link => ('path' in link && request.caller.cwd && !path.isAbsolute(link.path) ? { ...link, path: path.resolve(request.caller.cwd, link.path) } : link));
-    request.links = [...request.links ?? [], ...files].slice(0, NOTIFY_LINKS_MAX);
+    const fitted = fitLinks([...request.links ?? [], ...files], request.context);
+    request.links = fitted.links;
+    if (fitted.context !== undefined) request.context = fitted.context;
   }
+}
+
+/**
+ * `runpane report --state blocked --choices|--questions`: the same checks as an options card's,
+ * for a report sent by a CLI that did not check them. Neither given is fine.
+ */
+export function checkNotifyOptions(choices: NotifyRequest['choices'], questions: NotifyRequest['questions']): void {
+  if (choices && questions) throw invalid('pass choices or questions, not both.');
+  if (choices) checkChoices(choices, 'choices');
+  if (questions) checkQuestions(questions);
 }
 
 /** 1 to 9 choices with different labels. */

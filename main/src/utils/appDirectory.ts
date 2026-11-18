@@ -1,5 +1,6 @@
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
+import { createHash } from 'crypto';
 import { existsSync, renameSync } from 'fs';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
@@ -135,6 +136,18 @@ export function getAppDirectory(): string {
     console.log(`[Pane] Development build: using ${dir}, not the installed Pane's ~/.pane. Set PANE_DIR to choose another data directory.`);
   }
   return dir;
+}
+
+/** The variable every tab's environment carries with paneInstanceTag(). */
+export const PANE_INSTANCE_ENV = 'PANE_INSTANCE';
+
+/**
+ * Names this Pane instance by its data directory, as a short hash: two instances
+ * whose databases share session ids (a QA copy of ~/.pane) still tell their
+ * processes apart. A hash keeps it free of spaces for `ps -E` output.
+ */
+export function paneInstanceTag(): string {
+  return createHash('sha256').update(resolve(getAppDirectory())).digest('hex').slice(0, 16);
 }
 
 /**

@@ -3,7 +3,7 @@ import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatAgent, ChatPanelState, ChatTabLaunch } from '../../../../shared/types/chatTab';
 import { tokenizeShellCommand } from '../agents/agentIdentity';
 import { PaneError } from '../../../../shared/paneError';
-import { getAppDirectory } from '../../utils/appDirectory';
+import { getAppDirectory, PANE_INSTANCE_ENV, paneInstanceTag } from '../../utils/appDirectory';
 import { findExecutableInPath, getShellPath } from '../../utils/shellPath';
 import { interactiveTerminalEnv } from '../../utils/inheritedProcessEnv';
 import { getGitAttributionEnv } from '../../utils/attribution';
@@ -65,6 +65,7 @@ export function chatTabEnv(panel: ToolPanel, state: ChatPanelState, projectEnv: 
     WORKTREE_PATH: state.cwd,
     PANE_SESSION_ID: panel.sessionId,
     PANE_PANEL_ID: panel.id,
+    [PANE_INSTANCE_ENV]: paneInstanceTag(),
     PANE_PANEL_KIND: 'agent',
     PANE_PORT: String(panePortFor(panel.sessionId)),
     PANE_WORKSPACE_PATH: state.cwd,

@@ -60,12 +60,12 @@ export async function restartRunScripts(registry: PaneCommandRegistry, paneIds: 
   }
 }
 
-async function runScriptRunning(paneId: string): Promise<boolean> {
+export async function runScriptRunning(paneId: string): Promise<boolean> {
   // The live process is the truth; the Logs panel's saved flag can lag a script that just restarted.
   return (await logsManager.getRunningProcess(paneId)) !== undefined || (await logsManager.isRunning(paneId));
 }
 
-async function stopRunScript(registry: PaneCommandRegistry, paneId: string): Promise<void> {
+export async function stopRunScript(registry: PaneCommandRegistry, paneId: string): Promise<void> {
   try {
     await registry.invoke('sessions:stop-script', [paneId]);
   } catch (error) {

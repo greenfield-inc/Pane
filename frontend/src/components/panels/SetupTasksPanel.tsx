@@ -7,6 +7,7 @@ import { devLog } from '../../utils/console';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { SetupTasksPanelState } from '../../../../shared/types/panels';
 import { CreateSessionDialog } from '../CreateSessionDialog';
+import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from '../ui/Skeleton';
 
 interface SetupTask {
   id: string;
@@ -321,7 +322,9 @@ const SetupTasksPanel: React.FC<SetupTasksPanelProps> = ({ panelId, isActive }) 
     // For now, we'll rely on manual refresh
   }, [isActive, checkAllTasks]);
 
-  const allTasksComplete = Object.values(tasksStatus).every(status => status);
+  // Until the first check answers, no status is known: a bone stands in for each status icon.
+  const statusKnown = Object.keys(tasksStatus).length > 0;
+  const allTasksComplete = statusKnown && Object.values(tasksStatus).every(status => status);
   const completedCount = Object.values(tasksStatus).filter(status => status).length;
 
   if (!projectId) {
@@ -361,6 +364,7 @@ const SetupTasksPanel: React.FC<SetupTasksPanelProps> = ({ panelId, isActive }) 
         </div>
 
         {/* Task list */}
+        {!statusKnown && <LoadingStatus label="Checking setup tasks" />}
         <div className="space-y-3">
           {setupTasks.map(task => {
             const isComplete = tasksStatus[task.id] || false;
@@ -387,13 +391,9 @@ const SetupTasksPanel: React.FC<SetupTasksPanelProps> = ({ panelId, isActive }) 
                 >
                   {/* Status icon */}
                   <div className={`${isComplete ? 'text-status-success' : 'text-text-tertiary'}`}>
-                    {isChecking ? (
-                      <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                    ) : isComplete ? (
-                      <CheckCircle2 className="w-5 h-5" />
-                    ) : (
-                      <Circle className="w-5 h-5" />
-                    )}
+                    <SkeletonSwap loading={!statusKnown} skeleton={<Skeleton><Bone className="w-5 h-5 rounded-full" /></Skeleton>}>
+                      {isComplete ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+                    </SkeletonSwap>
                   </div>
 
                   {/* Task icon */}

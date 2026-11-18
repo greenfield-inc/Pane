@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, memo } from 'react';
 import { API } from '../utils/api';
 import { subscribeToSessionGitChanges } from '../utils/session-git-events';
-import { Loader2, GitCommitHorizontal, FileText, Plus, Minus, User, Clock, Hash, GitFork } from 'lucide-react';
+import { GitCommitHorizontal, FileText, Plus, Minus, User, Clock, Hash, GitFork } from 'lucide-react';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from './ui/Skeleton';
 import { Tooltip } from './ui/Tooltip';
 import { CopyableField } from './ui/CopyableField';
 
@@ -225,15 +226,7 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
 
   useEffect(() => subscribeToSessionGitChanges(sessionId, fetchGraph, ['git:operation_completed']), [sessionId, fetchGraph]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-4">
-        <Loader2 className="w-4 h-4 animate-spin text-text-tertiary" />
-      </div>
-    );
-  }
-
-  if (error) {
+  if (error && !loading) {
     return (
       <div className="text-xs text-text-tertiary px-1 py-2">
         Unable to load commit history
@@ -241,15 +234,35 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
     );
   }
 
-  if (rawEntries.length === 0) {
-    return (
+  // CommitRow's shape: the rail with its commit mark, a message line and a meta line.
+  const skeleton = (
+      <>
+        <LoadingStatus label="Loading commit history" />
+        <Skeleton className="flex flex-col">
+          {['w-3/4', 'w-1/2', 'w-2/3', 'w-3/5'].map((message, i, all) => (
+            <div key={message + i} className="flex items-stretch gap-1.5 w-full min-w-0">
+              <div className="flex flex-col items-center flex-shrink-0 w-3 ml-1">
+                <div className={`w-px flex-1 ${i === 0 ? 'bg-transparent' : 'bg-border-secondary'}`} />
+                <Bone className="w-3 h-3 flex-shrink-0 rounded-full" />
+                <div className={`w-px flex-1 ${i === all.length - 1 ? 'bg-transparent' : 'bg-border-secondary'}`} />
+              </div>
+              <div className="min-w-0 flex-1 py-0.5 pr-1">
+                <div className="flex h-[16.5px] items-center"><Bone className={`h-3 ${message}`} /></div>
+                <div className="flex h-[13.75px] items-center"><Bone className="h-2 w-2/5" /></div>
+              </div>
+            </div>
+          ))}
+        </Skeleton>
+      </>
+  );
+
+  return (
+    <SkeletonSwap loading={loading} skeleton={skeleton}>
+    {rawEntries.length === 0 ? (
       <div className="text-xs text-text-tertiary px-1 py-2">
         No commits yet
       </div>
-    );
-  }
-
-  return (
+    ) : (
     <div>
       <div className="flex flex-col">
         {rawEntries.map((entry, i) => (
@@ -268,5 +281,7 @@ export function GitHistoryGraph({ sessionId, baseBranch, layout = 'compact', onC
         </div>
       )}
     </div>
+    )}
+    </SkeletonSwap>
   );
 }

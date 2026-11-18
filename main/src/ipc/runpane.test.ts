@@ -7,6 +7,7 @@ import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { getRemoteDaemonExecutableCandidates } from '../daemon/remoteDaemonService';
 import { pathToFileURL } from 'url';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
@@ -54,6 +55,7 @@ const memoryDatabase = () => new Database(':memory:');
 
 // Transcript reads are real file I/O; these tests script what the transcript says.
 const findUserTurnSince = vi.spyOn(agentTranscripts, 'findUserTurnSince');
+
 
 vi.spyOn(panelManager, 'createPanel');
 vi.spyOn(panelManager, 'getPanel');
@@ -333,6 +335,30 @@ function configStub(value: Partial<ConfigManager>): ConfigManager {
   // SAFETY: chat tab creation reads only getConfig() from the config manager;
   // any other method call fails at its own site.
   return value as ConfigManager;
+}
+
+/**
+ * Runs `run` with a stand-in installed Pane at one of its fixed install paths, as `runpane:doctor` looks for one. With none
+ * installed, as on CI, doctor looks Pane up on PATH with `where`/`sh -lc` (5 s each), which a busy
+ * runner can stretch past a test's 5 s.
+ */
+async function withInstalledPane<T>(run: () => Promise<T>): Promise<T> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-doctor-'));
+  const key = process.platform === 'win32' ? 'LOCALAPPDATA' : 'HOME';
+  const saved = process.env[key];
+  process.env[key] = root;
+  try {
+    const installed = getRemoteDaemonExecutableCandidates().find(candidate => candidate.startsWith(root));
+    if (!installed) throw new Error(`No install path under ${key} for ${process.platform}`);
+    fs.mkdirSync(path.dirname(installed), { recursive: true });
+    fs.writeFileSync(installed, '');
+    fs.chmodSync(installed, 0o755);
+    return await run();
+  } finally {
+    if (saved === undefined) delete process.env[key];
+    else process.env[key] = saved;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 function createRegistry(services = createServices()): PaneCommandRegistry {
@@ -1357,7 +1383,7 @@ describe('runpane IPC handlers', () => {
   it('reports top-level runpane doctor health', async () => {
     const registry = createRegistry();
 
-    const result = await registry.invoke('runpane:doctor');
+    const result = await withInstalledPane(() => registry.invoke('runpane:doctor'));
 
     expect(result).toMatchObject({
       ok: true,
@@ -4779,12 +4805,20 @@ describe('runpane IPC handlers', () => {
         );
       });
       const registry = createRegistry();
-
-      const result = await registry.invoke('runpane:panels:resume', [{
+      // A fake clock moves only while the wait sleeps between polls, so a slow machine can't use up the 50 ms.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      let settled = false;
+      const pending = Promise.resolve(registry.invoke('runpane:panels:resume', [{
         panelId: terminalPanel.id,
         waitReady: true,
         readyTimeoutMs: 50,
-      }]);
+      }])).finally(() => { settled = true; });
+      try {
+        while (!settled) await vi.advanceTimersToNextTimerAsync();
+      } finally {
+        vi.useRealTimers();
+      }
+      const result = await pending;
 
       expect(result).toMatchObject({
         ok: true,
@@ -7971,6 +8005,38 @@ describe('runpane IPC handlers', () => {
       await expect(registry.invoke('runpane:inbox:ack', [{ all: true }])).rejects.toThrow('needs a Session');
     });
 
+    it("keeps a blocked report's --choices and --questions on the report and in its journal entry", async () => {
+      const registry = createRegistry();
+      const choices = [{ label: 'Invoice id', detail: 'Stable', recommended: true }, { label: 'Invoice number' }];
+      const result = await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Q-3: Use the invoice id? (Invoice id / Invoice number)', choices }]);
+      expect(result.report).toMatchObject({ state: 'blocked', choices });
+      expect(stored.state.customState).toMatchObject({ agentReport: { choices } });
+      const opted = await registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 0, kinds: ['agent.report'] }]);
+      expect(opted.entries.at(-1).report).toMatchObject({ choices });
+      const questions = [
+        { title: 'Filename key?', choices: [{ label: 'Id', recommended: true }, { label: 'Number' }] },
+        { title: 'Zip them?', choices: [{ label: 'Yes', recommended: true }, { label: 'No' }] },
+      ];
+      const second = await registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Q-4: Two export choices', questions }]);
+      expect(second.report.questions).toEqual(questions);
+      expect(second.report).not.toHaveProperty('choices');
+    });
+
+    it('refuses a blocked question that packs its options into the text, options on another state, and bad options, recording nothing', async () => {
+      const registry = createRegistry();
+      await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Q-3: Id or number? (Id (recommended) / Number)' }]))
+        .rejects.toMatchObject({ code: 'ERR_REPORT_PACKED_OPTIONS' });
+      await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'ready', choices: [{ label: 'A' }] }]))
+        .rejects.toThrow('only with state blocked');
+      await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Which?', choices: [] }]))
+        .rejects.toThrow('choices needs 1 to 9 entries');
+      await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Which?', choices: [{ label: 'A' }], questions: [] }]))
+        .rejects.toThrow('choices or questions, not both');
+      expect(panelManager.updatePanel).not.toHaveBeenCalled();
+      await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked', question: 'Which staging project should the backfill use?' }]))
+        .resolves.toMatchObject({ ok: true });
+    });
+
     it('refuses a blocked report without a question, a bad head, and a panel from another Pane', async () => {
       const registry = createRegistry();
       await expect(registry.invoke('runpane:report', [{ panelId: terminalPanel.id, state: 'blocked' }]))
@@ -10024,7 +10090,7 @@ describe('runpane IPC handlers', () => {
 
     it('exposes the lock channels to runpane doctor', async () => {
       const registry = createRegistry(createLockServices());
-      const result = await registry.invoke('runpane:doctor');
+      const result = await withInstalledPane(() => registry.invoke('runpane:doctor'));
       // SAFETY: The doctor result carries a daemon.channels string array.
       const daemon = (result as { daemon: { channels: string[] } }).daemon;
       expect(daemon.channels).toEqual(expect.arrayContaining(['runpane:locks:acquire', 'runpane:locks:release', 'runpane:locks:list']));

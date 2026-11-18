@@ -2,7 +2,7 @@ import { pausedMarkOf, type ToolPanel, type ToolPanelType } from '@shared/types/
 import * as Haptics from 'expo-haptics';
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActionSheetIOS, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
@@ -23,26 +23,55 @@ export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidS
   notes: { ios: 'note.text', android: 'sticky_note_2', label: 'notes' },
   dashboard: { ios: 'square.grid.2x2', android: 'dashboard', label: 'dashboard' },
   'setup-tasks': { ios: 'checklist', android: 'checklist', label: 'setup tasks' },
+  device: { ios: 'iphone', android: 'smartphone', label: 'device' },
 };
 const CHAT = { ios: 'bubble.left', android: 'chat_bubble', label: 'chat' } as const;
+
+/** A long press's menu for tab `title`: Close or Cancel. */
+export function offerClose(title: string, close: () => void) {
+  if (Platform.OS === 'ios') {
+    ActionSheetIOS.showActionSheetWithOptions(
+      { title, options: ['Close', 'Cancel'], destructiveButtonIndex: 0, cancelButtonIndex: 1 },
+      index => { if (index === 0) close(); },
+    );
+  } else {
+    Alert.alert(title, undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Close', style: 'destructive', onPress: close }]);
+  }
+}
+
+/** A tab the screen draws itself, ahead of the Pane's tabs (an approval and what it links). */
+export interface LeadingTab {
+  id: string;
+  title: string;
+  icon: { ios: SFSymbol; android: AndroidSymbol };
+  /** The word VoiceOver reads after its title, when the title doesn't say it. */
+  label?: string;
+  /** Closes it, after the long press's menu. Absent for a tab that can't be closed. */
+  onClose?: () => void;
+}
 
 export interface PanelTabsProps {
   panels: readonly ToolPanel[];
   selectedId: string | null;
-  onSelect: (panel: ToolPanel) => void;
-  onAdd: () => void;
+  /** Absent with no Pane tabs to pick. */
+  onSelect?: (panel: ToolPanel) => void;
+  /** No + without it. */
+  onAdd?: () => void;
   /** A long press on a tab, or the VoiceOver and TalkBack action, offers to close it. */
-  onClose: (panel: ToolPanel) => void;
+  onClose?: (panel: ToolPanel) => void;
   /** A Session's agent chat, drawn with a chat icon. */
   chatId?: string;
+  leading?: readonly LeadingTab[];
+  onSelectLeading?: (id: string) => void;
 }
 
 /**
  * The web app's tool tabs: bordered tabs on a raised strip and a square + at
  * the end that adds one. Each tab shows its type's icon; a tab that opens only
  * on the computer is dimmed, and a paused tab is grayed out behind a pause glyph. Ctrl+C lives on the floating controller.
+ * A screen's own `leading` tabs come first, in the same style.
  */
-export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId }: PanelTabsProps) {
+export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId, leading = [], onSelectLeading }: PanelTabsProps) {
   const theme = useTheme();
   const { colors } = theme;
   const { profile } = useDaemon();
@@ -59,6 +88,10 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
   };
   // A tab opened from a link, a notification or the computer can sit outside the strip's window.
   useEffect(revealSelected, [selectedId]);
+  const onTabLayout = (id: string, frame: { x: number; width: number }) => {
+    tabFrames.current.set(id, frame);
+    if (id === selectedId) revealSelected();
+  };
   return (
     <View style={[styles.bar, { borderBottomColor: colors.border, backgroundColor: colors.surfaceRaised }]}>
       <ScrollView
@@ -73,56 +106,42 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
         accessibilityRole="tablist"
         testID="terminal-panel-tabs"
       >
+        {leading.map(({ onClose: close, ...tab }) => (
+          <StripTab
+            key={tab.id}
+            id={tab.id}
+            title={tab.title}
+            icon={tab.icon}
+            accessibilityLabel={tab.label ? `${tab.title}, ${tab.label}` : tab.title}
+            selected={tab.id === selectedId}
+            onLayout={onTabLayout}
+            onSelect={() => onSelectLeading?.(tab.id)}
+            onClose={close ? () => offerClose(tab.title, close) : undefined}
+          />
+        ))}
         {panels.map(panel => {
-          const selected = panel.id === selectedId;
           const paused = Boolean(pausedMarkOf(panel));
           const dimmed = tabView(panel) === 'placeholder' || paused;
-          const tint = selected ? colors.text : dimmed ? colors.textMuted : colors.textSecondary;
           const type = panel.id === chatId ? CHAT : TAB_TYPES[panel.type];
           return (
-            <Pressable
+            <StripTab
               key={panel.id}
-              testID={`panel-tab-${panel.id}`}
-              onLayout={event => {
-                const { x, width } = event.nativeEvent.layout;
-                tabFrames.current.set(panel.id, { x, width });
-                if (selected) revealSelected();
-              }}
-              accessibilityRole="tab"
-              accessibilityState={{ selected }}
+              id={panel.id}
+              title={panel.title}
+              icon={type}
               accessibilityLabel={`${panel.title}, ${type.label}${paused ? ', paused' : ''}`}
               accessibilityHint={tabView(panel) === 'placeholder' ? `Opens on ${profile.label}` : undefined}
-              accessibilityActions={[{ name: 'close', label: 'Close' }]}
-              onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'close') onClose(panel); }}
-              onPress={() => {
-                if (selected) return;
-                void Haptics.selectionAsync();
-                onSelect(panel);
-              }}
-              onLongPress={() => {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                onClose(panel);
-              }}
-              style={({ pressed }) => [
-                styles.tab,
-                {
-                  borderTopLeftRadius: theme.radius.md,
-                  borderTopRightRadius: theme.radius.md,
-                  borderColor: colors.border,
-                  backgroundColor: selected ? colors.background : pressed ? colors.surfacePressed : colors.surface,
-                },
-              ]}
-            >
-              {paused ? <PausedBadge /> : null}
-              <Icon ios={type.ios} android={type.android} size={16} color={tint} />
-              <Text variant="callout" style={[styles.label, { color: tint }, dimmed && !selected && styles.dimmed]} numberOfLines={1}>
-                {panel.title}
-              </Text>
-            </Pressable>
+              selected={panel.id === selectedId}
+              dimmed={dimmed}
+              paused={paused}
+              onLayout={onTabLayout}
+              onSelect={() => onSelect?.(panel)}
+              onClose={onClose ? () => onClose(panel) : undefined}
+            />
           );
         })}
       </ScrollView>
-      <Pressable
+      {onAdd ? <Pressable
         testID="panel-tab-add"
         accessibilityRole="button"
         accessibilityLabel="Add tool"
@@ -138,8 +157,66 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
         ]}
       >
         <Icon ios="plus" android="add" size={16} color={colors.textSecondary} />
-      </Pressable>
+      </Pressable> : null}
     </View>
+  );
+}
+
+/** One bordered tab: its icon and title; a long press, or the VoiceOver and TalkBack action, offers Close when it can close. */
+function StripTab({ id, title, icon, accessibilityLabel, accessibilityHint, selected, dimmed = false, paused = false, onLayout, onSelect, onClose }: {
+  id: string;
+  title: string;
+  icon: { ios: SFSymbol; android: AndroidSymbol };
+  accessibilityLabel: string;
+  accessibilityHint?: string;
+  selected: boolean;
+  dimmed?: boolean;
+  paused?: boolean;
+  onLayout: (id: string, frame: { x: number; width: number }) => void;
+  onSelect: () => void;
+  onClose?: () => void;
+}) {
+  const theme = useTheme();
+  const { colors } = theme;
+  const tint = selected ? colors.text : dimmed ? colors.textMuted : colors.textSecondary;
+  return (
+    <Pressable
+      testID={`panel-tab-${id}`}
+      onLayout={event => {
+        const { x, width } = event.nativeEvent.layout;
+        onLayout(id, { x, width });
+      }}
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
+      accessibilityActions={onClose ? [{ name: 'close', label: 'Close' }] : undefined}
+      onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'close') onClose?.(); }}
+      onPress={() => {
+        if (selected) return;
+        void Haptics.selectionAsync();
+        onSelect();
+      }}
+      onLongPress={onClose ? () => {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        onClose();
+      } : undefined}
+      style={({ pressed }) => [
+        styles.tab,
+        {
+          borderTopLeftRadius: theme.radius.md,
+          borderTopRightRadius: theme.radius.md,
+          borderColor: colors.border,
+          backgroundColor: selected ? colors.background : pressed ? colors.surfacePressed : colors.surface,
+        },
+      ]}
+    >
+      {paused ? <PausedBadge /> : null}
+      <Icon ios={icon.ios} android={icon.android} size={16} color={tint} />
+      <Text variant="callout" style={[styles.label, { color: tint }, dimmed && !selected && styles.dimmed]} numberOfLines={1}>
+        {title}
+      </Text>
+    </Pressable>
   );
 }
 

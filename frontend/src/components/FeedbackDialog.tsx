@@ -154,7 +154,6 @@ export function FeedbackDialog({ isOpen, onClose }: FeedbackDialogProps) {
               <span>Title <span>(optional)</span></span>
               <input
                 type="text"
-                maxLength={120}
                 value={state.title}
                 onChange={event => dispatch({ type: 'set-title', value: event.target.value })}
                 placeholder="Short summary"
@@ -168,7 +167,6 @@ export function FeedbackDialog({ isOpen, onClose }: FeedbackDialogProps) {
                 ref={bodyRef}
                 required
                 rows={8}
-                maxLength={65_536}
                 value={state.body}
                 onChange={event => dispatch({ type: 'set-body', value: event.target.value })}
                 placeholder="Describe the bug, idea, or feedback. Plain text and Markdown are welcome."

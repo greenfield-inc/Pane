@@ -197,6 +197,7 @@ export function demoNotifyItems(now: number): NotifyItem[] {
         { label: 'New dark palette', detail: 'A fresh set just for the storefront.' },
         { label: 'Follow the OS only', detail: 'No toggle; match the phone or computer setting.' },
       ],
+      links: [{ label: 'Cover sheet', path: '/Users/you/code/storefront/tmp/plans/dark-mode/cover-sheet.html' }],
       source: { paneId: 'demo-dark-mode', panelId: 'demo-dark-mode-agent', name: 'add-dark-mode', agent: 'Codex' },
     },
     {

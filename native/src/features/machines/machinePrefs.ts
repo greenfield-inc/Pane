@@ -7,7 +7,7 @@ const ALL_KEY = 'pane.native.allMachines';
 const LAST_NEW_KEY = 'pane.native.lastNewMachine';
 
 interface MachinePrefsState {
-  /** Home shows every saved machine's list instead of the current machine's. */
+  /** Home shows every saved machine's list instead of the current machine's. On until the person picks one machine. */
   all: boolean;
   /** The profile id New last created on; New starts there. */
   lastNew: string | null;
@@ -16,7 +16,7 @@ interface MachinePrefsState {
 }
 
 export const useMachinePrefs = create<MachinePrefsState>(set => ({
-  all: false,
+  all: true,
   lastNew: null,
   setAll: all => {
     set({ all });

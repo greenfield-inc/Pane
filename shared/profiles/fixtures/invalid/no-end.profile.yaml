@@ -1,0 +1,14 @@
+# expect: FLOW_NO_END
+format: pane-profile/1
+name: no-end
+version: 1.0.0
+agents:
+  writer: { runs: claude/claude-opus-5-5 }
+flow:
+  start: draft
+  draft: { agent: writer, goal: Draft it, outcomes: { done: check, stuck: draft } }
+  check: { ask: Good?, choices: { again: draft, more: draft } }
+samples:
+  draft:
+    done: ["Drafted.", "Drafted, with notes."]
+    stuck: ["Stuck on the intro.", "Stuck on sources."]

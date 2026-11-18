@@ -43,6 +43,7 @@
         "@agentclientprotocol/codex-acp",
         "@agentclientprotocol/sdk",
         "@anthropic-ai/sdk",
+        "@greenfieldco/agent-farm",
         "@lydell/node-pty",
         "@modelcontextprotocol/sdk",
         "@xterm/addon-serialize",
@@ -87,6 +88,7 @@
       "project": ["src/**/*.ts", "build-mcp-bridge.js"],
       "ignoreUnresolved": ["/bin/sh", "/usr/bin/security"],
       "ignoreBinaries": [
+        "plutil",
         "fc-list",
         "system_profiler",
         "xclip",

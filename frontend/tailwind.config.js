@@ -75,6 +75,11 @@ const config = {
         },
         // Design token colors
         // Background colors
+        'device': {
+          'bezel': 'var(--color-device-bezel)',
+          'screen': 'var(--color-device-screen)',
+          'screen-text': 'var(--color-device-screen-text)',
+        },
         'bg': {
           'primary': 'var(--color-bg-primary)',
           'secondary': 'var(--color-bg-secondary)',
@@ -288,7 +293,6 @@ const config = {
         },
       },
       animation: {
-        shimmer: 'shimmer 2s linear infinite',
         // Tailwind's `animate-pulse`, run a set number of times instead of forever.
         'attention-pulse': defaultTheme.animation.pulse.replace('infinite', String(ATTENTION_PULSES)),
         // Tailwind's `animate-spin`, run a set number of turns instead of forever.
@@ -304,10 +308,6 @@ const config = {
         'modal-overlay-enter': 'fade-in var(--duration-modal) var(--ease-out-strong)',
       },
       keyframes: {
-        shimmer: {
-          '0%': { transform: 'translateX(-100%)' },
-          '100%': { transform: 'translateX(100%)' },
-        },
         // Vertical "loading" light that sweeps up and down the working status bar.
         'status-working-sweep': {
           '0%': { transform: 'translateY(-120%)' },

@@ -211,6 +211,8 @@ export interface ChatTabView {
   tasks?: ChatTabTask[];
   /** When /clear last started a fresh conversation in this tab. */
   clearedAt?: string;
+  /** Send now delivers into the running turn, which goes on with its subagents; absent, Send now stops the turn first. */
+  sendNowSteers?: true;
 }
 
 /** Tokens in the conversation's context and the size of its window. */
@@ -232,7 +234,7 @@ export interface ChatTabSend {
   operationId: string;
   text: string;
   images?: Array<{ mimeType: string; data: string }>;
-  /** Send now: the message goes ahead of the queue and interrupts the running turn. Not part of the message's fingerprint. */
+  /** Send now: the message goes ahead of the queue and reaches the running turn at once (see ChatTabView.sendNowSteers). Not part of the message's fingerprint. */
   now?: boolean;
 }
 

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Copy } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
+import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from '../ui/Skeleton';
+import { cn } from '../../utils/cn';
 import { SettingRow } from './SettingRow';
 import { SegmentedControl } from './SettingsControls';
 import { API } from '../../utils/api';
@@ -28,6 +30,8 @@ export const CARD_ROW = 'px-4 py-3';
 export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null }) {
   const [access, setAccess] = useState<WorkspaceAccessSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reading, setReading] = useState(true);
+  const { holding, reveal } = useSkeletonHold(reading);
   const [busy, setBusy] = useState(false);
   const [pendingVisibility, setPendingVisibility] = useState<WorkspaceVisibility | null>(null);
   const [passwordDraft, setPasswordDraft] = useState<string | null>(null);
@@ -42,6 +46,8 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
       else setError(response.error ?? 'Could not read who can connect to this machine.');
     }).catch((cause: unknown) => {
       if (mounted.current) setError(errorMessage(cause, 'Could not read who can connect to this machine.'));
+    }).finally(() => {
+      if (mounted.current) setReading(false);
     });
     return () => { mounted.current = false; };
   }, []);
@@ -97,6 +103,8 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
   const visibility = pendingVisibility ?? access?.visibility ?? 'owner';
   const passwordValid = passwordDraft !== null && passwordDraft.length >= WORKSPACE_PASSWORD_MIN_LENGTH;
 
+  const rowClass = cn(CARD_ROW, reveal && 'skeleton-reveal');
+
   return (
     <>
       {error && (
@@ -105,12 +113,13 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
           <Button type="button" variant="ghost" size="sm" onClick={() => setError(null)}>Dismiss</Button>
         </div>
       )}
+      {holding ? <CodelessAccessSkeleton /> : <>
       <SettingRow
         settingId="remote-visibility"
         label="Who can connect"
         description={describeAccess(access)}
         align="start"
-        className={CARD_ROW}
+        className={rowClass}
       >
         <div className="w-full space-y-3 sm:w-[420px]">
           <SegmentedControl<WorkspaceVisibility>
@@ -152,7 +161,7 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
           ? 'On. Every device enters it to connect.'
           : 'Off. Your own devices connect without one.'}
         align="start"
-        className={CARD_ROW}
+        className={rowClass}
       >
         {passwordDraft === null ? (
           <div className="flex justify-end gap-2">
@@ -195,7 +204,7 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
           settingId="remote-address"
           label="Address"
           description="Enter it in Pane on your phone to find your computers."
-          className={CARD_ROW}
+          className={rowClass}
         >
           <div className="flex items-center justify-end gap-2">
             <code className="truncate text-xs text-text-secondary">{phoneAddress(access.url)}</code>
@@ -211,12 +220,37 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
           </div>
         </SettingRow>
       )}
+      </>}
+    </>
+  );
+}
+
+/** The Who can connect and Password rows while this computer's Tailscale access is read. */
+function CodelessAccessSkeleton() {
+  const row = 'grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(180px,auto)] sm:items-start';
+  return (
+    <>
+      <Skeleton className={`${row} ${CARD_ROW}`}>
+        <div className="min-w-0">
+          <div className="text-sm font-medium leading-5"><TextBone text="Who can connect" /></div>
+          <div className="mt-1 flex h-[19.5px] items-center"><Bone className="h-3 w-40" /></div>
+        </div>
+        <Bone className="h-10 w-full rounded-md sm:w-[420px]" />
+      </Skeleton>
+      <Skeleton className={`${row} ${CARD_ROW}`}>
+        <div className="min-w-0">
+          <div className="text-sm font-medium leading-5"><TextBone text="Password" /></div>
+          <div className="mt-1 flex h-[19.5px] items-center"><Bone className="h-3 w-56" /></div>
+        </div>
+        <div className="flex justify-end"><Bone className="h-8 w-28 rounded-button" /></div>
+      </Skeleton>
+      <LoadingStatus label="Checking Tailscale" />
     </>
   );
 }
 
 function describeAccess(access: WorkspaceAccessSummary | null): string {
-  if (!access) return 'Checking Tailscale…';
+  if (!access) return '';
   if (access.state === 'off' && access.visibility !== 'off') return `${access.reason ?? 'Not running'}. ${access.fix ?? ''}`.trim();
   if (access.visibility === 'off') return 'No one over Tailscale. Phones paired with a QR code and connection codes still work.';
   return access.visibility === 'tailnet' ? 'Anyone on this tailnet.' : 'Your devices on Tailscale.';

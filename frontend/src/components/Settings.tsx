@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, RefreshCw } from 'lucide-react';
+import { AlertCircle, ArrowLeft } from 'lucide-react';
 import { Button } from './ui/Button';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SettingsLayout } from './settings/SettingsLayout';
 import { GeneralSettings } from './settings/categories/GeneralSettings';
@@ -10,10 +11,12 @@ import { LinksSettings } from './settings/categories/LinksSettings';
 import { AIAgentsSettings } from './settings/categories/AIAgentsSettings';
 import { AgentsSettings } from './settings/categories/AgentsSettings';
 import { WorktreesGitSettings } from './settings/categories/WorktreesGitSettings';
+import { MachineHealthSettings } from './settings/categories/MachineHealthSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { NotifySettings } from './settings/categories/NotifySettings';
 import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings';
 import { IntegrationsSettings } from './settings/categories/IntegrationsSettings';
+import { DevicesSettings } from './settings/categories/DevicesSettings';
 import { SecretsSettings } from './settings/categories/SecretsSettings';
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
 import { PrivacySettings } from './settings/categories/PrivacySettings';
@@ -206,6 +209,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <UsageView key={usageTab} initialTab={usageTab} />;
       case 'worktrees-git':
         return <WorktreesGitSettings persistence={persistence} {...sharedDirtyProps} />;
+      case 'machine-health':
+        return <MachineHealthSettings persistence={persistence} />;
       case 'notify':
         return <NotifySettings persistence={persistence} />;
       case 'autopilot':
@@ -232,6 +237,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <IntegrationsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'secrets':
         return <SecretsSettings />;
+      case 'devices':
+        return <DevicesSettings />;
       case 'shortcuts':
         return <ShortcutsSettings persistence={persistence} platform={platform} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':
@@ -249,26 +256,22 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     <>
       <div data-testid="settings-page" data-pane-part="settings" className="flex h-full min-h-0 w-full flex-col bg-bg-primary">
         <div className="pane-drag-area h-[38px] flex-shrink-0 bg-surface-secondary" />
-        {!persistence.config && (persistence.isLoading || persistence.configError) ? (
+        {!persistence.config && persistence.configError && !persistence.isLoading ? (
           <div className="relative flex min-h-0 flex-1 items-center justify-center">
             <button type="button" onClick={requestClose} className="absolute left-3 top-3 inline-flex h-7 items-center gap-1.5 rounded px-2 text-[12px] text-text-secondary hover:bg-surface-hover hover:text-text-primary">
               <ArrowLeft className="h-3.5 w-3.5" /> Back
             </button>
-            {persistence.isLoading ? (
-              <div className="flex items-center text-sm text-text-tertiary" aria-live="polite">
-                <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Loading settings
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3 p-6 text-center">
-                <AlertCircle className="h-6 w-6 text-status-error" />
-                <p className="max-w-md text-sm text-status-error" role="alert">{persistence.configError}</p>
-                <Button type="button" variant="secondary" size="sm" onClick={() => void persistence.fetchConfig()}>Retry</Button>
-              </div>
-            )}
+            <div className="flex flex-col items-center gap-3 p-6 text-center">
+              <AlertCircle className="h-6 w-6 text-status-error" />
+              <p className="max-w-md text-sm text-status-error" role="alert">{persistence.configError}</p>
+              <Button type="button" variant="secondary" size="sm" onClick={() => void persistence.fetchConfig()}>Retry</Button>
+            </div>
           </div>
         ) : (
           <SettingsLayout category={category} categories={autopilotOn ? SETTINGS_CATEGORIES : SETTINGS_WITHOUT_AUTOPILOT} onCategoryChange={changeCategory} onBack={requestClose} fullBleed={category === 'usage'}>
-            {content()}
+            <SkeletonSwap loading={!persistence.config} skeleton={<SettingsPageSkeleton title={SETTINGS_CATEGORIES.find((item) => item.id === category)?.label ?? 'Settings'} />}>
+              {persistence.config && content()}
+            </SkeletonSwap>
           </SettingsLayout>
         )}
       </div>
@@ -283,5 +286,37 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         variant="warning"
       />
     </>
+  );
+}
+
+/** A settings page while its config loads: the SettingsPage header, then one section of SettingRows. */
+function SettingsPageSkeleton({ title }: { title: string }) {
+  return (
+    <section className="mx-auto w-full max-w-3xl pb-8">
+      <LoadingStatus label="Loading settings" />
+      <Skeleton>
+        <header className="mb-7">
+          <h2 className="text-xl font-semibold leading-7"><TextBone text={title} /></h2>
+          <div className="mt-1.5 flex h-5 items-center"><Bone className="h-3.5 w-[min(28rem,80%)]" /></div>
+        </header>
+        <div className="space-y-1">
+          <div className="border-b border-border-secondary pb-2">
+            <div className="flex h-5 items-center"><Bone className="h-3.5 w-28" /></div>
+            <div className="mt-1 flex h-4 items-center"><Bone className="h-3 w-72 max-w-full" /></div>
+          </div>
+          <div className="space-y-4 divide-y divide-border-secondary">
+            {[[40, 78], [32, 64], [46, 70]].map(([label, description]) => (
+              <div key={label} className="grid gap-4 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(180px,auto)] sm:items-center">
+                <div className="min-w-0">
+                  <div className="flex h-5 items-center"><Bone className="h-3.5" style={{ width: `${label}%` }} /></div>
+                  <div className="mt-1 flex h-[19.5px] items-center"><Bone className="h-3" style={{ width: `${description}%` }} /></div>
+                </div>
+                <div className="flex justify-end"><Bone className="h-6 w-11 rounded-full" /></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Skeleton>
+    </section>
   );
 }

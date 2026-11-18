@@ -308,6 +308,13 @@ export async function restoreHostNavigation(
     return;
   }
 
+  if (memory.view === 'profiles') {
+    await setActiveSession(null);
+    if (!ownsRuntime()) return;
+    navigation.navigateToProfiles();
+    return;
+  }
+
   if (memory.view === 'notify') {
     await setActiveSession(null);
     if (!ownsRuntime()) return;
@@ -319,6 +326,13 @@ export async function restoreHostNavigation(
     await setActiveSession(null);
     if (!ownsRuntime()) return;
     navigation.navigateToSsh();
+    return;
+  }
+
+  if (memory.view === 'resources') {
+    await setActiveSession(null);
+    if (!ownsRuntime()) return;
+    navigation.navigateToResources();
     return;
   }
 

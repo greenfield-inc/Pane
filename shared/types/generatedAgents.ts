@@ -30,6 +30,9 @@ export const AGENTS_CONFIG = {
       "transcriptDirs": [
         ".claude/projects"
       ],
+      "tempDirs": [
+        "{tmp}/claude-{uid}"
+      ],
       "signIn": [
         "auth",
         "login"
@@ -267,6 +270,7 @@ export const AGENTS_CONFIG = {
         "fullAccessArgs": [
           "--auto"
         ],
+        "paneMcpConfigEnv": "OPENCODE_CONFIG_CONTENT",
         "hotkey": "mod+alt+6",
         "session": {
           "flag": "--session",

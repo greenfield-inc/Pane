@@ -7,6 +7,7 @@ import { CommitDialog, type CommitResult } from '../../CommitDialog';
 import { editorPanelState, openFileInEditor } from '../../../services/openFileInEditor';
 import { usePanelStore } from '../../../stores/panelStore';
 import { ChangesList } from './ChangesList';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 import { buildChangesRows, type ChangesRow } from './changesListModel';
 import { editorDiffRefForFile, isMutableScope, normalizeEditorDiffRef, sameScope, scopeKey, scopeLabel } from './diffScope';
 import { clearPendingViewCommit, takePendingViewCommit } from './pendingViewCommit';
@@ -20,6 +21,21 @@ interface LoadedScope { key: string; scope: DiffScope; manifest: DiffManifest; r
 
 const loadScope = (key: string, scope: DiffScope, manifest: DiffManifest): LoadedScope =>
   ({ key, scope, manifest, rows: buildChangesRows(manifest.files) });
+
+/** ChangesList's file rows while the manifest loads. */
+function ChangesListSkeleton({ label }: { label: string }) {
+  return <>
+    <LoadingStatus label={`Loading ${label}`} />
+    <Skeleton className="pane-changes-list min-h-0 flex-1">
+      {['w-3/5', 'w-2/5', 'w-1/2', 'w-1/3', 'w-3/5', 'w-2/5'].map((path, index) => <div key={index} className="pane-changes-list-row">
+        <Bone className="h-3.5 w-3.5" />
+        <Bone className={`h-3 ${path}`} />
+        <Bone className="pane-changes-list-stats h-2.5 w-10" />
+        <Bone className="h-2.5 w-2.5" />
+      </div>)}
+    </Skeleton>
+  </>;
+}
 
 const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffViewProps>(function CombinedDiffView({
   sessionId,
@@ -175,6 +191,13 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
   const historyLabel = isMainRepo ? (historySource === 'local' ? 'Local commits' : mainBranch) : null;
   const headerLabel = historyLabel ? `${historyLabel} · ${label}` : label;
   const busy = loading || executionsLoading || isGitOperationRunning;
+  // The refresh icon turns for a refresh the person asked for, and while the scope reloads behind its old list
+  // (a commit, a background change on activation). A first load shows a skeleton; a cached activation loads nothing.
+  const [refreshRequested, setRefreshRequested] = useState(false);
+  useEffect(() => {
+    if (!loading && !executionsLoading) setRefreshRequested(false);
+  }, [loading, executionsLoading]);
+  const reloadingShownList = loadingKey === key && visibleManifest !== null;
   const hasUncommitted = executions.some(execution => execution.id === 0 && execution.stats_files_changed > 0);
   const emptyMessage = isMainRepo && executions.length === 0
     ? historySource === 'remote'
@@ -212,8 +235,8 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
               <RotateCcw className="h-3.5 w-3.5" />
             </button>
           )}
-          <button type="button" onClick={refresh} disabled={busy} className="rounded p-1 hover:bg-surface-hover" title="Refresh">
-            <RefreshCw className={`h-3.5 w-3.5 text-text-tertiary ${busy ? 'animate-spin' : ''}`} />
+          <button type="button" onClick={() => { setRefreshRequested(true); refresh(); }} disabled={busy} className="rounded p-1 hover:bg-surface-hover" title="Refresh">
+            <RefreshCw className={`h-3.5 w-3.5 text-text-tertiary ${isGitOperationRunning || reloadingShownList || (refreshRequested && busy) ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
@@ -226,10 +249,11 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
               <p className="mt-1 text-sm text-text-tertiary">Please wait while the operation completes…</p>
             </div>
           </div>
-        ) : loading && !visibleManifest ? <div className="animate-pulse p-4 text-sm text-text-secondary">Loading {label}…</div>
-          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
-            : visible && visible.manifest.files.length > 0 ? <ChangesList sessionId={sessionId} rows={visible.rows} scopeKey={scopeKey(scope)} activePath={activeDiffPath} onFileOpen={handleFileOpen} />
-              : <div className="flex h-full items-center justify-center px-4 text-sm text-text-secondary"><div className="space-y-2 text-center"><p>{emptyMessage}</p>{isMainRepo && historySource === 'remote' && <p className="text-sm text-text-tertiary">Create new commits to see them here.</p>}</div></div>}
+        ) : error && !(loading && !visibleManifest) ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
+          : <SkeletonSwap loading={loading && !visibleManifest} skeleton={<ChangesListSkeleton label={label} />}>{
+            visible && visible.manifest.files.length > 0 ? <ChangesList sessionId={sessionId} rows={visible.rows} scopeKey={scopeKey(scope)} activePath={activeDiffPath} onFileOpen={handleFileOpen} />
+              : <div className="flex h-full items-center justify-center px-4 text-sm text-text-secondary"><div className="space-y-2 text-center"><p>{emptyMessage}</p>{isMainRepo && historySource === 'remote' && <p className="text-sm text-text-tertiary">Create new commits to see them here.</p>}</div></div>
+          }</SkeletonSwap>}
       </div>
       <CommitDialog isOpen={showCommitDialog} onClose={() => setShowCommitDialog(false)} onCommit={handleCommit} fileCount={visibleManifest?.stats.filesChanged ?? 0} sessionId={sessionId} />
     </div>

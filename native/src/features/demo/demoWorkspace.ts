@@ -470,12 +470,10 @@ export class DemoWorkspace {
   }
 
   private notifyCommand(command: NotifyRemoteCommand): JsonValue {
-    // The demo has no files or pages behind its cards to open.
-    if (command.type === 'open-link') throw new Error(`Opening related files ${NEEDS_COMPUTER}`);
     const item = this.notify.find(candidate => candidate.id === command.id);
     if (!item) throw new Error('This question is no longer waiting.');
     if (command.type === 'answer' && item.state === 'waiting' && 'picks' in command.answer && command.answer.text?.trim()) {
-      // A typed reply: the sample agent reads it, then takes it as the answer, as an asker would with --took.
+      // A typed reply: once the sample agent gets it, it is the answer, as Pane records a delivered reply.
       const { picks, text } = command.answer;
       const generation = this.nextAnswerGeneration(item.id);
       const reply: NotifyReply = { id: `${item.id}-reply-${generation}`, text: text.trim(), at: Date.now(), state: 'reading', reader: { kind: 'asker', name: item.source.agent } };

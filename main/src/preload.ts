@@ -1,4 +1,6 @@
+import type { DeviceInput } from '../../shared/types/devices';
 import type { LoopInput } from '../../shared/types/loop';
+import type { ProfileLaunchInput } from '../../shared/types/profiles';
 import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
@@ -42,7 +44,7 @@ import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
 import type { NotifyCommand, NotifyNavigateTarget, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
 import type { AutopilotDocument, AutopilotInstructionsView, AutopilotSnapshot, AutopilotStackCommand, AutopilotStackPushRequest } from '../../shared/types/autopilot';
-import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
+import type { MachineCommand, MachineConnectionsEvent, MachineLatency, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -384,6 +386,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
     delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
   },
+  /** The device tab (docs/DEVICES.md): the local screen, frames, and the person's own controls. */
+  devices: {
+    input: (panelId: string, input: DeviceInput): Promise<IPCResponse> => invokeIpc('devices:input', panelId, input),
+    frame: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame', panelId),
+    frameRate: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame-rate', panelId),
+    controls: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:controls', panelId),
+    capture: (panelId: string, image?: string): Promise<IPCResponse> => invokeIpc('devices:capture', panelId, image),
+    stage: (panelId: string, agentPanelId: string, text: string): Promise<IPCResponse> => invokeIpc('devices:stage', panelId, agentPanelId, text),
+    record: (panelId: string, action: 'start' | 'stop'): Promise<IPCResponse> => invokeIpc('devices:record', panelId, action),
+    recording: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:recording', panelId),
+    logs: (panelId: string, since: number): Promise<IPCResponse> => invokeIpc('devices:logs', panelId, since),
+    driver: (panelId: string, who: 'person' | 'agent'): Promise<IPCResponse> => invokeIpc('devices:driver', panelId, who),
+    visible: (panelId: string, clientId: string, visible: boolean): Promise<IPCResponse> => invokeIpc('devices:visible', panelId, clientId, visible),
+    takeOver: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:take-over', panelId),
+    power: (panelId: string, action: 'boot' | 'restart' | 'shutdown'): Promise<IPCResponse> => invokeIpc('devices:power', panelId, action),
+    settings: (): Promise<IPCResponse> => ipcRenderer.invoke('device-settings:get'),
+    updateSettings: (patch: { enabled?: boolean; iosMachineId?: string | null; maxBooted?: number }): Promise<IPCResponse> => ipcRenderer.invoke('device-settings:update', patch),
+  },
   onNotesChanged: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('notes:changed', listener);
@@ -439,6 +459,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // System utilities
   openExternal: (url: string): Promise<IPCResponse> => invokeIpc('openExternal', url),
+  openLocalPage: (fileUrl: string): Promise<IPCResponse> => invokeIpc('openLocalPage', fileUrl),
 
   feedback: {
     submit: (request: SubmitFeedbackRequest): Promise<IPCResponse> => invokeIpc('feedback:submit', request),
@@ -603,6 +624,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setEnabled: (id: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('loops:set-enabled', id, enabled),
     runNow: (id: string): Promise<IPCResponse> => invokeIpc('loops:run-now', id),
     preview: (cron: string): Promise<IPCResponse> => invokeIpc('loops:preview', cron),
+  },
+  // Profiles: the library, launches and runs (docs/PROFILES.md)
+  profiles: {
+    list: (): Promise<IPCResponse> => invokeIpc('profiles:list'),
+    ownAgentFarm: (): Promise<IPCResponse> => invokeIpc('profiles:own-agent-farm'),
+    get: (name: string): Promise<IPCResponse> => invokeIpc('profiles:get', name),
+    setEnabled: (name: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('profiles:set-enabled', name, enabled),
+    launch: (input: ProfileLaunchInput): Promise<IPCResponse> => invokeIpc('profiles:launch', input),
+    runs: (): Promise<IPCResponse> => invokeIpc('profiles:runs'),
+    setOutcome: (runId: string, outcome: string): Promise<IPCResponse> => invokeIpc('profiles:set-outcome', runId, outcome),
+    stop: (runId: string): Promise<IPCResponse> => invokeIpc('profiles:stop', runId),
   },
   // Mission Control — live overview of every agent pane across all sessions
   missionControl: {
@@ -1025,6 +1057,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('remote:settings-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('remote:settings-changed', wrappedCallback);
     },
+    onProfilesChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('profiles:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('profiles:changed', wrappedCallback);
+    },
     onLoopsChanged: (callback: () => void) => {
       const wrappedCallback = () => callback();
       ipcRenderer.on('loops:changed', wrappedCallback);
@@ -1430,6 +1467,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('machines:read', machineId, channel, args),
     run: (machineId: string, command: MachineCommand): Promise<MachineResult> => ipcRenderer.invoke('machines:run', machineId, command),
     retry: (machineId: string): Promise<void> => ipcRenderer.invoke('machines:retry', machineId),
+    latency: (machineId: string): Promise<MachineLatency> => ipcRenderer.invoke('machines:latency', machineId),
     onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, event: MachineConnectionsEvent) => callback(event);
       ipcRenderer.on('machines:event', listener);

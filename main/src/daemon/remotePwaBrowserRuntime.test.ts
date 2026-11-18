@@ -79,7 +79,8 @@ describe('Remote PWA browser runtime', () => {
 
     expect(result).toEqual({ projects: [] });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('https://host.example.test/invoke', {
+    // A read also carries its per-attempt deadline as an abort signal.
+    expect(fetchMock).toHaveBeenCalledWith('https://host.example.test/invoke', expect.objectContaining({
       method: 'POST',
       headers: {
         Authorization: 'Bearer secret-token',
@@ -92,7 +93,8 @@ describe('Remote PWA browser runtime', () => {
         runtimeId: 'runtime-id-1',
         clientLabel: 'Pane PWA on TestOS',
       }),
-    });
+      signal: expect.any(AbortSignal),
+    }));
   });
 
   it.each(['terminal:input', 'sessions:create', 'panels:create', 'sessions:get-or-create-main-repo', 'new:command'])(

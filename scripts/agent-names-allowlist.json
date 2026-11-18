@@ -289,7 +289,7 @@
   },
   "packages/runpane/src/nativeSession.ts": {
     "reason": "Vendor file format: carries each agent's own session store in a handoff.",
-    "count": 27
+    "count": 30
   },
   "shared/types/agentChat.ts": {
     "reason": "Persisted record shape: the legacy agent conversation record.",

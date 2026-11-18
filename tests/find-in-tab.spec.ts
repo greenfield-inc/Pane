@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
+import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
 // Cmd+F (Ctrl+F off macOS) opens Pane's find bar in the focused tab: J1
 // (terminal) and J7 (markdown preview) from the cmd-f-find plan.
@@ -19,6 +20,11 @@ const session = {
 interface PanelCustomState {
   isInitialized?: boolean;
   filePath?: string;
+  /** A chat tab's agent and launch. */
+  agent?: string;
+  launch?: { kind: string };
+  cwd?: string;
+  status?: string;
 }
 
 function panel(id: string, type: string, title: string, position: number, active: boolean, customState: PanelCustomState, permanent = false) {
@@ -193,4 +199,147 @@ test('markdown preview: matches scrolled into view by hand are highlighted', asy
     return Array.from(highlight.keys()).some(range => range instanceof Range && target.contains(range.startContainer));
   })).toBe(true);
   await expect(findBar(page)).toContainText('1 of 1100');
+});
+
+// ⌘F on approvals, the Approvals screen, the Summary and chats (keyboard-approvals C2, C3).
+
+const asker = { paneId: 'worker-pane', panelId: 'worker-panel', name: 'planner', agent: 'Claude', session: { id: 'plans', name: 'Pane UI/UX improvements', paneId: 'find-session' } };
+const approvals: NotifyItem[] = [
+  {
+    id: 'q12', ui: 'options', title: 'Q-12: Which key opens the keyboard shortcut sheet?', state: 'waiting', createdAt: Date.now() - 3 * 60_000, originKind: 'worker',
+    context: 'It must not clash with typing; the keyboard is the point.', source: asker,
+    choices: [{ label: 'Command slash everywhere', detail: 'The file editor keeps it for comments.', recommended: true }, { label: 'Question mark outside fields' }],
+  },
+  {
+    id: 'q11', ui: 'options', title: 'Q-11: Merge #1352 now that CI is green?', state: 'waiting', createdAt: Date.now() - 11 * 60_000, originKind: 'worker',
+    context: 'Merging unblocks the follow-up.', source: asker,
+    choices: [{ label: 'Merge it', detail: 'Merge commit on main.', recommended: true }, { label: 'Wait for QA' }],
+  },
+];
+
+function notifySnapshot(items: NotifyItem[]): NotifySnapshot {
+  return {
+    settings: { ...DEFAULT_NOTIFY_SETTINGS }, items, queue: items.map(item => item.id), hidden: [], strip: null, stripSurface: null,
+    pausedUntil: null, shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [],
+  };
+}
+
+const summaryHtml = '<!doctype html><html><head><title>Summary</title></head><body><h1>What is decided</h1><p>The sheet opens with one key.</p><p>The key works while typing.</p></body></html>';
+
+async function openApprovals(page: Page) {
+  const terminal = panel('find-terminal', 'terminal', 'Terminal', 0, true, { isInitialized: true }, true);
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], initialPanels: [terminal], activeProjectId: project.id,
+    notifySnapshot: notifySnapshot(approvals),
+    machineConnections: {
+      machines: [{ id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null }],
+      reads: { local: { 'notify:summary-page': { kind: 'template', html: summaryHtml } } },
+    },
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openPane(page);
+  await page.getByTestId('approvals-nav').click();
+  await expect(page.getByTestId('approval-title')).toHaveText(approvals[0].title);
+}
+
+const matchCount = (page: Page) => page.evaluate(() => CSS.highlights.get('pane-find-match')?.size ?? 0);
+
+test('Approvals screen: Cmd+F searches the list and the open approval, and follows paging', async ({ page }) => {
+  await openApprovals(page);
+  await page.getByTestId('approval-subtitle').click();
+  await page.keyboard.press('ControlOrMeta+f');
+  const input = findBar(page).getByRole('textbox', { name: 'Find' });
+  await expect(input).toBeFocused();
+  // "keyboard" is in the list row's title, the approval's title and its subtitle.
+  await input.fill('keyboard');
+  await expect(findBar(page)).toContainText('1 of 3');
+  await expect.poll(() => matchCount(page)).toBe(3);
+  await page.keyboard.press('ControlOrMeta+g');
+  await expect(findBar(page)).toContainText('2 of 3');
+
+  // Paging to the other approval searches again: its text has no "keyboard", the list still does.
+  await page.getByTestId('approval-column').getByRole('button', { name: /next/i }).first().click();
+  await expect(page.getByTestId('approval-title')).toHaveText(approvals[1].title);
+  await expect(findBar(page)).toContainText(/of 1$/);
+
+  await input.focus();
+  await page.keyboard.press('Escape');
+  await expect(findBar(page)).toHaveCount(0);
+  await expect.poll(() => matchCount(page)).toBe(0);
+  // Esc in the bar closes only the bar: Approvals stays open.
+  await expect(page.getByTestId('approvals-queue')).toBeVisible();
+});
+
+test('Approvals screen: Cmd+F from the reply box searches the approval and keeps the draft', async ({ page }) => {
+  await openApprovals(page);
+  const reply = page.getByTestId('approval-reply-box');
+  await reply.click();
+  await page.keyboard.type('a draft answer');
+  await page.keyboard.press('ControlOrMeta+f');
+  await expect(findBar(page).getByRole('textbox', { name: 'Find' })).toBeFocused();
+  await page.keyboard.type('clash');
+  await expect(findBar(page)).toContainText('1 of 1');
+  await expect(reply).toHaveValue('a draft answer');
+});
+
+test('Summary: Cmd+F finds text inside the sandboxed page, also with focus inside it', async ({ page }) => {
+  await openApprovals(page);
+  await page.getByRole('tab', { name: /Summary/ }).click();
+  const frame = page.frameLocator('[data-testid="approval-summary-frame"]');
+  await expect(frame.getByRole('heading', { name: 'What is decided' })).toBeVisible();
+  const frameMatches = () => page.locator('[data-testid="approval-summary-frame"]').evaluate((element) => {
+    // SAFETY: the test reads the frame Pane renders; it is same-origin by design.
+    const view = (element as HTMLIFrameElement).contentWindow as (Window & typeof globalThis) | null;
+    return view?.CSS.highlights.get('pane-find-match')?.size ?? -1;
+  });
+
+  // Focus inside the frame: its keys still reach Pane.
+  await frame.getByText('The sheet opens with one key.').click();
+  await page.keyboard.press('ControlOrMeta+f');
+  const input = findBar(page).getByRole('textbox', { name: 'Find' });
+  await expect(input).toBeFocused();
+  await input.fill('key');
+  await expect(findBar(page)).toContainText('1 of 2');
+  await expect.poll(frameMatches).toBe(2);
+  // Nothing outside the frame is highlighted for it.
+  await expect.poll(() => matchCount(page)).toBe(0);
+
+  // The frame never runs scripts, whatever else it is allowed.
+  const sandbox = await page.getByTestId('approval-summary-frame').getAttribute('sandbox');
+  expect(sandbox?.split(/\s+/)).not.toContain('allow-scripts');
+
+  // Back on Decide, the same query searches the approval again.
+  await page.getByRole('tab', { name: /Decide/ }).click();
+  // "key" twice in the list row, twice in the title, once in the subtitle.
+  await expect(page.getByTestId('approval-summary-frame')).toHaveCount(0);
+  await expect(findBar(page)).toContainText('1 of 5');
+  await expect.poll(() => matchCount(page)).toBe(5);
+});
+
+test('chat: Cmd+F from the composer searches the whole conversation', async ({ page }) => {
+  const chat = panel('find-chat', 'chat', 'Claude', 0, true, { agent: 'claude', launch: { kind: 'new' }, cwd: project.path, status: 'idle' });
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], initialPanels: [chat], activeProjectId: project.id,
+    chatMessages: {
+      [chat.id]: [
+        { id: 'm1', role: 'user', text: 'Plan the keyboard shortcut sheet and approvals keys.' },
+        { id: 'm2', role: 'assistant', text: 'I have drawn three sheet layouts and the approvals key map.' },
+        { id: 'm3', role: 'user', text: 'Use the rail layout.' },
+      ],
+    },
+  });
+  await openPane(page);
+  const composer = page.getByRole('textbox', { name: 'Message Claude' });
+  await expect(page.getByText('Use the rail layout.')).toBeVisible();
+  await composer.click();
+  await page.keyboard.type('draft');
+  await page.keyboard.press('ControlOrMeta+f');
+  const input = findBar(page).getByRole('textbox', { name: 'Find' });
+  await expect(input).toBeFocused();
+  await input.fill('approvals');
+  await expect(findBar(page)).toContainText('1 of 2');
+  await expect.poll(() => matchCount(page)).toBe(2);
+  await page.keyboard.press('Escape');
+  await expect(findBar(page)).toHaveCount(0);
+  await expect(composer).toHaveText('draft');
 });

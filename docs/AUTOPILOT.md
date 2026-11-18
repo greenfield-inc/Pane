@@ -114,7 +114,7 @@ default, Autopilot:
 | closes the ones that don't matter or that it judges stale; you can reopen them | "Closed by Autopilot: <reason>" |
 | may close an unclear one and re-ask it rewritten; the answer goes to the original asker | "Closed by Autopilot: rewritten as …" on the old one, "Rewritten by Autopilot from Q-n" on the new one |
 | answers only when the way forward is clear and the item relates to what it's working on with you, or when you tell it to handle approvals | "Answered by Autopilot · because <D-n, document or your words>", with **Override** |
-| reads a typed reply its asker can't (D-258): takes it as an answer with `runpane notify --took`, or as a question, then finds out and sends a new version with `runpane notify --update` ([Replies](PANE_NOTIFY.md#replies-and-new-versions)) | "Autopilot is reading your reply…", then "Taken as your answer" or "Updated · ready again" |
+| reads a typed reply its asker can't (D-258): Pane records it as the answer on delivery; when it was a question, Autopilot reopens it with `runpane notify --took`, finds out and sends a new version with `runpane notify --update` ([Replies](PANE_NOTIFY.md#replies-and-new-versions)) | "Taken as your answer", or "Updated · ready again" after a question |
 | never answers a permission prompt, or types raw keys into another tab | refused in code ([The guard](#the-guard-d-149)) |
 
 An answer is delivered at once, with no hold. Override sends your answer to the
@@ -177,11 +177,11 @@ The phone shows the same Autopilot as the computer it is on, over the
 host connection (`autopilot:*` channels, the `autopilot:changed` event). There
 are no tabs on the phone.
 
-- **Home** has an **Autopilot** row above Approvals ("Waiting on you") while
-  Autopilot is on for that computer. Before Start it carries **Start**, which
-  starts Autopilot and opens it; then it says Paused, or what it is walking,
-  with how many items are open on the stack. A computer whose Pane predates
-  Autopilot shows no row.
+- **Home** has an **Autopilot** bar above **Needs you** while Autopilot is on
+  for that computer. Before Start it reads "Walk these with Autopilot" and
+  carries **Start**, which starts Autopilot and opens it; then it says Paused,
+  or what it is walking, with how many items are open on the stack. A computer
+  whose Pane predates Autopilot shows no bar.
 - **The Autopilot screen** is its chat tab, with the walk bar above it:
   Running or Paused, every Session with what waits in it (the current one
   violet), and **Pause** or **Go on**. Opening it never starts a turn: until
@@ -202,9 +202,11 @@ are no tabs on the phone.
   Answering goes back to the chat where you were.
 - **A document** opens full screen with nothing to answer, and "‹ Back to Q-14
   to answer" returns to the approval. HTML files are read through the phone's
-  connection (`autopilot:read-doc` with `{ inline: true }`); a page loads the
-  way page tabs do. Only files on the stack, in the run's folder, or linked
-  from a waiting item open.
+  connection (`autopilot:read-doc` with `{ inline: true }`) and show as their
+  page as the Summary does: JavaScript off, nothing loaded from the network,
+  anchors followed and web links opened in the phone's browser. A web address
+  loads the way page tabs do. Only files on the stack, in the
+  run's folder, or linked from a waiting item open.
 - Phone builds without chat tabs (runtimes before 1.4) never show Autopilot:
   its owner Pane is hidden and they don't know its channels. Every 1.4 build
   gets this over the air. "Try a demo" has a sample Autopilot.
@@ -333,6 +335,6 @@ rewrites its own environment.
 | Types | `shared/types/autopilot.ts` |
 | Desktop view, stack, sidebar row | `frontend/src/components/autopilot/` |
 | Settings › Autopilot (your instructions) | `frontend/src/components/settings/categories/AutopilotSettings.tsx` |
-| Phone: home row, chat with cards, approval and document screens | `native/src/features/autopilot/`, routes in `native/src/app/autopilot/` |
+| Phone: home's Autopilot bar, chat with cards, approval and document screens | `native/src/features/autopilot/`, routes in `native/src/app/autopilot/` |
 | CLI | `packages/runpane/src/autopilot.ts`, `packages/runpane-py/src/runpane/autopilot.py` |
 | Journeys (scripted agent) | `tests/autopilot.spec.ts` (`pnpm test:chat-tabs`) |

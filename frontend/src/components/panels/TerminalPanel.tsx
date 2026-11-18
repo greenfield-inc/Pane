@@ -54,13 +54,18 @@ import { TerminalInterceptor } from '../../services/terminalInterceptor/Terminal
 import { createAtTerminalHandler } from '../../services/terminalInterceptor/handlers/atTerminalHandler';
 import { InterceptorDropdown } from '../terminal/InterceptorDropdown';
 import { InterceptorToast } from '../terminal/InterceptorToast';
+import { HostUploadList } from '../terminal/HostUploadList';
+import { attachTerminalPaste, uploadToTerminal, useHostUploads } from '../../hooks/useHostUploads';
 import { usePanelStore } from '../../stores/panelStore';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
-import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import { onTerminalReflow } from '../../utils/terminalReflow';
 import { createMaskOwnership } from '../../utils/maskOwnership';
+import { markTerminalRevealed, wasTerminalRevealed } from '../../utils/revealedTerminals';
+import { TerminalSkeleton } from './TerminalSkeleton';
+import { noteTerminalCell } from '../../utils/terminalCellSize';
+import { REVEAL_MS, useSkeletonHold } from '../ui/Skeleton';
 import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
 
@@ -69,47 +74,14 @@ interface DropdownPosition {
   y: number;
 }
 
-// Hold the loading overlay at least this long past ready so the terminal
-// underneath finishes painting before it is revealed.
+// Hold the mask this long past ready so the terminal underneath finishes
+// painting, and the activation's delayed refresh starts, before it is revealed.
 const TERMINAL_OVERLAY_LINGER_MS = 150;
 const TERMINAL_LOADING_TIMEOUT_MS = 30_000;
 
 // The hover toolbar's buttons: a 24px target around a 16px chip.
 const TERMINAL_TOOLBAR_BUTTON = 'group/toolbar-button flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:text-text-secondary transition-colors';
 const TERMINAL_TOOLBAR_CHIP = 'rounded bg-surface-secondary/60 p-0.5 group-hover/toolbar-button:bg-surface-tertiary/80 transition-colors';
-
-const SKELETON_TRANSCRIPT_WIDTHS = ['w-2/3', 'w-1/2', 'w-5/6', 'w-1/3', 'w-3/4', 'w-2/5'];
-
-// Opaque stand-in shaped like a CLI agent session: greeting banner, transcript
-// lines, and a prompt box, swept by a single shimmer so it reads as one
-// cohesive loading surface. Shown while initializing, refreshing, and CLI startup.
-const TerminalLoadingSkeleton: React.FC = () => (
-  <div className="relative w-full h-full overflow-hidden px-4 py-4 font-mono select-none" role="status" aria-label="Loading terminal">
-    <div className="flex h-full flex-col gap-4">
-      <div className="rounded-md border border-border-primary p-3 space-y-2 max-w-md">
-        <div className="h-3.5 w-40 rounded bg-surface-tertiary" />
-        <div className="h-3 w-56 rounded bg-surface-tertiary" />
-        <div className="h-3 w-32 rounded bg-surface-tertiary" />
-      </div>
-      <div className="space-y-2.5 max-w-2xl">
-        {SKELETON_TRANSCRIPT_WIDTHS.map((w, i) => (
-          <div key={i} className={`h-3 rounded bg-surface-tertiary ${w}`} />
-        ))}
-      </div>
-      <div className="flex-1" />
-      <div className="space-y-2">
-        <div className="rounded-md border border-border-primary px-3 py-2.5">
-          <div className="h-3 w-24 rounded bg-surface-tertiary" />
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="h-2.5 w-20 rounded bg-surface-tertiary" />
-          <div className="h-2.5 w-28 rounded bg-surface-tertiary" />
-        </div>
-      </div>
-    </div>
-    <div className="pointer-events-none absolute inset-0 animate-shimmer bg-gradient-to-r from-transparent via-[color-mix(in_srgb,var(--color-text-primary)_4%,transparent)] to-transparent" />
-  </div>
-);
 
 // Type for terminal state restoration
 interface TerminalRestoreState {
@@ -158,7 +130,6 @@ const terminalPasteImageResultSchema = boundary.object({
   filePath: boundary.string,
   imageNumber: boundary.number,
 });
-const terminalPasteFileResultSchema = boundary.object({ filePath: boundary.string });
 
 const TERMINAL_VISIBILITY_VIEWER_ID = getTerminalVisibilityViewerId();
 
@@ -288,6 +259,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const capabilitiesRef = useRef<LoadedTerminalCapabilities | null>(null);
   const isActiveRef = useRef(isActive);
   const pasteFilesRef = useRef<((files: File[]) => void) | null>(null);
+  const hostUploads = useHostUploads(panel.id);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const isNearBottomRef = useRef(true); // Track if user is scrolled near the bottom
   const [showScrollDown, setShowScrollDown] = useState(false); // Show jump-to-bottom pill
@@ -414,7 +386,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     }
   }, [terminalState?.isCliReady, isCliReady]);
 
-  // Loading-skeleton visibility: show immediately when any loading state is
+  // Loading-mask visibility: show immediately when any loading state is
   // active, hide only after a short linger so the terminal underneath has
   // finished painting before the mask lifts.
   const overlayActive = !isInitialized || isRefreshing || (isCliPanel && !isCliReady);
@@ -430,17 +402,56 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     return () => clearTimeout(timeout);
   }, [overlayActive, initAttempt]);
   const [overlayVisible, setOverlayVisible] = useState(true);
+  // Until a terminal is first revealed, its mask carries the loading skeleton
+  // (held so it never blinks). A terminal this window revealed before, in this
+  // mount or an earlier one, is cached content: its masks stay plain. A retry,
+  // or a dock instance reused for another panel, loads afresh.
+  const loadKey = `${panel.id}:${initAttempt}`;
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const revealed = revealedKey === loadKey || (initAttempt === 0 && wasTerminalRevealed(panel.id));
+  const firstLoad = useSkeletonHold(overlayActive && !revealed, panel.sessionId);
+  const maskHeld = overlayActive || firstLoad.holding;
+  // A skeleton the person saw stays up until the mask lifts, then fades out
+  // over the painted terminal; a fast load just appears.
+  const skeletonSeen = firstLoad.seen;
+  const [maskFading, setMaskFading] = useState(false);
+  // When the terminal became ready: a skeleton's hold counts toward the linger.
+  const readyAt = useRef(0);
   useEffect(() => {
-    if (overlayActive) {
+    if (!overlayActive) readyAt.current = performance.now();
+  }, [overlayActive]);
+  useEffect(() => {
+    if (maskHeld) {
       setOverlayVisible(true);
+      setMaskFading(false);
       return;
     }
-    const lingerTimer = setTimeout(() => {
+    let fadeTimer: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      setMaskFading(false);
       setOverlayVisible(false);
+      setRevealedKey(loadKey);
+      markTerminalRevealed(panel.id, panel.sessionId);
+      const terminal = xtermRef.current;
+      const screen = terminalRef.current?.querySelector('.xterm-screen');
+      if (terminal && screen) noteTerminalCell(terminal, screen);
       markPaneTerminalShown(panel.sessionId);
-    }, TERMINAL_OVERLAY_LINGER_MS);
-    return () => clearTimeout(lingerTimer);
-  }, [overlayActive, panel.sessionId]);
+    };
+    const lift = () => {
+      // Only a first load's skeleton fades, and only where animations run; a refit's plain mask just lifts.
+      const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+        || document.documentElement.classList.contains('window-blurred')
+        || document.documentElement.classList.contains('window-hidden');
+      if (revealed || !skeletonSeen || still) { finish(); return; }
+      setMaskFading(true);
+      fadeTimer = setTimeout(finish, REVEAL_MS);
+    };
+    // The mask lingers past ready (a skeleton's hold counts toward it), so the
+    // activation's delayed full refresh starts behind it, then lifts or fades.
+    const linger = Math.max(0, readyAt.current + TERMINAL_OVERLAY_LINGER_MS - performance.now());
+    const lingerTimer = setTimeout(lift, linger);
+    return () => { clearTimeout(lingerTimer); clearTimeout(fadeTimer); };
+  }, [maskHeld, loadKey, skeletonSeen, revealed, panel.id, panel.sessionId]);
 
   // Listen for cliReady event (only for CLI panels that aren't already ready)
   useEffect(() => {
@@ -1506,37 +1517,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
                   const file = items[i].getAsFile();
                   if (!file) return;
 
-                  if (file.size > 50 * 1024 * 1024) {
-                    const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-                    if (terminal && !disposed) {
-                      terminal.paste(`[Image paste failed] File too large (${sizeMB} MB), max 50 MB\n`);
-                    }
-                    return;
-                  }
-
-                  const reader = new FileReader();
-                  reader.onload = async (ev) => {
-                    if (disposed || !terminal) return;
-                    // SAFETY: readAsDataURL completes with a string result before onload fires.
-                    const dataUrl = ev.target?.result as string;
-                    if (!dataUrl) return;
-
-                    try {
-                      const result = decodeOptionalBoundary(await window.electronAPI.invoke(
-                        'terminal:paste-image',
-                        panel.id,
-                        terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
-                        dataUrl,
-                        file.type
-                      ), terminalPasteImageResultSchema);
-                      if (result?.filePath && !disposed && terminal) {
-                        terminal.paste(`${result.filePath}\n`);
-                      }
-                    } catch (err) {
-                      console.error('[TerminalPanel] Failed to paste image:', err);
-                    }
-                  };
-                  reader.readAsDataURL(file);
+                  // Same chunked copy as a dropped file: no size limit beyond the host's free space.
+                  pasteFilesRef.current?.([file]);
                   return;
                 }
               }
@@ -1600,65 +1582,19 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             e.dataTransfer.dropEffect = 'copy';
           };
           // Save files on the terminal's host and paste each resolved path. Shared by
-          // drag-and-drop and the upload button's file picker.
+          // drag-and-drop, image paste and the upload button's file picker. The copies run
+          // in resumable chunks with progress over the terminal, and keep going while
+          // another Pane is shown: what lands meanwhile is pasted when this terminal is back.
           const pasteFiles = (files: File[]) => {
             if (!files.length || disposed || !terminal) return;
-            (async () => {
-              for (const file of files) {
-                if (file.size > 50 * 1024 * 1024) {
-                  const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-                  if (!disposed && terminal) {
-                    terminal.paste(`[Upload failed] File too large (${sizeMB} MB), max 50 MB\n`);
-                  }
-                  continue;
-                }
-                const dataUrl = await new Promise<string | null>((resolve) => {
-                  const reader = new FileReader();
-                  reader.onload = (ev) => {
-                    // SAFETY: readAsDataURL completes with a string result before onload fires.
-                    resolve(ev.target?.result as string ?? null);
-                  };
-                  reader.onerror = () => resolve(null);
-                  reader.readAsDataURL(file);
-                });
-                if (!dataUrl || disposed || !terminal) continue;
-                try {
-                  const isImage = file.type.startsWith('image/');
-                  let resolvedPath: string | null = null;
-
-                  if (isImage) {
-                    const result = decodeOptionalBoundary(await window.electronAPI.invoke(
-                      'terminal:paste-image',
-                      panel.id,
-                      terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
-                      dataUrl,
-                      file.type
-                    ), terminalPasteImageResultSchema);
-                    resolvedPath = result?.filePath ?? null;
-                  } else {
-                    const result = decodeOptionalBoundary(await window.electronAPI.invoke(
-                      'terminal:paste-file',
-                      terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
-                      dataUrl,
-                      file.name
-                    ), terminalPasteFileResultSchema);
-                    resolvedPath = result?.filePath ?? null;
-                  }
-
-                  if (resolvedPath && !disposed && terminal) {
-                    // See paste-handler comment above: paste the raw path, Claude's
-                    // parser detects image file paths and auto-attaches them.
-                    terminal.paste(`${resolvedPath}\n`);
-                  }
-                } catch (err) {
-                  console.error('[TerminalPanel] Failed to upload file:', err);
-                  if (!disposed && terminal) {
-                    terminal.paste(`[Upload failed] ${err instanceof Error ? ipcErrorMessage(err, 'Unknown error') : String(err)}\n`);
-                  }
-                }
-              }
-            })();
+            void uploadToTerminal(panel.id, files, {
+              invoke: (channel, args) => window.electronAPI.invoke(channel, ...args),
+              sessionId: terminalRuntimeRef.current.sessionId || terminalRuntimeRef.current.panelSessionId,
+            });
           };
+          const detachUploadPaste = attachTerminalPaste(panel.id, text => {
+            if (!disposed && terminal) terminal.paste(text);
+          });
           pasteFilesRef.current = pasteFiles;
           const handleDrop = (e: DragEvent) => {
             e.preventDefault();
@@ -1918,6 +1854,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             terminalElement?.removeEventListener('dragover', handleDragOver);
             terminalElement?.removeEventListener('drop', handleDrop);
             if (pasteFilesRef.current === pasteFiles) pasteFilesRef.current = null;
+            detachUploadPaste();
           };
         }
       } catch (error) {
@@ -2286,11 +2223,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       )}
 
       {(overlayVisible || initError) && (
-        <div className="absolute inset-0 bg-surface-primary z-10" data-testid="terminal-activation-mask">
+        // The terminal's own background, so lifting the mask changes nothing but the text.
+        <div className={`absolute inset-0 z-10 bg-[var(--color-terminal-bg)]${maskFading ? ' skeleton-fade-out' : ''}`} data-testid="terminal-activation-mask" role={initError ? undefined : 'status'} aria-label={initError ? undefined : 'Loading terminal'}>
           {initError ? <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-text-secondary">
             <p role="alert">Terminal could not load: {initError}</p>
             <button type="button" className="rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => setInitAttempt(attempt => attempt + 1)}>Retry</button>
-          </div> : <TerminalLoadingSkeleton />}
+          </div> : !revealed && (firstLoad.holding || skeletonSeen) && <TerminalSkeleton chain={panel.sessionId} />}
         </div>
       )}
 
@@ -2360,6 +2298,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           position={getDropdownPosition()}
         />
       )}
+      <HostUploadList items={hostUploads.items} onCancel={hostUploads.cancel} />
       {toastMessage && (
         <InterceptorToast
           visible={!!toastMessage}

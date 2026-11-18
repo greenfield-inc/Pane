@@ -17,6 +17,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
+import { getProfileRunner } from '../services/profiles/profileRunnerHost';
 import { paneInactiveSince, parseSessionTimestampMs } from '../services/paneInactivity';
 import { chatPanelIdsOf, chatTabsNotPausedNote, panesWithStoppedRunScripts, pausePanes, restartRunScripts, terminalPanelIdsOf } from '../services/panePause';
 import { isOrchestrationInternalSessionId, resolveSessionRetention } from '../../../shared/types/orchestrationSession';
@@ -38,7 +39,7 @@ import type { ProjectEnvVar } from '../../../shared/types/projectEnvVars';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
-import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
+import { fastCheckWorkingDirectory, hasUntrackedWork, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
 import { queuedSetupMessage } from '../services/taskQueue';
 import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
@@ -58,6 +59,8 @@ import {
   readPanelAgentReport,
 } from '../services/agentReport';
 import { workerCard } from '../services/notify/workerContext';
+import { checkNotifyOptions } from './notify';
+import { agentReportOptionFields } from '../services/workspaceJournalSchema';
 import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand } from '../services/agents/opencodeLaunch';
 import { takesChosenSession } from '../services/agents/chosenSessionLaunch';
@@ -79,6 +82,7 @@ import { classifyWorktree } from '../services/worktreeTrash';
 import { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
+import { sessionMovingError } from '../../../shared/types/sessionMove';
 import { pausedMarkOf, type TerminalPausedMark, type BrowserPanelState, type CreatePanelRequest, type EditorPanelState, type PanelOpener, type TerminalAgentReport, type TerminalExpectedReport, type TerminalPanelState, type ToolPanel, type ToolPanelMetadata } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { withSessionFolderAccess } from '../services/agents/sessionFolderAccess';
@@ -337,10 +341,22 @@ const RUNPANE_CHANNELS = [
   'runpane:loops:set-enabled',
   'runpane:loops:run-now',
   'runpane:loops:preview',
+  'runpane:profiles:list',
+  'runpane:profiles:show',
+  'runpane:profiles:launch',
+  'runpane:profiles:runs',
   'runpane:secrets:list',
   'runpane:secrets:set',
   'runpane:secrets:delete',
   'runpane:secrets:resolve',
+  'runpane:devices:list',
+  'runpane:devices:open',
+  'runpane:devices:screenshot',
+  'runpane:devices:act',
+  'runpane:devices:run',
+  'runpane:devices:close',
+  'runpane:devices:usage',
+  'runpane:devices:free',
   'runpane:theme:read',
   'runpane:theme:set',
   'runpane:theme:reset',
@@ -1704,6 +1720,9 @@ export function registerRunpaneHandlers(
           return { ...result, ...pointerResultFields(pointer) };
         } catch (error) { if (expected) services.expectedReportTracker?.cancelPending(panel.id, expected); throw error; }
       }
+      // A tab its Session's move stopped says so, rather than that it isn't running.
+      const moving = pausedMarkOf(panel);
+      if (moving?.by === 'move') throw sessionMovingError(moving);
       if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
@@ -1730,6 +1749,8 @@ export function registerRunpaneHandlers(
   });
 
   async function submitToPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel, reserve: (screen: RunpanePanelScreenResult) => void, deliver: () => void): Promise<RunpanePanelSubmitResult> {
+    const moving = pausedMarkOf(panel);
+    if (moving?.by === 'move') throw sessionMovingError(moving);
     // An owed answer goes only to an agent: re-read the foreground right before each write, since the
     // agent may have quit back to the shell since Notify checked (F-7).
     const shellTookOver = () => agentOnlySubmits.has(panel.id) && terminalPanelManager.getForegroundProcess(panel.id)?.isShell === true;
@@ -1961,9 +1982,18 @@ export function registerRunpaneHandlers(
       if (normalized.paneId && normalized.paneId !== panel.sessionId) {
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
+      // Its buttons take notify's own checks (count, distinct labels, choices or questions).
+      checkNotifyOptions(normalized.choices, normalized.questions);
       const report = normalizeAgentReport(normalized, new Date().toISOString());
+      // A profile step's outcome moves its run first: an undeclared one is refused and nothing is recorded.
+      if (normalized.outcome !== undefined) {
+        // The same codes the CLIs refuse these with before sending.
+        if (normalized.state !== 'done') throw new PaneError('ERR_REPORT_OUTCOME_STATE', `An outcome ends a profile step as done, so it cannot be sent with --state ${normalized.state}. Nothing was recorded.`, `Run runpane report --outcome "${normalized.outcome.trim()}" without --state, or drop --outcome to report ${normalized.state}.`);
+        if (normalized.question !== undefined) throw new PaneError('ERR_REPORT_OUTCOME_QUESTION', 'An outcome ends a profile step, and a --question would block it instead. Nothing was recorded.', 'To ask something, run runpane report --state blocked --question "<text>"; once it is answered, run runpane report --outcome <name>.');
+        await getProfileRunner().reportOutcome(panel.id, normalized.outcome.trim(), report.summary);
+      }
       // A blocked report becomes an approval card: it takes the card check before it's recorded (P3).
-      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath }).warnings : [];
+      const warnings = report.state === 'blocked' && report.question ? workerCard(report.summary, report.question, { summaryPath: report.summaryPath, readStatusFile: report.summaryTruncated, choices: report.choices, questions: report.questions }).warnings : [];
       if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
       else await storePanelAgentReport(panel, report);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
@@ -3538,6 +3568,8 @@ async function resumeTerminalPanel(
     await panelManager.updatePanel(panel.id, { state: { ...panel.state, customState: { ...heldState, updateResumeHold: undefined, updateResumeId: undefined } } });
     panel = panelManager.getPanel(panel.id) ?? panel;
   }
+  // A Session move holds its tabs; only the move starts them again.
+  if (heldState?.paused?.by === 'move') throw sessionMovingError(heldState.paused);
   // An explicit resume is the one start a paused tab accepts.
   if (heldState?.paused) {
     await terminalPanelManager.clearPaused([panel.id]);
@@ -5582,6 +5614,8 @@ const reportRequestSchema = boundary.object({
   summary: boundary.optional(boundary.string),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  outcome: boundary.optional(boundary.nonEmptyString),
+  ...agentReportOptionFields,
 });
 
 function parseReportRequest(value: PaneCommandValue): RunpaneReportRequest {
@@ -6017,15 +6051,8 @@ async function computeArchiveSafety(services: AppServices, pane: Session): Promi
     const commits = await computeUnpublishedCommits(services, pane, ctx);
     const workingDirectory = await fastCheckWorkingDirectory(pane.worktreePath, ctx.commandRunner.wslContext);
     const hasUncommittedChanges = workingDirectory.hasModified || workingDirectory.hasStaged || workingDirectory.hasConflicts;
-    let hasUntrackedFiles = workingDirectory.hasUntracked;
-    if (hasUntrackedFiles) {
-      // Agent setup is disposable; ordinary untracked work must still block archive.
-      const { stdout } = await ctx.commandRunner.execFile('git', [
-        'ls-files', '--others', '--exclude-standard', '-z',
-        '--exclude=/.codex/', '--exclude=/.claude/', '--exclude=/.agent-farm/',
-      ], pane.worktreePath, { silent: true, timeout: 10_000 });
-      hasUntrackedFiles = stdout.length > 0;
-    }
+    // Agent setup is disposable; ordinary untracked work must still block archive.
+    const hasUntrackedFiles = workingDirectory.hasUntracked && await hasUntrackedWork(pane.worktreePath, ctx.commandRunner);
     return { performed: true, hasUncommittedChanges, hasUntrackedFiles, ...commits };
   } catch {
     return { performed: false, reason: 'git-error' };
@@ -6328,7 +6355,7 @@ const PR_STATUS_TIMEOUT_MS = 20_000;
  * The Pane's PR state by its branch, after dropping cached PR results. A failed,
  * unavailable or slow lookup is `unknown`, which a `--merged` sweep skips.
  */
-async function findPrStatusForPane(services: AppServices, paneId: string): Promise<RunpanePaneArchivePrStatus> {
+export async function findPrStatusForPane(services: AppServices, paneId: string): Promise<RunpanePaneArchivePrStatus> {
   const gitStatus = services.gitStatusManager;
   try {
     const projectPath = services.sessionManager.getProjectForSession?.(paneId)?.path;
@@ -6755,7 +6782,7 @@ function parseAttachments(value: PaneCommandValue, asFilePointer: boolean | unde
   return attachments;
 }
 
-function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector {
+export function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector {
   const selectorText = optionalString(value);
   if (selectorText !== undefined) return selectorText;
 
@@ -6776,7 +6803,7 @@ function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector {
   throw new Error('Repo selector must include id, path, name, active, or a string selector');
 }
 
-function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector): Project {
+export function resolveRepoSelector(projects: Project[], selector: RunpaneRepoSelector): Project {
   const selectorText = optionalString(selector);
   if (selectorText !== undefined) {
     if (selectorText === 'active' || selectorText === 'default') {

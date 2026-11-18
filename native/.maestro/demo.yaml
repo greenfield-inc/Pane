@@ -8,20 +8,38 @@ name: Try the demo
     id: demo-badge
 - assertNotVisible: "Allow.*Notifications.*"
 
-# A waiting question: pick a choice on its approval screen; once the agent has it, the screen
-# steps to the next one and the question leaves home's Approvals.
+# A waiting question: open its Cover sheet, then pick a choice on its approval tab; once the agent
+# has it, the screen steps to the next one and the question leaves home's Needs you.
+- tapOn:
+    id: home-tile-needs
+# By Session lists the sample Session's questions first.
+- scrollUntilVisible:
+    element: "add-dark-mode.*Which colors.*"
+    timeout: 10000
 - tapOn: "add-dark-mode.*Which colors.*"
 - extendedWaitUntil:
     visible:
       id: approval-card
     timeout: 10000
-- assertVisible: "2 of 2"
+# Its place depends on the sort sheet (By Session by default).
+- assertVisible: "[0-9] of 5"
+# Its Cover sheet opens as a tab beside the approval, drawn as its page; the Approval tab answers.
+- tapOn:
+    id: approval-link-0
+- extendedWaitUntil:
+    visible:
+      id: autopilot-doc-page
+    timeout: 10000
+- assertVisible:
+    id: "panel-tab-link:0"
+- tapOn:
+    id: panel-tab-approval
 - tapOn:
     id: notify-choice-0
 - assertVisible:
     id: notify-sent
 - extendedWaitUntil:
-    visible: "1 of 1"
+    visible: "[0-9] of 4"
     timeout: 15000
 - tapOn:
     id: approval-back
@@ -31,6 +49,10 @@ name: Try the demo
 
 # A live terminal: the agent streams, and what you send shows up.
 - waitForAnimationToEnd
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: fix-checkout
 - tapOn:
     id: "pane-row-demo-fix-checkout-race"
     index: 0
@@ -72,6 +94,10 @@ name: Try the demo
     id: terminal-back
 
 # Every other screen renders with sample data.
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: Spring sale
 - tapOn:
     id: "session-row-.*"
     index: 0
@@ -103,6 +129,10 @@ name: Try the demo
     timeout: 20000
 - tapOn:
     id: terminal-back
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: acme
 - scrollUntilVisible:
     element:
       id: "pane-row-demo-new-.*"

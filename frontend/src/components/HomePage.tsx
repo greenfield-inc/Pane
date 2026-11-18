@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { ChevronDown, MessageSquare, Minus, Plus, QrCode, Smartphone, Terminal, X } from 'lucide-react';
+import { ChevronDown, MessageSquare, Minus, MonitorSmartphone, Plus, QrCode, Terminal, X } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useConfigStore } from '../stores/configStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -218,19 +218,19 @@ function DiscordBanner() {
   );
 }
 
-/** Where a new person finds phone pairing: opens the Pair a phone dialog. */
-function UsePhoneCard() {
+/** Where a new person finds pairing: opens Add a device on its Phone tab, with the other device kinds one click away. */
+function PairDeviceCard() {
   const [open, setOpen] = useState(false);
   return (
     <section className="flex flex-wrap items-center gap-4 rounded-2xl border border-border-secondary bg-surface-primary/70 p-6 shadow-sm">
       <span className="flex h-11 w-11 flex-none items-center justify-center rounded-lg bg-interactive/10 text-interactive" aria-hidden="true">
-        <Smartphone className="h-5 w-5" />
+        <MonitorSmartphone className="h-5 w-5" />
       </span>
       <div className="min-w-0 flex-1 basis-64">
-        <h2 className="text-base font-semibold text-text-primary">Use Pane on your phone</h2>
-        <p className="mt-1 text-sm text-text-tertiary">Scan a code to watch and steer your agents from anywhere, with previews of your dev servers.</p>
+        <h2 className="text-base font-semibold text-text-primary">Use Pane from your phone, another computer, or glasses</h2>
+        <p className="mt-1 text-sm text-text-tertiary">Scan a code or share a link to watch and steer your agents from anywhere.</p>
       </div>
-      <Button type="button" icon={<QrCode className="h-4 w-4" />} onClick={() => setOpen(true)}>Pair a phone</Button>
+      <Button type="button" icon={<QrCode className="h-4 w-4" />} onClick={() => setOpen(true)}>Pair a device</Button>
       <PairPhoneDialog isOpen={open} onClose={() => setOpen(false)} />
     </section>
   );
@@ -458,7 +458,7 @@ export function HomePage() {
             </section>
           </section>
 
-          <UsePhoneCard />
+          <PairDeviceCard />
 
           {isFirstRun && <HomeUsageCard />}
 

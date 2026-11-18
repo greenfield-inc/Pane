@@ -2,17 +2,17 @@
 
 Sessions are named, ongoing Pane Chats where work intent lives. Each Session
 opens one chat, and its sidebar row can expand to show associated Panes. The
-optional overview keeps the Session name, associated Panes, and recent
-activity together while the chat remains the focused work surface. A tab
+**Overview** tab beside the chat keeps the Session name, associated Panes, and
+recent activity together while the chat remains the focused work surface. A tab
 shares its parent Pane's worktree.
 
 In the sidebar, `+` opens an agent picker, an optional Session name field, and
 an optional "What is this Session for?" field that becomes the Session's goal.
 Pane remembers the chosen agent as the default for future Sessions while
 existing Sessions keep their own agent. A blank name starts as `New chat` or
-`New chat 2` and is renamed once from the first message you send the Session
-agent; a name you type or set later is kept. Each new Session opens as one Pane
-Chat and can be renamed later from the optional read-only overview. Expand a Session to see
+`New chat 2`, and the Session agent renames it once, in 3 to 5 words, when it
+replies to your first task. A name you type or set later is kept. Each new Session opens as one Pane
+Chat and can be renamed later from its Overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
 With [chat tabs](CHAT_TABS.md) on (Settings → AI & Agents → Chat tabs), a new
@@ -77,21 +77,21 @@ Sessions receive independent internal owners while keeping their names, folders,
 panel IDs, saved histories, and settings. Interrupted ownership moves resume on
 startup; no transcript or workspace files are deleted by this migration.
 
-## Launch configuration and profile
+## Launch configuration and behavior
 
 Sessions use the same built-in launch presets and saved custom commands as
 ordinary project/worktree panels, including custom arguments. The application
 default seeds new Sessions. Creating a Session remembers its launch command and
 arguments for the next creation; cancelling, or a create Pane refuses, leaves that default unchanged.
 Selecting the agent default clears the remembered custom command. Each Session saves its own launch configuration
-and behavior profile. Changing defaults does not overwrite existing Sessions.
+and behavior. Changing defaults does not overwrite existing Sessions.
 Launch changes take effect on the next explicit restart.
 Use **Edit behavior…** during creation or in Session settings to open the
-separate profile editor. **Back** discards the draft; **Save behavior** applies it
+separate behavior editor. **Back** discards the draft; **Save behavior** applies it
 to the form, which is persisted when you create the Session or save settings.
 
-The command, behavior profile, and saved task context have separate purposes.
-A command selects how the agent runs; a profile describes how it should behave;
+The command, Session behavior, and saved task context have separate purposes.
+A command selects how the agent runs; the behavior describes how it should act;
 saved goals, decisions, and next actions help it respond to later user input.
 Custom commands (including Agent Farm wrappers) retain their arguments. Pane
 only adds native flags through compatible built-in adapters, an explicit custom
@@ -172,11 +172,11 @@ Choose a session ID source and provide first-launch and resume templates:
 - **Claude:** Pane allocates a UUID and resumes it only when its transcript exists.
 - **Codex / Cursor:** Pane captures the native resume ID from terminal output.
   OpenCode does the same without this setting (see
-  [Launch configuration and profile](#launch-configuration-and-profile)); OpenCode
+  [Launch configuration and behavior](#launch-configuration-and-behavior)); OpenCode
   Sessions refuse custom command resume.
 - **Pane allocates an ID:** for other CLIs that accept a caller-provided ID.
 - **CLI reports its ID:** the CLI or wrapper prints a standalone newline-terminated
-  `PANE_AGENT_SESSION_ID=your-session-id` line. IDs may contain letters, digits,
+  `PANE_AGENT_SESSION_ID=your-session-id` line (or `AGENT_FARM_SESSION_ID=…`). IDs may contain letters, digits,
   periods, underscores, colons, and hyphens (up to 256 characters).
 
 `{command}` expands to the saved command; `{sessionId}` expands to the quoted ID.
@@ -197,21 +197,36 @@ automatically; use an explicit resume command if you know their ID.
 ### Agent Farm
 
 Agent Farm is the one launcher Pane recognizes by name, because Agent Farm
-publishes this contract for Pane: when `PANE_PANEL_ID` is set it prints
-`PANE_AGENT_SESSION_ID=<launch id>` once, before the agent starts, and documents
-`{command} --resume <id>` as the way to reopen that conversation. Pane keeps the
-first ID line of each launch and ignores later ones, which can only be agent
-output. Every other wrapper still needs an explicit config.
+publishes this contract for a host: when the host sets
+`AGENT_FARM_REPORT_SESSION_ID=1` it prints `AGENT_FARM_SESSION_ID=<launch id>`
+once, on its own line, before the agent starts, and documents
+`{command} --resume <id>` as the way to reopen that conversation. Pane sets
+`AGENT_FARM_REPORT_SESSION_ID=1` in every terminal. An Agent Farm from before
+greenfield-inc/agent-farm#220 prints `PANE_AGENT_SESSION_ID=<launch id>`
+instead (it keys on `PANE_PANEL_ID`, which Pane also sets), and Pane accepts
+either line (D-403). Pane keeps the first ID line of each launch and ignores
+later ones, which can only be agent output. Every other wrapper still needs an
+explicit config.
 
 The launch ID is only where the conversation started: `/clear` and `/resume`
 move Claude to another one. Agent Farm's compiled Claude plugin therefore also
-carries a `SessionStart` hook that runs `runpane panels conversation --hook` on
-start, `/resume`, `/clear` and compact (D-269). Pane saves the reported
-conversation on the tab, ahead of the launch ID, so a restart resumes the
-conversation the tab was last on and Switch to chat opens it. The hook does
-nothing outside Pane and prints nothing. With an older Agent Farm there is no
-report, and Switch to chat opens the folder's most recent conversation instead
+carries a `SessionStart` hook that tells the host on start, `/resume`, `/clear`
+and compact (D-269). Since #220 it runs `"$AGENT_FARM_SESSION_HOOK" session-start`
+with Claude's hook JSON on stdin; Pane sets `AGENT_FARM_SESSION_HOOK` to its
+runpane shim (the same path as `PANE_RUNPANE_BIN`, exported by the rcfile in WSL),
+and `runpane session-start` is an alias of `runpane panels conversation --hook`.
+An older Agent Farm runs `"$PANE_RUNPANE_BIN" panels conversation --hook`
+directly. Either way Pane saves the reported conversation on the tab, ahead of
+the launch ID, so a restart resumes the conversation the tab was last on and
+Switch to chat opens it. The hook does nothing outside Pane and prints nothing.
+With an Agent Farm too old for the hook there is no report, and Switch to chat
+opens the folder's most recent conversation instead
 (see [CHAT_TABS.md](CHAT_TABS.md#switching-a-terminal-tab-to-chat)).
+
+| Agent Farm | ID line Pane reads | Hook Agent Farm runs |
+| --- | --- | --- |
+| before #220 | `PANE_AGENT_SESSION_ID=<id>` | `"$PANE_RUNPANE_BIN" panels conversation --hook` |
+| #220 and later | `AGENT_FARM_SESSION_ID=<id>` | `"$AGENT_FARM_SESSION_HOOK" session-start` |
 
 A command counts when it is a single `agent-farm run <profile>` or
 `agent-farm agent <profile>`, optionally preceded by `VAR=value` assignments,
@@ -223,13 +238,13 @@ it. The editor says so under the unticked checkbox. An explicit config always
 wins: tick **Enable custom command resume** and set your own templates.
 
 A panel created before this rule usually has no saved ID. On its next relaunch Pane
-makes one attempt to read the last `PANE_AGENT_SESSION_ID=` line from the
-panel's saved terminal buffer. Agent Farm older than 0.2.20 prints no ID, so
+makes one attempt to read the last `AGENT_FARM_SESSION_ID=` or
+`PANE_AGENT_SESSION_ID=` line from the panel's saved terminal buffer. Agent Farm older than 0.2.20 prints no ID, so
 those panels relaunch fresh, as before.
 
 To reopen an older conversation by hand, run
 `agent-farm run <profile> --resume <id>`. The ID is the launch ID (the
-`PANE_AGENT_SESSION_ID` value), shown as `resumeId` in
+`AGENT_FARM_SESSION_ID` or `PANE_AGENT_SESSION_ID` value), shown as `resumeId` in
 `runpane panels list --json`. Agent Farm keeps launch records in
 `~/.local/state/agent-farm/launches/` for 90 days.
 
@@ -352,12 +367,18 @@ until its agent works again. The row under the Inbox counts the hidden Panes
 ("3 running · 1 idle") and **Show all** lists every Pane. Pinned rows are
 unchanged, and ⌘1–9 number the Inbox rows while it is shown.
 
-The right sidebar has Overview, Files, and Changes tabs. When the Session
+Every Session opens with a split view: the conversation on the left and, on
+the right, the **Overview** tab first, before any page, file or browser tab
+opened beside the chat. A Session with no split yet gets one; an existing
+right split gains Overview as its leftmost tab and keeps the tab that was
+selected there. Overview can be dragged like any tab and stays where you put
+it on this computer, but it has no close button. A `pane://open?session=` link
+opens the Session with Overview selected. When the Session
 folder holds a status page at `session/index.html` (an orchestrator renders it
 there from a status JSON with the `orchestrate-sessions` skill's bundled
 renderer), Overview shows that page under a header with the Session name, Rename,
-**Open beside chat** (the page full-size in the split, in the tab already
-showing it) and **Show Session details** (the record described next). Pane checks for
+**Open as a browser tab** (the page in a browser tab beside chat, in the tab
+already showing it) and **Show Session details** (the record described next). Pane checks for
 the page each time the Session refreshes. Links in the page to
 `pane://open?pane=<id>&panel=<id>` open that tab and show its oldest waiting
 question in Approvals, as Open in Pane does; other links open as a browser tab beside chat. A client connected to
@@ -371,7 +392,8 @@ machine ([workers on another machine](RUNPANE_WORKSPACES.md#workers-on-another-m
 shows "On <machine>" with its tabs' states as that machine reports them, or
 "unreachable" when it doesn't answer, or "needs a Pane update" when its Pane is
 too old to report here; its card is read-only and opens from All machines. Agent state changes stay out
-of Activity; the status dot shows them. Files browses the Session workspace.
+of Activity; the status dot shows them. The right sidebar has Files and
+Changes tabs. Files browses the Session workspace.
 Changes summarizes the Session's Panes and opens a Pane for detailed review. The upper-right sidebar
 button shows or hides the selected tab. A single Session uses two rows at the
 top: the window title bar shows its name and controls, and the tab strip sits
@@ -430,35 +452,103 @@ replace an unrelated selection.
 ### Move a Session to another machine
 
 Right-click a Session, or use its ⋯ button, and choose **Move to machine…** to
-continue it on another machine. The dialog lists your Tailscale machines
-running Pane, except the one the Session is on, and your teammates' machines
-running Pane, shown with the owner's login after the name. A teammate's machine
-is a target only when its owner set Who can connect to Everyone on tailnet.
-Machines Pane can't reach, or that accept only their owner, are shown disabled
-with the reason. If none can be reached, it says so:
-open Pane on the other machine, or sign in to Tailscale. While you view a host
-connected with a pairing code rather than over Tailscale, the item is disabled,
-because Pane can't tell which machine that is. In All machines, the same item
-is in each Session's menu and moves the Session from its own machine, without
-switching to it; it is disabled, with the reason, while that machine isn't
-connected or was paired with a code. Choosing a machine
-sends the Session's agent a prompt to hand the Session off with
-[`runpane handoff`](RUNPANE_WORKSPACES.md#hand-a-task-to-another-machine) and
-the `handoff` skill.
+carry the whole Session to another of your machines: every Pane on its branch
+with its uncommitted work, every tab and its conversation, and the Session
+folder. It carries on there from where it is now, with the same Session, Pane
+and tab IDs.
 
-The agent writes a handoff note, and handoff creates a Session on that machine
-with the same name (numbered "<name> 2" if the name is taken), goal and agent.
-Its next action is to read the note, which handoff saved in that machine's
-`~/.pane/handoffs/`. When the new Session uses the same agent, the conversation
-moves too: its agent session's files are copied to that machine, and the new
-Session resumes that conversation when you first open it. Check that it shows
-the last message, and if that is unclear, ask it what it was last working on.
-With a different agent, or `--note-only`, only the note moves and the new
-Session starts fresh from it. Like every Session, it waits for your first
-message: switch to that machine, open the Session, and send "continue". The
-Session folder and its Panes stay where they are, and the original Session is
-not archived; archive it from the same menu when you are done with it, which
-also archives its Panes on this machine.
+The dialog lists your Tailscale machines running Pane, except the one the
+Session is on. Your teammates' machines are listed but disabled: a whole
+Session moves only between your own macOS and Linux machines, so for a teammate
+use **Hand off with a note…** (below). Machines Pane can't reach, or that run a
+Pane too old to receive a Session, are disabled with the reason. While you view
+a host connected with a pairing code rather than over Tailscale, the item is
+disabled. In All machines, the same item is in each Session's menu and moves
+the Session from its own machine without switching to it.
+
+Choosing a machine runs the checks at once, and nothing is paused until they
+pass:
+
+- each repository the Panes use is on that machine, matched by its remote.
+  A missing one offers **Clone**, to the same place under your home folder;
+- no branch there has commits this machine doesn't have, and none is checked
+  out in another folder there;
+- each agent the tabs use is installed there, with a warning naming both
+  versions when it is older there. Agent Farm profiles must be installed there
+  (a different version warns), and **Trust** runs `agent-farm workspace trust`
+  for a repository Agent Farm doesn't trust there yet;
+- project environment variables set here but not there are listed by name
+  (values never travel; Pane secrets sync on their own).
+
+**Move** then stops each tab as soon as its turn ends. A tab whose agent is
+only waiting in `runpane watch` counts as idle and stops at once. The dialog
+lists the agents still working; **Stop now** interrupts them, and they pick up
+the interrupted turn on the other machine. A stopped tab shows "Moving to
+<machine>" and refuses input, including messages and Notify answers, until the
+move is done. Run scripts stop too. **Cancel move** restarts everything here,
+unchanged.
+
+Pane then packs, sends and rebuilds the Session:
+
+- each Pane's branch travels as a git bundle with the commits its origin
+  lacks, plus a snapshot of its staged, unstaged and untracked work. The other
+  machine creates the worktree on the same branch (upstream set when origin has
+  it), puts the work back so staged stays staged, checks it, then runs the
+  Pane's normal setup. Ignored files such as `.env` or `node_modules` aren't
+  copied; setup rebuilds them there, and the done screen lists what stayed
+  behind on this machine;
+- conversations (Claude, Codex and Cursor tabs, and chat tabs) are copied byte
+  for byte into that machine's agent stores, never edited. A copy there that was
+  continued after an earlier move is never overwritten: the move stops instead;
+- the Session folder is copied with its text files rewritten for that machine's
+  paths. `moved.json` in the folder records the path map, for anything that
+  still names the old paths (conversation history keeps them);
+- terminal tabs keep their scrollback. Open approvals don't move yet: the
+  check asks you to answer them first. One you dismissed doesn't count as open
+  and doesn't hold the move back. When the move stops the tab that asked it,
+  it ends like any question whose asker stopped: the agent hears it went
+  unanswered, and the card leaves Approvals. Answer it first if it matters.
+
+Until it starts, the Session shows as "Arriving from <machine>" there. Once
+this machine has frozen its copy (shown as "Moving to <machine>"), the other
+machine starts each tab that was running on its conversation. The orchestrator
+and each agent that was working get one line saying the Session moved, the
+path map, and to restart their servers and watches. A tab that can't resume
+shows the problem there; the move isn't undone.
+
+This machine then archives the Session as "Moved to <machine>", with its Panes
+archived and their worktrees removed. The uncommitted work stays in each
+repository (`refs/pane/move/<pane id>`), and the ignored files that stayed
+behind move into the repository's `.git/pane-moved/<pane id>/` first, so
+**Restore here** from the archived list brings back the Session and its Panes
+with their work and those files while the archive lasts. Restore only when the other machine no longer runs it. Moving the
+Session back later replaces that archived copy, but only once the move back
+succeeds: until then its tabs, history and terminal output wait out of sight,
+and a failed move back leaves the archive as it was. If a Pane's ignored files
+can't be set aside, that Pane stays here, paused, with its worktree, and the
+summary says which files wait where.
+
+If anything fails before the other machine starts the tabs, it removes
+everything it set up, this machine restarts the tabs, and the dialog says what
+happened and what to fix. If the connection drops after the freeze, this
+machine keeps the Session paused as "Moving to <machine>" and offers **Check
+again**: it never restarts the tabs by itself, so the Session never runs twice.
+
+Not moved: secret values and keychain items, running processes (restart them
+there), Agent Farm telemetry, and conversations of agents whose sessions aren't
+plain files (an OpenCode tab starts fresh).
+
+**Hand off with a note…** in the same dialog keeps the older way: it asks the
+Session's agent to write a handoff note and run
+[`runpane handoff`](RUNPANE_WORKSPACES.md#hand-a-task-to-another-machine) with
+the `handoff` skill. That suits a single task, another agent, or a teammate's
+machine. Handoff creates a Session on that machine with the same name (numbered
+"<name> 2" if the name is taken), goal and agent, whose next action is to read
+the note in that machine's `~/.pane/handoffs/`. With the same agent, the
+agent session's files are copied too, and the new Session starts on that
+conversation right away; check that it shows the last message. With a
+different agent, or `--note-only`, only the note moves. The Session folder and
+its Panes stay where they are, and the original Session is not archived.
 
 ## Bring your existing sessions into Pane
 
@@ -677,8 +767,9 @@ section (`main/src/services/sessionTidyRules.ts`, used by the Session folder's
 `pane-orchestration` skill carries the same rules). The orchestrator cleans up
 as it goes without asking, and says in one line what it closed or archived:
 
-- It keeps one status document in the Session folder, updated in place, and
-  links plans, PRs, mock-ups and reports from it. It opens a page beside the
+- It keeps one status document at `session/index.html` in the Session folder,
+  updated in place, which the Session's Overview tab shows (it never opens it
+  as a tab), and links plans, PRs, mock-ups and reports from it. It opens a page beside the
   person only when they need to look at it now, and closes it once that's
   done.
 - It closes tabs it opened once they no longer matter, with
@@ -712,7 +803,7 @@ replaced one with your own (it has no Pane marker). It:
    covered, agents still working and open work-list items. It posts this as
    an info notification and writes it in the conversation; it doesn't ask or
    wait.
-3. Stops its watchers, closes every tab it opened (the status document too),
+3. Stops its watchers, closes every tab it opened,
    archives every Pane whose dry run is clean (parked ones too; their PRs stay
    open), keeps unsafe Panes, and marks the other open work-list items
    dropped. A worker still working keeps its Pane; once it finishes, its Pane
@@ -1073,14 +1164,19 @@ or sending it a message resumes it in its conversation, and it reports no
 A paused terminal tab stays stopped through clicks, app restarts and updates until
 `runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
 <pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts
-it in its conversation. The watch reports each paused tab once as
+it in its conversation. A tab held by a
+[Session move](#move-a-session-to-another-machine) is the exception: only the
+move starts it again. While it is held, submitting to it and resuming it are
+refused with `ERR_SESSION_MOVING` until the move finishes or is cancelled, or
+the Session is restored here. The watch reports each paused tab once as
 `panel.paused` (`PAUSED <pane-name> pane <pane-id> panel <panel-id>`) and each
 resumed one as `panel.unpaused` (`UNPAUSED ...`), followed by its usual ready
 signal. An orchestrator leaves paused workers paused unless the person asks.
 Any other start of a paused terminal tab (opening it, a retry, another machine)
 fails with `ERR_PANEL_PAUSED` and starts nothing.
 `runpane panes list --json` reports each Pane's `paused` mark (`{ at, by:
-"manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal
+"manual" | "auto" | "move", idleHours?, machine?, arriving?, interrupted? }`;
+`machine`, `arriving` and `interrupted` come only with `move`) and `inactiveSince`, the latest terminal
 output or input or chat agent activity in its tabs or the last time the person
 selected it;
 `runpane panels list` reports each tab's `paused`.
@@ -1470,11 +1566,20 @@ default), a Session has one voice to the person: its orchestrator.
   worker's `notify` call isn't shown to the person; it returns `unavailable`
   with a `next` that says to report blocked.
 - **A worker's question is a card at once.** Its blocked report shows in
-  Approvals straight away. From a JSON status file (even one the journal cut
-  short) or a bare `needs_you` block, the card takes its question and `why` as
+  Approvals straight away. Its buttons are the report's own `--choices` or
+  `--questions` (checked as `runpane notify` checks them) first. A question
+  that ends with options in brackets ("(A / B)") and has no buttons from
+  either source is refused with `ERR_REPORT_PACKED_OPTIONS`, showing nothing.
+  From a JSON status file or a bare `needs_you`
+  block, the card takes its question and `why` as
   context, its question's `options` as answer buttons (a `(recommended)`
   suffix marks the recommended one; several questions get an answer box), and
-  its `files` as links. Other JSON shows one line (`summary`, `step` or
+  its `files` as links (past six, the card names the rest). When the journal
+  cut the summary short, Pane reads the first 256 KB of the status file itself
+  (a regular file holding JSON), so a long `needs_you` keeps its buttons and
+  links; a `needs_you` past 256 KB gets none, and `runpane report` warns the
+  worker. A worker on another machine keeps the 2,000 characters the journal
+  sent, since its path names a file over there. Other JSON shows one line (`summary`, `step` or
   `title`) or none, never the raw text; the file itself opens as the worker's
   status link. It rings once the orchestrator
   relays it or after 10 minutes, so the orchestrator first settles what the plan
@@ -1492,9 +1597,9 @@ default), a Session has one voice to the person: its orchestrator.
   call's `{reply, picks?, id, replyId, next}` result, whose `replyId` the
   reader passes to `--took` and `--update`). A worker's question's reply goes
   to the worker's tab; when the worker can't read it, to the orchestrator that
-  relayed it; else to Autopilot. The reader decides whether it answers or asks:
-  `runpane notify --took <id|Q-n> answer`, or `--took <id|Q-n> question`, then
-  `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed
+  relayed it; else to Autopilot. Pane records it as the answer once its reader
+  gets it. When it asks a question instead, the reader runs
+  `runpane notify --took <id|Q-n> question`, then `runpane notify --update <id|Q-n> --asked "<their question>" --what-changed
   "<one line per change>"` with any changed fields. That saves a new version of
   the same approval ("Updated · ready again", at most 10 kept) and waits for the
   answer; nobody posts a second approval for it. `correction: Q-n → that was a
@@ -1530,7 +1635,9 @@ default), a Session has one voice to the person: its orchestrator.
   to tell). It
   records the decision with
   `runpane inbox ack <item> --decision <D-n>`, and the card reads "Recorded as
-  D-n". The older way (post a second card, ack, forward the answer) keeps working
+  D-n". When the worker takes a typed reply as a question, the orchestrator
+  gets `reopened: Q-n → … (by <worker>)`, an ack leaves that card open, and the
+  answer to its new version comes as `correction: Q-n → <answer> (by you)`. The older way (post a second card, ack, forward the answer) keeps working
   for one release. The orchestrator stays free to talk about the item in its
   tab while the card waits. Stopping an item's background call drops its own
   stale item. On start, resume or wake it reconciles against the status files,

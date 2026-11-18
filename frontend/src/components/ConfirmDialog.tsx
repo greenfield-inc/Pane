@@ -38,7 +38,7 @@ export function ConfirmDialog({
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="sm" ariaLabel={title} initialFocusRef={confirmRef}>
       <div className="p-6 pt-2">
-        <div className="flex items-start gap-3 mb-4">
+        <div className="flex items-start gap-3 mb-4 pr-6">
           {icon && <div className="flex-shrink-0">{icon}</div>}
           <h3 className="text-lg font-medium text-text-primary">{title}</h3>
         </div>

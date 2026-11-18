@@ -11,7 +11,7 @@ export default function AddComputerScreen() {
     <Screen scroll grouped testID="add-computer">
       <View style={styles.intro}>
         <Text variant="callout" tone="secondary">
-          Pair this phone with Pane on your computer. On the computer, open Pane and click Pair a phone on Home.
+          Pair this phone with Pane on your computer. On the computer, open Pane and click Pair a device on Home.
         </Text>
         <Button
           testID="add-computer-scan"

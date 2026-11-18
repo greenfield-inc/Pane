@@ -1,4 +1,9 @@
+import { execFileSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
+import { journalAgentReport, normalizeAgentReport } from '../agentReport';
 import { statusCard, workerCard, workerReportCard } from './workerContext';
 
 /**
@@ -123,5 +128,141 @@ describe("a worker's .html --summary-file", () => {
   it('is its Summary page, never its subtitle', () => {
     const card = workerCard('<!doctype html><html><body><h1>Q-80</h1></body></html>', 'Q-80: Sign in to gcloud?', { summaryPath: '/w/Q-80-summary.html' });
     expect(card.context).toBeUndefined();
+  });
+});
+
+describe("a blocked report's own buttons (--choices, --questions)", () => {
+  const choices = [{ label: 'Invoice id', detail: 'Ids are stable', recommended: true }, { label: 'Invoice number', detail: 'Numbers can be reissued' }];
+  const status = JSON.stringify({ needs_you: { why: 'The PDF name depends on it.', questions: [{ q: 'Id or number?', options: ['Number (recommended)', 'Id'] }], files: ['/w/options.html'] } });
+
+  it('are the card buttons, before any needs_you options, which still give the subtitle and files', () => {
+    const card = workerCard(status, 'Q-3: Use the invoice id in the PDF filename?', { choices });
+    expect(card.choices).toEqual(choices);
+    expect(card.questions).toBeUndefined();
+    expect(card.context).toContain('The PDF name depends on it.');
+    expect(card.links).toEqual([{ label: 'options.html', path: '/w/options.html' }]);
+  });
+
+  it('give each of several questions its own buttons', () => {
+    const questions = [
+      { title: 'Filename key?', choices: [{ label: 'Id', recommended: true }, { label: 'Number' }] },
+      { title: 'Zip them?', why: 'Large batches', choices: [{ label: 'Yes', recommended: true }, { label: 'No' }] },
+    ];
+    const card = workerCard(undefined, 'Q-4: Two choices for the invoice export', { questions });
+    expect(card.questions).toEqual(questions);
+    expect(card.choices).toBeUndefined();
+  });
+
+  it('are still checked like any card: two recommended options are refused', () => {
+    const two = [{ label: 'A', recommended: true }, { label: 'B', recommended: true }];
+    expect(() => workerCard(undefined, 'Q-5: Which one?', { choices: two })).toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_RECOMMENDED' }));
+  });
+});
+
+describe('a blocked question with its options packed into the text', () => {
+  const packed = 'Q-3: Use the invoice id or number in the PDF filename? (Invoice id (recommended) / Invoice number)';
+
+  it('is refused with the fix when nothing else gives it buttons', () => {
+    expect(() => workerCard(undefined, packed)).toThrow(expect.objectContaining({
+      code: 'ERR_REPORT_PACKED_OPTIONS',
+      message: 'The question ends with its options in brackets, (Invoice id (recommended) / Invoice number), but the report gives no buttons for them, so the person would get a card with nothing to press. Nothing was shown to the person.',
+      next: expect.stringContaining('--choices'),
+    }));
+    expect(() => workerCard('Invoice PDFs', 'Ship it? (Yes / No)')).toThrow(expect.objectContaining({ code: 'ERR_REPORT_PACKED_OPTIONS' }));
+  });
+
+  it('is accepted when --choices or the needs_you block gives the buttons', () => {
+    expect(workerCard(undefined, packed, { choices: [{ label: 'Invoice id', recommended: true }, { label: 'Invoice number' }] }).choices).toHaveLength(2);
+    const status = JSON.stringify({ needs_you: { questions: [{ q: 'Id or number?', options: ['Invoice id (recommended)', 'Invoice number'] }] } });
+    expect(workerCard(status, packed).choices).toHaveLength(2);
+  });
+
+  it('leaves an open question, or brackets that are not an option list, alone', () => {
+    expect(workerCard(undefined, 'Q-6: Which staging project should the backfill use?').choices).toBeUndefined();
+    expect(() => workerCard(undefined, 'Q-7: Should the CLI (and the MCP tool) refuse it?')).not.toThrow();
+    expect(() => workerCard(undefined, 'Q-8: Keep the and/or wording (iOS/Android)?')).not.toThrow();
+  });
+
+  it('keeps a report recorded before the check as it was sent', () => {
+    expect(workerCard(undefined, packed, { quietly: true }).title).toBe(packed);
+  });
+});
+
+describe("a worker's status file longer than the journal keeps", () => {
+  it('gets its buttons, links and Summary page from the file itself', () => {
+    const why = (topic: string) => `${topic} decides what ships in the first kit release, and the screens built after it inherit the choice, so changing it later means touching every one of them again. The options page shows each choice on the real screens, light and dark, at phone and desktop width.`;
+    const status = {
+      profile: 'greenfield/implementer',
+      state: 'blocked',
+      step: 'UI kit tokens and primitives built; blocked on four product calls before the screens',
+      needs_you: {
+        id: 'Q-7',
+        kind: 'choice',
+        title: 'Four UI kit calls before the screens',
+        why: 'The screens are built on these four choices.',
+        questions: [
+          { q: 'Which type scale?', why: why('The type scale'), options: ['Major third (recommended)', 'Perfect fourth', 'Golden ratio'] },
+          { q: 'Which corner radius?', why: why('The corner radius'), options: ['8 px (recommended)', '4 px', '12 px'] },
+          { q: 'Which icon set?', why: why('The icon set'), options: ['Lucide (recommended)', 'Phosphor'] },
+          { q: 'Dark mode in the first release?', why: why('Dark mode'), options: ['Yes (recommended)', 'Later'] },
+        ],
+        files: ['/work/glassly/bundle/options.html#decision-1', '/work/glassly/bundle/index.html', '/work/glassly/bundle/cover-sheet.html'],
+        summary: 'options.html',
+        blocking: true,
+        answers: [],
+      },
+      assumptions: Array.from({ length: 8 }, (_, index) => `A-${index + 1}: an assumption the worker logged while building the kit, long enough to matter`),
+    };
+    const statusPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'worker-status-')), 'ui-kit.json');
+    fs.writeFileSync(statusPath, JSON.stringify(status, null, 2));
+    const full = fs.readFileSync(statusPath, 'utf8');
+    const journaled = journalAgentReport(normalizeAgentReport({ state: 'blocked', question: 'Q-7: Four UI kit calls before the screens', summary: full, summaryPath: statusPath }, '2026-11-16T09:00:00.000Z'));
+    expect(full.indexOf('"files"')).toBeGreaterThan(2_000);
+
+    const card = workerCard(journaled.summary, 'Q-7: Four UI kit calls before the screens', { quietly: true, summaryPath: statusPath, readStatusFile: journaled.summaryTruncated });
+
+    expect(card.questions?.map(question => [question.title, question.choices.map(choice => choice.label)])).toEqual([
+      ['Which type scale?', ['Major third', 'Perfect fourth', 'Golden ratio']],
+      ['Which corner radius?', ['8 px', '4 px', '12 px']],
+      ['Which icon set?', ['Lucide', 'Phosphor']],
+      ['Dark mode in the first release?', ['Yes', 'Later']],
+    ]);
+    expect(card.links).toEqual([
+      { label: 'options.html', path: '/work/glassly/bundle/options.html#decision-1' },
+      { label: 'index.html', path: '/work/glassly/bundle/index.html' },
+      { label: 'cover-sheet.html', path: '/work/glassly/bundle/cover-sheet.html' },
+    ]);
+    expect(card.summaryPage).toBe('options.html');
+  });
+
+  const cutReport = (summaryPath: string) => journalAgentReport(normalizeAgentReport({ state: 'blocked', question: 'Q-8: Pick one', summary: `{"step": "Waiting on Q-8", "log": "${'s'.repeat(2_100)}"}`, summaryPath }, '2026-11-16T09:00:00.000Z'));
+  const tempPath = (name: string) => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'worker-status-')), name);
+
+  it('keeps the cut summary when the file is prose or a pipe, and never waits on the pipe', () => {
+    const prose = tempPath('notes.txt');
+    fs.writeFileSync(prose, 'Private notes that are not a status file.');
+    const fifo = tempPath('status.fifo');
+    execFileSync('mkfifo', [fifo]);
+    for (const summaryPath of [prose, fifo]) {
+      const card = workerCard(cutReport(summaryPath).summary, 'Q-8: Pick one', { quietly: true, summaryPath, readStatusFile: true });
+      expect(card.context).toBe('Waiting on Q-8');
+    }
+  });
+
+  it('tells the worker when needs_you sits past the first 256 KB', () => {
+    const big = tempPath('status.json');
+    fs.writeFileSync(big, JSON.stringify({ step: 'Late step', log: 'x'.repeat(300 * 1024), needs_you: { questions: [{ q: 'Ship?', options: ['Ship (recommended)', 'Wait'] }] } }));
+    const card = workerCard(cutReport(big).summary, 'Q-8: Pick one', { quietly: true, summaryPath: big, readStatusFile: true });
+    expect(card.choices).toBeUndefined();
+    expect(card.warnings).toEqual([expect.stringContaining('over 256 KB')]);
+  });
+
+  it('shows the status link and the first files, and names the files it has no room for', () => {
+    const many = tempPath('status.json');
+    const files = Array.from({ length: 8 }, (_, index) => `/w/page-${index + 1}.html`);
+    fs.writeFileSync(many, JSON.stringify({ step: 's'.repeat(2_100), needs_you: { why: 'Eight pages to read.', questions: [{ q: 'Ship?', options: ['Ship (recommended)', 'Wait'] }], files } }));
+    const card = workerCard(cutReport(many).summary, 'Q-8: Pick one', { quietly: true, summaryPath: many, readStatusFile: true, statusLabel: 'kit status' });
+    expect(card.links?.map(link => link.label)).toEqual(['kit status', 'page-1.html', 'page-2.html', 'page-3.html', 'page-4.html', 'page-5.html']);
+    expect(card.context).toContain('More links: page-6.html, page-7.html, page-8.html');
   });
 });

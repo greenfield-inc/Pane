@@ -34,6 +34,19 @@ export interface NativeSession {
   exported?: true;
 }
 
+/** The agents whose conversations are plain files in a store, which a whole-Session move carries byte for byte. */
+export const FILE_STORE_AGENTS = ['claude', 'codex', 'cursor'] as const;
+export type FileStoreAgent = typeof FILE_STORE_AGENTS[number];
+
+export function isFileStoreAgent(value: string | undefined): value is FileStoreAgent {
+  return FILE_STORE_AGENTS.some(agent => agent === value);
+}
+
+/** Where an agent's store is on this machine, honouring its config-folder override. */
+export function nativeStoreRoot(agent: FileStoreAgent, env: NodeJS.ProcessEnv = process.env): string {
+  return storeRoot(agent, env).root;
+}
+
 export function isNativeAgent(value: string | undefined): value is NativeAgent {
   return value === 'claude' || value === 'codex' || value === 'cursor' || value === 'opencode';
 }

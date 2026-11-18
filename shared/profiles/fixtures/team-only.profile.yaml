@@ -1,0 +1,8 @@
+# A team with no flow: listed and viewable, not launchable.
+format: pane-profile/1
+name: team-only
+version: 0.3.0
+title: A team without a workflow
+agents:
+  writer: { runs: claude/claude-opus-5-5 }
+  editor: { runs: some-new-cli }

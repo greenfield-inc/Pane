@@ -157,9 +157,13 @@ To test approvals' timers without waiting, start a dev build with
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
   CI runs: smoke, health check, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
-- `pnpm test:chat-tabs` runs the chat tab journeys: it launches Electron from
+- `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey
+  (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
+  CI runs its specs in three parallel shards, listed in
+  `playwright.chat-tabs.config.ts`; `PANE_ELECTRON_SHARD=<name>` runs one. A new
+  spec runs only once it is in a shard there.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
   (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
   start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port
@@ -229,6 +233,22 @@ defaults. Tests import `start()` from the script and drive the phases with
 `forceDown()` and `forceUp()`; see `scripts/flapping-link-proxy.test.mjs`, run
 by `pnpm test:flapping-proxy`.
 
+### Testing a Session move on one computer
+
+A Session move normally reaches the other machine over Tailscale. To move one
+between two isolated dev instances on one computer, give each its own
+`PANE_DIR` and `HOME` (see [Running a dev build safely](#running-a-dev-build-safely)),
+and start the source with `PANE_MOVE_TEST_PEERS`, a JSON list naming the
+target and its Pane folder:
+
+```bash
+PANE_MOVE_TEST_PEERS='[{"name":"robert-b","paneDir":"/tmp/pane-b/pane"}]' PANE_DIR=/tmp/pane-a/pane HOME=/tmp/pane-a/Users/alice pnpm dev
+```
+
+The target then appears in **Move to machine…**, and the move reaches it
+through its daemon socket under that folder, never the network. Packaged
+builds ignore the variable.
+
 ## Code Style
 
 - TypeScript throughout; no explicit `any` (use a specific type, or `unknown`
@@ -295,10 +315,9 @@ happened, why, what changed, and what to do next.
    you ran, and screenshots for UI changes.
 
 CI runs typecheck, lint, a markdown link check, unit tests on Linux, macOS and
-Windows, and the Playwright smoke suite. CI retries a failed unit test once
-(`--retry=1`; local runs never retry) and lists every retried test in the job
-summary, with a warning on each test that passed only on its retry: that test
-is flaky, so fix it. Playwright journeys are not retried. React Doctor also comments on new React
+Windows, and the Playwright smoke suite. CI retries nothing: a test, link
+check or download that fails once fails the run. A flaky test is a bug to fix
+in its own PR. React Doctor also comments on new React
 findings in `frontend/`; it is advisory. To see its findings before you push:
 
 ```bash
@@ -318,11 +337,11 @@ Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
 A pull request is ready to merge when `CI result` is green and its review is
 done. Watch only the required check (`gh pr checks <number> --required`; a PR
 based on another branch has no required checks, so watch its `CI result`
-check by name until it targets `main`). The other checks (Markdown Links,
-Native Android Build, Native OTA Updates, Native Runtime, React Doctor, Notes
+check by name until it targets `main`). `CI result` waits for every
+`Code Quality` job, Markdown Links included. The other workflows' checks
+(Native Android Build, Native OTA Updates, Native Runtime, React Doctor, Notes
 Native QA, the package builds) are advisory: look at them when they fail, but
-they never hold a merge. `CI result` does not wait for Markdown Links, so check
-it yourself when you change docs.
+they never hold a merge.
 
 A single pull request is squash-merged.
 

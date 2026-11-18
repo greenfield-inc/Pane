@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { CHAT_CONVERSATION_LIMIT, type ChatTabConversation } from '../../../../shared/types/chatTab';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { canPick, conversationTime, conversationTitle, enterOpens, filterConversations, firstPickable, stepPickable } from './pickerRows';
 
 export interface ConversationPickerViewProps {
@@ -35,11 +36,18 @@ export function ConversationPickerView({ rows, filter, selected, busy, error, no
       <input type="text" className="chat-picker-filter" aria-label="Filter by title" placeholder="Filter by title" value={filter} autoFocus onChange={event => onFilter(event.target.value)} />
     </div>
     {error && <p role="alert" className="chat-picker-error">{error}</p>}
-    {!rows
-      ? <p role="status" className="chat-picker-empty">Loading conversations…</p>
-      : !shown.length
-        // A list that failed says why above; an empty state under it would contradict it (QA F3).
-        ? error ? null : <p className="chat-picker-empty">{filter.trim() ? `No conversation matches “${filter.trim()}”.` : 'No past conversations in this folder yet.'}</p>
+    {/* A list that failed says why above; an empty state under it would contradict it (QA F3). */}
+    {rows && !shown.length && error ? null : <SkeletonSwap loading={!rows} skeleton={<>
+        <LoadingStatus label="Loading conversations…" />
+        <Skeleton className="chat-picker-list">
+          {['w-3/5', 'w-2/5', 'w-1/2', 'w-1/3', 'w-2/5'].map((width, index) => <div key={index} className="chat-picker-row">
+            <span className="flex-1 min-w-0"><Bone className={`h-3.5 ${width}`} /></span>
+            <Bone className="h-3 w-12" />
+          </div>)}
+        </Skeleton>
+      </>}>
+      {!shown.length
+        ? <p className="chat-picker-empty">{filter.trim() ? `No conversation matches “${filter.trim()}”.` : 'No past conversations in this folder yet.'}</p>
         : <ul role="listbox" aria-label="Past conversations" className="chat-picker-list">
           {shown.map((row, index) => {
             const time = conversationTime(row.updatedAt, now);
@@ -53,6 +61,7 @@ export function ConversationPickerView({ rows, filter, selected, busy, error, no
             </li>;
           })}
         </ul>}
+    </SkeletonSwap>}
     {rows && rows.length >= CHAT_CONVERSATION_LIMIT && <p className="chat-picker-subline">Pane lists the newest {CHAT_CONVERSATION_LIMIT.toLocaleString('en-US')} conversations, so older ones aren't shown here. To continue an older one, resume it from a terminal tab.</p>}
     <div className="chat-picker-foot">
       <span className="chat-picker-keys" aria-hidden="true">

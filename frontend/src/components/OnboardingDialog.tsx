@@ -17,6 +17,7 @@ import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStor
 import { useSessionStore } from '../stores/sessionStore';
 import { AgentStep, PhoneStepBody, SessionsStepBody, SessionsStepFooter } from './FirstRunSteps';
 import { PairPhoneDialog } from './PairPhoneDialog';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 import { sessionsToBringIn } from './sessionImport/sessionImportCopy';
 
 type OnboardingEnvironmentStatus = 'detecting' | 'git_missing' | 'gh_ready' | 'gh_missing' | 'gh_not_authenticated' | 'gh_missing_scopes' | 'gh_not_ready';
@@ -242,20 +243,35 @@ interface RepoListProps {
  * Up to five rows. It keeps three rows' height (two in a WSL column) so
  * loading, empty and short lists match.
  */
-function RepoList({ repos, emptyText, compact, label, checkedPaths, disabled, onToggle }: RepoListProps) {
+function RepoList(props: RepoListProps) {
+  const { repos, compact, label } = props;
   const minHeight = compact ? 'min-h-[78px]' : 'min-h-[120px]';
-  if (repos === null) {
-    return (
-      <div className={cn(minHeight, 'space-y-1.5')} aria-busy="true" aria-label={label}>
-        {(compact ? ['w-[60%]', 'w-[48%]'] : ['w-[60%]', 'w-[48%]', 'w-[55%]']).map(width => (
-          <div key={width} className="flex h-9 items-center rounded-lg border border-border-secondary bg-surface-secondary px-3">
-            <span className={cn('h-2.5 animate-pulse rounded bg-surface-tertiary', width)} />
-          </div>
-        ))}
-      </div>
-    );
-  }
+  // A block of its own: the swap's content wrapper is display: contents, which the parent's space-y would skip.
+  return (
+    <div>
+      <SkeletonSwap loading={repos === null} skeleton={
+        <div className={minHeight} aria-busy="true" aria-label={label}>
+          <Skeleton className="space-y-1.5">
+            {(compact ? [[28, 22], [22, 18]] : [[18, 30], [14, 36], [20, 26]]).map(([name, detail], index) => (
+              <div key={index} className="flex h-9 items-center gap-2.5 rounded-lg border border-border-secondary bg-surface-secondary px-3">
+                <Bone className="h-3.5 w-3.5 shrink-0" />
+                <Bone className="h-4 w-4 shrink-0" />
+                <Bone className="h-3.5" style={{ width: `${name}%` }} />
+                {!compact && <Bone className="h-3.5" style={{ width: `${detail}%` }} />}
+                <Bone className="ml-auto h-3" style={{ width: `${compact ? detail : 16}%` }} />
+              </div>
+            ))}
+          </Skeleton>
+        </div>
+      }>
+        <RepoRows {...props} repos={repos ?? []} />
+      </SkeletonSwap>
+    </div>
+  );
+}
 
+function RepoRows({ repos, emptyText, compact, label, checkedPaths, disabled, onToggle }: RepoListProps & { repos: FoundRepo[] }) {
+  const minHeight = compact ? 'min-h-[78px]' : 'min-h-[120px]';
   if (repos.length === 0) {
     return <p className={cn(minHeight, 'py-2 text-sm text-text-tertiary')}>{emptyText}</p>;
   }
@@ -724,16 +740,22 @@ export default function OnboardingDialog({ isOpen, onClose, fromHome = false }: 
         <div className="p-6 border-b border-border-primary">
           <div className="flex items-center">
             <img src={paneLogo} alt="Pane" className="h-10 w-10 mr-3" />
-            <h1 ref={titleRef} tabIndex={-1} className="text-lg font-semibold text-text-primary outline-none">{title}</h1>
+            <h1 ref={titleRef} tabIndex={-1} className="text-lg font-semibold text-text-primary outline-none">
+              <SkeletonSwap loading={view === 'sessions' && bringIn === null} skeleton={
+                <Skeleton className="inline-block align-top"><TextBone text="Bring your 0 sessions into Pane?" /></Skeleton>
+              }>
+                {title}
+              </SkeletonSwap>
+            </h1>
           </div>
         </div>
         <ModalBody>
-          {view === 'detecting' ? (
-            <div role="status" aria-label="Checking this computer" className="flex min-h-[132px] items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-text-tertiary" aria-hidden="true" />
-            </div>
-          ) : view === 'agent' ? (
-            <AgentStep agents={agents} disabled={isPicking} onPick={agent => void pickAgent(agent)} />
+          {view !== 'sessions' ? (
+            // One AgentStep across detecting and agent, so its skeleton swap holds and fades.
+            <>
+              {view === 'detecting' && <LoadingStatus label="Checking this computer" />}
+              <AgentStep agents={view === 'detecting' ? null : agents} disabled={view === 'detecting' || isPicking} onPick={agent => void pickAgent(agent)} />
+            </>
           ) : (
             <SessionsStepBody sessions={bringIn} />
           )}

@@ -40,6 +40,11 @@ export interface AgentDetectionResult {
   skipStateUpdate: boolean;
   /** Id of the winning rule, or null when the idle fallback was used. */
   matchedRuleId: string | null;
+  /**
+   * The program reported this state itself (OSC 7501), so it stands as is:
+   * output, startup grace and screen rules do not change it.
+   */
+  reported?: boolean;
 }
 
 /** Payload of the `panel:agentStatus` IPC event. */
