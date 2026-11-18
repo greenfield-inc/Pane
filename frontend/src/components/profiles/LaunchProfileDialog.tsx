@@ -49,6 +49,8 @@ export function LaunchProfileDialog({ profile, defaults, onClose, onLaunched }: 
     const choice = choices[agent.id] ?? PROFILE_CHOICE;
     return choice === OTHER_CHOICE || (choice === PROFILE_CHOICE && !isConfiguredAgent(agent.cli));
   });
+  // A one-step profile (each bundled dcouple agent) is one agent, not a team.
+  const oneStep = profile.profile?.flow?.steps.length === 1;
   const commandSteps = (profile.profile?.flow?.steps ?? []).flatMap((step) => (step.kind === 'command' ? [step] : []));
   const missingCommand = agents.some((agent) => choices[agent.id] === OTHER_CHOICE && !others[agent.id]?.trim());
 
@@ -82,8 +84,8 @@ export function LaunchProfileDialog({ profile, defaults, onClose, onLaunched }: 
   };
 
   return (
-    <Modal isOpen onClose={onClose} size="lg" ariaLabel={`Launch ${profile.name}`}>
-      <ModalHeader title={`Launch ${profile.name}`} description="The first step opens in a new Pane; every later step opens as a tab in it." onClose={onClose} />
+    <Modal isOpen onClose={onClose} size="lg" ariaLabel={`Launch ${profile.name}`} showCloseButton={false}>
+      <ModalHeader title={`Launch ${profile.name}`} description={oneStep ? 'Its agent starts in a new Pane.' : 'The first step opens in a new Pane; every later step opens as a tab in it.'} onClose={onClose} />
       <ModalBody>
         <div className="flex flex-col gap-3" data-testid="launch-profile-dialog">
           <label className="flex flex-col gap-1 text-xs text-text-secondary">
@@ -101,7 +103,7 @@ export function LaunchProfileDialog({ profile, defaults, onClose, onLaunched }: 
           </label>
           <label className="flex flex-col gap-1 text-xs text-text-secondary">
             Task
-            <textarea className={`${FIELD} min-h-[72px]`} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="What should the team do?" aria-label="Task" />
+            <textarea className={`${FIELD} min-h-[72px]`} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={oneStep ? 'What should the agent do?' : 'What should the team do?'} aria-label="Task" />
           </label>
           <fieldset className="flex flex-col gap-2 rounded-md border border-border-primary p-3">
             <legend className="px-1 text-xs text-text-secondary">Who runs each agent</legend>

@@ -135,6 +135,7 @@ test('Profiles is hidden until Settings turns it on, and appears without a resta
   await toggle.click();
   await expect(toggle).toBeChecked();
   await shoot(page, 'settings-on');
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.getByTestId('profiles-nav')).toBeVisible();
 });
 
@@ -143,6 +144,7 @@ test('launch dialog: a CLI per agent, and "Other…" marks the run baseline only
   await page.getByTestId('profile-launch').click();
   const dialog = page.getByTestId('launch-profile-dialog');
   await expect(dialog.getByTestId('launch-agent-row')).toHaveCount(5);
+  await expect(page.getByRole('button', { name: 'Close modal' })).toHaveCount(1);
   await expect(dialog.getByTestId('launch-baseline-note')).toHaveCount(0);
   await dialog.getByLabel('CLI for implementer').selectOption({ label: 'Other…' });
   await dialog.getByLabel('Command for implementer').fill('node ./stub-agent.js');
