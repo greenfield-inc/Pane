@@ -11,13 +11,13 @@ describe('ConfigManager appearance persistence', () => {
 
   beforeEach(async () => {
     paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-appearance-'));
-    process.env.PANE_DIR = paneDir;
+    vi.stubEnv('PANE_DIR', paneDir);
     configPath = path.join(paneDir, 'config.json');
     vi.clearAllMocks();
   });
 
   afterEach(async () => {
-    delete process.env.PANE_DIR;
+    vi.unstubAllEnvs();
     await fs.rm(paneDir, { recursive: true, force: true });
   });
 
@@ -319,12 +319,12 @@ describe('ConfigManager agent context defaults', () => {
 
   beforeEach(async () => {
     paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-agent-context-'));
-    process.env.PANE_DIR = paneDir;
+    vi.stubEnv('PANE_DIR', paneDir);
     configPath = path.join(paneDir, 'config.json');
   });
 
   afterEach(async () => {
-    delete process.env.PANE_DIR;
+    vi.unstubAllEnvs();
     await fs.rm(paneDir, { recursive: true, force: true });
   });
 
@@ -379,7 +379,7 @@ describe('ConfigManager analytics gate', () => {
 
   beforeEach(async () => {
     paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-analytics-gate-'));
-    process.env.PANE_DIR = paneDir;
+    vi.stubEnv('PANE_DIR', paneDir);
     configPath = path.join(paneDir, 'config.json');
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -387,7 +387,6 @@ describe('ConfigManager analytics gate', () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
-    delete process.env.PANE_DIR;
     await fs.rm(paneDir, { recursive: true, force: true });
   });
 

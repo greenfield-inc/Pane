@@ -3,8 +3,31 @@ import { EventEmitter } from 'events';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { vi } from 'vitest';
+import { afterAll, vi } from 'vitest';
 import type { ToolPanel } from '../../../shared/types/panels';
+import { guardFileState } from '../../../shared/testing/fileStateGuard';
+
+// Isolation is off (vitest.config.ts), so one worker runs many test files and
+// this file runs at the start of each. Do the module reset isolation would have
+// done: every module an earlier file evaluated is evaluated again, including
+// the cached results of its vi.mock factories ('mock:' entries), which
+// vi.resetModules() keeps. Vitest 2 exposes the cache only on its worker state.
+// This file is skipped because it is the module running now.
+interface CachedModule {
+  exports?: unknown;
+}
+interface ModuleCache {
+  forEach(fn: (mod: CachedModule, id: string) => void): void;
+  invalidateModule(mod: CachedModule): boolean;
+}
+// SAFETY: Vitest 2 sets __vitest_worker__ in every test worker before setup
+// files run; its moduleCache is vite-node's ModuleCacheMap, typed here to the
+// two members used.
+const workerState = (globalThis as { __vitest_worker__?: { moduleCache: ModuleCache } }).__vitest_worker__;
+workerState?.moduleCache.forEach((mod, id) => {
+  if (/\/(vitest|vite-node)\/dist\/|\/src\/test\/setup\.ts$/.test(id)) return;
+  workerState.moduleCache.invalidateModule(mod);
+});
 
 // Every module that imports services/database opens `${PANE_DIR}/sessions.db`
 // and runs the startup migrations at import time. Point that at a scratch
@@ -89,3 +112,5 @@ global.console = {
   warn: vi.fn(),
   error: vi.fn(),
 };
+
+guardFileState({ afterAll, vi });

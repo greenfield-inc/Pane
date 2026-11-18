@@ -43,7 +43,7 @@ describe('ConfigManager keeps outside edits to config.json', () => {
 
   beforeEach(async () => {
     dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-outside-edits-'));
-    process.env.PANE_DIR = dir;
+    vi.stubEnv('PANE_DIR', dir);
     configPath = path.join(dir, 'config.json');
     manager = new ConfigManager();
     await manager.initialize();
@@ -52,7 +52,7 @@ describe('ConfigManager keeps outside edits to config.json', () => {
   afterEach(async () => {
     manager.stopWatching();
     vi.restoreAllMocks();
-    delete process.env.PANE_DIR;
+    vi.unstubAllEnvs();
     await fs.rm(dir, { recursive: true, force: true });
   });
 
