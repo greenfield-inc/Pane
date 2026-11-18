@@ -1,4 +1,4 @@
-import { CircleCheck, CircleHelp, CircleMinus, CircleX, Clock } from 'lucide-react';
+import { CircleCheck, CircleHelp, CircleMinus, CircleX, Clock, Moon } from 'lucide-react';
 import type { TodoShownStatus } from '../../../../shared/types/todos';
 import { cn } from '../../utils/cn';
 
@@ -8,6 +8,7 @@ export const TODO_STATUS_LABEL = {
   working: 'Working',
   queued: 'Queued',
   idle: 'Idle',
+  snoozed: 'Snoozed',
   done: 'Done',
   dropped: 'Dropped',
 } as const satisfies Record<TodoShownStatus, string>;
@@ -40,6 +41,7 @@ export function TodoStatusIcon({ status, className, size = 'md' }: { status: Tod
       {status === 'waiting' && <CircleHelp className={cn(glyph, 'text-status-warning')} strokeWidth={2.25} />}
       {status === 'queued' && <Clock className={cn(glyph, 'text-text-secondary')} strokeWidth={2.25} />}
       {status === 'idle' && <CircleMinus className={cn(glyph, 'text-text-muted')} strokeWidth={2.25} />}
+      {status === 'snoozed' && <Moon className={cn(glyph, 'text-text-secondary')} strokeWidth={2.25} />}
       {status === 'done' && <CircleCheck className={cn(glyph, 'text-status-success')} strokeWidth={2.25} />}
       {status === 'dropped' && <CircleX className={cn(glyph, 'text-text-muted')} strokeWidth={2.25} />}
     </span>

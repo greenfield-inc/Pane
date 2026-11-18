@@ -13,6 +13,7 @@ const STATUS_TINT = {
   working: 'border-status-info/40',
   queued: 'bg-surface-tertiary',
   idle: '',
+  snoozed: '',
   done: '',
   dropped: '',
 } as const satisfies Record<TodoShownStatus, string>;
