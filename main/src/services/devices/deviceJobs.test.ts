@@ -64,4 +64,10 @@ describe.skipIf(process.platform === 'win32')('DeviceJobs', () => {
     expect(result.exitCode).toBe(3);
     expect(result.logTail).toContain('build ok');
   });
+
+  it('reports a command as exited when a process it left behind still holds its output', async () => {
+    const result = await jobs.start('pane-a', 'sleep 5 & echo build done; exit 0', dir, 2_000);
+    expect(result).toMatchObject({ state: 'exited', exitCode: 0 });
+    expect(result.logTail).toContain('build done');
+  });
 });
