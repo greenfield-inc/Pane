@@ -21,7 +21,7 @@ import { FindBar } from '../../find/FindBar';
 import { usePanelFind } from '../../find/usePanelFind';
 import { closeFind, getFindBar, reportFindResult, setFindQuery, useFindBar } from '../../find/findController';
 import { createBrowserFindAdapter } from './browserFind';
-import { AgentOverlay, BrowserDriverChip } from './AgentDriving';
+import { AgentOverlay } from './AgentDriving';
 
 const COPIED_FEEDBACK_MS = 1500;
 
@@ -661,7 +661,6 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             <polyline points="8 6 2 12 8 18" />
           </svg>
         </button>
-        <BrowserDriverChip panelId={panel.id} driver={driver} />
         <form
           onSubmit={handleSubmit}
           className={cn(

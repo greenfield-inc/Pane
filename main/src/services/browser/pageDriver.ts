@@ -14,7 +14,6 @@ export const ALLOWED_CDP_METHODS: ReadonlySet<string> = new Set([
   'Page.getLayoutMetrics',
   'Input.dispatchMouseEvent',
   'Input.dispatchKeyEvent',
-  'Input.insertText',
   'Runtime.evaluate',
   'Runtime.terminateExecution',
   'DOM.getDocument',
@@ -34,6 +33,10 @@ export interface BrowserPageContents extends DebuggableContents {
   reload(): void;
   navigationHistory: { canGoBack(): boolean; goBack(): void; canGoForward(): boolean; goForward(): void };
   isDevToolsOpened(): boolean;
+  /** Set while Pane's docked DevTools (setDevToolsWebContents) inspects the page, which isDevToolsOpened misses. */
+  readonly devToolsWebContents: { isDestroyed(): boolean } | null;
+  /** Inserts text at the page's focus, whether or not the page has the window's focus. */
+  insertText(text: string): Promise<void>;
   executeJavaScriptInIsolatedWorld(worldId: number, scripts: { code: string }[], userGesture?: boolean): Promise<unknown>;
   on(event: 'did-stop-loading' | 'did-navigate', listener: () => void): unknown;
   /** Every input event the page gets, the person's and the agent's alike. */
@@ -165,7 +168,8 @@ export class PageDriver {
     await this.focus(ref, clear);
     return this.input(async () => {
       if (clear) await this.key('Backspace', 0);
-      if (text) await this.send('Input.insertText', { text });
+      // Electron's insertText reaches a page without focus; the debugger's drops the text there.
+      if (text) await this.contents.insertText(text);
       if (submit) await this.key('Enter', 0);
     }, false);
   }
@@ -228,7 +232,7 @@ export class PageDriver {
       if (this.dialog) return;
       if (Date.now() >= deadline) {
         const wanted = [conditions.text && `text "${conditions.text}"`, conditions.url && `a URL containing "${conditions.url}"`, conditions.ref && `${conditions.ref} visible`].filter(Boolean).join(' and ');
-        throw new PaneError('ERR_BROWSER_WAIT_TIMEOUT', `The page did not show ${wanted} within ${Math.round(timeoutMs / 1000)} seconds.`, 'Call browser_snapshot to see what the page shows, or wait longer with --timeout-ms.');
+        throw new PaneError('ERR_BROWSER_WAIT_TIMEOUT', `The page did not show ${wanted} within ${Number((timeoutMs / 1000).toFixed(1))} seconds.`, 'Call browser_snapshot to see what the page shows, or wait longer with --timeout-ms.');
       }
       await sleep(200);
     }
@@ -255,7 +259,14 @@ export class PageDriver {
       source = `(() => { const el = document.querySelector('[data-pane-evaluate="${token}"]'); el?.removeAttribute('data-pane-evaluate'); return (${expression})(el); })()`;
     }
     await this.attach();
-    const evaluated = this.send('Runtime.evaluate', { expression: source, returnByValue: true, awaitPromise: true, userGesture: true, timeout: EVALUATE_TIMEOUT_MS, replMode: false });
+    // A script stopped at its timeout makes Chromium answer with a bare "Internal error".
+    const started = Date.now();
+    const evaluated = this.send('Runtime.evaluate', { expression: source, returnByValue: true, awaitPromise: true, userGesture: true, timeout: EVALUATE_TIMEOUT_MS })
+      .catch((cause: unknown) => {
+        if (cause instanceof PaneError) throw cause;
+        if (Date.now() - started >= EVALUATE_TIMEOUT_MS - 1_000) throw evaluateTimeout();
+        throw new PaneError('ERR_BROWSER_EVALUATE_FAILED', `The page could not run the script: ${cause instanceof Error ? cause.message : String(cause)}.`, 'Check the expression and try again.');
+      });
     let timer: NodeJS.Timeout | undefined;
     const overdue = new Promise<'overdue'>(resolve => { timer = setTimeout(() => resolve('overdue'), EVALUATE_TIMEOUT_MS + 2_000); });
     const result = await Promise.race([evaluated, overdue]).finally(() => clearTimeout(timer));
@@ -369,7 +380,8 @@ export class PageDriver {
       this.dialogWaiters.clear();
       this.dispatching -= 1;
       this.lastDispatchEnd = Date.now();
-      if (interceptChooser) await this.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);
+      // While a dialog blocks the page this reply waits for the answer, so it is never awaited.
+      if (interceptChooser) void this.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);
     }
     return this.outcome();
   }

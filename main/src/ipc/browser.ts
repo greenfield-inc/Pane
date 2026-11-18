@@ -298,7 +298,7 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     const tab = pickTab(caller, tabId, write);
     const run = async () => {
       const contents = await livePage(tab);
-      if (write && contents.isDevToolsOpened()) {
+      if (write && (contents.isDevToolsOpened() || (contents.devToolsWebContents !== null && !contents.devToolsWebContents.isDestroyed()))) {
         throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', `DevTools is open on tab ${tab.id}, and agents don't act on a page while the person inspects it. Nothing ran.`, 'Ask the person to close DevTools on that tab, then try again.');
       }
       return work(driverFor(tab, contents), tab, contents);

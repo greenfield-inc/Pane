@@ -80,8 +80,19 @@ function pageScript(limit: number) {
     const aria = clean(el.getAttribute('aria-label'));
     if (aria) return aria;
     const labels = (el as HTMLInputElement).labels;
-    if (labels && labels.length > 0) return clean(Array.from(labels).map(label => textOf(label)).join(' '));
+    if (labels && labels.length > 0) return clean(Array.from(labels).map(label => ownText(label)).join(' '));
     return '';
+  }
+
+  /** A label's text without the text of the controls inside it (a select's options). */
+  function ownText(label: Element): string {
+    let text = '';
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) text += `${node.textContent ?? ''} `;
+      else if (node instanceof Element && !['SELECT', 'TEXTAREA', 'INPUT', 'BUTTON', 'SCRIPT', 'STYLE'].includes(node.tagName)) node.childNodes.forEach(walk);
+    };
+    walk(label);
+    return clean(text);
   }
 
   function nameOf(el: Element, role: string): string {

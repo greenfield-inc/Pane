@@ -25,6 +25,8 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
     getTitle: () => 'Sign up',
     isLoading: () => false,
     isDevToolsOpened: () => false,
+    devToolsWebContents: null,
+    insertText: async () => undefined,
     capturePage: async () => ({ toPNG: () => Buffer.from('png'), getSize: () => ({ width: 800, height: 600 }) }),
     loadURL: async (next: string) => { url = next; },
     reload: () => undefined,
