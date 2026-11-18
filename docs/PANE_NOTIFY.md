@@ -91,7 +91,10 @@ Session go under "Not in a Session". Items Autopilot asks itself go under
   `needs_you` lists them). A question that ends with its options in brackets
   ("(A / B)") and gives no buttons either way is refused
   (`ERR_REPORT_PACKED_OPTIONS`) and nothing is shown; a question with no
-  options is an open question, answered in words. That question is a card at once, with an answer box, and it
+  options is an open question, answered in words. A unit in brackets with a
+  spaced slash, "(requests / second)", reads as options too: when you ask for
+  a value, word it as prose ("in requests per second") or drop the spaces
+  ("(requests/second)"); the refusal says so. That question is a card at once, with an answer box, and it
   rings once the orchestrator relays it or after 10 minutes, so the orchestrator
   first settles what the plan already answers. Your answer goes straight to the
   worker's tab (`answer: Q-n → <answer> (by you)`), even with the orchestrator
