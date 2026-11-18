@@ -98,7 +98,9 @@ function parseArgs(argv) {
   return args;
 }
 
-// GitHub answers 502/503/504 now and then; those are retried twice.
+// Telemetry, not a check: the CI timings report reads the jobs API, and
+// GitHub answers 502/503/504 now and then, so those reads are retried twice.
+// No test, link check or download in CI is retried.
 async function gh(apiPath, attempt = 1) {
   try {
     const { stdout } = await run('gh', ['api', apiPath], { maxBuffer: 64 * 1024 * 1024 });

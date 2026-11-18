@@ -103,14 +103,11 @@ jobs:
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
-    # CI retries a failed unit test once; the retry report lists every retried
-    # test in the job summary, so flaky tests stay visible (--retry, see
-    # CONTRIBUTING.md). Playwright journeys are never retried.
     - name: Run main process test suite
-      run: CI=1 pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: CI=1 pnpm --filter main exec vitest run
 
     - name: Run frontend unit tests
-      run: CI=1 pnpm --filter frontend exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: CI=1 pnpm --filter frontend exec vitest run
 
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
@@ -166,36 +163,37 @@ jobs:
   markdown-links:
     name: Markdown Links
     runs-on: ubuntu-latest
+    env:
+      LYCHEE_VERSION: 0.24.2
+      LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
 
-    # The action downloads lychee from GitHub's releases, which fail for hours
-    # at a time, so a failed first try runs once more. A broken link fails both.
+    # lychee is a pinned release binary kept in the Actions cache, so a run
+    # downloads nothing. A cache miss downloads it once; that download is not
+    # retried, so a failure there fails the job.
+    - name: Restore lychee
+      id: lychee-cache
+      uses: actions/cache@v5
+      with:
+        path: ${{ runner.temp }}/lychee
+        key: lychee-${{ env.LYCHEE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Download lychee
+      if: steps.lychee-cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p "$RUNNER_TEMP/lychee"
+        curl -fsSL -o "$RUNNER_TEMP/lychee.tar.gz" "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-x86_64-unknown-linux-gnu.tar.gz"
+        echo "${LYCHEE_SHA256}  $RUNNER_TEMP/lychee.tar.gz" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP/lychee" --strip-components=1
+
     - name: Check markdown links
-      id: links
-      continue-on-error: true
-      uses: lycheeverse/lychee-action@v2
-      with:
-        args: >-
-          --offline --include-fragments --no-progress
-          --exclude-path node_modules --exclude-path dist-electron
-          './**/*.md'
-        fail: true
-
-    - name: Wait before checking links again
-      if: steps.links.outcome == 'failure'
-      run: sleep 20
-
-    - name: Check markdown links again
-      if: steps.links.outcome == 'failure'
-      uses: lycheeverse/lychee-action@v2
-      with:
-        args: >-
-          --offline --include-fragments --no-progress
-          --exclude-path node_modules --exclude-path dist-electron
-          './**/*.md'
-        fail: true
+      run: >-
+        "$RUNNER_TEMP/lychee/lychee"
+        --offline --include-fragments --no-progress
+        --exclude-path node_modules --exclude-path dist-electron
+        './**/*.md'
 
   # The smoke suites run beside quality-checks in three jobs. The two browser
   # shards split the minimal suite, which loads the renderer from Vite with a
@@ -465,7 +463,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
     - name: Finish main process type checking
       if: ${{ !cancelled() && matrix.shard == 1 }}
