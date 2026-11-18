@@ -54,6 +54,13 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   first, and keep refits hidden behind its loading overlay (`isRefreshing`).
 - UI: theme tokens only; swapping indicators share a fixed-size box; animations
   on one surface share a period.
+- Unit test cleanup: Vitest runs many test files in one worker, in shuffled
+  order. A test file leaves the process as it found it: real timers,
+  `process.env` (use `vi.stubEnv`), globals (use `vi.stubGlobal`), the working
+  directory and `process` listeners. The setup files
+  (`main/src/test/setup.ts`, `frontend/src/test/setup.ts`) reset modules
+  between files and fail any file that leaves this state behind. To replay a
+  run's order, pass the seed it prints: `vitest run --sequence.seed=<seed>`.
 - Errors say what happened, why, what changed, and the next step: throw
   `PaneError` (main) or `RunpaneError` (CLI) with a `code` and `next`. See
   [How Pane reports errors](CONTRIBUTING.md#how-pane-reports-errors).
