@@ -35,7 +35,7 @@ import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
-import { usePageTextFind } from '../find/usePageTextFind';
+import { useSurfaceFind } from '../find/surfaceFind';
 import { takeLaunchDraft } from '../../utils/launchOutline';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
@@ -233,7 +233,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const viewportRef = useRef<HTMLDivElement>(null);
   // ⌘F searches the whole loaded conversation and the cards docked under it (approvals, questions).
   const findRootRef = useRef<HTMLDivElement>(null);
-  usePageTextFind(panelId, findRootRef);
+  useSurfaceFind(panelId, findRootRef);
   const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length, !!snapshot.hasNewer);
   const onViewportScroll = () => {
     recordAnchor();
