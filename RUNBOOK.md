@@ -220,10 +220,18 @@ interactive `mcp-publisher login github` cannot publish to an organization
 namespace. Check the listing with
 `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=runpane"`.
 
-`CI result` is the check branch protection requires. It fails if another
-`Code Quality` job fails or is cancelled, except Markdown Links, which it does
-not wait for. It is the only check a merge waits
-for; how to merge a pull request or a stack is in
+`CI result` is the check branch protection requires. It runs even when the
+run is cancelled, and passes only when every `Code Quality` job named in
+`scripts/ci-gate.mjs` `EXPECTED_JOBS` succeeded, or skipped with a reason from
+the manifest that Detect changed areas writes (a pull request that changes no
+wrapper, main or relay files skips those jobs). A job that fails, is
+cancelled, is skipped without a reason, or is missing from the workflow or
+from `CI result`'s needs fails it, and so does a `Code Quality` job the list
+does not name. Add a new job to `EXPECTED_JOBS` and to `CI result`'s needs in
+the same change; `scripts/ci-gate.test.mjs` (run by Type Check and Lint, and
+by `node --test scripts/ci-gate.test.mjs` locally) checks they match the
+workflow. It is the only check a merge waits for; how
+to merge a pull request or a stack is in
 [CONTRIBUTING.md](CONTRIBUTING.md#merging).
 
 `node scripts/ci-timings.mjs --since <date> --until <time>` writes
@@ -231,7 +239,10 @@ for; how to merge a pull request or a stack is in
 of every successful run of the CI, release and deploy workflows in that window,
 annotated with the CI speed PRs each run contains. It reads the API through
 `gh` and caches each run's jobs, so a re-run of the same window makes only the
-listing calls.
+listing calls. `--run <id> --attempt <n>` records a single run attempt
+instead: each job's head SHA, runner, and waiting, setup, running and teardown
+seconds. `CI result` writes that record to its job summary and log on every
+`Code Quality` run.
 
 ## Recovery and rollback
 
