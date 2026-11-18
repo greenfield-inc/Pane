@@ -12,7 +12,6 @@ import type { Session } from '../types/session';
 import type { SessionManager } from './sessionManager';
 import type { ToolPanel } from '../../../shared/types/panels';
 import { TaskQueue } from './taskQueue';
-import type { CreateSessionQueueResult, SessionCreationJob } from './taskQueue';
 import { WorktreeManager } from './worktreeManager';
 import { worktreePoolManager } from './worktreePoolManager';
 import { panelManager } from './panelManager';

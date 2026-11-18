@@ -60,7 +60,7 @@ function run(cmd, options = {}) {
       shell: true,
       ...options
     });
-  } catch (error) {
+  } catch {
     if (!options.ignoreError) {
       console.error(`Command failed: ${cmd}`);
       process.exit(1);

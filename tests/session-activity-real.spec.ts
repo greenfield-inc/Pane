@@ -20,8 +20,6 @@ interface Ref { paneId: string; panelId: string }
 
 /** The installed agent, not a shim from the repository's node_modules that the test runner puts first on PATH. */
 const installed = (name: string) => execFileSync('which', ['-a', name], { encoding: 'utf8' }).split('\n').find(entry => entry && !entry.includes('node_modules')) ?? name;
-interface Change { state: string; at: number }
-
 test.skip(process.env.SESSION_ACTIVITY_REAL !== '1', 'Spends real model turns; set SESSION_ACTIVITY_REAL=1 to run it.');
 
 async function screen(pane: IsolatedPane, panelId: string): Promise<string> {

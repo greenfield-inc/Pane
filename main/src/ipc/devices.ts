@@ -2,7 +2,7 @@ import type { IpcMain } from 'electron';
 import os from 'os';
 import path from 'path';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
-import type { DeviceCapture, DeviceControls, DeviceDriver, DeviceInput, DeviceLogPage, DeviceMac, DeviceRecording, DeviceOrientation, DevicePosture, DeviceOpenMarker, DevicePanelState, DevicePlatform, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
+import type { DeviceCapture, DeviceControls, DeviceInput, DeviceLogPage, DeviceMac, DeviceRecording, DeviceOrientation, DevicePosture, DeviceOpenMarker, DevicePanelState, DevicePlatform, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
 import type { MachineConnections } from '../services/machineConnections';
 import { DEFAULT_DEVICE_SETTINGS } from '../../../shared/types/devices';
 import type { ToolPanel } from '../../../shared/types/panels';

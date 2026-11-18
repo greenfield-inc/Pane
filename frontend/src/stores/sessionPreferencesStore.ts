@@ -87,11 +87,11 @@ export const useSessionPreferencesStore = create<SessionPreferencesStore>((set, 
       ...allowedUpdates,
       selectedTools: {
         ...currentPreferences.selectedTools,
-        ...(allowedUpdates.selectedTools || {})
+        ...allowedUpdates.selectedTools
       },
       claudeConfig: {
         ...currentPreferences.claudeConfig,
-        ...(allowedUpdates.claudeConfig || {})
+        ...allowedUpdates.claudeConfig
       },
       sessionCount: defaultPreferences.sessionCount
     };

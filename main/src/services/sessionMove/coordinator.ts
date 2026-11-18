@@ -6,7 +6,7 @@ import path from 'path';
 import { promisify } from 'util';
 import { app } from 'electron';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import {
   SESSION_MOVE_FEATURE,
   SESSION_MOVE_MANIFEST_VERSION,

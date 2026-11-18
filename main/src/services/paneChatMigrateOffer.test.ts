@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import {
   getPaneChatPanelId,
   ONBOARDING_HANDOFF_PREFERENCE,

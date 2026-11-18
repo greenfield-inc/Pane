@@ -8,7 +8,7 @@ import { PaneCommandRegistry, type PaneCommandValue } from './commandRegistry';
 import { GlassesAccess } from './glassesAccess';
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
 import { hashRemoteDaemonToken } from './auth';
-import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { GLASSES_COMMANDS } from '../../../shared/types/glasses';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 

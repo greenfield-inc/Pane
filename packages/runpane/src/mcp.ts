@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs';
 import { setFlagsFromString } from 'node:v8';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
 import { loadDocs } from './docs';
-import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildMcpTools, buildToolArgv, CONFIRM_FLAG, type McpTool } from './mcpTools';
 import { ProtocolError, ProtocolErrorCode, Server, serveStdio, StdioServerTransport, type AuthInfo, type JSONRPCMessage, type McpRequestContext } from './mcpSdk';
 import { getWrapperVersion } from './version';

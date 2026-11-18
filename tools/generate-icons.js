@@ -83,7 +83,7 @@ async function generateIcons() {
     const icoBuffer = await pngToIco(pngBuffers);
     fs.writeFileSync(path.join(outputDir, 'icon.ico'), icoBuffer);
     console.log('✅ icon.ico (sizes:', sizes.ico.join(', '), ')');
-  } catch (error) {
+  } catch {
     console.log('⚠️  png-to-ico not installed. Installing...');
     console.log('   Run: pnpm add -D png-to-ico');
     console.log('   Then run this script again.');
@@ -151,7 +151,7 @@ async function generateIcons() {
     const faviconIco = await pngToIco(faviconBuffers);
     fs.writeFileSync(path.join(faviconDir, 'favicon.ico'), faviconIco);
     console.log('✅ favicon.ico (16, 32, 48)');
-  } catch (error) {
+  } catch {
     console.log('⚠️  Skipped favicon.ico (png-to-ico not available)');
   }
 

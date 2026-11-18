@@ -121,8 +121,9 @@ jobs:
         }
 
   # Type checking and lint get their own runner: beside the unit tests they
-  # competed for its CPUs and slowed the tests by about 30s. They run in
-  # parallel here; the Finish steps print each output and fail on errors.
+  # competed for its CPUs and slowed the tests by about 30s. Oxlint runs
+  # first, alone, then the type check, the lint checks and Knip run in parallel; the Finish steps print
+  # each output and fail on errors.
   typecheck-lint:
     name: Type Check and Lint
     runs-on: ubuntu-latest
@@ -137,19 +138,34 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
+    # Oxlint runs alone first: beside the type check it shared the 4 CPUs and
+    # took 21-23s. The other lint:code checks run with the type check.
+    - name: Lint
+      run: scripts/ci-background.sh start lint node scripts/oxlint.mjs && scripts/ci-background.sh wait lint
+
     - name: Start type checking
+      if: ${{ !cancelled() }}
       run: scripts/ci-background.sh start typecheck pnpm typecheck
 
-    - name: Start consolidated lint harness
-      run: scripts/ci-background.sh start lint pnpm lint
+    - name: Start lint checks
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh start lint-checks sh -c 'pnpm lint:ox:boundary-conformance && pnpm lint:agent-facts'
+
+    - name: Start dead-code check
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh start deadcode pnpm deadcode
 
     - name: Finish type checking
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait typecheck
 
-    - name: Finish consolidated lint harness
+    - name: Finish dead-code check
       if: ${{ !cancelled() }}
-      run: scripts/ci-background.sh wait lint
+      run: scripts/ci-background.sh wait deadcode
+
+    - name: Finish lint checks
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh wait lint-checks
 
     # CI result's gate and its contract with this file (expected jobs, needs,
     # skip manifest). Here rather than in CI result, which runs it every time

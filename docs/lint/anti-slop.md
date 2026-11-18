@@ -29,9 +29,7 @@ regressions in the root lint command.
 | `no-unsafe-dictionary-type` | 192/51 | blocking | Dictionary contracts use bounded keys or validated JSON objects. |
 | `require-safety-comment-for-type-assertion` | 1,249/177 | blocking | Remaining necessary assertions document their checked invariant. |
 
-Run `pnpm lint` for the blocking policy. `pnpm lint:ox:extra` and
-`pnpm lint:ox:extra:details` remain available as harness checks, but no rules
-remain in the advisory lane.
+Run `pnpm lint` for the blocking policy.
 
 ## Root cause policy
 
