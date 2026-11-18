@@ -367,6 +367,11 @@ export interface NotifyItem extends NotifyQuestion {
   staleSince?: number;
   /** A worker's question its orchestrator still has first call on: it shows, but doesn't ring yet. */
   quiet?: boolean;
+  /**
+   * A worker's question only: the `runpane inbox` item it answers now, when the worker re-asked it in
+   * a newer report after the card was made. Absent while it answers the item it was made from.
+   */
+  reportId?: string;
   /** Autopilot rewrote an unclear item: this item is the rewrite of that one. */
   rewrittenFrom?: { id: string; title: string; qn?: string };
   /** Autopilot rewrote this item: it closed in favour of that one. */

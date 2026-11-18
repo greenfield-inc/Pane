@@ -88,6 +88,10 @@ export interface SessionInboxEnded {
   how: 'acked' | 'moved-on';
   /** The D-n the orchestrator recorded, with `inbox ack --decision`. */
   decision?: string;
+  /** `moved-on`: the question the item asked, when it asked one. */
+  question?: string;
+  /** `moved-on`: the worker's newer item in the same Session, which its card may carry over to. */
+  next?: RunpaneInboxItem;
 }
 
 /** What the inbox keeps in the table: its rows and its place in the journal. */
@@ -209,7 +213,8 @@ export class SessionInbox {
     const panelId = entry.panelId;
     if (!panelId || entry.replay || entry.baseline) return;
     let next = this.items;
-    const movedOn = new Set<string>();
+    // Each replaced item, and the item that replaced it in its Session.
+    const movedOn = new Map<string, RunpaneInboxItem | undefined>();
     if (UNBLOCKING_KINDS.includes(entry.kind)) {
       next = next.filter(item => !(item.kind === 'blocked' && item.panelId === panelId));
     }
@@ -217,12 +222,13 @@ export class SessionInbox {
     if (kind) {
       for (const sessionId of this.options.sessionIdsFor(entry.paneId, panelId)) {
         const superseded: readonly RunpaneInboxItemKind[] = SUPERSEDES[kind];
+        const fresh = this.itemFor(entry, panelId, sessionId, kind);
         next = next.filter(item => {
           const replaced = item.sessionId === sessionId && item.panelId === panelId && superseded.includes(item.kind);
-          if (replaced) movedOn.add(item.id);
+          if (replaced) movedOn.set(item.id, fresh);
           return !replaced;
         });
-        next = [...next, this.itemFor(entry, panelId, sessionId, kind)];
+        next = [...next, fresh];
         next = trimSession(next, sessionId, this.options.itemsPerSession());
       }
     }
@@ -254,7 +260,7 @@ export class SessionInbox {
     return item;
   }
 
-  private replace(items: RunpaneInboxItem[], options: { requireDurable?: boolean; how?: SessionInboxEnded['how']; ended?: Set<string>; decision?: string } = {}): void {
+  private replace(items: RunpaneInboxItem[], options: { requireDurable?: boolean; how?: SessionInboxEnded['how']; ended?: Map<string, RunpaneInboxItem | undefined>; decision?: string } = {}): void {
     const previous = this.items;
     this.items = items;
     try {
@@ -274,7 +280,8 @@ export class SessionInbox {
       for (const item of previous) {
         if (kept.has(item.id)) continue;
         // Trimmed for space is not a worker moving on: its card stays until its asker is gone.
-        if (options.how === 'acked' || options.ended?.has(item.id)) this.emitEnded({ id: item.id, how: options.how, decision: options.decision });
+        if (options.how === 'acked') this.emitEnded({ id: item.id, how: 'acked', decision: options.decision });
+        else if (options.ended?.has(item.id)) this.emitEnded(movedOnFrom(item, options.ended.get(item.id), kept));
       }
     }
     for (const listener of [...this.listeners]) listener();
@@ -314,6 +321,15 @@ export class SessionInbox {
       this.store.setMeta(GENERATION_KEY, String(this.generation));
     });
   }
+}
+
+/** A worker's newer item replaced this one: says what it asked, and what replaced it if it is still held. */
+function movedOnFrom(item: RunpaneInboxItem, next: RunpaneInboxItem | undefined, kept: Set<string>): SessionInboxEnded {
+  const ended: SessionInboxEnded = { id: item.id, how: 'moved-on' };
+  const question = item.report?.question?.trim();
+  if (question) ended.question = question;
+  if (next && kept.has(next.id)) ended.next = structuredClone(next);
+  return ended;
 }
 
 function trimSession(items: RunpaneInboxItem[], sessionId: string, limit: number): RunpaneInboxItem[] {
