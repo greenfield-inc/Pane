@@ -1091,6 +1091,8 @@ export class NotifyQueue extends EventEmitter {
     item.answerSummary = undefined;
     item.answeredBy = undefined;
     item.delivered = undefined;
+    // It asks again, so a Dismiss from before no longer holds (as Reopen and Undo).
+    item.dismissedAt = undefined;
     // An answer still waiting for the next --resume is no longer the answer.
     entry.pending = undefined;
     this.queue = [item.id, ...this.queue.filter(other => other !== item.id)];

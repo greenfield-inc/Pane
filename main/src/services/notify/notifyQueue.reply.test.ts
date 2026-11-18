@@ -213,6 +213,21 @@ describe('NotifyQueue replies (the reply contract)', () => {
     expect(item(queue, 'q20')).toMatchObject({ version: 2 });
   });
 
+  it('a dismissed card reopened by --took question counts as open for its Session again, and the row says so', async () => {
+    const queue = restoredQ20();
+    queue.run({ type: 'dismiss', id: 'q20' });
+    expect(item(queue, 'q20')?.dismissedAt).toBeDefined();
+    expect(store.readItem('q20')?.dismissedAt).toBeDefined();
+    queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Can it be undone?' } });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(item(queue, 'q20')).toMatchObject({ state: 'answered', reply: { state: 'answer' } });
+
+    queue.took({ panelId: 'orch' }, 'Q-20', 'question');
+    expect(item(queue, 'q20')).toMatchObject({ state: 'waiting', reply: { state: 'question' } });
+    expect(item(queue, 'q20')?.dismissedAt).toBeUndefined();
+    expect(store.readItem('q20')?.dismissedAt).toBeUndefined();
+  });
+
   it('J7: --took question, then --update makes v2 with the question, what changed and v1 kept', async () => {
     const queue = restoredQ20();
     queue.run({ type: 'answer', id: 'q20', answer: { picks: [], text: 'Can the switch be turned off again if the test goes badly?' } });

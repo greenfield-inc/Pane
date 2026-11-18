@@ -53,6 +53,23 @@ describe('NotifyQueue', () => {
     expect(queue.snapshot().items.map(item => item.source.panelId)).toEqual(['panel-2']);
   });
 
+  it('a dismissed card passes the move check, then ends like any other when the move pauses its tab', async () => {
+    const { queue } = makeQueue();
+    const dismissed = ask(queue, sessionStore, claude);
+    const id = onlyId(queue);
+    queue.run({ type: 'dismiss', id });
+    // Still waiting, so the tab still has a card; the move check (isOpenForSession) leaves it out.
+    expect(queue.hasOpenFor(['panel-1'])).toBe(true);
+
+    // The move stops the source tab: the asker hears its question went unanswered, and the card leaves Notify.
+    queue.withdrawForPanels(['panel-1']);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dismissed.result).toMatchObject({ unavailable: 'Its tab was paused in Pane.' });
+    expect(queue.snapshot().items).toEqual([]);
+    expect(queue.snapshot().queue).toEqual([]);
+    expect(queue.snapshot().hidden).toEqual([]);
+  });
+
   it('shows one question at a time, oldest first, and the next one after an answer', async () => {
     const { queue } = makeQueue();
     const first = ask(queue, sessionStore, claude);

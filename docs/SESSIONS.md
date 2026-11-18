@@ -505,7 +505,9 @@ Pane then packs, sends and rebuilds the Session:
   still names the old paths (conversation history keeps them);
 - terminal tabs keep their scrollback. Open approvals don't move yet: the
   check asks you to answer them first. One you dismissed doesn't count as open
-  and doesn't hold the move back; it stays behind in this machine's Approvals.
+  and doesn't hold the move back. When the move stops the tab that asked it,
+  it ends like any question whose asker stopped: the agent hears it went
+  unanswered, and the card leaves Approvals. Answer it first if it matters.
 
 Until it starts, the Session shows as "Arriving from <machine>" there. Once
 this machine has frozen its copy (shown as "Moving to <machine>"), the other
