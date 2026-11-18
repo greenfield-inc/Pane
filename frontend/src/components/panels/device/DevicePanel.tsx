@@ -17,9 +17,14 @@ import { captureName, clock, copyImage, deliverCapture, deliverText, saveImage, 
 import { CaptureCard, DriverChip } from './DeviceToolViews';
 import { agentTabOf } from '../../../../../shared/deviceAgentTab';
 import { DeviceClientContext, desktopDeviceClient, type DeviceTabClient } from './deviceClient';
+import { DeviceScreenSkeleton } from './DeviceScreenSkeleton';
+import { useSkeletonHold } from '../../ui/Skeleton';
 
 /** The tab's screen size when the device has not sent a frame yet (iPhone 17 Pro points). */
 const DEFAULT_ASPECT = { ios: 402 / 874, android: 412 / 915 } satisfies Record<DevicePanelState['platform'], number>;
+
+/** Each tab's screen shape as its last frame showed it, so the tab mounted again opens in that shape. */
+const screenAspects = new Map<string, number>();
 
 export interface DevicePanelProps {
   panel: ToolPanel;
@@ -52,12 +57,13 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const agentTab = useMemo(() => agentTabOf(panels ?? storePanels ?? [], state.openedBy), [panels, storePanels, state.openedBy]);
   const lastFrame = useLastFrame(client, panel.id, state.deviceId, !live && state.phase !== 'booting' && state.phase !== 'installing');
   // The screen's shape as its frames show it, so landscape, an iPad or a folded phone fit uncropped.
-  const [aspect, setAspect] = useState<number>(DEFAULT_ASPECT[state.platform]);
+  const [aspect, setAspect] = useState<number>(() => screenAspects.get(panel.id) ?? DEFAULT_ASPECT[state.platform]);
   const onScreenSize = useCallback((width: number, height: number) => {
     if (width <= 0 || height <= 0) return;
     const next = width / height;
+    screenAspects.set(panel.id, next);
     setAspect(current => (Math.abs(current - next) / current < 0.01 ? current : next));
-  }, []);
+  }, [panel.id]);
   const root = useRef<HTMLDivElement>(null);
   const narrow = useNarrow(root);
 
@@ -77,6 +83,10 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const shown = live && isActive && pageVisible;
   const streaming = live && isActive && client.streamUrl !== undefined && state.platform === 'ios';
   const [controls, frameRate, refreshControls] = useDeviceStatus(client, panel.id, shown, streaming);
+  // Booting (or reaching a linked Mac), then until the screen paints its first frame: a skeleton.
+  const [painted, setPainted] = useState(false);
+  const skeletonChain = `device:${panel.id}`;
+  const screenHold = useSkeletonHold(state.phase === 'booting' || (live && isActive && !painted), skeletonChain);
   const send = useCallback((input: DeviceInput) => { void client.input(panel.id, input).catch(() => undefined); }, [client, panel.id]);
   const act = useCallback((input: DeviceInput) => run(input.kind, async () => {
     await client.input(panel.id, input);
@@ -216,10 +226,13 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
               />
             </DeviceCaption>
           )}>
-            {live && isActive ? <LiveScreen client={client} panelId={panel.id} platform={state.platform} onScreenSize={onScreenSize} onInput={send} /> : (
+            {live && isActive ? <LiveScreen client={client} panelId={panel.id} platform={state.platform} onScreenSize={onScreenSize} onPainted={setPainted} onInput={send} /> : (
               <div className="absolute inset-0 bg-device-screen">
                 {lastFrame && <img src={lastFrame} alt="" className="h-full w-full object-contain opacity-60" onLoad={(event) => onScreenSize(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />}
               </div>
+            )}
+            {(screenHold.holding || screenHold.reveal) && (
+              <DeviceScreenSkeleton chain={skeletonChain} label={state.phase === 'booting' ? `Booting ${state.name}` : `Connecting to ${state.name}`} fading={!screenHold.holding} />
             )}
             <PhaseOverlay state={state} busy={busy} onBoot={() => run('boot', () => client.power(panel.id, 'boot'))} onTakeOver={() => run('take-over', () => client.takeOver(panel.id))} />
           </PhoneFrame>
@@ -515,7 +528,7 @@ const STREAM_RESIZE_SETTLE_MS = 400;
  * renderer; on another computer it is frames read over the connection, about twice a second.
  * Pointer events become normalized touches on the drawn image; moves are sent once a frame.
  */
-function LiveScreen({ client, panelId, platform, onScreenSize, onInput }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; onScreenSize: (width: number, height: number) => void; onInput: (input: DeviceInput) => void }) {
+function LiveScreen({ client, panelId, platform, onScreenSize, onPainted, onInput }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; onScreenSize: (width: number, height: number) => void; onPainted: (painted: boolean) => void; onInput: (input: DeviceInput) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const streamPx = useStreamPx(box);
   // Simulators stream MJPEG where the client can; an emulator's screen comes as frames.
@@ -525,9 +538,16 @@ function LiveScreen({ client, panelId, platform, onScreenSize, onInput }: { clie
   // A hidden window drops the stream, which closes its connection; the last polled frame stays.
   const pageVisible = usePageVisible();
   const src = stream ? (pageVisible ? stream : undefined) : polled;
+  // Painted once the image has a frame; not while it has no source, nor once this screen is gone.
+  useEffect(() => { if (!src) onPainted(false); }, [src, onPainted]);
+  useEffect(() => () => onPainted(false), [onPainted]);
+  const onFrameSize = useCallback((width: number, height: number) => {
+    if (width > 0 && height > 0) onPainted(true);
+    onScreenSize(width, height);
+  }, [onPainted, onScreenSize]);
   return (
     <div ref={box} className="absolute inset-0 bg-device-screen">
-      {src && <TouchScreen client={client} panelId={panelId} platform={platform} src={src} onScreenSize={onScreenSize} onInput={onInput} />}
+      {src && <TouchScreen client={client} panelId={panelId} platform={platform} src={src} onScreenSize={onFrameSize} onInput={onInput} />}
     </div>
   );
 }
@@ -636,11 +656,11 @@ function TouchScreen({ client, panelId, platform, src, onScreenSize, onInput }: 
   );
 }
 
-/** What covers the screen when it is not live: installing, booting, off, in use, closed, failed. */
+/** What covers the screen when it is not live: installing, off, in use, closed, failed. Booting shows the skeleton. */
 function PhaseOverlay({ state, busy, onBoot, onTakeOver }: { state: DevicePanelState; busy?: string; onBoot: () => void; onTakeOver: () => void }) {
   const copy = devicePhaseCopy(state);
   if (state.phase === 'live' || !copy) return null;
-  const dark = state.phase === 'installing' || state.phase === 'booting';
+  const dark = state.phase === 'installing';
   const icon = state.phase === 'in-use' ? <Lock className="h-5 w-5" /> : dark ? <Loader2 className="h-5 w-5 animate-spin" /> : <Power className="h-5 w-5" />;
   return (
     <div

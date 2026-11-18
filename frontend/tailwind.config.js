@@ -79,6 +79,7 @@ const config = {
           'bezel': 'var(--color-device-bezel)',
           'screen': 'var(--color-device-screen)',
           'screen-text': 'var(--color-device-screen-text)',
+          'bone': 'var(--color-device-bone)',
         },
         'bg': {
           'primary': 'var(--color-bg-primary)',

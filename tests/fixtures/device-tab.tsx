@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DEFAULT_AGENT_ID, agentLabel } from '../../shared/agents';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
@@ -66,9 +67,15 @@ const portrait = screen();
 // ?shape=landscape starts turned; qaRotate() turns the device mid-session.
 let frame = params.get('shape') === 'landscape' ? landscape : portrait;
 window.qaRotate = () => { frame = landscape; };
+// ?firstFrame=<ms> holds the first frame that long, as a device still connecting does.
+const firstFrameAt = performance.now() + Number(params.get('firstFrame') ?? 0);
 const client: DeviceTabClient = {
   clientId: 'fixture',
-  frame: async () => frame,
+  frame: async () => {
+    const wait = firstFrameAt - performance.now();
+    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    return frame;
+  },
   controls: async () => controls,
   capture: async (_panel, image) => ({ path: '/tmp/pane/devices/screenshots/pane-1.png', dataUrl: image ?? frame }),
   stage: async (_panel, agentPanelId, text) => { window.qaStaged.push(`${agentPanelId}:${text}`); },
@@ -150,8 +157,27 @@ if (params.get('fold')) {
   paneState.os = 'Android 16';
 }
 
+/** ?view=boot: the tab boots for ?boot=<ms>, then goes live. */
+function BootingTab() {
+  const [phase, setPhase] = useState<DevicePanelPhase>('booting');
+  useEffect(() => {
+    const timer = setTimeout(() => setPhase('live'), Number(params.get('boot') ?? 1000));
+    return () => clearTimeout(timer);
+  }, []);
+  return <DevicePanel panel={devicePanel('device', { ...paneState, phase })} panels={[agentPanel]} isActive />;
+}
+
 const root = createRoot(document.getElementById('root')!);
-if (params.get('view') === 'states') {
+if (params.get('view') === 'boot') {
+  root.render(
+    <DeviceClientContext.Provider value={client}>
+      <div className="flex bg-bg-primary" style={{ height: '100vh' }}>
+        <div className="border-r border-border-primary" style={{ width: 560, height: '100%' }}><ChatTabPanel panelId="chat" client={chatClient} actions={actions} /></div>
+        <div className="flex-1"><BootingTab /></div>
+      </div>
+    </DeviceClientContext.Provider>,
+  );
+} else if (params.get('view') === 'states') {
   root.render(
     <DeviceClientContext.Provider value={client}>
       <div className="grid grid-cols-4 gap-3 bg-bg-secondary p-3" style={{ width: 1600 }}>

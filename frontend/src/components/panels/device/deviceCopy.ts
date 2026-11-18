@@ -11,13 +11,11 @@ export interface DevicePhaseCopy {
   action?: 'boot' | 'take-over';
 }
 
-/** The words that cover the screen in each state the device tab can be in. */
+/** The words that cover the screen in each state the device tab can be in; booting has none (a skeleton). */
 export function devicePhaseCopy(state: Pick<DevicePanelState, 'phase' | 'name' | 'heldBy'>): DevicePhaseCopy | undefined {
   switch (state.phase) {
     case 'installing':
       return { title: 'Installing device tools', detail: 'First use on this computer. This takes about a minute.' };
-    case 'booting':
-      return { title: `Booting ${state.name}` };
     case 'off':
       return { title: 'Shut down after 10 minutes idle', action: 'boot' };
     case 'closed':
