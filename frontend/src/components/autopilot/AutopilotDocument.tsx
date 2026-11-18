@@ -4,6 +4,7 @@ import type { AutopilotDocument as AutopilotDocumentContent } from '../../../../
 import { SHARED_BROWSER_PARTITION } from '../../../../shared/constants/browserPartitions';
 import { guestColorSchemeScript } from './guestColorScheme';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
+import { cn } from '../../utils/cn';
 
 /**
  * A page shown in a stack tab keeps Pane's scrollbars (D-70): the theme's own scrollbar tokens,
@@ -73,6 +74,40 @@ export function AutopilotWebPage({ src, title }: { src: string; title: string })
   );
 }
 
+/**
+ * An image shown big (a to-do's screenshot, an Autopilot image): fitted to the space, centered on
+ * a neutral backdrop; a click shows it at its actual size, scrolling, and another fits it again.
+ */
+export function FittedImage({ src, label }: { src: string; label: string }) {
+  const [actual, setActual] = useState(false);
+  const toggle = () => setActual((current) => !current);
+  return (
+    <div className="relative min-h-0 flex-1 bg-surface-secondary" data-testid="autopilot-image-doc" data-fit={actual ? 'actual' : 'contain'}>
+      {/* A div, not a <button>: at actual size it is the scroll box. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } }}
+        aria-pressed={actual}
+        aria-label={actual ? `Fit ${label} to the space` : `Show ${label} at actual size`}
+        title={actual ? 'Fit' : 'Actual size'}
+        className={cn('absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-interactive', actual ? 'cursor-zoom-out overflow-auto' : 'cursor-zoom-in overflow-hidden')}
+      >
+        {actual ? (
+          <span className="grid min-h-full w-max min-w-full place-items-center p-4">
+            <img src={src} alt={label} className="block max-w-none" draggable={false} />
+          </span>
+        ) : (
+          <span className="flex h-full w-full items-center justify-center p-4">
+            <img src={src} alt={label} className="block max-h-full max-w-full object-contain" draggable={false} />
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Line widths (percent) of the text a document opens to; 0 is a blank line. */
 const DOC_LINES = [38, 0, 92, 86, 71, 0, 88, 94, 63, 0, 45, 90, 82, 57, 0, 91, 76];
 
@@ -110,9 +145,7 @@ export function AutopilotDocument({ path, label }: { path: string; label: string
       </>
     }>
       {content?.kind === 'html' ? <AutopilotWebPage src={content.url} title={label} /> : content?.kind === 'image' ? (
-        <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto p-4" data-testid="autopilot-image-doc">
-          <img src={content.dataUrl} alt={label} className="max-w-full rounded-md border border-border-primary" />
-        </div>
+        <FittedImage src={content.dataUrl} label={label} />
       ) : content?.kind === 'text' && (
         <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="autopilot-text-doc">
           {content.text}

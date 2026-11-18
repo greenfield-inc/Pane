@@ -5,6 +5,9 @@ import { selectNotifyItems, useNotifyStore } from '../../../../stores/notifyStor
 import { useNow } from '../../../notify/useNow';
 import { ApprovalCard, CommentCard, EventFold, EventLine, RunCard, type ThreadContext } from './ThreadCards';
 import { todoMidTurnTabs, todoThreadApprovals } from './threadInputs';
+import { sendFilesToComposer, useFileDropZone } from './useThreadSend';
+import { todosApi } from '../../../../stores/todosStore';
+import { cn } from '../../../../utils/cn';
 
 export interface TodoThreadProps {
   detail: TodoDetail;
@@ -43,11 +46,16 @@ export function TodoThread({ detail, openApprovalId, onOpenApproval, onOpenAttac
   const now = useNow();
   const [open, toggle] = useOpenKeys();
   const ctx: ThreadContext = { detail, now, openApprovalId, onOpenApproval, onOpenAttachment };
+  const number = detail.todo.number;
+  const toComposer = useCallback((files: File[]) => sendFilesToComposer(number, files), [number]);
+  const drop = useFileDropZone(toComposer, todosApi()?.files !== undefined);
   return (
-    <section aria-label="Activity" data-testid="todo-chat" data-items={items.length}>
+    <section aria-label="Activity" onDragOver={drop.onDragOver} onDragLeave={drop.onDragLeave} onDrop={drop.onDrop}
+      className={cn('rounded-[10px] outline-offset-4', drop.dragging && 'outline-dashed outline-2 outline-border-interactive')}
+      data-testid="todo-chat" data-items={items.length} data-dragging={drop.dragging || undefined}>
       <div className="mb-1.5 mt-[22px] text-[11px] font-semibold uppercase tracking-[0.06em] text-text-tertiary" data-testid="todo-chat-divider">Activity</div>
       {items.map((item) => {
-        if (item.kind === 'event') return <EventLine key={item.key} event={item.event} ctx={ctx} />;
+        if (item.kind === 'event') return <EventLine key={item.key} event={item.event} ctx={ctx} attachedImage={item.attachedImage} />;
         if (item.kind === 'fold') return <EventFold key={item.key} fold={item.fold} open={open.has(item.key)} onToggle={() => toggle(item.key)} ctx={ctx} />;
         if (item.kind === 'run') return <RunCard key={item.key} run={item.run} open={open.has(item.key)} onToggle={() => toggle(item.key)} ctx={ctx} />;
         if (item.kind === 'comment') return <CommentCard key={item.key} comment={item.comment} ctx={ctx} />;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TodoActivity } from '../../../../../../shared/types/todos';
-import { buildTodoThread, eventPhrase, type TodoThreadApproval, type TodoThreadInput, type TodoThreadItem } from '../../../../../../shared/todoThread';
+import { buildTodoThread, commentAttachments, eventPhrase, imageAttachLabel, isImageFile, type TodoThreadApproval, type TodoThreadInput, type TodoThreadItem } from '../../../../../../shared/todoThread';
 
 let nextId = 1;
 let clock = 1_000;
@@ -25,7 +25,7 @@ function outline(items: readonly TodoThreadItem[]): string[] {
     if (item.kind === 'fold') return `fold:${item.fold.events.length}`;
     if (item.kind === 'approval') return `approval:${item.approval.id}`;
     if (item.kind === 'comment') return `comment:${item.comment.activity.authorKind}`;
-    return 'event';
+    return item.attachedImage ? `image:${item.attachedImage}` : 'event';
   });
 }
 
@@ -191,5 +191,63 @@ describe('eventPhrase', () => {
     expect(eventPhrase('T-13 done: fonts')).toBe('T-13 done');
     expect(eventPhrase('Pane attached pr: PR #7')).toBe('Pane attached pr');
     expect(eventPhrase('A very long event line that keeps going well past the width a fold label can hold')).toMatch(/…$/u);
+  });
+});
+
+describe('buildTodoThread: attached images', () => {
+  it('never folds an image attach event, and keeps an agent’s out of its run so it shows while the run is closed', () => {
+    const items = buildTodoThread(input([
+      event('Created by you'),
+      agent('p1', 'planner', 'Taking a screenshot'),
+      event('planner attached image: shot.png', { authorKind: 'agent', authorName: 'planner' }),
+      event('planner attached plan: Plan', { authorKind: 'agent', authorName: 'planner' }),
+      agent('p1', 'planner', 'Done'),
+      event('Queued: busy'),
+      event('You attached image: mock.png', { authorKind: 'person', authorName: 'you' }),
+      event('Load came down: resumed'),
+    ]));
+    expect(outline(items)).toEqual(['event', 'run:planner:3', 'image:shot.png', 'event', 'image:mock.png', 'event']);
+  });
+
+  it('folds an image attach event a comment names, since the comment shows the image', () => {
+    const items = buildTodoThread(input([
+      event('You attached image: paste-1.png', { authorKind: 'person', authorName: 'you' }),
+      event('Queued: busy'),
+      person('Look at this\n\nAttached paste-1.png: /Users/me/.pane/images/paste-1.png'),
+    ]));
+    expect(outline(items)).toEqual(['fold:2', 'comment:person']);
+  });
+});
+
+describe('commentAttachments', () => {
+  it('splits the composer’s trailing Attached lines into images and files, keeping the words', () => {
+    const body = 'Look at these\n\nAttached shot.png: /tmp/a/shot.png\n\nAttached notes.txt: /tmp/a/notes.txt\n\nAttached logo.SVG: C:\\work\\logo.SVG';
+    expect(commentAttachments(body)).toEqual({
+      text: 'Look at these',
+      images: [{ name: 'shot.png', path: '/tmp/a/shot.png' }, { name: 'logo.SVG', path: 'C:\\work\\logo.SVG' }],
+      files: [{ name: 'notes.txt', path: '/tmp/a/notes.txt' }],
+    });
+  });
+
+  it('leaves an Attached line in the middle of the words, or one without a full path, as text', () => {
+    const body = 'Attached a.png: /x/a.png\n\nthen more words\n\nAttached b.png: relative/b.png';
+    expect(commentAttachments(body)).toEqual({ text: body, images: [], files: [] });
+  });
+
+  it('reads a body that is only attachments as no words', () => {
+    expect(commentAttachments('Attached a.gif: /x/a.gif')).toEqual({ text: '', images: [{ name: 'a.gif', path: '/x/a.gif' }], files: [] });
+  });
+});
+
+describe('image helpers', () => {
+  it('knows image files by extension, as Pane attaches them', () => {
+    expect(['a.png', 'b.JPG', 'c.jpeg', 'd.gif', 'e.webp', 'f.svg'].every(isImageFile)).toBe(true);
+    expect(['a.pdf', 'b.html', 'png', 'c.png.txt'].some(isImageFile)).toBe(false);
+  });
+
+  it('reads the label from an image attach event only', () => {
+    expect(imageAttachLabel('planner attached image: shot.png')).toBe('shot.png');
+    expect(imageAttachLabel('You attached image: Receipt mock (opened beside you)')).toBe('Receipt mock');
+    expect(imageAttachLabel('planner attached plan: Plan')).toBeUndefined();
   });
 });

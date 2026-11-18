@@ -309,7 +309,7 @@ function itemLinkPaths(notify: Pick<NotifyService, 'queue'>): string[] {
 }
 
 const IMAGE_LIMIT_BYTES = 8 * 1024 * 1024;
-const IMAGE_TYPES = new Map([['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['gif', 'image/gif'], ['webp', 'image/webp']]);
+const IMAGE_TYPES = new Map([['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['gif', 'image/gif'], ['webp', 'image/webp'], ['svg', 'image/svg+xml']]);
 
 export function readDocument(manager: Pick<AutopilotManager, 'snapshot'>, file: string, options: { inline?: boolean; links?: () => string[] } = {}): AutopilotDocument {
   const { stack, run } = manager.snapshot();
@@ -324,6 +324,7 @@ export function readDocument(manager: Pick<AutopilotManager, 'snapshot'>, file: 
   const image = IMAGE_TYPES.get(path.extname(file).slice(1).toLowerCase());
   if (image) {
     // An image (a to-do's pasted screenshot, say) comes back as a data URL, which any screen can show.
+    // An SVG too: screens show it through <img>, which runs none of its scripts.
     if (stat.size > IMAGE_LIMIT_BYTES) return { kind: 'missing', path: file, message: `${path.basename(file)} is larger than 8 MiB; open it in Pane instead.` };
     return { kind: 'image', path: file, dataUrl: `data:${image};base64,${fs.readFileSync(file).toString('base64')}` };
   }

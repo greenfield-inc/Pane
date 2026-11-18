@@ -9,6 +9,7 @@ import { TodoStatusPill } from '../TodoStatusIcon';
 import { focusTodoTab, openTodoSession } from './todoNavigation';
 import { AgentAvatar, SectionAction, SectionLabel, SubTodoRows, agoText } from './TodoPageParts';
 import { ATTACHMENT_KIND_ICON, ATTACHMENT_KIND_LABEL, AttachField } from './TodoAttach';
+import { useAttachDrop } from './thread/useThreadSend';
 
 /** How an attachment came, when Pane attached it on its own. */
 const SOURCE_WORDS = {
@@ -165,8 +166,12 @@ function AttachmentsTab({ detail, openAttachmentId, onOpen, onAttached }: {
   const own = detail.attachments.find((group) => !group.from);
   const inherited = detail.attachments.filter((group) => group.from && group.attachments.length > 0);
   const total = detail.attachments.reduce((sum, group) => sum + group.attachments.length, 0);
+  // A file dropped here is attached to the to-do straight away (round 8, T-5).
+  const drop = useAttachDrop(detail.todo.number, onAttached);
   return (
-    <div data-testid="todo-attachments">
+    <div onDragOver={drop.onDragOver} onDragLeave={drop.onDragLeave} onDrop={drop.onDrop}
+      className={cn('-m-1.5 min-h-[120px] rounded-lg border-2 border-dashed p-1', drop.dragging ? 'border-border-interactive bg-interactive-surface' : 'border-transparent')}
+      data-testid="todo-attachments" data-dragging={drop.dragging || undefined}>
       <SectionLabel className="mt-0" action={attaching
         ? <AttachField number={detail.todo.number} onAttached={onAttached} onClose={() => setAttaching(false)} className="ml-2" />
         : <SectionAction label="Attach" onClick={() => setAttaching(true)} testId="todo-attach" />}>

@@ -1,10 +1,12 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import type { TodoDetail } from '../../../../../shared/types/todos';
 import { MarkdownPreview, type MarkdownImageProps } from '../../MarkdownPreview';
-import { todosApi, useTodosStore } from '../../../stores/todosStore';
+import { useTodosStore } from '../../../stores/todosStore';
+import { LoadingStatus } from '../../ui/Skeleton';
 import { cn } from '../../../utils/cn';
 import { COMPACT_MARKDOWN, SectionAction, SectionLabel, SubTodoRows } from './TodoPageParts';
+import { useTodoImageSource } from './thread/TodoImage';
 
 /** A description taller than this collapses behind "Show more" (J9). */
 const DESCRIPTION_CLAMP_PX = 150;
@@ -124,32 +126,15 @@ function SubTodos({ detail, onOpenTodo, canAdd, onAdd }: { detail: TodoDetail; o
 }
 
 /**
- * One image in a description. A web or data URL shows as is; a file path (a pasted screenshot is
- * saved as one and attached) is read through Pane, which serves files attached to a to-do.
+ * One image in a description, loaded as the thread's are (`useTodoImageSource`). It sits inside a
+ * paragraph, so while it loads it is a plain surface the thumbnail's size (a span: a skeleton's
+ * div can't go in a <p>), named for screen readers only.
  */
 function DescriptionImage({ src, alt }: MarkdownImageProps) {
-  const direct = !src || /^(https?:|data:)/i.test(src);
-  const [loaded, setLoaded] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (direct || !src) return;
-    let live = true;
-    setLoaded(null);
-    setFailed(false);
-    const api = todosApi();
-    if (!api) {
-      setFailed(true);
-      return;
-    }
-    void api.readDoc(src)
-      .then(doc => { if (!live) return; if (doc.kind === 'image') setLoaded(doc.dataUrl); else setFailed(true); })
-      .catch(() => { if (live) setFailed(true); });
-    return () => { live = false; };
-  }, [direct, src]);
+  const { src: shown, failed } = useTodoImageSource(src);
   const label = alt || 'image';
   if (failed) return <span className="text-[12px] text-text-tertiary">[{label} could not be opened]</span>;
-  const shown = direct ? src : loaded;
-  if (!shown) return <span className="inline-block h-[60px] w-[100px] animate-pulse rounded-lg bg-surface-secondary" aria-label={`Loading ${label}`} />;
+  if (!shown) return <span className="my-1.5 block h-[100px] w-[160px] rounded-lg border border-border-secondary bg-surface-secondary" data-testid="todo-description-image-loading"><LoadingStatus label={`Loading ${label}`} /></span>;
   return <img src={shown} alt={alt} tabIndex={0} role="button" aria-label={`Open ${label} beside the to-do`} />;
 }
 

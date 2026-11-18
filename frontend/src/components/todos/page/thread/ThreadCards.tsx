@@ -1,7 +1,7 @@
 import { useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { ArrowUp, ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck, CircleDashed, CircleHelp, CirclePause, Clock, ExternalLink, GripVertical, Paperclip, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck, CircleDashed, CircleHelp, CirclePause, Clock, ExternalLink, File, GripVertical, Paperclip, X } from 'lucide-react';
 import type { TodoActivity, TodoDetail } from '../../../../../../shared/types/todos';
-import type { TodoThreadApproval, TodoThreadComment, TodoThreadDelivery, TodoThreadFold, TodoThreadReply, TodoThreadRun } from '../../../../../../shared/todoThread';
+import { commentAttachments, type TodoThreadApproval, type TodoThreadComment, type TodoThreadDelivery, type TodoThreadFile, type TodoThreadFold, type TodoThreadReply, type TodoThreadRun } from '../../../../../../shared/todoThread';
 import { MarkdownPreview } from '../../../MarkdownPreview';
 import { relativeAge } from '../../../notify/notifyFormat';
 import { cn } from '../../../../utils/cn';
@@ -9,7 +9,8 @@ import { TodoStatusIcon } from '../../TodoStatusIcon';
 import { todoEventIcon, type TodoEventIcon } from '../chatEntries';
 import { focusTodoTab } from '../todoNavigation';
 import { AgentAvatar, COMPACT_MARKDOWN } from '../TodoPageParts';
-import { attachedLabel, attachmentNamed, commentWithFiles, eventFiles } from './threadInputs';
+import { attachedLabel, attachmentAt, attachmentNamed, commentWithFiles, eventFiles } from './threadInputs';
+import { TodoImageThumb } from './TodoImage';
 import { sendThreadComment, useComposerAttach } from './useThreadSend';
 
 /** What every card reads from the page. */
@@ -76,12 +77,37 @@ function EventWords({ event, ctx }: { event: TodoActivity; ctx: ThreadContext })
   return <span className="min-w-0">{lead && <span className="text-text-secondary">{lead}</span>}{rest}</span>;
 }
 
-export function EventLine({ event, ctx }: { event: TodoActivity; ctx: ThreadContext }) {
+/**
+ * An event's line. One that attached an image (`attachedImage`, its label) reads "planner attached
+ * image" with the image under it, so a screenshot an agent attached shows in the thread.
+ */
+export function EventLine({ event, ctx, attachedImage }: { event: TodoActivity; ctx: ThreadContext; attachedImage?: string }) {
+  if (attachedImage !== undefined) return <ImageEventLine event={event} ctx={ctx} label={attachedImage} />;
   return (
     <div className="flex min-h-[26px] items-center gap-2 px-0.5 text-[12.5px] text-text-tertiary" data-testid="todo-thread-event" data-activity={event.id}>
       <EventIcon icon={todoEventIcon(event.body)} />
       <EventWords event={event} ctx={ctx} />
       <span className="shrink-0">· {relativeAge(event.createdAt, ctx.now)}</span>
+    </div>
+  );
+}
+
+function ImageEventLine({ event, ctx, label }: { event: TodoActivity; ctx: ThreadContext; label: string }) {
+  const attachment = attachmentNamed(ctx.detail, label);
+  const lead = event.authorKind === 'person' ? 'You' : event.authorName;
+  const onOpen = ctx.onOpenAttachment;
+  return (
+    <div className="py-0.5" data-testid="todo-thread-event" data-activity={event.id} data-image={label}>
+      <div className="flex min-h-[26px] items-center gap-2 px-0.5 text-[12.5px] text-text-tertiary">
+        <EventIcon icon="attached" />
+        <span className="min-w-0 truncate"><span className="text-text-secondary">{lead}</span> attached image</span>
+        <span className="shrink-0">· {relativeAge(event.createdAt, ctx.now)}</span>
+      </div>
+      {attachment && (
+        <div className="pb-1 pl-[22px]">
+          <TodoImageThumb path={attachment.target} label={attachment.label} onOpen={onOpen ? () => onOpen(attachment.id) : undefined} />
+        </div>
+      )}
     </div>
   );
 }
@@ -218,11 +244,56 @@ function Replies({ replies, ctx }: { replies: readonly TodoThreadReply[]; ctx: T
             <b className="font-semibold text-text-primary">{authorLabel(reply.activity)}</b>
             {relativeAge(reply.activity.createdAt, ctx.now)}
           </div>
-          <div className="pl-[22px] pt-[3px] text-[13.5px]"><MarkdownPreview content={reply.activity.body} className={COMPACT_MARKDOWN} /></div>
+          <MessageBody body={reply.activity.body} ctx={ctx} className="pl-[22px] pt-[3px] text-[13.5px]" markdownClassName={COMPACT_MARKDOWN} />
           {reply.delivery && <DeliveryLine delivery={reply.delivery} className="pl-[22px] pt-0.5" />}
         </div>
       ))}
     </>
+  );
+}
+
+/**
+ * A comment's or reply's words, then what its Attached lines name (round 8, T-5): images as
+ * thumbnails and other files as chips that open their attachment tab. The lines themselves stay
+ * in the stored body (agents read the paths) but aren't shown as text.
+ */
+function MessageBody({ body, ctx, className, markdownClassName }: { body: string; ctx: ThreadContext; className: string; markdownClassName: string }) {
+  const parts = commentAttachments(body);
+  return (
+    <div className={className}>
+      {parts.text && <MarkdownPreview content={parts.text} className={markdownClassName} />}
+      {parts.images.length > 0 && (
+        <div className={cn('flex flex-wrap gap-2', parts.text && 'mt-2')} data-testid="todo-thread-images">
+          {parts.images.map((file) => <ImageOf key={file.path} file={file} ctx={ctx} />)}
+        </div>
+      )}
+      {parts.files.length > 0 && (
+        <div className={cn('flex flex-wrap gap-1.5', (parts.text || parts.images.length > 0) && 'mt-2')}>
+          {parts.files.map((file) => <FileChip key={file.path} file={file} ctx={ctx} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImageOf({ file, ctx }: { file: TodoThreadFile; ctx: ThreadContext }) {
+  const attachment = attachmentAt(ctx.detail, file.path);
+  const onOpen = ctx.onOpenAttachment;
+  return <TodoImageThumb path={file.path} label={file.name} onOpen={attachment && onOpen ? () => onOpen(attachment.id) : undefined} />;
+}
+
+const FILE_CHIP = 'inline-flex h-[22px] max-w-full items-center gap-[5px] rounded-md bg-surface-tertiary px-[7px] text-[11.5px] text-text-secondary';
+
+/** A file a message names: opens its attachment tab while it is still attached. */
+function FileChip({ file, ctx }: { file: TodoThreadFile; ctx: ThreadContext }) {
+  const attachment = attachmentAt(ctx.detail, file.path);
+  const onOpen = ctx.onOpenAttachment;
+  const inner = <><File className="h-3 w-3 shrink-0" aria-hidden="true" /><span className="truncate">{file.name}</span></>;
+  if (!attachment || !onOpen) return <span className={FILE_CHIP} title={file.path} data-testid="todo-thread-file">{inner}</span>;
+  return (
+    <button type="button" onClick={() => onOpen(attachment.id)} title={file.path} className={cn(FILE_CHIP, 'outline-none hover:bg-surface-hover hover:text-text-primary focus-visible:ring-2 focus-visible:ring-interactive')} data-testid="todo-thread-file" data-attachment={attachment.id}>
+      {inner}
+    </button>
   );
 }
 
@@ -237,7 +308,7 @@ export function CommentCard({ comment, ctx }: { comment: TodoThreadComment; ctx:
         {activity.authorKind === 'requester' && <span>requester</span>}
         {relativeAge(activity.createdAt, ctx.now)}
       </div>
-      <div className="pb-2.5 pl-[38px] pr-3 pt-1 text-[13.5px] leading-[1.55]"><MarkdownPreview content={activity.body} className={cn(COMPACT_MARKDOWN, '!text-[13.5px]')} /></div>
+      <MessageBody body={activity.body} ctx={ctx} className="pb-2.5 pl-[38px] pr-3 pt-1 text-[13.5px] leading-[1.55]" markdownClassName={cn(COMPACT_MARKDOWN, '!text-[13.5px]')} />
       {comment.delivery && <DeliveryLine delivery={comment.delivery} className="-mt-1.5 pb-2 pl-[38px] pr-3" />}
       <Replies replies={comment.replies} ctx={ctx} />
       <ReplyBox ctx={ctx} replyTo={comment.replyTarget} placeholder="Leave a reply…" />

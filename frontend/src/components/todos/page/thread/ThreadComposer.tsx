@@ -1,4 +1,4 @@
-import { useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
+import { useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { ArrowUp, ChevronDown, Paperclip } from 'lucide-react';
 import type { TodoAction, TodoDetail } from '../../../../../../shared/types/todos';
 import { Dropdown } from '../../../ui/Dropdown';
@@ -7,7 +7,7 @@ import { paneName } from '../todoNavigation';
 import { AgentAvatar } from '../TodoPageParts';
 import { AttachedChips } from './ThreadCards';
 import { commentWithFiles, eventFiles } from './threadInputs';
-import { sendThreadComment, useComposerAttach } from './useThreadSend';
+import { sendThreadComment, useComposerAttach, useComposerFileInbox, useFileDropZone } from './useThreadSend';
 
 const ICON_BUTTON = 'inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:opacity-50';
 
@@ -32,7 +32,6 @@ export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
   const [toOrchestrator, setToOrchestrator] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
   const canSwitch = chatTarget.kind === 'assignee';
   const ready = text.trim().length > 0 || attach.files.length > 0;
@@ -67,18 +66,9 @@ export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
     event.preventDefault();
     void attach.addFiles(files);
   };
-  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
-    if (!event.dataTransfer.types.includes('Files')) return;
-    event.preventDefault();
-    setDragging(true);
-  };
-  const onDrop = (event: DragEvent<HTMLDivElement>) => {
-    setDragging(false);
-    const files = eventFiles(event.dataTransfer.files);
-    if (files.length === 0) return;
-    event.preventDefault();
-    void attach.addFiles(files);
-  };
+  const addFiles = attach.addFiles;
+  const drop = useFileDropZone((files) => void addFiles(files), attach.available);
+  useComposerFileInbox(todo.number, (files) => void addFiles(files));
 
   const assigneeLabel = `${chatTarget.name} · ${paneName(todo.assignee?.paneId) ?? 'its tab'}`;
   const orchestratorLabel = `${orchestrator?.name ?? 'orchestrator'} · its own Session`;
@@ -88,11 +78,11 @@ export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
   return (
     <div className={phone ? 'shrink-0 border-t border-border-primary bg-bg-primary px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2' : 'shrink-0 px-7 pb-3.5 pt-2.5'} data-testid="todo-composer">
       <div
-        onDragOver={onDragOver}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        className={cn('mx-auto rounded-[10px] border', phone ? 'max-w-none' : 'max-w-[760px]', 'bg-surface-primary px-3 pb-1.5 pt-2.5 focus-within:border-border-hover', dragging ? 'border-interactive' : 'border-border-primary')}
-        data-dragging={dragging || undefined}
+        onDragOver={drop.onDragOver}
+        onDragLeave={drop.onDragLeave}
+        onDrop={drop.onDrop}
+        className={cn('mx-auto rounded-[10px] border', phone ? 'max-w-none' : 'max-w-[760px]', 'bg-surface-primary px-3 pb-1.5 pt-2.5 focus-within:border-border-hover', drop.dragging ? 'border-interactive' : 'border-border-primary')}
+        data-dragging={drop.dragging || undefined}
       >
         <AttachedChips files={attach.files} onRemove={attach.remove} />
         <textarea

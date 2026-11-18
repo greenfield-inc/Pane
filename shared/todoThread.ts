@@ -12,6 +12,8 @@ import type { TodoActivity } from './types/todos';
  * - Comment cards hold the person's and the requester's messages.
  * - A row with `replyTo` sits under the card it answers, as does a reply to that reply.
  * - Approval cards sit where they were asked.
+ * - An image attached to the to-do shows in the thread (round 8, T-5): its attach event never folds
+ *   and never joins a run card, unless a message names the file (that message shows the image).
  */
 
 export type TodoThreadApprovalState = 'waiting' | 'answered' | 'closed';
@@ -98,7 +100,8 @@ export interface TodoThreadFold {
 }
 
 export type TodoThreadItem =
-  | { kind: 'event'; key: string; event: TodoActivity }
+  /** `attachedImage`: the label of the image this event attached, shown with it. */
+  | { kind: 'event'; key: string; event: TodoActivity; attachedImage?: string }
   | { kind: 'fold'; key: string; fold: TodoThreadFold }
   | { kind: 'run'; key: string; run: TodoThreadRun }
   | { kind: 'comment'; key: string; comment: TodoThreadComment }
@@ -123,7 +126,8 @@ interface CommentBuilder extends CardBuilder {
 }
 
 type Entry =
-  | { kind: 'event'; at: number; row: TodoActivity }
+  /** `image`: an image attach event, which stands on its own line. */
+  | { kind: 'event'; at: number; row: TodoActivity; image?: string }
   | { kind: 'run'; at: number; run: RunBuilder }
   | { kind: 'comment'; at: number; comment: CommentBuilder }
   | { kind: 'approval'; at: number; approval: TodoThreadApproval };
@@ -136,6 +140,7 @@ export function buildTodoThread(input: TodoThreadInput): TodoThreadItem[] {
   const runsByTab = new Map<string, RunBuilder[]>();
   const entries: Entry[] = [];
   let openRun: RunBuilder | null = null;
+  const named = namedFiles(rows);
 
   for (const row of rows) {
     const answered = row.replyTo === undefined ? undefined : cardOf.get(row.replyTo);
@@ -145,6 +150,11 @@ export function buildTodoThread(input: TodoThreadInput): TodoThreadItem[] {
       continue;
     }
     if (row.kind === 'event') {
+      const image = imageAttachLabel(row.body);
+      if (image !== undefined && !named.has(image)) {
+        entries.push({ kind: 'event', at: row.createdAt, row, image });
+        continue;
+      }
       if (openRun && eventJoinsRun(openRun, row)) {
         openRun.steps.push(row);
         cardOf.set(row.id, openRun);
@@ -258,11 +268,15 @@ function foldEvents(entries: readonly Entry[], input: TodoThreadInput, runsByTab
     pending = [];
   };
   for (const entry of entries) {
-    if (entry.kind === 'event') {
+    if (entry.kind === 'event' && entry.image === undefined) {
       pending.push(entry.row);
       continue;
     }
     flush();
+    if (entry.kind === 'event') {
+      items.push({ kind: 'event', key: `event:${entry.row.id}`, event: entry.row, attachedImage: entry.image });
+      continue;
+    }
     if (entry.kind === 'approval') items.push({ kind: 'approval', key: `approval:${entry.approval.id}`, approval: entry.approval });
     else if (entry.kind === 'comment') items.push({ kind: 'comment', key: `comment:${entry.comment.activity.id}`, comment: commentOf(entry.comment) });
     else items.push({ kind: 'run', key: `run:${entry.run.steps[0].id}`, run: runOf(entry.run, input, runsByTab, startedBy) });
@@ -325,4 +339,68 @@ export function eventPhrase(body: string): string {
   if (colon > 0) text = text.slice(0, colon);
   if (/^[A-Z][a-z]/u.test(text) && !/^Pane\b/u.test(text)) text = text[0].toLowerCase() + text.slice(1);
   return text.length > PHRASE_MAX ? `${text.slice(0, PHRASE_MAX - 1).trimEnd()}…` : text;
+}
+
+/** A file a message names on an `Attached <name>: <path>` line (the composer writes one per file). */
+export interface TodoThreadFile {
+  name: string;
+  path: string;
+}
+
+/** A message's words, and the files its trailing `Attached` lines name: images apart from other files. */
+export interface TodoCommentParts {
+  text: string;
+  images: TodoThreadFile[];
+  files: TodoThreadFile[];
+}
+
+/** The extensions Pane attaches as kind `image` (`TodoService`). */
+export function isImageFile(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg)$/iu.test(path);
+}
+
+const ATTACHED_LINE = /^Attached (.+?): ((?:\/|[A-Za-z]:[\\/]).*)$/u;
+
+/**
+ * Splits off the `Attached <name>: <path>` lines the composer adds at a message's end. Only that
+ * trailing run counts, and only absolute paths, so words that merely look like one stay words.
+ */
+export function commentAttachments(body: string): TodoCommentParts {
+  const lines = body.split('\n');
+  const found: TodoThreadFile[] = [];
+  let end = lines.length;
+  while (end > 0) {
+    const line = lines[end - 1].trim();
+    if (line === '') {
+      end -= 1;
+      continue;
+    }
+    const match = ATTACHED_LINE.exec(line);
+    if (!match) break;
+    found.unshift({ name: match[1], path: match[2] });
+    end -= 1;
+  }
+  if (found.length === 0) return { text: body, images: [], files: [] };
+  return {
+    text: lines.slice(0, end).join('\n').trim(),
+    images: found.filter((file) => isImageFile(file.path)),
+    files: found.filter((file) => !isImageFile(file.path)),
+  };
+}
+
+/** "planner attached image: shot.png (from …)" → "shot.png"; undefined for any other event. */
+export function imageAttachLabel(body: string): string | undefined {
+  const match = /\battached image: (.+?)(?: \(.*\))?$/u.exec(body.trim());
+  return match?.[1];
+}
+
+/** The names messages give on their Attached lines: those images already show on the message. */
+function namedFiles(rows: readonly TodoActivity[]): Set<string> {
+  const names = new Set<string>();
+  for (const row of rows) {
+    if (row.kind !== 'message') continue;
+    const parts = commentAttachments(row.body);
+    for (const file of [...parts.images, ...parts.files]) names.add(file.name);
+  }
+  return names;
 }

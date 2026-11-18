@@ -58,6 +58,15 @@ export function attachmentNamed(detail: TodoDetail, label: string): TodoAttachme
   return undefined;
 }
 
+/** The to-do's own or inherited attachment at a file path (the path a comment's Attached line names), if it's still attached. */
+export function attachmentAt(detail: TodoDetail, path: string): TodoAttachment | undefined {
+  for (const group of detail.attachments) {
+    const found = group.attachments.find((attachment) => attachment.target === path && attachment.removedAt === undefined);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 /** A file the person attached from the composer: now a to-do attachment, named in the comment. */
 export interface ComposerFile {
   name: string;
