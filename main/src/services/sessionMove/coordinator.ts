@@ -383,6 +383,10 @@ export class MoveCoordinator {
       throw new PaneError('ERR_MOVE_NOT_READY', here ? `The Session can't move yet: ${block?.title}.` : `${target} isn't ready: ${block?.title ?? 'a check failed'}.`, here ? block?.detail ?? 'Check again.' : 'Fix what the dialog lists, then move again.');
     }
     const record = await this.manager().get({ sessionId });
+    // Another start may have begun the move during those awaits: join it rather than replace it, so
+    // there is never a second job whose clean-up could put back the running move's snapshot refs.
+    const active = this.jobs.get(sessionId);
+    if (active && !['done', 'failed', 'cancelled'].includes(active.progress.phase)) return { ...active.progress };
     const moveId = randomUUID();
     const tabs = this.tabsOf(record);
     const job: SourceJob = {
