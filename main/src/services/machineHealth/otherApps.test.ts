@@ -203,6 +203,19 @@ describe('OtherApps.stop', () => {
     expect(stopped).toEqual([]);
   });
 
+  it("refuses any process running Pane's own executable outside its tree, such as a dev build's electron.exe", async () => {
+    const electron = 'C:\\repos\\Pane\\node_modules\\electron\\dist\\electron.exe';
+    const table = [
+      row(PANE_PID, electron, 300),
+      // A Pane helper whose parent chain Windows lost: it must not read as another app.
+      row(77, electron, 200, { ppid: 9999 }),
+    ];
+    const { apps: other, stopped } = apps({ platform: 'win32', paneProcesses: () => new Set(), selfExecutable: electron }, [table]);
+    expect((await other.list()).map(app => [app.name, app.protectedReason !== null])).toEqual([['electron', true]]);
+    await expect(other.stop('electron', 'ui')).rejects.toMatchObject({ code: 'ERR_MACHINE_APP_PROTECTED' });
+    expect(stopped).toEqual([]);
+  });
+
   it('says so when the app is no longer running', async () => {
     const { apps: other, stopped } = apps();
     await expect(other.stop('/Applications/Gone.app', 'ui')).rejects.toMatchObject({ code: 'ERR_MACHINE_APP_GONE' });
