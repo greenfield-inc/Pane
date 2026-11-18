@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SessionMovePreflight, SessionMoveProgress } from '../../../shared/types/sessionMove';
 import type { TerminalPausedMark } from '../../../shared/types/panels';
 import {
-  TEAMMATE_REASON, doneView, formatMoveBytes, isMoveRunning, moveIntro, moveMarkLabel, movedBannerLine, needsFixLine, progressHeading, shownProgress,
+  TEAMMATE_REASON, confirmingReason, doneView, formatMoveBytes, isMoveRunning, moveIntro, moveMarkLabel, movedBannerLine, needsFixLine, progressHeading, shownProgress,
   targetCheckLabel, waitingLine, wholeMoveTargets, workingFor,
 } from './sessionMoveView';
 import { pauseOffersResume, pausedLabel, pausedReason } from './pause';
@@ -72,6 +72,16 @@ describe('targetCheckLabel and needsFixLine', () => {
     expect(formatMoveBytes(138_400_000)).toBe('~138 MB');
     expect(formatMoveBytes(2_300_000_000)).toBe('~2.3 GB');
     expect(formatMoveBytes(200_000)).toBe('~<1 MB');
+  });
+});
+
+describe('confirmingReason', () => {
+  it('tells a target that is not answering from one that answers without a decision (QA observation 1)', () => {
+    const unreachable = confirmingReason(progress({ phase: 'confirming', frozen: true, waitReason: 'unreachable', error: { message: 'studio-b isn’t answering (timed out).', next: 'Open Pane on studio-b.' } }));
+    const undecided = confirmingReason(progress({ phase: 'confirming', frozen: true, waitReason: 'undecided', error: { message: 'studio-b answers but can’t say yet whether the move finished.', next: 'Open the Session on studio-b to check it there.' } }));
+    expect(unreachable).toEqual({ title: 'studio-b isn’t answering', detail: 'studio-b isn’t answering (timed out). Open Pane on studio-b.' });
+    expect(undecided).toEqual({ title: 'studio-b answers, but hasn’t decided the move yet', detail: 'studio-b answers but can’t say yet whether the move finished. Open the Session on studio-b to check it there.' });
+    expect(confirmingReason(progress({ phase: 'moving', waitReason: 'unreachable' }))).toBeUndefined();
   });
 });
 

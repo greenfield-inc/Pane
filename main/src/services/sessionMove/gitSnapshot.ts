@@ -32,6 +32,8 @@ export interface Snapshot {
   head: string;
   /** Short branch name, or null when HEAD is detached. */
   branch: string | null;
+  /** What the ref pointed at before (an earlier move's snapshot, kept for Restore), or null. */
+  previous: string | null;
 }
 
 export interface MoveGitErrorDetails {
@@ -186,8 +188,16 @@ export async function createSnapshot(worktreePath: string, ref: string): Promise
   const env = SNAPSHOT_IDENTITY;
   const indexCommit = await gitOut(worktreePath, ['commit-tree', indexTree, '-p', head, '-m', 'index'], { env });
   const commit = await gitOut(worktreePath, ['commit-tree', worktreeTree, '-p', head, '-p', indexCommit, '-m', 'pane move snapshot'], { env });
+  // An earlier move may have left this ref for Restore; a move that doesn't happen puts it back.
+  const previous = (await git(worktreePath, ['rev-parse', '--verify', '--quiet', ref], { okExitCodes: [1] })).stdout.trim() || null;
   await git(worktreePath, ['update-ref', ref, commit]);
-  return { ref, commit, head, branch };
+  return { ref, commit, head, branch, previous };
+}
+
+/** Puts a ref back as it was: at `previous`, or gone when there was none. Safe to run twice. */
+export async function putBackRef(worktreePath: string, ref: string, previous: string | null): Promise<void> {
+  if (previous) await git(worktreePath, ['update-ref', ref, previous]);
+  else await git(worktreePath, ['update-ref', '-d', ref], { okExitCodes: [1] });
 }
 
 interface BundleHeader {

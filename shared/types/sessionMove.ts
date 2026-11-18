@@ -102,6 +102,11 @@ export interface SessionMoveProgress {
   error?: { message: string; next: string };
   /** True once the source froze: a failure from here never restarts tabs on its own. */
   frozen: boolean;
+  /**
+   * While confirming, why the move waits: the target doesn't answer (open Pane there), it answers
+   * without a decision (open the Session there), or its start failed (Check again retries it).
+   */
+  waitReason?: 'unreachable' | 'undecided' | 'startFailed';
   updatedAt: string;
 }
 

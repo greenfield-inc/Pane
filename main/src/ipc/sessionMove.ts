@@ -8,6 +8,9 @@ import { fixRequestSchema, MoveImporter, moveIdRequestSchema, preflightRequestSc
 import { writeRequestSchema } from '../services/sessionMove/transfer';
 import { testPeers } from '../services/sessionMove/peer';
 
+/** How long after Pane starts an interrupted move resumes. */
+const RESUME_AFTER_START_MS = 10_000;
+
 /** The dialog's calls, on the Session's own host. */
 const SOURCE_CHANNELS = Object.values(SESSION_MOVE_CHANNELS);
 
@@ -42,4 +45,12 @@ export function registerSessionMoveHandlers(ipcMain: IpcMain, services: AppServi
   register(SESSION_MOVE_TARGET_CHANNELS.status, async (request: PaneCommandValue) => importer.status(moveId(request)));
 
   commandRegistry.bindChannels(ipcMain, SOURCE_CHANNELS);
+
+  // A move this Pane was in the middle of when it quit carries on to its outcome: the target
+  // finishes a start it had committed, and the source asks the target again about a frozen
+  // Session. Deferred so the tab managers and the Pane-to-Pane connection are up first.
+  setTimeout(() => {
+    void importer.resume().catch(error => console.error('[SessionMove] Moves arriving here didn\'t resume:', error));
+    void coordinator.resume().catch(error => console.error('[SessionMove] Moves from here didn\'t resume:', error));
+  }, RESUME_AFTER_START_MS).unref();
 }

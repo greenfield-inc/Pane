@@ -74,6 +74,7 @@ const progressSchema: BoundarySchema<SessionMoveProgress> = boundary.object({
   })),
   error: boundary.optional(boundary.object({ message: boundary.string, next: boundary.string })),
   frozen: boundary.boolean,
+  waitReason: boundary.optional(boundary.enumeration('unreachable', 'undecided', 'startFailed')),
   updatedAt: boundary.string,
 });
 
