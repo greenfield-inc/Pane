@@ -77,4 +77,37 @@ describe('to-do channels', () => {
     const theirs = activity(2).find(row => row.body === 'from two')!;
     expect(await registry.invoke('todos:act', [{ kind: 'comment', number: 1, body: 'x', replyTo: theirs.id }])).toMatchObject({ success: false, error: expect.stringContaining('isn’t on T-1') });
   });
+
+  describe('snoozing (round 9)', () => {
+    // The service's clock reads 1 s past the epoch.
+    const until = 1_000 + 3_600_000;
+
+    it('snoozes and wakes from the app, and Remind me… creates a to-do snoozed, not started', async () => {
+      await registry.invoke('todos:create', [{ title: 'Mine' }]);
+      expect(await registry.invoke('todos:act', [{ kind: 'snooze', number: 1, until, zone: 'Europe/London', note: 'check', action: 'agents' }]))
+        .toMatchObject({ success: true, data: { todo: { state: 'stopped', snooze: { until, zone: 'Europe/London', note: 'check', action: 'agents', by: 'you' } } } });
+      expect(await registry.invoke('todos:act', [{ kind: 'wake', number: 1 }])).toMatchObject({ success: true, data: { todo: { state: 'in_progress' } } });
+      expect(await registry.invoke('todos:create', [{ title: 'Call Northwind', snooze: { until, zone: 'Europe/London', note: 'did they reply?' } }]))
+        .toMatchObject({ success: true, data: { state: 'stopped', sessionId: null, snooze: { action: 'remind', from: 'todo', note: 'did they reply?' } } });
+      expect(await registry.invoke('todos:act', [{ kind: 'snooze', number: 1, until: 1, zone: 'UTC' }])).toMatchObject({ success: false, error: expect.stringContaining('already passed') });
+    });
+
+    it('runpane todos snooze, list --status snoozed and wake, with the calling tab as the snoozer', async () => {
+      await registry.invoke('runpane:todos:create', [{ title: 'Ship', callerPanelId: 'x' }]);
+      await registry.invoke('runpane:todos:create', [{ title: 'Other', callerPanelId: 'x' }]);
+      expect(await registry.invoke('runpane:todos:snooze', [{ todo: 'T-1', until, zone: 'UTC', note: 'check Sentry', callerPanelId: 's1-orch' }])).toMatchObject({
+        ok: true, todo: { ref: 'T-1', state: 'stopped', status: 'snoozed', snooze: { until: '1970-01-01T01:00:01+00:00', zone: 'UTC', note: 'check Sentry', action: 'agents', by: 'orchestrator' } },
+      });
+      expect(await registry.invoke('runpane:todos:snooze', [{ todo: 'T-2', until: until + 60_000, zone: 'UTC', remindMe: true, callerPanelId: 's2-orch' }]))
+        .toMatchObject({ ok: true, todo: { snooze: { action: 'remind', note: '' } } });
+      const listed = await registry.invoke('runpane:todos:list', [{ status: 'snoozed' }]);
+      expect(listed).toMatchObject({ ok: true, todos: [{ ref: 'T-1' }, { ref: 'T-2' }] });
+      expect(await registry.invoke('runpane:todos:list', [{ status: 'working' }])).toEqual({ ok: true, todos: [] });
+      const woken = await registry.invoke('runpane:todos:wake', [{ todo: 'T-1', callerPanelId: 's1-orch' }]);
+      expect(woken).toMatchObject({ ok: true, todo: { ref: 'T-1', state: 'in_progress' } });
+      expect(woken).not.toHaveProperty('todo.snooze');
+      await expect(registry.invoke('runpane:todos:snooze', [{ todo: 'T-1', until: 1, zone: 'UTC' }])).rejects.toMatchObject({ code: 'todo_snooze_past', next: expect.any(String) });
+    });
+  });
 });
+

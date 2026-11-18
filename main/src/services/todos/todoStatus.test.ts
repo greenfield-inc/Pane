@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TodoRecord, TodoState } from '../../../../shared/types/todos';
-import { deriveTodoStatus, type TodoStatusInputs } from './todoStatus';
+import { STATUS_ORDER, deriveTodoStatus, type TodoStatusInputs } from './todoStatus';
 import type { LinkedApproval } from './todoStore';
 
 const NOW = Date.UTC(2026, 10, 16, 15, 0);
@@ -74,5 +74,38 @@ describe('deriveTodoStatus', () => {
   it('reads Done and Dropped from the state alone', () => {
     expect(status({ todo: todo({ state: 'done' }), waiting: [approval()] }).status).toBe('done');
     expect(status({ todo: todo({ state: 'dropped' }) }).status).toBe('dropped');
+  });
+
+  describe('snoozed (round 9, T-17)', () => {
+    // Wednesday 18 Nov 2026, 9:00 AM in Los Angeles.
+    const until = Date.UTC(2026, 10, 18, 17, 0);
+    const snoozed = (over: Partial<NonNullable<TodoRecord['snooze']>> = {}) => todo({
+      state: 'stopped', snooze: { until, zone: 'Europe/London', note: 'check Sentry\nthen the logs', action: 'agents', by: 'you', from: 'in_progress', reminderCardId: null, ...over },
+    });
+    const zone = 'America/Los_Angeles';
+
+    it('reads Snoozed until the time in the host’s zone, with the note’s first line, over Queued and Idle', () => {
+      expect(status({ todo: snoozed(), zone })).toEqual({ status: 'snoozed', reason: 'until Wed 9:00 AM · check Sentry' });
+      expect(status({ todo: { ...snoozed({ note: '' }), loadHold: 'queued' }, zone })).toEqual({ status: 'snoozed', reason: 'until Wed 9:00 AM' });
+    });
+
+    it('ends “· machine offline” when its host is unreachable', () => {
+      expect(status({ todo: snoozed({ note: '' }), zone, offline: true })).toEqual({ status: 'snoozed', reason: 'until Wed 9:00 AM · machine offline' });
+    });
+
+    it('still reads Waiting on you while an approval waits, with “snoozed until …” after it', () => {
+      expect(status({ todo: snoozed(), zone, waiting: [approval()] })).toMatchObject({ status: 'waiting', reason: 'Q-11 · Merge #1352 now? · snoozed until Wed 9:00 AM' });
+    });
+
+    it('reads as a plain stopped to-do to a build that knows nothing of snoozing', () => {
+      const older = { ...snoozed() };
+      delete older.snooze;
+      expect(status({ todo: older })).toMatchObject({ status: 'idle', idleReason: 'stopped' });
+    });
+
+    it('lists the Snoozed group after Idle', () => {
+      expect(STATUS_ORDER.snoozed).toBeGreaterThan(STATUS_ORDER.idle);
+      expect(STATUS_ORDER.snoozed).toBeLessThan(STATUS_ORDER.done);
+    });
   });
 });

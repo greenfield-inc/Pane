@@ -14,6 +14,8 @@ export class FakeHost implements TodoHost {
   resumed: string[] = [];
   paused: string[][] = [];
   cards: Array<TodoCard & { answer: (result: NotifyResult) => void }> = [];
+  /** Cards Pane ended itself (closeCard), with why. */
+  closed: Array<{ id: string; summary: string }> = [];
   load: Omit<LoadSample, 'at'> = { cpuPercent: 5, memory: 'ok' };
   gateEnabled = true;
   archiveResult = { archived: ['clean'], kept: [{ name: 'keyboard-approvals', reason: '2 unpushed commits' }], sessionArchived: false };
@@ -45,6 +47,7 @@ export class FakeHost implements TodoHost {
   ask(card: TodoCard): Promise<NotifyResult> {
     return new Promise(resolve => this.cards.push({ ...card, answer: resolve }));
   }
+  closeCard(id: string, summary: string) { this.closed.push({ id, summary }); }
   async archiveSessionPanes() { return this.archiveResult; }
   async restoreSession() {}
   async sampleLoad() { return this.load; }

@@ -22,16 +22,17 @@ function doneWhenBlock(todo: TodoRecord): string {
   return ['Done when:', ...todo.doneWhen.map(item => `- [${item.met ? 'x' : ' '}] ${item.text}`)].join('\n');
 }
 
-/** The first message a to-do's new orchestrator gets. */
-export function orchestratorStartText(todo: TodoRecord, groups: readonly TodoAttachmentGroup[], subTodos: readonly TodoRecord[], repo: string | null): string {
+/** The first message a to-do's new orchestrator gets. `handedOver`: a reminder you handed to an agent (round 9). */
+export function orchestratorStartText(todo: TodoRecord, groups: readonly TodoAttachmentGroup[], subTodos: readonly TodoRecord[], repo: string | null, handedOver?: HandOver): string {
   return [
     `[From Pane, To-dos] You are the orchestrator for ${todo.ref} "${todo.title}", requested by ${todo.requester.kind === 'person' ? 'the person' : todo.requester.name}.`,
     repo ? `Repo: ${repo}. Start worker Panes there with runpane panes create --repo "${repo}".` : '',
     todo.summary ? `Summary:\n${todo.summary}` : '',
+    handedOver ? handOverBlock(handedOver) : '',
     doneWhenBlock(todo),
     subTodos.length > 0 ? ['Sub-to-dos:', ...subTodos.map(sub => `- ${sub.ref} ${sub.title}`)].join('\n') : '',
     attachmentsBlock(groups),
-    `Keep an agent working on ${todo.ref} until it is ready for review. Split it into sub-to-dos (runpane todos create --parent ${todo.ref} "…") and assign workers (runpane todos assign <T-n> --panel <tab>). Attach what you make or use (runpane todos attach ${todo.ref} <file|url>). Ask ${todo.requester.kind === 'person' ? 'the person with runpane todos ask' : 'your requester first with runpane todos ask'} ${todo.ref} "…". Post short summaries to the to-do’s chat with runpane todos comment ${todo.ref} "…": the person reads that chat, not this tab. When every done-when check is met, run runpane todos review ${todo.ref}. If an agent start fails with machine_busy, wait: Pane tells you when capacity is back. Full detail: runpane todos show ${todo.ref}.`,
+    `Keep an agent working on ${todo.ref} until it is ready for review. Split it into sub-to-dos (runpane todos create --parent ${todo.ref} "…") and assign workers (runpane todos assign <T-n> --panel <tab>). Attach what you make or use (runpane todos attach ${todo.ref} <file|url>). Ask ${todo.requester.kind === 'person' ? 'the person with runpane todos ask' : 'your requester first with runpane todos ask'} ${todo.ref} "…". Post short summaries to the to-do’s chat with runpane todos comment ${todo.ref} "…": the person reads that chat, not this tab. When every done-when check is met, run runpane todos review ${todo.ref}. If an agent start fails with machine_busy, wait: Pane tells you when capacity is back. To check something later (after a deploy, or waiting on a reply), run runpane todos snooze ${todo.ref} --until … --note … instead of waiting in a turn: Pane wakes you then with the note. Full detail: runpane todos show ${todo.ref}.`,
   ].filter(Boolean).join('\n\n');
 }
 
@@ -70,8 +71,57 @@ export function stopText(todo: TodoRecord): string {
   return personMessageText(todo, `Stop ${todo.ref}: finish your current step, tell its workers to stop after theirs, then wait. Pane tells you when to resume.`);
 }
 
-export function resumeText(todo: TodoRecord): string {
-  return personMessageText(todo, `Resume ${todo.ref}: carry it on until it is ready for review.`);
+export function resumeText(todo: TodoRecord, handedOver?: HandOver): string {
+  const text = personMessageText(todo, `Resume ${todo.ref}: carry it on until it is ready for review.`);
+  return handedOver ? `${text}\n\n${handOverBlock(handedOver)}` : text;
+}
+
+// ── Snoozing (round 9, T-17) ──────────────────────────────────────────────
+
+/** A reminder you handed to an agent: its note, your words on the card, and what you wrote while it was snoozed. */
+export interface HandOver {
+  note: string;
+  said?: string;
+  held?: readonly string[];
+}
+
+function heldBlock(held: readonly string[]): string {
+  return held.length > 0 ? ['While it was snoozed, the person wrote:', ...held.map(body => `- ${body}`)].join('\n') : '';
+}
+
+function handOverBlock(handedOver: HandOver): string {
+  return [
+    `The person handed you this reminder${handedOver.note ? `: ${handedOver.note}` : '.'}`,
+    handedOver.said ? `They added: ${handedOver.said}` : '',
+    heldBlock(handedOver.held ?? []),
+  ].filter(Boolean).join('\n');
+}
+
+/**
+ * Typed when a to-do is snoozed while its agents work: to the orchestrator (it tells its workers),
+ * or, when the orchestrator snoozed it, to each worker. `when` is the wake time as the host reads it.
+ */
+export function snoozeText(todo: TodoRecord, when: string, note: string, to: 'orchestrator' | 'worker'): string {
+  const wakesWith = note ? ` with: ${note}` : '.';
+  if (to === 'worker') return `[From Pane, To-dos] ${todo.ref} is snoozed until ${when}: finish your current step, then wait. Pane wakes the orchestrator then${wakesWith}`;
+  return `[From Pane, To-dos] Snoozed ${todo.ref} until ${when}: finish your current step, tell its workers to stop after theirs, then wait. Pane wakes you then${wakesWith}`;
+}
+
+export interface WakeLine {
+  /** "Wed 9:00 AM": the snooze's time. */
+  until: string;
+  /** "overdue by 14h: Pane was closed", or "woken early by you". */
+  late?: string;
+}
+
+/** The wake message: the note, any comments held while it was snoozed, then the usual attachments block. */
+export function wakeText(todo: TodoRecord, line: WakeLine, note: string, held: readonly string[], groups: readonly TodoAttachmentGroup[]): string {
+  return [
+    `[From Pane, To-dos] Reminder for ${todo.ref} "${todo.title}" (snoozed until ${line.until}${line.late ? `, ${line.late}` : ''}): ${note || 'its time came, so carry it on.'}`,
+    heldBlock(held),
+    attachmentsBlock(groups),
+    `Carry it on until it is ready for review (runpane todos review ${todo.ref}). To wait again, run runpane todos snooze ${todo.ref} --until … --note ….`,
+  ].filter(Boolean).join('\n\n');
 }
 
 export function acceptedText(todo: TodoRecord): string {

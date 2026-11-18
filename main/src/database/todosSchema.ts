@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3-multiple-ciphers';
 
 /**
- * To-dos (D-408): three tables and one column in sessions.db, all additive so an older Pane opening
+ * To-dos (D-408): three tables and one column in sessions.db (plus round 7's reply_to and round 9's snooze columns), all additive so an older Pane opening
  * the same database still starts and its approvals still work. Added by runMigrations() in
  * database.ts and by TodoStore.
  */
@@ -41,7 +41,14 @@ const TODOS_SCHEMA_SQL = [
     stuck_card_id TEXT,
     load_hold TEXT CHECK (load_hold IS NULL OR load_hold IN ('queued', 'paused')),
     load_hold_since INTEGER,
-    load_override TEXT CHECK (load_override IS NULL OR load_override = 'never_pause')
+    load_override TEXT CHECK (load_override IS NULL OR load_override = 'never_pause'),
+    snoozed_until INTEGER,
+    snooze_zone TEXT,
+    wake_note TEXT,
+    wake_action TEXT,
+    snoozed_by TEXT,
+    snoozed_from TEXT,
+    reminder_card_id TEXT
   )`,
   'CREATE INDEX IF NOT EXISTS idx_todos_session ON todos(session_id)',
   'CREATE INDEX IF NOT EXISTS idx_todos_parent ON todos(parent_id)',
@@ -81,12 +88,29 @@ const TODOS_SCHEMA_SQL = [
   'CREATE INDEX IF NOT EXISTS idx_todo_activity_undelivered ON todo_activity(to_tab, delivered_at)',
 ] as const;
 
+/**
+ * Round 9 (T-17): a snooze is a time on a stopped to-do. Plain columns with no CHECK, added the same
+ * guarded way as reply_to, so a build that knows nothing of snoozing still reads and writes the row
+ * (and sees a stopped to-do).
+ */
+const SNOOZE_COLUMNS = [
+  ['snoozed_until', 'INTEGER'], ['snooze_zone', 'TEXT'], ['wake_note', 'TEXT'], ['wake_action', 'TEXT'],
+  ['snoozed_by', 'TEXT'], ['snoozed_from', 'TEXT'], ['reminder_card_id', 'TEXT'],
+] as const;
+
+function columnsOf(db: Database.Database, table: string): string[] {
+  // SAFETY: PRAGMA table_info rows always carry a name.
+  return db.prepare(`PRAGMA table_info(${table})`).all().map(column => (column as { name: string }).name);
+}
+
 /** Creates the to-do tables. Guarded: safe on fresh and upgraded databases. approvals.todo_id is added by ensureApprovalsSchema. */
 export function ensureTodosSchema(db: Database.Database): void {
   for (const sql of TODOS_SCHEMA_SQL) db.prepare(sql).run();
   // Round 7: the row a reply answers. Databases from earlier to-dos builds lack it; an older build ignores it.
-  // SAFETY: PRAGMA table_info rows always carry a name.
-  const columns = db.prepare('PRAGMA table_info(todo_activity)').all().map(column => (column as { name: string }).name);
-  if (!columns.includes('reply_to')) db.prepare('ALTER TABLE todo_activity ADD COLUMN reply_to INTEGER').run();
+  if (!columnsOf(db, 'todo_activity').includes('reply_to')) db.prepare('ALTER TABLE todo_activity ADD COLUMN reply_to INTEGER').run();
   db.prepare('CREATE INDEX IF NOT EXISTS idx_todo_activity_reply ON todo_activity(todo_id, reply_to)').run();
+  // Round 9: the snooze columns, and the index each wake check reads the due ones by.
+  const todoColumns = columnsOf(db, 'todos');
+  for (const [column, type] of SNOOZE_COLUMNS) if (!todoColumns.includes(column)) db.prepare(`ALTER TABLE todos ADD COLUMN ${column} ${type}`).run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_todos_snoozed ON todos(snoozed_until)').run();
 }

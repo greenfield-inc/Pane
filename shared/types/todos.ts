@@ -19,7 +19,36 @@ export function isOpenTodoState(state: TodoState): boolean {
 }
 
 /** The status shown on every surface, worked out each time. */
-export type TodoShownStatus = 'waiting' | 'working' | 'queued' | 'idle' | 'done' | 'dropped';
+export type TodoShownStatus = 'waiting' | 'working' | 'queued' | 'snoozed' | 'idle' | 'done' | 'dropped';
+
+/** What waking a snoozed to-do does (round 9, T-17): wake its agents with the note, or raise a reminder card. */
+export const TODO_WAKE_ACTIONS = ['agents', 'remind'] as const;
+export type TodoWakeAction = typeof TODO_WAKE_ACTIONS[number];
+
+/**
+ * A snoozed to-do (round 9, T-17). Stored as a time on a stopped to-do, so a build that doesn't know
+ * snoozing reads it as Stopped and leaves it quiet; every surface shows it as Snoozed.
+ */
+export interface TodoSnooze {
+  /** The wake time, ms since epoch (UTC). */
+  until: number;
+  /** IANA zone of whoever set it ("Europe/London"), for showing the time as they meant it. */
+  zone: string;
+  /** What to tell the agents (or you) at the time; may be empty. */
+  note: string;
+  action: TodoWakeAction;
+  /** "you", or the agent's name. */
+  by: string;
+  /** The state to return to on a reminder (todo, in_progress or stopped). */
+  from: TodoState;
+  /** The reminder card raised for it, while one waits. */
+  reminderCardId: string | null;
+}
+
+/** The longest a snooze can run (a year). */
+export const TODO_SNOOZE_MAX_MS = 366 * 24 * 60 * 60 * 1000;
+/** A wake later than this after its time reads "overdue by …". */
+export const TODO_SNOOZE_OVERDUE_MS = 2 * 60 * 1000;
 
 /** Why an open to-do reads Idle. */
 export type TodoIdleReason = 'not_started' | 'stopped' | 'usage_limit' | 'offline' | 'quiet' | 'between_turns' | 'in_review';
@@ -146,6 +175,8 @@ export interface TodoRecord {
   loadOverride: 'never_pause' | null;
   /** Set by Pane when the stuck card was raised; cleared by progress. */
   stuckCardId: string | null;
+  /** Round 9 (T-17): set while the to-do is snoozed; absent otherwise. */
+  snooze?: TodoSnooze;
 }
 
 export function todoRef(number: number): string {
@@ -228,6 +259,8 @@ export interface TodoCreateInput {
   startNow?: boolean;
   parentNumber?: number | null;
   attach?: Array<{ target: string; kind?: TodoAttachmentKind; label?: string; note?: string }>;
+  /** Round 9 (T-17): New to-do's Remind me…: created snoozed (not started) until this time. */
+  snooze?: { until: number; zone: string; note?: string; action?: TodoWakeAction };
 }
 
 export const TODO_AGENT_REPLY_MAX = 2000;
@@ -248,7 +281,11 @@ export type TodoAction =
   | { kind: 'attach'; number: number; target: string; label?: string; attachmentKind?: TodoAttachmentKind }
   | { kind: 'detach'; number: number; attachmentId: number }
   | { kind: 'check'; number: number; index: number; met: boolean }
-  | { kind: 'rename'; number: number; title: string };
+  | { kind: 'rename'; number: number; title: string }
+  /** Round 9 (T-17): snooze, or change a snooze, until `until` (ms since epoch). */
+  | { kind: 'snooze'; number: number; until: number; zone: string; note?: string; action?: TodoWakeAction }
+  /** Wakes a snoozed to-do now, as its time arriving would (its held comments go with the wake message). */
+  | { kind: 'wake'; number: number };
 
 /** What `todos:act` resolves with: the to-do after the action, and a line for archive's result. */
 export interface TodoActionResult {
@@ -307,6 +344,22 @@ export interface RunpaneTodoDetachRequest extends RunpaneTodoRefRequest {
 export interface RunpaneTodoListRequest {
   /** Include done and dropped to-dos from the last 7 days. */
   all?: boolean;
+  /** Round 9: only to-dos shown with this status (`snoozed` lists soonest first). */
+  status?: TodoShownStatus;
+}
+
+/**
+ * `runpane todos snooze T-n --until … [--note …] [--remind-me]` (round 9, T-17). The CLI reads the
+ * time in its own machine's zone and sends the instant, so the host never reinterprets it.
+ */
+export interface RunpaneTodoSnoozeRequest extends RunpaneTodoRefRequest {
+  /** ms since epoch (UTC). */
+  until: number;
+  /** IANA zone the CLI read the time in. */
+  zone: string;
+  note?: string;
+  /** Raise a reminder card for the person at the time instead of waking the agents. */
+  remindMe?: boolean;
 }
 
 export interface RunpaneTodoAssignRequest extends RunpaneTodoRefRequest {
@@ -355,6 +408,8 @@ export interface RunpaneTodo {
   doneWhen: TodoDoneWhenItem[];
   attachmentCount: number;
   updatedAt: string;
+  /** Round 9: while snoozed. `until` is ISO 8601 with its offset in `zone`. */
+  snooze?: { until: string; zone: string; note: string; action: TodoWakeAction; by: string };
 }
 
 export interface RunpaneTodoAttachment {

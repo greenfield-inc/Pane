@@ -1,14 +1,15 @@
 import path from 'path';
 import { PaneError } from '../../../shared/paneError';
 import {
-  TODO_ATTACHMENT_KINDS, parseTodoRef, todoRef,
+  TODO_ATTACHMENT_KINDS, TODO_WAKE_ACTIONS, parseTodoRef, todoRef,
   type RunpaneTodo, type RunpaneTodoActivity, type RunpaneTodoArchiveResult, type RunpaneTodoAskResult, type RunpaneTodoAttachResult,
   type RunpaneTodoAttachment, type RunpaneTodoCommentResult, type RunpaneTodoDetachResult, type RunpaneTodoListResult, type RunpaneTodoResult,
   type RunpaneTodoReviewResult, type RunpaneTodoShowResult, type RunpaneTodoStartResult, type TodoAction, type TodoActionResult, type TodoCreateInput,
-  type TodoDetail, type TodoListRow, type TodoRecord, type TodosSnapshot,
+  type TodoDetail, type TodoListRow, type TodoRecord, type TodoShownStatus, type TodosSnapshot,
 } from '../../../shared/types/todos';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { paneCommandCaller, type IpcMainHandleLike, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
+import { isKnownZone, isoInZone } from '../services/todos/snoozeClock';
 import type { TodoActor, TodoService } from '../services/todos/todoService';
 import type { AppServices } from './types';
 
@@ -41,12 +42,16 @@ const optionalString = boundary.optional(boundary.string);
 const optionalStrings = boundary.optional(boundary.array(boundary.string));
 const optionalNumbers = boundary.optional(boundary.array(boundary.number));
 const attachmentKind = boundary.optional(boundary.enumeration(...TODO_ATTACHMENT_KINDS));
+const wakeAction = boundary.optional(boundary.enumeration(...TODO_WAKE_ACTIONS));
+const SHOWN_STATUSES = ['waiting', 'working', 'queued', 'snoozed', 'idle', 'done', 'dropped'] as const satisfies readonly TodoShownStatus[];
 
 const createInputSchema = boundary.object({
   title: boundary.string, summary: optionalString, doneWhen: optionalStrings, subTodos: optionalStrings,
   projectId: boundary.optional(boundary.nullable(boundary.number)), agent: boundary.optional(boundary.nullable(boundary.string)),
   startNow: boundary.optional(boundary.boolean), parentNumber: boundary.optional(boundary.nullable(boundary.number)),
   attach: boundary.optional(boundary.array(boundary.object({ target: boundary.string, kind: attachmentKind, label: optionalString, note: optionalString }))),
+  // Round 9: New to-do's Remind me….
+  snooze: boundary.optional(boundary.object({ until: boundary.number, zone: boundary.string, note: optionalString, action: wakeAction })),
 });
 
 const number = boundary.number;
@@ -64,6 +69,8 @@ const actionSchema = boundary.union(
   boundary.object({ kind: boundary.literal('detach'), number, attachmentId: boundary.number }),
   boundary.object({ kind: boundary.literal('check'), number, index: boundary.number, met: boundary.boolean }),
   boundary.object({ kind: boundary.literal('rename'), number, title: boundary.string }),
+  boundary.object({ kind: boundary.literal('snooze'), number, until: boundary.number, zone: boundary.string, note: optionalString, action: wakeAction }),
+  boundary.object({ kind: boundary.literal('wake'), number }),
 );
 
 const PERSON: TodoActor = { kind: 'person' };
@@ -96,6 +103,10 @@ async function runTodoAction(service: TodoService, action: TodoAction): Promise<
       return { todo: service.update(action.number, action.met ? { check: [action.index + 1] } : { uncheck: [action.index + 1] }, PERSON) };
     case 'rename':
       return { todo: service.update(action.number, { title: action.title }, PERSON) };
+    case 'snooze':
+      return { todo: service.snooze(action.number, { until: action.until, zone: action.zone, note: action.note, action: action.action }, PERSON) };
+    case 'wake':
+      return { todo: await service.wake(action.number, PERSON) };
   }
 }
 
@@ -120,13 +131,28 @@ function iso(at: number): string {
   return new Date(at).toISOString();
 }
 
+/** The host's own zone: what a snooze set without a known zone is shown in. */
+function hostZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+function runpaneSnooze(todo: TodoRecord): RunpaneTodo['snooze'] {
+  const snooze = todo.snooze;
+  if (!snooze) return undefined;
+  const zone = isKnownZone(snooze.zone) ? snooze.zone : hostZone();
+  return { until: isoInZone(snooze.until, zone), zone, note: snooze.note, action: snooze.action, by: snooze.by };
+}
+
 function runpaneTodoOf(row: TodoListRow, attachmentCount: number): RunpaneTodo {
   const { todo } = row;
-  return {
+  const shown: RunpaneTodo = {
     ref: todo.ref, number: todo.number, title: todo.title, state: todo.state, status: row.status.status, reason: row.status.reason,
     parent: todo.parentNumber !== null ? todoRef(todo.parentNumber) : null, sessionId: todo.sessionId, requester: todo.requester.name,
     assignee: todo.assignee?.name ?? null, summary: todo.summary, doneWhen: todo.doneWhen, attachmentCount, updatedAt: iso(todo.updatedAt),
   };
+  const snooze = runpaneSnooze(todo);
+  if (snooze) shown.snooze = snooze;
+  return shown;
 }
 
 function runpaneAttachments(detail: TodoDetail): RunpaneTodoAttachment[] {
@@ -220,10 +246,13 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
   });
 
   commandRegistry.register('runpane:todos:list', (value: PaneCommandValue): RunpaneTodoListResult => {
-    const request = decodeBoundary(value ?? {}, boundary.object({ all: boundary.optional(boundary.boolean) }));
+    const request = decodeBoundary(value ?? {}, boundary.object({ all: boundary.optional(boundary.boolean), status: boundary.optional(boundary.enumeration(...SHOWN_STATUSES)) }));
     const snapshot = service().snapshot();
     const counts = service().attachmentCounts();
-    const rows = request.all ? snapshot.rows : snapshot.rows.filter(row => row.status.status !== 'done' && row.status.status !== 'dropped');
+    const closed = request.status === 'done' || request.status === 'dropped';
+    const listed = request.all || closed ? snapshot.rows : snapshot.rows.filter(row => row.status.status !== 'done' && row.status.status !== 'dropped');
+    // --status snoozed: soonest first, as the snapshot orders that group.
+    const rows = request.status ? listed.filter(row => row.status.status === request.status) : listed;
     return { ok: true, todos: rows.map(row => runpaneTodoOf(row, counts.get(row.todo.number) ?? 0)) };
   });
 
@@ -282,5 +311,20 @@ export function registerTodoHandlers(ipcMain: IpcMainHandleLike, services: TodoH
     const request = decodeBoundary(value, refSchema);
     const stopped = service().stop(requireRef(request.todo), agentActor(request.callerPanelId));
     return { ok: true, todo: runpaneTodo(service(), stopped.number) };
+  });
+
+  // Round 9 (T-17). The CLI reads the time in its own zone and sends the instant; `by` is the calling tab.
+  commandRegistry.register('runpane:todos:snooze', (value: PaneCommandValue): RunpaneTodoResult => {
+    const request = decodeBoundary(value, boundary.object({
+      todo: boundary.string, until: boundary.number, zone: boundary.string, note: optionalString, remindMe: boundary.optional(boundary.boolean), ...callerField,
+    }));
+    const snoozed = service().snooze(requireRef(request.todo), { until: request.until, zone: request.zone, note: request.note, action: request.remindMe ? 'remind' : undefined }, agentActor(request.callerPanelId));
+    return { ok: true, todo: runpaneTodo(service(), snoozed.number) };
+  });
+
+  commandRegistry.register('runpane:todos:wake', async (value: PaneCommandValue): Promise<RunpaneTodoResult> => {
+    const request = decodeBoundary(value, refSchema);
+    const woken = await service().wake(requireRef(request.todo), agentActor(request.callerPanelId));
+    return { ok: true, todo: runpaneTodo(service(), woken.number) };
   });
 }

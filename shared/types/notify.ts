@@ -61,8 +61,8 @@ export type NotifyLink = { label: string; path: string } | { label: string; url:
 export interface NotifyTodoLink {
   number: number;
   title: string;
-  /** Pane's own card about the to-do: its review, or the supervisor's stuck card. */
-  kind?: 'review' | 'stuck' | 'question';
+  /** Pane's own card about the to-do: its review, the supervisor's stuck card, or a snooze's reminder (round 9). */
+  kind?: 'review' | 'stuck' | 'question' | 'reminder';
 }
 
 /** Up to this many links per card; a label takes up to NOTIFY_LINK_LABEL_MAX characters. */

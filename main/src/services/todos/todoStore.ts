@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3-multiple-ciphers';
 import {
-  TODO_ATTACHMENT_KINDS, TODO_STATES, todoRef,
+  TODO_ATTACHMENT_KINDS, TODO_STATES, TODO_WAKE_ACTIONS, todoRef,
   type TodoActivity, type TodoAttachment, type TodoAttachmentKind, type TodoAttachmentSource, type TodoAuthorKind,
-  type TodoDoneWhenItem, type TodoRecord, type TodoRequester, type TodoState,
+  type TodoDoneWhenItem, type TodoRecord, type TodoRequester, type TodoSnooze, type TodoState, type TodoWakeAction,
 } from '../../../../shared/types/todos';
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../../shared/validation/boundaryDecoder';
 import { ensureApprovalsSchema } from '../../database/approvalsSchema';
@@ -24,6 +24,9 @@ const todoRowSchema = boundary.object({
   attach_reminded_at: num, work_ms: boundary.number, stuck_card_id: str,
   load_hold: boundary.nullable(boundary.enumeration('queued', 'paused')), load_hold_since: num,
   load_override: boundary.nullable(boundary.literal('never_pause')),
+  // Round 9: absent on a row read before ensureTodosSchema added them (never, in practice); null when not snoozed.
+  snoozed_until: boundary.optional(num), snooze_zone: boundary.optional(str), wake_note: boundary.optional(str), wake_action: boundary.optional(str),
+  snoozed_by: boundary.optional(str), snoozed_from: boundary.optional(str), reminder_card_id: boundary.optional(str),
 });
 
 const doneWhenSchema = boundary.array(boundary.object({ text: boundary.string, met: boundary.boolean }));
@@ -76,8 +79,49 @@ function assigneeOf(row: TodoRow): TodoRecord['assignee'] {
   return assignee;
 }
 
-function toRecord(row: TodoRow): TodoRecord {
+const WAKE_ACTIONS: ReadonlySet<string> = new Set(TODO_WAKE_ACTIONS);
+const STATES: ReadonlySet<string> = new Set(TODO_STATES);
+
+function isWakeAction(value: string): value is TodoWakeAction {
+  return WAKE_ACTIONS.has(value);
+}
+
+function isState(value: string): value is TodoState {
+  return STATES.has(value);
+}
+
+/**
+ * What waking a to-do will need, kept on the row (round 9). While `until` is set the to-do is
+ * snoozed. After a reminder wake, or an agents wake the load gate queued, `until` is cleared and the
+ * rest stays until the card is answered or the agents start.
+ */
+export interface StoredWake {
+  until: number | null;
+  zone: string;
+  note: string;
+  action: TodoWakeAction;
+  by: string;
+  from: TodoState;
+  reminderCardId: string | null;
+}
+
+function wakeOf(row: TodoRow): StoredWake | null {
+  if (!row.wake_action || !isWakeAction(row.wake_action)) return null;
   return {
+    until: row.snoozed_until ?? null, zone: row.snooze_zone ?? '', note: row.wake_note ?? '', action: row.wake_action, by: row.snoozed_by ?? 'you',
+    from: row.snoozed_from && isState(row.snoozed_from) ? row.snoozed_from : 'stopped', reminderCardId: row.reminder_card_id ?? null,
+  };
+}
+
+/** A snooze shows only on a stopped row: if a build that ignores snoozing moved it on, the stale time means nothing. */
+function snoozeOf(row: TodoRow): TodoSnooze | undefined {
+  const wake = wakeOf(row);
+  if (!wake || wake.until === null || row.state !== 'stopped') return undefined;
+  return { until: wake.until, zone: wake.zone, note: wake.note, action: wake.action, by: wake.by, from: wake.from, reminderCardId: wake.reminderCardId };
+}
+
+function toRecord(row: TodoRow): TodoRecord {
+  const record: TodoRecord = {
     number: row.number, ref: todoRef(row.number), sessionId: row.session_id, parentNumber: row.parent_id, title: row.title, summary: row.summary,
     doneWhen: decodeDoneWhen(row.done_when), state: row.state, requester: requesterOf(row), projectId: row.project, agent: row.agent,
     assignee: assigneeOf(row),
@@ -86,6 +130,9 @@ function toRecord(row: TodoRow): TodoRecord {
     episodeRestarts: row.episode_restarts, stallsToday: row.stalls_today, stallsDay: row.stalls_day, attachRemindedAt: row.attach_reminded_at,
     workMs: row.work_ms, loadHold: row.load_hold, loadHoldSince: row.load_hold_since, loadOverride: row.load_override, stuckCardId: row.stuck_card_id,
   };
+  const snooze = snoozeOf(row);
+  if (snooze) record.snooze = snooze;
+  return record;
 }
 
 const ATTACHMENT_KINDS: ReadonlySet<string> = new Set(TODO_ATTACHMENT_KINDS);
@@ -168,7 +215,17 @@ export interface TodoPatch {
   loadHold?: TodoRecord['loadHold'];
   loadHoldSince?: number | null;
   loadOverride?: TodoRecord['loadOverride'];
+  snoozedUntil?: number | null;
+  snoozeZone?: string | null;
+  wakeNote?: string | null;
+  wakeAction?: TodoWakeAction | null;
+  snoozedBy?: string | null;
+  snoozedFrom?: TodoState | null;
+  reminderCardId?: string | null;
 }
+
+/** Clears every snooze column: nothing snoozed, no reminder card, no wake waiting. */
+export const NO_WAKE: TodoPatch = { snoozedUntil: null, snoozeZone: null, wakeNote: null, wakeAction: null, snoozedBy: null, snoozedFrom: null, reminderCardId: null };
 
 const PATCH_COLUMNS = {
   title: 'title', summary: 'summary', state: 'state', sessionId: 'session_id', projectId: 'project', agent: 'agent',
@@ -176,6 +233,8 @@ const PATCH_COLUMNS = {
   episodeReminders: 'episode_reminders', episodeRestarts: 'episode_restarts', stallsToday: 'stalls_today', stallsDay: 'stalls_day',
   attachRemindedAt: 'attach_reminded_at', workMs: 'work_ms', stuckCardId: 'stuck_card_id', loadHold: 'load_hold',
   loadHoldSince: 'load_hold_since', loadOverride: 'load_override',
+  snoozedUntil: 'snoozed_until', snoozeZone: 'snooze_zone', wakeNote: 'wake_note', wakeAction: 'wake_action', snoozedBy: 'snoozed_by',
+  snoozedFrom: 'snoozed_from', reminderCardId: 'reminder_card_id',
 } as const satisfies Record<Exclude<keyof TodoPatch, 'assignee' | 'doneWhen'>, string>;
 
 type PatchColumnKey = keyof typeof PATCH_COLUMNS;
@@ -275,6 +334,26 @@ export class TodoStore {
 
   listOpen(): TodoRecord[] {
     return decodeBoundary(this.db.prepare("SELECT * FROM todos WHERE state NOT IN ('done', 'dropped') ORDER BY number").all(), boundary.array(todoRowSchema)).map(toRecord);
+  }
+
+  /** Snoozed to-dos whose time is at or before `now`, oldest first (round 9: each wake check). */
+  listDueSnoozes(now: number): TodoRecord[] {
+    return decodeBoundary(this.db.prepare("SELECT * FROM todos WHERE snoozed_until IS NOT NULL AND snoozed_until <= ? AND state = 'stopped' ORDER BY snoozed_until, number").all(now), boundary.array(todoRowSchema)).map(toRecord);
+  }
+
+  /** What waking this to-do needs, while any of it is kept (see StoredWake). */
+  wake(number: number): StoredWake | null {
+    const row = optionalRow(this.db.prepare('SELECT * FROM todos WHERE number = ?').get(number), todoRowSchema);
+    return row ? wakeOf(row) : null;
+  }
+
+  /** Open to-dos with a reminder card raised, with what the card needs (launch re-raises a lost one). */
+  reminders(): Array<{ todo: TodoRecord; wake: StoredWake }> {
+    const rows = decodeBoundary(this.db.prepare("SELECT * FROM todos WHERE reminder_card_id IS NOT NULL AND state NOT IN ('done', 'dropped') ORDER BY number").all(), boundary.array(todoRowSchema));
+    return rows.flatMap(row => {
+      const wake = wakeOf(row);
+      return wake ? [{ todo: toRecord(row), wake }] : [];
+    });
   }
 
   children(parentNumber: number): TodoRecord[] {
@@ -442,6 +521,12 @@ export class TodoStore {
       if (row.qn) linked.qn = row.qn;
       return linked;
     });
+  }
+
+  /** An approval's state and who closed it, if Pane has it (round 9: was a reminder card lost, or closed by you?). */
+  approvalState(id: string): { state: string; closedBy: string | null } | undefined {
+    const row = optionalRow(this.db.prepare('SELECT state, closed_by FROM approvals WHERE id = ?').get(id), boundary.object({ state: boundary.string, closed_by: str }));
+    return row ? { state: row.state, closedBy: row.closed_by } : undefined;
   }
 
   /** Every approval linked to these to-dos, any state, oldest first. */

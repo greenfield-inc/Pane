@@ -3,18 +3,21 @@ import { randomUUID } from 'crypto';
 import { PaneError } from '../../../../shared/paneError';
 import type { NotifyItem, NotifyLink, NotifyResult, NotifyTodoLink } from '../../../../shared/types/notify';
 import {
-  MOVING_TODO_STATES, TODO_AGENT_REPLY_MAX, TODO_ATTACHMENT_KINDS, isOpenTodoState, parseTodoRef, todoRef,
+  MOVING_TODO_STATES, TODO_AGENT_REPLY_MAX, TODO_ATTACHMENT_KINDS, TODO_SNOOZE_MAX_MS, TODO_SNOOZE_OVERDUE_MS, isOpenTodoState, parseTodoRef, todoRef,
   type LoadGateSnapshot, type TodoActivity, type TodoAttachment, type TodoAttachmentGroup, type TodoAttachmentKind,
-  type TodoAttachmentSource, type TodoCreateInput, type TodoDetail, type TodoListRow, type TodoRecord, type TodoStatus, type TodosSnapshot,
+  type TodoAttachmentSource, type TodoCreateInput, type TodoDetail, type TodoListRow, type TodoRecord, type TodoSnooze, type TodoState, type TodoStatus,
+  type TodoWakeAction, type TodosSnapshot,
 } from '../../../../shared/types/todos';
 import { LOAD_GATE, LoadGate, pickShedTarget, type LoadSample } from './loadGate';
 import {
   acceptedText, assignedText, capacityBackText, changesText, orchestratorStartText, personChatText, personMessageText, requesterQuestionText,
-  requesterReplyText, requesterUpdateText, restartText, resumeText, shedText, stopText, subTodoAddedText, type RequesterUpdate,
+  requesterReplyText, requesterUpdateText, restartText, resumeText, shedText, snoozeText, stopText, subTodoAddedText, wakeText,
+  type HandOver, type RequesterUpdate, type WakeLine,
 } from './todoMessages';
+import { clockText, durationText, isKnownZone, nextMorning, snoozeWhen } from './snoozeClock';
 import { SUPERVISOR, dayOf, decideSupervisorAction, lastMovedAt, reminderText, attachReminderText, stuckCardText, type SupervisorInputs } from './supervisorRules';
 import { STATUS_ORDER, deriveTodoStatus, workingTabOf } from './todoStatus';
-import type { LinkedApproval, TodoPatch, TodoStore } from './todoStore';
+import { NO_WAKE, type LinkedApproval, type StoredWake, type TodoPatch, type TodoStore } from './todoStore';
 
 /** Who acts: the person (Pane's own UI), or an agent through runpane or the MCP. */
 export type TodoActor =
@@ -55,7 +58,7 @@ export interface TodoCard {
   choices: string[];
   links?: NotifyLink[];
   todo: TodoRecord;
-  kind: 'review' | 'stuck' | 'question';
+  kind: 'review' | 'stuck' | 'question' | 'reminder';
   /** The tab whose question this is; its answer is typed there. Absent: Pane's own card. */
   askerPanelId?: string;
 }
@@ -82,6 +85,8 @@ export interface TodoHost {
   usageLimitUntil(panelId: string): number | null;
   /** Raises an approval; resolves with its answer (or never, if Pane quits first). */
   ask(card: TodoCard): Promise<NotifyResult>;
+  /** Ends one of Pane's own cards that no longer applies (a stuck card on a snoozed to-do), with why. */
+  closeCard(id: string, summary: string): void;
   archiveSessionPanes(sessionId: string): Promise<{ archived: string[]; kept: Array<{ name: string; reason: string }>; sessionArchived: boolean }>;
   restoreSession(sessionId: string): Promise<void>;
   sampleLoad(): Promise<Omit<LoadSample, 'at'>>;
@@ -97,6 +102,8 @@ interface OutboxEntry {
   todoNumber: number;
   /** The chat row to mark Delivered. */
   activityId?: number;
+  /** Comments held while the to-do was snoozed, delivered inside this wake message (round 9). */
+  heldIds?: number[];
   /** Resume the tab first when it is down (an answer, a comment). */
   resumeIfDown: boolean;
 }
@@ -104,6 +111,33 @@ interface OutboxEntry {
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const SETTLE_MS = 10_000;
+/** Round 9: agents a wake check starts per tick, as launch resume restarts three at a time. */
+const WAKES_PER_TICK = 3;
+/** A gap this long between wake checks means the Mac slept through it. */
+const SLEPT_MS = 60_000;
+const REMINDER_CHOICES = ['Done', 'Hand to an agent', 'Snooze 1 hour', 'Snooze to the next morning'];
+
+/** What snoozing takes: the instant, the zone it was set in, the note, and what waking does. */
+export interface TodoSnoozeInput {
+  until: number;
+  zone: string;
+  note?: string;
+  action?: TodoWakeAction;
+}
+
+function snoozeStateError(todo: TodoRecord): PaneError | null {
+  if (todo.parentNumber !== null) {
+    const parent = todoRef(todo.parentNumber);
+    return new PaneError('todo_snooze_state', `${todo.ref} is a sub-to-do, and only top-level to-dos can be snoozed. Nothing changed.`, `To pause it, snooze its parent ${parent} instead: runpane todos snooze ${parent} --until "…".`);
+  }
+  switch (todo.state) {
+    case 'in_review': return new PaneError('todo_snooze_state', `${todo.ref} is waiting for your review, so it can't be snoozed. Nothing changed.`, 'Accept it or ask for changes first, then snooze it.');
+    case 'accepted': return new PaneError('todo_snooze_state', `${todo.ref} is accepted and its orchestrator is wrapping it up, so it can't be snoozed. Nothing changed.`, `Let it finish and mark it done, or stop it with runpane todos stop ${todo.ref}.`);
+    case 'done':
+    case 'dropped': return new PaneError('todo_snooze_state', `${todo.ref} is ${todo.state}, so it can't be snoozed. Nothing changed.`, 'Reopen it from the To-dos page first, then snooze it.');
+    default: return null;
+  }
+}
 
 function notFound(ref: string): PaneError {
   return new PaneError('ERR_TODO_NOT_FOUND', `There is no to-do ${ref} on this machine.`, 'Run runpane todos list to see the to-dos here.');
@@ -165,13 +199,19 @@ export class TodoService extends EventEmitter {
   private lastSupervisorPass = 0;
   private lastSampleAt = 0;
   private statusDigest = '';
+  /** Round 9: no wake check runs until launch resume has, so nothing is restarted twice on launch. */
+  private launchResumed = false;
+  private lastWakeCheck = 0;
+  /** "snoozed until Wed 9:00 AM, overdue by 3h", for a wake the load gate queued: its message goes when it starts. */
+  private readonly wakeLines = new Map<number, WakeLine>();
 
   constructor(private readonly store: TodoStore, private readonly host: TodoHost, private readonly now: () => number = Date.now) {
     super();
     this.startedAt = now();
     this.gate = new LoadGate(() => host.loadGateEnabled());
     for (const message of store.undelivered()) {
-      if (message.toTab) this.outbox.push({ panelId: message.toTab, text: personChatText(this.require(message.todoNumber), message.body), todoNumber: message.todoNumber, activityId: message.id, resumeIfDown: true });
+      // A comment held while snoozed goes with the wake message instead (round 9).
+      if (message.toTab && !this.holdsComments(message.todoNumber)) this.outbox.push({ panelId: message.toTab, text: personChatText(this.require(message.todoNumber), message.body), todoNumber: message.todoNumber, activityId: message.id, resumeIfDown: true });
     }
   }
 
@@ -265,7 +305,9 @@ export class TodoService extends EventEmitter {
     const waiting = this.waitingByTodo();
     const byNumber = new Map(todos.map(todo => [todo.number, todo]));
     const rows = todos.map(todo => this.rowOf(todo, children, waiting, byNumber));
-    rows.sort((a, b) => STATUS_ORDER[a.status.status] - STATUS_ORDER[b.status.status] || b.todo.updatedAt - a.todo.updatedAt);
+    // Snoozed: soonest first.
+    const wakesAt = (row: TodoListRow) => row.status.status === 'snoozed' ? row.todo.snooze?.until ?? 0 : 0;
+    rows.sort((a, b) => STATUS_ORDER[a.status.status] - STATUS_ORDER[b.status.status] || wakesAt(a) - wakesAt(b) || b.todo.updatedAt - a.todo.updatedAt);
     return { rows, gate: this.gateSnapshot(), machine: this.host.machineName(), ownSessionIds: this.store.ownSessionIds() };
   }
 
@@ -389,6 +431,9 @@ export class TodoService extends EventEmitter {
       throw new PaneError('ERR_TODO_TOO_DEEP', `${parent.ref} is already a sub-to-do; sub-to-dos go one level deep. Nothing was created.`, `Add it under ${todoRef(parent.parentNumber)} instead: --parent ${todoRef(parent.parentNumber)}.`);
     }
     if (parent) this.requireOpen(parent, 'given sub-to-dos');
+    // Remind me… (round 9): the time is checked before anything is written.
+    if (input.snooze && parent) throw new PaneError('todo_snooze_state', 'A sub-to-do can\'t be created snoozed: only top-level to-dos can be snoozed. Nothing was created.', `Create it without a reminder, or snooze its parent ${parent.ref}.`);
+    if (input.snooze) this.checkSnoozeTime(input.snooze.until, input.snooze.zone);
     const requesterPanel = actor.kind === 'agent' && actor.panelId ? this.host.panel(actor.panelId) : null;
     const requester = parent
       ? parent.requester
@@ -420,6 +465,9 @@ export class TodoService extends EventEmitter {
       if (actor.kind === 'person' && orchestrator) this.enqueue({ panelId: orchestrator, text: subTodoAddedText(parent, todo, this.attachmentGroups(todo)), todoNumber: parent.number, resumeIfDown: false });
       if (parent.state === 'todo') this.store.update(todo.number, { state: 'todo' }, now);
       this.progress(parent);
+    } else if (input.snooze) {
+      // Created, not started: snoozed until its time, which raises a reminder card by default.
+      this.snooze(todo.number, { ...input.snooze, action: input.snooze.action ?? 'remind' }, actor);
     } else if (input.startNow !== false) {
       await this.start(todo.number, actor);
     }
@@ -443,6 +491,12 @@ export class TodoService extends EventEmitter {
       this.store.update(number, { loadOverride: 'never_pause' }, this.now());
       this.event(todo, `Start anyway by ${this.actorName(actor)}: starts now and won't be paused for load`, actor.kind === 'person' ? 'person' : 'agent', this.actorName(actor));
     }
+    // Round 9: Start on a snoozed to-do wakes its agents now.
+    if (todo.snooze) {
+      const woke = await this.wakeNow(this.require(number), { early: actor }, 'agents');
+      this.changed();
+      return { todo: this.require(number), queued: woke === 'queued' };
+    }
     if (!options.anyway && !this.gate.allowsStart()) {
       const queued = this.store.update(number, { state: 'in_progress', loadHold: 'queued', loadHoldSince: this.now() }, this.now());
       this.event(queued, `Queued: ${this.gate.line(this.host.machineName(), this.now()) ?? 'the machine is busy'} · starts when load comes down`);
@@ -458,9 +512,12 @@ export class TodoService extends EventEmitter {
   private async launch(number: number, actor: TodoActor | null): Promise<void> {
     const todo = this.require(number);
     const now = this.now();
+    // A wake waiting to start (round 9): its message replaces the plain Resume.
+    const wake = this.takeWake(number);
     if (!todo.sessionId) {
       const subs = this.store.children(number);
-      const openingPrompt = orchestratorStartText({ ...todo, state: 'in_progress' }, this.attachmentGroups(todo), subs, todo.projectId !== null ? this.host.projectName(todo.projectId) : null);
+      const handOver: HandOver | undefined = wake ? { note: wake.note, held: wake.held.map(row => row.body) } : undefined;
+      const openingPrompt = orchestratorStartText({ ...todo, state: 'in_progress' }, this.attachmentGroups(todo), subs, todo.projectId !== null ? this.host.projectName(todo.projectId) : null, handOver);
       const { sessionId, orchestratorPanelId, prompted } = await this.host.createSession({
         name: `${todo.ref} · ${todo.title}`.slice(0, 120), projectId: todo.projectId, agent: todo.agent, openingPrompt, todoNumber: number,
       });
@@ -475,7 +532,14 @@ export class TodoService extends EventEmitter {
     const orchestrator = this.orchestratorOf(todo);
     if (orchestrator && await this.host.isPanelDown(orchestrator)) await this.host.resumePanel(orchestrator);
     this.store.update(number, { state: 'in_progress', startedAt: todo.startedAt ?? now, lastProgressAt: now, loadHold: null, loadHoldSince: null }, now);
-    if (orchestrator) this.enqueue({ panelId: orchestrator, text: resumeText(todo), todoNumber: number, resumeIfDown: true });
+    if (!orchestrator) return;
+    if (!wake) {
+      this.enqueue({ panelId: orchestrator, text: resumeText(todo), todoNumber: number, resumeIfDown: true });
+      return;
+    }
+    const held = wake.held.map(row => row.body);
+    const text = wake.line ? wakeText(todo, wake.line, wake.note, held, this.attachmentGroups(todo)) : resumeText(todo, { note: wake.note, held });
+    this.enqueue({ panelId: orchestrator, text, todoNumber: number, heldIds: wake.held.map(row => row.id), resumeIfDown: true });
   }
 
   stop(number: number, actor: TodoActor): TodoRecord {
@@ -483,8 +547,8 @@ export class TodoService extends EventEmitter {
     this.requireOpen(todo, 'stopped');
     const orchestrator = this.orchestratorOf(todo);
     if (orchestrator && MOVING_TODO_STATES.includes(todo.state)) this.enqueue({ panelId: orchestrator, text: stopText(todo), todoNumber: number, resumeIfDown: false });
-    const stopped = this.store.update(number, { state: 'stopped', loadHold: null, loadHoldSince: null }, this.now());
-    this.event(stopped, `Stopped by ${this.actorName(actor)}`, actor.kind === 'person' ? 'person' : 'agent', this.actorName(actor));
+    const stopped = this.store.update(number, { state: 'stopped', loadHold: null, loadHoldSince: null, ...this.endWake(number, `Stopped by ${this.actorName(actor)}`) }, this.now());
+    this.event(stopped, `Stopped by ${this.actorName(actor)}${todo.snooze ? ' (no longer snoozed)' : ''}`, actor.kind === 'person' ? 'person' : 'agent', this.actorName(actor));
     this.changed();
     return stopped;
   }
@@ -492,6 +556,12 @@ export class TodoService extends EventEmitter {
   async resume(number: number, actor: TodoActor): Promise<{ todo: TodoRecord; queued: boolean }> {
     const todo = this.require(number);
     this.requireOpen(todo, 'resumed');
+    // Round 9: Resume on a snoozed to-do wakes its agents now.
+    if (todo.snooze) {
+      const woke = await this.wakeNow(todo, { early: actor }, 'agents');
+      this.changed();
+      return { todo: this.require(number), queued: woke === 'queued' };
+    }
     if (!todo.sessionId) return this.start(number, actor);
     if (!this.gate.allowsStart()) {
       const queued = this.store.update(number, { state: 'in_progress', loadHold: 'queued', loadHoldSince: this.now() }, this.now());
@@ -664,7 +734,8 @@ export class TodoService extends EventEmitter {
         toName: target.panelId ? target.name : undefined, replyTo: options.replyTo, now: this.now(),
       });
       if (reply?.gone) this.event(todo, `${reply.gone}’s tab is closed; sent to the orchestrator`);
-      if (target.panelId) this.enqueue({ panelId: target.panelId, text: personChatText(todo, text), todoNumber: number, activityId: message.id, resumeIfDown: true });
+      // Snoozed (round 9): held, undelivered, until it wakes; then it goes inside the wake message.
+      if (target.panelId && !this.holdsComments(number)) this.enqueue({ panelId: target.panelId, text: personChatText(todo, text), todoNumber: number, activityId: message.id, resumeIfDown: true });
       this.progress(todo);
       this.changed();
       void this.flush();
@@ -804,7 +875,7 @@ export class TodoService extends EventEmitter {
     const links: NotifyLink[] = groups.flatMap(group => group.attachments).slice(0, 6).map(attachment => /^https?:/.test(attachment.target) ? { label: attachment.label.slice(0, 80), url: attachment.target } : { label: attachment.label.slice(0, 80), path: attachment.target });
     const id = randomUUID();
     const context = [options.summary?.trim(), count === 0 ? `No attachments: ${options.noAttachments?.trim()}` : `Attachments: ${groups.flatMap(group => group.attachments).map(attachment => `${attachment.kind} · ${attachment.label}`).join('; ')}`].filter(Boolean).join('\n\n');
-    const updated = this.progress(todo, { state: 'in_review' });
+    const updated = this.progress(todo, { state: 'in_review', ...this.endWake(number, `${this.actorName(actor)} asked for your review`) });
     this.event(updated, `${this.actorName(actor)} asked for your review${options.summary ? `: ${options.summary.trim()}` : ''}`, 'agent', this.actorName(actor));
     this.notifyRequester(updated, 'review');
     void this.host.ask({ id, title: `Review ${todo.ref}: ${todo.title}`, context, choices: ['Accept', 'Ask for changes'], links, todo: updated, kind: 'review' })
@@ -847,7 +918,7 @@ export class TodoService extends EventEmitter {
       throw new PaneError('ERR_TODO_DONE_NEEDS_REVIEW', `${todo.ref} is a top-level to-do the person hasn't accepted, so an agent can't mark it done. Nothing changed.`,
         `Ask for review with runpane todos review ${todo.ref}; after they Accept, wrap up and run runpane todos done ${todo.ref}. If they told you to close it, pass --person-said "<their words>".`);
     }
-    const done = this.store.update(number, { state: 'done', closedAt: this.now(), loadHold: null, loadHoldSince: null, stuckSince: null }, this.now());
+    const done = this.store.update(number, { state: 'done', closedAt: this.now(), loadHold: null, loadHoldSince: null, stuckSince: null, ...this.endWake(number, `Done · marked by ${this.actorName(actor)}`) }, this.now());
     if (personSaid) this.store.addActivity({ todoNumber: number, kind: 'message', authorKind: 'agent', authorName: this.actorName(actor), body: `Marked done because you said: “${personSaid}”`, now: this.now() });
     this.event(done, `Done · marked by ${this.actorName(actor)}`, actor.kind === 'person' ? 'person' : 'agent', this.actorName(actor));
     if (todo.parentNumber !== null) {
@@ -866,7 +937,7 @@ export class TodoService extends EventEmitter {
   drop(number: number, options: { reason?: string }, actor: TodoActor): TodoRecord {
     const todo = this.require(number);
     this.requireOpen(todo, 'dropped');
-    const dropped = this.store.update(number, { state: 'dropped', closedAt: this.now(), loadHold: null, loadHoldSince: null }, this.now());
+    const dropped = this.store.update(number, { state: 'dropped', closedAt: this.now(), loadHold: null, loadHoldSince: null, ...this.endWake(number, `Dropped by ${this.actorName(actor)}`) }, this.now());
     this.event(dropped, `Dropped by ${this.actorName(actor)}${options.reason ? `: ${options.reason}` : ''}`, actor.kind === 'person' ? 'person' : 'agent', this.actorName(actor));
     if (todo.parentNumber === null) {
       this.notifyRequester(dropped, 'dropped');
@@ -978,6 +1049,8 @@ export class TodoService extends EventEmitter {
   private async flushOnce(): Promise<void> {
     const tried = new Set<string>();
     for (const entry of [...this.outbox]) {
+      // A comment queued before a snooze waits for the wake message too (round 9).
+      if (entry.activityId !== undefined && this.holdsComments(entry.todoNumber)) continue;
       if (tried.has(entry.panelId)) continue;
       tried.add(entry.panelId);
       if (await this.host.isPanelDown(entry.panelId)) {
@@ -991,11 +1064,12 @@ export class TodoService extends EventEmitter {
       if (result === 'busy') continue;
       this.outbox.splice(this.outbox.indexOf(entry), 1);
       if (entry.activityId !== undefined && result === 'delivered') this.store.markDelivered(entry.activityId, this.now());
+      if (result === 'delivered') for (const id of entry.heldIds ?? []) this.store.markDelivered(id, this.now());
       if (result !== 'delivered') {
         const todo = this.store.get(entry.todoNumber);
         if (todo) this.event(todo, `Couldn't reach ${this.host.panel(entry.panelId)?.name ?? 'the tab'}: ${result === 'gone' ? 'its tab closed' : 'it takes no typed messages'}`);
       }
-      if (entry.activityId !== undefined) this.changed();
+      if (entry.activityId !== undefined || entry.heldIds !== undefined) this.changed();
     }
   }
 
@@ -1313,15 +1387,305 @@ export class TodoService extends EventEmitter {
     this.changed();
   }
 
+  // ── Snoozing and reminders (round 9, T-17) ──────────────────────────────
+
+  /** Who set a snooze, for the chip: "you", "orchestrator" (the to-do's own), or the agent's name. */
+  private snoozerName(todo: TodoRecord, actor: TodoActor): string {
+    if (actor.kind === 'person') return 'you';
+    if (actor.panelId && actor.panelId === this.orchestratorOf(todo)) return 'orchestrator';
+    return this.actorName(actor);
+  }
+
+  private checkSnoozeTime(until: number, zone: string): void {
+    const now = this.now();
+    if (!Number.isFinite(until)) {
+      throw new PaneError('todo_snooze_time', 'That wake time is not a time Pane can read, so nothing was snoozed.', 'Pass the time as ms since the epoch, or use runpane todos snooze T-n --until "tomorrow 9:00".');
+    }
+    if (!isKnownZone(zone)) {
+      throw new PaneError('todo_snooze_time', `"${zone}" is not a time zone Pane knows, so nothing was snoozed.`, 'Pass an IANA zone such as Europe/London, or leave it out to use this machine’s.');
+    }
+    if (until <= now) {
+      throw new PaneError('todo_snooze_past', `${snoozeWhen(until, now, zone, { full: true })} has already passed, so nothing was snoozed.`, 'Pick a time in the future, for example --until tomorrow or --until 2h.');
+    }
+    if (until - now > TODO_SNOOZE_MAX_MS) {
+      throw new PaneError('todo_snooze_time', `${snoozeWhen(until, now, zone, { full: true })} is more than a year away, and a snooze can run a year at most. Nothing was snoozed.`, 'Pick a time within a year; to wait longer, snooze it again when it wakes.');
+    }
+  }
+
+  /** Its comments wait for the wake message: while snoozed, or while a wake waits on the load gate. */
+  private holdsComments(number: number): boolean {
+    const wake = this.store.wake(number);
+    if (!wake) return false;
+    if (wake.until !== null) return this.store.get(number)?.snooze !== undefined;
+    return wake.action === 'agents' && wake.reminderCardId === null;
+  }
+
+  /** Comments written to its agents and not yet typed: they go inside the wake message. */
+  private heldComments(number: number): TodoActivity[] {
+    const held = this.store.undelivered().filter(row => row.todoNumber === number && row.authorKind === 'person');
+    const ids = new Set(held.map(row => row.id));
+    for (let index = this.outbox.length - 1; index >= 0; index -= 1) {
+      const id = this.outbox[index].activityId;
+      if (id !== undefined && ids.has(id)) this.outbox.splice(index, 1);
+    }
+    return held;
+  }
+
+  /** The wake a start is waiting on, taken (and cleared) as the agents start. */
+  private takeWake(number: number): { note: string; line?: WakeLine; held: TodoActivity[] } | null {
+    const wake = this.store.wake(number);
+    if (!wake || wake.until !== null || wake.action !== 'agents' || wake.reminderCardId !== null) return null;
+    const held = this.heldComments(number);
+    this.store.update(number, NO_WAKE, this.now());
+    const line = this.wakeLines.get(number);
+    this.wakeLines.delete(number);
+    return line ? { note: wake.note, line, held } : { note: wake.note, held };
+  }
+
+  /** Ends a snooze, a waiting reminder card and a wake queued on the load gate: Stop, Done, Drop, review. */
+  private endWake(number: number, why: string): TodoPatch {
+    const wake = this.store.wake(number);
+    if (!wake) return {};
+    if (wake.reminderCardId) this.host.closeCard(wake.reminderCardId, why);
+    this.wakeLines.delete(number);
+    return NO_WAKE;
+  }
+
+  /**
+   * Snoozes a top-level to-do until `until`, or changes its snooze. Its agents are told to stop after
+   * their step (never the tab that asked), its ladder and stuck card are cleared, and it is stored as
+   * stopped, so the supervisor, launch resume and the load gate leave it alone until it wakes.
+   */
+  snooze(number: number, input: TodoSnoozeInput, actor: TodoActor): TodoRecord {
+    const todo = this.require(number);
+    const refused = snoozeStateError(todo);
+    if (refused) throw refused;
+    this.checkSnoozeTime(input.until, input.zone);
+    const now = this.now();
+    const current: TodoSnooze | undefined = todo.snooze;
+    const note = (input.note ?? current?.note ?? '').trim();
+    const action: TodoWakeAction = input.action ?? current?.action ?? (todo.sessionId ? 'agents' : 'remind');
+    const from: TodoState = current?.from ?? todo.state;
+    const by = this.snoozerName(todo, actor);
+    const when = snoozeWhen(input.until, now);
+    const stored = this.store.wake(number);
+    if (stored?.reminderCardId) this.host.closeCard(stored.reminderCardId, `Snoozed again until ${when}`);
+    if (todo.stuckCardId) this.host.closeCard(todo.stuckCardId, `Snoozed until ${when}`);
+    this.wakeLines.delete(number);
+    this.lastRestartAt.delete(number);
+    this.usageLimited.delete(number);
+    this.shedAsked.delete(number);
+    const updated = this.store.update(number, {
+      ...NO_WAKE, state: 'stopped', loadHold: null, loadHoldSince: null, stuckSince: null, episodeReminders: 0, episodeRestarts: 0, stuckCardId: null,
+      snoozedUntil: input.until, snoozeZone: input.zone, wakeNote: note, wakeAction: action, snoozedBy: by, snoozedFrom: from,
+    }, now);
+    // Its agents were working: they finish their step and wait. The tab that asked already knows.
+    if (!current && MOVING_TODO_STATES.includes(todo.state) && todo.loadHold === null) {
+      const caller = actor.kind === 'agent' ? actor.panelId : undefined;
+      const orchestrator = this.orchestratorOf(todo);
+      const full = snoozeWhen(input.until, now, undefined, { full: true });
+      if (orchestrator && orchestrator !== caller) {
+        this.enqueue({ panelId: orchestrator, text: snoozeText(todo, full, note, 'orchestrator'), todoNumber: number, resumeIfDown: false });
+      } else if (orchestrator) {
+        for (const tab of this.tabsOf(todo)) if (tab !== orchestrator) this.enqueue({ panelId: tab, text: snoozeText(todo, full, note, 'worker'), todoNumber: number, resumeIfDown: false });
+      }
+    }
+    const who = by === 'orchestrator' ? 'the orchestrator' : by;
+    this.event(updated, `${current ? 'Snooze changed to' : 'Snoozed until'} ${when} by ${who}${note ? `: ${note}` : ''}`, actor.kind === 'person' ? 'person' : 'agent', this.actorName(actor));
+    this.changed();
+    return updated;
+  }
+
+  /** Takes the snooze off without waking anything: it reads Stopped. */
+  clearSnooze(number: number, actor: TodoActor): TodoRecord {
+    const todo = this.require(number);
+    if (!this.store.wake(number)) return todo;
+    const cleared = this.store.update(number, this.endWake(number, `Snooze cleared by ${this.actorName(actor)}`), this.now());
+    this.event(cleared, `Snooze cleared by ${this.actorName(actor)}`, actor.kind === 'person' ? 'person' : 'agent', this.actorName(actor));
+    this.changed();
+    return cleared;
+  }
+
+  /** Wake now (the button, R, runpane todos wake): as its time arriving would, with "woken early" in the message. */
+  async wake(number: number, actor: TodoActor): Promise<TodoRecord> {
+    const todo = this.require(number);
+    if (!todo.snooze) {
+      throw new PaneError('todo_snooze_state', `${todo.ref} isn't snoozed, so there was nothing to wake. Nothing changed.`, `To start its agents, run runpane todos start ${todo.ref}.`);
+    }
+    await this.wakeNow(todo, { early: actor }, 'as-due');
+    this.changed();
+    return this.require(number);
+  }
+
+  /** "overdue by 3h: Pane was closed", when it wakes more than 2 minutes late. */
+  private lateness(until: number, now: number, lastCheck: number): string | undefined {
+    const over = now - until;
+    if (over <= TODO_SNOOZE_OVERDUE_MS) return undefined;
+    const why = this.startedAt > until ? 'Pane was closed' : lastCheck > 0 && now - lastCheck > SLEPT_MS ? 'the Mac was asleep' : '';
+    return `overdue by ${durationText(over)}${why ? `: ${why}` : ''}`;
+  }
+
+  /**
+   * Wakes one snoozed to-do. `as-due`: what its time does (its agents, or a reminder card when it
+   * says remind or has no Session). `agents`: Resume and Start, which always start its agents.
+   */
+  private async wakeNow(todo: TodoRecord, how: { early?: TodoActor; lastCheck?: number }, mode: 'as-due' | 'agents'): Promise<'woke' | 'queued' | 'reminded'> {
+    const snooze = todo.snooze;
+    if (!snooze) return 'woke';
+    const number = todo.number;
+    const now = this.now();
+    const early = how.early ? this.actorName(how.early) : undefined;
+    const late = early ? `woken early by ${early}` : this.lateness(snooze.until, now, how.lastCheck ?? 0);
+    const line: WakeLine = late ? { until: snoozeWhen(snooze.until, now), late } : { until: snoozeWhen(snooze.until, now) };
+    if (early && how.early) this.event(todo, `Woken early by ${early}`, how.early.kind === 'person' ? 'person' : 'agent', early);
+    else this.event(todo, late ? `Woke at ${clockText(now)}, ${late}` : `Woke at ${clockText(snooze.until)}`);
+
+    if (mode === 'as-due' && (snooze.action === 'remind' || !todo.sessionId)) {
+      this.raiseReminder(todo, { note: snooze.note, zone: snooze.zone }, line, snooze.from);
+      return 'reminded';
+    }
+    // From here the to-do isn't snoozed: what it still needs to wake is kept until its agents start.
+    this.store.update(number, { snoozedUntil: null, wakeAction: 'agents', reminderCardId: null }, now);
+    this.wakeLines.set(number, line);
+    if (!todo.sessionId) {
+      // A reminder you start: its Session and orchestrator, as Start makes them, with the note in the first message.
+      const started = await this.start(number, how.early ?? { kind: 'person' });
+      return started.queued ? 'queued' : 'woke';
+    }
+    // A new episode: the ladder counts again from now.
+    const woke = this.progress(todo, { state: 'in_progress' });
+    if (!this.gate.allowsStart() && todo.loadOverride !== 'never_pause') {
+      this.store.update(number, { loadHold: 'queued', loadHoldSince: now }, now);
+      this.event(woke, `Wake queued: ${this.gate.line(this.host.machineName(), now) ?? `${this.host.machineName()} is busy`} · wakes when load comes down`);
+      return 'queued';
+    }
+    for (const tab of this.tabsOf(woke)) if (await this.host.isPanelDown(tab)) await this.host.resumePanel(tab);
+    await this.launch(number, null);
+    return 'woke';
+  }
+
+  /**
+   * On the 2 s housekeeping tick, once launch resume has run: wakes every to-do whose time has come,
+   * against the wall clock (no timer per to-do, so sleep, a restart or a clock change can't lose one).
+   * At most three start agents per tick; the rest wake on later ticks. Reminder cards aren't limited.
+   */
+  async wakeTick(): Promise<void> {
+    if (!this.launchResumed) return;
+    const now = this.now();
+    const lastCheck = this.lastWakeCheck;
+    this.lastWakeCheck = now;
+    const due = this.store.listDueSnoozes(now);
+    if (due.length === 0) return;
+    let started = 0;
+    for (const todo of due) {
+      const startsAgents = todo.snooze?.action === 'agents' && todo.sessionId !== null && (this.gate.allowsStart() || todo.loadOverride === 'never_pause');
+      if (startsAgents && started >= WAKES_PER_TICK) continue;
+      try {
+        if (await this.wakeNow(todo, { lastCheck }, 'as-due') === 'woke') started += 1;
+      } catch (error) {
+        this.host.log(`[Todos] waking ${todo.ref} failed`, error instanceof Error ? error : String(error));
+      }
+    }
+    this.changed();
+  }
+
+  /** The reminder card: Done / Hand to an agent / Snooze 1 hour / Snooze to the next morning. The to-do goes back to `returnTo`. */
+  private raiseReminder(todo: TodoRecord, wake: { note: string; zone: string }, line: WakeLine | null, returnTo?: TodoState): void {
+    const id = randomUUID();
+    const now = this.now();
+    const patch: TodoPatch = { snoozedUntil: null, reminderCardId: id };
+    if (returnTo) patch.state = returnTo;
+    const updated = this.store.update(todo.number, patch, now);
+    const due = line ? `Due ${line.until}${line.late ? `, ${line.late}` : ''}.` : 'Raised again: Pane restarted before you answered it.';
+    this.event(updated, line ? `Reminder at ${clockText(now)}${line.late ? `, ${line.late}` : ''}: Pane asked you` : 'Reminder raised again after Pane restarted');
+    void this.host.ask({ id, title: `Reminder: ${todo.ref} ${todo.title}`, context: [due, wake.note].filter(Boolean).join('\n\n'), choices: REMINDER_CHOICES, todo: updated, kind: 'reminder' })
+      .then(result => this.onReminderAnswered(todo.number, id, result))
+      .catch(error => this.host.log(`[Todos] ${todo.ref} reminder failed`, error));
+  }
+
+  /** Launch: a reminder whose card didn't survive the restart (Pane's own cards end when it quits) is raised again. */
+  private reraiseReminders(): void {
+    for (const { todo, wake } of this.store.reminders()) {
+      if (!wake.reminderCardId) continue;
+      const card = this.store.approvalState(wake.reminderCardId);
+      if (card && (card.state === 'waiting' || card.state === 'sent')) continue;
+      if (card?.closedBy === 'you') {
+        this.store.update(todo.number, NO_WAKE, this.now());
+        continue;
+      }
+      this.raiseReminder(todo, wake, null);
+    }
+  }
+
+  private async onReminderAnswered(number: number, cardId: string, result: NotifyResult): Promise<void> {
+    const todo = this.store.get(number);
+    const wake: StoredWake | null = this.store.wake(number);
+    // A newer card, or the reminder was ended (Stop, Done, a new snooze).
+    if (!todo || !wake || wake.reminderCardId !== cardId) return;
+    const pick = 'answer' in result ? result.answer : 'reply' in result ? result.picks?.[0] ?? null : null;
+    const said = ('answer' in result ? result.note ?? '' : 'reply' in result ? result.reply : '').trim();
+    const now = this.now();
+    if (pick === null && !('reply' in result)) {
+      // Not answered: closed by you ends the reminder; one lost as Pane quit is raised again on launch.
+      if (this.store.approvalState(cardId)?.closedBy === 'you') {
+        this.store.update(number, NO_WAKE, now);
+        this.event(todo, 'You closed the reminder', 'person', 'you');
+        this.changed();
+      }
+      return;
+    }
+    const person: TodoActor = { kind: 'person' };
+    this.store.update(number, NO_WAKE, now);
+    try {
+      switch (pick) {
+        case 'Done':
+          this.done(number, {}, person);
+          break;
+        case 'Snooze 1 hour':
+          this.snooze(number, { until: now + HOUR, zone: wake.zone, note: wake.note, action: wake.action }, person);
+          break;
+        case 'Snooze to the next morning':
+          this.snooze(number, { until: nextMorning(now, isKnownZone(wake.zone) ? wake.zone : undefined), zone: wake.zone, note: wake.note, action: wake.action }, person);
+          break;
+        case 'Hand to an agent': {
+          // Started as Start does, with the note and your words in its first message.
+          const note = [wake.note, said ? `They added: ${said}` : ''].filter(Boolean).join('\n');
+          this.store.update(number, { wakeNote: note, wakeAction: 'agents', snoozeZone: wake.zone, snoozedBy: wake.by, snoozedFrom: wake.from }, now);
+          this.event(todo, 'You handed the reminder to an agent', 'person', 'you');
+          if (todo.sessionId) await this.resume(number, person);
+          else await this.start(number, person);
+          break;
+        }
+        default:
+          this.event(todo, `You answered the reminder: ${pick ?? said}`, 'person', 'you');
+      }
+    } catch (error) {
+      this.event(todo, `Pane couldn't act on your answer (${pick ?? said}): ${error instanceof Error ? error.message : String(error)}`);
+    }
+    this.changed();
+    void this.flush();
+  }
+
   // ── Launch resume ───────────────────────────────────────────────────────
 
   /**
    * When Pane starts (or wakes): restart the orchestrators and assigned tabs of every in-progress or
    * accepted to-do, in their same conversations, three at a time and only as the gate allows.
-   * Waiting, stopped and to-do items stay down. Re-raises a review that lost its card.
+   * Waiting, stopped (and so snoozed) and to-do items stay down. Re-raises a review or reminder that lost its card.
+   * Wake checks start only once this has run (round 9), so a to-do due at launch is restarted once.
    */
   async resumeOnLaunch(why: 'launch' | 'wake' = 'launch'): Promise<{ restarted: number; queued: number }> {
+    try {
+      return await this.resumeOnLaunchOnce(why);
+    } finally {
+      this.launchResumed = true;
+    }
+  }
+
+  private async resumeOnLaunchOnce(why: 'launch' | 'wake'): Promise<{ restarted: number; queued: number }> {
     const now = this.now();
+    if (why === 'launch') this.reraiseReminders();
+    const reminding = new Set(this.store.reminders().map(entry => entry.todo.number));
     const waiting = this.waitingByTodo();
     const top = this.store.listOpen().filter(todo => todo.parentNumber === null && todo.sessionId !== null);
     for (const todo of top) {
@@ -1332,7 +1696,7 @@ export class TodoService extends EventEmitter {
       }
     }
     const due = this.store.listOpen().filter(todo => todo.parentNumber === null && todo.sessionId !== null && MOVING_TODO_STATES.includes(todo.state) && todo.loadHold === null
-      && (waiting.get(todo.number)?.length ?? 0) === 0 && !this.store.children(todo.number).some(child => (waiting.get(child.number)?.length ?? 0) > 0));
+      && !reminding.has(todo.number) && (waiting.get(todo.number)?.length ?? 0) === 0 && !this.store.children(todo.number).some(child => (waiting.get(child.number)?.length ?? 0) > 0));
     const bySession = new Map<string, TodoRecord[]>();
     for (const todo of due) if (todo.sessionId) bySession.set(todo.sessionId, [...(bySession.get(todo.sessionId) ?? []), todo]);
     let restarted = 0;

@@ -6,6 +6,7 @@ import { ensureTodosSchema } from '../../database/todosSchema';
 import { TODO_RETENTION_MS, TodoStore } from './todoStore';
 
 const person = { kind: 'person' as const, name: 'you' };
+const SNOOZE_COLUMNS = ['snoozed_until', 'snooze_zone', 'wake_note', 'wake_action', 'snoozed_by', 'snoozed_from', 'reminder_card_id'];
 
 describe('TodoStore', () => {
   let db: Database.Database;
@@ -100,6 +101,43 @@ describe('to-dos migration', () => {
     const reply = store.addActivity({ todoNumber: 1, kind: 'message', authorKind: 'person', authorName: 'you', body: 'a reply', replyTo: 2, now: 3 });
     expect(store.activity(1).map(row => [row.body, row.replyTo])).toEqual([['before the upgrade', undefined], ['from an older build', undefined], ['a reply', 2]]);
     expect(reply.replyTo).toBe(2);
+    db.close();
+  });
+
+  it('adds the seven snooze columns and their index to a database from an earlier build, keeping its rows (S14)', () => {
+    const db = new Database(':memory:');
+    ensureTodosSchema(db);
+    db.prepare("INSERT INTO todos (title, state, requester_kind, created_by, created_at, updated_at) VALUES ('Before', 'stopped', 'person', 'you', 1, 1)").run();
+    // The table as round 8 made it: no snooze columns.
+    db.prepare('DROP INDEX idx_todos_snoozed').run();
+    for (const column of SNOOZE_COLUMNS) db.prepare(`ALTER TABLE todos DROP COLUMN ${column}`).run();
+    for (let run = 0; run < 2; run += 1) ensureTodosSchema(db);
+    // SAFETY: PRAGMA table_info rows always carry a name.
+    const columns = db.prepare('PRAGMA table_info(todos)').all().map(column => (column as { name: string }).name);
+    for (const column of SNOOZE_COLUMNS) expect(columns).toContain(column);
+    // SAFETY: sqlite_master rows always carry a name.
+    const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'todos'").all().map(row => (row as { name: string }).name);
+    expect(indexes).toContain('idx_todos_snoozed');
+    const store = new TodoStore(db);
+    expect(store.get(1)).toMatchObject({ title: 'Before', state: 'stopped' });
+    expect(store.get(1)?.snooze).toBeUndefined();
+    db.close();
+  });
+
+  it('keeps a snooze on the row, lists the due ones oldest first, and shows none on a to-do that isn’t stopped', () => {
+    const db = new Database(':memory:');
+    const store = new TodoStore(db);
+    const make = (title: string) => store.create({ title, requester: person, createdBy: 'you', now: 1 });
+    const [late, early, later] = [make('Late'), make('Early'), make('Later')];
+    const snooze = (number: number, until: number) => store.update(number, { state: 'stopped', snoozedUntil: until, snoozeZone: 'Europe/London', wakeNote: 'check', wakeAction: 'agents', snoozedBy: 'you', snoozedFrom: 'in_progress' }, 2);
+    expect(snooze(late.number, 200).snooze).toEqual({ until: 200, zone: 'Europe/London', note: 'check', action: 'agents', by: 'you', from: 'in_progress', reminderCardId: null });
+    snooze(early.number, 100);
+    snooze(later.number, 900);
+    expect(store.listDueSnoozes(500).map(todo => todo.title)).toEqual(['Early', 'Late']);
+    // A build that ignores snoozing may move it on; the stale time then means nothing.
+    store.update(early.number, { state: 'in_progress' }, 3);
+    expect(store.get(early.number)?.snooze).toBeUndefined();
+    expect(store.listDueSnoozes(500).map(todo => todo.title)).toEqual(['Late']);
     db.close();
   });
 

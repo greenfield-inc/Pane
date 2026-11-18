@@ -609,7 +609,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     todoTimer = setInterval(() => {
       if (ticking) return;
       ticking = true;
+      // Round 9: the wake check reads the wall clock each tick (no timer per to-do), so a snooze that came due
+      // while Pane was closed or the Mac slept wakes on the first tick after; it waits for launch resume below.
       void todoService.fastTick()
+        .then(() => todoService.wakeTick())
         .then(() => todoService.loadTick())
         .then(() => todoService.supervisorPass())
         .catch(error => logger.warn('[Todos] tick failed', error))

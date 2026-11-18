@@ -1,4 +1,5 @@
 import { MOVING_TODO_STATES, isOpenTodoState, type TodoRecord, type TodoStatus } from '../../../../shared/types/todos';
+import { snoozeWhen } from './snoozeClock';
 import type { LinkedApproval } from './todoStore';
 
 /** The supervisor's first rung: a to-do quiet this long reads red. */
@@ -20,6 +21,8 @@ export interface TodoStatusInputs {
   usageLimitUntil?: number | null;
   offline?: boolean;
   now: number;
+  /** The zone times are written in; the host's when absent (the renderer formats its own). */
+  zone?: string;
 }
 
 function minutes(ms: number): string {
@@ -52,8 +55,14 @@ function quietReason(todo: TodoRecord, now: number): QuietReason {
   return { reason: quiet, alert: quietFor >= QUIET_ALERT_MS };
 }
 
+/** "until Wed 9:00 AM · check Sentry": the snooze's time in the host's zone and its note's first line. */
+function snoozedReason(snooze: NonNullable<TodoRecord['snooze']>, inputs: TodoStatusInputs): string {
+  const note = snooze.note.split('\n').map(line => line.trim()).find(Boolean) ?? '';
+  return [`until ${snoozeWhen(snooze.until, inputs.now, inputs.zone)}`, note, inputs.offline ? 'machine offline' : ''].filter(Boolean).join(' · ');
+}
+
 /**
- * Waiting on you wins, then Working, then Queued, then Idle with a reason (D-395, D-408). Never stored:
+ * Waiting on you wins, then Working, then Snoozed (round 9), then Queued, then Idle with a reason (D-395, D-408). Never stored:
  * every surface asks this with fresh inputs, so a status can't go stale.
  */
 export function deriveTodoStatus(inputs: TodoStatusInputs): TodoStatus {
@@ -67,7 +76,7 @@ export function deriveTodoStatus(inputs: TodoStatusInputs): TodoStatus {
     const question = first.title.replace(/^Q-\d+:\s*/, '');
     const waiting: TodoStatus = {
       status: 'waiting',
-      reason: review ? 'ready for your review' : [first.qn, question].filter(Boolean).join(' · '),
+      reason: [review ? 'ready for your review' : [first.qn, question].filter(Boolean).join(' · '), todo.snooze ? `snoozed until ${snoozeWhen(todo.snooze.until, inputs.now, inputs.zone)}` : ''].filter(Boolean).join(' · '),
       waitingApprovalId: first.id, waitingQuestion: question, waitingCount: inputs.waiting.length,
     };
     if (first.qn) waiting.waitingQn = first.qn;
@@ -79,6 +88,8 @@ export function deriveTodoStatus(inputs: TodoStatusInputs): TodoStatus {
     const tabs = [workingTabOf(todo, inputs.orchestratorPanelId), ...inputs.openChildren.map(child => workingTabOf(child, inputs.orchestratorPanelId))];
     if (tabs.some(tab => tab !== null && inputs.isMidTurn(tab))) return { status: 'working', reason: '' };
   }
+
+  if (todo.snooze) return { status: 'snoozed', reason: snoozedReason(todo.snooze, inputs) };
 
   if (todo.loadHold === 'queued') return { status: 'queued', reason: `${inputs.machineName} is busy · starts when load comes down` };
   if (todo.loadHold === 'paused') return { status: 'queued', reason: 'paused for load · resumes when load comes down' };
@@ -97,5 +108,5 @@ export function deriveTodoStatus(inputs: TodoStatusInputs): TodoStatus {
   return idle;
 }
 
-/** List order inside a group, and the group order: Waiting on you, Working, Queued, Idle, Done. */
-export const STATUS_ORDER = { waiting: 0, working: 1, queued: 2, idle: 3, done: 4, dropped: 5 } as const satisfies Record<TodoStatus['status'], number>;
+/** List order inside a group, and the group order: Waiting on you, Working, Queued, Idle, Snoozed (round 9), Done. */
+export const STATUS_ORDER = { waiting: 0, working: 1, queued: 2, idle: 3, snoozed: 4, done: 5, dropped: 6 } as const satisfies Record<TodoStatus['status'], number>;

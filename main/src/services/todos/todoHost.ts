@@ -153,6 +153,9 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
       return queue.ask({ id: card.id, question, source });
     },
 
+    // Settled, not closed by you: it moves to Earlier today with why (a snooze ended its stuck card, say).
+    closeCard: (id, summary) => services.notifyService?.queue.settle(id, summary),
+
     archiveSessionPanes: sessionId => archiveTodoSessionPanes(services, commandRegistry, sessionId),
 
     async restoreSession(sessionId: string): Promise<void> {
