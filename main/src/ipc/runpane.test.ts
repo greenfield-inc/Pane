@@ -4779,12 +4779,20 @@ describe('runpane IPC handlers', () => {
         );
       });
       const registry = createRegistry();
-
-      const result = await registry.invoke('runpane:panels:resume', [{
+      // A fake clock moves only while the wait sleeps between polls, so a slow machine can't use up the 50 ms.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      let settled = false;
+      const pending = Promise.resolve(registry.invoke('runpane:panels:resume', [{
         panelId: terminalPanel.id,
         waitReady: true,
         readyTimeoutMs: 50,
-      }]);
+      }])).finally(() => { settled = true; });
+      try {
+        while (!settled) await vi.advanceTimersToNextTimerAsync();
+      } finally {
+        vi.useRealTimers();
+      }
+      const result = await pending;
 
       expect(result).toMatchObject({
         ok: true,
