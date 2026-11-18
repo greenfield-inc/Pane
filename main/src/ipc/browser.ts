@@ -252,10 +252,11 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
       }
     }
     if (!page) {
+      const paneName = services.sessionManager.getSession(tab.sessionId)?.name ?? 'this Pane';
       throw new PaneError('ERR_BROWSER_NOT_SHOWING', host.hasWindow()
-        ? `Tab ${tab.id} did not load its page within ${PAGE_WAIT_MS / 1000} seconds of being brought forward. Nothing ran.`
+        ? `Tab ${tab.id} did not load its page within ${PAGE_WAIT_MS / 1000} seconds. A browser tab's page loads only while its Pane is open in Pane's window, and ${paneName} may not be. Nothing ran.`
         : `Tab ${tab.id} is not showing on this computer: this Pane runs without a window, so its pages exist only on a desktop that shows them. Nothing ran.`,
-      host.hasWindow() ? 'Try again; if it keeps failing, close the tab and open it with browser_open.' : 'Open this Pane in Pane\'s desktop app on this computer, then try again.');
+      host.hasWindow() ? `Ask the person to open ${paneName} in Pane, then try again.` : 'Open this Pane in Pane\'s desktop app on this computer, then try again.');
     }
     return page;
   }

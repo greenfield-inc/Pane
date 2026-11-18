@@ -90,8 +90,9 @@ and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open 
 ## Where a tab must be
 
 Today a tab's page exists only while the tab shows in a Pane window on the agent's computer. A
-call on a tab that is not showing brings it forward and waits up to 5 seconds for its page. On
-a Pane running without a window, calls fail with `ERR_BROWSER_NOT_SHOWING`. A call from an agent
+call on a tab that is not showing brings it forward in its Pane and waits up to 5 seconds for
+its page. When the window shows another Pane, or Pane runs without a window, the page never
+loads and the call fails with `ERR_BROWSER_NOT_SHOWING`. A call from an agent
 on another computer fails with `ERR_BROWSER_LOCAL_ONLY`.
 
 ## How it works
