@@ -11,7 +11,7 @@ const readSchema = boundary.object({
 
 /**
  * The renderer's channels for every machine: `machines:list`, `machines:read`, `machines:run`,
- * `machines:retry`, and `machines:event` pushed to each window that sent `machines:subscribe`.
+ * `machines:retry`, `machines:latency`, and `machines:event` pushed to each window that sent `machines:subscribe`.
  */
 export function registerMachineConnectionHandlers(ipcMain: IpcMain, machines: MachineConnections): void {
   // Only windows showing every machine pay for its events.
@@ -33,6 +33,8 @@ export function registerMachineConnectionHandlers(ipcMain: IpcMain, machines: Ma
   });
   ipcMain.handle('machines:run', (_event, machineId: PaneCommandValue, command: PaneCommandValue) =>
     rejectWithPaneErrorText(machines.run(decodeBoundary(machineId, boundary.nonEmptyString), command)));
+  ipcMain.handle('machines:latency', (_event, machineId: PaneCommandValue) =>
+    rejectWithPaneErrorText(machines.measureLatency(decodeBoundary(machineId, boundary.nonEmptyString))));
   ipcMain.handle('machines:retry', (_event, machineId: PaneCommandValue) =>
     rejectWithPaneErrorText(machines.retry(decodeBoundary(machineId, boundary.nonEmptyString))));
 }

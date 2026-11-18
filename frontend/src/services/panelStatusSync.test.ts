@@ -140,4 +140,13 @@ describe('panel status synchronization', () => {
     status(event('idle'));
     expect(usePanelStore.getState().hasUnviewedCompletedActivity('s')).toBe(true);
   });
+
+  it("marks a program's own done report unseen even when the tab already read idle", async () => {
+    replies[0](snapshot('idle'));
+    await flush();
+    status(event('idle'));
+    expect(usePanelStore.getState().hasUnviewedCompletedActivity('s')).toBe(false);
+    status({ ...event('idle'), reason: 'program_status:done', workedVisibly: true });
+    expect(usePanelStore.getState().hasUnviewedCompletedActivity('s')).toBe(true);
+  });
 });

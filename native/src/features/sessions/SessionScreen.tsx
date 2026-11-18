@@ -1,6 +1,7 @@
 import { useLocalSearchParams } from 'expo-router';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
+import { useJourneyMark, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
 import { ErrorState } from '@/ui';
 
@@ -12,7 +13,9 @@ import { useSessionView } from './hooks';
 export function SessionScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const theme = useTheme();
+  useScreenJourney('session', sessionId);
   const view = useSessionView(sessionId);
+  useJourneyMark('session', 'data', view.data !== undefined);
 
   if (view.data) return <TerminalScreen paneId={view.data.internalSession.id} session={view.data} />;
   return (

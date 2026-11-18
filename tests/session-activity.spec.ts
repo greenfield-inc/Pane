@@ -106,7 +106,9 @@ test('the Session icon spins only for real turns, with no flicker (J1–J10, J12
     const s: Record<string, SessionRef> = {};
     for (const name of names) s[name] = await createSession(page, name);
     await expect.poll(async () => (await page.locator('button[data-testid^="orchestration-session-"]').count()), { timeout: 20_000 }).toBeGreaterThanOrEqual(names.length);
-    await expect.poll(() => runpane(pane, ['doctor', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
+    // The bundled runpane reaches this Pane and sees every Session. Not `runpane doctor`: its exit
+    // code also needs the latest release from api.github.com, which CI can't count on.
+    await expect.poll(() => runpane(pane, ['sessions', 'list', '--json']).then(out => decodeBoundary(JSON.parse(out), boundary.object({ sessions: boundary.array(boundary.json) })).sessions.length, () => 0), { timeout: 30_000 }).toBeGreaterThanOrEqual(names.length);
     // Every orchestrator starts and settles before the journeys, so starting never reads as work.
     for (const name of names) await say(page, s[name], 'hello');
     for (const name of names) await expect.poll(() => chatStatus(page, s[name].panelId), { timeout: 30_000 }).toBe('idle');
@@ -168,9 +170,15 @@ test('the Session icon spins only for real turns, with no flicker (J1–J10, J12
     await runpane(pane, ['panels', 'close', '--panel', j9b.panelId, '--force', '--yes', '--json']);
     await runpane(pane, ['sessions', 'detach', '--session', s['J9 detach'].id, '--pane', j9c.paneId, '--yes', '--json']);
 
-    // Let the long ones finish: J10's 180 s loop (which ends at a loop's end, up to 35 s later),
-    // its reply, and 10 s of quiet after.
-    await page.waitForTimeout(Math.max(0, t0 + 300_000 - Date.now()));
+    // Let the long ones finish: J10's 180 s loop (which ends at a loop's end, up to 35 s later)
+    // and its reply, with no Session left spinning, then 10 s of quiet after.
+    await expect.poll(async () => {
+      const j10Done = transitions(await changes(page, s['J10 long command'])).at(-1) === 'idle';
+      const spinning = [];
+      for (const name of names) if ((await changes(page, s[name])).at(-1)?.state === 'working') spinning.push(name);
+      return j10Done ? spinning : ['J10 long command', ...spinning];
+    }, { timeout: Math.max(0, t0 + 300_000 - Date.now()), intervals: [500] }).toEqual([]);
+    await page.waitForTimeout(10_000);
     clearInterval(poller);
     await shot(page, 'after');
     const log = (name: string) => changes(page, s[name]);

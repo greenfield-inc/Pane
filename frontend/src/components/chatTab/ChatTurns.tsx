@@ -1,20 +1,25 @@
 import { memo, useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { ChatBlocksContext } from './chatRendering';
-import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Terminal, Wrench, XCircle } from 'lucide-react';
+import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Smartphone, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import { markdownBlocks } from './markdownBlocks';
 import remarkGfm from 'remark-gfm';
 import { describeChatContent } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import type { AgentChatMessage } from '../../../../shared/types/agentChat';
 import { imageOf, messageTime, planEntryKeys, stoppedText, turnDisplay, type WorkerNote, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 import { responseText, userMarkdown } from '../../../../shared/chatTabMarkdown';
 import { ChatCopyButton } from './ChatCopyButton';
+import { DeviceCard, type ChatDeviceActions } from './DeviceCard';
+import { deviceMarkerOf } from '../../../../shared/deviceMarker';
 
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
   onViewDiff?: (path: string) => void;
   /** Opens a Session worker's Pane, at the given tab when one is named. */
   onOpenWorker?: (paneId: string, panelId?: string) => void;
+  /** Device cards at device_open steps; without it, the step is a plain row. */
+  device?: ChatDeviceActions;
 }
 
 /** A code block keeps its own copy button, for the code alone. */
@@ -85,7 +90,36 @@ function Output({ text, live }: { text: string; live: boolean }) {
   return <pre className="chat-step-output" aria-live={live ? 'polite' : undefined}>{shown}</pre>;
 }
 
+/** device_open's step: "Opened iPhone 17 Pro · iOS 27 · This Mac" and the device's live card. */
+function DeviceStepRow({ anchorId, marker, device }: { anchorId: string; marker: NonNullable<ReturnType<typeof deviceMarkerOf>>; device: ChatDeviceActions }) {
+  return <div className="chat-step" data-anchor-id={anchorId} data-kind="device" data-state="done">
+    <div className="chat-step-line">
+      <span className="chat-step-icon" data-state="done"><Smartphone aria-hidden="true" /></span>
+      <span className="chat-step-verb">Opened</span>
+      <span className="chat-step-label">{[marker.name, marker.os, marker.machine].filter(Boolean).join(' · ')}</span>
+    </div>
+    <DeviceCard marker={marker} device={device} />
+  </div>;
+}
+
+/** The device_open steps in a turn's activity, so a live device's card stays in view after the turn folds. */
+function deviceMarkers(items: readonly TurnItem[]) {
+  return items.flatMap(item => item.type === 'steps' ? item.groups.flatMap(group => group.steps.length === 1 ? [deviceMarkerOf(group.steps[0].output)] : []) : []).filter(marker => marker !== undefined);
+}
+
+/** Cards that stay in view under a folded turn: its own device_open steps, and on the latest turn the tabs its agent opened that no step names. */
+function pinnedMarkers(items: readonly TurnItem[], openedHere: readonly NonNullable<ReturnType<typeof deviceMarkerOf>>[]) {
+  const own = deviceMarkers(items);
+  return [...own, ...openedHere.filter(marker => !own.some(step => step.panelId === marker.panelId))];
+}
+
 function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
+  const marker = actions.device && group.steps.length === 1 && group.steps[0].status === 'completed' ? deviceMarkerOf(group.steps[0].output) : undefined;
+  if (marker && actions.device) return <DeviceStepRow anchorId={group.id} marker={marker} device={actions.device} />;
+  return <StepGroupLine group={group} waiting={waiting} actions={actions} />;
+}
+
+function StepGroupLine({ group, waiting, actions }: { group: StepGroup; waiting: ReadonlySet<string>; actions: ChatTurnActions }) {
   const state = groupState(group, waiting);
   const [open, setOpen] = useState(false);
   const single = group.steps.length === 1 ? group.steps[0] : undefined;
@@ -133,6 +167,7 @@ function TodoList({ entries }: { entries: PlanEntry[] }) {
 function Item({ item, waiting, actions, live }: { item: TurnItem; waiting: ReadonlySet<string>; actions: ChatTurnActions; live: boolean }) {
   switch (item.type) {
     case 'text': return <div data-pane-part="chat-message" data-anchor-id={item.id}><Markdown text={item.text} live={live} /></div>;
+    case 'user': return <div className="chat-user-row"><div className="chat-user" data-pane-part="chat-message" data-anchor-id={item.id}><UserParts message={item.message} /></div></div>;
     case 'thought': return <details className="chat-thought"><summary><Brain aria-hidden="true" />Thinking</summary><div className="whitespace-pre-wrap">{item.text}</div></details>;
     case 'image': return <img className="chat-image" alt="Sent by the agent" src={`data:${item.mimeType};base64,${item.data}`} />;
     case 'plan': return <TodoList entries={item.entries} />;
@@ -149,17 +184,26 @@ function UserImage({ content }: { content: JsonValue }) {
   return picture ? <img className="chat-image" alt="Attached to your message" src={`data:${picture.mimeType};base64,${picture.data}`} /> : null;
 }
 
+function UserParts({ message }: { message: AgentChatMessage }) {
+  return <>{message.parts.map((part, index) => part.type === 'text'
+    ? <span key={`${message.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
+    : part.type === 'content' ? <UserImage key={`${message.id}:${index}`} content={part.content} /> : null)}</>;
+}
+
 function UserMessage({ turn }: { turn: ChatTurn }) {
   const { userMessage } = useContext(ChatBlocksContext);
   if (!turn.user) return null;
   const custom = userMessage?.(turn.user.parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n'));
   if (custom !== undefined) return <>{custom}</>;
   return <div className="chat-user-row" title={messageTime(turn.startedAt)?.full}>
-    <div className="chat-user" data-pane-part="chat-message" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
-      ? <span key={`${turn.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
-      : part.type === 'content' ? <UserImage key={`${turn.id}:${index}`} content={part.content} /> : null)}</div>
+    <div className="chat-user" data-pane-part="chat-message" data-anchor-id={turn.user.id}><UserParts message={turn.user} /></div>
     {userMarkdown(turn) && <div className="chat-message-actions"><ChatCopyButton label="Copy message" text={() => userMarkdown(turn)} /></div>}
   </div>;
+}
+
+/** A folded turn keeps its device's card in view while the device is live; a closed one folds away. */
+function PinnedDeviceCard({ marker, device }: { marker: NonNullable<ReturnType<typeof deviceMarkerOf>>; device: ChatDeviceActions }) {
+  return device.phase(marker.panelId) === 'live' ? <div className="chat-steps"><DeviceStepRow anchorId={`device:${marker.panelId}`} marker={marker} device={device} /></div> : null;
 }
 
 /** A worker the latest turn has news of, as one compact line with Open (D-201). */
@@ -196,6 +240,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, waiting, actions,
     <UserMessage turn={turn} />
     <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {fold}
+    {!open && actions.device && pinnedMarkers(activity, latest ? actions.device.openedHere : []).map(marker => <PinnedDeviceCard key={marker.panelId} marker={marker} device={actions.device!} />)}
     <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} live={turn.running} />)}</div>
     {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
       {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}

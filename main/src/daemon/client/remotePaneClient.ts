@@ -661,6 +661,51 @@ export class RemotePaneClient {
       : { kind: 'unreachable', detail: result.message };
   }
 
+  /**
+   * The round trip to the host over the route in use, in whole ms: two GET /health on one kept-alive
+   * connection, timing the second, so the TCP and TLS handshakes do not count. Null when it does not answer.
+   */
+  async measureLatency(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<number | null> {
+    const endpoint = new URL('health', this.normalizedBaseUrl);
+    const options = this.buildRequestOptions(endpoint, { method: 'GET' });
+    // Node never reuses a socket for a request that carries its own key pin, so the pin moves onto an agent of its own.
+    // The direct path's agent already keeps its connection.
+    if (options.agent) return this.timeTwoGets(endpoint, options, timeoutMs);
+    const { checkServerIdentity, ...rest } = options;
+    const agentOptions: https.AgentOptions = { keepAlive: true, maxSockets: 1 };
+    if (checkServerIdentity) agentOptions.checkServerIdentity = checkServerIdentity;
+    const agent = endpoint.protocol === 'https:' ? new https.Agent(agentOptions) : new http.Agent(agentOptions);
+    try {
+      return await this.timeTwoGets(endpoint, { ...rest, agent }, timeoutMs);
+    } finally {
+      agent.destroy();
+    }
+  }
+
+  private async timeTwoGets(endpoint: URL, options: RemoteRequestOptions, timeoutMs: number): Promise<number | null> {
+    // One deadline for both requests, so "no answer" takes at most timeoutMs.
+    const deadlineAt = performance.now() + timeoutMs;
+    let elapsed = 0;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const startedAt = performance.now();
+      const answered = await new Promise<boolean>((resolve) => {
+        const request = createRequest(endpoint, options, (response) => {
+          const ok = !PROXY_BACKEND_DOWN_STATUSES.has(response.statusCode ?? 0);
+          // Read to the end, so the connection is free for the second request.
+          response.on('end', () => resolve(ok)).resume();
+        });
+        const deadline = setTimeout(() => request.destroy(new Error('no answer')), Math.max(0, deadlineAt - startedAt));
+        request.on('error', () => resolve(false));
+        // A connection dropped mid-answer closes without an error or an end; the first outcome wins.
+        request.on('close', () => { clearTimeout(deadline); resolve(false); });
+        request.end();
+      });
+      if (!answered) return null;
+      elapsed = performance.now() - startedAt;
+    }
+    return Math.max(1, Math.round(elapsed));
+  }
+
   /** Whether the host accepts this profile's sign-in, without opening an event stream. */
   async checkSignIn(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<'accepted' | 'rejected'> {
     const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'events');
@@ -1611,7 +1656,7 @@ export class RemotePaneClientController extends EventEmitter {
         activeProfileId,
         activeProfileLabel: null,
         activeBaseUrl: null,
-        lastError: `Remote daemon connection profile "${activeProfileId}" does not exist`,
+        lastError: `The saved connection "${activeProfileId}" does not exist. Pick a computer in Settings > Remote Access > Computers, or pair it again.`,
         lastSeenAt: null,
       });
       return;
@@ -1842,7 +1887,7 @@ export class RemotePaneClientController extends EventEmitter {
           activeProfileId: profile.id,
           activeProfileLabel: profile.label,
           activeBaseUrl: profile.baseUrl,
-          lastError: getErrorMessage(error, `Failed to connect to remote daemon profile "${profile.label}"`),
+          lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
           lastSeenAt: null,
         });
         return;
@@ -1869,7 +1914,7 @@ export class RemotePaneClientController extends EventEmitter {
         activeProfileId: profile.id,
         activeProfileLabel: profile.label,
         activeBaseUrl: profile.baseUrl,
-        lastError: getErrorMessage(error, `Failed to connect to remote daemon profile "${profile.label}"`),
+        lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
         lastSeenAt: null,
       });
       throw error;

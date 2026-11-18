@@ -8,6 +8,8 @@ import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import { useRemoteTerminal } from '../hooks/useRemoteTerminal';
 import { RemotePausedTerminal } from './RemotePausedTerminal';
 import { RemoteTerminalInputBar } from './RemoteTerminalInputBar';
+import { TerminalSkeleton } from '../../components/panels/TerminalSkeleton';
+import { LoadingStatus, useSkeletonHold } from '../../components/ui/Skeleton';
 import { RemoteTerminalScrollJoystick } from './RemoteTerminalScrollJoystick';
 
 interface RemoteTerminalPanelProps {
@@ -40,7 +42,8 @@ function NativeRemoteTerminalPanel({
 }: RemoteTerminalPanelProps) {
   const {
     containerRef,
-    statusText,
+    loading,
+    problem,
     focusTerminal,
     sendInput,
     resetTerminal,
@@ -53,13 +56,19 @@ function NativeRemoteTerminalPanel({
     connectionStatus,
   });
 
+  const skeleton = useSkeletonHold(loading);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#010409]">
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div ref={containerRef} className="absolute inset-x-2 bottom-0 top-2 overflow-hidden" />
-        {statusText !== 'Connected' && (
-          <div className="pointer-events-none absolute right-3 top-3 rounded-md bg-black/70 px-2 py-1 text-xs text-white">
-            {statusText}
+        {skeleton.holding && <div className="absolute inset-0 bg-[#010409]">
+          <LoadingStatus label="Opening the terminal" />
+          <TerminalSkeleton />
+        </div>}
+        {problem && (
+          <div role="alert" className="pointer-events-none absolute right-3 top-3 rounded-md bg-black/70 px-2 py-1 text-xs text-white">
+            {problem}
           </div>
         )}
         <RemoteTerminalScrollJoystick

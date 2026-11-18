@@ -35,6 +35,7 @@ import { MachineMark } from './machines/MachineMark';
 import { SegmentedControl } from './settings/SettingsControls';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
+import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from './ui/Skeleton';
 
 interface NewDialogProps {
   /** The repositories of the machine the app is on. */
@@ -207,6 +208,8 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
     ?? (!onOtherMachine ? repositories.find(item => item.id === defaultProjectId) : undefined)
     ?? repositories[0]);
   const environment = machine?.os ? ENVIRONMENT_BY_OS[machine.os] : undefined;
+  const repositoriesError = otherRepositories?.machineId === machineId ? otherRepositories?.error : undefined;
+  const repositoriesHold = useSkeletonHold(kind === 'pane' && onOtherMachine && !repositories && !repositoriesError);
 
   const pick = (id: string) => {
     setBranchDropdownOpen(false);
@@ -225,7 +228,7 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
 
   const notice = (text: string) => <>
     {header}
-    <ModalBody><p className="text-sm text-text-secondary">{text}</p></ModalBody>
+    <ModalBody><p className={cn('text-sm text-text-secondary', repositoriesHold.reveal && 'skeleton-reveal')}>{text}</p></ModalBody>
     <ModalFooter><Button variant="secondary" className="focus-visible:ring-interactive" onClick={onClose}>Close</Button></ModalFooter>
   </>;
 
@@ -254,10 +257,36 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
           useNavigationStore.getState().navigateToPaneChat();
           onClose();
         }} />
+      : repositoriesError ? notice(repositoriesError)
+      : repositoriesHold.holding ? <>
+        {header}
+        <ModalBody className="p-0">
+          <LoadingStatus label={`Reading ${machine.name}'s repositories`} />
+          <Skeleton>
+            <div className="px-6 pt-4">
+              <div className="mb-2 text-sm font-medium leading-5"><TextBone text="Repository" /></div>
+              <div className="flex h-[38px] items-center rounded border border-border-primary px-3"><Bone className="h-3.5 w-36" /></div>
+            </div>
+            <div className="border-b border-border-primary px-6 pb-5 pt-6">
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium leading-5"><Bone className="h-4 w-4" /><TextBone text="Base Branch" /></div>
+              <div className="flex h-[38px] items-center gap-2 rounded-md border border-border-primary px-3"><Bone className="h-4 w-4 shrink-0" /><Bone className="h-3.5 w-28" /></div>
+              <p className="mt-2 text-xs"><TextBone text="Remote branches will automatically track the remote for git pull/push." /></p>
+            </div>
+            <div className="border-b border-border-primary px-6 pb-5 pt-6">
+              <div className="mb-2 text-sm font-medium leading-5"><TextBone text="Pane Name" /></div>
+              <div className="h-[38px] rounded-input border border-border-primary" />
+            </div>
+          </Skeleton>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Skeleton><Bone className="h-9 w-40 rounded-button" /></Skeleton>
+        </ModalFooter>
+      </>
       : repository ? <CreatePaneForm key={machine.id} isOpen projectId={repository.id} projectName={repository.name} onClose={onClose} header={header}
         machineName={formMachineName} otherMachine={otherMachine} onSessionCreated={() => rememberNewMachine(machine.id)}
         onBranchDropdownOpenChange={setBranchDropdownOpen} onSubmittingChange={setIsSubmitting} repositoryPicker={
-          <div className="px-6 pt-4">
+          <div className={cn('px-6 pt-4', repositoriesHold.reveal && 'skeleton-reveal')}>
             <label htmlFor="new-pane-repository" className="mb-2 block text-sm font-medium text-text-primary">Repository</label>
             <select id="new-pane-repository" value={repository.id} disabled={isSubmitting} onChange={event => {
               const next = repositories?.find(item => item.id === Number(event.target.value));
@@ -269,8 +298,6 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
           </div>
         } />
       : !onOtherMachine ? notice('A Pane needs a repository. Add one with the + beside Projects.')
-      : otherRepositories?.machineId === machine.id && otherRepositories.error ? notice(otherRepositories.error)
-      : repositories ? notice(`${machine.name} has no repositories yet. Switch to ${machine.name} and add one with the + beside Projects.`)
-      : notice(`Reading ${machine.name}'s repositories…`)}
+      : notice(`${machine.name} has no repositories yet. Switch to ${machine.name} and add one with the + beside Projects.`)}
   </Modal>;
 }

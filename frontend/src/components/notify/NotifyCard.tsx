@@ -10,6 +10,8 @@ import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, S
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
 import { ClampedText } from './ClampedText';
+import { HealthCardBody } from '../machineHealth/HealthCardBody';
+import { isHealthCard, remoteMachineName, reviewHealthCard, type HealthNotifyItem } from '../machineHealth/healthCardActions';
 
 /** The compact strip shows this many choices, then More. */
 const COMPACT_CHOICE_LIMIT = 4;
@@ -76,6 +78,7 @@ export function NotifyCard(props: NotifyCardProps) {
     case 'question':
       // The agent stopped waiting on Pane; its terminal still asks, and answering there clears this.
       if (props.item.agentPrompt?.inTerminal) return <InTerminalCard {...props} />;
+      if (isHealthCard(props.item)) return <HealthNotifyCard {...props} item={props.item} />;
       return <QuestionCard key={props.item.id} {...props} />;
   }
 }
@@ -188,7 +191,7 @@ function KeepsWaiting({ item }: { item: NotifyItem }) {
   );
 }
 
-/** ✕ hides the question; right-click or a long press offers a reminder instead. */
+/** ✕ dismisses the question without answering it (it stays in Approvals); right-click or a long press offers a reminder instead. */
 function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCardProps, 'item' | 'onCommand' | 'menuPlacement'>) {
   const [menuOpen, setMenuOpen] = useState(false);
   const pressTimer = useRef<number | null>(null);
@@ -205,8 +208,9 @@ function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCa
     <div ref={rootRef} className="relative ml-auto shrink-0">
       <button
         type="button"
-        aria-label="Close"
-        title="Close (right-click to answer later)"
+        aria-label="Dismiss"
+        title="Dismiss: it stays in Approvals (right-click to answer later)"
+        data-testid="notify-dismiss"
         className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover hover:text-text-primary"
         onPointerDown={() => {
           openedByPress.current = false;
@@ -1148,6 +1152,22 @@ function InfoLine({ item, onCommand, hideAt = null, hideAfterMs = 6000, onOpenUr
         )}
       </div>
       <Countdown hideAt={hideAt} hideAfterMs={hideAfterMs} />
+    </div>
+  );
+}
+
+/** A machine health card on a Notify surface: the same body as the in-window dialog. Ask an agent runs in the main window, which shows the Session. */
+function HealthNotifyCard({ item, form, onCommand, className }: NotifyCardProps & { item: HealthNotifyItem }) {
+  return (
+    <div className={cn('rounded-xl border border-border-primary bg-surface-primary p-4', className)}>
+      <HealthCardBody
+        item={item}
+        compact={form === 'strip'}
+        machineName={remoteMachineName(item)}
+        onAnswer={choice => onCommand({ type: 'answer', id: item.id, answer: { choice } })}
+        onAskAgent={() => onCommand({ type: 'ask-agent', id: item.id })}
+        onReview={form === 'strip' ? undefined : () => { void reviewHealthCard(item); }}
+      />
     </div>
   );
 }

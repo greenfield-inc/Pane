@@ -33,6 +33,16 @@ interface ProjectContext {
   commandRunner: CommandRunner;
 }
 
+/** A script's last lines go to the session log (which keeps 1,000 entries); its result keeps all of it. */
+const SCRIPT_LOG_LINES = 500;
+
+function logTail(sessionId: string, level: 'info' | 'warn', output: string, label: string): void {
+  const lines = output.split('\n').filter(line => line.trim());
+  const shown = lines.slice(-SCRIPT_LOG_LINES);
+  if (lines.length > shown.length) addSessionLog(sessionId, level, `[${(lines.length - shown.length).toLocaleString('en-US')} earlier lines not shown]`, label);
+  for (const line of shown) addSessionLog(sessionId, level, line, label);
+}
+
 interface CommandExecutionError {
   stderr?: string;
   stdout?: string;
@@ -139,6 +149,7 @@ type DbSessionOutputType = import('../database/models').SessionOutput['type'];
 import { addSessionLog, cleanupSessionLogs, startSessionLogs } from './session-logs';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner, type CommandRunOptions } from '../utils/commandRunner';
+import { COMMAND_OUTPUT_LIMIT } from '../utils/commandExecutor';
 import { withLock } from '../utils/mutex';
 import { detectGitBase } from './worktreeManager';
 import { panelManager } from './panelManager';
@@ -1244,6 +1255,11 @@ export class SessionManager extends EventEmitter {
     this.db.clearSessionOutputs(id);
   }
 
+  /** Drops a Pane from memory only; its saved rows stay (a move back sets an archived Pane aside). */
+  forgetSession(id: string): void {
+    this.activeSessions.delete(id);
+  }
+
   markSessionAsViewed(id: string): void {
     const updatedDbSession = this.db.markSessionAsViewed(id);
     if (updatedDbSession) {
@@ -1381,15 +1397,11 @@ export class SessionManager extends EventEmitter {
 
           if (stdout) {
             allOutput += stdout;
-            stdout.split('\n').filter(line => line.trim()).forEach(line => {
-              addSessionLog(sessionId, 'info', line, label);
-            });
+            logTail(sessionId, 'info', stdout, label);
           }
           if (stderr) {
             allOutput += stderr;
-            stderr.split('\n').filter(line => line.trim()).forEach(line => {
-              addSessionLog(sessionId, 'warn', line, label);
-            });
+            logTail(sessionId, 'warn', stderr, label);
           }
         } catch (cmdError) {
           console.error(`[SessionManager] ${label} command failed: ${command}`, cmdError);
@@ -1401,7 +1413,9 @@ export class SessionManager extends EventEmitter {
               message: boundary.optional(boundary.string),
             }));
           } catch { /* String(cmdError) remains the fallback. */ }
-          const errorMessage = error.stderr || error.stdout || error.message || String(cmdError);
+          const errorMessage = cmdError instanceof Error && 'code' in cmdError && cmdError.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+            ? `Pane stopped it after it printed more than ${COMMAND_OUTPUT_LIMIT / 1024 / 1024} MB of output. Make it quieter (or send its output to a file) and run it again.`
+            : error.stderr || error.stdout || error.message || String(cmdError);
           allOutput += errorMessage;
 
           addSessionLog(sessionId, 'error', `Command failed: ${command}`, label);

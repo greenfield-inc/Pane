@@ -48,6 +48,41 @@ describe('TerminalSession.restore', () => {
     expect(host.screen).toEqual(['[reset]$ ls\r\nREADME.md\r\n']);
   });
 
+  it('sends the start check, size and visibility together, then reads the screen: two round trips', async () => {
+    const answered: string[] = [];
+    let release: () => void = () => undefined;
+    const roundTrip = new Promise<void>(resolve => { release = resolve; });
+    const host = fakeHost({
+      'panels:checkInitialized': async () => { await roundTrip; answered.push('check'); return true; },
+      'terminal:getState': () => ({ scrollbackBuffer: '$ ' }),
+    });
+
+    const restoring = host.session.restore({ cols: 48, rows: 30 });
+    await tick();
+    // Before the first answer, all three are already on their way.
+    expect(host.channels()).toEqual(['panels:checkInitialized', 'terminal:resize', 'terminal:setVisibility']);
+    release();
+    await restoring;
+
+    expect(host.channels().at(-1)).toBe('terminal:getState');
+    expect(host.screen).toEqual(['[reset]$ ']);
+  });
+
+  it('sizes the PTY to this screen again on a return, since the desktop may have resized it meanwhile', async () => {
+    const host = fakeHost({
+      'panels:checkInitialized': () => true,
+      'terminal:getState': () => ({ scrollbackBuffer: '$ ' }),
+    });
+    await host.session.restore({ cols: 48, rows: 30 });
+    host.session.detach();
+    host.calls.length = 0;
+
+    await host.session.restore({ cols: 48, rows: 30 });
+
+    expect(host.calls.find(call => call.channel === 'terminal:resize')?.args).toEqual(['panel-1', 48, 30]);
+    expect(host.channels().indexOf('terminal:resize')).toBeLessThan(host.channels().indexOf('terminal:getState'));
+  });
+
   it('starts an unstarted panel at the screen size and shows everything it prints from the first byte', async () => {
     const host = fakeHost({ 'panels:checkInitialized': () => false });
     let releaseStart: () => void = () => undefined;
@@ -116,9 +151,10 @@ describe('TerminalSession.restore', () => {
     releaseCheck(true);
     await restoring;
 
-    const resizes = host.calls.filter(call => call.channel === 'terminal:resize').map(call => call.args.slice(1, 3));
+    // The PTY is at the latest size before the host serializes the snapshot.
+    const beforeSnapshot = host.calls.slice(0, host.channels().indexOf('terminal:getState'));
+    const resizes = beforeSnapshot.filter(call => call.channel === 'terminal:resize').map(call => call.args.slice(1, 3));
     expect(resizes.at(-1)).toEqual([40, 60]);
-    expect(resizes).not.toContainEqual([80, 24]);
   });
 
   it('reports a panel that fails to start', async () => {

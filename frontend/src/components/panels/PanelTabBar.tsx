@@ -26,6 +26,8 @@ import { focusChatSoon } from '../../services/regionFocus';
 import { SwitchToChatPaletteEntry } from './SwitchToChat';
 import { CustomCommandForm } from './CustomCommandForm';
 import { AgentFarmProfileDialog } from '../chatTab/AgentFarmProfileDialog';
+import { LaunchProfileDialog } from '../profiles/LaunchProfileDialog';
+import type { LibraryProfile } from '../../../../shared/types/profiles';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
 const ADD_TOOL_MENU_WIDTH = 280;
@@ -113,6 +115,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   // Read the catalog again each time the menu opens, so an agent installed meanwhile is offered.
   useEffect(() => { if (showDropdown && chatTabs) void refreshChatAgents(window.electronAPI.chatTab); }, [showDropdown, chatTabs]);
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [launchingProfile, setLaunchingProfile] = useState<LibraryProfile | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const addToolButtonRef = useRef<HTMLButtonElement>(null);
   const dropdownMenuRef = useRef<HTMLDivElement>(null);
@@ -391,8 +394,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       // Exclude permanent panels
       if (capabilities.permanent) return false;
 
-      // Logs is created by running scripts; editor tabs by opening files
-      if (type === 'logs' || type === 'editor') return false;
+      // Logs is created by running scripts, editor tabs by opening files, device tabs by device_open
+      if (type === 'logs' || type === 'editor' || type === 'device') return false;
 
       // Enforce singleton panels
       if (capabilities.singleton) {
@@ -641,7 +644,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                     onClick={() => { setShowDropdown(false); setProfileDialogOpen(true); }}
                   >
                     <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span className="truncate">Agent Farm profile…</span>
+                    <span className="truncate">Profile…</span>
                   </button>
                   <button
                     type="button"
@@ -670,6 +673,19 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                     </button>
                   ))}
                 </>
+              )}
+              {/* Profiles run in terminal tabs, so "Profile…" is there with chat tabs off too. */}
+              {!chatTabs && session && (
+                <button
+                  type="button"
+                  ref={itemRef()}
+                  role="menuitem"
+                  className={menuItemClass}
+                  onClick={() => { setShowDropdown(false); setProfileDialogOpen(true); }}
+                >
+                  <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="truncate">Profile…</span>
+                </button>
               )}
               {/* Terminal - plain terminal */}
               {availablePanelTypes.includes('terminal') && (
@@ -794,7 +810,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                       setShowCustomInput(true);
                     }}
                     aria-label={`Rename ${cmd.name} shortcut`}
-                    title="Rename profile"
+                    title="Rename command"
                   >
                     <Pencil className="w-3 h-3" />
                   </button>
@@ -878,7 +894,12 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       <AgentFarmProfileDialog
         onClose={() => setProfileDialogOpen(false)}
         onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: session.id, launch }); }}
+        onLaunchProfile={profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); }}
+        byName={chatTabs}
       />
+    )}
+    {launchingProfile && session && (
+      <LaunchProfileDialog profile={launchingProfile} defaults={{ repoId: session.projectId }} onClose={() => setLaunchingProfile(null)} onLaunched={() => setLaunchingProfile(null)} />
     )}
 
     </>

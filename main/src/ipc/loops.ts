@@ -2,12 +2,14 @@ import type { IpcMain } from 'electron';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { LoopManager } from '../services/loops/loopManager';
 import type { StoredLoop } from '../services/loops/loopRepository';
+import type { LoopRunStart, LoopSessionRecovery } from '../services/loops/loopManager';
 import { previewLoopSchedule } from '../services/loops/loopSchedule';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { LOOP_AGENTS, LOOP_NEW_SESSION, isLoopAgent, loopInputSchema, loopSlug, type LoopAgent } from '../../../shared/types/loop';
 import { ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX } from '../../../shared/types/orchestrationSession';
 import type { RunpanePaneCreateRequest } from '../../../shared/types/runpaneOrchestration';
 import { PaneError } from '../../../shared/paneError';
+import { FOLDER_TRUST_PROMPT } from '../services/agents/folderTrustPrompt';
 import { isPlainAgentCommand, tokenizeShellCommand } from '../services/agents/agentIdentity';
 import { agentLabel, agentTerminalCommand, configuredAgentSchema } from '../../../shared/agents';
 
@@ -37,8 +39,6 @@ const paneCreateResultSchema = boundary.object({
     })),
   })),
 });
-/** The folder-trust prompts `detectPanelBlocker` recognises: Claude, Codex and Agent Farm. */
-const TRUST_PROMPT = /trust this folder|trust and continue|quick safety check|trust this repository workspace/i;
 
 const paneArchiveResultSchema = boundary.object({ blocked: failureSchema });
 const loopSessionSchema = boundary.object({
@@ -49,6 +49,7 @@ const loopSessionSchema = boundary.object({
     agent: configuredAgentSchema,
     launchCommand: boundary.optional(boundary.string),
     archived: boundary.optional(boundary.boolean),
+    isPinned: boundary.optional(boundary.boolean),
     panelIds: boundary.object({ claude: boundary.string, codex: boundary.string, cursor: boundary.string }),
   }),
 });
@@ -111,8 +112,8 @@ export async function startLoopRun(
   loop: StoredLoop,
   slotAtMs: number,
   sessionContext: SessionRunContext,
-): Promise<{ sessionId: string | null; warning?: string }> {
-  if (loop.orchestrationSessionId) return sendSessionLoopRun(commandRegistry, sessionContext, loop.orchestrationSessionId, loop.initialInput ?? '');
+): Promise<LoopRunStart> {
+  if (loop.orchestrationSessionId) return sendSessionLoopRun(commandRegistry, sessionContext, loop);
   const { projectId } = loop;
   if (projectId === undefined) throw new Error('This loop has no project or Session to run in.');
   const slot = new Date(slotAtMs);
@@ -154,7 +155,7 @@ function readinessWarning(readiness: Readiness): string | null {
   const blocked = readiness?.blocked?.message;
   if (blocked !== undefined) {
     // Pane never answers trust prompts for an unattended run; the person decides.
-    return TRUST_PROMPT.test(blocked)
+    return FOLDER_TRUST_PROMPT.test(blocked)
       ? 'When it started, the run was stopped at the agent\'s folder-trust prompt in its new worktree. '
         + 'If it is still there, open the run and answer it, or trust the project folder in the agent once so later runs start on their own.'
       : 'When it started, the run was stopped at a prompt in its terminal. If it is still there, open the run and answer it.';
@@ -165,9 +166,52 @@ function readinessWarning(readiness: Readiness): string | null {
   return null;
 }
 
-async function getLoopSession(commandRegistry: PaneCommandRegistry, target: string) {
+type LoopSession = ReturnType<typeof loopSessionSchema.decode>['session'];
+
+async function getLoopSession(commandRegistry: PaneCommandRegistry, target: string): Promise<LoopSession> {
   const selector = target.startsWith(ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX) ? { sessionId: target } : { name: target };
   return decodeBoundary(await commandRegistry.invoke('runpane:sessions:get', [selector]), loopSessionSchema).session;
+}
+
+/**
+ * A new Session for a loop, named after it. An archived Session keeps its name, so a taken
+ * name gets a number: `standup 2`. Its empty launch command means the agent's template.
+ */
+async function createLoopSession(commandRegistry: PaneCommandRegistry, name: string, agent: LoopAgent): Promise<LoopSession> {
+  for (let attempt = 1; ; attempt += 1) {
+    const candidate = attempt === 1 ? name : `${name} ${attempt}`;
+    try {
+      return decodeBoundary(await commandRegistry.invoke('runpane:sessions:create', [{ name: candidate, agent, launchCommand: '' }]), loopSessionSchema).session;
+    } catch (error) {
+      if (attempt >= 9 || !/already exists/i.test(error instanceof Error ? error.message : String(error))) throw error;
+    }
+  }
+}
+
+/**
+ * A Session loop's Session, ready for a run. An archived one is restored, unpinned, and a
+ * missing one is recreated from the loop's name and agent; either way the run says so, and the
+ * loop's card offers Undo.
+ */
+async function readyLoopSession(commandRegistry: PaneCommandRegistry, loop: StoredLoop): Promise<{ session: LoopSession; recovered?: LoopSessionRecovery }> {
+  const target = loop.orchestrationSessionId ?? '';
+  let session: LoopSession;
+  try {
+    session = await getLoopSession(commandRegistry, target);
+  } catch (error) {
+    if (!(error instanceof PaneError && error.code === 'ERR_SESSION_NOT_FOUND')) throw error;
+    // Saving a Session loop requires its agent, so a stored one always has it.
+    if (!loop.agent) throw error;
+    const created = await createLoopSession(commandRegistry, loop.name, loop.agent);
+    return { session: created, recovered: { kind: 'recreated', ...recoveredSession(created) } };
+  }
+  if (!session.archived) return { session };
+  await commandRegistry.invoke('runpane:sessions:update', [{ selector: { sessionId: session.id }, input: { archived: false, isPinned: false, source: 'user' } }]);
+  return { session: { ...session, archived: false }, recovered: { kind: 'restored', ...recoveredSession(session) } };
+}
+
+function recoveredSession(session: LoopSession): Omit<LoopSessionRecovery, 'kind'> {
+  return { sessionId: session.id, sessionName: session.name };
 }
 
 /** What a Session loop run reads from Pane: the command each terminal last launched, if Pane launched one. */
@@ -186,9 +230,18 @@ const PRINTED = /It printed: "(.+?)"\./;
  * or working on a turn (it queues the prompt). Anything else is reported in
  * the app's words, never typed into.
  */
-async function sendSessionLoopRun(commandRegistry: PaneCommandRegistry, context: SessionRunContext, sessionId: string, prompt: string): Promise<{ sessionId: null; warning?: string }> {
-  const session = await getLoopSession(commandRegistry, sessionId);
-  if (session.archived) throw new Error(`Session ${session.name} is archived, so the prompt was not sent. Restore it, or point the loop at another Session.`);
+async function sendSessionLoopRun(commandRegistry: PaneCommandRegistry, context: SessionRunContext, loop: StoredLoop): Promise<LoopRunStart> {
+  const { session, recovered } = await readyLoopSession(commandRegistry, loop);
+  if (!recovered) return sendToLoopSession(commandRegistry, context, session, loop.initialInput ?? '');
+  try {
+    return { ...await sendToLoopSession(commandRegistry, context, session, loop.initialInput ?? ''), recovered };
+  } catch (error) {
+    const done = recovered.kind === 'restored' ? `restored the archived Session ${session.name}` : `made a new Session, ${session.name}`;
+    throw new Error(`Pane ${done} for this run, but the prompt was not sent: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function sendToLoopSession(commandRegistry: PaneCommandRegistry, context: SessionRunContext, session: LoopSession, prompt: string): Promise<LoopRunStart> {
   if (!isLoopAgent(session.agent)) throw new Error(`Session ${session.name} runs ${agentLabel(session.agent)}, which loops cannot run yet, so the prompt was not sent. Point the loop at a ${loopAgentNames()} Session.`);
   const panelId = session.panelIds[session.agent];
   const { readiness } = decodeBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId, waitReady: true }]), panelResumeResultSchema);
@@ -276,10 +329,14 @@ export async function prepareLoopSession(
 ): Promise<string> {
   // An empty launch command means the template, whatever the app's default Session command is.
   const session = target === LOOP_NEW_SESSION
-    ? decodeBoundary(await commandRegistry.invoke('runpane:sessions:create', [{ name: loop.name, agent: loop.agent, launchCommand: '' }]), loopSessionSchema).session
+    ? await createLoopSession(commandRegistry, loop.name, loop.agent)
     : await getLoopSession(commandRegistry, target);
   if (session.archived) {
     throw new PaneError('ERR_LOOP_INVALID', `Session ${session.name} is archived. Nothing was saved.`, 'Restore the Session first, or pick another one.');
+  }
+  // A loop's Session lives under Loops, never in the pinned list.
+  if (session.isPinned) {
+    await commandRegistry.invoke('runpane:sessions:update', [{ selector: { sessionId: session.id }, input: { isPinned: false, source: 'user' } }]);
   }
   // Switching it to the loop's agent would drop its launch command without asking.
   if (!isLoopAgent(session.agent)) {

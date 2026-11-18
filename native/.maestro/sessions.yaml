@@ -32,6 +32,10 @@ name: Session journeys
     start: 5%, 50%
     end: 90%, 50%
     duration: 400
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: ${output.session}
 - extendedWaitUntil:
     visible: "Open Session ${output.session}"
     timeout: 15000
@@ -76,20 +80,28 @@ name: Session journeys
 - extendedWaitUntil:
     notVisible: "Open Session ${output.session}"
     timeout: 10000
-- scrollUntilVisible:
-    element:
-      id: sidebar-section-archived
+- tapOn:
+    id: panes-search-clear
 - runFlow:
-    when:
-      notVisible: "Restore Session ${output.session}"
-    commands:
-      - tapOn:
-          id: sidebar-section-archived
+    file: subflows/home-open.yaml
+    env:
+      SECTION: archived
 - scrollUntilVisible:
     element: "Restore Session ${output.session}"
     timeout: 15000
 - tapOn: "Restore Session ${output.session}"
-- scrollUntilVisible:
-    element: "Open Session ${output.session}"
-    direction: UP
+- extendedWaitUntil:
+    notVisible: "Restore Session ${output.session}"
+    timeout: 10000
+# The restored Session is back among home's Sessions.
+- swipe:
+    start: 5%, 50%
+    end: 90%, 50%
+    duration: 400
+- runFlow:
+    file: subflows/home-search.yaml
+    env:
+      QUERY: ${output.session}
+- extendedWaitUntil:
+    visible: "Open Session ${output.session}"
     timeout: 15000

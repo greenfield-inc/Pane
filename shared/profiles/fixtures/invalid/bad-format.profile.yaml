@@ -1,0 +1,4 @@
+# expect: PROFILE_FORMAT
+format: agent-farm/1
+name: bad-format
+version: 1.0.0

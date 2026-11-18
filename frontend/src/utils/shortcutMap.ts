@@ -12,6 +12,7 @@ import {
   KEYBOARD_SHORTCUT_CATALOG,
   getCatalogEntry,
   normalizeEnvironmentPlatform,
+  type KeyboardShortcutId,
   type ShortcutCategory,
   type ShortcutScope,
 } from '../../../shared/constants/keyboardShortcuts';
@@ -68,26 +69,50 @@ export interface ShortcutMap {
   unknownIdDiagnostics: string[];
 }
 
+/** The keyboard shortcut sheet's groups, in rail order. */
+export type SheetGroupId =
+  | 'navigation' | 'tabs' | 'find' | 'chat' | 'approvals' | 'panes' | 'view'
+  | 'machines' | 'git' | 'tools' | 'terminal' | 'sidebar' | 'help';
+
 export interface ReferenceRow {
   id: string;
   label: string;
+  /** Space-separated keys, each shown as its own key (canonical chords or bare keys). */
   chord: string;
+  group: SheetGroupId;
+  /** The row answers to these catalog commands' current keys instead of `chord`. */
+  follows?: readonly KeyboardShortcutId[];
+  /** The system-wide answer-all key, set in Settings › Approvals; `chord` is its default. */
+  answerAll?: true;
 }
 
 /**
- * Terminal- and context-native shortcuts that are not registry commands.
- * They are listed for reference only; the terminal owns them before Pane's
- * hotkey registry sees the key.
+ * Keys that are not catalog commands: the terminal's, the chat composer's,
+ * the sidebar list's and an approval's fixed keys. They cannot be changed,
+ * except where `follows` or `answerAll` says where their key comes from.
+ * The shortcut sheet and Settings › Shortcuts both list them from here.
  */
 export const REFERENCE_ROWS: readonly ReferenceRow[] = [
-  { id: 'reference-send-input', label: 'Send Input / Continue Conversation', chord: 'mod+Enter' },
-  { id: 'reference-newline', label: 'Insert newline in agent input', chord: 'shift+Enter' },
-  { id: 'reference-terminal-copy', label: 'Terminal: Copy selection', chord: 'mod+c' },
-  { id: 'reference-terminal-paste', label: 'Terminal: Paste', chord: 'mod+v' },
-  { id: 'reference-terminal-clear', label: 'Terminal: Clear (⌘K alone; ⌘K then a second key runs a two-step key)', chord: 'mod+k' },
-  { id: 'reference-sidebar-list', label: 'Sidebar: move, open, open and stay, collapse or expand, back', chord: 'ArrowUp ArrowDown k j Enter Space ArrowLeft ArrowRight Escape' },
-  { id: 'reference-chat-enter', label: 'Chat: into the message box (when focus is on no field or control)', chord: 'Enter' },
-  { id: 'reference-approvals-back', label: 'Approvals: back to where you were (when not typing an answer)', chord: 'Escape' },
+  { id: 'reference-chat-send', label: 'Send message', chord: 'Enter', group: 'chat' },
+  { id: 'reference-chat-newline', label: 'New line', chord: 'shift+Enter', group: 'chat' },
+  { id: 'reference-chat-send-now', label: 'Send now, interrupting the agent', chord: 'mod+Enter', group: 'chat' },
+  { id: 'reference-chat-stop', label: 'Stop the agent\u2019s turn', chord: 'Escape', group: 'chat' },
+  { id: 'reference-chat-enter', label: 'Into the message box (from no field)', chord: 'Enter', group: 'chat' },
+  { id: 'reference-approval-page', label: 'Next / previous approval (in the approval)', chord: 'ArrowRight ArrowLeft', group: 'approvals' },
+  { id: 'reference-approval-tabs', label: 'Decide, Summary and reference tabs', chord: 'mod+shift+] mod+shift+[', group: 'approvals', follows: ['cycle-tab-next-d', 'cycle-tab-prev-a'] },
+  { id: 'reference-approval-move', label: 'Move between options', chord: 'ArrowDown ArrowUp', group: 'approvals' },
+  { id: 'reference-approval-pick', label: 'Pick the focused option', chord: 'Space', group: 'approvals' },
+  { id: 'reference-approval-question', label: 'Next / previous question', chord: 'Tab shift+Tab', group: 'approvals' },
+  { id: 'reference-approvals-list', label: 'Approvals list: move, open, back', chord: 'ArrowDown ArrowUp Enter Escape', group: 'approvals' },
+  { id: 'reference-approvals-archive', label: 'Approvals list: archive the focused row (Undo on its toast)', chord: 'Backspace', group: 'approvals' },
+  { id: 'reference-approvals-filter', label: 'Approvals list: Waiting / Done today (your tab keys)', chord: 'mod+shift+] mod+shift+[', group: 'approvals', follows: ['cycle-tab-next-d', 'cycle-tab-prev-a'] },
+  { id: 'reference-approvals-back', label: 'Back to where you were', chord: 'Escape', group: 'approvals' },
+  { id: 'reference-answer-all', label: 'Answer all, from any app', chord: 'ctrl+shift+Space', group: 'approvals', answerAll: true },
+  { id: 'reference-terminal-copy', label: 'Copy selection', chord: 'mod+c', group: 'terminal' },
+  { id: 'reference-terminal-paste', label: 'Paste', chord: 'mod+v', group: 'terminal' },
+  { id: 'reference-terminal-clear', label: 'Clear (\u2318K then a key runs a two-step key)', chord: 'mod+k', group: 'terminal' },
+  { id: 'reference-sidebar-move', label: 'Move, open, open and stay', chord: 'ArrowDown ArrowUp j k Enter Space', group: 'sidebar' },
+  { id: 'reference-sidebar-tree', label: 'Collapse, expand, back', chord: 'ArrowLeft ArrowRight Escape', group: 'sidebar' },
 ];
 
 /** Chords the terminal owns outright; recording one is refused. */

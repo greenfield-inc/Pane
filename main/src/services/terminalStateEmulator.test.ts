@@ -286,4 +286,25 @@ describe('TerminalStateEmulator', () => {
     expect(emulator.getOscTitle()).toBe('Action Required · Codex');
     emulator.dispose();
   });
+
+  it('ends OSC 7501 running records at a new shell prompt and every record at a full reset', async () => {
+    const emulator = new TerminalStateEmulator(40, 5);
+    emulator.write('\x1b]7501;state=done:id=lint\x1b\\\x1b]7501;state=working:id=build\x1b\\');
+    emulator.write('\x1b]133;A\x07$ ');
+    await emulator.waitForIdle();
+    expect(emulator.getProgramStatus()).toEqual({ state: 'done' });
+    emulator.write('\x1bc');
+    await emulator.waitForIdle();
+    expect(emulator.getProgramStatus()).toBeUndefined();
+    emulator.dispose();
+  });
+
+  it('clears an OSC 7501 record and its children, not a sibling that shares its prefix', async () => {
+    const emulator = new TerminalStateEmulator(40, 5);
+    emulator.write('\x1b]7501;state=blocked:id=build/test\x1b\\\x1b]7501;state=working:id=build2\x1b\\');
+    emulator.write('\x1b]7501;state=clear:id=build\x1b\\');
+    await emulator.waitForIdle();
+    expect(emulator.getProgramStatus()).toEqual({ state: 'working' });
+    emulator.dispose();
+  });
 });

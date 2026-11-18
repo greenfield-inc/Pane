@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore, type Attachment as ComposerAttachment,
+  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, messageTime, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
+import { chatTurns, messageTime, steeredMessageId, waitingToolIds, workerNotes, workingAgents, type ChatWorkerLine, type WorkingAgent } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -24,14 +24,20 @@ import { ChatSwitchBanner } from './ChatSwitchBanner';
 import { ConversationPicker } from './ConversationPicker';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, riskySetting, usePhoneWidth } from './ChatComposerControls';
 import { ChatStatusBar, type ChatStatusPullRequest } from './ChatStatusBar';
-import { sendNowKeys } from './chatKeys';
+import { sendNowEffect, sendNowKeys } from './chatKeys';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
-import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
+import { ChatAttachmentAdapter, dragHasFiles, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
+import { describeUpload } from '../../utils/hostUpload';
+import type { UploadProgress } from '../../../../shared/chunkedUpload';
 import { ChatCopyButton } from './ChatCopyButton';
+import { draftAttachments, shownComposers } from './chatDrafts';
 import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
+import { FindBar } from '../find/FindBar';
+import { usePageTextFind } from '../find/usePageTextFind';
 import { takeLaunchDraft } from '../../utils/launchOutline';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -48,14 +54,19 @@ function ImagePreview() {
   return url ? <img className="chat-attachment-preview" src={url} alt="" /> : <span className="chat-attachment-icon" aria-hidden><ImageIcon /></span>;
 }
 
-/** An attached image or file before sending; a file shows "Copying…" until it is on the chat's machine. */
+/** How each file's copy to the chat's machine is going, by attachment id. */
+const CopyProgressContext = createContext<ReadonlyMap<string, UploadProgress>>(new Map());
+
+/** An attached image or file before sending; a file shows its copy's progress until it is on the chat's machine. */
 function Attachment() {
   const kind = useAuiState(state => state.attachment.type);
+  const id = useAuiState(state => state.attachment.id);
   const copying = useAuiState(state => state.attachment.status.type === 'running');
+  const progress = useContext(CopyProgressContext).get(id);
   return <AttachmentPrimitive.Root className="chat-attachment" data-kind={kind} aria-busy={copying}>
     {kind === 'image' ? <ImagePreview /> : <span className="chat-attachment-icon" aria-hidden>{copying ? <LoaderCircle className="chat-spin" /> : <FileText />}</span>}
     <span className="chat-attachment-name"><AttachmentPrimitive.Name /></span>
-    {copying && <span className="chat-attachment-status">Copying…</span>}
+    {copying && <span className="chat-attachment-status" title={progress ? `Copying ${describeUpload(progress)}` : 'Copying'}>{progress ? describeUpload(progress, { short: true }) : '0%'}</span>}
     <AttachmentPrimitive.Remove aria-label="Remove attachment" title="Remove attachment"><X className="h-3 w-3" /></AttachmentPrimitive.Remove>
   </AttachmentPrimitive.Root>;
 }
@@ -174,12 +185,6 @@ export interface ChatTabPanelProps {
   working?: readonly WorkingAgent[];
 }
 
-/**
- * The attachments of each chat's unsent draft, kept with its viewer as the draft text is: the
- * composer is rebuilt when the tab or its Pane is shown again, and they go back into it then.
- */
-const draftAttachments = new WeakMap<ChatTabViewer, readonly ComposerAttachment[]>();
-
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
 const PASTE_LIMIT = 1024 * 1024;
 
@@ -188,6 +193,19 @@ const NO_ACTIONS: ChatTurnActions = {};
 /** How long after the handover an Enter pressed before the chat loaded may still send. */
 const LAUNCH_SEND_MS = 5_000;
 const NO_RENDERING: ChatRendering = {};
+
+/** Two turns shaped like ChatTurnView: the person's bubble, then the reply's lines. */
+function TurnsSkeleton() {
+  return <>
+    <LoadingStatus label="Loading conversation" />
+    <Skeleton className="flex flex-col">
+      {['w-56', 'w-40'].map((bubble, turn) => <div key={turn} className="chat-turn">
+        <Bone className={`self-end h-10 rounded-2xl ${bubble}`} />
+        <div className="flex flex-col gap-2"><Bone className="h-4 w-full" /><Bone className="h-4 w-11/12" /><Bone className="h-4 w-2/3" /></div>
+      </div>)}
+    </Skeleton>
+  </>;
+}
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
@@ -207,11 +225,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   /** The sent message's transcript ID: when the host's copy of it renders, the chat follows the live end once more. */
   const followSent = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!followSent.current || !messages.some(message => message.id === followSent.current)) return;
+    const sent = followSent.current;
+    if (!sent || !messages.some(message => message.id === `user:${sent}` || message.id === steeredMessageId(sent))) return;
     followSent.current = undefined;
     followLiveEnd.current?.();
   }, [messages]);
   const viewportRef = useRef<HTMLDivElement>(null);
+  // ⌘F searches the whole loaded conversation and the cards docked under it (approvals, questions).
+  const findRootRef = useRef<HTMLDivElement>(null);
+  usePageTextFind(panelId, findRootRef);
   const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length, !!snapshot.hasNewer);
   const onViewportScroll = () => {
     recordAnchor();
@@ -223,12 +245,19 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const waiting = useMemo(() => waitingToolIds(view?.permissions, view?.questions), [view?.permissions, view?.questions]);
   const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const agentsWorking = useMemo(() => workingOverride ?? workingAgents(workers), [workingOverride, workers]);
-  const [copying, setCopying] = useState(0);
+  const [copies, setCopies] = useState<ReadonlyMap<string, UploadProgress>>(new Map());
+  const copying = copies.size;
   const canAttachImages = !!view?.canAttachImages;
   const attachments = useMemo(() => {
-    const options = { images: canAttachImages, saveFile, onCopying: (delta: 1 | -1) => setCopying(count => count + delta) };
+    const onProgress = (id: string, progress: UploadProgress | null) => setCopies(current => {
+      const next = new Map(current);
+      if (progress) next.set(id, progress);
+      else next.delete(id);
+      return next;
+    });
+    const options = { images: canAttachImages, saveFile, onProgress, panelId };
     return ChatAttachmentAdapter.available(options) ? new ChatAttachmentAdapter(options) : undefined;
-  }, [canAttachImages, saveFile]);
+  }, [canAttachImages, saveFile, panelId]);
   /** Why dropped, pasted or picked files were not attached; shown until dismissed or the next attempt. */
   const [attachProblems, setAttachProblems] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -319,7 +348,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
       const request: ChatTabSend = { operationId, text, images: imageParts };
       // Send now only means something while a turn runs; otherwise it is a plain send.
       if (now && working) request.now = true;
-      followSent.current = `user:${operationId}`;
+      followSent.current = operationId;
       if (!await deliver(request, true)) return;
       // Typing while an approval waits tells the agent what to do instead (round 2): once the message is in.
       await Promise.all(waitingPermissions.map(permission => {
@@ -366,9 +395,14 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     }
     const run = restore.current;
     run.mounted += 1;
+    shownComposers.set(viewer, composer);
     // Sending empties the composer's attachments, and with them the saved ones.
     const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
-    return () => { run.mounted -= 1; unsubscribe(); };
+    return () => {
+      run.mounted -= 1;
+      unsubscribe();
+      if (shownComposers.get(viewer) === composer) shownComposers.delete(viewer);
+    };
   }, [runtime, viewer]);
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
@@ -455,6 +489,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     setBusy(true);
     try { await operation(); viewer.setError(undefined); } catch (error) { viewer.setError(ipcErrorMessage(error, 'Pane did not say why.')); } finally { setBusy(false); }
   };
+  /** The whole conversation, not only the window on screen. */
+  const copyConversation = async () => {
+    try {
+      return conversationMarkdown(chatTurns(await viewer.allMessages(), { running: working }), agentName);
+    } catch (error) {
+      viewer.setError(`Could not copy the conversation: ${ipcErrorMessage(error, 'Pane did not say why.')}`);
+      throw error;
+    }
+  };
   const configure = (id: string, value: string) => void act(() => client.configure(panelId, id, value));
   const answerPermission = (permission: AgentChatPermission, optionId: string) => void act(() => client.permission(panelId, permission.id, optionId));
   const clearConversation = () => {
@@ -488,14 +531,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     setCommandIndex(0);
   };
 
-  return <AssistantRuntimeProvider runtime={runtime}>
-    <ThreadPrimitive.Root className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} {...dragProps}>
+  return <AssistantRuntimeProvider runtime={runtime}><CopyProgressContext.Provider value={copies}>
+    <ThreadPrimitive.Root ref={findRootRef} className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} {...dragProps}>
+      <FindBar panelId={panelId} />
       {dragging && <div className="chat-drop" aria-hidden>
         <div className="chat-drop-card">
           <Paperclip className="chat-drop-icon" />
           <p className="chat-drop-title">Drop to attach</p>
           <p className="chat-drop-detail">{saveFile
-            ? `Images up to ${megabytes(MAX_IMAGE_BYTES)}; other files up to ${megabytes(MAX_FILE_BYTES)} are copied to the chat's machine.`
+            ? `Images up to ${megabytes(MAX_IMAGE_BYTES)} go to the agent as images; other files, of any size, are copied to the chat's machine.`
             : `PNG, JPEG, WebP or GIF images up to ${megabytes(MAX_IMAGE_BYTES)}.`}</p>
         </div>
       </div>}
@@ -516,7 +560,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         {clearable && <button type="button" className="chat-copy chat-copy-all" disabled={disabled} title="Start a fresh conversation in this tab (/clear)" onClick={requestClear}>
           <Eraser className="h-3.5 w-3.5" aria-hidden /><span>Clear</span>
         </button>}
-        <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={() => conversationMarkdown(turns, agentName)} />
+        <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={copyConversation} />
       </div>}
       <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer && !paged}>
         <div className="chat-column">
@@ -524,10 +568,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {view?.clearedAt && (snapshot.transcript?.start ?? 0) === 0 && <ClearedDivider at={view.clearedAt} />}
-          {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
-          <ChatBlocksContext.Provider value={rendering}>
-            {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
-          </ChatBlocksContext.Provider>
+          {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view) && <p role="status" className="chat-notice">Starting {agentName}…</p>}
+          <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting'} skeleton={<TurnsSkeleton />}>
+            <ChatBlocksContext.Provider value={rendering}>
+              {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
+            </ChatBlocksContext.Provider>
+          </SkeletonSwap>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
             {snapshot.loadingNewer ? 'Loading…' : 'Newer messages'}
@@ -552,12 +598,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           <button type="button" className="chat-button chat-button-outline" onClick={() => setConfirmClear(false)}>Cancel</button>
           <button type="button" className="chat-button chat-button-primary" disabled={disabled} onClick={clearConversation}>Clear</button>
         </dialog>}
-        <ChatQueue queue={view?.queue ?? []} working={working} disabled={disabled} label={rendering.queued}
+        <ChatQueue queue={view?.queue ?? []} working={working} steers={view?.sendNowSteers} disabled={disabled} label={rendering.queued}
           onRemove={operationId => void act(() => client.unqueue(panelId, operationId))}
           onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
           onEdit={editQueued} />
         {view && <ChatStatusBar context={view.context} tasks={view.tasks}
-          queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
+          queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} sendNowSteers={view.sendNowSteers} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         <ComposerPrimitive.Root className="chat-composer" data-pane-part="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
@@ -598,7 +644,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 requestClear();
                 return;
               }
-              // Cmd/Ctrl+Enter sends now: while a turn runs it interrupts it; otherwise it is a plain send.
+              // Cmd/Ctrl+Enter sends now (sendNowEffect) while a turn runs; otherwise it is a plain send.
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
                 event.preventDefault();
                 sendNowNext.current = true;
@@ -627,7 +673,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
                 : <ChatModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />}
               {working
                 ? <>
-                  <ComposerPrimitive.Send aria-label="Queue message" title={`Queue message: sends after this turn (Enter). Send now: ${sendNowKeys()}`} className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
+                  <ComposerPrimitive.Send aria-label="Queue message" title={`Queue message: sends after this turn (Enter). Send now (${sendNowKeys()}): ${sendNowEffect(view?.sendNowSteers)}`} className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
                   <button type="button" aria-label="Stop agent turn" title="Stop" className="chat-send" onClick={() => void act(() => client.cancel(panelId))}><Square className="h-3.5 w-3.5 fill-current" /></button>
                 </>
                 : <ComposerPrimitive.Send aria-label="Send message" title="Send message" className="chat-send"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>}
@@ -636,5 +682,5 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
         </ComposerPrimitive.Root>
       </div>
     </ThreadPrimitive.Root>
-  </AssistantRuntimeProvider>;
+  </CopyProgressContext.Provider></AssistantRuntimeProvider>;
 }

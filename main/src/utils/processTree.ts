@@ -3,6 +3,9 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
+/** Environment for `ps`: the C locale keeps dates and names in one parseable form, and the start text stops compare stable. */
+export const cLocaleEnv = (): NodeJS.ProcessEnv => ({ ...process.env, LC_ALL: 'C' });
+
 /** Reading the whole process table is one call; give it room without hanging teardown. */
 const SNAPSHOT_TIMEOUT_MS = 5_000;
 /** A killed process leaves the table within a few milliseconds, so poll finely. */
@@ -51,6 +54,11 @@ export async function waitForProcessesToExit(
  * Read this *before* the roots are killed: a dead parent's children keep its
  * pid as their parent, so nothing can walk to them afterwards. Best effort —
  * an unreadable process table yields an empty list rather than an error.
+ *
+ * Windows never clears a dead parent's pid from its children, and reuses pids
+ * quickly: a process that inherits a dead parent's pid is not that parent. A
+ * child counts only when it was born no earlier than the process holding its
+ * parent pid now.
  */
 export async function listDescendantPids(rootPids: readonly number[]): Promise<number[]> {
   const roots = rootPids.filter(pid => Number.isInteger(pid) && pid > 0);
@@ -121,9 +129,12 @@ export async function terminateProcessTrees(
 async function killProcesses(pids: readonly number[]): Promise<void> {
   if (process.platform === 'win32') {
     // One taskkill for the lot — a process per pid would cost more than the
-    // kill itself. `/T` also takes down children spawned since the snapshot,
-    // and taskkill reports a pid it cannot touch without abandoning the rest.
-    const args = ['/F', '/T', ...pids.flatMap(pid => ['/PID', String(pid)])];
+    // kill itself. taskkill reports a pid it cannot touch without abandoning
+    // the rest.
+    // No `/T`: taskkill walks children by a parent pid that Windows never
+    // clears, so it would also kill whatever outlived a dead process whose pid
+    // one of these now holds. The list already holds the verified descendants.
+    const args = ['/F', ...pids.flatMap(pid => ['/PID', String(pid)])];
     await execFileAsync('taskkill', args, { timeout: SNAPSHOT_TIMEOUT_MS }).catch(() => undefined);
     return;
   }
@@ -143,6 +154,8 @@ export interface ProcessTableRow {
   uid: number | null;
   /** Full executable path where the platform reports one, else the process name. Empty when hidden. */
   executable: string;
+  /** Windows: creation time in 100 ns ticks, to tell a parent from a later process with its pid. Unknown elsewhere. */
+  born?: bigint;
 }
 
 /**
@@ -158,7 +171,7 @@ export async function readProcessTable(): Promise<ProcessTableRow[]> {
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$(if ($_.ExecutablePath) { $_.ExecutablePath } else { $_.Name })" }',
+        'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$(if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().Ticks })`t$(if ($_.ExecutablePath) { $_.ExecutablePath } else { $_.Name })" }',
       ], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })).stdout
       // `comm` goes last: on macOS it is the full executable path, which may contain spaces.
       : (await execFileAsync('ps', ['-Ao', 'pid=,ppid=,uid=,comm='], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })).stdout;
@@ -168,16 +181,22 @@ export async function readProcessTable(): Promise<ProcessTableRow[]> {
   }
   const rows: ProcessTableRow[] = [];
   for (const line of stdout.split(/\r?\n/u)) {
-    const match = process.platform === 'win32'
-      ? /^(\d+)\t(\d+)\t(.*)$/u.exec(line)
-      : /^\s*(\d+)\s+(\d+)\s+(\d+)\s?(.*)$/u.exec(line);
+    if (process.platform === 'win32') {
+      const match = /^(\d+)\t(\d+)\t(\d*)\t(.*)$/u.exec(line);
+      if (!match) continue;
+      const [, pid, parentPid, born, executable] = match;
+      const row: ProcessTableRow = { pid: Number.parseInt(pid, 10), parentPid: Number.parseInt(parentPid, 10), uid: null, executable: executable.trim() };
+      if (born) row.born = BigInt(born);
+      rows.push(row);
+      continue;
+    }
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s?(.*)$/u.exec(line);
     if (!match) continue;
-    const [pid, parentPid, ...rest] = match.slice(1);
-    const [uid, executable] = rest.length === 2 ? rest : [null, rest[0]];
+    const [, pid, parentPid, uid, executable] = match;
     rows.push({
       pid: Number.parseInt(pid, 10),
       parentPid: Number.parseInt(parentPid, 10),
-      uid: uid === null ? null : Number.parseInt(uid, 10),
+      uid: Number.parseInt(uid, 10),
       executable: executable.trim(),
     });
   }
@@ -187,8 +206,15 @@ export async function readProcessTable(): Promise<ProcessTableRow[]> {
 /** Parent pid → its child pids, for every process on the machine. */
 async function readProcessChildren(): Promise<Map<number, number[]>> {
   const children = new Map<number, number[]>();
-  for (const { pid, parentPid } of await readProcessTable()) {
+  const table = await readProcessTable();
+  const born = new Map(table.map(row => [row.pid, row.born]));
+  for (const { pid, parentPid } of table) {
     if (pid === parentPid) continue;
+    if (process.platform === 'win32') {
+      const parentBorn = born.get(parentPid);
+      const childBorn = born.get(pid);
+      if (parentBorn === undefined || childBorn === undefined || parentBorn > childBorn) continue;
+    }
     const siblings = children.get(parentPid);
     if (siblings) siblings.push(pid);
     else children.set(parentPid, [pid]);

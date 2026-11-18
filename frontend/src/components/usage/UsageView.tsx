@@ -1,3 +1,4 @@
+import { CATEGORY_COLORS } from '../ui/charts/palette';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, CalendarDays, Check, Download, Loader2, RefreshCw, Share2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
@@ -5,6 +6,7 @@ import { API } from '../../utils/api';
 import { useHotkey } from '../../hooks/useHotkey';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { AreaChart } from '../ui/charts/AreaChart';
+import { Bone, Skeleton, TextBone, useSkeletonHold, LoadingStatus } from '../ui/Skeleton';
 import { BarChart } from '../ui/charts/BarChart';
 import { DonutChart } from '../ui/charts/DonutChart';
 import { formatTokens, formatUsd } from '../ui/charts/chartScales';
@@ -13,6 +15,7 @@ import { LeaderboardTab } from './LeaderboardTab';
 import { settingDomId } from '../settings/catalog';
 import { PaneUsageSummary } from './PaneUsageSummary';
 import { UsageDateRangeDialog } from './UsageDateRangeDialog';
+import { hasNoAgentTranscripts } from './usageEmptyState';
 import { presetCalendarRange, rollingUsageRange, usageDateBounds, type UsageDateRange } from './usageDateRange';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
@@ -51,7 +54,7 @@ const SERIES_COLORS = {
   cacheWrite: '#e0913a',
 } as const;
 
-const MODEL_COLORS = ['#4f8ef7', '#37b877', '#e0913a', '#c765d6', '#e05a6b', '#3fb8c4', '#8f8ff0', '#c2a63a'];
+const MODEL_COLORS = CATEGORY_COLORS;
 
 type PaneSortKey =
   | 'paneName'
@@ -90,6 +93,75 @@ function StatCard({
       <p className="mt-0.5 truncate text-lg font-semibold tabular-nums text-text-primary" title={value}>{value}</p>
       {detail && <p className="text-[10px] text-text-tertiary">{detail}</p>}
     </div>
+  );
+}
+
+/** A StatCard while usage loads: its label, a value and an optional detail line. */
+function StatCardSkeleton({ label, detail = true }: { label: string; detail?: boolean }) {
+  return (
+    <div className="min-w-0 rounded border border-border-primary bg-surface-secondary px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wider"><TextBone text={label} /></p>
+      <div className="mt-0.5 flex h-7 items-center"><Bone className="h-5 w-16" /></div>
+      {detail && <div className="flex h-[15px] items-center"><Bone className="h-2.5 w-24" /></div>}
+    </div>
+  );
+}
+
+/** The usage report's first screen while it is read: range line, stat cards, per-pane summary and the first charts. */
+function UsageSkeleton() {
+  const heading = 'mb-2 text-[11px] font-medium uppercase tracking-wider';
+  return (
+    <>
+      <Skeleton className="mx-auto flex max-w-6xl flex-col gap-4">
+        <div className="flex h-4 items-center"><Bone className="h-3 w-40" /></div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <StatCardSkeleton label="Total tokens" />
+          <StatCardSkeleton label="Input" />
+          <StatCardSkeleton label="Output" />
+          <StatCardSkeleton label="Cache hit rate" />
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <StatCardSkeleton label="Messages" />
+          <StatCardSkeleton label="Busiest project" />
+          <StatCardSkeleton label="Saved by caching" />
+        </div>
+        <section className="rounded border border-border-primary bg-surface-secondary p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-[11px] font-medium uppercase tracking-wider"><TextBone text="Per-pane usage" /></h2>
+            <div className="flex gap-1"><Bone className="h-6 w-16" /><Bone className="h-6 w-16" /></div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="rounded border border-border-primary px-3 py-2">
+                <div className="flex h-[15px] items-center"><Bone className="h-2.5 w-20" /></div>
+                <div className="mt-0.5 flex h-7 items-center"><Bone className="h-5 w-16" /></div>
+                <div className="flex h-[15px] items-center"><Bone className="h-2.5 w-28" /></div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex h-4 items-center"><Bone className="h-3 w-3/4" /></div>
+        </section>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <section className="rounded border border-border-primary bg-surface-secondary p-3 lg:col-span-2">
+            <h2 className={heading}><TextBone text="Tokens over time" /></h2>
+            <Bone className="aspect-[16/5] w-full" />
+            <div className="mt-2 flex gap-2"><Bone className="h-[19px] w-24" /><Bone className="h-[19px] w-24" /></div>
+          </section>
+          <section className="rounded border border-border-primary bg-surface-secondary p-3">
+            <h2 className={heading}><TextBone text="Provider limits" /></h2>
+            <div className="mt-2 space-y-2">
+              {[0, 1, 2].map((index) => (
+                <div key={index}>
+                  <div className="flex h-4 items-center justify-between"><Bone className="h-3 w-28" /><Bone className="h-3 w-8" /></div>
+                  <Bone className="mt-0.5 h-1.5 w-full rounded-full" />
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </Skeleton>
+      <LoadingStatus label="Reading usage" />
+    </>
   );
 }
 
@@ -151,6 +223,7 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
   const [activeTab, setActiveTab] = useState<UsageTab>(initialTab);
   const [report, setReport] = useState<UsageReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const { holding, reveal } = useSkeletonHold(loading);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rangeDays, setRangeDays] = useState<number>(DEFAULT_USAGE_RANGE_DAYS);
@@ -410,7 +483,7 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
     ];
   }, [report]);
 
-  const bothRootsMissing = (report?.index.missingRoots.length ?? 0) >= 2;
+  const noAgentTranscripts = hasNoAgentTranscripts(report?.index);
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
@@ -566,27 +639,24 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
         </div>
       ) : (
       <div ref={contentRef} className="relative min-h-0 flex-1 overflow-auto p-4">
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-xs text-text-tertiary">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Reading usage…
-          </div>
-        ) : error ? (
+        {!loading && error ? (
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}
           </div>
-        ) : bothRootsMissing ? (
+        ) : holding ? (
+          <UsageSkeleton />
+        ) : noAgentTranscripts ? (
           <div className="mx-auto max-w-lg rounded border border-border-primary bg-surface-secondary p-6 text-center">
             <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>
             <p className="text-xs text-text-secondary">
               Usage is read from the Claude Code and Codex transcript files in your home directory.
-              Neither <code className="font-mono">~/.claude/projects</code> nor{' '}
-              <code className="font-mono">~/.codex/sessions</code> exists yet — run an agent once and
+              Nothing was found in <code className="font-mono">~/.claude/projects</code> or{' '}
+              <code className="font-mono">~/.codex/sessions</code> yet — run an agent once and
               come back.
             </p>
           </div>
         ) : report ? (
-          <div className="mx-auto flex max-w-6xl flex-col gap-4">
+          <div className={`mx-auto flex max-w-6xl flex-col gap-4${reveal ? ' skeleton-reveal' : ''}`}>
             <p className="text-xs text-text-tertiary">{customRange ? rangeLabel : `Last ${rangeLabel}`} · {provider === 'all' ? 'All providers' : PROVIDER_OPTIONS.find(option => option.value === provider)?.label}</p>
             {/* Summary — all from logs */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

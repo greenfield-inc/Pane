@@ -129,6 +129,8 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
     }
   }, finder);
   await page.goto('/');
+  // goto returns at the page's load event, before main.tsx imports the app; the outline goes once the app has loaded its data.
+  await page.locator('#pane-launch-outline').waitFor({ state: 'detached' });
   if (finder.done) return page.getByRole('heading', { name: 'Get Started', exact: true });
   if (finder.atFirstStep) {
     const first = page.getByRole('dialog', { name: 'Which agent do you use?' });

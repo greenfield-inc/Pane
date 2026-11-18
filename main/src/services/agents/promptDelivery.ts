@@ -44,6 +44,15 @@ export function bracketedPaste(text: string): string {
 }
 
 
+/**
+ * Text staged at a terminal agent's prompt, never sent: newlines stay text inside one bracketed
+ * paste, or become spaces when the terminal takes no bracketed paste.
+ */
+export function stagedPromptText(text: string, bracketed: boolean): string {
+  const staged = stripTrailingNewlines(normalizePromptNewlines(text));
+  return bracketed ? bracketedPaste(staged) : staged.replace(/\n+/gu, ' ');
+}
+
 function promptFileName(now: Date): string {
   return `${now.toISOString().replace(/[:.]/gu, '-')}-${randomBytes(3).toString('hex')}`;
 }

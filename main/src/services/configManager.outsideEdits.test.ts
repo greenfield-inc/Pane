@@ -144,19 +144,25 @@ describe('ConfigManager keeps outside edits to config.json', () => {
   });
 
   it('keeps a hand edit that lands while a reload persists a migration', async () => {
-    // Force a migration write on every reload: registerMcp missing.
-    let lost = 0;
-    const N = 200;
-    for (let i = 0; i < N; i++) {
-      const c = await onDisk(configPath);
-      delete c.keyboardShortcutOverrides;
-      const { registerMcp: _dropped, ...agentContext } = decodeBoundary(c.agentContext, boundary.jsonObject);
-      c.agentContext = agentContext;
-      await fs.writeFile(configPath, JSON.stringify(c, null, 2));
-      await Promise.all([manager.reloadFromDisk(), atomicHandEdit(configPath, addKeys)]);
-      if (!(await onDisk(configPath)).keyboardShortcutOverrides) lost++;
-    }
-    expect(lost).toBe(0);
+    // A file that needs a migration: registerMcp missing.
+    const c = await onDisk(configPath);
+    const { registerMcp: _dropped, ...agentContext } = decodeBoundary(c.agentContext, boundary.jsonObject);
+    c.agentContext = agentContext;
+    await fs.writeFile(configPath, JSON.stringify(c, null, 2));
+    // The hand edit lands just after the reload has read the file, before it could save its migration.
+    const readFile = fs.readFile;
+    let landed = false;
+    vi.spyOn(fs, 'readFile').mockImplementation(async (...args: Parameters<typeof fs.readFile>) => {
+      const text = await readFile(...args);
+      if (!landed && args[0] === configPath) {
+        landed = true;
+        await atomicHandEdit(configPath, addKeys);
+      }
+      return text;
+    });
+    await manager.reloadFromDisk();
+    expect(landed).toBe(true);
+    expect((await onDisk(configPath)).keyboardShortcutOverrides).toEqual(HAND_OVERRIDES);
   });
 
   it('reloads and tells listeners when the file changes while watching, ignoring its own writes', async () => {

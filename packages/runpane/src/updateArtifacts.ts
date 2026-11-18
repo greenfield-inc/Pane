@@ -9,6 +9,11 @@ import type { UpdateHost } from './updatePreflight';
 import { RunpaneError } from './errors';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 
+/** Where an update keeps the previous app (bundle, folder or AppImage) until rollback no longer needs it. */
+export function appBackupPath(installPath: string, updateId: string): string {
+  return `${installPath}.before-${updateId}`;
+}
+
 export interface StagedApp { version: string; artifact: string; installPath: string; backupPath: string; sha256: string }
 function sha(file: string): string { return createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
 function macSigner(bundle: string): string {
@@ -59,7 +64,7 @@ export async function stageApp(host: UpdateHost, requested: string, directory: s
     if (!line || line.trim().split(/\s+/)[0].toLowerCase() !== sha(artifact)) throw new Error('The AppImage release checksum is missing or invalid.');
     fs.chmodSync(artifact, 0o755);
   }
-  return { version, artifact, installPath, backupPath: `${installPath}.before-${path.basename(path.dirname(directory))}`, sha256: sha(downloaded.path) };
+  return { version, artifact, installPath, backupPath: appBackupPath(installPath, path.basename(path.dirname(directory))), sha256: sha(downloaded.path) };
 }
 
 /** Replacement is reconciled from owned sibling paths after a helper restart. */

@@ -1,7 +1,9 @@
+import { DevicePanel } from './device/DevicePanel';
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { PanelContainerProps } from '../../types/panelComponents';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PanelLoadingFallback } from './PanelLoadingFallback';
+import { TerminalSkeleton } from './TerminalSkeleton';
 import { loadChatTabRoute, loadedChatTabRoute } from './chatTabRouteModule';
 import { PausedTerminalView } from './PausedTabView';
 import { pausedMarkOf } from '../../../../shared/types/panels';
@@ -9,8 +11,31 @@ import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { renderLog } from '../../utils/console';
 
 // Lazy load panel components for better performance
-const TerminalPanel = lazy(() => import('./TerminalPanel'));
+type TerminalPanelComponent = typeof import('./TerminalPanel').default;
+let loadedTerminalPanel: TerminalPanelComponent | null = null;
+const loadTerminalPanel = () => import('./TerminalPanel').then(module => {
+  loadedTerminalPanel = module.default;
+  return module;
+});
+const LazyTerminalPanel = lazy(loadTerminalPanel);
+// Almost every screen shows a terminal: fetch its code while the app is idle, so
+// the first Session or Pane opened does not wait for it.
+if (globalThis.window) {
+  const preload = () => { void loadTerminalPanel().catch(() => undefined); };
+  if ('requestIdleCallback' in window) window.requestIdleCallback(preload, { timeout: 2000 });
+  else setTimeout(preload, 1000);
+}
 const LazyChatTabRoute = lazy(() => loadChatTabRoute().then(ChatTabRoute => ({ default: ChatTabRoute })));
+
+/**
+ * A terminal renders its code directly once loaded (the idle preload above), so
+ * React never commits a Suspense fallback, whose reveal it holds back about
+ * 300 ms. The component is picked once per mount, as for a chat tab below.
+ */
+function TerminalHost(props: React.ComponentProps<TerminalPanelComponent>) {
+  const [Terminal] = useState(() => loadedTerminalPanel ?? LazyTerminalPanel);
+  return <Terminal {...props} />;
+}
 
 /**
  * A chat tab renders its code directly once loaded (a launch preloads it), so it
@@ -100,7 +125,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
     // Panel type rendering
     switch (panel.type) {
       case 'notes':
-        if (notesEnabled === undefined) return <PanelLoadingFallback panelType={panel.type} message="Loading notes panel..." />;
+        if (notesEnabled === undefined) return <PanelLoadingFallback panelType={panel.type} />;
         if (!notesEnabled) {
           return (
             <div className="h-full w-full flex items-center justify-center p-8">
@@ -113,7 +138,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
       {
         // A paused tab never mounts its terminal, so nothing starts it: it shows its last screen.
         const paused = pausedMarkOf(panel);
-        return paused ? <PausedTerminalView panel={panel} mark={paused} /> : <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
+        return paused ? <PausedTerminalView panel={panel} mark={paused} /> : <TerminalHost panel={panel} isActive={isActive} autoFocus={autoFocus} />;
       }
       case 'chat':
         return <ChatTabHost panel={panel} />;
@@ -131,6 +156,8 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
         return <SetupTasksPanel panelId={panel.id} sessionId={panel.sessionId} isActive={isActive} />;
       case 'browser':
         return <BrowserPanel panel={panel} isActive={isActive} />;
+      case 'device':
+        return <DevicePanel panel={panel} isActive={isActive} />;
       default:
         return (
           <div className="h-full w-full flex items-center justify-center p-8">
@@ -170,12 +197,9 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
       )}
       resetKeys={[panel.id]} // Only reset when panel changes
     >
-      <Suspense fallback={
-        <PanelLoadingFallback 
-          panelType={panel.type}
-          message={`Loading ${panel.type} panel...`}
-        />
-      }>
+      <Suspense fallback={panel.type === 'terminal'
+        ? <div className="relative h-full w-full bg-[var(--color-terminal-bg)]"><TerminalSkeleton panelId={panel.id} chain={panel.sessionId} /></div>
+        : <PanelLoadingFallback panelType={panel.type} />}>
         {panelComponent}
       </Suspense>
     </ErrorBoundary>

@@ -7,15 +7,17 @@ import { useTheme, type ThemeColors } from '@/theme';
 import { Text } from '@/ui';
 
 interface SwipeRowActions {
-  pinned: boolean;
-  onTogglePinned: () => void;
+  /** Pin or Unpin on a right swipe; rows that can't pin (approvals) leave it out. */
+  pinned?: boolean;
+  onTogglePinned?: () => void;
   onArchive: () => void;
   /** Pause or Resume beside Archive; rows that can't pause leave it out. */
   pause?: { paused: boolean; onToggle: () => void };
 }
 
 /**
- * A home-list row that swipes right to pin or unpin, and left to pause or resume and archive.
+ * A home-list row that swipes right to pin or unpin, and left to pause or resume and archive. Pin and
+ * pause are optional.
  * The swipe actions' testIDs are `<testIDPrefix>-swipe-pin-<id>`, `<testIDPrefix>-swipe-pause-<id>`
  * and `<testIDPrefix>-swipe-archive-<id>`.
  */
@@ -29,17 +31,19 @@ export function SwipeRow({ testIDPrefix, id, pinned, onTogglePinned, onArchive, 
     <View style={[styles.outer, { borderRadius: theme.radius.md }]}>
       <ReanimatedSwipeable
         friction={2}
+        // The screen's left edge belongs to swipe-back on pushed screens.
+        hitSlop={{ left: -24 }}
         overshootFriction={8}
         leftThreshold={48}
         rightThreshold={48}
-        renderLeftActions={(_progress, _translation, swipe) => (
+        renderLeftActions={onTogglePinned ? (_progress, _translation, swipe) => (
           <SwipeAction
             testID={`${testIDPrefix}-swipe-pin-${id}`}
             label={pinned ? 'Unpin' : 'Pin'}
             color="accent"
             onPress={() => { swipe.close(); onTogglePinned(); }}
           />
-        )}
+        ) : undefined}
         renderRightActions={(_progress, _translation, swipe) => (
           <View style={styles.actions}>
             {pause ? (
@@ -68,16 +72,16 @@ export function SwipeRow({ testIDPrefix, id, pinned, onTogglePinned, onArchive, 
   );
 }
 
-/** Pin/Unpin, Pause/Resume and Archive as screen reader actions, for the row's focusable Pressable. */
+/** Pin/Unpin and Pause/Resume when the row has them, and Archive, as screen reader actions, for the row's focusable Pressable. */
 export function swipeRowAccessibility({ pinned, onTogglePinned, onArchive, pause }: SwipeRowActions) {
   return {
     accessibilityActions: [
-      { name: 'pin', label: pinned ? 'Unpin' : 'Pin' },
+      ...(onTogglePinned ? [{ name: 'pin', label: pinned ? 'Unpin' : 'Pin' }] : []),
       ...(pause ? [{ name: 'pause', label: pause.paused ? 'Resume' : 'Pause' }] : []),
       { name: 'archive', label: 'Archive' },
     ],
     onAccessibilityAction: (event: AccessibilityActionEvent) => {
-      if (event.nativeEvent.actionName === 'pin') onTogglePinned();
+      if (event.nativeEvent.actionName === 'pin') onTogglePinned?.();
       else if (event.nativeEvent.actionName === 'pause') pause?.onToggle();
       else if (event.nativeEvent.actionName === 'archive') onArchive();
     },

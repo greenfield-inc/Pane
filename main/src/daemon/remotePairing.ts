@@ -5,6 +5,7 @@ import type {
 } from '../../../shared/types/remoteDaemon';
 import { isRemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import { createRemoteDaemonToken, hashRemoteDaemonToken } from './auth';
+import { PaneError } from '../../../shared/paneError';
 
 export interface CreateRemoteDaemonConnectionPairInput {
   label: string;
@@ -42,7 +43,11 @@ export function createRemoteDaemonConnectionPair(
   };
 
   if (!isRemotePaneConnectionProfile(profile)) {
-    throw new Error('Generated remote daemon connection profile is invalid');
+    throw new PaneError(
+      'ERR_REMOTE_PAIR_INVALID',
+      `Pane could not create a saved connection for "${label}" at ${baseUrl}: the generated connection failed its own checks. Nothing was saved.`,
+      'Pair again. If it fails again, report this message.',
+    );
   }
 
   return {

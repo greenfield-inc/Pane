@@ -72,7 +72,8 @@ above that component describes the activation lifecycle; read it before you
 change how panels show, hide or refresh.
 
 Agent status (working, idle, blocked) is derived in
-`main/src/services/agentStatus/`.
+`main/src/services/agentStatus/`, from each tab's screen or from the program's
+own OSC 7501 reports ([PROGRAM_STATUS.md](PROGRAM_STATUS.md)).
 
 ## File previews
 
@@ -206,6 +207,11 @@ settings cog holds promotion and deletion actions. Agent visibility is automatic
 within scope, with no sharing controls in the editor. Restoring an archived
 Pane refreshes its derived context from current project notes.
 
+Every marked section Pane keeps in an instruction file someone else can edit (the
+Notify block, notes' Pane memories, the repository `AGENTS.md` section and Session
+folder instructions) goes through `writeOwnedBlock` in `instructionsBlock.ts`: Pane
+adds, updates or removes only its own marked lines and keeps every other byte.
+
 `noteExports.ts` derives marked instruction sections and drawing assets from saved
 documents. Excalidraw scenes remain editable JSON, with PNG previews and readable
 labels in agent-facing Markdown. Global destinations are Claude's user
@@ -248,11 +254,13 @@ Notes tab.
 | Adding an agent CLI | `main/src/services/agents/` | [ADDING_NEW_CLI_TOOLS.md](ADDING_NEW_CLI_TOOLS.md) |
 | Panels | `panelManager.ts`, `shared/types/panels.ts` | [TOOL_PANEL_SYSTEM.md](TOOL_PANEL_SYSTEM.md) |
 | Chat tabs (ACP agents without a terminal) | `main/src/services/chatTabs/`, `main/src/ipc/chatTabs.ts`, `frontend/src/components/chatTab/` | [CHAT_TABS.md](CHAT_TABS.md) |
+| Machine health (disk, memory, cleanup, Resources) | `main/src/services/machineHealth/`, `main/src/ipc/resourceMonitor.ts`, `frontend/src/components/machineHealth/` | [MACHINE_HEALTH.md](MACHINE_HEALTH.md) |
 | Autopilot (experimental agent above every Session) | `main/src/services/autopilot/`, `main/src/ipc/autopilot.ts`, `frontend/src/components/autopilot/` | [AUTOPILOT.md](AUTOPILOT.md) |
 | Renderer updates | IPC events in `main/src/events.ts` | [STATE_MANAGEMENT.md](STATE_MANAGEMENT.md) |
 | Timestamps | `main/src/utils/timestampUtils.ts` | [TIMESTAMP_HANDLING.md](TIMESTAMP_HANDLING.md) |
 | Pane Chat and orchestration sessions | `paneChatManager.ts`, `skillCacheManager.ts`, `paneChatBundle/` | [SESSIONS.md](SESSIONS.md) |
 | Loops (scheduled tasks) | `main/src/services/loops/`, `main/src/ipc/loops.ts`, `shared/types/loop.ts` | [LOOPS.md](LOOPS.md) |
+| Profiles (teams and workflows Pane runs) | `shared/profiles/`, `main/src/services/profiles/`, `main/src/services/agentFarm/`, `main/src/ipc/profiles.ts`, `frontend/src/components/profiles/` | [PROFILES.md](PROFILES.md) |
 | Approvals / Pane Notify (agent questions) | One saved list per machine, the `approvals` table in `sessions.db` (each item filed under its Session, Session-inbox items included), floating strip and round windows, tray icon in `main/src/services/notify/`; the in-Pane Approvals screen in `frontend/src/components/approvals/`; `main/src/ipc/notify.ts`, `shared/types/notify.ts`; the floating windows load `frontend/notify.html`. Desktops (one slot per saved machine, fed by `main/src/services/machineConnections.ts`) and phones read each host's queue over `notify:remote-snapshot`, `notify:remote-command` and the `notify:shared-changed` event; phone alerts go through `main/src/daemon/mobilePushSender.ts` | [PANE_NOTIFY.md](PANE_NOTIFY.md) |
 | Machine connections | `main/src/services/machineConnections.ts` holds the desktop's one connection to each saved machine; key and Pane secret sharing and the shared Approvals switch (`sharedCredentialSync.ts`) and the renderer use it; the sidebar's All machines view (`frontend/src/stores/allMachinesStore.ts`, `frontend/src/components/machines/AllMachinesSidebar.tsx`) reads every machine through it and re-reads one machine when its events arrive; its arrangement (row order and open rows) is a preference on the viewing computer (`sidebar_all_machines_layout`), never written to a machine it shows. Each host adds a `repository` identity (origin remote, normalised; `main/src/services/repositoryIdentity.ts`, read from git once per project path) to the projects in `sessions:get-all-with-projects`, and the view merges projects by it. A host's Pane order is the `sessions.display_order` column read highest first (`shared/utils/paneOrder.ts`), so Panes created before any arranging list newest first; `sessions:get-all-with-projects` serves Panes in that order. `main/src/ipc/machineConnections.ts` and `shared/types/machineConnections.ts` give the renderer `machines:list`, `machines:read` (list reads), `machines:run` (a short command list) and `machines:retry`, and push `machines:event` (events tagged with their machine, never terminal output) to windows that subscribe. This computer is the machine `local` | |
 | SSH hosts view | `sshConfigHosts.ts`, `ipc/sshHosts.ts`, `SshView.tsx` | [SSH_HOSTS.md](SSH_HOSTS.md) |

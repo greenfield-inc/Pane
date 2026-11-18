@@ -11,6 +11,7 @@ import type {
   VoiceTranscriptionRequest,
   VoiceTranscriptionResult,
 } from '../../../../shared/types/voiceTranscription';
+import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from '../../components/ui/Skeleton';
 import { useRemoteVoiceDictation } from '../hooks/useRemoteVoiceDictation';
 
 interface RemoteTerminalInputBarProps {
@@ -152,9 +153,18 @@ export function RemoteTerminalInputBar({
               <X className="h-4 w-4" />
             </button>
           </div>
-          {shortcutsLoading ? (
-            <p className="px-3 py-4 text-sm text-text-tertiary">Loading host shortcuts...</p>
-          ) : enabledShortcuts.length > 0 ? (
+          <SkeletonSwap loading={shortcutsLoading} skeleton={<>
+            <LoadingStatus label="Loading host shortcuts" />
+            <Skeleton className="p-1.5">
+              {[40, 55, 35].map(width => (
+                <div key={width} className="flex items-start gap-3 px-2.5 py-2">
+                  <Bone className="mt-0.5 h-5 w-6" />
+                  <span className="flex min-w-0 flex-1 flex-col gap-1.5 pt-0.5"><Bone className="h-3.5" style={{ width: `${width}%` }} /><Bone className="h-3 w-2/3" /></span>
+                </div>
+              ))}
+            </Skeleton>
+          </>}>
+          {enabledShortcuts.length > 0 ? (
             <div className="p-1.5">
               {enabledShortcuts.map(shortcut => (
                 <button
@@ -181,6 +191,7 @@ export function RemoteTerminalInputBar({
           ) : (
             <p className="px-3 py-4 text-sm text-text-tertiary">No enabled terminal shortcuts on this host.</p>
           )}
+          </SkeletonSwap>
         </div>
       )}
 

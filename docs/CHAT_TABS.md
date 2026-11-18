@@ -17,14 +17,18 @@ entries and new Sessions open their orchestrator in a terminal. Open chat tabs k
 ## Opening one
 
 - **Desktop**: the + menu lists, under *New tab*, each chat agent installed on
-  the Pane's machine, **Agent Farm profile…** and **More agents…** (which opens
+  the Pane's machine, **Profile…** and **More agents…** (which opens
   Settings → Agents), then *In a terminal*: the terminal agents and a plain
   Terminal. The menu reads the host's agent catalog again each time it opens,
   so an agent installed meanwhile shows up. The empty Pane screen offers the
   same.
 - **Remote PWA** and **phone**: *Add Tool* lists the host's installed chat
-  agents and **Agent Farm profile…** first when the host has chat tabs on.
-- **Agent Farm profile…** asks for a profile name and optional arguments, one
+  agents and **Profile…** first when the host has chat tabs on.
+- **Profile…** on the desktop first lists Pane's profiles that are on
+  ([PROFILES.md](PROFILES.md)); picking one opens its launch dialog. Profiles run in
+  terminal tabs, so with chat tabs off the desktop + menu and empty Pane screen
+  still offer **Profile…**, with this list alone. Below the list when chat tabs
+  are on, and as all of it on the PWA and phone, it asks for an Agent Farm profile name and optional arguments, one
   `key=value` per line, and opens the chat tab on the Pane's machine exactly as
   `--agent-farm <profile> --arg key=value` does. The name is typed, not picked:
   `agent-farm profiles list` prints no machine-readable list. An unknown profile
@@ -137,8 +141,8 @@ opens.
 Code's `SessionStart` hook, which fires on start, `/resume`, `/clear` and
 compact (D-269). Pane adds the hook to plain `claude` tabs through the tab's
 `--settings` file, and Agent Farm ships it in the plugin it compiles for every
-Claude it launches. The hook runs `runpane panels conversation --hook`, which
-records the conversation on the tab and as the one its next restart resumes.
+Claude it launches. The hook runs `runpane panels conversation --hook` (Agent
+Farm since #220 runs `runpane session-start`, the same thing), which records the conversation on the tab and as the one its next restart resumes.
 Pane never asks the running Claude.
 
 - **Sure**: the hook reported since the terminal's current launch started. The
@@ -351,10 +355,17 @@ composer marks it in amber like a mode that never asks.
 - **Queue and Send now** (D-211): a message sent while the agent works (Enter)
   waits in the queue, listed in the order it will be sent. Each queued message
   can be edited (its images are kept), removed, or sent now. **Send now**, or
-  Cmd/Ctrl+Enter in the composer, puts the message first and interrupts the
-  running turn (including one blocked on an approval or question), so it is
-  sent as soon as the turn stops (`chat-tab:send` with `now`, `chat-tab:send-now`,
-  `chat-tab:edit-queued`).
+  Cmd/Ctrl+Enter in the composer, puts the message first and gives it to the
+  agent at once. Claude and Codex take it inside the running turn (ACP's
+  `_session/steering`), where it shows as part of that turn; the turn, its
+  subagents and its background tasks keep
+  running. An approval or question the turn waits on stays open: Claude holds
+  the message until it is answered; when Codex reads it then is not known. A
+  steer the agent refuses leaves the message queued with a notice. An agent
+  without steering, and a turn Claude started on its own, are stopped first and
+  the message is sent next. The view's `sendNowSteers` says which applies, and
+  Send now's tooltip says it (`chat-tab:send` with `now`, `chat-tab:send-now`,
+  `chat-tab:edit-queued`). Only Stop stops a steered turn.
 - **/clear** (or **Clear** above the thread) ends the agent and starts a fresh
   conversation in the same tab, with the same agent, launch and settings
   (`chat-tab:clear`). It asks first while a turn runs; a turn cut off this way is
@@ -369,20 +380,25 @@ composer marks it in amber like a mode that never asks.
 - **Copying**: message text can be selected and copied like any page. Each
   message and each finished response has a copy button (on hover with a mouse,
   always on touch) that copies what was written, as Markdown, without the
-  agent's activity. **Copy conversation** above the thread copies the loaded
-  conversation under **You:** and the agent's name, with each tool step as one
-  short line and no raw output. Code blocks have their own copy button. On the
+  agent's activity. **Copy conversation** above the thread copies the whole
+  conversation, including messages scrolled out of the window, under **You:**
+  and the agent's name, with each tool step as one short line and no raw output. Code blocks have their own copy button. On the
   phone app, each message has a copy action, and a long press on a reply copies
   it.
 - **Attachments** (desktop and PWA): drop photos and files anywhere on the chat,
   paste them into the composer, or pick them with **+**. An image the agent
-  takes (PNG, JPEG, WebP or GIF up to 5 MB) is sent as an image. Any other file,
-  up to 10 MB, is copied to the Pane's folder on the chat's machine under its own
-  name (in a folder of its own, so two files with one name never collide), the same
-  way a terminal tab's upload works (`terminal:paste-file`, so a remote host
+  takes (PNG, JPEG, WebP or GIF up to 5 MB, the most Anthropic's API takes as
+  one image) is sent as an image. Any other file, of any size, is copied to the
+  Pane's folder on the chat's machine under its own name (in a folder of its own,
+  so two files with one name never collide), the same resumable chunked upload a
+  terminal tab and the phone use (`terminal:upload-start`, so a remote host
   receives it too), and its path is sent with the message. Each attachment is a
-  chip that can be removed before sending, and sending waits until every file
-  has finished copying. Every refusal says why, and nothing is attached for it.
+  chip that shows how far its copy has got (and the time left when it is slow),
+  can be removed before sending (which stops its copy), and sending waits until
+  every file has finished copying. Leaving the chat keeps a copy running, and the
+  draft's chip picks it up again when you come back (or takes the path of a copy
+  that finished meanwhile). Closing the chat tab stops its copies. The host refuses a file only when it would leave less free space than
+  Machine health's critical level. Every refusal says why, and nothing is attached for it.
   The phone app keeps its **+** photo picker.
 - The composer does not show the machine: the window's machine picker does, and
   an approval from a remote machine names it.
@@ -500,6 +516,29 @@ The profile's model, effort, instructions with LAUNCH CONTEXT, skills,
 subagents, MCP servers and telemetry come with it. The contract is Agent Farm's
 CONFIGURATION.md, *ACP sessions*.
 
+Which `agent-farm` runs: the person's own when one is on PATH, with their own
+config root, exactly as before. Without one, Pane runs the Agent Farm it ships
+(`@greenfieldco/agent-farm`, pinned in `package.json` and `main/package.json`)
+with its Electron as Node and `--config-root <PANE_DIR>/agent-farm`, so a
+profile works on a fresh install. At each start
+(`main/src/services/agentFarm/bundledAgentFarm.ts`, called from
+`main/src/daemon/bootstrap.ts` without waiting) Pane installs the plugins that
+package carries (greenfield, orchestra, bigbrain and machine-security) into
+that folder, when the package's version or plugin files differ from what
+`<PANE_DIR>/agent-farm/pane-manifest.json` records; an unchanged bundle installs
+nothing and the log says so. An install that never finished (its lock or
+half-copied plugin files) is cleared before the next one, and a failed install
+is logged and never blocks startup. Pane never writes to the person's
+`~/.config/agent-farm`. With the bundled copy, `run` writes its launch bundle to
+`<worktree>/.agent-farm/generated`, which Pane hides from git through
+`info/exclude` as it does `.pane/`, and launch telemetry goes to
+`<PANE_DIR>/agent-farm/telemetry` (set in that folder's `settings.json`). Agent
+Farm still keeps small state of its own (workspace trust, launch records, MCP
+logins) under `~/.local/state/agent-farm` and `~/.cache/agent-farm`. `scripts/verify-chat-adapters.js` (run by
+`scripts/after-pack.js`) fails a packaged build unless Agent Farm is inside
+`app.asar`, carries no native binaries, and answers `--version` under Electron
+as Node.
+
 ## Older clients
 
 Phone apps released before chat tabs would crash on a tab kind they don't know,
@@ -536,4 +575,4 @@ is a scripted ACP agent (each prompt's first word picks a behaviour: `permission
 prints a `--print-acp` launch for it. An unpackaged Pane started with
 `PANE_CHAT_TEST_AGENT=<path to scriptedAgent.mjs>` runs it in every chat tab;
 `tests/chat-tabs.spec.ts` uses that for journeys J1 and J5: run it with
-`pnpm build:main && pnpm test:chat-tabs` (CI runs it in Functional Smoke (Electron)).
+`pnpm build:main && pnpm test:chat-tabs` (CI runs it in Functional Smoke (Electron journeys)).

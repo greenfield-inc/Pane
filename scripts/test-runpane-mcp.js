@@ -822,11 +822,18 @@ test('serves the core toolset by default, and named toolsets or read-only on req
 
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
-    'agents_ask', 'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
+    'agents_ask', 'agents_send', 'agents_start', 'agents_status',
+    'device_act', 'device_close', 'device_list', 'device_open', 'device_run', 'device_screenshot',
+    'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
+    'profiles_launch', 'profiles_list', 'profiles_runs', 'profiles_show',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'theme_read', 'theme_set', 'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
+  ]);
+  const devices = await names(['--toolsets', 'devices']);
+  assert.deepEqual(devices.map((tool) => tool.name).sort(), [
+    'device_act', 'device_close', 'device_free', 'device_list', 'device_open', 'device_run', 'device_screenshot', 'device_usage',
   ]);
   const git = await names(['--toolsets', 'git']);
   assert.deepEqual(git.map((tool) => tool.name).sort(), [
@@ -848,6 +855,7 @@ test('the plugin toolset is core without the tools that reach other machines', a
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
+    'profiles_launch', 'profiles_list', 'profiles_runs', 'profiles_show',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'workspace_state',
   ]);
@@ -936,12 +944,20 @@ test('docs search finds docs, help, and installed skills; docs read and resource
   const skillDir = path.join(paneDir, 'skills', 'pane-chat', 'skills', 'zebra-release');
   fs.mkdirSync(skillDir, { recursive: true });
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: zebra-release\ndescription: "Ship a zebra release"\n---\n\nRun the zebrafication checklist before tagging.\n');
+  for (let index = 0; index < 25; index++) {
+    const dir = path.join(paneDir, 'skills', 'pane-chat', 'skills', `quokka-${index}`);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nname: quokka\n---\n\nQuokkafication steps.\n');
+  }
   try {
     await withMcpClient(async (client) => {
       const skill = (await client.callTool({ name: 'docs_search', arguments: { query: 'zebrafication checklist' } })).structuredContent;
       assert.equal(skill.results[0].path, 'skills/zebra-release/SKILL.md');
       assert.equal(skill.results[0].kind, 'skill');
       assert.match(skill.results[0].excerpt, /zebrafication checklist/);
+
+      const many = (await client.callTool({ name: 'docs_search', arguments: { query: 'quokkafication', limit: 25 } })).structuredContent;
+      assert.equal(many.results.length, 25, 'a --limit above 20 returns every match it asks for');
 
       const doc = (await client.callTool({ name: 'docs_search', arguments: { query: 'pane mcp toolsets', limit: 3 } })).structuredContent;
       assert.ok(doc.results.some((result) => result.path === 'docs/PANE_MCP.md'), JSON.stringify(doc.results));

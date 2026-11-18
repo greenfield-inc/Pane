@@ -149,7 +149,7 @@ function getRemoteHostRuntimePresentation(
     borderClassName: 'bg-surface-secondary border-border-secondary',
     title: inactiveTitle,
     description: surface === 'settings'
-      ? 'Run setup or reopen Pane on this machine to make existing remote profiles connect.'
+      ? 'Run setup or reopen Pane on this machine to make existing saved connections connect.'
       : 'Remote hosting is not active on this Pane app.',
   };
 }
@@ -167,7 +167,7 @@ export function getRemoteFooterStatus(
         dotClassName: getRemoteConnectionDotClassName(presence),
         title: 'Remote connection failed',
         description: [
-          connectionState.lastError ?? 'Pane could not connect to the selected remote profile.',
+          connectionState.lastError ?? 'Pane could not connect to the selected remote connection.',
           lastSeenText ? `Remote was ${lastSeenText}.` : null,
         ].filter(Boolean).join(' '),
         ariaLabel: 'Remote connection failed',
@@ -189,7 +189,7 @@ export function getRemoteFooterStatus(
       dotClassName: getRemoteConnectionDotClassName(presence),
       title: 'Connecting to remote runtime',
       description: [
-        connectionState.activeBaseUrl ?? 'Pane is trying to connect to the selected remote profile.',
+        connectionState.activeBaseUrl ?? 'Pane is trying to connect to the selected remote connection.',
         lastSeenText ? `Remote was ${lastSeenText}.` : null,
       ].filter(Boolean).join(' '),
       ariaLabel: 'Connecting to remote runtime',

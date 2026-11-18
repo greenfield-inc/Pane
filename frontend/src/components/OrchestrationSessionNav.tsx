@@ -6,6 +6,9 @@ import { SessionApprovalsCountButton } from './approvals/SessionApprovals';
 import { openApprovalsFromCount } from './approvals/useSessionApprovals';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { useLoopsStore } from '../stores/loopsStore';
+import { sessionWaitingCount, useNotifyStore } from '../stores/notifyStore';
+import { LoopLabel, LoopMark } from './loops/LoopMark';
 import {
   isArchivedOrchestrationSession,
   useOrchestrationSessionStore,
@@ -17,6 +20,7 @@ import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '.
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { LoadingStatus } from './ui/Skeleton';
 import { Tooltip } from './ui/Tooltip';
 import { UndoToast } from './ui/UndoToast';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
@@ -35,6 +39,7 @@ import { PausedTooltipLines } from './SessionDetailTooltip';
 import { resumeIfOpenResumes, runPauseAction } from '../utils/pause';
 import { usePanelStore } from '../stores/panelStore';
 import { panePausedMark } from '../../../shared/types/panels';
+import { moveMarkLabel } from '../utils/sessionMoveView';
 
 interface OrchestrationSessionNavProps {
   compact?: boolean;
@@ -55,6 +60,8 @@ interface SessionContextMenuState {
   sessionName: string;
   isPinned: boolean;
   isPaused: boolean;
+  /** A loop's Session is never pinned, so its menu has no Pin. */
+  loopOwned: boolean;
   x: number;
   y: number;
   /** The ⋯ button that opened the menu; focus moves into the menu and returns here on Escape. */
@@ -112,14 +119,20 @@ export function OrchestrationSessionNav({
   sessionsSectionExpanded,
   onSessionsSectionExpandedChange,
 }: OrchestrationSessionNavProps) {
+  const selectedSessionIdForList = useOrchestrationSessionStore(state => state.selectedSessionId);
   const sessions = useOrchestrationSessionStore(state => state.sessions);
+  const loopsBySessionTarget = useLoopsStore(state => state.loopsBySessionTarget);
+  const notifySnapshot = useNotifyStore(state => state.snapshot);
+  const openSessionId = useNavigationStore(state => state.activeView === 'pane-chat') ? selectedSessionIdForList : undefined;
+  // A loop's Session lives under Loops; it joins the list only while a card from it waits on you, or while it is open.
   const activeSessions = useMemo(
-    () => sessions.filter(session => !isArchivedOrchestrationSession(session)),
-    [sessions],
+    () => sessions.filter(session => !isArchivedOrchestrationSession(session)
+      && (!loopsBySessionTarget.has(session.id) || session.id === openSessionId || sessionWaitingCount(notifySnapshot, session.id) > 0)),
+    [sessions, loopsBySessionTarget, notifySnapshot, openSessionId],
   );
   const pinnedSessions = useMemo(
-    () => activeSessions.filter(session => session.isPinned === true),
-    [activeSessions],
+    () => activeSessions.filter(session => session.isPinned === true && !loopsBySessionTarget.has(session.id)),
+    [activeSessions, loopsBySessionTarget],
   );
   const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
   const availability = useOrchestrationSessionStore(state => state.availability);
@@ -238,6 +251,7 @@ export function OrchestrationSessionNav({
       sessionName: session.name || 'Pane Chat',
       isPinned: session.isPinned === true,
       isPaused: Boolean(session.paused),
+      loopOwned: useLoopsStore.getState().loopsBySessionTarget.has(session.id),
       x,
       y,
       trigger,
@@ -367,7 +381,7 @@ export function OrchestrationSessionNav({
 
   const undoArchive = useCallback(async () => {
     if (!archivedToast) return;
-    const { sessionId, wasOpen, hostRevision, panes } = archivedToast;
+    const { sessionId, wasOpen, hostRevision, panes, pausedLoops } = archivedToast;
     // Every await can outlive the host; nothing may act on a host that never archived this Session.
     const hostChanged = () => useOrchestrationSessionStore.getState().hostRevision !== hostRevision;
     setArchivedToast(null);
@@ -378,6 +392,7 @@ export function OrchestrationSessionNav({
       // The Session is back either way; a Pane that fails to restore is reported after the refresh.
       const paneRestore = await restoreArchivedPanes(panes.archivedPaneIds).then(() => null, (cause: unknown) => cause);
       if (hostChanged()) return;
+      for (const loop of pausedLoops) await useLoopsStore.getState().setEnabled(loop.id, true);
       await refresh();
       // Reopen only if the person is still on Home where the archive left them.
       const stillHome = useNavigationStore.getState().activeView === 'sessions' && !useSessionStore.getState().activeSessionId;
@@ -395,7 +410,7 @@ export function OrchestrationSessionNav({
   const archivedToastElement = archivedToast && (
     <UndoToast
       key={archivedToast.sessionId}
-      message={describeArchive(archivedToast.sessionName, archivedToast.panes)}
+      message={describeArchive(archivedToast.sessionName, archivedToast.panes, archivedToast.pausedLoops)}
       onUndo={() => void undoArchive()}
       onDismiss={clearArchivedToast}
     />
@@ -434,6 +449,10 @@ export function OrchestrationSessionNav({
     const panesId = `orchestration-session-panes-${placement}-${session.id}`;
     const isOpen = activeView === 'pane-chat' && session.id === selectedSessionId;
     const drag = sessionDragProps(session, placement);
+    // Moving and arriving Sessions say so in place of their activity; an arriving one opens once it has arrived.
+    const moveLabel = session.move && session.move.state !== 'moved' ? moveMarkLabel(session.move) : null;
+    const arriving = session.move?.state === 'arriving';
+    const loopName = loopsBySessionTarget.get(session.id)?.name;
     const rowButton = (
       <button
         type="button"
@@ -441,25 +460,34 @@ export function OrchestrationSessionNav({
         data-sidebar-item
         data-sidebar-key={`session-${placement}-${session.id}`}
         aria-current={isOpen ? 'page' : undefined}
-        aria-label={isLegacy ? label : `Open Session ${session.name}`}
+        aria-label={isLegacy ? label : `Open Session ${session.name}${moveLabel ? ` (${moveLabel})` : ''}`}
+        aria-disabled={arriving || undefined}
+        title={arriving ? `${moveLabel}: it opens here once it has arrived` : undefined}
         // Dragging a row tiles the Session beside another, the same gesture
         // as dragging a tab, or reorders it within its own list. Repository
         // rows carry only text/plain, so the drags never answer each other.
         {...drag.source}
-        onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
+        onClick={event => { if (arriving) return; openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
         onContextMenu={event => handleSessionContextMenu(event, session)}
         onKeyDown={event => handleSessionKeyDown(event, session, placement)}
         className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
       >
-        {session.paused ? (
+        {moveLabel ? (
+          <>
+            <PausedGlyph size="sm" className="flex-shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-[13px] text-text-muted">{label}</span>
+            <span data-testid="session-move-label" className="max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
+          </>
+        ) : session.paused ? (
           <>
             <PausedGlyph size="sm" className="flex-shrink-0" />
             <span className="min-w-0 flex-1 truncate text-[13px] text-text-muted">{label}</span>
           </>
         ) : (
           <>
-            <SessionActivityDot session={session} paneIds={visiblePaneIds} />
+            {loopName !== undefined ? <LoopMark loopName={loopName} /> : <SessionActivityDot session={session} paneIds={visiblePaneIds} />}
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
+            {loopName !== undefined && <LoopLabel loopName={loopName} />}
             <SessionApprovalsCount sessionId={session.id} opensApprovals otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
           </>
         )}
@@ -487,7 +515,7 @@ export function OrchestrationSessionNav({
               {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             </button>
           ) : <span className="ml-1 h-6 w-4 flex-shrink-0" aria-hidden="true" />}
-          {session.paused ? <Tooltip content={<PausedTooltipLines mark={session.paused} />} side="right">{rowButton}</Tooltip> : rowButton}
+          {session.paused && !moveLabel ? <Tooltip content={<PausedTooltipLines mark={session.paused} />} side="right">{rowButton}</Tooltip> : rowButton}
           {/* Same masked hover slot as Pane rows; it covers the activity summary while shown. */}
           <div className={cn(
             'absolute inset-y-0.5 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100',
@@ -542,7 +570,7 @@ export function OrchestrationSessionNav({
         {activeSessions.map(session => {
           const drag = sessionDragProps(session, 'rail');
           return (
-          <Tooltip key={session.id} content={session.paused ? <><p>{session.name}</p><PausedTooltipLines mark={session.paused} /></> : `${session.name} · ${statusLabel(session)}`} side="right">
+          <Tooltip key={session.id} content={session.move && session.move.state !== 'moved' ? `${session.name} · ${moveMarkLabel(session.move)}` : session.paused ? <><p>{session.name}</p><PausedTooltipLines mark={session.paused} /></> : `${session.name} · ${statusLabel(session)}`} side="right">
             <button
               type="button"
               data-testid={sessionTestId(session, 'rail')}
@@ -551,13 +579,14 @@ export function OrchestrationSessionNav({
               title={session.name}
               {...drag.source}
               {...drag.target}
-              onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
+              aria-disabled={session.move?.state === 'arriving' || undefined}
+              onClick={event => { if (session.move?.state === 'arriving') return; openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
               onContextMenu={event => handleSessionContextMenu(event, session)}
               onKeyDown={event => handleSessionKeyDown(event, session, 'rail')}
               className={cn(
                 'flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-interactive',
                 session.id === selectedSessionId ? 'bg-surface-selected text-text-primary' : 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary',
-                session.paused && 'text-text-disabled',
+                (session.paused || session.move) && 'text-text-disabled',
                 // The drop line is drawn outside the item, so it takes no room and moves nothing.
                 drag.indicator && 'relative before:pointer-events-none before:absolute before:inset-x-1 before:h-0.5 before:rounded-full before:bg-interactive before:content-[""]',
                 drag.indicator === 'before' && 'before:-top-[3px]',
@@ -651,13 +680,7 @@ export function OrchestrationSessionNav({
           >
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate">Sessions</span>
-              <span
-                className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center"
-                role={availability === 'loading' ? 'status' : undefined}
-                aria-label={availability === 'loading' ? 'Loading Sessions' : undefined}
-              >
-                {availability === 'loading' && <RefreshCw aria-hidden="true" className="h-3 w-3 animate-spin text-text-muted" />}
-              </span>
+              {availability === 'loading' && <LoadingStatus label="Loading Sessions" />}
             </span>
             <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
               {sectionExpanded ? (
@@ -772,12 +795,14 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
       className="w-48"
     >
       <div ref={menuRef} role="menu" aria-label={`Session actions for ${menu?.sessionName ?? 'Session'}`} onKeyDown={handleMenuKeyDown}>
-        <PopoverButton role="menuitem" onClick={onPin}>
-          <span className="flex items-center gap-2">
-            {menu?.isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-            {menu?.isPinned ? 'Unpin Session' : 'Pin Session'}
-          </span>
-        </PopoverButton>
+        {!menu?.loopOwned && (
+          <PopoverButton role="menuitem" onClick={onPin}>
+            <span className="flex items-center gap-2">
+              {menu?.isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+              {menu?.isPinned ? 'Unpin Session' : 'Pin Session'}
+            </span>
+          </PopoverButton>
+        )}
         <PopoverButton role="menuitem" onClick={() => {
           if (menu) void runPauseAction({ kind: 'session', id: menu.sessionId }, !menu.isPaused);
           onClose();
@@ -846,10 +871,11 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
   </>);
 }
 
-/** "Archived Alpha and its 2 Panes · kept auth-fix open", from what the host reports. */
-function describeArchive(sessionName: string, panes: OrchestrationSessionArchivedPanes): string {
+/** "Archived Alpha and its 2 Panes · paused standup · kept auth-fix open", from what the host reports. */
+function describeArchive(sessionName: string, panes: OrchestrationSessionArchivedPanes, pausedLoops: ReadonlyArray<{ name: string }>): string {
   const count = panes.archivedPaneIds.length;
   const parts = [`Archived ${sessionName}${count === 0 ? '' : count === 1 ? ' and its Pane' : ` and its ${count} Panes`}`];
+  if (pausedLoops.length > 0) parts.push(`paused ${pausedLoops.map(loop => loop.name).join(', ')}`);
   if (panes.keptPanes.length > 0) parts.push(`kept ${panes.keptPanes.map(pane => pane.name).join(', ')} open`);
   if (panes.failedPanes.length > 0) parts.push(`could not archive ${panes.failedPanes.map(pane => pane.name).join(', ')}`);
   return parts.join(' · ');

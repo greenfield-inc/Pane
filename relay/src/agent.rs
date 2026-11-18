@@ -75,7 +75,7 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
     let (rd, mut wr) = tokio::io::split(stream);
     let mut rd = BufReader::new(rd);
     let source = registration_source(peer);
-    match state.charge(Charge::AgentConns(&source), 0, 1) {
+    match state.charge(Charge::AgentConns(&source), 1) {
         Level::Over => {
             let message = "Too many control connections from this address; try again in a minute.";
             tracing::info!(%peer, "control connection refused: too many this minute");
@@ -132,7 +132,7 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
             "full",
             "This relay has no room for new computers; try another relay.",
         ))
-    } else if state.charge(Charge::NewIds(&source), 0, 1) != Level::Ok {
+    } else if state.charge(Charge::NewIds(&source), 1) != Level::Ok {
         Some((
             "over-limit",
             "Too many new computers from this address this hour; try again later.",
@@ -208,7 +208,7 @@ pub async fn run(state: Arc<State>, stream: BoxStream, peer: IpAddr) {
             Ok(Err(ReadError::Invalid)) => break "invalid frame",
             Ok(Ok(v)) => v,
         };
-        if state.charge(Charge::Frames(&id), 0, 1) == Level::Over {
+        if state.charge(Charge::Frames(&id), 1) == Level::Over {
             state.cut(&id, "over-limit", "Too many control frames this minute.");
             continue;
         }

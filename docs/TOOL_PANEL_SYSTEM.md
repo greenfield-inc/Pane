@@ -59,7 +59,7 @@ The tool panel system consists of several key components:
 
 ## Implemented Panel Types
 
-The tool panel system supports 10 panel types (`ToolPanelType` in `shared/types/panels.ts`):
+The tool panel system supports 11 panel types (`ToolPanelType` in `shared/types/panels.ts`):
 
 1. **Terminal** (`terminal`): PTY shells, several per pane. Agent CLIs such as
    Claude Code, Codex and Cursor Agent run in terminal panels
@@ -79,6 +79,8 @@ The tool panel system supports 10 panel types (`ToolPanelType` in `shared/types/
 8. **Browser** (`browser`): embedded browser. Worktrees only.
 9. **Notes** (`notes`): the Pane's notes. Singleton. Experimental: hidden
    until Settings → Advanced → Notes is on.
+10. **Device** (`device`): an iOS simulator or Android emulator's live screen,
+   opened by `device_open`, not the + menu. See [DEVICES.md](DEVICES.md).
 
 ## Panel Capabilities
 
@@ -94,14 +96,14 @@ Each panel type has specific capabilities defined in `PANEL_CAPABILITIES`:
 
 Example: Diff panels are singleton + permanent + worktree-only, consuming `files:changed` and `terminal:command_executed` events to auto-refresh.
 
-### Named custom launch profiles
+### Named custom commands
 
 In a worktree's **Add Tool (+)** menu, choose **Add custom command…** and enter
-an optional **Name** alongside the command. **Save & launch** saves the profile
+an optional **Name** alongside the command. **Save & launch** saves the command
 and opens a terminal tab with that name. Leaving the name blank uses the first
-three words of the command. Saved profiles are shared through app configuration.
-Use the pencil beside a saved profile to rename it; the menu and future tabs use
-the new name. Existing tabs keep their titles. Hover a profile to see its full
+three words of the command. Saved commands are shared through app configuration.
+Use the pencil beside a saved command (**Rename command**) to rename it; the menu and future tabs use
+the new name. Existing tabs keep their titles. Hover a command to see its full
 name and command.
 
 Resume commands retain the original shell quoting and environment assignments when removing a launch prompt. Custom Claude launchers may choose a separate configuration directory; Pane trusts their recorded conversation IDs instead of checking the app configuration for their transcripts.

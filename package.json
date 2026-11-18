@@ -1,6 +1,6 @@
 {
   "name": "Pane",
-  "version": "2.4.230",
+  "version": "2.4.240",
   "private": true,
   "description": "Pane - Terminal-first AI code assistant manager with Windows support",
   "author": {
@@ -100,6 +100,7 @@
     "@agentclientprotocol/claude-agent-acp": "0.100.0",
     "@agentclientprotocol/codex-acp": "2.5.0",
     "@agentclientprotocol/sdk": "2.0.1",
+    "@greenfieldco/agent-farm": "0.2.34",
     "@anthropic-ai/sdk": "^0.60.0",
     "@lydell/node-pty": "1.2.0-beta.3",
     "@modelcontextprotocol/sdk": "^1.12.1",

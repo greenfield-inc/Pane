@@ -96,6 +96,8 @@ export interface SplitLayoutProps {
    * terminals deactivate and their reveal runs the masked activation refresh.
    */
   hidden?: boolean;
+  /** Content for a tab that has no panel component of its own (a Session's Overview); undefined renders the panel. */
+  renderPanelContent?: (panel: ToolPanel) => React.ReactNode | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +129,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   renderAddTool,
   onToggleMaximize,
   hidden = false,
+  renderPanelContent,
 }) => {
   // Inject allotment theme CSS on first render
   React.useEffect(() => { injectTheme(); }, []);
@@ -195,6 +198,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           isMaximized={zoomedGroupId === node.id}
           isHidden={hidden || (zoomedGroupId !== null && zoomedGroupId !== node.id)}
           onToggleMaximize={multiGroup ? onToggleMaximize : undefined}
+          renderPanelContent={renderPanelContent}
         />
       );
     }
@@ -242,7 +246,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
     onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
     showAddTool, alwaysShowClose, keepPermanentTabsInGroups, renderAddTool,
-    onToggleMaximize, hidden,
+    onToggleMaximize, hidden, renderPanelContent,
   ]);
 
   return <>{renderNode(layout.root, true)}</>;

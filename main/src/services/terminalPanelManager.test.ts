@@ -113,7 +113,7 @@ type HandlerAccess = {
 };
 
 type LaunchCommandAccess = {
-  resolveCliLaunchCommand(panelId: string, initialCommand: string, customState: TerminalPanelState, shellType?: string): {
+  resolveCliLaunchCommand(panelId: string, initialCommand: string, customState: TerminalPanelState, shellType?: string, isWSL?: boolean): {
     commandToRun: string;
     customState: TerminalPanelState;
     isCliCommand: boolean;
@@ -164,7 +164,11 @@ function echoStagedWrites(terminal: TerminalUnderTest): void {
 }
 
 // Direct Claude launches get Pane's --settings file (its hooks are tested in claudePrompts); these tests read the rest of the command.
-beforeEach(() => { vi.spyOn(claudePrompts, 'withClaudePromptHooks').mockImplementation((_panelId, command) => command); });
+beforeEach(() => {
+  vi.spyOn(claudePrompts, 'withClaudePromptHooks').mockImplementation((_panelId, command) => command);
+  // Launch resolution checks Claude transcripts on disk; keep the developer's ~/.claude out of it.
+  vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(false);
+});
 
 function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnderTest {
   return {
@@ -1687,6 +1691,53 @@ describe('TerminalPanelManager hidden output delivery', () => {
     } finally { readable.mockRestore(); lookup.mockRestore(); }
   });
 
+  it('reopens an unused plain Claude tab with the same ID instead of resuming a nonexistent transcript (#1380)', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const id = '00000000-0000-4000-8000-000000001380';
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
+    const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue(undefined);
+    try {
+      const result = manager.resolveCliLaunchCommand(id, 'claude', {
+        agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
+      });
+      expect(lookup).toHaveBeenCalledWith(id);
+      expect(result.commandToRun).toBe(`claude --session-id ${id}`);
+      expect(result.customState.agentSessionId).toBe(id);
+    } finally { readable.mockRestore(); lookup.mockRestore(); }
+  });
+
+  it('resumes a used plain Claude tab from its transcript', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const id = '00000000-0000-4000-8000-000000001381';
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(true);
+    const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue('/claude/projects/old/transcript.jsonl');
+    try {
+      const result = manager.resolveCliLaunchCommand(id, 'claude --model test', {
+        agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
+      });
+      expect(result.commandToRun).toBe('claude --model test --resume "/claude/projects/old/transcript.jsonl"');
+    } finally { readable.mockRestore(); lookup.mockRestore(); }
+  });
+
+  it.each([
+    ['WSL', 'claude', true, true],
+    ['unreadable transcripts', 'claude', false, false],
+    // Pane looks in its own config dir; this Claude keeps its transcripts elsewhere.
+    ['a command that sets its own CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIR=/elsewhere claude', false, true],
+  ])('trusts the recorded Claude conversation when Pane cannot check transcripts (%s)', (_label, command, isWSL, readableTranscripts) => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const id = '00000000-0000-4000-8000-000000001382';
+    const readable = vi.spyOn(claudeTranscripts, 'canReadClaudeTranscripts').mockReturnValue(readableTranscripts);
+    const lookup = vi.spyOn(claudeTranscripts, 'findClaudeSessionTranscript').mockReturnValue(undefined);
+    try {
+      const result = manager.resolveCliLaunchCommand(id, command, {
+        agentType: 'claude', agentSessionId: id, hasClaudeSessionId: true,
+      }, undefined, isWSL);
+      expect(lookup).not.toHaveBeenCalled();
+      expect(result.commandToRun).toBe(`${command} --resume "${id}"`);
+    } finally { readable.mockRestore(); lookup.mockRestore(); }
+  });
+
   it('does not mistake a Codex option value for a subcommand on resume', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const command = 'codex -c model_instructions_file="/tmp/review.md"';
@@ -2950,6 +3001,34 @@ describe('TerminalPanelManager Agent Farm resume', () => {
     expect(terminal.capturedAgentSessionId).toBe(LAUNCH_ID);
     expect(panel?.state.customState).toMatchObject({ agentSessionId: LAUNCH_ID });
     disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  // D-403: Agent Farm since #220 prints AGENT_FARM_SESSION_ID; older builds print PANE_AGENT_SESSION_ID.
+  it.each([
+    ['old name only', `PANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\n`],
+    ['new name only', `AGENT_FARM_SESSION_ID=${LAUNCH_ID}\r\n`],
+    ['new line, then an old one', `AGENT_FARM_SESSION_ID=${LAUNCH_ID}\r\nPANE_AGENT_SESSION_ID=other-launch\r\n`],
+    ['old line, then a new one', `PANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\nAGENT_FARM_SESSION_ID=other-launch\r\n`],
+  ])('captures an Agent Farm launch ID from the %s', (_case, output) => {
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const terminal = createTerminal();
+    terminal.agentType = 'claude';
+    mockFarmPanel({ initialCommand: FARM, agentType: 'claude' });
+    manager.captureAgentSessionId(terminal, output);
+    expect(terminal.capturedAgentSessionId).toBe(LAUNCH_ID);
+    expect(panelManager.getPanel('panel-1')?.state.customState).toMatchObject({ agentSessionId: LAUNCH_ID });
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it.each([
+    ['old name only', `PANE_AGENT_SESSION_ID=old-launch\r\n...\r\nPANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\n`],
+    ['new name only', `AGENT_FARM_SESSION_ID=old-launch\r\n...\r\nAGENT_FARM_SESSION_ID=${LAUNCH_ID}\r\n`],
+    ['both names, newest last', `PANE_AGENT_SESSION_ID=old-launch\r\n...\r\nAGENT_FARM_SESSION_ID=${LAUNCH_ID}\r\n`],
+  ])('recovers the last launch ID from a saved buffer with the %s', (_case, scrollback) => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    vi.spyOn(databaseService, 'getPanelBuffers').mockReturnValue({ scrollback: `$ ${FARM}\r\n${scrollback}working`, serialized: '', alternate: '' });
+    const result = manager.resolveCliLaunchCommand('panel-1', FARM, { initialCommand: FARM, agentType: 'claude' });
+    expect(result.commandToRun).toBe(`${FARM} --resume "${LAUNCH_ID}"`);
   });
 
   it('records a SessionStart report for the running launch, and a later launch ID line does not undo it (D-269)', async () => {

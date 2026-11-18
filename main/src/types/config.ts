@@ -1,3 +1,5 @@
+import type { DeviceSettings } from '../../../shared/types/devices';
+import type { MachineHealthSettings } from '../../../shared/types/machineHealth';
 import type { PaneSecretMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
@@ -57,8 +59,12 @@ export interface AnalyticsIdentity {
 type HtmlFileOpenMode = 'preview' | 'source';
 
 export interface AppConfig {
+  /** Profiles (docs/PROFILES.md): the bundled profiles that are on, by name. Absent: greenfield only. */
+  profiles?: { enabled?: string[] };
   // Chat tabs (Claude and Codex over ACP, no terminal). On for a fresh install; see ConfigManager.
   chatTabsEnabled?: boolean;
+  /** Settings > Devices (docs/DEVICES.md). */
+  devices?: Partial<DeviceSettings>;
   /** Experimental: Autopilot, one always-running agent above every Session (needs chat tabs). */
   autopilotEnabled?: boolean;
   verbose?: boolean;
@@ -104,6 +110,8 @@ export interface AppConfig {
   backgroundActivity?: BackgroundActivityProfile;
   // Pause: selecting a paused Pane or Session chat resumes it (default off)
   resumePausedOnOpen?: boolean;
+  // Machine health thresholds and switches (defaults in MACHINE_HEALTH_DEFAULTS, shared/types/machineHealth.ts)
+  machineHealth?: MachineHealthSettings;
   // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
@@ -273,6 +281,7 @@ export interface UpdateConfigRequest {
   keepAwakeOnBattery?: boolean;
   backgroundActivity?: BackgroundActivityProfile;
   resumePausedOnOpen?: boolean;
+  machineHealth?: MachineHealthSettings;
   autoPauseEnabled?: boolean;
   autoPauseAfterHours?: number;
   archiveRetentionDays?: number;

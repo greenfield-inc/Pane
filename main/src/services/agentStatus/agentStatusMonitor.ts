@@ -8,7 +8,8 @@
  * a short poll, so debounce/grace windows resolve purely from timestamps, which
  * keeps the machine fully unit-testable.
  *
- * Arbitration precedence: a visible blocker wins immediately; otherwise recent
+ * Arbitration precedence: a state the program reported itself (OSC 7501)
+ * stands as is; then a visible blocker wins immediately; otherwise recent
  * activity (or a working detection) means working; otherwise idle. PTY activity
  * stays authoritative for a measured settle window, and a single trailing chunk
  * cannot wake an already-idle panel unless working chrome is visible.
@@ -101,7 +102,9 @@ export class AgentStatusMonitor {
       tracker.published !== 'idle' || tracker.activityChunksInBurst >= 2;
 
     let candidate: AgentState;
-    if (detection.state === 'blocked') {
+    if (detection.reported) {
+      candidate = detection.state;
+    } else if (detection.state === 'blocked') {
       candidate = 'blocked';
     } else if (detection.visibleWorking || (recentlyActive && activityCanPublishWorking)) {
       candidate = 'working';
@@ -110,7 +113,7 @@ export class AgentStatusMonitor {
     }
 
     // Startup grace: a freshly launched agent shouldn't flash idle before it boots.
-    if (candidate === 'idle' && now - tracker.startedAt < startupGraceMs) {
+    if (candidate === 'idle' && !detection.reported && now - tracker.startedAt < startupGraceMs) {
       candidate = tracker.published ?? 'working';
     }
 

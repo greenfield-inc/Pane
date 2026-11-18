@@ -1,4 +1,5 @@
 /// <reference types="electron" />
+import type { DeviceCapture, DeviceControls, DeviceInput, DeviceLogPage, DeviceRecording, DeviceSettings, DeviceSettingsView } from '../../../shared/types/devices';
 import type { PreferencesApi } from '../../../shared/types/preferences';
 import type { VoiceKeyCheck } from '../../../shared/voice/voiceKeys';
 // Type definitions for Electron preload API
@@ -28,7 +29,7 @@ import type {
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
-import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
+import type { MachineCommand, MachineConnectionsEvent, MachineLatency, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../../shared/types/glasses';
 import type {
   PanePermissionRequest,
@@ -67,6 +68,7 @@ import type {
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../../../shared/types/loop';
+import type { ProfileDetailView, ProfileLaunchInput, OwnAgentFarmView, ProfileLibraryView, ProfileRun } from '../../../shared/types/profiles';
 import type { SetupExportResult, SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../../../shared/types/setupTransfer';
 import type { MissionControlAgentPanel, MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../shared/types/missionControl';
 import type { CreateSessionRequest } from './session';
@@ -125,6 +127,24 @@ interface IPCResponse<T = any> {
 
 interface ElectronAPI {
   /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
+  /** The device tab (docs/DEVICES.md). */
+  devices: {
+    input: (panelId: string, input: DeviceInput) => Promise<IPCResponse<boolean>>;
+    frame: (panelId: string) => Promise<IPCResponse<string>>;
+    frameRate: (panelId: string) => Promise<IPCResponse<number | null>>;
+    controls: (panelId: string) => Promise<IPCResponse<DeviceControls>>;
+    capture: (panelId: string, image?: string) => Promise<IPCResponse<DeviceCapture>>;
+    stage: (panelId: string, agentPanelId: string, text: string) => Promise<IPCResponse<boolean>>;
+    record: (panelId: string, action: 'start' | 'stop') => Promise<IPCResponse<DeviceRecording | null>>;
+    recording: (panelId: string) => Promise<IPCResponse<number | null>>;
+    logs: (panelId: string, since: number) => Promise<IPCResponse<DeviceLogPage>>;
+    driver: (panelId: string, who: 'person' | 'agent') => Promise<IPCResponse<boolean>>;
+    visible: (panelId: string, clientId: string, visible: boolean) => Promise<IPCResponse<boolean>>;
+    takeOver: (panelId: string) => Promise<IPCResponse<boolean>>;
+    power: (panelId: string, action: 'boot' | 'restart' | 'shutdown') => Promise<IPCResponse<boolean>>;
+    settings: () => Promise<IPCResponse<DeviceSettingsView>>;
+    updateSettings: (patch: { enabled?: boolean; iosMachineId?: string | null; maxBooted?: number }) => Promise<IPCResponse<DeviceSettings>>;
+  };
   paneSecrets: {
     list: () => Promise<IPCResponse<{ secrets: PaneSecretSummary[]; storage: PaneSecretStorage }>>;
     /** Data is true when it replaced a saved value. */
@@ -188,6 +208,8 @@ interface ElectronAPI {
 
   // System utilities
   openExternal: (url: string) => Promise<IPCResponse>;
+  /** Opens a local `.html` or `.htm` page, given as a `file:` URL, in the default browser. */
+  openLocalPage: (fileUrl: string) => Promise<IPCResponse>;
 
   feedback: {
     submit: (request: import('../../../shared/types/feedback').SubmitFeedbackRequest) => Promise<IPCResponse<
@@ -312,6 +334,16 @@ interface ElectronAPI {
     setEnabled: (id: string, enabled: boolean) => Promise<IPCResponse<Loop>>;
     runNow: (id: string) => Promise<IPCResponse<Loop>>;
     preview: (cron: string) => Promise<IPCResponse<LoopSchedulePreview>>;
+  };
+  profiles: {
+    list: () => Promise<IPCResponse<ProfileLibraryView>>;
+    ownAgentFarm: () => Promise<IPCResponse<OwnAgentFarmView | null>>;
+    get: (name: string) => Promise<IPCResponse<ProfileDetailView>>;
+    setEnabled: (name: string, enabled: boolean) => Promise<IPCResponse<ProfileLibraryView>>;
+    launch: (input: ProfileLaunchInput) => Promise<IPCResponse<ProfileRun>>;
+    runs: () => Promise<IPCResponse<ProfileRun[]>>;
+    setOutcome: (runId: string, outcome: string) => Promise<IPCResponse<ProfileRun>>;
+    stop: (runId: string) => Promise<IPCResponse<ProfileRun>>;
   };
   // Mission Control — every agent pane across all sessions
   missionControl: {
@@ -587,6 +619,7 @@ interface ElectronAPI {
     onSessionUpdated: (callback: (session: Session) => void) => () => void;
     /** Loops or their runs changed; read them again with `loops.list`. */
     onLoopsChanged: (callback: () => void) => () => void;
+    onProfilesChanged: (callback: () => void) => () => void;
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;
@@ -822,6 +855,8 @@ interface ElectronAPI {
     run: (machineId: string, command: MachineCommand) => Promise<MachineResult>;
     /** Reconnects an offline saved machine now. */
     retry: (machineId: string) => Promise<void>;
+    /** A saved machine's round trip over the route its connection is on; `ms` null when it is offline or does not answer. */
+    latency: (machineId: string) => Promise<MachineLatency>;
     /** Every machine's list, Notify and permission events, resyncs and online/offline changes. */
     onEvent: (callback: (event: MachineConnectionsEvent) => void) => () => void;
   };

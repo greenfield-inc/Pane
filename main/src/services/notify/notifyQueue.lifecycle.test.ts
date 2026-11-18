@@ -333,6 +333,20 @@ describe('NotifyQueue with its store', () => {
     expect(typed).toEqual([['w1', 'closed: Q-39 (by you)']]);
   });
 
+  it('closes waiting for the same tab reach it as one line, still one line when the reason has a newline', async () => {
+    const queue = queueWith();
+    tabState = 'busy';
+    for (const n of [39, 40, 41]) {
+      queue.addWorkerQuestion({ id: `in-${n}`, question: `Q-${n}: run?`, source: worker, at: Date.now() });
+      queue.run({ type: 'close', id: `in-${n}`, reason: 'loop run\nreviewed' });
+    }
+    await vi.advanceTimersByTimeAsync(1);
+    tabState = 'delivered';
+    queue.flushTabMessages();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(typed).toEqual([['w1', 'closed: Q-39, Q-40, Q-41 (by you): loop run reviewed']]);
+  });
+
   it('J27: Answered holds 24 hours, while the store keeps the record', async () => {
     const queue = queueWith();
     queue.addWorkerQuestion({ id: 'in-1', question: 'Q-39: run?', source: worker, at: Date.now() });

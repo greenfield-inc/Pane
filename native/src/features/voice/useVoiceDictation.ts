@@ -313,7 +313,7 @@ async function invokeWhenConnected<T>(client: RemoteDaemonClient, channel: strin
   const giveUp = new AbortController();
   const timer = setTimeout(() => giveUp.abort(), HOST_WAIT_MS);
   try {
-    if (!(await connected(client, giveUp.signal))) return null;
+    await client.whenConnected(HOST_WAIT_MS);
     return await Promise.race([invokeChannel<T>(client, channel, args), aborted(giveUp.signal).then(() => null)]);
   } catch (cause) {
     console.warn(`[voice] ${channel} failed`, cause);
@@ -321,25 +321,6 @@ async function invokeWhenConnected<T>(client: RemoteDaemonClient, channel: strin
   } finally {
     clearTimeout(timer);
   }
-}
-
-/** Resolves true once the client is connected, or false if `signal` aborts first. */
-function connected(client: RemoteDaemonClient, signal: AbortSignal): Promise<boolean> {
-  if (client.getState().status === 'connected') return Promise.resolve(true);
-  if (signal.aborted) return Promise.resolve(false);
-  return new Promise(resolve => {
-    const finish = (value: boolean) => {
-      unsubscribe();
-      signal.removeEventListener('abort', onAbort);
-      resolve(value);
-    };
-    const onAbort = () => finish(false);
-    signal.addEventListener('abort', onAbort, { once: true });
-    // onStatus reports the current state at once; it was just checked as not connected.
-    const unsubscribe = client.onStatus(state => {
-      if (state.status === 'connected') finish(true);
-    });
-  });
 }
 
 function aborted(signal: AbortSignal): Promise<void> {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals } from './approvalCard';
+import { bridgedFrom, canReplyAlone, canSend, cardChip, cardTabs, dockApprovals, dockKey, dotTone, firstToOpen, latestReplied, markedQuestions, readyCount, replyLine, sessionApprovals } from './approvalCard';
 
 const q20: NotifyItem = {
   id: 'q20',
@@ -71,6 +71,17 @@ describe('the approval card', () => {
     expect(bridgedFrom(own, 'other-chat')).toBe(false);
   });
 
+  it('Dismiss leaves a card out of the chat\'s dock until the item changes (Q-389)', () => {
+    const a = { ...q20, id: 'a' };
+    const b = { ...q20, id: 'b' };
+    const dismissed = { a: dockKey(a) };
+    expect(dockApprovals([a, b], 'chat-1', dismissed).map(item => item.id)).toEqual(['b']);
+    // A new version, a reply or a ready-again brings it back.
+    expect(dockApprovals([{ ...a, version: 2 }, b], 'chat-1', dismissed).map(item => item.id)).toEqual(['a', 'b']);
+    expect(dockApprovals([{ ...a, readyAgain: 9 }, b], 'chat-1', dismissed).map(item => item.id)).toEqual(['a', 'b']);
+    expect(dockApprovals([{ ...a, reply: { id: 'r9', text: 'x', at: 1, state: 'unread' as const } }, b], 'chat-1', dismissed).map(item => item.id)).toEqual(['a', 'b']);
+  });
+
   it('P7: the status line follows the reply sent last in the Session, until it is dismissed', () => {
     const reading = { ...q20, id: 'b', reply: { id: 'r1', text: 'x', at: 10, state: 'reading' as const } };
     const taken = { ...q20, id: 'c', state: 'answered' as const, reply: { id: 'r2', text: 'y', at: 20, state: 'answer' as const } };
@@ -111,5 +122,14 @@ describe('the approval card', () => {
     expect(firstToOpen(list)?.id).toBe('ready');
     expect(readyCount(list)).toBe(1);
     expect(firstToOpen([older])?.id).toBe('older');
+  });
+
+  it('a Session whose approvals were dismissed has none open, so no count or badge', () => {
+    const dismissed = [{ ...q20, dismissedAt: 2_000 }, { ...q20, id: 'q21', dismissedAt: 2_500 }];
+    expect(sessionApprovals(dismissed, 's1')).toEqual([]);
+    expect(readyCount(sessionApprovals(dismissed, 's1'))).toBe(0);
+    expect(firstToOpen(sessionApprovals(dismissed, 's1'))).toBeUndefined();
+    // A dismissed one beside a waiting one: only the waiting one counts.
+    expect(sessionApprovals([...dismissed, { ...q20, id: 'open' }], 's1').map(item => item.id)).toEqual(['open']);
   });
 });

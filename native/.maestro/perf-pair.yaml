@@ -1,0 +1,52 @@
+# Pairs a fresh install with the two perf hosts (scripts/perf/README.md) through their
+# pane-remote:// links: B_CODE first, then A_CODE, so host A is the machine the phone is on.
+appId: com.dcouple.pane.mobile
+env:
+  METRO_PORT: ${METRO_PORT || "8137"}
+---
+- runFlow: subflows/launch-dev-client.yaml
+# The welcome screen opens on the camera and asks for it; pairing goes through the link instead.
+- extendedWaitUntil:
+    visible: "Don.t Allow"
+    timeout: 180000
+    optional: true
+- runFlow:
+    when:
+      visible: "Don.t Allow"
+    commands:
+      - tapOn: "Don.t Allow"
+- extendedWaitUntil:
+    visible: "Paste a connection code"
+    timeout: 30000
+- openLink: ${B_CODE}
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible:
+      id: connect-submit
+    timeout: 30000
+- tapOn:
+    id: connect-submit
+- extendedWaitUntil:
+    visible:
+      id: panes-list
+    timeout: 60000
+- openLink: ${A_CODE}
+- runFlow:
+    when:
+      visible: "Open"
+    commands:
+      - tapOn: "Open"
+- extendedWaitUntil:
+    visible:
+      id: connect-submit
+    timeout: 30000
+- tapOn:
+    id: connect-submit
+- extendedWaitUntil:
+    visible:
+      id: panes-list
+    timeout: 60000

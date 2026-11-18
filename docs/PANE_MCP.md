@@ -55,16 +55,19 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 
 | Toolset | Tools |
 |---|---|
-| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `panels_open` (show a page or file beside the agent), `repos_list`, `repos_add`, `repos_rename`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_adopt`, `panes_rename`, `panes_archive`, `panes_restore`, `sessions_create`, `sessions_associate`, `sessions_pin`, `links_create`, `docs_search`, `docs_read`, `doctor`, `notify` (ask the person and wait for the answer), `secrets_request` (ask the person for a secret, saved as a [Pane secret](PANE_SECRETS.md); the value never comes back), `theme_read` and `theme_set` (restyle Pane itself with a [Custom theme](APPEARANCE.md#custom-theme), only when the person asks), the four `workspace` tools, and the seven loop tools (`loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete`) |
+| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `panels_open` (show a page or file beside the agent), `repos_list`, `repos_add`, `repos_rename`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_adopt`, `panes_rename`, `panes_archive`, `panes_restore`, `sessions_create`, `sessions_associate`, `sessions_pin`, `links_create`, `docs_search`, `docs_read`, `doctor`, `notify` (ask the person and wait for the answer), `secrets_request` (ask the person for a secret, saved as a [Pane secret](PANE_SECRETS.md); the value never comes back), `theme_read` and `theme_set` (restyle Pane itself with a [Custom theme](APPEARANCE.md#custom-theme), only when the person asks), the six device tools (`device_list`, `device_open`, `device_screenshot`, `device_act`, `device_run`, `device_close`; see [Devices](DEVICES.md)), the four `workspace` tools, the seven loop tools (`loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete`), and the four profile tools (`profiles_list`, `profiles_show`, `profiles_launch`, `profiles_runs`) |
 | `agents` | the three agent tasks, `workspace_state`, `watch` |
 | `panes` | create, adopt, list, archive, restore, pin, unpin, rename, focus, pause, resume, cost, run and stop the run script, move to a folder, `folders_list`, `folders_create` |
 | `panels` | create, open, list, output, screen, input, submit, submit-composer, wait, pause, resume, last-message, close |
 | `workspace` | `workspace_list`, `workspace_read`, `workspace_write`, `workspace_exec`: find your other machines, move files to and from them, and run commands there (see [Workspaces](RUNPANE_WORKSPACES.md)) |
 | `git` | status, commit, push, pull, fetch, rebase onto main, squash-rebase onto main, stash, stash-pop, soft reset (`panes_*`) |
 | `sessions` | the `sessions_*` tools (including `sessions_pause` and `sessions_resume`) and the three named-lock tools (`lock_acquire`, `lock_release`, `lock_list`) |
+| `profiles` | `profiles_list`, `profiles_show`, `profiles_launch`, `profiles_runs`: list, show and launch [profiles](PROFILES.md), and follow their runs |
 | `loops` | `loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete` (see [Loops](LOOPS.md)) |
 | `autopilot` | `autopilot_status`, `autopilot_waiting`, `autopilot_stack`, `autopilot_stack_push`, `autopilot_answer`, `autopilot_close`, `autopilot_rewrite`: Autopilot's (experimental) reads, its stack, and its actions on waiting items. `autopilot_stack_push` takes one `tab` per call (the CLI's `--tab` repeats). Only Autopilot's panel may act (`AUTOPILOT_ONLY`), and a permission prompt, or an answer or rewrite of a secret card, is refused with `AUTOPILOT_CANNOT_ANSWER` |
 | `repos` | the repository tools, including `repos_get` and `repos_update` (a repo's Project Settings: build, run and archive scripts, worktree folder) |
+| `devices` | the six device tools plus `device_usage` and `device_free`, which report and free what simulators use on this machine ([Devices](DEVICES.md)) |
+| `machine` | `machine_health` (disk and memory levels, the Panes using the most memory, leak warnings, and what Pane can free by tier) and `machine_cleanup` (lists one kind of tier 1 or 2 item, and deletes them with `yes: true`; tier 3 is refused with how to free it) |
 | `secrets` | `secrets_list`, `secrets_delete`. No tool sets or reads a value: agents use secrets through `runpane secrets exec` ([Pane secrets](PANE_SECRETS.md)) |
 | `docs`, `links`, `admin` | documentation, deep-link, and diagnostic tools |
 | `plugin` | `core` without the four `workspace` tools: what the [Claude plugin](#claude-plugin) serves |
@@ -98,7 +101,7 @@ The server tells Pane which agent is asking (Claude, Codex, Cursor, or the clien
 
 `docs_search` searches Pane's docs, `runpane` help, per-command context, and the Pane Chat skills installed in the Pane data directory. It returns short excerpts with paths. `docs_read` returns one path in full. Both work offline, and the same docs are listed as `runpane-docs:` MCP resources.
 
-`links_create` builds `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, or `pane://open?session=<id>`. Pane registers the `pane://` scheme on macOS, Windows, and Linux. Opening a link (from a browser, a terminal, or `links_open`) raises Pane and selects what it names. It never changes Pane state, and a link with any unexpected part is rejected.
+`links_create` builds `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, or `pane://open?session=<id>`. Pane registers the `pane://` scheme on macOS, Windows, and Linux. Opening a link (from a browser, a terminal, or `links_open`) raises Pane and selects what it names (a Session opens on its Overview tab). It never changes Pane state, and a link with any unexpected part is rejected.
 
 ## Registering by hand
 
@@ -201,7 +204,7 @@ A few flags are left out. `--json` is always passed. `--follow` and `--until-eve
 
 ## Confirmation
 
-Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `secrets_request`, `theme_set`, `report`, and the `sessions_*` and lock tools have no `yes`. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
+Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `secrets_request`, `theme_set`, `report`, and the `sessions_*` and lock tools have no `yes`. `machine_cleanup` without `yes` is a dry run: it lists what it would delete and changes nothing. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
 
 ## Agent guidance
 

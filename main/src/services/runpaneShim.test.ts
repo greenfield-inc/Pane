@@ -177,8 +177,8 @@ describe('WSL terminals', () => {
   it.skipIf(process.platform === 'win32')('keeps Pane runpane first after the login files edit PATH', () => {
     // Paths are already POSIX here, so wslpath -u returns its argument.
     const output = launchWslTerminal('#!/bin/sh\nprintf %s "$2"\n',
-      'echo "RESOLVED=$(command -v runpane) BIN=$PANE_RUNPANE_BIN PROFILE=$USER_PROFILE_RAN"; runpane probe; exit\n');
-    expect(output).toContain(`RESOLVED=${appDirectory}/bin/runpane BIN=${appDirectory}/bin/runpane PROFILE=yes`);
+      'echo "RESOLVED=$(command -v runpane) BIN=$PANE_RUNPANE_BIN HOOK=$AGENT_FARM_SESSION_HOOK PROFILE=$USER_PROFILE_RAN"; runpane probe; exit\n');
+    expect(output).toContain(`RESOLVED=${appDirectory}/bin/runpane BIN=${appDirectory}/bin/runpane HOOK=${appDirectory}/bin/runpane PROFILE=yes`);
     expect(output).toContain(`pane-runpane ${appDirectory} probe`);
   });
 
@@ -371,6 +371,8 @@ describe('withRunpaneOnPath', () => {
     const launch = withRunpaneOnPath({ name: 'sh', args: ['-i'] }, env, state, 'darwin');
     expect(launch.env.PATH).toBe('/pane/bin:/usr/bin:/bin');
     expect(launch.env.PANE_RUNPANE_BIN).toBe('/pane/bin/runpane');
+    // Agent Farm's SessionStart hook runs this executable with `session-start` (D-403).
+    expect(launch.env.AGENT_FARM_SESSION_HOOK).toBe('/pane/bin/runpane');
     expect(launch.args).toEqual(['-i']);
   });
 
@@ -390,7 +392,7 @@ describe('withRunpaneOnPath', () => {
 
   it('only prepends PATH on Windows and for non-interactive commands', () => {
     const win = withRunpaneOnPath({ name: 'bash', args: ['-i'] }, { PATH: 'C:\\Windows' }, { ...state, binDir: 'C:\\pane\\bin' }, 'win32');
-    expect(win).toEqual({ args: ['-i'], env: { PATH: 'C:\\pane\\bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane' } });
+    expect(win).toEqual({ args: ['-i'], env: { PATH: 'C:\\pane\\bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane', AGENT_FARM_SESSION_HOOK: '/pane/bin/runpane' } });
     expect(withRunpaneBinOnPath({ PATH: '/usr/bin' }, state, 'linux')).toEqual({ PATH: '/pane/bin:/usr/bin', PANE_RUNPANE_BIN: '/pane/bin/runpane' });
   });
 });

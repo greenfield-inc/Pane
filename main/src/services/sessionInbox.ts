@@ -1,6 +1,7 @@
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { createHash } from 'crypto';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import { agentReportOptionFields } from './workspaceJournalSchema';
 import type { WorkspaceJournal } from './workspaceJournal';
 import type { ApprovalStore } from './approvals/approvalStore';
 import type {
@@ -47,6 +48,7 @@ const reportSchema = boundary.object({
   summaryTruncated: boundary.optional(boundary.literal(true)),
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
+  ...agentReportOptionFields,
   reportedAt: boundary.string,
 });
 const itemSchema = boundary.object({

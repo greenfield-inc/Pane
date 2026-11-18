@@ -12,6 +12,7 @@ import type {
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
+import type { OwnAgentFarmView, ProfileLibraryView } from '../shared/types/profiles';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
@@ -57,6 +58,11 @@ export type ElectronApiMockOptions = {
   /** The host runs an older Pane with no Pane order commands: they fail as the remote client says. */
   paneOrderUnsupported?: boolean;
   initialLoops?: Loop[];
+  /** profiles:list answer (the Profiles page); profiles:get reads each file's text from profileYaml. */
+  profileLibrary?: ProfileLibraryView;
+  /** profiles:own-agent-farm answer ("Your Agent Farm"); absent: no agent-farm installed. */
+  ownAgentFarm?: OwnAgentFarmView;
+  profileYaml?: Record<string, string>;
   /** remote-daemon:list-tailnet-machines answer. */
   tailnetMachines?: TailnetMachineList;
   /** Remote connections end in `error` with this message instead of connecting. */
@@ -131,12 +137,16 @@ export type ElectronApiMockOptions = {
   hostConnectedClients?: RemoteDaemonConnectedClient[];
   /** setup:choose-import fails with this PaneError text instead of previewing. */
   setupImportError?: string;
+  /** Each chat tab's conversation, by panel id (plain text turns). Absent: no messages. */
+  chatMessages?: Record<string, Array<{ id: string; role: 'user' | 'assistant'; text: string }>>;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
   notifySnapshot?: NotifySnapshot;
   /** window.electronAPI.paneSecrets: the saved secrets and this host's store. Absent: none saved, in the keychain. */
   paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage };
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
+  /** machines:latency answers by machine, in ms, over the route its machine state names; `pending` never answers. Absent: null (no answer). */
+  machineLatency?: Record<string, number | null | 'pending'>;
   /** machines:run answers by machine, then command type. Absent: `{ success: true }`. */
   machineRunAnswers?: Record<string, Record<string, JsonValue>>;
   /** Phone access (QR pairing). Absent: off; turning it on reaches `ready` at once with 10-minute codes. */
@@ -351,6 +361,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     const mockArchivedSessions: JsonObject[] = [];
     let mockLoops = clone(mockOptions.initialLoops ?? []);
+    const mockProfiles: ProfileLibraryView = clone(mockOptions.profileLibrary ?? { profiles: [] });
     /** A plausible loops:preview answer for the form's preset shapes. */
     const previewLoopCron = (cron: string): LoopSchedulePreview => {
       const fields = cron.trim().split(/\s+/);
@@ -605,6 +616,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onPaneFocusRequested') {
           return (callback: MockEventCallback) => subscribe('pane:focus-requested', callback);
         }
+        if (prop === 'onPaneOpenLink') {
+          return (callback: MockEventCallback) => subscribe('pane:open-link', callback);
+        }
         if (prop === 'onRemoteDaemonResyncRequested') {
           return (callback: () => void) => subscribe('remote-daemon:resync-required', callback);
         }
@@ -634,6 +648,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
         if (prop === 'onSessionCreated') {
           return (callback: MockEventCallback) => subscribe('session:created', callback);
+        }
+        if (prop === 'onProfilesChanged') {
+          return (callback: MockEventCallback) => subscribe('profiles:changed', callback);
         }
         if (prop === 'onLoopsChanged') {
           return (callback: MockEventCallback) => subscribe('loops:changed', callback);
@@ -759,6 +776,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       ],
     };
 
+    const uploads = new Map<string, { fileName: string; received: number }>();
     const invoke = (channel: string, ...args: unknown[]) => {
       trackCall(channel, args);
       if (channel === 'terminal:ack') terminalAckedBytes += Number(args[1]);
@@ -774,6 +792,29 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }
       if (channel === 'terminal:set-preferred-shell') {
         configState.preferredShell = String(args[0]);
+        return Promise.resolve(undefined);
+      }
+      // The host's chunked upload (terminal and chat files): bytes are counted, and a commit lands the file under its name.
+      if (channel === 'terminal:upload-start') {
+        // SAFETY: the shared upload loop sends an UploadStart object.
+        const start = args[0] as { uploadId: string; fileName: string; size: number };
+        const upload = uploads.get(start.uploadId) ?? { fileName: start.fileName, received: 0 };
+        uploads.set(start.uploadId, upload);
+        return Promise.resolve({ receivedBytes: upload.received });
+      }
+      if (channel === 'terminal:upload-chunk') {
+        const upload = uploads.get(String(args[0]));
+        if (!upload) return Promise.reject(new Error('Upload not found. Start it again.'));
+        if (Number(args[1]) === upload.received) upload.received += atob(String(args[2])).length;
+        return Promise.resolve({ receivedBytes: upload.received });
+      }
+      if (channel === 'terminal:upload-commit') {
+        const upload = uploads.get(String(args[0]));
+        if (!upload) return Promise.reject(new Error('Upload not found. Start it again.'));
+        return Promise.resolve({ filePath: `/tmp/pane-uploads/${upload.fileName}` });
+      }
+      if (channel === 'terminal:upload-cancel') {
+        uploads.delete(String(args[0]));
         return Promise.resolve(undefined);
       }
       if (channel === 'app:show-context-menu') {
@@ -916,6 +957,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       reads: {},
     };
     const machineRuns: Array<{ machineId: string; command: MachineCommand }> = [];
+    const machineLatencyCalls: string[] = [];
     const machineReads: Array<{ machineId: string; channel: string }> = [];
     const machineListeners = new Set<(event: MachineConnectionsEvent) => void>();
     const machinesApi = {
@@ -931,6 +973,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return Promise.resolve({ machineId, data: clone(answer ?? { success: true }) });
       },
       retry: () => Promise.resolve(),
+      latency: (machineId: string) => {
+        machineLatencyCalls.push(machineId);
+        const answer = mockOptions.machineLatency?.[machineId] ?? null;
+        // Measured over the route main's connection is on, as main answers.
+        const routeId = machineConnections.machines.find((machine) => machine.id === machineId)?.routeId ?? null;
+        return answer === 'pending' ? new Promise<{ ms: number | null; routeId: string | null }>(() => undefined) : Promise.resolve({ ms: answer, routeId });
+      },
       onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
         machineListeners.add(callback);
         return () => { machineListeners.delete(callback); };
@@ -978,9 +1027,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     } : undefined;
     // window.electronAPI.chatTab, served when a fixture panel is a chat tab: an idle Claude chat with no messages.
     const chatTabApi = mockPanels.some((panel) => panel.type === 'chat') ? (() => {
+      const messagesOf = (panelId: string) => (mockOptions.chatMessages?.[panelId] ?? [])
+        .map(({ id, role, text }) => ({ id, role, parts: [{ type: 'text', text }] }));
       const view = (panelId: string) => ({
-        panelId, agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [], messageCount: 0,
-        transcript: { panelId, generation: 1, revision: 0, start: 0, messages: [] },
+        panelId, agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, controls: [], commands: [], permissions: [], questions: [], queue: [], messageCount: messagesOf(panelId).length,
+        transcript: { panelId, generation: 1, revision: 0, start: 0, messages: messagesOf(panelId) },
       });
       const done = () => Promise.resolve();
       return {
@@ -1072,6 +1123,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return Promise.resolve({ success: false, error: 'No browser is available.' });
         }
         // Matches preload's Promise<IPCResponse> contract; callers await this result.
+        return success();
+      },
+      openLocalPage: (fileUrl: string) => {
+        openedExternalUrls.push(fileUrl);
         return success();
       },
       feedback: namespace({
@@ -1462,6 +1517,26 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       resourceMonitor: namespace({
         getSnapshot: () => success(null),
       }),
+      profiles: namespace({
+        list: () => success(clone(mockProfiles)),
+        ownAgentFarm: () => success(mockOptions.ownAgentFarm ? clone(mockOptions.ownAgentFarm) : null),
+        get: (name: string) => {
+          const profile = mockProfiles.profiles.find((candidate) => candidate.name === name);
+          return profile ? success({ profile: clone(profile), yaml: mockOptions.profileYaml?.[name] ?? '' }) : Promise.resolve({ success: false, error: `No profile is named "${name}".` });
+        },
+        setEnabled: (name: string, enabled: boolean) => {
+          trackCall('profiles:set-enabled', [name, enabled]);
+          for (const profile of mockProfiles.profiles) if (profile.name === name) profile.enabled = enabled;
+          return success(clone(mockProfiles));
+        },
+        launch: (input: JsonObject) => {
+          trackCall('profiles:launch', [input]);
+          return Promise.resolve({ success: false, error: 'Launching is not available in this preview.' });
+        },
+        runs: () => success([]),
+        setOutcome: () => success(null),
+        stop: () => success(null),
+      }),
       loops: namespace({
         list: () => success(clone(mockLoops)),
         save: (input: LoopInput) => {
@@ -1792,7 +1867,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             const activeComputer = remoteDaemonConfig.client.computers.find(
               (computer) => computer.id === remoteDaemonConfig.client.activeProfileId
             );
-            const failure = activeComputer ? mockOptions.remoteConnectError ?? null : 'Missing remote profile';
+            const failure = activeComputer ? mockOptions.remoteConnectError ?? null : 'Missing saved connection';
             setRemoteConnectionState({
               mode: 'remote',
               status: failure ? 'error' : 'connected',
@@ -2015,6 +2090,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         emitWindowFocusChanged(focused: boolean) {
           emit('window:focus-changed', focused);
         },
+        /** A pane:// link main resolved to a Session or repo, as it sends it to the renderer. */
+        emitPaneOpenLink(target: JsonObject) {
+          emit('pane:open-link', clone(target));
+        },
         emitSessionCreationFailed(name: string, error: string) {
           emit('session:creation-failed', { name, error });
         },
@@ -2210,6 +2289,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getMachineRuns() {
           return clone(machineRuns);
+        },
+        getMachineLatencyCalls() {
+          return [...machineLatencyCalls];
         },
         getMachineReads() {
           return clone(machineReads);

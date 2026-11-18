@@ -1,0 +1,12 @@
+# expect: RUN_OFF_FLOW
+format: pane-profile/1
+name: run-off-flow
+version: 1.0.0
+flow:
+  start: test
+  test: { run: npm test, outcomes: { green: ship, red: end } }
+  ship: { run: echo shipped }
+runs:
+  A:
+    - test: red
+    - ship

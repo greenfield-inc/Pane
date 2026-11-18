@@ -24,6 +24,7 @@ import { pushEntry, resolveEntries, sameRef, showEntry, shownEntry, stepStack } 
 import { assertAutopilotEntitled, autopilotEntitlement } from './entitlement';
 import { autopilotInstructions, OWN_INSTRUCTIONS_LABEL } from './autopilotInstructions';
 import { DEFAULT_AGENT_ID } from '../../../../shared/agents';
+import { isOpenForSession } from '../../../../shared/approvalOpen';
 
 /** A Session as the walk sees it, in sidebar order. */
 /** What a push did: the snapshot after it, and the entry it made or refreshed. */
@@ -126,6 +127,8 @@ const RESTART_QUESTION = { title: 'Sentinel stopped: Pane restarted', on: 'Turn 
 const EXITED_QUESTION = { title: 'Autopilot stopped: its agent exited', on: 'Start again with Sentinel', off: 'Leave it stopped' };
 /** The person's own instructions (D-196): longer than this is not a brief any more. */
 const INSTRUCTIONS_LIMIT = 20_000;
+/** A file edited outside Pane is read whole up to this; past it, Autopilot refuses it rather than cut it. */
+const INSTRUCTIONS_FILE_CEILING = 1024 * 1024;
 const INSTRUCTIONS_FILE = 'instructions.md';
 const instructionsMessage = (text: string) => (text
   ? `[Pane · Instructions] The person changed their own instructions for you. From now on, follow these instead of any earlier ones. ${OWN_INSTRUCTIONS_LABEL}\n\n${text}`
@@ -412,7 +415,7 @@ export class AutopilotManager extends EventEmitter {
   async setInstructions(text: string): Promise<AutopilotInstructionsView> {
     const trimmed = text.trim();
     if (trimmed.length > INSTRUCTIONS_LIMIT) {
-      throw new PaneError('AUTOPILOT_INSTRUCTIONS_TOO_LONG', `Your instructions are ${trimmed.length.toLocaleString('en-US')} characters, over the ${INSTRUCTIONS_LIMIT.toLocaleString('en-US')} Autopilot reads. Nothing was saved.`, 'Shorten them: a few lines on how you want Autopilot to work is enough.');
+      throw new PaneError('AUTOPILOT_INSTRUCTIONS_TOO_LONG', `Your instructions are ${trimmed.length.toLocaleString('en-US')} characters; Settings saves up to ${INSTRUCTIONS_LIMIT.toLocaleString('en-US')}. Nothing was saved.`, 'Shorten them: a few lines on how you want Autopilot to work is enough.');
     }
     const file = this.instructionsFile();
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -427,14 +430,27 @@ export class AutopilotManager extends EventEmitter {
     return path.join(this.ports.root, INSTRUCTIONS_FILE);
   }
 
+  /** The instructions file whole; a missing file is none, one past the ceiling is refused. */
   private readInstructions(): string {
-    try { return fs.readFileSync(this.instructionsFile(), 'utf8').trim().slice(0, INSTRUCTIONS_LIMIT); } catch { return ''; }
+    const file = this.instructionsFile();
+    let size: number;
+    try { size = fs.statSync(file).size; } catch { return ''; }
+    if (size > INSTRUCTIONS_FILE_CEILING) {
+      throw new PaneError('AUTOPILOT_INSTRUCTIONS_FILE_TOO_LARGE', `Your Autopilot instructions file is ${size.toLocaleString('en-US')} bytes; Autopilot reads up to ${INSTRUCTIONS_FILE_CEILING.toLocaleString('en-US')}, so it read none of it and sent nothing to the agent.`, `Shorten ${file}, then start Autopilot again.`);
+    }
+    try { return fs.readFileSync(file, 'utf8').trim(); } catch { return ''; }
   }
 
   /** The running agent gets the person's instructions as they are on disk, once per change. */
   private deliverInstructions(): void {
     if (!this.run || this.state === 'stopped' || this.instructionsApplied === undefined) return;
-    const text = this.readInstructions();
+    let text: string;
+    try {
+      text = this.readInstructions();
+    } catch (error) {
+      this.log(error instanceof Error ? error.message : String(error));
+      return;
+    }
     if (text === this.instructionsApplied) return;
     this.writeAgentsFile(this.run, text);
     this.trySend(panelIdOf(this.run.id), instructionsMessage(text));
@@ -674,7 +690,7 @@ export class AutopilotManager extends EventEmitter {
   private walk(): AutopilotWalk {
     const counts = new Map<string, number>();
     for (const item of this.ports.notify.items()) {
-      const id = item.state === 'waiting' && (item.machineId ?? 'local') === 'local' ? item.source.session?.id : undefined;
+      const id = isOpenForSession(item) && (item.machineId ?? 'local') === 'local' ? item.source.session?.id : undefined;
       if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
     }
     const sessions = this.ports.sessions.list().filter(session => !session.archived).map(session => ({ id: session.id, name: session.name, waiting: counts.get(session.id) ?? 0 }));

@@ -641,7 +641,7 @@ const remoteProfileSchema: BoundarySchema<RemotePaneConnectionProfile> = {
       return cursor.child('token', profile.token).fail('expected a non-empty string');
     }
     if (profile.tailnetMachine && !profile.tailnetDomain) {
-      return cursor.child('tailnetDomain', profile.tailnetDomain).fail('a codeless profile needs its tailnet');
+      return cursor.child('tailnetDomain', profile.tailnetDomain).fail('a codeless connection needs its tailnet');
     }
     return profile;
   },
