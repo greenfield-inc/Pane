@@ -4,6 +4,12 @@ Oxlint is Pane's only linter. `pnpm lint:code` runs it with `.oxlintrc.json`
 over the whole repository, then the boundary-decoder conformance check and the
 agent-facts check. `pnpm lint` adds Knip.
 
+`pnpm lint:ox` (`scripts/oxlint.mjs`) splits the files `git ls-files` lists
+into up to four groups and runs one Oxlint process per group. Oxlint runs the
+anti-slop rules on one JavaScript thread per process, so a single process
+leaves the other cores idle. Arguments after it reach every process, and each
+process prints its own report.
+
 ## What is on
 
 `.oxlintrc.json` turns on every Oxlint category except `nursery`
