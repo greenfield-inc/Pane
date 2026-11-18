@@ -55,7 +55,8 @@ export class DeviceJobs {
     child.stderr?.on('data', append);
     job.exited = new Promise<void>((resolve) => {
       child.once('error', (error) => { append(Buffer.from(`\n${error.message}\n`)); job.exitCode = 127; resolve(); });
-      child.once('exit', (code, signal) => { job.exitCode = code ?? (signal ? 128 : 1); resolve(); });
+      // 'close', not 'exit': 'exit' can fire before the last stdout and stderr chunks are read.
+      child.once('close', (code, signal) => { job.exitCode ??= code ?? (signal ? 128 : 1); resolve(); });
     });
     this.jobs.set(job.id, job);
     return this.wait(owner, job.id, waitMs);
