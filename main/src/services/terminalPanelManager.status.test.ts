@@ -694,9 +694,16 @@ describe('terminal status events', () => {
     await poll();
     expect(panel.state.customState.agentLive).toBe(false);
 
-    // The agent was resumed, then Pane's quit sent Ctrl+C: it left, but not on purpose.
-    panel.state.customState = { ...panel.state.customState, agentLive: true };
+    // The person starts the agent again by hand in the same shell: it is live again.
+    fixture.terminal.pty.process = 'claude';
+    foregroundGroup = 999;
+    await poll();
+    expect(panel.state.customState.agentLive).toBe(true);
+
+    // Then Pane's quit sent Ctrl+C: it left, but not on purpose.
     exitManager.prepareForQuit();
+    fixture.terminal.pty.process = 'zsh';
+    foregroundGroup = fixture.terminal.pty.pid;
     await poll();
     expect(panel.state.customState.agentLive).toBe(true);
   });

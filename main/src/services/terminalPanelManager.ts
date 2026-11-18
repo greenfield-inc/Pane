@@ -3081,16 +3081,26 @@ export class TerminalPanelManager extends EventEmitter {
 
   /**
    * A live agent whose launch command exited back to Pane's own shell ended on purpose: its tab's
-   * live mark goes. Windows, WSL and ptyHost terminals cannot name their foreground, so there the
+   * live mark goes, and comes back when an agent takes the foreground again. Windows, WSL and ptyHost terminals cannot name their foreground, so there the
    * mark ends only with the shell or the tab.
    */
   private endExitedAgent(terminal: TerminalProcess): void {
     if (this.quitting || this.stoppedByPane.has(terminal.panelId) || terminal.agentExitCheckInFlight || terminal.launchCommandWrittenAt === undefined) return;
     if (Date.now() - terminal.launchCommandWrittenAt < LAUNCH_EXIT_GRACE_MS) return;
     const name = this.readForegroundProcessName(terminal);
-    if (!name || !this.isInteractiveShellProcess(terminal, name)) return;
+    if (!name) return;
     const panel = panelManager.getPanel(terminal.panelId);
-    if (!panel || terminalCustomState(panel.state).agentLive !== true) return;
+    if (!panel) return;
+    const customState = terminalCustomState(panel.state);
+    // The person started the agent again by hand in the same shell: it is live again.
+    if (customState.agentLive === false && !pausedMarkOf(panel) && (resolveAgentTypeFromProcessName(name) || isVersionedExecutableName(name))) {
+      panel.state.customState = { ...customState, agentLive: true };
+      void panelManager.updatePanel(terminal.panelId, { state: panel.state }).catch(error => {
+        console.warn(`[TerminalPanelManager] Could not restore the live-agent mark for panel ${terminal.panelId}:`, error);
+      });
+      return;
+    }
+    if (customState.agentLive !== true || !this.isInteractiveShellProcess(terminal, name)) return;
     terminal.agentExitCheckInFlight = true;
     void this.isOwnShellInForeground(terminal).then((exited) => {
       terminal.agentExitCheckInFlight = false;
