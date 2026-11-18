@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { TodoListRow, TodoRecord, TodoShownStatus, TodoState, TodosSnapshot } from '../../../../shared/types/todos';
 import type { RemoteTodos } from '../../stores/todosStore';
 import {
-  actionForKey, entryAction, flattenGroups, groupTodos, mergeTodoEntries, moveSelection, navSummary, nextGrouping, rowAction, tabCounts,
+  actionForKey, entryAction, flattenGroups, groupTodos, mergeTodoEntries, moveSelection, navSummary, nextGrouping, otherMachines, rowAction, tabCounts,
 } from './todoList';
+import type { MachineState } from '../../../../shared/types/machineConnections';
 
 interface RowSeed {
   number: number;
@@ -126,5 +127,24 @@ describe('navSummary', () => {
   it('counts open to-dos waiting on you and notes any working', () => {
     expect(navSummary(mergeTodoEntries(local, []))).toEqual({ waiting: 1, working: true });
     expect(navSummary([])).toEqual({ waiting: 0, working: false });
+  });
+});
+
+describe('otherMachines (T-8)', () => {
+  const machine = (id: string, kind: MachineState['kind'], installId?: string): MachineState => ({ id, label: id, kind, status: 'online', offlineSince: null, installId });
+
+  it('leaves out a saved machine that is this computer read over a connection, so its to-dos are not listed twice', () => {
+    const machines = [machine('local', 'local', 'mac-1'), machine('self', 'remote', 'mac-1'), machine('devbox', 'remote', 'box-9')];
+    expect(otherMachines(machines).map(m => m.id)).toEqual(['devbox']);
+  });
+
+  it('leaves out the computer this window shows in remote mode: its to-dos are already the list\'s own rows', () => {
+    const machines = [machine('local', 'local', 'book-2'), machine('mini', 'remote', 'mini-1'), machine('devbox', 'remote', 'box-9')];
+    expect(otherMachines(machines, 'mini').map(m => m.id)).toEqual(['devbox']);
+  });
+
+  it('keeps saved machines whose install id is not known yet, and every machine when this computer has none', () => {
+    expect(otherMachines([machine('local', 'local', 'mac-1'), machine('new', 'remote')]).map(m => m.id)).toEqual(['new']);
+    expect(otherMachines([machine('local', 'local'), machine('devbox', 'remote', 'box-9')]).map(m => m.id)).toEqual(['devbox']);
   });
 });

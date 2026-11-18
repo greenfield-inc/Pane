@@ -1,4 +1,4 @@
-import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
+import { LOCAL_MACHINE_ID, type MachineState } from '../../../../shared/types/machineConnections';
 import { isOpenTodoState, type TodoListRow, type TodoShownStatus, type TodoStatus, type TodosSnapshot } from '../../../../shared/types/todos';
 import type { RemoteTodos } from '../../stores/todosStore';
 import { TODO_STATUS_LABEL } from './TodoStatusIcon';
@@ -61,6 +61,17 @@ function offlineRow(row: TodoListRow, machine: string): TodoListRow {
 }
 
 /** Every top-level to-do from this machine and each saved one, newest change first. */
+/**
+ * The saved machines whose to-dos the list reads. A saved machine that answers with this computer's own
+ * install id is this computer read over a connection, and in remote mode `viewedHostId` (the computer
+ * this window shows) answers the list's own reads (T-8): either way its to-dos are already the local rows.
+ */
+export function otherMachines(machines: readonly MachineState[], viewedHostId: string | null = null): MachineState[] {
+  const self = machines.find(machine => machine.kind === 'local')?.installId;
+  return machines.filter(machine => machine.kind === 'remote' && machine.id !== LOCAL_MACHINE_ID
+    && machine.id !== viewedHostId && !(self && machine.installId === self));
+}
+
 export function mergeTodoEntries(local: TodosSnapshot | null, remotes: readonly RemoteTodos[]): TodoEntry[] {
   const entries: TodoEntry[] = [];
   for (const row of local?.rows ?? []) {

@@ -3,6 +3,9 @@ import { create } from 'zustand';
 import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoListRow, TodoRecord, TodosSnapshot } from '../../../shared/types/todos';
 import { isMac } from '../utils/platformUtils';
 import { LOCAL_MACHINE_ID, type MachineCommand, type MachineConnectionsEvent, type MachineEventChannel, type MachineState } from '../../../shared/types/machineConnections';
+import { otherMachines } from '../components/todos/todoList';
+import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
+import { useConfigStore } from './configStore';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { showActionError } from './errorStore';
 import { useNotifyStore } from './notifyStore';
@@ -225,7 +228,9 @@ export const useTodosStore = create<TodosState>((set, get) => ({
   remote: {},
   machines: [],
   setMachines: (machines) => {
-    const saved = machines.filter(machine => machine.kind === 'remote' && machine.id !== LOCAL_MACHINE_ID);
+    // In remote mode the list's own reads go to the computer this window shows; it is not listed again (T-8).
+    const config = useConfigStore.getState().config;
+    const saved = otherMachines(machines, config ? getActiveRemoteHostId(config.remoteDaemon) : null);
     set(state => {
       const remote: Record<string, RemoteTodos> = {};
       for (const machine of saved) {
@@ -310,7 +315,9 @@ export function useTodosMachines(): void {
         if (!stopped) void useTodosStore.getState().refreshRemote(machineId);
       }, REMOTE_REREAD_DEBOUNCE_MS));
     };
+    let latest: readonly MachineState[] = [];
     const applyMachines = (machines: readonly MachineState[]) => {
+      latest = machines;
       const before = new Map(useTodosStore.getState().machines.map(machine => [machine.id, machine.status]));
       useTodosStore.getState().setMachines(machines);
       for (const machine of machines) {
@@ -323,10 +330,15 @@ export function useTodosMachines(): void {
       else if (REMOTE_TODO_EVENTS.has(event.channel)) schedule(event.machineId);
     };
     const unsubscribe = api.onEvent(onEvent);
+    // The settings can arrive after the machines: which computer this window shows decides who is listed (T-8).
+    const unsubscribeConfig = useConfigStore.subscribe((state, prior) => {
+      if (state.config?.remoteDaemon !== prior.config?.remoteDaemon) applyMachines(latest);
+    });
     api.list().then(machines => { if (!stopped) applyMachines(machines); }).catch(() => undefined);
     return () => {
       stopped = true;
       unsubscribe();
+      unsubscribeConfig();
       for (const timer of timers.values()) window.clearTimeout(timer);
     };
   }, []);
