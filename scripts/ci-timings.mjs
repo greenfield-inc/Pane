@@ -10,11 +10,20 @@
 // earlier attempt's jobs and would stretch the wall time. Reads the GitHub API
 // through `gh api`, so it needs `gh auth login`, and caches each run's jobs in
 // --cache so a second run makes only the listing calls.
+//
+//   node scripts/ci-timings.mjs --run <run id> --attempt <n> [--out <file>] [--summary <file>]
+//
+// Records one run attempt instead: each job's head SHA, runner, and its
+// created, started and completed times split into waiting, setup, running and
+// teardown seconds (setup is checkout, toolchain, install, caches and native
+// rebuilds, by step name). CI result writes this for every Code Quality run;
+// --summary appends a table to that file (the job summary).
 
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -60,8 +69,17 @@ function parseArgs(argv) {
     else if (flag === '--out') args.out = value;
     else if (flag === '--cache') args.cache = value;
     else if (flag === '--workflow') args.workflows.push(value);
-    else throw new Error(`Unknown option ${flag}. Options: --since, --until, --out, --workflow, --cache.`);
+    else if (flag === '--run') args.run = value;
+    else if (flag === '--attempt') args.attempt = value;
+    else if (flag === '--summary') args.summary = value;
+    else throw new Error(`Unknown option ${flag}. Options: --since, --until, --out, --workflow, --cache, or --run, --attempt, --out, --summary.`);
     i += 1;
+  }
+  if (args.run || args.attempt) {
+    if (!/^\d+$/.test(args.run ?? '') || !/^\d+$/.test(args.attempt ?? '')) {
+      throw new Error('--run and --attempt take numbers together, for example --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT".');
+    }
+    return args;
   }
   if (!args.since || !args.until) {
     throw new Error('--since and --until are required, for example --since 2026-10-10 --until 2026-11-10T09:00:00Z, so a re-run returns the same rows.');
@@ -214,8 +232,70 @@ function rowFor(file, workflowRun, jobs, prs) {
   return row;
 }
 
+// Step names that are setup, not the job's work (the audit's split).
+const SETUP_STEPS = ['checkout', 'setup ', 'set up ', 'install ', 'installing', 'cache', 'restore ', 'fetch electron', 'rebuild', 'configure electron', 'keep temp', 'exclude temp', 'authenticate', 'configure artifact'];
+
+export function phaseOf(stepName) {
+  const name = stepName.toLowerCase();
+  if (name.startsWith('post ') || name === 'complete job') return 'teardown';
+  if (name === 'set up job' || SETUP_STEPS.some((word) => name.includes(word))) return 'setup';
+  return 'running';
+}
+
+/** One row per job of a run attempt, from the jobs API. */
+export function jobTimings(jobs) {
+  return jobs.map((job) => {
+    const phases = { setup: 0, running: 0, teardown: 0 };
+    for (const step of job.steps ?? []) {
+      if (!step.started_at || !step.completed_at || step.conclusion === 'skipped') continue;
+      phases[phaseOf(step.name)] += Math.max(0, seconds(step.started_at, step.completed_at));
+    }
+    const ran = Boolean(job.started_at && job.completed_at && job.conclusion !== 'skipped');
+    return {
+      name: job.name,
+      conclusion: job.conclusion ?? job.status,
+      head_sha: job.head_sha,
+      run_attempt: job.run_attempt,
+      runner: job.runner_name || null,
+      created_at: job.created_at,
+      started_at: job.started_at,
+      completed_at: job.completed_at,
+      waiting_seconds: ran ? seconds(job.created_at, job.started_at) : null,
+      setup_seconds: ran ? phases.setup : null,
+      running_seconds: ran ? phases.running : null,
+      teardown_seconds: ran ? phases.teardown : null,
+    };
+  });
+}
+
+async function recordRun(args) {
+  // In Actions the run belongs to the repository running it, which may be a fork.
+  const repo = process.env.GITHUB_REPOSITORY || REPO;
+  const jobs = [];
+  for (let page = 1; ; page += 1) {
+    const body = await gh(`repos/${repo}/actions/runs/${args.run}/attempts/${args.attempt}/jobs?per_page=100&page=${page}`);
+    jobs.push(...body.jobs);
+    if (body.jobs.length < 100) break;
+  }
+  const rows = jobTimings(jobs);
+  const output = { repo, run_id: Number(args.run), run_attempt: Number(args.attempt), recorded_at: new Date().toISOString(), jobs: rows };
+  await writeFile(args.out, `${JSON.stringify(output, null, 2)}\n`);
+  const cell = (value) => value ?? '';
+  const table = [
+    `### Job timings (run ${args.run}, attempt ${args.attempt})`,
+    '',
+    '| Job | Result | Runner | Waiting s | Setup s | Running s | Teardown s |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+    ...rows.map((row) => `| ${row.name} | ${row.conclusion} | ${cell(row.runner)} | ${cell(row.waiting_seconds)} | ${cell(row.setup_seconds)} | ${cell(row.running_seconds)} | ${cell(row.teardown_seconds)} |`),
+    '',
+  ].join('\n');
+  if (args.summary) await appendFile(args.summary, table);
+  console.error(`Recorded ${rows.length} jobs of run ${args.run} attempt ${args.attempt} in ${args.out}`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.run) return recordRun(args);
   await mkdir(args.cache, { recursive: true });
 
   const prs = await mapLimit(SPEED_PRS, 3, async (entry) => {
@@ -259,7 +339,9 @@ async function main() {
   console.error(`Wrote ${rows.length} runs to ${args.out}`);
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exit(1);
+  });
+}
