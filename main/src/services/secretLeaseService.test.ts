@@ -6,7 +6,8 @@ import { memoryConfig } from '../test/memorySecretStore';
 import { fileSecretBackend, PaneSecretStore, type SecretEncryption } from './paneSecrets';
 import { OnePassword, type OpRunner } from './onePassword';
 import { SecretLeaseStore } from './secretLeases';
-import { SecretLeaseService, type LeaseMachineLink } from './secretLeaseService';
+import { leaseEndSchema, leasePushSchema, SecretLeaseService, type LeaseMachineLink } from './secretLeaseService';
+import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppConfig } from '../types/config';
 
@@ -45,10 +46,9 @@ async function fakeHost(name: string, clock: { now: number }, options: { online?
       received.push({ channel, arg: args[0] });
       if (options.refuse) throw Object.assign(new Error(options.refuse), { code: 'ERR_UNKNOWN_CHANNEL' });
       if (channel === 'secrets:lease:push') {
-        const push = args[0] as Parameters<SecretLeaseStore['grant']>[0];
-        return { ok: true, lease: await store.grant(push) };
+        return { ok: true, lease: await store.grant(decodeBoundary(args[0], leasePushSchema)) };
       }
-      if (channel === 'secrets:lease:end') return { ok: true, ended: await store.end((args[0] as { id: string }).id) };
+      if (channel === 'secrets:lease:end') return { ok: true, ended: await store.end(decodeBoundary(args[0], leaseEndSchema).id) };
       if (channel === 'secrets:lease:list') return { leases: store.list(), memoryOnly: false, refusal: null };
       throw new Error(`unexpected ${channel}`);
     },

@@ -5,7 +5,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { findExecutableInPath, getShellPath } from '../utils/shellPath';
 
 /** What one run of `op` gave back. stdout can hold values: callers never log it or put it in an error. */
-export interface OpOutput {
+interface OpOutput {
   code: number;
   stdout: string;
   stderr: string;
@@ -22,7 +22,7 @@ function opMissing(): PaneError {
 }
 
 /** `op` from the login shell's PATH, run without a terminal. */
-export function systemOpRunner(): OpRunner {
+function systemOpRunner(): OpRunner {
   return (args, stdin) => new Promise((resolve, reject) => {
     const executable = findExecutableInPath(process.platform === 'win32' ? 'op.exe' : 'op');
     if (!executable) {
@@ -36,11 +36,12 @@ export function systemOpRunner(): OpRunner {
       windowsHide: true,
       env: { ...process.env, PATH: getShellPath() },
     }, (error, stdout, stderr) => {
-      if (error && typeof error.code !== 'number') {
+      // A non-zero exit carries its exit code; anything else (op missing, a timeout) never ran to the end.
+      if (error && !Number.isInteger(error.code)) {
         reject(error.code === 'ENOENT' ? opMissing() : new PaneError('ONEPASSWORD_FAILED', `The 1Password CLI did not finish: ${error.killed ? 'it timed out waiting for approval' : error.message}. Nothing was read.`, 'Unlock 1Password and approve the prompt, then try again.'));
         return;
       }
-      resolve({ code: typeof error?.code === 'number' ? error.code : 0, stdout, stderr });
+      resolve({ code: error ? Number(error.code) : 0, stdout, stderr });
     });
     child.stdin?.end(stdin);
   });

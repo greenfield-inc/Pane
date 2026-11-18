@@ -2334,8 +2334,7 @@ function leaseCard(
   const hours = described.lengthMs / 3_600_000;
   const length = hours >= 48 && Number.isInteger(hours / 24) ? `${hours / 24} days` : hours >= 1 ? `${Math.round(hours * 10) / 10} hours` : `${Math.round(described.lengthMs / 60_000)} minutes`;
   const what = names.length === 1 ? `${lease.project}/${names[0]}` : `${names.length} ${lease.project} secrets`;
-  return {
-    title: lease.renews ? `Extend the lease on ${what} for ${length}?` : `Lease ${what} for ${length}?`,
-    lease: { project: lease.project, names, references: described.references, lengthMs: described.lengthMs, machine, memoryOnly: described.memoryOnly, ...(lease.renews ? { renews: lease.renews } : {}) },
-  };
+  const card: NotifyLeaseTarget = { project: lease.project, names, references: described.references, lengthMs: described.lengthMs, machine, memoryOnly: described.memoryOnly };
+  if (lease.renews) card.renews = lease.renews;
+  return { title: lease.renews ? `Extend the lease on ${what} for ${length}?` : `Lease ${what} for ${length}?`, lease: card };
 }

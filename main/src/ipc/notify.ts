@@ -39,6 +39,7 @@ import type { AgentState } from '../../../shared/types/agentStatus';
 import { paneSecretNameProblem, paneSecretProjectProblem, SECRET_LEASE_DEFAULT_MS, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore, secretLeaseStore } from '../services/paneSecrets';
 import { secretLeaseService } from '../services/secretLeaseRuntime';
+import type { SecretLeaseStart } from '../services/secretLeaseService';
 import { agentLabel } from '../../../shared/agents';
 
 const MAX_CHOICES = 9;
@@ -436,13 +437,14 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       const service = secretLeaseService();
       const lease = item.lease;
       if (!service || !lease) throw new PaneError('SECRET_LEASE_NEEDS_DESKTOP', 'This Pane can\'t start leases. Nothing was leased.', 'Press Start lease in Pane on your Mac or PC.');
-      const started = await service.start({
+      const request: SecretLeaseStart = {
         project: lease.project,
         names: lease.names,
         machines: machineId ? [machineId] : [],
         requestedBy: `${item.source.agent} in "${item.source.name}"`,
-        ...(lease.renews ? { renews: lease.renews } : {}),
-      });
+      };
+      if (lease.renews) request.renews = lease.renews;
+      const started = await service.start(request);
       const refused = started.refused.map(entry => `${entry.machine}: ${entry.reason}`);
       // The machine that asked must hold it, or its agent can't use it.
       if (machineId && refused.length > 0 && !lease.renews) {

@@ -61,7 +61,7 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
 const valueKey = (id: string, name: string) => `lease:${id}:${name}`;
 
 /** Why a reference-backed secret has no value to give. */
-export function secretLeaseEnded(project: string, name: string, endedAt: string | null): PaneError {
+function secretLeaseEnded(project: string, name: string, endedAt: string | null): PaneError {
   const key = paneSecretKey(project, name);
   return new PaneError(
     'SECRET_LEASE_ENDED',
@@ -180,10 +180,12 @@ export class SecretLeaseStore {
         this.memory.delete(key);
         continue;
       }
-      await this.options.values.remove(key).catch((error: unknown) => {
+      try {
+        await this.options.values.remove(key);
+      } catch (error) {
         failed = true;
         console.warn(`[SecretLeases] Could not delete a value of lease ${lease.id}: ${reasonOf(error)}`);
-      });
+      }
     }
     const endedAt = new Date(this.now()).toISOString();
     for (const secret of lease.secrets) this.endedAt.set(paneSecretKey(lease.project, secret.name), endedAt);

@@ -46,7 +46,7 @@ const leaseSummarySchema = boundary.object({
   grantedOn: boundary.string,
   memoryOnly: boundary.boolean,
 });
-export const hostLeaseListSchema = boundary.object({
+const hostLeaseListSchema = boundary.object({
   leases: boundary.array(leaseSummarySchema),
   memoryOnly: boundary.boolean,
   refusal: boundary.nullable(boundary.string),
@@ -74,9 +74,10 @@ export function leaseRefused(machine: string, reason: string): PaneError {
   return new PaneError('SECRET_LEASE_REFUSED', `${machine} refused the lease: ${reason}. Nothing was stored there.`, 'Set that machine to "Only me" in Settings → Workspaces, or lease without it.');
 }
 
-function pushFailure(machine: string, error: unknown): string {
-  const code = error instanceof Error && 'code' in error ? String(error.code) : '';
-  if (code === 'ERR_UNKNOWN_CHANNEL') return `Pane on ${machine} needs an update for leases`;
+/** Why a machine took no lease. A host too old for leases answers ERR_UNKNOWN_CHANNEL. */
+function pushFailure(machine: string, error: Error): string {
+  const code = 'code' in error ? String(error.code) : '';
+  if (code === 'ERR_UNKNOWN_CHANNEL' || /unknown (command|channel)/i.test(error.message)) return `Pane on ${machine} needs an update for leases`;
   if (error instanceof PaneError && error.code === 'SECRET_LEASE_REFUSED') return error.message;
   return reasonOf(error);
 }
@@ -86,7 +87,7 @@ export interface SecretLeaseServiceDeps {
   secrets: () => PaneSecretStore;
   onePassword: () => OnePassword;
   config: () => AppConfig;
-  updateConfig: (update: (config: AppConfig) => Partial<AppConfig>) => Promise<unknown>;
+  updateConfig: (update: (config: AppConfig) => Partial<AppConfig>) => Promise<AppConfig>;
   machines: () => LeaseMachineLink[];
   hostLabel: () => string;
   now?: () => number;
@@ -218,7 +219,7 @@ export class SecretLeaseService {
         }]);
         pushed.push(link);
       } catch (error) {
-        refused.push({ machine: link.name, reason: pushFailure(link.name, error) });
+        refused.push({ machine: link.name, reason: pushFailure(link.name, error instanceof Error ? error : new Error(String(error))) });
       }
     }));
     return { pushed, refused };

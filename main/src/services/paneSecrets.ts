@@ -219,7 +219,7 @@ export function fileSecretBackend(filePath: string, encryption: SecretEncryption
  * Writes use the async API (the sync one is removed in Electron 46); a value the async API cannot
  * decrypt is read with the sync one, so values written before the move keep reading.
  */
-export function electronSecretEncryption(): SecretEncryption {
+function electronSecretEncryption(): SecretEncryption {
   type SafeStorage = Electron.SafeStorage;
   const safeStorage: SafeStorage | null = electronSafeStorage ?? null;
   const available = () => {
@@ -236,8 +236,8 @@ export function electronSecretEncryption(): SecretEncryption {
       if (!safeStorage) throw new Error('Encryption is not available');
       try {
         return (await safeStorage.decryptStringAsync(data)).result;
-      } catch (asyncError) {
-        if (typeof safeStorage.decryptString !== 'function') throw asyncError;
+      } catch {
+        // Written by the sync API before the move. Electron 46 removes it: re-encrypt such values before upgrading.
         return safeStorage.decryptString(data);
       }
     },
@@ -463,7 +463,7 @@ export class PaneSecretStore {
   }
 
   /** References and their removals, for the other hosts. Addresses only: a reference carries no value. */
-  exportReferencesForSync(): Record<string, SharedCredential> {
+  exportReferencesForSync() {
     const records: Record<string, SharedCredential> = {};
     for (const [key, meta] of Object.entries(this.referenceIndex())) {
       if (!parsePaneSecretKey(key)) continue;

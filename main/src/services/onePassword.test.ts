@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { OnePassword, type OpRunner } from './onePassword';
 
 /** Answers `op inject` the way op does: each {{ reference }} replaced by its value, the rest of the template kept. */
-function injecting(values: Record<string, string>): { run: OpRunner; stdins: string[] } {
+function injecting(values: Record<string, string>) {
   const stdins: string[] = [];
   return {
     stdins,
-    run: async (_args, stdin) => {
+    run: async (_args: readonly string[], stdin: string) => {
       stdins.push(stdin);
       return { code: 0, stdout: stdin.replace(/\{\{ (op:\/\/[^}]+) \}\}/g, (_match, reference: string) => values[reference]), stderr: '' };
     },
