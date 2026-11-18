@@ -138,12 +138,20 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    # Beside the type check, lint shared the 4 CPUs and took 21-23s.
+    # Beside the type check, lint shared the 4 CPUs and took 21-23s. Oxlint
+    # and the two small lint checks (pnpm lint:code runs them in turn) run
+    # side by side.
     - name: Start lint
-      run: scripts/ci-background.sh start lint pnpm lint:code
+      run: |
+        scripts/ci-background.sh start lint pnpm lint:ox
+        scripts/ci-background.sh start lint-checks sh -c 'pnpm lint:ox:boundary-conformance && pnpm lint:agent-facts'
 
     - name: Finish lint
-      run: scripts/ci-background.sh wait lint
+      run: |
+        status=0
+        scripts/ci-background.sh wait lint || status=1
+        scripts/ci-background.sh wait lint-checks || status=1
+        exit "$status"
 
     - name: Start type checking
       if: ${{ !cancelled() }}
