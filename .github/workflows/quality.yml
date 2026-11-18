@@ -111,15 +111,15 @@ jobs:
           exit 1
         }
 
-  # The main process suite on Linux, in four Vitest shards (files split by
+  # The main process suite on Linux, in five Vitest shards (files split by
   # Vitest's --shard). Windows runs the same suite in cross-os-main-tests.
   main-tests:
-    name: Main Process Tests (ubuntu-latest, ${{ matrix.shard }}/4)
+    name: Main Process Tests (ubuntu-latest, ${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
 
     steps:
     - name: Checkout code
@@ -141,7 +141,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/4
+      run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/5
 
   # Type checking and lint get their own runner: beside the unit tests they
   # competed for its CPUs and slowed the tests by about 30s. They run in
@@ -350,8 +350,8 @@ jobs:
   # on Windows too. The Linux floor entry runs on ubuntu-24.04: setup-python
   # has no Python 3.8 build for Ubuntu 26.04 (ubuntu-latest), and uv installs
   # 3.8 there.
-  # Each leg runs in five lanes: `package` checks versions and packs the
-  # wrappers, and lanes 1/4 to 4/4 each run a quarter of the contract checks
+  # Each leg runs in seven lanes: `package` checks versions and packs the
+  # wrappers, and lanes 1/6 to 6/6 each run a sixth of the contract checks
   # and of the node:test suites (RUNPANE_TEST_SHARD, scripts/runpane-test-shard.js).
   runpane-wrapper-tests:
     name: Runpane Wrapper (${{ matrix.leg.os }}, Node ${{ matrix.leg.node-version }}, Python ${{ matrix.leg.python-version }}, ${{ matrix.lane }})
@@ -365,7 +365,7 @@ jobs:
           - { os: ubuntu-24.04, node-version: '22.23.4', python-version: '3.8' }
           - { os: ubuntu-latest, node-version: '24.22.1', python-version: '3.13' }
           - { os: windows-2022, node-version: '22.23.4', python-version: '3.8' }
-        lane: [package, 1/4, 2/4, 3/4, 4/4]
+        lane: [package, 1/6, 2/6, 3/6, 4/6, 5/6, 6/6]
     env:
       RUNPANE_TEST_SHARD: ${{ matrix.lane != 'package' && matrix.lane || '' }}
 
@@ -448,7 +448,7 @@ jobs:
 
   # Ubuntu is already covered by main-tests above; this job only adds
   # Windows, and only when main-process code (or its deps) changed. It runs the
-  # suite in four vitest shards, each about a quarter of it. Type Check and Lint
+  # suite in six vitest shards, each about a sixth of it. Type Check and Lint
   # already type-checks main, and a type check gives the same result on any OS.
   cross-os-main-tests:
     name: Main Process Tests (${{ matrix.os }}${{ matrix.shards > 1 && format(', {0}/{1}', matrix.shard, matrix.shards) || '' }})
@@ -459,10 +459,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-2022, shard: 1, shards: 4 }
-          - { os: windows-2022, shard: 2, shards: 4 }
-          - { os: windows-2022, shard: 3, shards: 4 }
-          - { os: windows-2022, shard: 4, shards: 4 }
+          - { os: windows-2022, shard: 1, shards: 6 }
+          - { os: windows-2022, shard: 2, shards: 6 }
+          - { os: windows-2022, shard: 3, shards: 6 }
+          - { os: windows-2022, shard: 4, shards: 6 }
+          - { os: windows-2022, shard: 5, shards: 6 }
+          - { os: windows-2022, shard: 6, shards: 6 }
 
     steps:
     # The default Windows TEMP is on the runner's slow C: drive; the database
