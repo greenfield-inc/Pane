@@ -359,7 +359,8 @@ function MoveVaultPicker({ moveVault, run }: { moveVault: string | null; run: Ru
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="pane-secrets-move-vault">
       <span className="text-text-secondary">1Password vault for moved secrets:</span>
-      <span className="font-mono text-text-primary">{moveVault ?? 'none picked'}</span>
+      {/* The open picker shows the current vault itself. */}
+      {!vaults && <span className="font-mono text-text-primary">{moveVault ?? 'none picked'}</span>}
       {vaults ? (
         <Select value={moveVault ?? undefined} onValueChange={(vault) => void run(() => window.electronAPI.paneSecrets.setMoveVault(vault), `Pane could not save ${vault} as the vault.`).then(() => setVaults(null))}>
           <SelectTrigger aria-label="1Password vault for moved secrets" className="h-[30px] w-[180px]"><SelectValue placeholder="Pick a vault" /></SelectTrigger>
