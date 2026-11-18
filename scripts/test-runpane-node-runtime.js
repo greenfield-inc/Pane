@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 const { assertSupportedNodeRuntime, assertSupportedCliRuntime } = require('../packages/runpane/dist/nodeRuntime');
 const { main } = require('../packages/runpane/dist/cli');
 const { RUNPANE_CONTRACT } = require('../packages/runpane/dist/generated/contract');

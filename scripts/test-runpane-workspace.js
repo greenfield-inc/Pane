@@ -8,7 +8,7 @@ const net = require('node:net');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 
 const cli = path.join(__dirname, '..', 'packages', 'runpane', 'dist', 'cli.js');
 const owner = 31;

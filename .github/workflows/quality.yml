@@ -49,6 +49,7 @@ jobs:
             - 'scripts/test-runpane-handoff.js'
             - 'scripts/test-runpane-ask.js'
             - 'scripts/test-runpane-managed-cli.js'
+            - 'scripts/runpane-test-shard.js'
             - 'scripts/fixtures/**'
             - '.github/workflows/quality.yml'
           relay:
@@ -85,8 +86,8 @@ jobs:
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
 
-    # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
-    # builds the only native module these tests load.
+    # The frontend tests load no native module and no Electron, so the
+    # Electron-targeted postinstall rebuild is skipped.
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
@@ -95,16 +96,6 @@ jobs:
 
     - name: Verify macOS updater metadata merge
       run: node scripts/test-merge-mac-latest.js
-
-    # The unit tests load the real electron package (main/src/utils/shellPath.ts).
-    - name: Fetch Electron
-      uses: ./.github/actions/fetch-electron
-
-    - name: Rebuild native modules for Node tests
-      run: pnpm rebuild better-sqlite3-multiple-ciphers
-
-    - name: Run main process test suite
-      run: CI=1 pnpm --filter main exec vitest run
 
     - name: Run frontend unit tests
       run: CI=1 pnpm --filter frontend exec vitest run
@@ -119,6 +110,38 @@ jobs:
           echo "::error title=runpane contract drift::Generated runpane contract files differ from contracts/runpane/contract.json. Edit contract.json, not the generated files, then run: node scripts/generate-runpane-contract.js and commit the result."
           exit 1
         }
+
+  # The main process suite on Linux, in four Vitest shards (files split by
+  # Vitest's --shard). Windows runs the same suite in cross-os-main-tests.
+  main-tests:
+    name: Main Process Tests (ubuntu-latest, ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
+    # builds the only native module these tests load.
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    # The unit tests load the real electron package (main/src/utils/shellPath.ts).
+    - name: Fetch Electron
+      uses: ./.github/actions/fetch-electron
+
+    - name: Rebuild native modules for Node tests
+      run: pnpm rebuild better-sqlite3-multiple-ciphers
+
+    - name: Run main process unit tests
+      run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/4
 
   # Type checking and lint get their own runner: beside the unit tests they
   # competed for its CPUs and slowed the tests by about 30s. They run in
@@ -324,22 +347,27 @@ jobs:
   # runtime floors (Node 22.23.4 / Python 3.8) and at current (Node 24.22.1 /
   # Python 3.13); Windows at the floors only, since every Windows defect it has
   # caught failed both Windows legs. No macOS leg: its one catch (#939) failed
-  # on Windows too. The Linux
-  # floor entry runs on ubuntu-24.04. It was pinned there because setup-python
-  # has no Python 3.8 build for Ubuntu 26.04 (ubuntu-latest); uv now installs
-  # 3.8, so that reason no longer applies.
+  # on Windows too. The Linux floor entry runs on ubuntu-24.04: setup-python
+  # has no Python 3.8 build for Ubuntu 26.04 (ubuntu-latest), and uv installs
+  # 3.8 there.
+  # Each leg runs in five lanes: `package` checks versions and packs the
+  # wrappers, and lanes 1/4 to 4/4 each run a quarter of the contract checks
+  # and of the node:test suites (RUNPANE_TEST_SHARD, scripts/runpane-test-shard.js).
   runpane-wrapper-tests:
-    name: Runpane Wrapper (${{ matrix.os }}, Node ${{ matrix.node-version }}, Python ${{ matrix.python-version }})
+    name: Runpane Wrapper (${{ matrix.leg.os }}, Node ${{ matrix.leg.node-version }}, Python ${{ matrix.leg.python-version }}, ${{ matrix.lane }})
     needs: changes
     if: ${{ !fromJSON(needs.changes.outputs.skip)['runpane-wrapper-tests'] }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.leg.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        leg:
           - { os: ubuntu-24.04, node-version: '22.23.4', python-version: '3.8' }
           - { os: ubuntu-latest, node-version: '24.22.1', python-version: '3.13' }
           - { os: windows-2022, node-version: '22.23.4', python-version: '3.8' }
+        lane: [package, 1/4, 2/4, 3/4, 4/4]
+    env:
+      RUNPANE_TEST_SHARD: ${{ matrix.lane != 'package' && matrix.lane || '' }}
 
     steps:
     - name: Checkout code
@@ -348,19 +376,19 @@ jobs:
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
       with:
-        node-version: ${{ matrix.node-version }}
+        node-version: ${{ matrix.leg.node-version }}
 
     # Python 3.8 is not preinstalled on Windows runners, and
     # setup-python took 31-56 s to fetch it there. uv installs its standalone
     # CPython build in a few seconds. The test scripts read PYTHON.
     - name: Setup Python
-      if: matrix.python-version != '3.8'
+      if: matrix.leg.python-version != '3.8'
       uses: actions/setup-python@v6
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: ${{ matrix.leg.python-version }}
 
     - name: Setup uv for Python 3.8
-      if: matrix.python-version == '3.8'
+      if: matrix.leg.python-version == '3.8'
       uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       with:
         # A pinned uv, so a new uv release can't change the required jobs.
@@ -369,7 +397,7 @@ jobs:
         enable-cache: false
 
     - name: Install Python 3.8 with uv
-      if: matrix.python-version == '3.8'
+      if: matrix.leg.python-version == '3.8'
       shell: bash
       run: |
         uv python install 3.8
@@ -382,58 +410,45 @@ jobs:
       run: pnpm install --filter runpane --ignore-scripts
 
     - name: Check wrapper package versions
+      if: matrix.lane == 'package'
       run: node scripts/sync-runpane-package-versions.js --check
 
     - name: Build npm wrapper
       run: pnpm --filter runpane build
 
-    # Packing runs runpane's prepack, which rebuilds dist/, so the package
-    # smoke tests run before anything else reads dist/.
+    # Packing runs runpane's prepack, which rebuilds dist/.
     - name: Run package manager smoke tests
+      if: matrix.lane == 'package'
       run: node scripts/test-runpane-package-smoke.js
 
-    # The two slow suites (about 95 and 120 s on Windows) use their own temp
-    # directories, so they run in the background beside the short ones. Each
-    # Finish step prints that suite's output and fails with it.
+    # The contract checks use their own temp directories, so they run in the
+    # background beside the node:test suites. The Finish step prints their
+    # output and fails with them.
     - name: Start wrapper contract tests
+      if: matrix.lane != 'package'
       shell: bash
       run: scripts/ci-background.sh start contract node scripts/test-runpane-contract.js
 
-    - name: Start handoff tests
-      shell: bash
-      run: scripts/ci-background.sh start handoff node --test scripts/test-runpane-handoff.js
-
-    - name: Check patched Node runtime guard
-      run: node --test scripts/test-runpane-node-runtime.js
-
-    - name: Run MCP server tests
-      run: node --test scripts/test-runpane-mcp.js
-
-    - name: Run ask and models tests
-      run: node --test scripts/test-runpane-ask.js
-
-    - name: Run workspace routing tests
-      run: node --test scripts/test-runpane-workspace.js
-
-    - name: Run managed CLI hand-off tests
-      run: node --test scripts/test-runpane-managed-cli.js
-
-    - name: Run wrapper telemetry tests
-      run: node --test scripts/test-runpane-telemetry.js
+    - name: Run wrapper node:test suites
+      if: matrix.lane != 'package'
+      run: >-
+        node --test
+        scripts/test-runpane-handoff.js
+        scripts/test-runpane-mcp.js
+        scripts/test-runpane-node-runtime.js
+        scripts/test-runpane-ask.js
+        scripts/test-runpane-workspace.js
+        scripts/test-runpane-managed-cli.js
+        scripts/test-runpane-telemetry.js
 
     - name: Finish wrapper contract tests
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && matrix.lane != 'package' }}
       shell: bash
       run: scripts/ci-background.sh wait contract
 
-    - name: Finish handoff tests
-      if: ${{ !cancelled() }}
-      shell: bash
-      run: scripts/ci-background.sh wait handoff
-
-  # Ubuntu is already covered by quality-checks above; this job only adds
+  # Ubuntu is already covered by main-tests above; this job only adds
   # Windows, and only when main-process code (or its deps) changed. It runs the
-  # suite in two vitest shards, each about half of it. Type Check and Lint
+  # suite in four vitest shards, each about a quarter of it. Type Check and Lint
   # already type-checks main, and a type check gives the same result on any OS.
   cross-os-main-tests:
     name: Main Process Tests (${{ matrix.os }}${{ matrix.shards > 1 && format(', {0}/{1}', matrix.shard, matrix.shards) || '' }})
@@ -444,8 +459,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-2022, shard: 1, shards: 2 }
-          - { os: windows-2022, shard: 2, shards: 2 }
+          - { os: windows-2022, shard: 1, shards: 4 }
+          - { os: windows-2022, shard: 2, shards: 4 }
+          - { os: windows-2022, shard: 3, shards: 4 }
+          - { os: windows-2022, shard: 4, shards: 4 }
 
     steps:
     # The default Windows TEMP is on the runner's slow C: drive; the database
@@ -486,16 +503,16 @@ jobs:
     - name: Run main process unit tests
       run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
-  # The relay (Rust) and the computer side of QR pairing against it: a real relay
-  # with its DNS helper, and Pebble validating certificates through that DNS.
-  # Also the direct-path helper (direct/), and a desktop reaching a computer over it.
-  relay-tests:
-    name: Relay Tests
+  # The relay and direct-path helper (Rust): format, lints and cargo tests,
+  # including the relay's ACME test against Pebble. It also builds both
+  # binaries, so the cargo cache it saves serves Relay Tests below.
+  relay-rust:
+    name: Relay Rust Checks
     needs: changes
-    if: ${{ !fromJSON(needs.changes.outputs.skip)['relay-tests'] }}
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['relay-rust'] }}
     runs-on: ubuntu-latest
     env:
-      # The relay, Pebble and pane-direct suites fail here instead of skipping when a binary is missing.
+      # The Pebble test fails here instead of skipping when Pebble is missing.
       PANE_RELAY_INTEGRATION_REQUIRED: '1'
     timeout-minutes: 30
     steps:
@@ -515,14 +532,6 @@ jobs:
           direct/target
         key: relay-${{ runner.os }}-${{ hashFiles('relay/Cargo.lock', 'direct/Cargo.lock') }}
 
-    - name: Check, test and build pane-direct
-      working-directory: direct
-      run: |
-        cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
-        cargo test --locked
-        cargo build --locked
-        echo "PANE_DIRECT_BIN=$GITHUB_WORKSPACE/direct/target/debug/pane-direct" >> "$GITHUB_ENV"
-
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
@@ -534,7 +543,14 @@ jobs:
         GOBIN="$RUNNER_TEMP/bin" go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.8.0
         echo "PEBBLE_BIN=$RUNNER_TEMP/bin/pebble" >> "$GITHUB_ENV"
         echo "PEBBLE_DIR=$(go env GOMODCACHE)/github.com/letsencrypt/pebble/v2@v2.8.0" >> "$GITHUB_ENV"
-        echo "PANE_RELAY_BIN=$GITHUB_WORKSPACE/relay/target/debug/pane-relay" >> "$GITHUB_ENV"
+
+    - name: Check, test and build pane-direct
+      working-directory: direct
+      run: |
+        cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
+        cargo test --locked
+        cargo build --locked
+        echo "PANE_DIRECT_BIN=$GITHUB_WORKSPACE/direct/target/debug/pane-direct" >> "$GITHUB_ENV"
 
     - name: Check formatting and lints
       working-directory: relay
@@ -547,6 +563,55 @@ jobs:
     - name: Build the relay
       working-directory: relay
       run: cargo build --locked
+
+  # The computer side of QR pairing against a real relay with its DNS helper,
+  # and Pebble validating certificates through that DNS. Also a desktop
+  # reaching a computer over the direct-path helper (direct/).
+  relay-tests:
+    name: Relay Tests
+    needs: changes
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['relay-tests'] }}
+    runs-on: ubuntu-latest
+    env:
+      # The relay, Pebble and pane-direct suites fail here instead of skipping when a binary is missing.
+      PANE_RELAY_INTEGRATION_REQUIRED: '1'
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+
+    # Relay Rust Checks saves this cache; this job only reads it.
+    - name: Restore cargo cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          relay/target
+          direct/target
+        key: relay-${{ runner.os }}-${{ hashFiles('relay/Cargo.lock', 'direct/Cargo.lock') }}
+
+    - name: Build pane-direct and the relay
+      run: |
+        cargo build --locked --manifest-path direct/Cargo.toml
+        cargo build --locked --manifest-path relay/Cargo.toml
+        echo "PANE_DIRECT_BIN=$GITHUB_WORKSPACE/direct/target/debug/pane-direct" >> "$GITHUB_ENV"
+        echo "PANE_RELAY_BIN=$GITHUB_WORKSPACE/relay/target/debug/pane-relay" >> "$GITHUB_ENV"
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: stable
+        cache: false
+
+    - name: Install Pebble
+      run: |
+        GOBIN="$RUNNER_TEMP/bin" go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.8.0
+        echo "PEBBLE_BIN=$RUNNER_TEMP/bin/pebble" >> "$GITHUB_ENV"
+        echo "PEBBLE_DIR=$(go env GOMODCACHE)/github.com/letsencrypt/pebble/v2@v2.8.0" >> "$GITHUB_ENV"
 
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
@@ -572,7 +637,7 @@ jobs:
   # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, typecheck-lint, markdown-links, functional-smoke-browser, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
+    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

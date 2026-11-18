@@ -89,7 +89,7 @@ test('an unreadable manifest allows no skip', () => {
 test('pushes and manual runs skip nothing; pull requests skip only unchanged areas', () => {
   assert.deepEqual(skipManifest({ event: 'push', changed: {} }), {});
   assert.deepEqual(skipManifest({ event: 'workflow_dispatch', changed: {} }), {});
-  assert.deepEqual(Object.keys(PR_SKIP).sort(), ['relay-tests', 'runpane-wrapper-tests']);
+  assert.deepEqual(Object.keys(PR_SKIP).sort(), ['relay-rust', 'relay-tests', 'runpane-wrapper-tests']);
 });
 
 // The contract with the real workflow file.
