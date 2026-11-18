@@ -230,7 +230,7 @@ function bundlePreload(root) {
   try {
     execSync('pnpm run --filter main bundle:preload', { cwd: root, stdio: 'inherit', shell: true });
     return true;
-  } catch (error) {
+  } catch {
     console.error('[preload] ❌ Failed to bundle preload; the renderer will fall back to browser mode until this is fixed.');
     return false;
   }
@@ -309,7 +309,7 @@ function execCommand(command, cwd) {
       stdio: 'inherit',
       shell: true
     });
-  } catch (error) {
+  } catch {
     console.error(`❌ Command failed: ${command}`);
     process.exit(1);
   }
@@ -321,7 +321,7 @@ function execCommand(command, cwd) {
 function killProcessWindows(pid) {
   try {
     execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
-  } catch (error) {
+  } catch {
     // Ignore errors - process might already be dead
   }
 }
@@ -332,7 +332,7 @@ function killProcessWindows(pid) {
 function killProcessUnix(pid) {
   try {
     process.kill(-pid, 'SIGTERM');
-  } catch (error) {
+  } catch {
     // Ignore errors - process might already be dead
   }
 }
@@ -357,7 +357,7 @@ async function main() {
   try {
     projectRoot = findGitRoot(cwd);
     console.log(`📁 Project root: ${projectRoot}`);
-  } catch (error) {
+  } catch {
     console.error('❌ Error: Not in a git repository');
     process.exit(1);
   }

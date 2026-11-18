@@ -784,7 +784,7 @@ export function registerRunpaneHandlers(
       const manager = requireOrchestrationSessionManager(services);
       const session = await manager.get(parseOrchestrationSessionSelector(request));
       return { ok: true, session };
-    }, result => ({ resultCount: 1 }));
+    }, _result => ({ resultCount: 1 }));
   });
 
   commandRegistry.register('runpane:sessions:update', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
@@ -792,7 +792,7 @@ export function registerRunpaneHandlers(
       const normalized = parseOrchestrationSessionUpdateRequest(request);
       const { session, panes } = await updateOrchestrationSession(services, commandRegistry, normalized.selector, normalized.input);
       return panes ? { ok: true, session, panes } : { ok: true, session };
-    }, result => ({ resultCount: 1 }));
+    }, _result => ({ resultCount: 1 }));
   });
 
   commandRegistry.register('runpane:sessions:set-agent', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
@@ -810,7 +810,7 @@ export function registerRunpaneHandlers(
       const normalized = parseOrchestrationSessionAssociationRequest(request);
       const session = await manager.associate(normalized.selector, normalized.association);
       return { ok: true, session };
-    }, result => ({ resultCount: 1 }));
+    }, _result => ({ resultCount: 1 }));
   });
 
   // A Pane another machine created for this computer's Session (`runpane workspace <machine> panes create`).
@@ -857,7 +857,7 @@ export function registerRunpaneHandlers(
       const normalized = parseOrchestrationSessionDetachRequest(request);
       const session = await manager.detach(normalized.selector, normalized.paneId);
       return { ok: true, session };
-    }, result => ({ resultCount: 1 }));
+    }, _result => ({ resultCount: 1 }));
   });
 
   commandRegistry.register('runpane:sessions:overview', async (request: PaneCommandValue): Promise<RunpaneSessionOverviewResult> => {
@@ -1404,7 +1404,7 @@ export function registerRunpaneHandlers(
         const current = panelManager.getPanel(existing.id) ?? existing;
         const state = {
           ...current.state,
-          customState: { ...(current.state.customState ?? {}), reopenedAt: new Date().toISOString(), reopenedWithFocus: activate },
+          customState: { ...current.state.customState, reopenedAt: new Date().toISOString(), reopenedWithFocus: activate },
         };
         await panelManager.updatePanel(existing.id, { title, state });
         panel = panelManager.getPanel(existing.id) ?? existing;

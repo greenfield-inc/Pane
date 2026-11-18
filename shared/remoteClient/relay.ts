@@ -191,9 +191,11 @@ export function isRelayComputerUnder(computer: RelayComputer, domain: string): b
  * computer's own code does.
  */
 export function withNewProfiles<T extends RemotePaneConnectionProfile>(saved: readonly T[], added: readonly T[]): T[] {
-  return added.reduce<T[]>((profiles, profile) => (
-    profiles.some(known => known.id === profile.id || known.baseUrl === profile.baseUrl) ? profiles : [...profiles, profile]
-  ), [...saved]);
+  const profiles = [...saved];
+  for (const profile of added) {
+    if (!profiles.some(known => known.id === profile.id || known.baseUrl === profile.baseUrl)) profiles.push(profile);
+  }
+  return profiles;
 }
 
 /** A client that calls one computer's commands: `RemoteDaemonClient`, or a fake in tests. */

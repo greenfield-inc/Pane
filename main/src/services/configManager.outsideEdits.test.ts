@@ -101,7 +101,7 @@ describe('ConfigManager keeps outside edits to config.json', () => {
 
   it('keeps hand-edited overrides when a renderer copy from before the edit saves one key', async () => {
     const rendererCopy = await manager.reloadFromDisk();
-    const staleOverrides = { ...(rendererCopy.keyboardShortcutOverrides ?? {}) };
+    const staleOverrides = { ...rendererCopy.keyboardShortcutOverrides };
     await atomicHandEdit(configPath, addKeys);
     // The CMD-K CMD-S save sends the whole map from the renderer's copy, without the hand-edited ids.
     await manager.updateConfig({ keyboardShortcutOverrides: { ...staleOverrides, 'cycle-tab-next-d': 'mod+alt+]' } });
