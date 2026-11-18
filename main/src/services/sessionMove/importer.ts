@@ -27,6 +27,7 @@ import { buildPathMap, mapPath, rewriteText, type PathMap } from './pathMap';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
 import { isRegeneratedSessionFile, isTextFile } from './sessionFolder';
 import { agentFarmProfileOf, movedLine } from './rules';
+import { MoveLedger, type CommitPlan, type LedgerEntry, type LedgerTab } from './ledger';
 
 const run = promisify(execFile);
 
@@ -65,6 +66,10 @@ export interface TargetStatus {
   missingEnv?: string[];
   /** A failed start the source may ask for again. */
   retryable?: boolean;
+  /** Durable proof the move was rolled back here (or never committed) and can never start: the source may release its copy. */
+  rolledBack?: boolean;
+  /** This machine keeps a durable record of every move it commits, so "no record" means it never committed one. */
+  durable?: boolean;
 }
 
 interface Job {
@@ -214,6 +219,10 @@ function tabCommand(tab: MoveTab): string | undefined {
 export class MoveImporter {
   private readonly jobs = new Map<string, Job>();
   readonly receiver: MoveReceiver;
+  /** Each move's one decision, on disk, so it survives a restart of either machine. */
+  readonly ledger: MoveLedger;
+  /** Starts resumed from the ledger after a restart, by move. */
+  private readonly resuming = new Map<string, Promise<void>>();
 
   constructor(
     private readonly services: AppServices,
@@ -222,8 +231,11 @@ export class MoveImporter {
     private readonly tabs: ImporterTabs = liveTabs,
   ) {
     this.receiver = new MoveReceiver(root);
-    // Staging left by a move that was under way when Pane quit can't be finished: it goes.
+    this.ledger = new MoveLedger(path.join(path.dirname(root), 'move-ledger'));
+    // Staging left by a move that was under way when Pane quit can't be finished: it goes. A move
+    // that was built keeps its ledger entry, which is all its start needs.
     fs.rmSync(root, { recursive: true, force: true });
+    this.ledger.prune();
     setInterval(() => void this.dropAbandoned(), RECEIVE_IDLE_MS / 4).unref();
   }
 
@@ -408,6 +420,8 @@ export class MoveImporter {
   async write(parsed: WriteRequest): Promise<WriteResult> {
     this.refuseTeammate();
     if (!this.jobs.has(parsed.moveId)) {
+      const decided = this.ledger.get(parsed.moveId);
+      if (decided) throw new PaneError('ERR_MOVE_STAGE', `Move ${parsed.moveId} was already ${decided.decision === 'rolledBack' ? 'rolled back' : decided.decision} here.`, 'Start the move again.');
       this.jobs.set(parsed.moveId, { status: { moveId: parsed.moveId, stage: 'receiving', panesDone: 0, panesTotal: 0 }, lastWriteAt: Date.now(), cleanup: [], conversations: [], tabs: [], setAside: [] });
     }
     const job = this.job(parsed.moveId);
@@ -418,16 +432,39 @@ export class MoveImporter {
 
   async status(moveId: string): Promise<TargetStatus> {
     const job = this.jobs.get(moveId);
-    if (job) return { ...job.status };
-    // Pane restarted since: a Session this move started here says so in its moved.json.
+    if (job) return { ...job.status, durable: true };
+    const entry = this.ledger.get(moveId);
+    if (entry) return this.fromLedger(entry);
+    // Moved here by a Pane from before the ledger: a Session this move started says so in its moved.json.
     for (const session of (await this.services.orchestrationSessionManager?.list())?.sessions ?? []) {
       if (session.move?.state === 'arriving') continue;
       const record = await fs.promises.readFile(path.join(sessionWorkspacePath(session.id), 'moved.json'), 'utf8').catch(() => '');
       if (decodeOptionalBoundary(record ? JSON.parse(record) : null, boundary.object({ moveId: boundary.string }))?.moveId === moveId) {
-        return { moveId, stage: 'started', panesDone: 0, panesTotal: 0, resumed: 0, failedTabs: [] };
+        return { moveId, stage: 'started', panesDone: 0, panesTotal: 0, resumed: 0, failedTabs: [], durable: true };
       }
     }
-    return { moveId, stage: 'aborted', panesDone: 0, panesTotal: 0, error: { message: 'This machine has no record of the move (Pane may have restarted).', next: 'Start the move again.' } };
+    return { moveId, stage: 'aborted', panesDone: 0, panesTotal: 0, durable: true, error: { message: 'This machine has no record of the move, so it never started it here.', next: 'Start the move again.' } };
+  }
+
+  /** A move this Pane decided before it restarted, as the source asks for it. */
+  private fromLedger(entry: LedgerEntry): TargetStatus {
+    const base = { moveId: entry.moveId, panesDone: 0, panesTotal: 0, durable: true };
+    const plan = entry.plan;
+    switch (entry.decision) {
+      case 'built':
+        return { ...base, stage: 'built', approvals: plan?.approvals ?? 0, leftBehind: plan?.leftBehind ?? [], missingEnv: plan?.missingEnv ?? [] };
+      case 'committed':
+        // A start cut short by the restart finishes on its own; the source sees it starting meanwhile.
+        void this.resumeCommitted(entry.moveId);
+        return { ...base, stage: 'starting', detail: 'Resuming tabs' };
+      case 'started': {
+        const results = Object.entries(entry.done);
+        const failedTabs = results.filter(([, result]) => result === 'failed').map(([id]) => plan?.tabs.find(tab => tab.id === id)?.title ?? id);
+        return { ...base, stage: 'started', resumed: results.filter(([, result]) => result === 'resumed').length, failedTabs, approvals: plan?.approvals ?? 0, leftBehind: plan?.leftBehind ?? [], missingEnv: plan?.missingEnv ?? [] };
+      }
+      case 'rolledBack':
+        return { ...base, stage: 'aborted', rolledBack: true, error: { message: `The move was rolled back on ${thisMachineName()}; it never started there.`, next: 'Start the move again.' } };
+    }
   }
 
   // ── Build ──────────────────────────────────────────────────────────────
@@ -676,7 +713,32 @@ export class MoveImporter {
       const placement = placements.get(pane.id);
       if (placement) await deleteRefs(placement.projectPath, `refs/pane/move-incoming/${pane.id}`).catch(() => undefined);
     }
-    job.status = { ...job.status, stage: 'built', detail: undefined, approvals: 0, leftBehind, missingEnv: manifest.source.envNames.filter(name => !this.envNamesHere().has(name)) };
+    const missingEnv = manifest.source.envNames.filter(name => !this.envNamesHere().has(name));
+    // Built: the plan goes on disk before the source hears it, so the start survives a restart here.
+    this.ledger.built(moveId, this.commitPlan(job, { leftBehind, missingEnv }));
+    job.status = { ...job.status, stage: 'built', detail: undefined, approvals: 0, leftBehind, missingEnv };
+  }
+
+  /** What the start does, from the build's results, in a form that survives a restart. */
+  private commitPlan(job: Job, { leftBehind, missingEnv }: { leftBehind: string[]; missingEnv: string[] }): CommitPlan {
+    const manifest = job.manifest!;
+    const orchestratorPanels = new Set(Object.values(decodeBoundary(manifest.session.panelIds ?? {}, boundary.jsonObject)));
+    const tabs = job.tabs.map(({ tab }) => {
+      const planned: LedgerTab = {
+        id: tab.id, type: tab.type, title: tab.title,
+        agent: tab.type === 'chat' || !!readTabFields(tab.state).agentId,
+        running: tab.running, working: tab.working, interrupted: tab.interrupted,
+      };
+      if (tab.conversation?.id) planned.conversationId = tab.conversation.id;
+      return planned;
+    });
+    return {
+      sessionId: String(manifest.session.id), source: manifest.source.machine, tabs,
+      told: tabs.filter(tab => orchestratorPanels.has(tab.id) || tab.working).map(tab => tab.id),
+      movedLine: movedLine(manifest.source.machine, thisMachineName(), job.map!),
+      setAside: [...job.setAside], leftovers: job.conversations.flatMap(placed => placed.leftovers),
+      approvals: 0, leftBehind, missingEnv,
+    };
   }
 
   private envNamesHere(): Set<string> {
@@ -739,10 +801,13 @@ export class MoveImporter {
     await this.receiver.remove(job.status.moveId).catch(() => undefined);
   }
 
-  /** Before start only: removes everything this move made here. */
+  /**
+   * Before start only: records the roll-back, then removes everything this move made here. The
+   * record comes first, so a move rolled back here can never start later, even after a restart.
+   */
   async abort(moveId: string): Promise<TargetStatus> {
     const job = this.jobs.get(moveId);
-    if (!job) return { moveId, stage: 'aborted', panesDone: 0, panesTotal: 0 };
+    if (!job) return this.abortFromLedger(moveId);
     if (job.status.stage === 'starting' || job.status.stage === 'started' || job.startFailed) {
       throw new PaneError('ERR_MOVE_STARTED', 'The Session already started here, so the move can no longer be undone.', 'Use the Session here.');
     }
@@ -750,82 +815,142 @@ export class MoveImporter {
       // A build still running stops at its next step, and settles before anything is undone.
       job.abortRequested = true;
       await job.building;
+      this.ledger.decide(moveId, 'rolledBack');
       await this.rollBack(job);
-      job.status = { ...job.status, stage: 'aborted', detail: undefined };
-      return { ...job.status };
+      job.status = { ...job.status, stage: 'aborted', detail: undefined, rolledBack: true };
+      return { ...job.status, durable: true };
     })();
     return job.aborting;
   }
 
+  /**
+   * Abort after a restart here: the build's undo steps are gone with it, so only the roll-back is
+   * recorded and the arriving Session record removed; a move this machine never built is fenced.
+   */
+  private async abortFromLedger(moveId: string): Promise<TargetStatus> {
+    const entry = this.ledger.get(moveId);
+    if (entry?.decision === 'committed' || entry?.decision === 'started') {
+      throw new PaneError('ERR_MOVE_STARTED', 'The Session already started here, so the move can no longer be undone.', 'Use the Session here.');
+    }
+    if (!entry) {
+      const known = await this.status(moveId);
+      if (known.stage === 'started') throw new PaneError('ERR_MOVE_STARTED', 'The Session already started here, so the move can no longer be undone.', 'Use the Session here.');
+    }
+    const decided = this.ledger.decide(moveId, 'rolledBack');
+    if (entry?.decision === 'built' && decided.plan) {
+      const sessionId = decided.plan.sessionId;
+      const manager = this.services.orchestrationSessionManager;
+      const arriving = (await manager?.list())?.sessions.find(session => session.id === sessionId);
+      if (manager && arriving?.move?.state === 'arriving' && arriving.move.moveId === moveId) {
+        await manager.removeArriving(sessionId).catch(error => console.warn(`[SessionMove] The arriving Session ${sessionId} wasn't removed:`, error));
+      }
+      console.warn(`[SessionMove] Move ${moveId} was rolled back after Pane restarted; its Panes and worktrees here stay for you to archive.`);
+    }
+    return this.fromLedger(decided);
+  }
+
   // ── Start ──────────────────────────────────────────────────────────────
 
-  /** After the source froze: shows the Session and starts every tab on its conversation. */
+  /** After the source froze: shows the Session and starts every tab on its conversation. Idempotent. */
   start(moveId: string): TargetStatus {
     this.refuseTeammate();
-    const job = this.job(moveId);
+    const job = this.jobs.get(moveId);
+    if (!job) return this.startFromLedger(moveId);
     // A start that failed before any tab started may be asked again (the source's Check again).
     const retry = job.startFailed && job.status.stage === 'failed';
-    if ((job.status.stage !== 'built' && !retry) || job.abortRequested) return { ...job.status };
+    if ((job.status.stage !== 'built' && !retry) || job.abortRequested) return { ...job.status, durable: true };
     job.status = { ...job.status, stage: 'starting', detail: 'Resuming tabs', error: undefined, retryable: undefined };
-    void this.runStart(job).catch(error => {
+    void this.commit(moveId).then(result => {
+      job.status = { ...job.status, stage: 'started', detail: undefined, ...result };
+    }, error => {
       // The Session isn't usable here yet, so the source must not retire its copy.
       console.error(`[SessionMove] Start of ${moveId} failed:`, error);
       job.startFailed = true;
       const failure = moveError(error);
       job.status = { ...job.status, stage: 'failed', detail: undefined, retryable: true, error: { message: `The Session didn't start on ${thisMachineName()}: ${failure.message}`, next: 'It stays paused on both machines. Check again to retry.' } };
     });
-    return { ...job.status };
+    return { ...job.status, durable: true };
   }
 
-  private async runStart(job: Job): Promise<void> {
-    const manifest = job.manifest!;
-    const sessionId = String(manifest.session.id);
+  /** Start after a restart here: a move built before it starts from its plan; one already decided answers as it stands. */
+  private startFromLedger(moveId: string): TargetStatus {
+    const entry = this.ledger.get(moveId);
+    if (!entry) throw new PaneError('ERR_MOVE_UNKNOWN', `This machine has no move ${moveId} in progress.`, 'Start the move again from the other machine.');
+    if (entry.decision === 'built' || entry.decision === 'committed') {
+      void this.resumeCommitted(moveId);
+      return { moveId, stage: 'starting', detail: 'Resuming tabs', panesDone: 0, panesTotal: 0, durable: true };
+    }
+    return this.fromLedger(entry);
+  }
+
+  /** Finishes the start of every move this Pane had committed (or built and been asked to start) before it quit. */
+  async resume(): Promise<void> {
+    await Promise.all(this.ledger.pending().filter(entry => entry.decision === 'committed').map(entry => this.resumeCommitted(entry.moveId)));
+  }
+
+  private resumeCommitted(moveId: string): Promise<void> {
+    const running = this.resuming.get(moveId);
+    if (running) return running;
+    const resumed = this.commit(moveId).then(() => undefined, error => {
+      // Stays committed: the next status or start asks again, and the source stays frozen meanwhile.
+      console.error(`[SessionMove] The start of ${moveId} didn't finish after Pane restarted:`, error);
+    }).finally(() => this.resuming.delete(moveId));
+    this.resuming.set(moveId, resumed);
+    return resumed;
+  }
+
+  /**
+   * The commit: recorded first, then every step that can't be undone, from the ledger's plan.
+   * Each tab is noted as it is handled, so a start resumed after a restart picks up where it was.
+   */
+  private async commit(moveId: string): Promise<{ resumed: number; failedTabs: string[] }> {
+    const entry = this.ledger.decide(moveId, 'committed');
+    const plan = entry.plan;
+    if (!plan) throw new PaneError('ERR_MOVE_NO_PLAN', `This machine's record of move ${moveId} has no start plan.`, 'Start the move again.');
     const manager = this.services.orchestrationSessionManager!;
     // From here the move is committed: no undo, the previous copies kept for it go.
-    job.cleanup = [];
-    for (const asideId of job.setAside.splice(0)) {
+    const job = this.jobs.get(moveId);
+    if (job) job.cleanup = [];
+    for (const asideId of plan.setAside) {
       try {
         this.services.databaseService.deleteArchivedSessionPermanently(asideId);
       } catch (error) {
         console.warn(`[SessionMove] The replaced archive ${asideId} wasn't deleted:`, error);
       }
     }
-    for (const placed of job.conversations) await placed.commit().catch(error => console.warn('[SessionMove] Commit of a conversation failed:', error));
-    await manager.setMoveMark(sessionId, undefined, `Moved here from ${manifest.source.machine}.`);
-    const failedTabs: string[] = [];
-    let resumed = 0;
-    const line = movedLine(manifest.source.machine, thisMachineName(), job.map!);
-    const orchestratorPanels = new Set(Object.values(decodeBoundary(manifest.session.panelIds ?? {}, boundary.jsonObject)));
-    const told: Array<{ panelId: string; title: string; input: string }> = [];
-    for (const { tab } of job.tabs) {
+    for (const file of plan.leftovers) await fs.promises.rm(file, { force: true }).catch(error => console.warn("[SessionMove] A previous conversation copy wasn't removed:", error));
+    await manager.setMoveMark(plan.sessionId, undefined, `Moved here from ${plan.source}.`);
+    const told = new Set(plan.told);
+    const tell: Array<{ panelId: string; title: string; input: string }> = [];
+    for (const tab of plan.tabs) {
       if (tab.type !== 'terminal' && tab.type !== 'chat') continue;
-      // Every agent tab starts on its conversation; a plain shell starts only if it was running there.
-      const isAgent = tab.type === 'chat' || !!readTabFields(tab.state).agentId;
+      if (entry.done[tab.id]) continue;
+      let result: 'resumed' | 'failed' | 'skipped' = 'skipped';
       try {
-        if (!isAgent && !tab.running) {
+        if (!tab.agent && !tab.running) {
+          // A plain shell starts only if it was running there.
           await this.tabs.clearPaused([tab.id]);
-          continue;
-        }
-        await this.releaseTab(tab.id, tab.type);
-        if (tab.type === 'terminal') await this.registry.invoke('runpane:panels:resume', [{ panelId: tab.id }]);
-        const panel = this.tabs.getPanel(tab.id);
-        const want = tab.conversation?.id;
-        const have = readTabFields(toJsonObject(panel?.state.customState ?? {})).conversationId;
-        if (isAgent && (!want || have === want)) resumed += 1;
-        else if (isAgent) failedTabs.push(tab.title);
-        if (orchestratorPanels.has(tab.id) || tab.working) {
-          told.push({ panelId: tab.id, title: tab.title, input: `${line}${tab.interrupted ? ' Your last turn was interrupted by the move; pick it up where it stopped.' : ''}` });
+        } else {
+          await this.releaseTab(tab.id, tab.type);
+          if (tab.type === 'terminal') await this.registry.invoke('runpane:panels:resume', [{ panelId: tab.id }]);
+          const panel = this.tabs.getPanel(tab.id);
+          const have = readTabFields(toJsonObject(panel?.state.customState ?? {})).conversationId;
+          if (tab.agent) result = !tab.conversationId || have === tab.conversationId ? 'resumed' : 'failed';
+          if (told.has(tab.id)) tell.push({ panelId: tab.id, title: tab.title, input: `${plan.movedLine}${tab.interrupted ? ' Your last turn was interrupted by the move; pick it up where it stopped.' : ''}` });
         }
       } catch (error) {
         console.warn(`[SessionMove] ${tab.title} couldn't resume after the move:`, error);
-        failedTabs.push(tab.title);
+        result = 'failed';
       }
+      this.ledger.tabDone(moveId, tab.id, result);
     }
     // The moved line waits for each agent's composer, so it doesn't hold up the source's confirmation.
-    void Promise.all(told.map(({ panelId, title, input }) => this.registry.invoke('runpane:panels:submit', [{ panelId, input, source: 'agent' }])
+    void Promise.all(tell.map(({ panelId, title, input }) => this.registry.invoke('runpane:panels:submit', [{ panelId, input, source: 'agent' }])
       .catch(error => console.warn(`[SessionMove] The moved line didn't reach ${title}:`, error))));
-    await this.receiver.remove(job.status.moveId).catch(() => undefined);
-    job.status = { ...job.status, stage: 'started', detail: undefined, resumed, failedTabs };
+    await this.receiver.remove(moveId).catch(() => undefined);
+    const done = this.ledger.decide(moveId, 'started');
+    const status = this.fromLedger(done);
+    return { resumed: status.resumed ?? 0, failedTabs: status.failedTabs ?? [] };
   }
 
   /** Clears an arriving tab's move mark so it can start. */

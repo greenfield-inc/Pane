@@ -9,6 +9,7 @@ import { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import { sessionWorkspacePath } from '../sessionWorkspace';
 import { createBundle, createSnapshot } from './gitSnapshot';
 import { MoveImporter, type ImporterTabs, type TargetStatus } from './importer';
+import { settleAfterFreeze, type FreezeTarget } from './afterFreeze';
 import type { MoveManifest, MovePane } from './manifest';
 
 /**
@@ -309,5 +310,131 @@ describe('MoveImporter', () => {
     await expect(importer.abort(moveId)).rejects.toThrow(/already started/);
     importer.start(moveId);
     expect((await waitStage(importer, moveId, ['started', 'failed'])).stage).toBe('started');
+  });
+});
+
+describe('MoveImporter after a restart (F-10, J9)', () => {
+  const registry = new PaneCommandRegistry();
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-importer-restart-'));
+    previousPaneDir = process.env.PANE_DIR;
+    process.env.PANE_DIR = path.join(root, 'pane');
+    fs.mkdirSync(path.join(root, 'target'));
+  });
+  afterEach(() => {
+    if (previousPaneDir === undefined) delete process.env.PANE_DIR;
+    else process.env.PANE_DIR = previousPaneDir;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  /** A Pane that restarts: a new importer on the same folders, its in-memory jobs gone. */
+  const restart = (services: AppServices) => new MoveImporter(services, registry, path.join(root, 'moves'), memoryTabs());
+
+  async function built(services: AppServices): Promise<{ moveId: string; importer: MoveImporter }> {
+    const importer = restart(services);
+    const moveId = newMoveId();
+    await stage(importer, manifest(moveId, []), {});
+    importer.build(moveId);
+    expect((await waitStage(importer, moveId, ['built', 'failed'])).stage).toBe('built');
+    return { moveId, importer };
+  }
+
+  it('restarted after the build, before the start arrived: it still says built, and a resent start completes the move', async () => {
+    const { services, setMoveMark } = fakeServices(path.join(root, 'target'));
+    const { moveId } = await built(services);
+    const after = restart(services);
+    expect(await after.status(moveId)).toMatchObject({ stage: 'built', durable: true });
+    after.start(moveId);
+    expect((await waitStage(after, moveId, ['started', 'failed', 'aborted'])).stage).toBe('started');
+    expect(setMoveMark).toHaveBeenCalledWith('sess-1', undefined, 'Moved here from A.');
+    // Asked again (a start resent while the answer was lost): still started, nothing runs twice.
+    expect(after.start(moveId).stage).toBe('started');
+    expect(setMoveMark).toHaveBeenCalledTimes(1);
+  });
+
+  it('restarted mid-commit: the start resumes on its own and the move ends started', async () => {
+    const { services, setMoveMark } = fakeServices(path.join(root, 'target'));
+    const { moveId, importer } = await built(services);
+    // The commit is recorded, then Pane quits before the start finishes.
+    setMoveMark.mockImplementationOnce(() => new Promise(() => undefined));
+    importer.start(moveId);
+    expect((await importer.status(moveId)).stage).toBe('starting');
+    const after = restart(services);
+    await after.resume();
+    expect(await after.status(moveId)).toMatchObject({ stage: 'started', durable: true });
+    // A committed move can no longer be rolled back.
+    await expect(after.abort(moveId)).rejects.toThrow(/already started/);
+  });
+
+  it('rolled back after a restart: it proves the roll-back, removes the arriving Session record, and never starts later', async () => {
+    const { services } = fakeServices(path.join(root, 'target'));
+    const removeArriving = vi.fn(async () => undefined);
+    const sessions = [{ id: 'sess-1', move: { state: 'arriving', machine: 'A', moveId: '', at: '' } }];
+    Object.assign(services.orchestrationSessionManager!, { list: async () => ({ sessions }), removeArriving });
+    const { moveId } = await built(services);
+    sessions[0].move.moveId = moveId;
+    const after = restart(services);
+    expect(await after.abort(moveId)).toMatchObject({ stage: 'aborted', rolledBack: true });
+    expect(removeArriving).toHaveBeenCalledWith('sess-1');
+    expect(after.start(moveId)).toMatchObject({ stage: 'aborted', rolledBack: true });
+    expect(await restart(services).status(moveId)).toMatchObject({ stage: 'aborted', rolledBack: true });
+  });
+
+  it('a move it has no record of was never committed: rolling it back fences it, so it can never start', async () => {
+    const { services } = fakeServices(path.join(root, 'target'));
+    const importer = restart(services);
+    const moveId = newMoveId();
+    expect(await importer.status(moveId)).toMatchObject({ stage: 'aborted', durable: true });
+    expect(await importer.abort(moveId)).toMatchObject({ stage: 'aborted', rolledBack: true });
+    // The package turns up late: the fenced move refuses it, and can't start.
+    await expect(stage(importer, manifest(moveId, []), {})).rejects.toThrow(/rolled back/);
+    expect(importer.start(moveId)).toMatchObject({ stage: 'aborted', rolledBack: true });
+  });
+
+  it('an abort before the start records the roll-back first, so the source may release its copy', async () => {
+    const { services } = fakeServices(path.join(root, 'target'));
+    const { moveId, importer } = await built(services);
+    expect(await importer.abort(moveId)).toMatchObject({ stage: 'aborted', rolledBack: true });
+    expect(await restart(services).status(moveId)).toMatchObject({ stage: 'aborted', rolledBack: true });
+  });
+
+  it('end to end: the source loses its start, the target restarts, and the move still completes on its own', async () => {
+    const { services, setMoveMark } = fakeServices(path.join(root, 'target'));
+    const { moveId } = await built(services);
+    // The link drops the first start; then the target restarts before anything else arrives.
+    let target = restart(services);
+    let dropped = 0;
+    const link: FreezeTarget = {
+      status: async () => target.status(moveId),
+      start: async () => { if (dropped++ === 0) throw new Error('connection reset'); return target.start(moveId); },
+      rollBack: async () => target.abort(moveId),
+    };
+    let rounds = 0;
+    const outcome = await settleAfterFreeze(link, {
+      onWait: () => { if (rounds === 1) target = restart(services); },
+      stopped: () => (rounds += 1) > 200,
+      sleep: () => new Promise(resolve => setTimeout(resolve, 5)),
+    });
+    expect(outcome?.kind).toBe('committed');
+    expect(dropped).toBeGreaterThanOrEqual(2);
+    expect(setMoveMark).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fs.readFileSync(path.join(root, 'move-ledger', `${moveId}.json`), 'utf8')).decision).toBe('started');
+  });
+
+  it('end to end: an unreachable target never releases the source', async () => {
+    const { services } = fakeServices(path.join(root, 'target'));
+    const { moveId } = await built(services);
+    const released = vi.fn();
+    let rounds = 0;
+    const outcome = await settleAfterFreeze({
+      status: async () => { throw new Error('timed out'); },
+      start: async () => { throw new Error('timed out'); },
+      rollBack: async () => { released(); throw new Error('timed out'); },
+    }, { onWait: () => undefined, stopped: () => (rounds += 1) > 100, sleep: async () => undefined });
+    expect(outcome).toBeUndefined();
+    expect(released).not.toHaveBeenCalled();
+    // The target still holds the move, undecided, for when contact comes back.
+    expect(await restart(services).status(moveId)).toMatchObject({ stage: 'built' });
   });
 });

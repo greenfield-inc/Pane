@@ -106,6 +106,8 @@ export interface PlacedConversation {
   undo(): Promise<void>;
   /** Drops the previous copies kept for undo, and any stale copy in another Claude folder. */
   commit(): Promise<void>;
+  /** The files `commit` removes, so a start resumed after a restart can remove them too. */
+  leftovers: string[];
 }
 
 interface Placement {
@@ -190,14 +192,15 @@ export async function placeConversation(
     await undo();
     throw new PaneError('ERR_MOVE_CONVERSATION_PLACE', `Conversation ${conversation.id} couldn't be filed on ${machine.here}: ${reasonOf(error)}. Its store was put back as it was.`, 'Check the disk on that machine, then move again.');
   }
+  // One copy per id: a copy in another Claude folder (from an earlier move) goes on commit too.
+  const leftovers = [...done.filter(placement => placement.hadPrevious).map(placement => placement.previous), ...stale];
   return {
     mainPath: placements[0].target,
     undo,
     commit: async () => {
-      for (const placement of done) await fs.promises.rm(placement.previous, { force: true });
-      // One copy per id: a copy in another Claude folder (from an earlier move) goes.
-      for (const file of stale) await fs.promises.rm(file, { force: true });
+      for (const file of leftovers) await fs.promises.rm(file, { force: true });
     },
+    leftovers,
   };
 }
 
