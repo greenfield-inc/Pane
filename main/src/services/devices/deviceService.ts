@@ -97,11 +97,14 @@ export interface DeviceServiceOptions {
    * Which boot a running device is in (a simulator's launchd_sim, an emulator's kernel boot id), or
    * undefined when Pane cannot tell; this machine's own check when absent.
    */
-  bootIdentity?: (device: { id: string; platform: DevicePlatform; serial?: string }) => Promise<string | undefined>;
+  bootIdentity?: (device: BootTarget) => Promise<string | undefined>;
   /** The helpers started installing on this machine. */
   onInstall?: () => void;
   log?: (message: string) => void;
 }
+
+/** A device as the boot check names it: its id, platform and, for an emulator, its adb serial. */
+export interface BootTarget { id: string; platform: DevicePlatform; serial?: string }
 
 export type DeviceChange =
   | { kind: 'held'; id: string; paneId: string; previous?: string }
@@ -1020,14 +1023,16 @@ export class DeviceService {
   }
 
   private bootIdentityOf(device: HubDevice): Promise<string | undefined> {
-    return (this.options.bootIdentity ?? (target => this.ownBootIdentity(target)))({ id: device.id, platform: device.platform, ...(device.serial ? { serial: device.serial } : {}) });
+    const target: BootTarget = { id: device.id, platform: device.platform };
+    if (device.serial) target.serial = device.serial;
+    return (this.options.bootIdentity ?? (candidate => this.ownBootIdentity(candidate)))(target);
   }
 
   /**
    * This machine's answer to which boot a device is in: a simulator's launchd_sim process (its pid
    * and start time, new on every boot), or an emulator's kernel boot id.
    */
-  private async ownBootIdentity(device: { id: string; platform: DevicePlatform; serial?: string }): Promise<string | undefined> {
+  private async ownBootIdentity(device: BootTarget): Promise<string | undefined> {
     if (device.platform === 'ios') {
       if (process.platform !== 'darwin') return undefined;
       const { stdout } = await execFileAsync('ps', ['-axo', 'pid=,lstart=,command='], { maxBuffer: 16 * 1024 * 1024 });

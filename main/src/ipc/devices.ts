@@ -1,4 +1,5 @@
-import { nativeImage, type IpcMain } from 'electron';
+import type { IpcMain } from 'electron';
+import { FrameScaler } from '../services/devices/frameScaler';
 import os from 'os';
 import path from 'path';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
@@ -93,7 +94,9 @@ function onMac(paneId: string, platform: DevicePlatform | undefined): boolean {
   return wanted === undefined || wanted === lease.platform;
 }
 let remote: RemoteDevices | undefined;
-let machines: MachineConnections | undefined;
+/** The saved computers' connections, as the device code uses them. */
+type DeviceMachines = Pick<MachineConnections, 'invokeOn' | 'machineState' | 'openPortStream'>;
+let machines: DeviceMachines | undefined;
 
 /** iOS on a linked Mac for a computer without Xcode. */
 function remoteDevices(services: AppServices): RemoteDevices {
@@ -114,7 +117,7 @@ function remoteDevices(services: AppServices): RemoteDevices {
 }
 
 /** Main hands over the saved machines' connections once they exist; iOS on a PC routes through them. */
-export function setDeviceMachines(connections: MachineConnections): void {
+export function setDeviceMachines(connections: DeviceMachines): void {
   machines = connections;
 }
 
@@ -133,20 +136,22 @@ function paneNameOf(services: AppServices, paneId: string): string {
 
 /** The devices service on this machine; created on the first device call. */
 function deviceService(services: AppServices): DeviceService {
-  service ??= new DeviceService({
+  if (service) return service;
+  const options: DeviceServiceOptions = {
     root: path.join(getAppDirectory(), 'devices'),
     machineName: localMachineName,
     machineLabel: localMachineLabel,
     findExecutable: findExecutableInPath,
     probeEnvironment: () => (deviceOptions.probeEnvironment ?? defaultProbeEnvironment)(findExecutableInPath),
-    ...(deviceOptions.bootIdentity ? { bootIdentity: deviceOptions.bootIdentity } : {}),
     maxBooted: () => deviceSettings(services).maxBooted,
     paneName: (paneId) => paneNameOf(services, paneId),
     onChange: (change) => { void followDeviceChange(change); },
     // A recording stops, and saves, before the lease that made it ends.
     beforeRelease: (paneId, id, by) => stopRecordingsOn(services, paneId, id, by),
     log: (message) => console.log(message),
-  });
+  };
+  if (deviceOptions.bootIdentity) options.bootIdentity = deviceOptions.bootIdentity;
+  service = new DeviceService(options);
   return service;
 }
 
@@ -710,28 +715,24 @@ function withPosture(posture: DevicePosture | undefined): NonNullable<DeviceCont
  * Each tab's last frame and its scaled copy: a still screen sends the same bytes again (as a new
  * buffer), and comparing bytes costs far less than scaling them.
  */
-const fittedFrames = new Map<string, { source: Buffer; maxPx: number; fitted: Buffer }>();
+const fittedFrames = new Map<string, { source: Buffer; maxPx: number; url: string }>();
+/** Scales remote viewers' frames outside the main process. */
+const frameScaler = new FrameScaler();
 
 /**
- * `frame` scaled so its longest side is at most `maxPx`, as a JPEG; unchanged when it already fits
- * or no size is asked. `panelId` keys the copy kept for a frame that repeats.
+ * `frame` as a data URL no larger than `maxPx` on its longest side (scaled off the main thread),
+ * or whole when no size is asked, it already fits or it cannot be scaled here. `panelId` keys the
+ * copy kept for a frame that repeats.
  */
-function fitFrame(panelId: string, frame: Buffer, maxPx: number | undefined): Buffer {
-  if (maxPx === undefined) return frame;
+async function fittedFrame(panelId: string, frame: Buffer, maxPx: number | undefined): Promise<string> {
+  if (maxPx === undefined) return imageDataUrl(frame);
   const cached = fittedFrames.get(panelId);
-  if (cached && cached.maxPx === maxPx && cached.source.equals(frame)) return cached.fitted;
-  const image = nativeImage.createFromBuffer(frame);
-  const { width, height } = image.getSize();
-  const longest = Math.max(width, height);
-  if (longest <= maxPx) return frame;
-  const scale = maxPx / longest;
-  const fitted = image.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: 'good' }).toJPEG(FRAME_JPEG_QUALITY);
-  fittedFrames.set(panelId, { source: frame, maxPx, fitted });
-  return fitted;
+  if (cached && cached.maxPx === maxPx && cached.source.equals(frame)) return cached.url;
+  const scaled = await frameScaler.scale(frame, maxPx);
+  if (!scaled) return imageDataUrl(frame);
+  fittedFrames.set(panelId, { source: frame, maxPx, url: scaled });
+  return scaled;
 }
-
-/** JPEG quality for a scaled frame: sharp text at a fraction of the bytes. */
-const FRAME_JPEG_QUALITY = 80;
 
 /** A frame as a data URL: PNG from an emulator, JPEG from a simulator's stream. */
 function imageDataUrl(frame: Buffer): string {
@@ -808,7 +809,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     if (!state.deviceId) throw new PaneError('ERR_DEVICE_NOT_OPEN', 'This tab has no device yet.', 'Wait for it to boot.');
     const frame = state.machineId ? await remoteDevices(services).frame(panel.sessionId) : await devices().latestFrame(state.deviceId);
     const px = decodeOptionalBoundary(maxPx, boundary.number);
-    return imageDataUrl(fitFrame(panel.id, frame, px === undefined ? undefined : streamSize(String(px))));
+    return fittedFrame(panel.id, frame, px === undefined ? undefined : streamSize(String(px)));
   }));
 
   /** What the device can do now (turn, fold) and how it is turned and folded, for the tab's controls. */
@@ -1053,6 +1054,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
 export async function disposeDevices(): Promise<void> {
   inputSockets.closeAll();
   emulatorLogs.stopAll();
+  frameScaler.close();
   // A recording does not outlive Pane: its tab says so now, not 5 s into the next start.
   for (const panelId of [...recordings.keys()]) {
     const panel = panelManager.getPanel(panelId);

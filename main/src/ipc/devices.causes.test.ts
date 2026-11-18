@@ -78,6 +78,7 @@ const serviceFixture = {
 // SAFETY: the fixture supplies the AppServices members the device channels read.
 // The stand-in simulator stays in one boot for these tests while it runs.
 const bootIdentity = async () => (readFileSync(path.join(helpers, 'booted.json'), 'utf8') === 'true' ? 'boot-1' : undefined);
+// SAFETY: the stub only records Settings registrations, and the fixture supplies the AppServices members the device channels read.
 registerDeviceHandlers({ handle: vi.fn() } as Pick<IpcMain, 'handle'>, serviceFixture as AppServices, registry, { probeEnvironment: machine, bootIdentity });
 afterAll(async () => {
   await disposeDevices();

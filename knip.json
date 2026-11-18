@@ -78,6 +78,7 @@
       "entry": [
         "src/index.ts",
         "src/preload.ts",
+        "src/services/devices/frameScalerPreload.ts",
         "src/daemon/headless.ts",
         "src/ptyHost/ptyHostMain.ts",
         "src/services/mcpPermissionBridge.ts",
