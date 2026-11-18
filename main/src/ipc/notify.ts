@@ -36,8 +36,9 @@ import { thisMachineName, type ApprovalStore } from '../services/approvals/appro
 import type { LoopManager } from '../services/loops/loopManager';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 import type { AgentState } from '../../../shared/types/agentStatus';
-import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
-import { paneSecretStore } from '../services/paneSecrets';
+import { paneSecretNameProblem, paneSecretProjectProblem, SECRET_LEASE_DEFAULT_MS, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
+import { paneSecretStore, secretLeaseStore } from '../services/paneSecrets';
+import { secretLeaseService } from '../services/secretLeaseRuntime';
 import { agentLabel } from '../../../shared/agents';
 
 const MAX_CHOICES = 9;
@@ -82,6 +83,7 @@ const notifyRequestSchema = boundary.object({
   suggestions: boundary.optional(boundary.array(boundary.string)),
   action: boundary.optional(boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString })),
   secret: boundary.optional(boundary.object({ project: boundary.string, name: boundary.string })),
+  lease: boundary.optional(boundary.object({ project: boundary.string, names: boundary.array(boundary.string) })),
   links: boundary.optional(boundary.array(linkInputSchema)),
   resume: boundary.optional(boundary.nonEmptyString),
   took: boundary.optional(boundary.string),
@@ -101,10 +103,17 @@ const notifyRequestSchema = boundary.object({
   }),
 });
 
+const MAX_LEASE_NAMES = 20;
+
 const answerSchema = boundary.union(
   boundary.object({ picks: boundary.array(boundary.string), text: boundary.optional(boundary.string) }),
   boundary.object({ choice: boundary.nonEmptyString, note: boundary.optional(boundary.string) }),
-  boundary.object({ approved: boundary.boolean, note: boundary.optional(boundary.string) }),
+  boundary.object({
+    approved: boundary.boolean,
+    note: boundary.optional(boundary.string),
+    // Set only by the desktop that started the lease a lease card asks for.
+    lease: boundary.optional(boundary.object({ id: boundary.nonEmptyString, expiresAt: boundary.string, machines: boundary.array(boundary.string) })),
+  }),
   boundary.object({ text: boundary.string }),
 );
 const idCommand = <const T extends string>(type: T) => boundary.object({ type: boundary.literal(type), id: boundary.nonEmptyString });
@@ -217,6 +226,16 @@ const notifyItemSchema = boundary.object({
   agentPrompt: boundary.optional(boundary.object({ yes: boundary.string, no: boundary.string, inTerminal: boundary.optional(boundary.boolean) })),
   secret: boundary.optional(boundary.object({ project: boundary.string, name: boundary.string, replaces: boundary.optional(boundary.boolean) })),
   secretError: boundary.optional(boundary.string),
+  lease: boundary.optional(boundary.object({
+    project: boundary.string,
+    names: boundary.array(boundary.string),
+    references: boundary.optional(boundary.record(boundary.string)),
+    lengthMs: boundary.optional(boundary.number),
+    machine: boundary.optional(boundary.string),
+    memoryOnly: boundary.optional(boundary.boolean),
+    renews: boundary.optional(boundary.string),
+  })),
+  leaseError: boundary.optional(boundary.string),
   links: boundary.optional(boundary.array(linkSchema)),
   source: boundary.object({
     paneId: boundary.optional(boundary.string),
@@ -401,6 +420,37 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       exists: (project, name) => paneSecretStore().has(project, name),
       save: async (project, name, value) => { await paneSecretStore().set(project, name, value); },
     },
+    leases: {
+      describe: (project, names) => {
+        const store = paneSecretStore();
+        const references: Record<string, string> = {};
+        for (const name of names) {
+          const reference = store.referenceOf(project, name);
+          if (reference) references[name] = reference;
+        }
+        const lengthMs = secretLeaseService()?.lengthFor(project) ?? services.configManager.getConfig().secretLeaseLengths?.[project] ?? SECRET_LEASE_DEFAULT_MS;
+        return { references, lengthMs, memoryOnly: secretLeaseStore().memoryOnly() };
+      },
+    },
+    startLease: async (item, machineId) => {
+      const service = secretLeaseService();
+      const lease = item.lease;
+      if (!service || !lease) throw new PaneError('SECRET_LEASE_NEEDS_DESKTOP', 'This Pane can\'t start leases. Nothing was leased.', 'Press Start lease in Pane on your Mac or PC.');
+      const started = await service.start({
+        project: lease.project,
+        names: lease.names,
+        machines: machineId ? [machineId] : [],
+        requestedBy: `${item.source.agent} in "${item.source.name}"`,
+        ...(lease.renews ? { renews: lease.renews } : {}),
+      });
+      const refused = started.refused.map(entry => `${entry.machine}: ${entry.reason}`);
+      // The machine that asked must hold it, or its agent can't use it.
+      if (machineId && refused.length > 0 && !lease.renews) {
+        await service.end(started.leaseId);
+        throw new PaneError('SECRET_LEASE_REFUSED', `The lease could not reach the machine that asked (${refused.join('; ')}). It was ended everywhere.`, 'Fix that machine, then press Start lease again.');
+      }
+      return { id: started.leaseId, expiresAt: started.expiresAt, machines: started.machines };
+    },
     publish: (state) => getPaneEventSink().send('notify:shared-changed', state),
     sendToMachine: async (machineId, command) => {
       if (!saved) throw new PaneError('ERR_MACHINE_UNKNOWN', 'Pane is still starting its machine connections. Nothing was sent.', 'Answer again in a moment.');
@@ -502,6 +552,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     const teammate = teammatePaneCaller();
     // A secret card writes the owner's secret store, so a teammate cannot post one.
     if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
+    if (teammate && parsed.lease) throw teammateSecretRefusal(teammate, 'ask for a lease');
     const warnings = [...admitNotifyCard(parsed), ...loopInfoWarning(parsed)];
     const result = await notify.ask(parsed, paneCommandSignal());
     // A card that wasn't shown (a worker's, sent back to its orchestrator) has nothing to warn about.
@@ -840,6 +891,13 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
     if (problem) throw invalid(problem);
   } else if (request.secret) {
     throw invalid(`secret only goes with ui: secret, not ${ui}.`);
+  }
+  if (request.lease) {
+    // Created only by `runpane secrets lease`; the host words the title and fills in the rest.
+    if (ui !== 'approve') throw invalid(`lease only goes with ui: approve, not ${ui}.`);
+    if (request.lease.names.length === 0 || request.lease.names.length > MAX_LEASE_NAMES) throw invalid(`a lease names 1 to ${MAX_LEASE_NAMES} secrets.`);
+    const problem = paneSecretProjectProblem(request.lease.project) ?? request.lease.names.map(paneSecretNameProblem).find(Boolean) ?? null;
+    if (problem) throw invalid(problem);
   }
   if (!request.title?.trim()) throw invalid('title is required.');
   if (request.title.length > MAX_TEXT) throw invalid(`title takes up to ${MAX_TEXT} characters.`);

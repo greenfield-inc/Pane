@@ -11,6 +11,7 @@ import type {
   NotifyConnected,
   NotifyInstructionsFile,
   NotifyItem,
+  NotifyLeaseTarget,
   NotifyQuestion,
   NotifyReply,
   NotifyReplyReader,
@@ -169,6 +170,10 @@ export interface NotifyQueueEnvironment {
   secrets?: {
     exists(project: string, name: string): boolean;
     save(project: string, name: string, value: string): Promise<void>;
+  };
+  /** What a lease card shows about this machine's side of a lease. */
+  leases?: {
+    describe(project: string, names: readonly string[]): { references: Record<string, string>; lengthMs: number; memoryOnly: boolean };
   };
   /** The Session a Pane (and tab) works in, filed on each new item; Approvals groups by it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
@@ -408,6 +413,10 @@ export class NotifyQueue extends EventEmitter {
       const { project, name } = question.secret;
       item.secret = { project, name, replaces: this.env.secrets?.exists(project, name) ?? false };
     }
+    if (question.lease) {
+      if (question.ui !== 'approve' || !this.env.leases) return Promise.resolve(unavailable('This Pane cannot lease secrets.'));
+      Object.assign(item, leaseCard(question.lease, this.env.leases, this.machine()));
+    }
     item.originKind = originOf(item);
     item.connected = request.connected ?? connectedOf(item, this.machine());
     const entry: Entry = { item, resumeLoop: false };
@@ -481,8 +490,9 @@ export class NotifyQueue extends EventEmitter {
     if (teammate && command.type.startsWith('agent-')) {
       throw new PaneError('ERR_NOTIFY_NOT_AUTOPILOT', `${teammate} can't act as Autopilot on ${this.machine()}. Nothing was changed.`, 'Answer or close it as yourself instead.');
     }
-    if (teammate && entry.item.ui === 'secret' && command.type !== 'dismiss' && command.type !== 'skip' && command.type !== 'remind') {
-      throw teammateSecretRefusal(teammate, command.type === 'answer' ? 'answer a secret card' : `${command.type} a secret card`);
+    if (teammate && (entry.item.ui === 'secret' || entry.item.lease) && command.type !== 'dismiss' && command.type !== 'skip' && command.type !== 'remind') {
+      const card = entry.item.lease ? 'a lease card' : 'a secret card';
+      throw teammateSecretRefusal(teammate, command.type === 'answer' ? `answer ${card}` : `${command.type} ${card}`);
     }
     switch (command.type) {
       case 'close': this.closeBy(command.id, 'you', command.reason ?? '', device); return;
@@ -565,6 +575,15 @@ export class NotifyQueue extends EventEmitter {
     }
   }
 
+  /** Why a desktop could not start the lease this card asks for; the card keeps waiting with it shown. Null clears it. */
+  noteLeaseError(id: string, text: string | null): void {
+    const entry = this.entries.get(id);
+    if (!entry?.item.lease || entry.item.state !== 'waiting') return;
+    if (text === null) delete entry.item.leaseError;
+    else entry.item.leaseError = text;
+    this.changed();
+  }
+
   /** The orchestrator recorded this answer as a D-n (J8). */
   recordDecision(id: string, decision: string): boolean {
     const entry = this.entries.get(id);
@@ -584,6 +603,10 @@ export class NotifyQueue extends EventEmitter {
     if (!entry) throw new PaneError('ERR_NOTIFY_GONE', `That item is no longer on ${this.machine()}. Nothing was changed.`, 'List what waits again with runpane autopilot waiting --json.');
     if (entry.item.agentPrompt) {
       throw new PaneError('AUTOPILOT_CANNOT_ANSWER', `Autopilot can't answer or close the permission prompt "${entry.item.title}": permission prompts grant an agent power, so they stay the person's (D-149). Nothing was changed; it still waits.`, 'Point the person to the buttons on its card.');
+    }
+    if (entry.item.lease && action.type !== 'agent-close') {
+      // Only the person grants access to their 1Password, on their computer (D-130).
+      throw new PaneError('AUTOPILOT_CANNOT_ANSWER', `Autopilot can't answer or rewrite the lease card "${entry.item.title}": only the person starts a lease, on their computer. Nothing was changed; it still waits.`, 'Point the person to the card.');
     }
     if (entry.item.ui === 'secret' && action.type !== 'agent-close') {
       // A secret's value goes only to the secret store, from the person (#1014); Autopilot has none to give.
@@ -1793,6 +1816,7 @@ export class NotifyQueue extends EventEmitter {
       throw new PaneError('ERR_NOTIFY_IN_TERMINAL', `${entry.item.source.agent} stopped waiting on Pane and is asking in its terminal now. Nothing was sent.`, 'Open the tab and answer in the terminal.');
     }
     if (entry.item.ui === 'secret') return this.answerSecret(entry, answer, device);
+    if (entry.item.lease) return this.answerLease(entry, answer, device);
     const typed = 'picks' in answer ? answer.text?.trim() ?? '' : '';
     if ('picks' in answer && typed && entry.item.optionsOnly) {
       throw new Error('This question takes only one of its options: pick one, or answer in its chat.');
@@ -1853,6 +1877,35 @@ export class NotifyQueue extends EventEmitter {
     entry.saving = false;
     if (entry.item.state !== 'waiting') return;
     this.finishSecret(entry, { status: 'saved', project: target.project, name: target.name }, `Saved as ${target.project}/${target.name}`, device);
+  }
+
+  /**
+   * A lease card ends at once: Decline, or Approve from a desktop that already read 1Password and
+   * pushed the lease (it sends the lease with the answer). A plain Approve, from a screen too old for
+   * leases or from the phone, is refused with the next step: only a computer can show 1Password's prompt.
+   */
+  private answerLease(entry: Entry, answer: NotifyAnswer, device?: string): void {
+    const target = entry.item.lease;
+    if (!target) return;
+    if (!('approved' in answer)) throw new Error('A lease card takes Start lease or Decline.');
+    if (!answer.approved) {
+      this.finishSecret(entry, { status: 'declined' }, 'Declined', device);
+      return;
+    }
+    if (!answer.lease) {
+      throw new PaneError(
+        'SECRET_LEASE_NEEDS_DESKTOP',
+        'Only Pane on a computer can start a lease, because 1Password asks for approval there. Nothing was leased.',
+        'Press Start lease on the card in Pane on your Mac or PC.',
+      );
+    }
+    const { id, expiresAt, machines } = answer.lease;
+    this.finishSecret(
+      entry,
+      { status: 'leased', project: target.project, names: [...target.names], leaseId: id, expiresAt, machines: [...machines] },
+      `Leased until ${new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} on ${machines.join(', ')}`,
+      device,
+    );
   }
 
   private finishSecret(entry: Entry, result: NotifyResult, summary: string, device?: string): void {
@@ -2028,7 +2081,8 @@ export class NotifyQueue extends EventEmitter {
     return { ...source, ...(session && { session }), ...(project && { project }) };
   }
 
-  private find(id: string): NotifyItem | undefined {
+  /** This machine's item, or another machine's this screen follows (keyed `<machineId>:<id>`). */
+  find(id: string): NotifyItem | undefined {
     const local = this.entries.get(id)?.item;
     if (local) return local;
     for (const remote of this.remotes.values()) {
@@ -2266,4 +2320,21 @@ function summarize(item: NotifyItem, result: NotifyResult): string {
   if ('approved' in result) return `${result.approved ? 'Approved' : 'Denied'}${note}`;
   if ('answer' in result) return `${result.answer}${note}`;
   return item.title;
+}
+
+/** The host's side of a lease card: its references, length and storage, and a title the agent can't word. */
+function leaseCard(
+  lease: NotifyLeaseTarget,
+  leases: NonNullable<NotifyQueueEnvironment['leases']>,
+  machine: string,
+): Pick<NotifyItem, 'lease' | 'title'> {
+  const names = [...new Set(lease.names)];
+  const described = leases.describe(lease.project, names);
+  const hours = described.lengthMs / 3_600_000;
+  const length = hours >= 48 && Number.isInteger(hours / 24) ? `${hours / 24} days` : hours >= 1 ? `${Math.round(hours * 10) / 10} hours` : `${Math.round(described.lengthMs / 60_000)} minutes`;
+  const what = names.length === 1 ? `${lease.project}/${names[0]}` : `${names.length} ${lease.project} secrets`;
+  return {
+    title: lease.renews ? `Extend the lease on ${what} for ${length}?` : `Lease ${what} for ${length}?`,
+    lease: { project: lease.project, names, references: described.references, lengthMs: described.lengthMs, machine, memoryOnly: described.memoryOnly, ...(lease.renews ? { renews: lease.renews } : {}) },
+  };
 }

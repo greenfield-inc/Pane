@@ -25,7 +25,11 @@ export function registerSharedCredentialHandlers(
   secrets: PaneSecretStore = paneSecretStore(),
 ): void {
   const { configManager } = services;
-  const readAll = async () => ({ ...readSharedCredentials(configManager.getConfig()), paneSecrets: await secrets.exportForSync() });
+  const readAll = async () => ({
+    ...readSharedCredentials(configManager.getConfig()),
+    paneSecrets: await secrets.exportForSync(),
+    paneSecretReferences: secrets.exportReferencesForSync(),
+  });
   commandRegistry.register('credentials:shared:get', async (_input: PaneCommandValue, trusted: PaneCommandValue) => {
     decodeBoundary(trusted, trustedSchema);
     return readAll();
@@ -34,7 +38,10 @@ export function registerSharedCredentialHandlers(
     decodeBoundary(trusted, trustedSchema);
     const incoming = decodeBoundary(input, sharedCredentialsSchema);
     const { changed } = await applySharedCredentials(configManager, incoming);
-    const changedSecrets = incoming.paneSecrets ? await secrets.applyFromSync(incoming.paneSecrets) : [];
+    const changedSecrets = [
+      ...(incoming.paneSecrets ? await secrets.applyFromSync(incoming.paneSecrets) : []),
+      ...(incoming.paneSecretReferences ? await secrets.applyReferencesFromSync(incoming.paneSecretReferences) : []),
+    ];
     // Carries no values, so no key ever rides an event.
     if (changed.length + changedSecrets.length > 0) getPaneEventSink().send('remote:settings-changed');
     // The keys only, as before secrets: callers ignore the answer, so secret values never travel back.

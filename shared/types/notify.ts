@@ -24,6 +24,34 @@ export interface NotifySecretTarget {
   replaces?: boolean;
 }
 
+/**
+ * A lease card (ui `approve` with this set): an agent asks to lease 1Password references.
+ * Only a desktop starts the lease, since only it can show 1Password's prompt: it reads 1Password,
+ * pushes the lease, then answers `{ approved: true, lease }`. An older screen shows a plain
+ * approve card, and the host refuses its Approve with the next step.
+ */
+export interface NotifyLeaseTarget {
+  project: string;
+  names: string[];
+  /** Set by the host: each name's 1Password reference, as its synced index has it. */
+  references?: Record<string, string>;
+  /** Set by the host: lease length in ms for the project. */
+  lengthMs?: number;
+  /** Set by the host: its own machine name, where the asking agent runs. */
+  machine?: string;
+  /** Set by the host: it can't encrypt at rest, so its copy is held in memory only. */
+  memoryOnly?: boolean;
+  /** A renewal: the lease being extended. */
+  renews?: string;
+}
+
+/** The lease a desktop started for a lease card, sent with its Approve. */
+export interface NotifyLeaseGranted {
+  id: string;
+  expiresAt: string;
+  machines: string[];
+}
+
 export interface NotifyChoice {
   label: string;
   detail?: string;
@@ -84,6 +112,10 @@ export interface NotifyQuestion {
   secret?: NotifySecretTarget;
   /** secret only, set by the host: why the last save failed (never contains the value). The card stays waiting for another try. */
   secretError?: string;
+  /** approve only: this card asks to lease 1Password references. */
+  lease?: NotifyLeaseTarget;
+  /** lease only, set by the desktop that tried: why the lease could not start. The card stays waiting. */
+  leaseError?: string;
   /** Set when the question mirrors a prompt in an agent's terminal (Claude's permission and plan prompts). */
   agentPrompt?: NotifyAgentPrompt;
   /**
@@ -183,6 +215,8 @@ export type NotifyResultBody =
   /** secret: the value was saved as `project/name`; it is never returned. */
   | { status: 'saved'; project: string; name: string }
   | { status: 'declined' }
+  /** lease: the person approved and the desktop leased the secrets; never a value. */
+  | { status: 'leased'; project: string; names: string[]; leaseId: string; expiresAt: string; machines: string[] }
   | { waiting: true; id: string; next: string }
   | { unavailable: string; next: string };
 
@@ -588,7 +622,7 @@ export type NotifyAnswer =
    */
   | { picks: string[]; text?: string }
   | { choice: string; note?: string }
-  | { approved: boolean; note?: string }
+  | { approved: boolean; note?: string; lease?: NotifyLeaseGranted }
   | { text: string };
 
 export type NotifyCommand =

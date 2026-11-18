@@ -63,6 +63,32 @@ export function secretSavesAs(item: NotifyItem): string {
 
 export const SECRET_KEPT_OUT = 'Kept out of chat. Any agent on your machines can use it with runpane secrets exec.';
 
+/** A lease end as people read it: "14:05" today, "Thu 14:05" within a week, else "Nov 28, 14:05". */
+export function leaseEndLabel(at: number, now: number): string {
+  const end = new Date(at);
+  const time = end.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  if (end.toDateString() === new Date(now).toDateString()) return time;
+  if (at - now < 6 * 86_400_000) return `${end.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`;
+  return `${end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`;
+}
+
+/** The asking machine's name when a lease card comes from another machine; undefined when it is this computer's. */
+export function leaseRemoteMachine(item: NotifyItem): string | undefined {
+  if (item.machineId === undefined || item.machineId === LOCAL_MACHINE_ID) return undefined;
+  return item.machine ?? item.lease?.machine;
+}
+
+/** A lease card's summary line: "On: this computer, devbox · Ends Thu 14:05 · 1Password will ask once". */
+export function leaseSummary(item: NotifyItem, now: number): string {
+  const remote = leaseRemoteMachine(item);
+  const lengthMs = item.lease?.lengthMs;
+  return [
+    `On: ${['this computer', remote].filter(Boolean).join(', ')}`,
+    lengthMs ? `Ends ${leaseEndLabel(now + lengthMs, now)}` : null,
+    '1Password will ask once',
+  ].filter(Boolean).join(' · ');
+}
+
 /** Who asked: "notify-remote · Claude", plus the machine while two machines' questions show. */
 export function askedBy(item: NotifyItem): string {
   return [item.source.name, item.source.agent, machineLabel(item)].filter(Boolean).join(' · ');

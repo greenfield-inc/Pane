@@ -4,7 +4,7 @@ import type { NotifyAnswer, NotifyCommand, NotifyItem, NotifySnapshot } from '..
 import { useDraftChoice } from '../../stores/approvalColumnStore';
 import { canReplyAlone } from '../approvals/approvalCard';
 import { cn } from '../../utils/cn';
-import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
+import { askedBy, cardAnswer, leaseRemoteMachine, leaseSummary, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
 import { ShortcutCap, UnreachableNotice } from './NotifyCard';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
@@ -70,6 +70,12 @@ interface RoundRow {
 }
 
 function rowsFor(item: NotifyItem): RoundRow[] {
+  if (item.ui === 'approve' && item.lease) {
+    return [
+      { key: 'Y', label: item.lease.renews ? 'Extend' : 'Start lease', detail: '1Password will ask once' },
+      { key: 'N', label: 'Decline' },
+    ];
+  }
   if (item.ui === 'approve') {
     return [
       { key: 'Y', label: 'Approve' },
@@ -132,6 +138,11 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
     if (index < 0) {
       // Words with no pick are a reply on their own: an answer or a question (D-245).
       if (trimmedNote && canReplyAlone(item)) sendAnswer(cardAnswer(item, null, trimmedNote));
+      return;
+    }
+    // A lease answer is the bare approval main intercepts, so a note never turns it into a reply.
+    if (approval && item.lease) {
+      sendAnswer({ approved: index === 0 });
       return;
     }
     if (approval) {
@@ -221,6 +232,20 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
       </div>
       {item.unreachable && <UnreachableNotice item={item} className="px-[26px] pt-2" />}
       {item.context && <ClampedText text={item.context} className="px-[26px] py-1.5 text-[14.5px] text-text-tertiary" />}
+      {item.lease && (
+        <div className="space-y-1 px-[26px] pt-1.5 text-[13px]" data-testid="notify-round-lease">
+          {item.lease.names.map((name) => (
+            <div key={name} className="flex min-w-0 items-baseline gap-3">
+              <span className="w-[38%] shrink-0 truncate font-mono text-text-primary" title={name}>{name}</span>
+              <span className="min-w-0 truncate font-mono text-text-tertiary" title={item.lease?.references?.[name]}>
+                {item.lease?.references?.[name] ?? `not a 1Password reference on ${leaseRemoteMachine(item) ?? item.lease?.machine ?? 'this computer'}`}
+              </span>
+            </div>
+          ))}
+          <div className="text-text-tertiary">{leaseSummary(item, now)}</div>
+          {item.leaseError && <div className="text-status-error" role="alert">{item.leaseError}</div>}
+        </div>
+      )}
       {item.ui === 'approve' && item.detail && (
         <pre className="mx-[26px] mb-1 mt-1.5 max-h-40 overflow-auto rounded-xl bg-surface-tertiary px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-text-secondary">{item.detail}</pre>
       )}

@@ -4,7 +4,7 @@ import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 
 import { approvalStatus } from '@shared/approvalStatus';
 
-import { initialPicks, isReply, notifySheetState, optionsAnswer, replyStateLine, replyStatus, revisionNote, waitingQuestions } from './notifyQuestions';
+import { initialPicks, isReply, leaseLengthText, notifySheetState, optionsAnswer, replyStateLine, replyStatus, revisionNote, waitingQuestions } from './notifyQuestions';
 
 const question: NotifyItem = {
   id: 'q1', ui: 'approve', title: 'Run the migration?', source: { paneId: 's1', name: 'api-fix', agent: 'Claude' }, state: 'waiting', createdAt: 2_000,
@@ -168,5 +168,14 @@ describe('optionsAnswer', () => {
     expect(isReply({ picks: ['Yes', 'One train'] })).toBe(false);
     expect(optionsAnswer(two, [undefined, 'One train'], 'Why one?')).toEqual({ picks: ['', 'One train'], text: 'Why one?' });
     expect(optionsAnswer(one, [], '')).toBeNull();
+  });
+});
+
+describe('leaseLengthText', () => {
+  it('reads a lease length in the largest whole unit, with a day as 24 hours', () => {
+    expect(leaseLengthText(30 * 60_000)).toBe('30 minutes');
+    expect(leaseLengthText(60 * 60_000)).toBe('1 hour');
+    expect(leaseLengthText(86_400_000)).toBe('24 hours');
+    expect(leaseLengthText(7 * 86_400_000)).toBe('7 days');
   });
 });
