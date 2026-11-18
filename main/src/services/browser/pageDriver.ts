@@ -1,4 +1,5 @@
 import { PaneError } from '../../../../shared/paneError';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { attachDebugger, type DebuggableContents } from '../debuggerLifetime';
 import { PANE_WORLD_ID, pageCall } from './pageScript';
 
@@ -37,15 +38,17 @@ export interface BrowserPageContents extends DebuggableContents {
   readonly devToolsWebContents: { isDestroyed(): boolean } | null;
   /** Inserts text at the page's focus, whether or not the page has the window's focus. */
   insertText(text: string): Promise<void>;
-  executeJavaScriptInIsolatedWorld(worldId: number, scripts: { code: string }[], userGesture?: boolean): Promise<unknown>;
-  on(event: 'did-stop-loading' | 'did-navigate', listener: () => void): unknown;
+  /** Sends a key to the page, whether or not it has the window's focus. */
+  sendInputEvent(event: KeyInput): void;
+  executeJavaScriptInIsolatedWorld(worldId: number, scripts: { code: string }[], userGesture?: boolean): Promise<JsonValue>;
+  on(event: 'did-stop-loading' | 'did-navigate', listener: () => void): void;
   /** Every input event the page gets, the person's and the agent's alike. */
-  on(event: 'input-event', listener: (event: unknown, input: { type: string }) => void): unknown;
-  removeListener(event: 'did-stop-loading' | 'did-navigate', listener: () => void): unknown;
+  on(event: 'input-event', listener: (event: Electron.Event, input: { type: string }) => void): void;
+  removeListener(event: 'did-stop-loading' | 'did-navigate', listener: () => void): void;
   debugger: DebuggableContents['debugger'] & {
-    sendCommand(method: string, params?: object): Promise<unknown>;
-    on(event: 'message', listener: (event: unknown, method: string, params: unknown) => void): unknown;
-    on(event: 'detach', listener: () => void): unknown;
+    sendCommand(method: string, params?: JsonObject): Promise<JsonValue>;
+    on(event: 'message', listener: (event: Electron.Event, method: string, params: JsonValue) => void): void;
+    on(event: 'detach', listener: () => void): void;
   };
 }
 
@@ -55,27 +58,56 @@ export interface FileChooser { multiple: boolean }
 /** What an action leaves for the agent to know: a dialog or file picker it opened. */
 export interface ActionOutcome { dialog?: PendingDialog; fileChooser?: FileChooser }
 
-export type ClickTarget = { ref: string } | { x: number; y: number };
+export interface PagePoint { x: number; y: number }
+export type ClickTarget = { ref: string } | PagePoint;
+export interface PageReading { url: string; title: string; snapshot: string; truncated: boolean }
+export interface PageScreenshot { png: Buffer; width: number; height: number }
+export interface Evaluated { value: JsonValue; truncated: boolean }
+interface Chord { key: string; modifiers: number }
+
+const readingSchema = boundary.object({ snapshot: boundary.string, truncated: boundary.boolean, url: boundary.string, title: boundary.string });
+/** A ref call the page refused: the ref is stale, or the element is not ready yet. */
+const refusalSchema = boundary.object({ stale: boundary.optional(boundary.string), wait: boundary.optional(boundary.string) });
+const pointSchema = boundary.object({ x: boundary.number, y: boundary.number });
+const checkSchema = boundary.object({ met: boundary.boolean, stale: boundary.optional(boundary.string) });
+const sizeSchema = boundary.object({ width: boundary.number, height: boundary.number });
+const layoutSchema = boundary.object({ cssContentSize: sizeSchema, cssLayoutViewport: boundary.object({ clientWidth: boundary.number, clientHeight: boundary.number }) });
+const screenshotSchema = boundary.object({ data: boundary.string });
+const nodeSchema = boundary.object({ nodeId: boundary.number });
+const documentSchema = boundary.object({ root: nodeSchema });
+const evaluateSchema = boundary.object({
+  result: boundary.optional(boundary.object({ value: boundary.optional(boundary.json) })),
+  exceptionDetails: boundary.optional(boundary.object({ text: boundary.optional(boundary.string), exception: boundary.optional(boundary.object({ description: boundary.optional(boundary.string) })) })),
+});
+const dialogEventSchema = boundary.object({ type: boundary.string, message: boundary.string, defaultPrompt: boundary.optional(boundary.string) });
+const chooserEventSchema = boundary.object({ backendNodeId: boundary.number, mode: boundary.string });
+const frameEventSchema = boundary.object({ frame: boundary.object({ parentId: boundary.optional(boundary.string) }) });
 
 /** How long an action waits for its element to become visible, enabled and uncovered. */
 const ACTIONABLE_WAIT_MS = 5_000;
 /** How long after its input an action looks for a dialog or file picker it opened. */
 const SETTLE_MS = 150;
 const NAVIGATION_WAIT_MS = 30_000;
-export const EVALUATE_TIMEOUT_MS = 30_000;
-export const EVALUATE_RESULT_LIMIT = 64 * 1024;
+const EVALUATE_TIMEOUT_MS = 30_000;
+const EVALUATE_RESULT_LIMIT = 64 * 1024;
 export const WAIT_DEFAULT_MS = 10_000;
 export const WAIT_MAX_MS = 120_000;
 
-const MODIFIERS: Record<string, number> = { alt: 1, control: 2, ctrl: 2, meta: 4, cmd: 4, command: 4, shift: 8 };
-/** Named keys: [code, windowsVirtualKeyCode, text typed]. */
-const NAMED_KEYS: Record<string, [string, number, string?]> = {
-  Enter: ['Enter', 13, '\r'], Tab: ['Tab', 9], Escape: ['Escape', 27], Backspace: ['Backspace', 8], Delete: ['Delete', 46],
-  ArrowLeft: ['ArrowLeft', 37], ArrowUp: ['ArrowUp', 38], ArrowRight: ['ArrowRight', 39], ArrowDown: ['ArrowDown', 40],
-  Home: ['Home', 36], End: ['End', 35], PageUp: ['PageUp', 33], PageDown: ['PageDown', 34], ' ': ['Space', 32, ' '], Space: ['Space', 32, ' '],
-};
+const MODIFIERS = new Map([['alt', 1], ['control', 2], ['ctrl', 2], ['meta', 4], ['cmd', 4], ['command', 4], ['shift', 8]]);
+/** A key as Electron's sendInputEvent takes it. */
+export interface KeyInput { type: 'keyDown' | 'char' | 'keyUp'; keyCode: string; modifiers?: Array<'alt' | 'control' | 'meta' | 'shift'> }
+/** A named key: its DOM code, Windows virtual key code, Electron's name for it, and the text it types. */
+interface NamedKey { code: string; keyCode: number; electron: string; text?: string }
+const NAMED_KEYS = new Map<string, NamedKey>([
+  ['Enter', { code: 'Enter', keyCode: 13, electron: 'Return', text: '\r' }], ['Tab', { code: 'Tab', keyCode: 9, electron: 'Tab' }], ['Escape', { code: 'Escape', keyCode: 27, electron: 'Escape' }],
+  ['Backspace', { code: 'Backspace', keyCode: 8, electron: 'Backspace' }], ['Delete', { code: 'Delete', keyCode: 46, electron: 'Delete' }],
+  ['ArrowLeft', { code: 'ArrowLeft', keyCode: 37, electron: 'Left' }], ['ArrowUp', { code: 'ArrowUp', keyCode: 38, electron: 'Up' }], ['ArrowRight', { code: 'ArrowRight', keyCode: 39, electron: 'Right' }], ['ArrowDown', { code: 'ArrowDown', keyCode: 40, electron: 'Down' }],
+  ['Home', { code: 'Home', keyCode: 36, electron: 'Home' }], ['End', { code: 'End', keyCode: 35, electron: 'End' }], ['PageUp', { code: 'PageUp', keyCode: 33, electron: 'PageUp' }], ['PageDown', { code: 'PageDown', keyCode: 34, electron: 'PageDown' }],
+  [' ', { code: 'Space', keyCode: 32, electron: 'Space', text: ' ' }], ['Space', { code: 'Space', keyCode: 32, electron: 'Space', text: ' ' }],
+]);
+const MODIFIER_NAMES = [[1, 'alt'], [2, 'control'], [4, 'meta'], [8, 'shift']] as const;
 /** Editing commands a modifier chord runs (Chromium needs them named when input is synthetic). */
-const CHORD_COMMANDS: Record<string, string> = { a: 'selectAll', c: 'copy', x: 'cut', v: 'paste', z: 'undo' };
+const CHORD_COMMANDS = new Map([['a', 'selectAll'], ['c', 'copy'], ['x', 'cut'], ['v', 'paste'], ['z', 'undo']]);
 
 function stale(reason: string): PaneError {
   return new PaneError('ERR_BROWSER_STALE_REF', `${reason} Nothing ran.`, 'Call browser_snapshot for fresh refs, then try again with one of them.');
@@ -83,10 +115,6 @@ function stale(reason: string): PaneError {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
@@ -102,7 +130,7 @@ export class PageDriver {
   private refsRevoked = false;
   private dispatching = 0;
   private lastDispatchEnd = 0;
-  private screenshots: Promise<unknown> = Promise.resolve();
+  private screenshots: Promise<void> = Promise.resolve();
   private readonly dialogWaiters = new Set<() => void>();
 
   constructor(private readonly contents: BrowserPageContents) {}
@@ -121,32 +149,30 @@ export class PageDriver {
     this.refsRevoked = true;
   }
 
-  async snapshot(): Promise<{ url: string; title: string; snapshot: string; truncated: boolean }> {
+  async snapshot(): Promise<PageReading> {
     this.refuseWhileDialog();
-    const result = await this.page('snapshot');
-    if (!isObject(result) || typeof result.snapshot !== 'string') throw new PaneError('ERR_BROWSER_PAGE_FAILED', 'The page did not return a snapshot.', 'Try again; if the page is still loading, call browser_wait first.');
+    const reading = decodeOptionalBoundary(await this.page('snapshot'), readingSchema);
+    if (!reading) throw new PaneError('ERR_BROWSER_PAGE_FAILED', 'The page did not return a snapshot.', 'Try again; if the page is still loading, call browser_wait first.');
     this.refsRevoked = false;
-    return { url: String(result.url ?? this.contents.getURL()), title: String(result.title ?? this.contents.getTitle()), snapshot: result.snapshot, truncated: result.truncated === true };
+    return reading;
   }
 
   /** A PNG of what the tab shows, or of the whole page. One capture per tab at a time. */
-  screenshot(fullPage: boolean): Promise<{ png: Buffer; width: number; height: number }> {
-    const run = this.screenshots.then(async () => {
+  screenshot(fullPage: boolean): Promise<PageScreenshot> {
+    const run = this.screenshots.then(async (): Promise<PageScreenshot> => {
       if (!fullPage) {
         const image = await this.contents.capturePage();
         const size = image.getSize();
         return { png: image.toPNG(), width: size.width, height: size.height };
       }
       await this.attach();
-      const metrics = await this.send('Page.getLayoutMetrics');
-      const content = isObject(metrics) && isObject(metrics.cssContentSize) ? metrics.cssContentSize : undefined;
-      const width = Math.ceil(Number(content?.width ?? 0));
-      const height = Math.min(Math.ceil(Number(content?.height ?? 0)), 16_384);
-      const shot = await this.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width, height, scale: 1 } });
-      if (!isObject(shot) || typeof shot.data !== 'string') throw new PaneError('ERR_BROWSER_PAGE_FAILED', 'The page did not return a screenshot.', 'Try again without --full-page.');
+      const content = decodeBoundary(await this.send('Page.getLayoutMetrics'), layoutSchema).cssContentSize;
+      const width = Math.ceil(content.width);
+      const height = Math.min(Math.ceil(content.height), 16_384);
+      const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width, height, scale: 1 } }), screenshotSchema);
       return { png: Buffer.from(shot.data, 'base64'), width, height };
     });
-    this.screenshots = run.catch(() => undefined);
+    this.screenshots = run.then(() => undefined, () => undefined);
     return run;
   }
 
@@ -183,16 +209,14 @@ export class PageDriver {
 
   async select(ref: string, values: string[]): Promise<string[]> {
     this.refuseWhileDialog();
-    const result = await this.withRef(ref, () => this.page('select', ref, values));
-    if (!Array.isArray(result)) throw new PaneError('ERR_BROWSER_PAGE_FAILED', 'The page did not choose the options.', 'Call browser_snapshot and try again.');
-    return result.map(String);
+    return decodeBoundary(await this.withRef(ref, () => this.page('select', ref, values)), boundary.array(boundary.string));
   }
 
   async scroll(ref: string | undefined, dx: number, dy: number): Promise<void> {
     this.refuseWhileDialog();
     if (ref === undefined && (dx !== 0 || dy !== 0)) {
       const center = await this.viewportCenter();
-      await this.input(() => this.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: center.x, y: center.y, deltaX: dx, deltaY: dy }), false);
+      await this.input(async () => { await this.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: center.x, y: center.y, deltaX: dx, deltaY: dy }); }, false);
       return;
     }
     await this.withRef(ref ?? null, () => this.page('scrollBy', ref ?? null, dx, dy));
@@ -226,9 +250,9 @@ export class PageDriver {
     if (conditions.ref && this.refsRevoked) throw stale('The person took over this tab, so refs from before are revoked.');
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-      const result = this.contents.isLoading() ? undefined : await this.page('check', conditions.text ?? null, conditions.url ?? null, conditions.ref ?? null).catch(() => undefined);
-      if (isObject(result) && typeof result.stale === 'string') throw stale(result.stale);
-      if (isObject(result) && result.met === true) return;
+      const result = this.contents.isLoading() ? undefined : decodeOptionalBoundary(await this.page('check', conditions.text ?? null, conditions.url ?? null, conditions.ref ?? null).catch(() => null), checkSchema);
+      if (result?.stale) throw stale(result.stale);
+      if (result?.met) return;
       if (this.dialog) return;
       if (Date.now() >= deadline) {
         const wanted = [conditions.text && `text "${conditions.text}"`, conditions.url && `a URL containing "${conditions.url}"`, conditions.ref && `${conditions.ref} visible`].filter(Boolean).join(' and ');
@@ -242,15 +266,13 @@ export class PageDriver {
     const dialog = this.dialog;
     if (!dialog) throw new PaneError('ERR_BROWSER_NO_DIALOG', 'This tab has no dialog open. Nothing ran.', 'Call browser_tabs to see which tab has one.');
     await this.attach();
-    const params: { accept: boolean; promptText?: string } = { accept };
-    if (text !== undefined) params.promptText = text;
-    await this.send('Page.handleJavaScriptDialog', params);
+    await this.send('Page.handleJavaScriptDialog', text === undefined ? { accept } : { accept, promptText: text });
     this.dialog = undefined;
     return dialog;
   }
 
   /** Runs an expression in the page (or a function of a ref's element); the value as JSON, capped. */
-  async evaluate(expression: string, ref: string | undefined): Promise<{ value: unknown; truncated: boolean }> {
+  async evaluate(expression: string, ref: string | undefined): Promise<Evaluated> {
     this.refuseWhileDialog();
     let source = expression;
     if (ref) {
@@ -274,16 +296,16 @@ export class PageDriver {
       await this.send('Runtime.terminateExecution').catch(() => undefined);
       throw evaluateTimeout();
     }
-    if (!isObject(result)) throw new PaneError('ERR_BROWSER_EVALUATE_FAILED', 'The page returned no result.', 'Check the expression and try again.');
-    if (isObject(result.exceptionDetails)) {
-      const details = result.exceptionDetails;
-      const description = isObject(details.exception) && typeof details.exception.description === 'string' ? details.exception.description : String(details.text ?? 'an error');
+    const evaluation = decodeBoundary(result, evaluateSchema);
+    if (evaluation.exceptionDetails) {
+      const details = evaluation.exceptionDetails;
+      const description = details.exception?.description ?? details.text ?? 'an error';
       if (/terminated|timed out/i.test(description)) throw evaluateTimeout();
       throw new PaneError('ERR_BROWSER_EVALUATE_FAILED', `The script threw: ${description.split('\n')[0]}`, 'Fix the expression and try again.');
     }
-    const value = isObject(result.result) ? result.result.value : undefined;
-    const json = JSON.stringify(value ?? null);
-    if (json.length <= EVALUATE_RESULT_LIMIT) return { value: value ?? null, truncated: false };
+    const value = evaluation.result?.value ?? null;
+    const json = JSON.stringify(value);
+    if (json.length <= EVALUATE_RESULT_LIMIT) return { value, truncated: false };
     return { value: json.slice(0, EVALUATE_RESULT_LIMIT), truncated: true };
   }
 
@@ -301,10 +323,8 @@ export class PageDriver {
     const token = `pane-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     await this.withRef(ref, () => this.page('mark', ref, 'data-pane-upload', token));
     await this.attach();
-    const document = await this.send('DOM.getDocument', { depth: 0 });
-    const root = isObject(document) && isObject(document.root) ? Number(document.root.nodeId) : NaN;
-    const found = await this.send('DOM.querySelector', { nodeId: root, selector: `[data-pane-upload="${token}"]` });
-    const nodeId = isObject(found) ? Number(found.nodeId) : 0;
+    const root = decodeBoundary(await this.send('DOM.getDocument', { depth: 0 }), documentSchema).root.nodeId;
+    const nodeId = decodeBoundary(await this.send('DOM.querySelector', { nodeId: root, selector: `[data-pane-upload="${token}"]` }), nodeSchema).nodeId;
     if (!nodeId) throw stale(`${ref} has left the page.`);
     await this.send('DOM.setFileInputFiles', { files: paths, nodeId });
     await this.page('mark', ref, 'data-pane-upload', '').catch(() => undefined);
@@ -318,27 +338,26 @@ export class PageDriver {
   }
 
   /** Runs a call on the page script in Pane's isolated world. */
-  private page(method: Parameters<typeof pageCall>[0], ...args: unknown[]): Promise<unknown> {
+  private page(method: Parameters<typeof pageCall>[0], ...args: Parameters<typeof pageCall>[1][]): Promise<JsonValue> {
     return this.contents.executeJavaScriptInIsolatedWorld(PANE_WORLD_ID, [{ code: pageCall(method, ...args) }], false);
   }
 
   /** Runs a ref call, turning the page's stale and not-yet-actionable answers into errors. */
-  private async withRef<Result>(ref: string | null, work: () => Promise<Result>): Promise<Result> {
+  private async withRef(ref: string | null, work: () => Promise<JsonValue>): Promise<JsonValue> {
     if (ref !== null && this.refsRevoked) throw stale('The person took over this tab, so refs from before are revoked.');
     const result = await work();
-    if (isObject(result) && typeof result.stale === 'string') throw stale(result.stale);
-    if (isObject(result) && typeof result.wait === 'string') throw new PaneError('ERR_BROWSER_NOT_ACTIONABLE', `${result.wait} Nothing ran.`, 'Call browser_snapshot to see the page, scroll, or wait for it with browser_wait.');
+    const refusal = decodeOptionalBoundary(result, refusalSchema);
+    if (refusal?.stale) throw stale(refusal.stale);
+    if (refusal?.wait) throw new PaneError('ERR_BROWSER_NOT_ACTIONABLE', `${refusal.wait} Nothing ran.`, 'Call browser_snapshot to see the page, scroll, or wait for it with browser_wait.');
     return result;
   }
 
   /** Waits for the element to be visible, enabled and uncovered, then returns its center. */
-  private async actionablePoint(ref: string): Promise<{ x: number; y: number }> {
+  private async actionablePoint(ref: string): Promise<PagePoint> {
     const deadline = Date.now() + ACTIONABLE_WAIT_MS;
     for (;;) {
       try {
-        const result = await this.withRef(ref, () => this.page('point', ref));
-        if (isObject(result) && typeof result.x === 'number' && typeof result.y === 'number') return { x: result.x, y: result.y };
-        throw new PaneError('ERR_BROWSER_PAGE_FAILED', 'The page did not say where the element is.', 'Call browser_snapshot and try again.');
+        return decodeBoundary(await this.withRef(ref, () => this.page('point', ref)), pointSchema);
       } catch (cause) {
         if (!(cause instanceof PaneError) || cause.code !== 'ERR_BROWSER_NOT_ACTIONABLE' || Date.now() >= deadline) throw cause;
         await sleep(100);
@@ -352,11 +371,10 @@ export class PageDriver {
     await this.withRef(ref, () => this.page('focus', ref, clear));
   }
 
-  private async viewportCenter(): Promise<{ x: number; y: number }> {
+  private async viewportCenter(): Promise<PagePoint> {
     await this.attach();
-    const metrics = await this.send('Page.getLayoutMetrics');
-    const viewport = isObject(metrics) && isObject(metrics.cssLayoutViewport) ? metrics.cssLayoutViewport : {};
-    return { x: Number(viewport.clientWidth ?? 800) / 2, y: Number(viewport.clientHeight ?? 600) / 2 };
+    const viewport = decodeBoundary(await this.send('Page.getLayoutMetrics'), layoutSchema).cssLayoutViewport;
+    return { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 };
   }
 
   /**
@@ -364,7 +382,7 @@ export class PageDriver {
    * without focus still takes keys and Pane's window keeps its own. A dialog or file picker the
    * input opens is returned at once: the page stays blocked until browser_dialog answers it.
    */
-  private async input(work: () => Promise<unknown>, interceptChooser: boolean): Promise<ActionOutcome> {
+  private async input(work: () => Promise<void>, interceptChooser: boolean): Promise<ActionOutcome> {
     await this.attach();
     await this.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     this.chooser = undefined;
@@ -395,15 +413,22 @@ export class PageDriver {
   }
 
   private async key(key: string, modifiers: number): Promise<void> {
-    const named = NAMED_KEYS[key];
-    const single = key.length === 1 ? key : undefined;
-    if (!named && !single) throw new PaneError('ERR_BROWSER_INVALID_REQUEST', `"${key}" is not a key Pane knows. Nothing ran.`, 'Use a key name such as Enter, Tab, Escape, ArrowDown, or one character, with modifiers joined by + (Shift+Tab, Meta+A).');
-    const code = named ? named[0] : /[a-z]/i.test(single ?? '') ? `Key${(single ?? '').toUpperCase()}` : /\d/.test(single ?? '') ? `Digit${single}` : '';
-    const keyCode = named ? named[1] : (single ?? '').toUpperCase().charCodeAt(0);
+    const named = NAMED_KEYS.get(key) ?? singleKey(key);
+    if (!named) throw new PaneError('ERR_BROWSER_INVALID_REQUEST', `"${key}" is not a key Pane knows. Nothing ran.`, 'Use a key name such as Enter, Tab, Escape, ArrowDown, or one character, with modifiers joined by + (Shift+Tab, Meta+A).');
+    const { code, keyCode } = named;
     const chordOnly = (modifiers & ~8) !== 0;
-    const text = chordOnly ? undefined : named ? named[2] : single;
-    const command = chordOnly && single ? CHORD_COMMANDS[single.toLowerCase()] : undefined;
-    const down: Record<string, unknown> = { type: text ? 'keyDown' : 'rawKeyDown', key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers };
+    const text = chordOnly ? undefined : named.text;
+    const command = chordOnly ? CHORD_COMMANDS.get(key.toLowerCase()) : undefined;
+    if (!command) {
+      // Electron's input reaches a page without focus; the debugger's keys are dropped there.
+      const held = MODIFIER_NAMES.filter(([bit]) => (modifiers & bit) !== 0).map(([, name]) => name);
+      this.contents.sendInputEvent({ type: 'keyDown', keyCode: named.electron, modifiers: held });
+      if (text) this.contents.sendInputEvent({ type: 'char', keyCode: text, modifiers: held });
+      this.contents.sendInputEvent({ type: 'keyUp', keyCode: named.electron, modifiers: held });
+      return;
+    }
+    // An editing chord (Meta+A) runs its command, which only the debugger's key event carries.
+    const down: JsonObject = { type: text ? 'keyDown' : 'rawKeyDown', key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers };
     if (text) { down.text = text; down.unmodifiedText = text; }
     if (command) down.commands = [command];
     await this.send('Input.dispatchKeyEvent', down);
@@ -427,17 +452,20 @@ export class PageDriver {
     this.listening = true;
     this.contents.debugger.on('detach', () => { this.listening = false; this.dialog = undefined; this.chooser = undefined; });
     this.contents.debugger.on('message', (_event, method, params) => {
-      if (method === 'Page.javascriptDialogOpening' && isObject(params)) {
-        const type = String(params.type);
-        const dialog: PendingDialog = { type: type === 'confirm' || type === 'prompt' || type === 'beforeunload' ? type : 'alert', message: String(params.message ?? '') };
-        if (typeof params.defaultPrompt === 'string' && type === 'prompt') dialog.defaultPrompt = params.defaultPrompt;
+      if (method === 'Page.javascriptDialogOpening') {
+        const opened = decodeOptionalBoundary(params, dialogEventSchema);
+        if (!opened) return;
+        const type = opened.type === 'confirm' || opened.type === 'prompt' || opened.type === 'beforeunload' ? opened.type : 'alert';
+        const dialog: PendingDialog = { type, message: opened.message };
+        if (opened.defaultPrompt !== undefined && type === 'prompt') dialog.defaultPrompt = opened.defaultPrompt;
         this.dialog = dialog;
         for (const waiter of this.dialogWaiters) waiter();
       } else if (method === 'Page.javascriptDialogClosed') {
         this.dialog = undefined;
-      } else if (method === 'Page.fileChooserOpened' && isObject(params) && typeof params.backendNodeId === 'number') {
-        this.chooser = { backendNodeId: params.backendNodeId, multiple: params.mode === 'selectMultiple' };
-      } else if (method === 'Page.frameNavigated' && isObject(params) && isObject(params.frame) && params.frame.parentId === undefined) {
+      } else if (method === 'Page.fileChooserOpened') {
+        const chooser = decodeOptionalBoundary(params, chooserEventSchema);
+        if (chooser) this.chooser = { backendNodeId: chooser.backendNodeId, multiple: chooser.mode === 'selectMultiple' };
+      } else if (method === 'Page.frameNavigated' && decodeOptionalBoundary(params, frameEventSchema)?.frame.parentId === undefined) {
         this.chooser = undefined;
       }
     });
@@ -445,7 +473,7 @@ export class PageDriver {
   }
 
   /** Every debugger command goes through here; anything outside ALLOWED_CDP_METHODS is refused. */
-  private send(method: string, params?: object): Promise<unknown> {
+  private send(method: string, params?: JsonObject): Promise<JsonValue> {
     if (!ALLOWED_CDP_METHODS.has(method)) {
       return Promise.reject(new PaneError('ERR_BROWSER_METHOD_REFUSED', `Pane's page driver does not send ${method}.`, 'This is a bug in Pane; report it.'));
     }
@@ -458,17 +486,24 @@ function evaluateTimeout(): PaneError {
 }
 
 /** "Meta+Shift+A" → the key and CDP's modifier bits. */
-function parseChord(chord: string): { key: string; modifiers: number } {
+function parseChord(chord: string): Chord {
   const parts = chord.split('+');
   // "+" itself, or a chord ending in "+" ("Control++").
   const key = chord.endsWith('++') || chord === '+' ? '+' : parts[parts.length - 1];
   const names = chord === '+' ? [] : parts.slice(0, chord.endsWith('++') ? -2 : -1);
   let modifiers = 0;
   for (const name of names) {
-    const bit = MODIFIERS[name.toLowerCase()];
+    const bit = MODIFIERS.get(name.toLowerCase());
     if (bit === undefined) throw new PaneError('ERR_BROWSER_INVALID_REQUEST', `"${name}" in "${chord}" is not a modifier. Nothing ran.`, 'Use Alt, Control, Meta or Shift, joined by + (Meta+A).');
     modifiers |= bit;
   }
   if (!key) throw new PaneError('ERR_BROWSER_INVALID_REQUEST', `"${chord}" names no key. Nothing ran.`, 'Pass a key such as Enter or Meta+A.');
   return { key, modifiers };
+}
+
+/** One character as a key: letters and digits get their codes, anything else types itself. */
+function singleKey(key: string): NamedKey | undefined {
+  if ([...key].length !== 1) return undefined;
+  const code = /^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : /^\d$/.test(key) ? `Digit${key}` : '';
+  return { code, keyCode: key.toUpperCase().charCodeAt(0), electron: key, text: key };
 }

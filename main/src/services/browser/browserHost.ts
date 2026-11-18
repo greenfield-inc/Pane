@@ -9,7 +9,7 @@ import { getAppDirectory } from '../../utils/appDirectory';
 import { panelManager } from '../panelManager';
 
 /** The renderer hears where an agent clicked, to draw its cursor on the tab. */
-export const BROWSER_AGENT_CURSOR_EVENT = 'browser-panel:agent-cursor';
+const BROWSER_AGENT_CURSOR_EVENT = 'browser-panel:agent-cursor';
 
 /** Browser tabs as this desktop's main process has them: the panel store and the pages its window registered. */
 export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, commandRegistry: PaneCommandRegistry): BrowserHost {

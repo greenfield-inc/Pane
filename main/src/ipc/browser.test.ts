@@ -10,7 +10,8 @@ import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels'
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { BrowserPageContents } from '../services/browser/pageDriver';
 import type { AppServices } from './types';
-import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost } from './browser';
+import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost, type BrowserServices } from './browser';
+import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
 
 /** A page that answers the page script and the debugger the way a simple form page would. */
 function fakePage(id: number, url: string): BrowserPageContents & EventEmitter & { sent: string[] } {
@@ -27,6 +28,7 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
     isDevToolsOpened: () => false,
     devToolsWebContents: null,
     insertText: async () => undefined,
+    sendInputEvent: () => undefined,
     capturePage: async () => ({ toPNG: () => Buffer.from('png'), getSize: () => ({ width: 800, height: 600 }) }),
     loadURL: async (next: string) => { url = next; },
     reload: () => undefined,
@@ -62,11 +64,9 @@ interface Fixture {
 
 function browserTab(id: string, paneId: string, openedByPanel?: string, url = 'http://localhost:4173/'): ToolPanel {
   const customState: BrowserPanelState = { currentUrl: url };
-  return {
-    id, sessionId: paneId, type: 'browser', title: id,
-    state: { isActive: true, customState },
-    metadata: { createdAt: '', lastActiveAt: '', position: 0, ...(openedByPanel ? { openedBy: { source: 'agent', panelId: openedByPanel } } : {}) },
-  };
+  const tab: ToolPanel = { id, sessionId: paneId, type: 'browser', title: id, state: { isActive: true, customState }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
+  if (openedByPanel) tab.metadata.openedBy = { source: 'agent', panelId: openedByPanel };
+  return tab;
 }
 
 function agentTab(id: string, paneId: string, agent: string): ToolPanel {
@@ -97,13 +97,12 @@ function setup(initial: ToolPanel[] = []): Fixture {
     shotsDirectory: () => path.join(worktree, '.shots'),
     showCursor: () => undefined,
   };
-  const services = {
+  const services: BrowserServices = {
     sessionManager: { getSession: (id: string) => (id === 'pane-a' || id === 'pane-b' ? { name: id, worktreePath: worktree } : undefined) },
     configManager: { getConfig: () => ({ browser: { agentTools: tools } }) },
   };
   const registry = new PaneCommandRegistry();
-  // SAFETY: The fixture supplies the two AppServices members the browser tools read.
-  registerBrowserHandlers({ handle: vi.fn() } as Pick<IpcMain, 'handle'>, services as unknown as Pick<AppServices, 'sessionManager' | 'configManager'>, registry, host);
+  registerBrowserHandlers({ handle: vi.fn() }, services, registry, host);
   return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree };
 }
 
@@ -112,9 +111,8 @@ const claudeInA: PaneDaemonCaller = { paneId: 'pane-a', panelId: 'claude-a' };
 const codexInA: PaneDaemonCaller = { paneId: 'pane-a', panelId: 'codex-a' };
 
 /** `null` calls from outside any Pane tab. */
-async function call(fixture: Fixture, verb: string, request: Record<string, unknown>, caller: PaneDaemonCaller | null = claudeInA): Promise<PaneCommandValue> {
-  // SAFETY: Requests are plain JSON objects built in these tests.
-  return fixture.registry.invokeConnected(`runpane:browser:${verb}`, [request as PaneCommandValue], signal, caller ?? undefined);
+async function call(fixture: Fixture, verb: string, request: JsonObject, caller: PaneDaemonCaller | null = claudeInA): Promise<PaneCommandValue> {
+  return fixture.registry.invokeConnected(`runpane:browser:${verb}`, [request], signal, caller ?? undefined);
 }
 
 async function code(work: Promise<unknown>): Promise<string> {

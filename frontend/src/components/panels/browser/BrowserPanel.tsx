@@ -447,10 +447,14 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     const webview = webviewRef.current;
     if (!webview) return;
 
-    const onDomReady = () => {
+    // Registered on attach as well as dom-ready, so agents reach a page that fails to load.
+    const register = () => {
       const wcId = webview.getWebContentsId();
       pageWcIdRef.current = wcId;
       window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId);
+    };
+    const onDomReady = () => {
+      register();
       webviewReadyRef.current = true;
       syncFindActive(getFindBar(panel.id).open);
     };
@@ -492,6 +496,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       setCanGoForward(webview.canGoForward());
     };
 
+    webview.addEventListener('did-attach', register);
     webview.addEventListener('dom-ready', onDomReady);
     webview.addEventListener('did-navigate', onDidNavigateDocument);
     webview.addEventListener('did-navigate', onDidNavigate);
@@ -508,6 +513,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       webview.removeEventListener('found-in-page', onFoundInPage);
       webview.removeEventListener('did-finish-load', rerunOpenFind);
       webview.removeEventListener('did-navigate-in-page', rerunOpenFind);
+      webview.removeEventListener('did-attach', register);
       webview.removeEventListener('dom-ready', onDomReady);
       webview.removeEventListener('did-navigate', onDidNavigateDocument);
       webview.removeEventListener('did-navigate', onDidNavigate);

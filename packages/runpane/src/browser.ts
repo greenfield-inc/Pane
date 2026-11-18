@@ -52,7 +52,8 @@ export function setBrowserFlag(request: BrowserRequest, flag: string, value: str
     return;
   }
   if (spec.kind === 'list') {
-    request[spec.field] = [...(request[spec.field] as string[] | undefined ?? []), ...listValue(flag, value)];
+    const earlier = request[spec.field];
+    request[spec.field] = [...(Array.isArray(earlier) ? earlier : []), ...listValue(flag, value)];
     return;
   }
   request[spec.field] = value;
@@ -71,6 +72,7 @@ function listValue(flag: string, value: string): string[] {
 /** Screenshots, evaluate and waits can take a while; a call also waits while the person drives (4 minutes). */
 const CALL_TIMEOUT_MS = 5 * 60_000;
 
+const textFields = boundary.object({ snapshot: boundary.optional(boundary.string), path: boundary.optional(boundary.string), tabs: boundary.optional(boundary.json), value: boundary.optional(boundary.json) });
 const tabResult = boundary.object({ tab: boundary.optional(boundary.string), url: boundary.optional(boundary.string), title: boundary.optional(boundary.string) });
 
 export async function runBrowser(parsed: ParsedArgs): Promise<number> {
@@ -83,10 +85,10 @@ export async function runBrowser(parsed: ParsedArgs): Promise<number> {
 
 /** What a person reading the terminal wants from each result. */
 function humanText(verb: string, result: JsonValue): string {
-  const fields = decodeBoundary(result, boundary.json);
-  if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) return JSON.stringify(result);
-  if (verb === 'snapshot' && typeof fields.snapshot === 'string') return fields.snapshot;
-  if (verb === 'screenshot' && typeof fields.path === 'string') return fields.path;
+  // Every browser result is an object with these optional fields.
+  const fields = decodeBoundary(result, textFields);
+  if (verb === 'snapshot' && fields.snapshot !== undefined) return fields.snapshot;
+  if (verb === 'screenshot' && fields.path !== undefined) return fields.path;
   if (verb === 'tabs' || verb === 'evaluate') return JSON.stringify(verb === 'tabs' ? fields.tabs : fields.value, null, 2);
   const tab = decodeBoundary(result, tabResult);
   return [tab.tab, tab.url, tab.title].filter(Boolean).join('\t');

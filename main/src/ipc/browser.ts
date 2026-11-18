@@ -11,7 +11,6 @@ import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema }
 import { isRemotePaneCommand, paneCommandCaller, paneCommandSignal, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { DeviceDriverGate } from '../services/devices/deviceDriverGate';
 import { PageDriver, WAIT_DEFAULT_MS, WAIT_MAX_MS, type ActionOutcome, type BrowserPageContents, type PendingDialog } from '../services/browser/pageDriver';
-import type { AppServices } from './types';
 
 /**
  * Where the browser tools find tabs and pages. Main's default reads the panel store and the page
@@ -36,6 +35,19 @@ export interface BrowserHost {
   shotsDirectory(): string;
   /** Shows the agent's cursor where it clicked, in the tab. */
   showCursor(panelId: string, x: number, y: number): void;
+}
+
+/** One tab as browser_tabs lists it (the contract's browserTab). */
+interface TabSummary { id: string; url: string; title: string; openedBy: string; yours: boolean; driving?: string; showing: boolean; dialog?: PendingDialog }
+/** What an action on a tab returns (the contract's browserActionResult). */
+interface ActionResult { ok: true; tab: string; url: string; title: string; dialog?: PendingDialog; fileChooser?: ActionOutcome['fileChooser']; note?: string }
+interface SnapshotResult { ok: true; tab: string; url: string; title: string; snapshot: string; truncated?: boolean; note?: string }
+interface WaitConditions { text?: string; url?: string; ref?: string }
+
+/** What the browser tools read from the app: the caller's Pane and Settings > Browser. */
+export interface BrowserServices {
+  sessionManager: { getSession(paneId: string): { name: string; worktreePath?: string } | undefined };
+  configManager: { getConfig(): { browser?: Partial<BrowserSettings> } };
 }
 
 /** Who called: the agent's Pane and tab. */
@@ -66,7 +78,6 @@ const schemas = {
   evaluate: boundary.object({ tab: tabField, expression: boundary.string, ref: refField }),
   upload: boundary.object({ tab: tabField, ref: refField, paths: boundary.array(boundary.string) }),
 };
-type Verb = keyof typeof schemas;
 
 function decode<Value>(verb: string, value: PaneCommandValue, schema: BoundarySchema<Value>): Value {
   try {
@@ -92,7 +103,7 @@ function tabState(tab: ToolPanel): BrowserPanelState {
 }
 
 /** Only http and https pages load for an agent. */
-export function checkedWebUrl(raw: string): string {
+function checkedWebUrl(raw: string): string {
   let url: URL;
   try {
     url = new URL(raw.trim());
@@ -133,7 +144,7 @@ function checkedUploadPath(worktree: string | undefined, raw: string): string {
  * Pane through `runpane:browser:*`. Writes run through the driver gate keyed by tab, so the person
  * sees who drives and can take over; calls on different tabs never wait on each other.
  */
-export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, services: Pick<AppServices, 'sessionManager' | 'configManager'>, commandRegistry: PaneCommandRegistry, host: BrowserHost): void {
+export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost): void {
   const pages = new Map<number, PageDriver>();
   /** Tabs the person holds by touching the page; they go back to the agent TOUCH_HOLD_MS after the last touch. */
   const touchTimers = new Map<string, NodeJS.Timeout>();
@@ -191,7 +202,7 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
   function summary(tab: ToolPanel, caller: BrowserCaller) {
     const state = tabState(tab);
     const page = host.page(tab.id);
-    const item: { id: string; url: string; title: string; openedBy: string; yours: boolean; driving?: string; showing: boolean; dialog?: PendingDialog } = {
+    const item: TabSummary = {
       id: tab.id,
       url: page?.getURL() || state.currentUrl || '',
       title: page?.getTitle() || tab.title,
@@ -307,7 +318,7 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
   }
 
   function after(tab: ToolPanel, contents: BrowserPageContents, outcome: ActionOutcome = {}) {
-    const result: { ok: true; tab: string; url: string; title: string; dialog?: ActionOutcome['dialog']; fileChooser?: ActionOutcome['fileChooser']; note?: string } = { ok: true, tab: tab.id, url: contents.getURL(), title: contents.getTitle() };
+    const result: ActionResult = { ok: true, tab: tab.id, url: contents.getURL(), title: contents.getTitle() };
     if (outcome.dialog) {
       result.dialog = outcome.dialog;
       result.note = 'The page opened a dialog and is blocked until it is answered. Answer it with browser_dialog.';
@@ -319,180 +330,175 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     return result;
   }
 
-  const handlers: { [V in Verb]: (request: PaneCommandValue) => Promise<unknown> } = {
-    open: async (request) => {
-      const caller = callerOf();
-      const { url: raw } = decode('open', request, schemas.open);
-      const url = checkedWebUrl(raw);
-      const origin = new URL(url).origin;
-      const own = host.tabs(caller.paneId).find(tab => openerOf(tab, caller) === 'you' && (() => { try { return new URL(host.page(tab.id)?.getURL() || tabState(tab).currentUrl || '').origin === origin; } catch { return false; } })());
-      if (own) {
-        return gate.run(own.id, agentName(caller.panelId), paneCommandSignal(), async () => {
-          const contents = await livePage(own);
-          await driverFor(own, contents).navigate({ url });
-          return { ...after(own, contents), reused: true, next: 'Read it with browser_snapshot, then act on refs.' };
-        });
+  commandRegistry.register('runpane:browser:open', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { url: raw } = decode('open', request, schemas.open);
+    const url = checkedWebUrl(raw);
+    const origin = new URL(url).origin;
+    const own = host.tabs(caller.paneId).find(tab => openerOf(tab, caller) === 'you' && (() => { try { return new URL(host.page(tab.id)?.getURL() || tabState(tab).currentUrl || '').origin === origin; } catch { return false; } })());
+    if (own) {
+      return gate.run(own.id, agentName(caller.panelId), paneCommandSignal(), async () => {
+        const contents = await livePage(own);
+        await driverFor(own, contents).navigate({ url });
+        return { ...after(own, contents), reused: true, next: 'Read it with browser_snapshot, then act on refs.' };
+      });
+    }
+    const tab = await host.open(caller.paneId, url, caller.panelId);
+    const contents = await livePage(tab);
+    return { ...after(tab, contents), reused: false, next: 'Read it with browser_snapshot, then act on refs. Close it with browser_close when you are done.' };
+  });
+
+  commandRegistry.register('runpane:browser:tabs', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    decode('tabs', request, schemas.tabs);
+    return { ok: true, tabs: host.tabs(caller.paneId).map(tab => summary(tab, caller)) };
+  });
+
+  commandRegistry.register('runpane:browser:close', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId } = decode('close', request, schemas.close);
+    const tab = pickTab(caller, tabId, true);
+    if (openerOf(tab, caller) !== 'you') {
+      throw new PaneError('ERR_BROWSER_NOT_YOURS', `Tab ${tab.id} was opened by ${openerOf(tab, caller) === 'person' ? 'the person' : openerOf(tab, caller)}, and agents close only the tabs they opened. Nothing ran.`, 'Leave it open, or ask the person to close it.');
+    }
+    await gate.run(tab.id, agentName(caller.panelId), paneCommandSignal(), () => host.close(tab));
+    return { ok: true, tab: tab.id };
+  });
+
+  commandRegistry.register('runpane:browser:snapshot', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId } = decode('snapshot', request, schemas.snapshot);
+    return onTab(caller, tabId, false, async (page, tab) => {
+      const shot = await page.snapshot();
+      const result: SnapshotResult = { ok: true, tab: tab.id, ...shot };
+      if (shot.truncated) result.note = 'The page is long, so the snapshot was cut off. Scroll, or use browser_evaluate to read a part of it.';
+      else delete result.truncated;
+      return result;
+    });
+  });
+
+  commandRegistry.register('runpane:browser:screenshot', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, fullPage } = decode('screenshot', request, schemas.screenshot);
+    return onTab(caller, tabId, false, async (page, tab) => {
+      const shot = await page.screenshot(fullPage === true);
+      const directory = host.shotsDirectory();
+      await mkdir(directory, { recursive: true });
+      const file = path.join(directory, `${tab.id}-${Date.now()}.png`);
+      await writeFile(file, shot.png);
+      return { ok: true, tab: tab.id, path: file, mimeType: 'image/png', width: shot.width, height: shot.height };
+    });
+  });
+
+  commandRegistry.register('runpane:browser:click', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, ref, x, y, button, double } = decode('click', request, schemas.click);
+    const target = ref !== undefined ? { ref } : x !== undefined && y !== undefined ? { x, y } : undefined;
+    if (!target) throw invalid('browser_click needs a ref, or both x and y.', 'Pass a ref from browser_snapshot.');
+    return onTab(caller, tabId, true, async (page, tab, contents) => {
+      const clicked = await page.click(target, button ?? 'left', double === true);
+      host.showCursor(tab.id, clicked.x, clicked.y);
+      return after(tab, contents, clicked);
+    });
+  });
+
+  commandRegistry.register('runpane:browser:type', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, ref, text, clear, submit } = decode('type', request, schemas.type);
+    return onTab(caller, tabId, true, async (page, tab, contents) => after(tab, contents, await page.type(ref, text, clear === true, submit === true)));
+  });
+
+  commandRegistry.register('runpane:browser:press', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, key, ref } = decode('press', request, schemas.press);
+    return onTab(caller, tabId, true, async (page, tab, contents) => after(tab, contents, await page.press(key, ref)));
+  });
+
+  commandRegistry.register('runpane:browser:select', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, ref, values } = decode('select', request, schemas.select);
+    if (values.length === 0) throw invalid('browser_select needs at least one value.', 'Pass --values with the options to choose.');
+    return onTab(caller, tabId, true, async (page, tab, contents) => {
+      const selected = await page.select(ref, values);
+      return { ...after(tab, contents), note: `Selected: ${selected.join(', ')}` };
+    });
+  });
+
+  commandRegistry.register('runpane:browser:scroll', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, ref, dx, dy } = decode('scroll', request, schemas.scroll);
+    if (ref === undefined && !dx && !dy) throw invalid('browser_scroll needs a distance (dx or dy) or a ref to scroll into view.', 'Pass --dy 600 to scroll down a screen.');
+    return onTab(caller, tabId, true, async (page, tab, contents) => {
+      await page.scroll(ref, dx ?? 0, dy ?? 0);
+      return after(tab, contents);
+    });
+  });
+
+  commandRegistry.register('runpane:browser:navigate', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, url, back, forward, reload } = decode('navigate', request, schemas.navigate);
+    const chosen = [url !== undefined, back === true, forward === true, reload === true].filter(Boolean).length;
+    if (chosen !== 1) throw invalid('browser_navigate takes exactly one of url, back, forward or reload.', 'Pass a URL, or one of back, forward or reload.');
+    const target = url !== undefined ? { url: checkedWebUrl(url) } : { history: back ? 'back' as const : forward ? 'forward' as const : 'reload' as const };
+    return onTab(caller, tabId, true, async (page, tab, contents) => {
+      await page.navigate(target);
+      return after(tab, contents);
+    });
+  });
+
+  commandRegistry.register('runpane:browser:wait', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, text, url, ref, timeoutMs } = decode('wait', request, schemas.wait);
+    if (text === undefined && url === undefined && ref === undefined) throw invalid('browser_wait needs at least one of text, url or ref.', 'Pass --text with what the page should show.');
+    const conditions: WaitConditions = {};
+    if (text !== undefined) conditions.text = text;
+    if (url !== undefined) conditions.url = url;
+    if (ref !== undefined) conditions.ref = ref;
+    const timeout = Math.min(Math.max(timeoutMs ?? WAIT_DEFAULT_MS, 0), WAIT_MAX_MS);
+    return onTab(caller, tabId, false, async (page, tab, contents) => {
+      await page.wait(conditions, timeout);
+      return after(tab, contents, page.pendingDialog ? { dialog: page.pendingDialog } : {});
+    });
+  });
+
+  commandRegistry.register('runpane:browser:dialog', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, accept, dismiss, text } = decode('dialog', request, schemas.dialog);
+    if ((accept === true) === (dismiss === true)) throw invalid('browser_dialog takes exactly one of accept or dismiss.', 'Pass --accept to press OK, or --dismiss to press Cancel.');
+    return onTab(caller, tabId, true, async (page, tab, contents) => {
+      const answered = await page.answerDialog(accept === true, text);
+      return { ...after(tab, contents), note: `${accept ? 'Accepted' : 'Dismissed'} the ${answered.type} "${answered.message.slice(0, 120)}".` };
+    });
+  });
+
+  commandRegistry.register('runpane:browser:evaluate', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, expression, ref } = decode('evaluate', request, schemas.evaluate);
+    return onTab(caller, tabId, true, async (page, tab, contents) => {
+      const { value, truncated } = await page.evaluate(expression, ref);
+      const result: ReturnType<typeof after> & { value: unknown; truncated?: boolean } = { ...after(tab, contents), value };
+      if (truncated) {
+        result.truncated = true;
+        result.note = 'The value was over 64 KB, so it is cut off: value holds the start of its JSON text. Return less, such as one field or a slice.';
       }
-      const tab = await host.open(caller.paneId, url, caller.panelId);
-      const contents = await livePage(tab);
-      return { ...after(tab, contents), reused: false, next: 'Read it with browser_snapshot, then act on refs. Close it with browser_close when you are done.' };
-    },
+      return result;
+    });
+  });
 
-    tabs: async (request) => {
-      const caller = callerOf();
-      decode('tabs', request, schemas.tabs);
-      return { ok: true, tabs: host.tabs(caller.paneId).map(tab => summary(tab, caller)) };
-    },
+  commandRegistry.register('runpane:browser:upload', async (request: PaneCommandValue) => {
+    const caller = callerOf();
+    const { tab: tabId, ref, paths } = decode('upload', request, schemas.upload);
+    if (paths.length === 0) throw invalid('browser_upload needs at least one path.', 'Pass --paths with files in your worktree.');
+    const files = paths.map(file => checkedUploadPath(caller.worktree, file));
+    return onTab(caller, tabId, true, async (page, tab, contents) => {
+      await page.upload(ref, files);
+      return { ...after(tab, contents), note: `Set ${files.map(file => path.basename(file)).join(', ')}.` };
+    });
+  });
 
-    close: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId } = decode('close', request, schemas.close);
-      const tab = pickTab(caller, tabId, true);
-      if (openerOf(tab, caller) !== 'you') {
-        throw new PaneError('ERR_BROWSER_NOT_YOURS', `Tab ${tab.id} was opened by ${openerOf(tab, caller) === 'person' ? 'the person' : openerOf(tab, caller)}, and agents close only the tabs they opened. Nothing ran.`, 'Leave it open, or ask the person to close it.');
-      }
-      await gate.run(tab.id, agentName(caller.panelId), paneCommandSignal(), () => host.close(tab));
-      return { ok: true, tab: tab.id };
-    },
-
-    snapshot: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId } = decode('snapshot', request, schemas.snapshot);
-      return onTab(caller, tabId, false, async (page, tab) => {
-        const shot = await page.snapshot();
-        const result: { ok: true; tab: string; url: string; title: string; snapshot: string; truncated?: boolean; note?: string } = { ok: true, tab: tab.id, ...shot };
-        if (shot.truncated) result.note = 'The page is long, so the snapshot was cut off. Scroll, or use browser_evaluate to read a part of it.';
-        else delete result.truncated;
-        return result;
-      });
-    },
-
-    screenshot: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, fullPage } = decode('screenshot', request, schemas.screenshot);
-      return onTab(caller, tabId, false, async (page, tab) => {
-        const shot = await page.screenshot(fullPage === true);
-        const directory = host.shotsDirectory();
-        await mkdir(directory, { recursive: true });
-        const file = path.join(directory, `${tab.id}-${Date.now()}.png`);
-        await writeFile(file, shot.png);
-        return { ok: true, tab: tab.id, path: file, mimeType: 'image/png', width: shot.width, height: shot.height };
-      });
-    },
-
-    click: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, ref, x, y, button, double } = decode('click', request, schemas.click);
-      const target = ref !== undefined ? { ref } : x !== undefined && y !== undefined ? { x, y } : undefined;
-      if (!target) throw invalid('browser_click needs a ref, or both x and y.', 'Pass a ref from browser_snapshot.');
-      return onTab(caller, tabId, true, async (page, tab, contents) => {
-        const clicked = await page.click(target, button ?? 'left', double === true);
-        host.showCursor(tab.id, clicked.x, clicked.y);
-        return after(tab, contents, clicked);
-      });
-    },
-
-    type: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, ref, text, clear, submit } = decode('type', request, schemas.type);
-      return onTab(caller, tabId, true, async (page, tab, contents) => after(tab, contents, await page.type(ref, text, clear === true, submit === true)));
-    },
-
-    press: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, key, ref } = decode('press', request, schemas.press);
-      return onTab(caller, tabId, true, async (page, tab, contents) => after(tab, contents, await page.press(key, ref)));
-    },
-
-    select: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, ref, values } = decode('select', request, schemas.select);
-      if (values.length === 0) throw invalid('browser_select needs at least one value.', 'Pass --values with the options to choose.');
-      return onTab(caller, tabId, true, async (page, tab, contents) => {
-        const selected = await page.select(ref, values);
-        return { ...after(tab, contents), note: `Selected: ${selected.join(', ')}` };
-      });
-    },
-
-    scroll: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, ref, dx, dy } = decode('scroll', request, schemas.scroll);
-      if (ref === undefined && !dx && !dy) throw invalid('browser_scroll needs a distance (dx or dy) or a ref to scroll into view.', 'Pass --dy 600 to scroll down a screen.');
-      return onTab(caller, tabId, true, async (page, tab, contents) => {
-        await page.scroll(ref, dx ?? 0, dy ?? 0);
-        return after(tab, contents);
-      });
-    },
-
-    navigate: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, url, back, forward, reload } = decode('navigate', request, schemas.navigate);
-      const chosen = [url !== undefined, back === true, forward === true, reload === true].filter(Boolean).length;
-      if (chosen !== 1) throw invalid('browser_navigate takes exactly one of url, back, forward or reload.', 'Pass a URL, or one of back, forward or reload.');
-      const target = url !== undefined ? { url: checkedWebUrl(url) } : { history: back ? 'back' as const : forward ? 'forward' as const : 'reload' as const };
-      return onTab(caller, tabId, true, async (page, tab, contents) => {
-        await page.navigate(target);
-        return after(tab, contents);
-      });
-    },
-
-    wait: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, text, url, ref, timeoutMs } = decode('wait', request, schemas.wait);
-      if (text === undefined && url === undefined && ref === undefined) throw invalid('browser_wait needs at least one of text, url or ref.', 'Pass --text with what the page should show.');
-      const conditions: { text?: string; url?: string; ref?: string } = {};
-      if (text !== undefined) conditions.text = text;
-      if (url !== undefined) conditions.url = url;
-      if (ref !== undefined) conditions.ref = ref;
-      const timeout = Math.min(Math.max(timeoutMs ?? WAIT_DEFAULT_MS, 0), WAIT_MAX_MS);
-      return onTab(caller, tabId, false, async (page, tab, contents) => {
-        await page.wait(conditions, timeout);
-        return after(tab, contents, page.pendingDialog ? { dialog: page.pendingDialog } : {});
-      });
-    },
-
-    dialog: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, accept, dismiss, text } = decode('dialog', request, schemas.dialog);
-      if ((accept === true) === (dismiss === true)) throw invalid('browser_dialog takes exactly one of accept or dismiss.', 'Pass --accept to press OK, or --dismiss to press Cancel.');
-      return onTab(caller, tabId, true, async (page, tab, contents) => {
-        const answered = await page.answerDialog(accept === true, text);
-        return { ...after(tab, contents), note: `${accept ? 'Accepted' : 'Dismissed'} the ${answered.type} "${answered.message.slice(0, 120)}".` };
-      });
-    },
-
-    evaluate: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, expression, ref } = decode('evaluate', request, schemas.evaluate);
-      return onTab(caller, tabId, true, async (page, tab, contents) => {
-        const { value, truncated } = await page.evaluate(expression, ref);
-        const result: ReturnType<typeof after> & { value: unknown; truncated?: boolean } = { ...after(tab, contents), value };
-        if (truncated) {
-          result.truncated = true;
-          result.note = 'The value was over 64 KB, so it is cut off: value holds the start of its JSON text. Return less, such as one field or a slice.';
-        }
-        return result;
-      });
-    },
-
-    upload: async (request) => {
-      const caller = callerOf();
-      const { tab: tabId, ref, paths } = decode('upload', request, schemas.upload);
-      if (paths.length === 0) throw invalid('browser_upload needs at least one path.', 'Pass --paths with files in your worktree.');
-      const files = paths.map(file => checkedUploadPath(caller.worktree, file));
-      return onTab(caller, tabId, true, async (page, tab, contents) => {
-        await page.upload(ref, files);
-        return { ...after(tab, contents), note: `Set ${files.map(file => path.basename(file)).join(', ')}.` };
-      });
-    },
-  };
-
-  for (const verb of Object.keys(handlers) as Verb[]) {
-    commandRegistry.register(`runpane:browser:${verb}`, (request: PaneCommandValue) => handlers[verb](request));
-  }
 
   /** The tab's chip: Take over and Hand to agent. Only Pane's own UI may call it, never an agent. */
-  ipcMain.handle('browser-panel:driver', async (_event, panelId: unknown, who: unknown) => {
+  ipcMain.handle('browser-panel:driver', async (_event, panelId: PaneCommandValue, who: PaneCommandValue) => {
     if (paneCommandCaller() || teammatePaneCaller()) return { success: false, error: 'This channel belongs to the person\'s browser tab.' };
     const id = decodeOptionalBoundary(panelId, boundary.string);
     if (!id || !host.tab(id) || (who !== 'person' && who !== 'agent')) return { success: false, error: 'That browser tab is gone.' };

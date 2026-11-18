@@ -10,7 +10,14 @@
 export const PANE_WORLD_ID = 1_337;
 
 /** Characters a snapshot keeps before it is cut off with a note. */
-export const SNAPSHOT_CHAR_LIMIT = 20_000;
+const SNAPSHOT_CHAR_LIMIT = 20_000;
+
+/** What the page script's snapshot returns. */
+interface PageSnapshot { snapshot: string; truncated: boolean; url: string; title: string }
+/** What browser_wait's check returns. */
+interface PageCheck { met: boolean; stale?: string }
+/** The JSON values page calls take. */
+type PageArgument = string | number | boolean | null | undefined | readonly string[];
 
 function pageScript(limit: number) {
   type Entry = { el: Element; role: string; name: string };
@@ -40,9 +47,9 @@ function pageScript(limit: number) {
     const tag = el.tagName.toLowerCase();
     if (tag === 'a' || tag === 'area') return el.hasAttribute('href') ? 'link' : '';
     if (tag === 'button' || tag === 'summary') return 'button';
-    if (tag === 'input') return inputRole(el as HTMLInputElement);
+    if (el instanceof HTMLInputElement) return inputRole(el);
     if (tag === 'textarea') return 'textbox';
-    if (tag === 'select') return (el as HTMLSelectElement).multiple || (el as HTMLSelectElement).size > 1 ? 'listbox' : 'combobox';
+    if (el instanceof HTMLSelectElement) return el.multiple || el.size > 1 ? 'listbox' : 'combobox';
     if (tag === 'option') return 'option';
     if (/^h[1-6]$/.test(tag)) return 'heading';
     if (tag === 'img') return el.getAttribute('alt') === '' ? '' : 'img';
@@ -59,8 +66,22 @@ function pageScript(limit: number) {
     if (tag === 'header') return 'banner';
     if (tag === 'footer') return 'contentinfo';
     if (tag === 'article') return 'article';
-    if ((el as HTMLElement).isContentEditable && !(el.parentElement as HTMLElement | null)?.isContentEditable) return 'textbox';
+    if (editable(el) && !(el.parentElement && editable(el.parentElement))) return 'textbox';
     return '';
+  }
+
+  function editable(el: Element): boolean {
+    return el instanceof HTMLElement && el.isContentEditable;
+  }
+
+  function disabled(el: Element): boolean {
+    return ('disabled' in el && el.disabled === true) || el.getAttribute('aria-disabled') === 'true';
+  }
+
+  /** The labels of a form control; other elements have none. */
+  function labelsOf(el: Element): NodeListOf<HTMLLabelElement> | null {
+    if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement || el instanceof HTMLButtonElement) return el.labels;
+    return null;
   }
 
   function clean(text: string | null | undefined): string {
@@ -68,18 +89,18 @@ function pageScript(limit: number) {
   }
 
   function textOf(el: Element): string {
-    return clean((el as HTMLElement).innerText ?? el.textContent);
+    return clean(el instanceof HTMLElement ? el.innerText : el.textContent);
   }
 
   function labelText(el: Element): string {
     const labelledBy = el.getAttribute('aria-labelledby');
     if (labelledBy) {
-      const text = labelledBy.split(/\s+/).map(id => el.ownerDocument.getElementById(id)).filter(Boolean).map(node => textOf(node as Element)).join(' ');
+      const text = labelledBy.split(/\s+/).map(id => el.ownerDocument.getElementById(id)).filter(node => node !== null).map(node => textOf(node)).join(' ');
       if (text) return text;
     }
     const aria = clean(el.getAttribute('aria-label'));
     if (aria) return aria;
-    const labels = (el as HTMLInputElement).labels;
+    const labels = labelsOf(el);
     if (labels && labels.length > 0) return clean(Array.from(labels).map(label => ownText(label)).join(' '));
     return '';
   }
@@ -99,8 +120,8 @@ function pageScript(limit: number) {
     const label = labelText(el);
     if (label) return label;
     const tag = el.tagName.toLowerCase();
-    if (tag === 'img' || tag === 'area' || (tag === 'input' && (el as HTMLInputElement).type === 'image')) return clean(el.getAttribute('alt'));
-    if (tag === 'input' && ['submit', 'button', 'reset'].includes((el as HTMLInputElement).type)) return clean((el as HTMLInputElement).value) || ((el as HTMLInputElement).type === 'submit' ? 'Submit' : '');
+    if (tag === 'img' || tag === 'area' || (el instanceof HTMLInputElement && el.type === 'image')) return clean(el.getAttribute('alt'));
+    if (el instanceof HTMLInputElement && ['submit', 'button', 'reset'].includes(el.type)) return clean(el.value) || (el.type === 'submit' ? 'Submit' : '');
     if (['button', 'link', 'heading', 'option', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'treeitem', 'cell', 'columnheader', 'switch', 'checkbox', 'radio'].includes(role) && !['input', 'select', 'textarea'].includes(tag)) {
       return textOf(el).slice(0, 200);
     }
@@ -122,7 +143,7 @@ function pageScript(limit: number) {
     }
     if (el instanceof HTMLTextAreaElement) return el.value ? (masked(el) ? MASK : el.value) : undefined;
     if (el instanceof HTMLSelectElement) return Array.from(el.selectedOptions).map(option => clean(option.label || option.text)).join(', ') || undefined;
-    if ((el as HTMLElement).isContentEditable) return masked(el) ? MASK : textOf(el) || undefined;
+    if (editable(el)) return masked(el) ? MASK : textOf(el) || undefined;
     return undefined;
   }
 
@@ -130,35 +151,35 @@ function pageScript(limit: number) {
     const out: string[] = [];
     const tag = el.tagName.toLowerCase();
     if (role === 'heading') out.push(`level=${/^h[1-6]$/.test(tag) ? tag[1] : el.getAttribute('aria-level') ?? '2'}`);
-    const input = el as HTMLInputElement;
+    const input = el instanceof HTMLInputElement ? el : undefined;
     if (role === 'checkbox' || role === 'radio' || role === 'switch' || role === 'menuitemcheckbox' || role === 'menuitemradio') {
-      const checked = tag === 'input' ? input.checked : el.getAttribute('aria-checked') === 'true';
+      const checked = input ? input.checked : el.getAttribute('aria-checked') === 'true';
       if (checked) out.push('checked');
     }
-    if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') out.push('disabled');
+    if (disabled(el)) out.push('disabled');
     if (el.getAttribute('aria-expanded') === 'true') out.push('expanded');
     if (el.getAttribute('aria-expanded') === 'false') out.push('collapsed');
     if (el.getAttribute('aria-selected') === 'true' || (el instanceof HTMLOptionElement && el.selected)) out.push('selected');
     if (el.getAttribute('aria-pressed') === 'true') out.push('pressed');
-    if ((el as HTMLInputElement).required || el.getAttribute('aria-required') === 'true') out.push('required');
+    if (('required' in el && el.required === true) || el.getAttribute('aria-required') === 'true') out.push('required');
     if (el.ownerDocument.activeElement === el) out.push('focused');
-    if (tag === 'input' && input.type === 'file') out.push('file input');
+    if (input?.type === 'file') out.push('file input');
     return out;
   }
 
   function hidden(el: Element): boolean {
-    if (el.getAttribute('aria-hidden') === 'true' || (el as HTMLElement).hidden) return true;
+    if (el.getAttribute('aria-hidden') === 'true' || (el instanceof HTMLElement && el.hidden)) return true;
     if (el instanceof HTMLInputElement && el.type === 'hidden') return true;
     // A file input styled away still takes browser_upload, so it stays in the tree.
     if (el instanceof HTMLInputElement && el.type === 'file') return false;
-    return typeof el.checkVisibility === 'function' ? !el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true }) : false;
+    return !el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true });
   }
 
   function quote(text: string): string {
     return JSON.stringify(text.length > 300 ? `${text.slice(0, 300)}…` : text);
   }
 
-  function snapshot(): { snapshot: string; truncated: boolean; url: string; title: string } {
+  function snapshot(): PageSnapshot {
     generation += 1;
     refs = new Map();
     const lines: string[] = [];
@@ -204,11 +225,11 @@ function pageScript(limit: number) {
         if (role === 'heading' || role === 'img') return;
         if (role === 'combobox' && tag === 'select') return;
       }
-      const root = (node as HTMLElement).shadowRoot;
+      const root = node.shadowRoot;
       for (const child of Array.from((root ?? node).childNodes)) walk(child, childDepth);
-      if (tag === 'iframe') {
+      if (node instanceof HTMLIFrameElement) {
         try {
-          const doc = (node as HTMLIFrameElement).contentDocument;
+          const doc = node.contentDocument;
           if (doc?.body) walk(doc.body, childDepth);
           else push(childDepth, 'iframe (another site; not read)');
         } catch {
@@ -234,10 +255,10 @@ function pageScript(limit: number) {
   function point(ref: string): { x: number; y: number } | { stale: string } | { wait: string } {
     const el = lookup(ref);
     if ('stale' in el) return el;
-    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' as ScrollBehavior });
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     const rect = el.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0 || hidden(el)) return { wait: `${ref} is not visible.` };
-    if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') return { wait: `${ref} is disabled.` };
+    if (disabled(el)) return { wait: `${ref} is disabled.` };
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
     const hit = document.elementFromPoint(x, y);
@@ -251,12 +272,12 @@ function pageScript(limit: number) {
   function focus(ref: string, clear: boolean): true | { stale: string } | { wait: string } {
     const el = lookup(ref);
     if ('stale' in el) return el;
-    if ((el as HTMLInputElement).disabled) return { wait: `${ref} is disabled.` };
-    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' as ScrollBehavior });
-    (el as HTMLElement).focus();
+    if (disabled(el)) return { wait: `${ref} is disabled.` };
+    el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    if (el instanceof HTMLElement) el.focus();
     if (clear) {
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.select();
-      else if ((el as HTMLElement).isContentEditable) {
+      else if (editable(el)) {
         const range = document.createRange();
         range.selectNodeContents(el);
         const selection = getSelection();
@@ -291,17 +312,17 @@ function pageScript(limit: number) {
 
   function scrollBy(ref: string | null, dx: number, dy: number): true | { stale: string } {
     if (ref === null) {
-      window.scrollBy({ left: dx, top: dy, behavior: 'instant' as ScrollBehavior });
+      window.scrollBy({ left: dx, top: dy, behavior: 'instant' });
       return true;
     }
     const el = lookup(ref);
     if ('stale' in el) return el;
-    if (dx === 0 && dy === 0) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' as ScrollBehavior });
-    else el.scrollBy({ left: dx, top: dy, behavior: 'instant' as ScrollBehavior });
+    if (dx === 0 && dy === 0) el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    else el.scrollBy({ left: dx, top: dy, behavior: 'instant' });
     return true;
   }
 
-  function check(text: string | null, url: string | null, ref: string | null): { met: boolean; stale?: string } {
+  function check(text: string | null, url: string | null, ref: string | null): PageCheck {
     if (url !== null && !location.href.includes(url)) return { met: false };
     if (text !== null && !(document.body?.innerText ?? '').includes(text)) return { met: false };
     if (ref !== null) {
@@ -317,6 +338,6 @@ function pageScript(limit: number) {
 }
 
 /** One call on the page script, with JSON arguments; the first call in a document defines it. */
-export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check', ...args: unknown[]): string {
+export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check', ...args: PageArgument[]): string {
   return `(globalThis.__paneBrowser ??= (${pageScript.toString()})(${SNAPSHOT_CHAR_LIMIT})).${method}(${args.map(arg => JSON.stringify(arg ?? null)).join(', ')})`;
 }

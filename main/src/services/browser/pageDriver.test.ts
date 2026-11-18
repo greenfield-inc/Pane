@@ -26,7 +26,7 @@ function recordingPage() {
     },
   });
   let reloads = 0;
-  const page = Object.assign(new EventEmitter(), {
+  const page: BrowserPageContents = Object.assign(new EventEmitter(), {
     id: 1,
     isDestroyed: () => false,
     getURL: () => 'http://localhost/',
@@ -35,6 +35,7 @@ function recordingPage() {
     isDevToolsOpened: () => false,
     devToolsWebContents: null,
     insertText: async () => undefined,
+    sendInputEvent: () => undefined,
     capturePage: async () => ({ toPNG: () => Buffer.from('png'), getSize: () => ({ width: 800, height: 600 }) }),
     loadURL: async () => undefined,
     reload: () => { reloads += 1; page.emit('did-stop-loading'); },
@@ -49,8 +50,7 @@ function recordingPage() {
     },
     debugger: debug,
   });
-  // SAFETY: The fake implements every member the driver calls.
-  return { page: page as unknown as BrowserPageContents, sent, reloads: () => reloads };
+  return { page, sent, reloads: () => reloads };
 }
 
 describe('page driver', () => {
