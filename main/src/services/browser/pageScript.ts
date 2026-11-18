@@ -24,6 +24,8 @@ function pageScript(limit: number) {
   const INTERACTIVE = new Set(['button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'combobox', 'listbox', 'option', 'slider', 'spinbutton', 'switch', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'treeitem']);
   const LANDMARK = new Set(['heading', 'img', 'dialog', 'alert', 'navigation', 'main', 'form', 'table', 'row', 'cell', 'columnheader', 'list', 'listitem', 'banner', 'contentinfo', 'region', 'search', 'tablist', 'menu', 'tree', 'group', 'article']);
   const MASK = '••••••••';
+  /** Elements a snapshot names or refs; a subtree without them is plain text. */
+  const STRUCTURE = 'a[href],area[href],button,input,select,textarea,summary,option,img,iframe,h1,h2,h3,h4,h5,h6,nav,main,form,dialog,table,ul,ol,header,footer,article,[role],[contenteditable],[aria-label],[tabindex]';
   let generation = 0;
   let refs = new Map<string, Entry>();
 
@@ -178,8 +180,9 @@ function pageScript(limit: number) {
     return style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse';
   }
 
-  function quote(text: string): string {
-    return JSON.stringify(text.length > 300 ? `${text.slice(0, 300)}…` : text);
+  /** Names and values are cut at 300 characters, text runs at 2,000. */
+  function quote(text: string, max = 300): string {
+    return JSON.stringify(text.length > max ? `${text.slice(0, max)}…` : text);
   }
 
   function snapshot(): PageSnapshot {
@@ -189,18 +192,33 @@ function pageScript(limit: number) {
     let size = 0;
     let truncated = false;
     let counter = 0;
+    // The last line, when it is text: the next text at the same depth joins it.
+    let openText: { depth: number; text: string } | null = null;
     const push = (depth: number, line: string) => {
       if (truncated) return;
+      openText = null;
       const text = `${'  '.repeat(Math.min(depth, 20))}- ${line}`;
       if (size + text.length + 1 > limit) { truncated = true; return; }
       lines.push(text);
       size += text.length + 1;
     };
+    const pushText = (depth: number, text: string) => {
+      if (openText && openText.depth === depth && lines.length > 0) {
+        const joined = `${openText.text} ${text}`;
+        const previous = lines.pop() ?? '';
+        size -= previous.length + 1;
+        push(depth, `text: ${quote(joined, 2_000)}`);
+        openText = { depth, text: joined };
+        return;
+      }
+      push(depth, `text: ${quote(text, 2_000)}`);
+      openText = { depth, text };
+    };
     const walk = (node: Node, depth: number) => {
       if (truncated) return;
       if (node.nodeType === Node.TEXT_NODE) {
         const text = clean(node.textContent);
-        if (text) push(depth, `text: ${quote(text)}`);
+        if (text) pushText(depth, text);
         return;
       }
       if (!(node instanceof Element)) return;
@@ -227,6 +245,12 @@ function pageScript(limit: number) {
         if (INTERACTIVE.has(role) && role !== 'listbox' && role !== 'combobox') return;
         if (role === 'heading' || role === 'img') return;
         if (role === 'combobox' && tag === 'select') return;
+      }
+      // A run of text with nothing to act on or name inside (a paragraph, a code block) reads as one line.
+      if (!role && !node.shadowRoot && !node.querySelector(STRUCTURE)) {
+        const text = textOf(node);
+        if (text) pushText(depth, text);
+        return;
       }
       const root = node.shadowRoot;
       for (const child of Array.from((root ?? node).childNodes)) walk(child, childDepth);
