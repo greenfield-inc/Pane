@@ -8,7 +8,7 @@ import type { RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
 
 import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
 import { KeyBadge } from './KeyBadge';
@@ -72,43 +72,60 @@ export function ShortcutsSheet({ visible, onClose, shortcuts, loading, onPick }:
           style={[theme.typography.subhead, styles.searchInput, { color: colors.text }]}
         />
       </View>
-      {loading ? (
-        <Text variant="subhead" tone="muted" style={styles.message}>Loading the host's shortcuts…</Text>
-      ) : shown.length === 0 ? (
-        <Text variant="subhead" tone="muted" style={styles.message} testID="shortcuts-empty">
-          {query ? 'No shortcut matches.' : 'No shortcuts are on. Tap Edit to add one.'}
-        </Text>
-      ) : (
-        <LegendList
-          data={shown}
-          keyExtractor={shortcut => shortcut.id}
-          estimatedItemSize={60}
-          keyboardShouldPersistTaps="handled"
-          // A list in a sheet needs a set height; rows are about 80 pt.
-          style={[styles.list, { height: Math.min(shown.length * 80 + 8, 360) }]}
-          renderItem={({ item }) => (
-            <Pressable
-              testID={`shortcut-${item.id}`}
-              accessibilityRole="button"
-              accessibilityLabel={item.label}
-              accessibilityHint="Inserts its text at the cursor"
-              onPress={() => {
-                void Haptics.selectionAsync();
-                onPick(item.text);
-                close();
-              }}
-              style={({ pressed }) => [styles.item, { borderRadius: theme.radius.md, backgroundColor: pressed ? colors.surfacePressed : 'transparent' }]}
-            >
-              <KeyBadge letter={item.key} style={styles.badge} />
-              <View style={styles.body}>
-                <Text variant="callout" numberOfLines={1}>{item.label}</Text>
-                <Text variant="footnote" tone="muted" numberOfLines={2}>{item.text}</Text>
-              </View>
-            </Pressable>
-          )}
-        />
-      )}
+      <SkeletonSwap loading={loading} skeleton={<ShortcutsSkeleton />}>
+        {shown.length === 0 ? (
+          <Text variant="subhead" tone="muted" style={styles.message} testID="shortcuts-empty">
+            {query ? 'No shortcut matches.' : 'No shortcuts are on. Tap Edit to add one.'}
+          </Text>
+        ) : (
+          <LegendList
+            data={shown}
+            keyExtractor={shortcut => shortcut.id}
+            estimatedItemSize={60}
+            keyboardShouldPersistTaps="handled"
+            // A list in a sheet needs a set height; rows are about 80 pt.
+            style={[styles.list, { height: Math.min(shown.length * 80 + 8, 360) }]}
+            renderItem={({ item }) => (
+              <Pressable
+                testID={`shortcut-${item.id}`}
+                accessibilityRole="button"
+                accessibilityLabel={item.label}
+                accessibilityHint="Inserts its text at the cursor"
+                onPress={() => {
+                  void Haptics.selectionAsync();
+                  onPick(item.text);
+                  close();
+                }}
+                style={({ pressed }) => [styles.item, { borderRadius: theme.radius.md, backgroundColor: pressed ? colors.surfacePressed : 'transparent' }]}
+              >
+                <KeyBadge letter={item.key} style={styles.badge} />
+                <View style={styles.body}>
+                  <Text variant="callout" numberOfLines={1}>{item.label}</Text>
+                  <Text variant="footnote" tone="muted" numberOfLines={2}>{item.text}</Text>
+                </View>
+              </Pressable>
+            )}
+          />
+        )}
+      </SkeletonSwap>
     </ComposerSheet>
+  );
+}
+
+/** Three shortcut rows as a skeleton: key badge, label and text. */
+function ShortcutsSkeleton() {
+  return (
+    <View testID="shortcuts-skeleton" accessible accessibilityLabel="Loading shortcuts" style={styles.list}>
+      {[0.35, 0.5, 0.3].map(width => (
+        <View key={width} style={styles.item}>
+          <Skeleton width={22} height={18} radius={4} style={styles.badge} />
+          <View style={[styles.body, styles.boneLines]}>
+            <Skeleton width={`${width * 100}%`} height={14} />
+            <Skeleton width="80%" height={12} />
+          </View>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -123,4 +140,6 @@ const styles = StyleSheet.create({
   item: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginHorizontal: 6, paddingHorizontal: 10, paddingVertical: 9 },
   badge: { marginTop: 2 },
   body: { flex: 1, minWidth: 0 },
+  // The label's 20 pt line over one 16 pt line of text.
+  boneLines: { height: 36, justifyContent: 'space-evenly' },
 });

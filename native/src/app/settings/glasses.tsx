@@ -1,10 +1,10 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, StyleSheet, View } from 'react-native';
+import { Alert, Linking, StyleSheet, View } from 'react-native';
 
 import { useGlasses } from '@/features/glasses/useGlasses';
 import { useTheme } from '@/theme';
-import { Button, ErrorState, ListRow, ListSection, Screen, Text } from '@/ui';
+import { Button, ErrorState, ListRow, ListSection, Screen, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 /** Where a stranger learns to use Pane on Even G2; the repo docs page, published with each merge. */
 const GLASSES_DOCS_URL = 'https://github.com/greenfield-inc/Pane/blob/main/docs/EVEN_G2_GLASSES.md';
@@ -66,7 +66,20 @@ export default function GlassesSettingsScreen() {
         {isPaired ? (
           <ListRow testID="glasses-device" title={deviceName} subtitle={`${pairedOn.length} ${pairedOn.length === 1 ? 'computer' : 'computers'}`} />
         ) : null}
-        {directory && machines.isPending ? <View style={styles.cardNote}><ActivityIndicator color={theme.colors.textMuted} /></View> : null}
+        {directory && machines.isPending ? (
+          // A computer's row (ListRow: name over status) until the list answers.
+          <SkeletonSwap
+            loading
+            skeleton={(
+              <View testID="glasses-computers-skeleton" accessible accessibilityLabel="Loading computers" style={[styles.boneRow, { backgroundColor: theme.colors.card }]}>
+                <Skeleton width="40%" height={16} />
+                <Skeleton width="25%" height={12} />
+              </View>
+            )}
+          >
+            {null}
+          </SkeletonSwap>
+        ) : null}
         {machines.isError ? <View style={styles.cardNote}><ErrorState error={machines.error} onRetry={() => void machines.refetch()} /></View> : null}
         {machines.data && !machines.data.ok ? <View style={styles.cardNote}><Text variant="rowDetail" tone="secondary">{machines.data.reason}. {machines.data.fix}</Text></View> : null}
         {computers.map(({ machine }) => {
@@ -130,4 +143,5 @@ const styles = StyleSheet.create({
   actions: { gap: 8 },
   inset: { paddingHorizontal: 4 },
   cardNote: { padding: 16 },
+  boneRow: { minHeight: 58, justifyContent: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9 },
 });

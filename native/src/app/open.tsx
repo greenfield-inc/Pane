@@ -1,6 +1,6 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { openRoute, resolveOpenTarget } from '@/features/links/links';
@@ -51,14 +51,10 @@ export default function OpenScreen() {
       </View>
     );
   }
-  return (
-    <View testID="open-loading" style={[styles.fill, styles.center, { backgroundColor: theme.colors.background }]}>
-      <ActivityIndicator />
-    </View>
-  );
+  // Only a frame or two: the screen it opens draws its own skeleton.
+  return <View testID="open-loading" accessibilityLabel="Opening" style={[styles.fill, { backgroundColor: theme.colors.background }]} />;
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  center: { alignItems: 'center', justifyContent: 'center' },
 });

@@ -1,13 +1,13 @@
 import { LegendList } from '@legendapp/list/react-native';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useState, type ReactNode } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { ChangedFileSummary, DiffScope } from '@shared/types/gitDiff';
 import type { EditorPanelState, ToolPanel } from '@shared/types/panels';
 
 import { useDaemon } from '@/daemon';
 import { monoFontFamily, useTheme, withAlpha } from '@/theme';
-import { EmptyState, ErrorState, Icon, Text } from '@/ui';
+import { EmptyState, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 import { TabFooter } from '../tabs/TabFooter';
 import { changeBadge, DiffError, inlinePatch, parsePatch, versusLabel, type PatchRow } from './diff';
@@ -31,7 +31,7 @@ export function DiffTab({ panel }: { panel: ToolPanel }) {
   const [fullPath, setFullPath] = useState<string | null>(null);
   const full = fullPath === null ? undefined : changes.data?.files.find(file => file.path === fullPath);
 
-  let body;
+  let body: ReactNode = null;
   if (full) {
     body = (
       <>
@@ -50,8 +50,9 @@ export function DiffTab({ panel }: { panel: ToolPanel }) {
         <FilePatch sessionId={panel.sessionId} scope={BRANCH_SCOPE} file={full} fill />
       </>
     );
-  } else if (changes.isPending) body = <View style={styles.center}><ActivityIndicator color={colors.textMuted} /></View>;
-  else if (changes.isError) body = <ErrorState title="Couldn’t read this branch’s changes" error={changes.error} onRetry={() => void changes.refetch()} testID="diff-error" />;
+  } else if (changes.isPending) {
+    // Drawn by the skeleton below.
+  } else if (changes.isError) body = <ErrorState title="Couldn’t read this branch’s changes" error={changes.error} onRetry={() => void changes.refetch()} testID="diff-error" />;
   else if (changes.data.files.length === 0) body = <EmptyState testID="diff-empty" title="No changes" message={`This branch matches ${versusLabel(changes.data.resolvedBase).replace(/^vs /, '') || 'its base'}.`} />;
   else {
     const { stats } = changes.data;
@@ -93,8 +94,44 @@ export function DiffTab({ panel }: { panel: ToolPanel }) {
   }
   return (
     <View testID="diff-tab" style={[styles.fill, { backgroundColor: colors.background }]}>
-      <View style={styles.fill}>{body}</View>
+      <View style={styles.fill}>
+        <SkeletonSwap loading={changes.isPending} skeleton={<ChangesSkeleton />} style={styles.fill}>{body}</SkeletonSwap>
+      </View>
       <TabFooter left="Read-only on the phone" right={`Commit and revert on ${profile.label}`} />
+    </View>
+  );
+}
+
+/** The changes' footprint while they load: the summary line, then file rows. */
+function ChangesSkeleton() {
+  const { colors } = useTheme();
+  return (
+    <View testID="diff-skeleton" accessible accessibilityLabel="Loading changes">
+      <View style={[styles.summary, { borderBottomColor: colors.border }]}>
+        <Skeleton width={60} height={14} style={styles.boneCallout} />
+        <Skeleton width={70} height={14} style={styles.boneCallout} />
+        <Skeleton width={90} height={14} style={styles.versus} />
+      </View>
+      {[0.55, 0.7, 0.45, 0.6, 0.5].map(width => (
+        <View key={width} style={[styles.file, styles.fileRow, { borderBottomColor: colors.border }]}>
+          <Skeleton width={12} height={12} />
+          <Skeleton width={20} height={20} />
+          <View style={styles.path}><Skeleton width={`${width * 100}%`} height={14} /></View>
+          <Skeleton width={44} height={14} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** A patch's footprint while it loads: lines of varied length, four inside the file list. */
+function PatchSkeleton({ fill }: { fill?: boolean }) {
+  const widths = fill ? [0.5, 0.8, 0.65, 0.9, 0.4, 0.75, 0.6, 0.85, 0.55, 0.7, 0.45, 0.8] : [0.5, 0.8, 0.65, 0.9];
+  return (
+    <View testID="diff-patch-skeleton" accessible accessibilityLabel="Loading the patch" style={[styles.patch, fill && styles.fill]}>
+      {widths.map((width, index) => (
+        <View key={index} style={styles.patchBone}><Skeleton width={`${width * 100}%`} height={12} /></View>
+      ))}
     </View>
   );
 }
@@ -125,9 +162,16 @@ function FilePatch({ sessionId, scope, file, fill, onShowAll }: {
   /** Inside the file list: opens a patch too long to draw there in its own view. */
   onShowAll?: () => void;
 }) {
-  const { colors } = useTheme();
   const diff = useFileDiff(sessionId, scope, file.previousPath ? { path: file.path, previousPath: file.previousPath } : { path: file.path });
-  if (diff.isPending) return <View style={[styles.patchState, fill && styles.center]}><ActivityIndicator color={colors.textMuted} /></View>;
+  return (
+    <SkeletonSwap loading={diff.isPending} skeleton={<PatchSkeleton fill={fill} />} style={fill ? styles.fill : undefined}>
+      {diff.isPending ? null : <PatchBody diff={diff} fill={fill} onShowAll={onShowAll} />}
+    </SkeletonSwap>
+  );
+}
+
+function PatchBody({ diff, fill, onShowAll }: { diff: Exclude<ReturnType<typeof useFileDiff>, { isPending: true }>; fill?: boolean; onShowAll?: () => void }) {
+  const { colors } = useTheme();
   if (diff.isError) {
     const tooLarge = diff.error instanceof DiffError && diff.error.code === 'diff-too-large';
     return (
@@ -228,4 +272,7 @@ const styles = StyleSheet.create({
   patch: { paddingBottom: 4 },
   patchLine: { fontSize: 13, lineHeight: 20, paddingHorizontal: 10 },
   patchState: { padding: 16 },
+  // A patch line is 20 pt; the summary's callout text 20.
+  patchBone: { height: 20, justifyContent: 'center', paddingHorizontal: 10 },
+  boneCallout: { marginVertical: 3 },
 });

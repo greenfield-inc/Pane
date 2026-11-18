@@ -93,13 +93,16 @@ export function Notice({ message, danger, action, testID }: {
   );
 }
 
-/** Placeholder rows in the drawer rows' footprint while the list loads. */
-export function LoadingRows() {
+/**
+ * The drawer's rows as a skeleton, for SkeletonSwap: PaneRow's 44 pt rows, or `archived` rows
+ * in ArchivedRow's footprint.
+ */
+export function LoadingRows({ archived = false }: { archived?: boolean }) {
   return (
-    <View accessibilityLabel="Loading panes">
+    <View testID={archived ? 'archived-skeleton' : 'panes-skeleton'} accessible accessibilityLabel={archived ? 'Loading archived panes' : 'Loading panes'}>
       {[0.55, 0.4, 0.5].map(width => (
-        <View key={width} style={styles.loadingRow}>
-          <Skeleton width={8} height={8} radius={4} />
+        <View key={width} style={archived ? styles.archivedBone : styles.paneBone}>
+          {archived ? <Skeleton width={14} height={14} /> : <Skeleton width={8} height={8} radius={4} />}
           <Skeleton width={`${width * 100}%`} height={14} />
         </View>
       ))}
@@ -194,7 +197,9 @@ const styles = StyleSheet.create({
   sectionGap: { marginTop: 12 },
   sectionTitle: { flex: 1, fontSize: 13, lineHeight: 18, letterSpacing: 0.1 },
   count: { fontWeight: '500' },
-  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 12, marginBottom: 4 },
+  // PaneRow's and ArchivedRow's footprints.
+  paneBone: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, paddingHorizontal: 14 },
+  archivedBone: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 12, marginBottom: 4 },
   notice: { borderWidth: 1, padding: 16, gap: 8 },
   sheetButton: { minHeight: 40, paddingHorizontal: 16, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   bold: { fontWeight: '600' },

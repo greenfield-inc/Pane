@@ -87,6 +87,7 @@ function shape(items: SidebarItem[]): string[] {
       case 'pane': return `${item.nested ? '  ' : ''}${item.label}`;
       case 'archived': return `restore ${item.label}${item.detail ? ` · ${item.detail}` : ''}`;
       case 'note': return `note: ${item.text}`;
+      case 'loading': return 'loading';
     }
   });
 }
@@ -185,7 +186,7 @@ describe('buildSidebar', () => {
       '# Sessions (collapsed)',
       '# Repositories (collapsed)',
       '# Archived',
-      'note: Loading archived panes…',
+      'loading',
     ]);
     expect(shape(buildSidebar(input({ expanded, archivedProjects })))).toEqual([
       '# Pinned (collapsed)',
@@ -240,7 +241,7 @@ describe('buildSidebar', () => {
       'restore old-spike · pane',
     ]);
     expect(shape(buildSidebar(input({ expanded, archivedProjects, query: 'login' })))).not.toContain('# Archived');
-    expect(shape(buildSidebar(input({ expanded, query: 'spike' })))).toEqual(['# Archived', 'note: Loading archived panes…']);
+    expect(shape(buildSidebar(input({ expanded, query: 'spike' })))).toEqual(['# Archived', 'loading']);
     expect(buildSidebar(input({ expanded, archivedProjects, query: 'nothing-like-this' }))).toEqual([]);
   });
 

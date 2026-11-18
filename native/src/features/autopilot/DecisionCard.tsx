@@ -12,7 +12,7 @@ import { ApprovalActions } from '@/features/approvals/ApprovalActions';
 import { receiptLines } from '@/features/approvals/approvals';
 import { useNotifyCommand } from '@/features/notify/hooks';
 import { useTheme, withAlpha } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Icon, Skeleton, Text } from '@/ui';
 
 import { answerBar, cardState, type CardState } from './autopilot';
 
@@ -123,6 +123,33 @@ export function DecisionCard({ notifyId, item, variant, onOpen, answer }: {
   );
 }
 
+/**
+ * A decision card's footprint while the questions load: its kind line, origin, title, why, and two
+ * option rows. `testID` names the skeleton for the screen that draws it.
+ */
+export function DecisionCardSkeleton({ testID }: { testID: string }) {
+  const { colors } = useTheme();
+  return (
+    <View testID={testID} accessible accessibilityLabel="Loading the question" style={[styles.card, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+      <View style={styles.head}>
+        <View style={styles.metaRow}>
+          <Skeleton width={16} height={16} radius={8} />
+          <Skeleton width="30%" height={12} />
+        </View>
+        <Skeleton width="45%" height={12} style={styles.boneFootnote} />
+        <Skeleton width="80%" height={17} style={styles.boneTitle} />
+        <Skeleton width="65%" height={14} style={styles.boneSubhead} />
+      </View>
+      {[0.5, 0.35].map(width => (
+        <View key={width} style={[styles.option, { borderTopColor: colors.border }]}>
+          <View style={styles.radioBox}><Skeleton width={20} height={20} radius={10} /></View>
+          <Skeleton width={`${width * 100}%`} height={16} style={styles.boneOption} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function OptionRow({ option, divider, pickable, sending, onPick, testID }: { option: DecisionOption; divider: string; pickable: boolean; sending: boolean; onPick: () => void; testID: string }) {
   const theme = useTheme();
   const { colors } = theme;
@@ -213,4 +240,9 @@ const styles = StyleSheet.create({
   footer: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, minHeight: 48, borderTopWidth: StyleSheet.hairlineWidth },
   error: { paddingHorizontal: 14, paddingBottom: 10 },
   itemActions: { paddingHorizontal: 14, paddingBottom: 12 },
+  // Bones sit centred in their text's line: footnote 16, the title's 23, subhead 20, body 24.
+  boneFootnote: { marginVertical: 2 },
+  boneTitle: { marginVertical: 3 },
+  boneSubhead: { marginVertical: 3 },
+  boneOption: { marginVertical: 4 },
 });

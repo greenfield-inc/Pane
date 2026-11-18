@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { decisionModel, type DecisionModel } from '@shared/autopilotDecision';
@@ -14,10 +14,10 @@ import { ConnectionBar } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { useTheme } from '@/theme';
-import { Button, ErrorState, Icon, Text } from '@/ui';
+import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 import { answerBar, cardState, contextSource, itemPosition, relatedDocs, stackEntryFor, type CardState, type RelatedDoc, autopilotItems } from './autopilot';
-import { DecisionCard, useDecisionAnswer } from './DecisionCard';
+import { DecisionCard, DecisionCardSkeleton, useDecisionAnswer } from './DecisionCard';
 import { useAutopilot } from './hooks';
 
 /** Back to the chat: the screen under this one, where the chat kept its place. */
@@ -50,10 +50,9 @@ export function AutopilotItemScreen({ notifyId }: { notifyId: string }) {
   const position = itemPosition(autopilot.data, notifyId, approvalOrder(notify.data, sort));
   const entry = stackEntryFor(autopilot.data, notifyId);
 
-  let body: ReactNode;
+  let body: ReactNode = null;
   if (notify.isError) body = <ErrorState title="Couldn’t read the question" error={notify.error} onRetry={() => void notify.refetch()} />;
-  else if (!notify.data) body = <View style={styles.center}><ActivityIndicator /></View>;
-  else {
+  else if (notify.data) {
     body = (
       <ScrollView testID="autopilot-item-scroll" style={styles.fill} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <DecisionCard notifyId={notifyId} item={item} variant="full" answer={answer} />
@@ -84,9 +83,31 @@ export function AutopilotItemScreen({ notifyId }: { notifyId: string }) {
         </View>
       </View>
       <PresenceBar />
-      <View style={styles.fill}>{body}</View>
+      <View style={styles.fill}>
+        <SkeletonSwap loading={!notify.isError && !notify.data} skeleton={<ItemSkeleton />} style={styles.fill}>{body}</SkeletonSwap>
+      </View>
       {model ? <AnswerBar model={model} state={cardState(item)} answer={answer} bottom={insets.bottom} /> : null}
     </KeyboardAvoidingView>
+  );
+}
+
+/** The screen's footprint before the questions load: the card, its connected row, and the two closed sections. */
+function ItemSkeleton() {
+  const theme = useTheme();
+  const { colors } = theme;
+  return (
+    <View testID="autopilot-item-skeleton" accessible accessibilityLabel="Loading the question" style={[styles.fill, styles.content]}>
+      <DecisionCardSkeleton testID="autopilot-item-card-skeleton" />
+      <Skeleton height={36} radius={theme.radius.md} />
+      {[0.4, 0.3].map(width => (
+        <View key={width} style={[styles.section, { borderColor: colors.border }]}>
+          <View style={styles.sectionHead}>
+            <View style={styles.chevronBox}><Skeleton width={10} height={14} /></View>
+            <Skeleton width={`${width * 100}%`} height={16} />
+          </View>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -196,7 +217,6 @@ function AnswerBar({ model, state, answer, bottom }: { model: DecisionModel; sta
 const styles = StyleSheet.create({
   fill: { flex: 1, minWidth: 0 },
   bold: { fontWeight: '600' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   bar: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12 },
   back: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingRight: 8 },
   position: { flex: 1, textAlign: 'right' },

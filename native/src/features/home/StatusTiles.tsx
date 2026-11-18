@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useTheme, type ThemeColors } from '@/theme';
-import { Text } from '@/ui';
+import { Skeleton, Text } from '@/ui';
 
 import type { BoardTile } from './statusBoard';
 
@@ -39,9 +39,13 @@ export function StatusTiles({ counts, selected, onSelect }: {
               backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised,
             }]}
           >
-            <Text style={[styles.count, { color: on ? color : theme.colors.text }]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
-              {count === undefined ? '–' : String(count)}
-            </Text>
+            {/* Until it's counted, a bone sits where the number goes, on a hidden digit that holds its line. */}
+            <View>
+              <Text style={[styles.count, { color: count === undefined ? 'transparent' : on ? color : theme.colors.text }]} numberOfLines={1} maxFontSizeMultiplier={1.4}>
+                {count === undefined ? '0' : String(count)}
+              </Text>
+              {count === undefined ? <Skeleton width={28} height={22} style={styles.countBone} /> : null}
+            </View>
             <View style={styles.label}>
               <View style={[styles.dot, { backgroundColor: color }]} />
               <Text variant="rowDetail" tone="secondary" numberOfLines={1} maxFontSizeMultiplier={1.4}>{tile.label}</Text>
@@ -58,6 +62,7 @@ const styles = StyleSheet.create({
   // Two per row: half the width, less half the gap.
   tile: { flexBasis: '48%', flexGrow: 1, minHeight: 72, paddingHorizontal: 12, paddingVertical: 9, borderWidth: 1.5, justifyContent: 'center' },
   count: { fontSize: 26, lineHeight: 30, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  countBone: { position: 'absolute', left: 0, top: 4 },
   label: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   dot: { width: 8, height: 8, borderRadius: 4 },
 });

@@ -1,7 +1,7 @@
 import { AssistantRuntimeProvider, ThreadPrimitive, useExternalStoreRuntime, type AppendMessage } from '@assistant-ui/react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Keyboard, StyleSheet, View } from 'react-native';
+import { Keyboard, StyleSheet, View } from 'react-native';
 
 import { chatAgentLabel } from '@shared/chatAgentMenu';
 import { arrangeComposerControls, choiceName, isRiskyMode, paneFullAccessOn, triggerLabels } from '@shared/chatComposerControls';
@@ -11,7 +11,7 @@ import type { ChatTabCommand, ChatTabSend } from '@shared/types/chatTab';
 
 import { useJourneyMark, useLiveMarks, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
-import { Text } from '@/ui';
+import { SkeletonSwap, Text } from '@/ui';
 
 import { ComposerSheet } from '../composer/ComposerSheet';
 import { Dimmed } from '../hosts/ConnectionStatus';
@@ -21,7 +21,7 @@ import { ChatTabComposer } from './ChatTabComposer';
 import { ChatTabSettings } from './ChatTabSettings';
 import { matchingCommands } from './chatComposer';
 import { ApprovalCard, DockButton, ProblemBanner, QuestionCard, QueueList } from './ChatTabDock';
-import { ChatRowView, type ChatRowActions } from './ChatTabRows';
+import { ChatRowsSkeleton, ChatRowView, type ChatRowActions } from './ChatTabRows';
 import { chatRows } from './chatRows';
 import { chatImageAdapter, chatImageAttachment, chatSendFromComposer, chatThreadMessage, composedText, restorableAttachments } from './chatThread';
 import { pickChatImages } from './pickChatImages';
@@ -83,6 +83,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     renderBlock: (language, content) => blocks?.[language]?.(content),
   }), [onViewDiff, onOpenWorker, onOpenDevice, blocks]);
   const agent = view ? chatAgentLabel(catalog, view.agent) : 'the agent';
+  const starting = view?.status === 'starting';
   // Full strength and typing while the connection comes back; a send waits for it.
   const disabled = !live || !view || view.status === 'stopped';
   useJourneyMark('chat', 'messages', messages.length > 0);
@@ -188,7 +189,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   // The never-asks marker: the agent's own bypass mode, or Pane's Full access answering approvals for it.
   const riskyMode = arranged.mode && isRiskyMode(arranged.mode) ? choiceName(arranged.mode) : paneFullAccessOn(view?.controls ?? [])?.name;
   const footer = snapshot.hasNewer
-    ? <DockButton testID="chat-newer" title={snapshot.loadingNewer ? 'Loading…' : 'Newer messages'} disabled={snapshot.loadingNewer} onPress={() => void viewer.loadNewer()} style={styles.newer} />
+    ? <DockButton testID="chat-newer" title="Newer messages" busy={snapshot.loadingNewer} onPress={() => void viewer.loadNewer()} style={styles.newer} />
     : view?.notice ? <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>{view.notice}</Text> : null;
   return <AssistantRuntimeProvider runtime={runtime}>
     <ThreadPrimitive.Root testID="chat-tab" style={[styles.fill, { backgroundColor: theme.chat.background }]}>
@@ -198,15 +199,20 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
         <Text selectable variant="subhead" style={{ color: theme.chat.danger }}>{error}</Text>
       </View>}
       <Dimmed dimmed={!live} style={styles.fill}>
-        {!snapshot.transcript && !view?.problem
-          ? <View style={styles.loading}><ActivityIndicator color={theme.chat.mutedForeground} /><Text style={{ color: theme.chat.mutedForeground }}>{view?.status === 'starting' || !view ? `Starting ${agent}…` : 'Loading conversation…'}</Text></View>
-          : <LegendList testID="chat-rows" data={rows} keyExtractor={row => row.key} estimatedItemSize={60} recycleItems={false}
+        <SkeletonSwap loading={!snapshot.transcript && !view?.problem} style={styles.fill} skeleton={
+          <View testID="chat-skeleton" accessible accessibilityLabel={starting ? `Starting ${agent}` : 'Loading conversation'} style={[styles.fill, styles.rows, styles.bones]}>
+            <ChatRowsSkeleton />
+            {/* The host is launching the agent and replaying its history: a real state, which can take seconds. */}
+            {starting && <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Starting {agent}…</Text>}
+          </View>}>
+          <LegendList testID="chat-rows" data={rows} keyExtractor={row => row.key} estimatedItemSize={60} recycleItems={false}
             contentContainerStyle={styles.rows} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition initialScrollAtEnd
             // A window that stops short of the newest message must not chase the end.
             maintainScrollAtEnd={snapshot.hasNewer ? false : { animated: false }} maintainScrollAtEndThreshold={0.05}
-            ListHeaderComponent={(snapshot.transcript?.start ?? 0) > 0 ? <DockButton testID="chat-earlier" title={snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`} disabled={snapshot.loadingEarlier} onPress={() => void viewer.loadEarlier()} style={styles.earlier} /> : null}
+            ListHeaderComponent={(snapshot.transcript?.start ?? 0) > 0 ? <DockButton testID="chat-earlier" title={`Earlier messages (${snapshot.transcript?.start})`} busy={snapshot.loadingEarlier} onPress={() => void viewer.loadEarlier()} style={styles.earlier} /> : null}
             ListFooterComponent={footer}
-            renderItem={({ item }) => <View style={styles.row}><ChatRowView row={item} actions={rowActions} /></View>} />}
+            renderItem={({ item }) => <View style={styles.row}><ChatRowView row={item} actions={rowActions} /></View>} />
+        </SkeletonSwap>
       </Dimmed>
       <View style={styles.dock}>
         {snapshot.pendingDelivery && <View style={styles.inline}>
@@ -234,9 +240,10 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
 const styles = StyleSheet.create({
   fill: { flex: 1, minHeight: 0 },
   pad: { padding: 12 },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   rows: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 },
   row: { paddingVertical: 4 },
+  // The rows' 4 pt padding above and below each.
+  bones: { gap: 8 },
   earlier: { alignSelf: 'center', marginBottom: 8 },
   newer: { alignSelf: 'center', marginTop: 8 },
   error: { marginHorizontal: 12, marginTop: 8, padding: 10, borderWidth: 1, borderRadius: 8 },

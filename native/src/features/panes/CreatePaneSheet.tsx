@@ -141,7 +141,7 @@ export function CreatePaneForm({ machine, projectId, onCreated }: {
             accessibilityLabel="Base Branch"
             editable={!branches.isPending && branchList.length > 0}
             value={branchOpen ? branchQuery : baseBranch ?? ''}
-            placeholder={branches.isPending ? 'Loading branches...' : 'Search branches'}
+            placeholder="Search branches"
             placeholderTextColor={theme.colors.textMuted}
             selectionColor={theme.colors.accent}
             autoCapitalize="none"

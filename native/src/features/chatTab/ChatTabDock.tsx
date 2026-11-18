@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
-import { Linking, Pressable, StyleSheet, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useMarkdown } from 'react-native-marked';
 
 import { permissionSummary } from '@shared/chatTabPermissions';
@@ -14,12 +14,17 @@ import { Icon, Text } from '@/ui';
 
 import { queuedLabel } from './chatComposer';
 
-/** A 44pt target in the chat palette. */
-export function DockButton({ title, onPress, disabled, primary, testID, style }: { title: string; onPress: () => void; disabled?: boolean; primary?: boolean; testID: string; style?: StyleProp<ViewStyle> }) {
+/**
+ * A 44pt target in the chat palette. `busy` dims it and spins beside the label, as ui/Button's
+ * busy state does; the spinner sits outside the button so its footprint never changes.
+ */
+export function DockButton({ title, onPress, disabled, busy, primary, testID, style }: { title: string; onPress: () => void; disabled?: boolean; busy?: boolean; primary?: boolean; testID: string; style?: StyleProp<ViewStyle> }) {
   const { chat } = useTheme();
-  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: !!disabled }} disabled={disabled}
+  const inactive = disabled || busy;
+  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={title} accessibilityState={{ disabled: !!inactive, busy: !!busy }} disabled={inactive}
     onPress={() => { void Haptics.selectionAsync(); onPress(); }}
-    style={({ pressed }) => [styles.button, { backgroundColor: primary ? chat.primary : chat.muted, opacity: disabled ? 0.5 : pressed ? 0.75 : 1 }, style]}>
+    style={({ pressed }) => [styles.button, { backgroundColor: primary ? chat.primary : chat.muted, opacity: inactive ? 0.5 : pressed ? 0.75 : 1 }, style]}>
+    {busy && <ActivityIndicator size="small" color={chat.mutedForeground} style={styles.busy} />}
     <Text variant="callout" style={{ color: primary ? chat.onPrimary : chat.foreground }}>{title}</Text>
   </Pressable>;
 }
@@ -145,6 +150,7 @@ export function QueueList({ queue, onRemove, label }: { queue: ChatTabQueuedProm
 
 const styles = StyleSheet.create({
   button: { minHeight: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 14 },
+  busy: { position: 'absolute', right: '100%', marginRight: 8 },
   card: { borderWidth: 1, borderRadius: 16, padding: 12, gap: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   choices: { gap: 8 },

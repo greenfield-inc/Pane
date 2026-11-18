@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
-import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PaneError } from '@shared/paneError';
@@ -13,7 +13,7 @@ import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
 import { useTheme } from '@/theme';
-import { EmptyState, ErrorState, Icon, Text } from '@/ui';
+import { EmptyState, ErrorState, Icon, SkeletonSwap, Text } from '@/ui';
 
 import { BrowserTab } from '../browser/BrowserTab';
 import { DeviceTab } from '../device/DeviceTab';
@@ -49,6 +49,7 @@ import { followsHost, pickPanel, sessionWorkspacePanels, stripPanels, tabView } 
 import { offerClose, PanelTabs, type LeadingTab } from './PanelTabs';
 import { PausedTerminal } from './PausedTerminal';
 import { TerminalInputBar } from './TerminalInputBar';
+import { PanelTabsSkeleton, TerminalSkeleton } from './TerminalSkeletons';
 import { TerminalTopBar } from './TerminalTopBar';
 import { TerminalTouchSurface } from './TerminalTouchSurface';
 import { TerminalWebView } from './TerminalWebView';
@@ -191,6 +192,8 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />}
       {/* An approval's layout is final once the tabs and the tab body stop moving (perf marks). */}
       <View onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `tabs=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
+        {/* Tab lists of recent Panes are kept on the phone, so this skeleton shows only for a Pane never opened here. */}
+        <SkeletonSwap loading={!leading && panelList.isPending} skeleton={<PanelTabsSkeleton />}>
         <PanelTabs
           panels={panels}
           chatId={session?.panel.id}
@@ -201,10 +204,13 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
           onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
           onClose={closePanel}
         />
+        </SkeletonSwap>
       </View>
       <View style={styles.fill} onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `body=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
       {leading ? <LeadingBodies leading={leading} selectedId={leadingTab?.id ?? null} /> : null}
-      {leadingTab ? null : panel && view !== 'terminal' ? (
+      {leadingTab ? null : (
+      <SkeletonSwap loading={panelList.isPending} skeleton={<TerminalSkeleton testID="pane-skeleton" label="Loading the Pane" />} style={styles.fill}>
+      {panel && view !== 'terminal' ? (
         <TabBody panel={panel} title={title} panels={panels} />
       ) : panel && paused ? (
         <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resumePanel.isPending} onResume={() => resume(panel)} />
@@ -225,9 +231,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
         />
       ) : (
         <View style={[styles.fill, { backgroundColor: theme.terminal.background }]}>
-          {panelList.isPending ? (
-            <View style={styles.center}><ActivityIndicator color={theme.colors.textMuted} /></View>
-          ) : panelList.isError ? (
+          {panelList.isError ? (
             <ErrorState error={panelList.error} onRetry={() => void panelList.refetch()} />
           ) : (
             <EmptyState
@@ -237,6 +241,8 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
             />
           )}
         </View>
+      )}
+      </SkeletonSwap>
       )}
       </View>
       {/* The box sits on the bottom safe area (HIG: controls stay out of it), or a hair above the keyboard. */}
@@ -330,6 +336,10 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   // strength and keys wait for it (useTerminal); past the grace window it dims.
   const disabled = terminal.status !== 'ready' || !live;
   const shown = terminal.status === 'ready' || terminal.hasContent;
+  // A terminal that has shown a screen covers a reload with its plain background; only a first open draws lines.
+  const [drawn, setDrawn] = useState(false);
+  if (terminal.hasContent && !drawn) setDrawn(true);
+  const blank = terminal.status === 'loading' && !terminal.hasContent;
   useJourneyMark('terminal', 'content', terminal.hasContent);
   useJourneyMark('terminal', 'live', !disabled);
   useLiveMarks('terminal', !disabled);
@@ -415,15 +425,22 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
             </Pressable>
           ) : null}
         </Dimmed>
-        {/* Only a failure while connected replaces the screen; a spinner only covers a blank one. */}
-        {terminal.status === 'error' || (terminal.status === 'loading' && !terminal.hasContent) ? (
+        {/*
+          Only a failure while connected replaces the screen; a mask covers a blank one, hiding the
+          page's load and refit. A first open masks with skeleton lines, opaque from the first frame.
+        */}
+        <SkeletonSwap
+          loading={blank && !drawn}
+          skeleton={<TerminalSkeleton testID="terminal-skeleton" label="Loading terminal" style={StyleSheet.absoluteFill} />}
+        >
+          {null}
+        </SkeletonSwap>
+        {terminal.status === 'error' ? (
           <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: theme.terminal.background }]}>
-            {terminal.status === 'loading' ? (
-              <ActivityIndicator testID="terminal-loading" color={theme.colors.textMuted} />
-            ) : (
-              <ErrorState title="Terminal unavailable" error={terminal.error} onRetry={terminal.retry} testID="terminal-error" />
-            )}
+            <ErrorState title="Terminal unavailable" error={terminal.error} onRetry={terminal.retry} testID="terminal-error" />
           </View>
+        ) : blank && drawn ? (
+          <View testID="terminal-refreshing" style={[StyleSheet.absoluteFill, { backgroundColor: theme.terminal.background }]} />
         ) : null}
       </View>
       <View style={[styles.inputArea, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>

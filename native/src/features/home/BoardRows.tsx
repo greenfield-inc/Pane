@@ -9,7 +9,7 @@ import { MachineMark } from '@/features/machines/MachineMark';
 import { PausedBadge, StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
 import { SwipeRow, swipeRowAccessibility } from '@/features/panes/SwipeRow';
 import { useTheme } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Icon, Skeleton, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
 
 import type { PaneRecentRow } from './statusBoard';
@@ -214,6 +214,55 @@ export function EmptyCard({ title, detail, testID }: { title: string; detail?: s
   );
 }
 
+/** A card of Pane rows as a skeleton, in ActivityRow's footprint. */
+export function CardSkeleton({ testID, label }: { testID: string; label: string }) {
+  const theme = useTheme();
+  const lines = { height: theme.typography.rowValue.lineHeight + theme.typography.rowDetail.lineHeight };
+  return (
+    <View testID={testID} accessible accessibilityLabel={label}>
+      <Card>
+        {[0.5, 0.65, 0.4].map((width, index) => (
+          <View key={width} style={styles.activity}>
+            {index > 0 ? <RowDivider /> : null}
+            <View style={styles.approvalDot}><Skeleton width={8} height={8} radius={4} /></View>
+            <View style={[styles.fill, styles.boneLines, lines]}>
+              <Skeleton width={`${width * 100}%`} height={14} />
+              <Skeleton width="35%" height={12} />
+            </View>
+          </View>
+        ))}
+      </Card>
+    </View>
+  );
+}
+
+/**
+ * The board below the tiles while its first read runs: a header over a card of Pane rows, or with
+ * `groups` (one machine's All panes) the cards that open Sessions, Repositories and Archived.
+ */
+export function BoardSkeleton({ groups }: { groups: boolean }) {
+  if (groups) {
+    return (
+      <View testID="board-skeleton" accessible accessibilityLabel="Loading panes">
+        {[0.3, 0.4, 0.25].map(width => (
+          <Card key={width} style={styles.groupCard}>
+            <View style={styles.group}>
+              <View style={styles.groupIcon}><Skeleton width={16} height={16} /></View>
+              <Skeleton width={`${width * 100}%`} height={14} />
+            </View>
+          </Card>
+        ))}
+      </View>
+    );
+  }
+  return (
+    <View>
+      <View style={styles.header}><Skeleton width={84} height={14} /></View>
+      <CardSkeleton testID="board-skeleton" label="Loading panes" />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   fill: { flex: 1, minWidth: 0 },
   bold: { fontWeight: '600' },
@@ -231,6 +280,8 @@ const styles = StyleSheet.create({
   activity: { flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 54, paddingHorizontal: 14, paddingVertical: 8 },
   group: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, paddingHorizontal: 14 },
   groupIcon: { width: 18, alignItems: 'center' },
+  groupCard: { marginTop: 12 },
+  boneLines: { justifyContent: 'space-evenly' },
   history: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: 8, marginTop: 4 },
   empty: { paddingHorizontal: 16, paddingVertical: 18, gap: 4, alignItems: 'center' },
 });

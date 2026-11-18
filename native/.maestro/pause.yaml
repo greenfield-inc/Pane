@@ -57,7 +57,7 @@ name: Pause journeys
     timeout: 15000
 - assertVisible: "Paused .*"
 - assertNotVisible:
-    id: terminal-loading
+    id: terminal-skeleton
 # Resume from the bar: the live terminal comes back.
 - tapOn:
     id: paused-resume

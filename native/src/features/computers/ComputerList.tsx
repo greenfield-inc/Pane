@@ -9,7 +9,7 @@ import { passwordProblem } from '@/auth/computers';
 import { useActiveHost } from '@/auth/hostsStore';
 import { TAILNET_STATE_TEXT } from '@/features/machines/machines';
 import { useTheme } from '@/theme';
-import { Button, Text, TextField } from '@/ui';
+import { Button, Skeleton, SkeletonSwap, Text, TextField } from '@/ui';
 
 import { OsLogo } from './OsLogo';
 import { useComputers, useConnectComputer } from './useComputers';
@@ -144,7 +144,6 @@ export function ComputerList({ directory, header, onConnected, connected: isConn
         <View style={styles.header}>
           {header}
           {list?.ok ? <Text variant="sectionLabel" tone="muted" style={styles.label}>On {list.tailnet}</Text> : null}
-          {computers.isLoading ? <Text variant="subhead" tone="secondary">Looking for your computers…</Text> : null}
           {list && !list.ok ? <Text variant="subhead" tone="danger">{list.reason}. {list.fix}</Text> : null}
           {directoryProblem && directory ? (
             <View style={styles.password}>
@@ -169,10 +168,37 @@ export function ComputerList({ directory, header, onConnected, connected: isConn
           ) : computers.error ? <Text variant="subhead" tone="danger">{computers.error.message}</Text> : null}
         </View>
       )}
-      ListEmptyComponent={list?.ok ? (
-        <Text variant="subhead" tone="secondary">Open Pane on another computer on your Tailscale login to see it here.</Text>
-      ) : null}
+      ListEmptyComponent={(
+        <SkeletonSwap loading={computers.isLoading} skeleton={<ComputersSkeleton />}>
+          {list?.ok ? <Text variant="subhead" tone="secondary">Open Pane on another computer on your Tailscale login to see it here.</Text> : null}
+        </SkeletonSwap>
+      )}
     />
+  );
+}
+
+/** The "On <tailnet>" label over a card of computer rows, while the list loads. */
+function ComputersSkeleton() {
+  const theme = useTheme();
+  return (
+    <View testID="computers-skeleton" accessible accessibilityLabel="Loading computers">
+      <View style={[styles.label, styles.skeletonLabel]}><Skeleton width={120} height={13} /></View>
+      <View style={[styles.skeletonCard, { borderRadius: theme.radius.card, backgroundColor: theme.colors.card, borderColor: theme.colors.cardBorder }]}>
+        {[0.4, 0.55].map((width, index) => (
+          <View key={width} style={styles.skeletonRow}>
+            {index > 0 ? <View style={[styles.separator, { backgroundColor: theme.colors.border }]} /> : null}
+            <View style={styles.summary}>
+              <View style={styles.logo}><Skeleton width={20} height={20} radius={theme.radius.sm} /></View>
+              <View style={styles.text}>
+                <Skeleton width={`${width * 100}%`} height={16} style={styles.bone} />
+                <Skeleton width="30%" height={12} style={styles.bone} />
+              </View>
+              <Skeleton width={92} height={44} radius={theme.radius.md} />
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -180,6 +206,12 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingVertical: 16 },
   header: { gap: 12, marginBottom: 8 },
   label: { paddingHorizontal: 4 },
+  // Where the label sits once loaded: the header's 12 pt gap under it, less its 8 pt margin, then 8 pt above the rows.
+  skeletonLabel: { justifyContent: 'center', height: 18, marginTop: 4, marginBottom: 8 },
+  skeletonCard: { overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
+  // A computer row's footprint, inside the card's own border.
+  skeletonRow: { minHeight: 58, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 9 },
+  bone: { marginVertical: 3 },
   row: { minHeight: 58, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 9, gap: 8, borderLeftWidth: StyleSheet.hairlineWidth, borderRightWidth: StyleSheet.hairlineWidth },
   // Inset past the logo, as ListSection does below a row with a leading icon.
   separator: { position: 'absolute', top: 0, left: 54, right: 0, height: StyleSheet.hairlineWidth },

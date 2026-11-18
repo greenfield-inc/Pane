@@ -32,6 +32,7 @@ it('paints a machine’s lists after a relaunch, marked stale so screens still r
   before.queryClient.setQueryData([MAC, 'runpane:workspace:state'], { unseen: { 'pane-1': true } });
   before.queryClient.setQueryData([MAC, 'panels:list', 'pane-1', { chatTabs: true }], [{ id: 'tab' }]);
   before.queryClient.setQueryData([MAC, 'git:diff', 'pane-1'], 'not saved');
+  before.queryClient.setQueryData([MAC, 'orchestration-sessions:get', 's-1'], { name: 'Spring sale launch' });
   before.queryClient.setQueryData([DEVBOX, 'all-machines:snapshot', 'https://devbox.example'], { projects: [] });
   vi.advanceTimersByTime(2_000);
 
@@ -41,6 +42,8 @@ it('paints a machine’s lists after a relaunch, marked stale so screens still r
   expect(after.queryClient.getQueryData([MAC, 'runpane:workspace:state'])).toEqual({ unseen: { 'pane-1': true } });
   expect(after.queryClient.getQueryData([MAC, 'panels:list', 'pane-1', { chatTabs: true }])).toEqual([{ id: 'tab' }]);
   expect(after.queryClient.getQueryData([MAC, 'git:diff', 'pane-1'])).toBeUndefined();
+  // An approval opens inside its Session's tabs, named from the saved Session.
+  expect(after.queryClient.getQueryData([MAC, 'orchestration-sessions:get', 's-1'])).toEqual({ name: 'Spring sale launch' });
   // Another machine's lists live in its own file.
   expect(after.queryClient.getQueryData([DEVBOX, 'all-machines:snapshot', 'https://devbox.example'])).toBeUndefined();
   expect(after.queryClient.getQueryState([MAC, 'sessions:get-all-with-projects'])?.isInvalidated).toBe(true);

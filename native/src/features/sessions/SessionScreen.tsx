@@ -1,11 +1,12 @@
 import { useLocalSearchParams } from 'expo-router';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { useJourneyMark, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
-import { ErrorState } from '@/ui';
+import { ErrorState, SkeletonSwap } from '@/ui';
 
 import { TerminalScreen } from '../terminal/TerminalScreen';
+import { PanelTabsSkeleton, TerminalSkeleton } from '../terminal/TerminalSkeletons';
 import { TerminalTopBar } from '../terminal/TerminalTopBar';
 import { useSessionView } from './hooks';
 
@@ -17,20 +18,30 @@ export function SessionScreen() {
   const view = useSessionView(sessionId);
   useJourneyMark('session', 'data', view.data !== undefined);
 
-  if (view.data) return <TerminalScreen paneId={view.data.internalSession.id} session={view.data} />;
   return (
-    <View testID="session-loading-screen" style={[styles.fill, { backgroundColor: theme.colors.surface }]}>
-      <TerminalTopBar paneName="" />
-      <View style={[styles.fill, styles.center, { backgroundColor: theme.terminal.background }]}>
-        {view.isError
-          ? <ErrorState title="Couldn’t open the Session" error={view.error} onRetry={() => void view.refetch()} />
-          : <ActivityIndicator color={theme.colors.textMuted} />}
-      </View>
-    </View>
+    <SkeletonSwap
+      loading={view.data === undefined && !view.isError}
+      skeleton={(
+        <View testID="session-skeleton" style={[styles.fill, { backgroundColor: theme.colors.surface }]}>
+          <TerminalTopBar paneName="" />
+          <PanelTabsSkeleton />
+          <TerminalSkeleton testID="session-terminal-skeleton" label="Loading the Session" />
+        </View>
+      )}
+      style={styles.fill}
+    >
+      {view.data ? <TerminalScreen paneId={view.data.internalSession.id} session={view.data} /> : (
+        <View testID="session-error-screen" style={[styles.fill, { backgroundColor: theme.colors.surface }]}>
+          <TerminalTopBar paneName="" />
+          <View style={[styles.fill, { backgroundColor: theme.terminal.background }]}>
+            <ErrorState title="Couldn’t open the Session" error={view.error} onRetry={() => void view.refetch()} />
+          </View>
+        </View>
+      )}
+    </SkeletonSwap>
   );
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  center: { alignItems: 'center', justifyContent: 'center' },
 });

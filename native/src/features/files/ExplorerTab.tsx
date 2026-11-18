@@ -1,12 +1,12 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import type { ChangedFileSummary } from '@shared/types/gitDiff';
 import type { ToolPanel } from '@shared/types/panels';
 
 import { useTheme } from '@/theme';
-import { EmptyState, ErrorState, Icon, Text } from '@/ui';
+import { EmptyState, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 import { ChangeBadge } from '../diff/DiffTab';
 import { useChanges } from '../diff/useDiff';
@@ -129,29 +129,46 @@ function FolderView({ sessionId, rootName, folder, onOpenFolder, onOpenFile }: {
           style={[theme.typography.body, styles.searchInput, { color: colors.text }]}
         />
       </View>
-      {list.isPending ? (
-        <View style={styles.center}><ActivityIndicator color={colors.textMuted} /></View>
-      ) : list.isError ? (
-        <ErrorState title={searching ? 'Search didn’t finish' : 'Couldn’t open this folder'} error={list.error} onRetry={() => void list.refetch()} testID="explorer-error" />
-      ) : rows.length === 0 ? (
-        <EmptyState testID="explorer-empty" title={searching ? 'No matches' : 'Empty folder'} message={searching ? `No file name in ${rootName} contains “${pattern}”.` : undefined} />
-      ) : (
-        <LegendList
-          testID="explorer-list"
-          data={rows}
-          keyExtractor={rowKey}
-          getItemType={row => row.kind}
-          estimatedItemSize={46}
-          recycleItems
-          keyboardDismissMode="on-drag"
-          keyboardShouldPersistTaps="handled"
-          refreshing={list.isRefetching}
-          onRefresh={() => void list.refetch()}
-          renderItem={({ item }) => item.kind === 'label' ? <SectionLabel text={item.text} />
-            : item.kind === 'changed' ? <ChangedRow file={item.file} onPress={() => open({ name: item.file.path.split('/').pop() ?? item.file.path, path: item.file.path, isDirectory: false })} />
-            : <EntryRow entry={item.entry} change={changed.get(item.entry.path)} showFolder={searching} onPress={() => open(item.entry)} />}
-        />
-      )}
+      <SkeletonSwap loading={list.isPending} skeleton={<FolderSkeleton />} style={styles.fill}>
+        {list.isPending ? null : list.isError ? (
+          <ErrorState title={searching ? 'Search didn’t finish' : 'Couldn’t open this folder'} error={list.error} onRetry={() => void list.refetch()} testID="explorer-error" />
+        ) : rows.length === 0 ? (
+          <EmptyState testID="explorer-empty" title={searching ? 'No matches' : 'Empty folder'} message={searching ? `No file name in ${rootName} contains “${pattern}”.` : undefined} />
+        ) : (
+          <LegendList
+            testID="explorer-list"
+            data={rows}
+            keyExtractor={rowKey}
+            getItemType={row => row.kind}
+            estimatedItemSize={46}
+            recycleItems
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="handled"
+            refreshing={list.isRefetching}
+            onRefresh={() => void list.refetch()}
+            renderItem={({ item }) => item.kind === 'label' ? <SectionLabel text={item.text} />
+              : item.kind === 'changed' ? <ChangedRow file={item.file} onPress={() => open({ name: item.file.path.split('/').pop() ?? item.file.path, path: item.file.path, isDirectory: false })} />
+              : <EntryRow entry={item.entry} change={changed.get(item.entry.path)} showFolder={searching} onPress={() => open(item.entry)} />}
+          />
+        )}
+      </SkeletonSwap>
+    </View>
+  );
+}
+
+/** A folder's footprint while it loads: rows with an icon and a name. */
+function FolderSkeleton() {
+  const { colors } = useTheme();
+  return (
+    <View testID="explorer-skeleton" accessible accessibilityLabel="Loading files">
+      {[0.35, 0.5, 0.3, 0.55, 0.4, 0.45].map(width => (
+        <View key={width} style={styles.row}>
+          <Skeleton width={20} height={20} />
+          <View style={[styles.rowBody, { borderBottomColor: colors.border }]}>
+            <Skeleton width={`${width * 100}%`} height={16} />
+          </View>
+        </View>
+      ))}
     </View>
   );
 }
@@ -217,7 +234,6 @@ function EntryRow({ entry, change, showFolder, onPress }: { entry: FileEntry; ch
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   shrink: { flexShrink: 1 },
   semibold: { fontWeight: '600' },
   crumbBar: { flexGrow: 0 },

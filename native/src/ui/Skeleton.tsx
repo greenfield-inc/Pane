@@ -13,7 +13,7 @@ import Animated, {
 
 import { useTheme } from '@/theme';
 
-import { SKELETON_REVEAL_MS, skeletonState } from './skeletonTiming';
+import { SKELETON_REVEAL_MS, skeletonStart, skeletonState } from './skeletonTiming';
 
 /**
  * One breathe for every bone in the app, so all skeletons on screen step together: opacity
@@ -57,6 +57,9 @@ export function Skeleton({ width = '100%', height = 16, radius, style }: Skeleto
   );
 }
 
+/** The last skeleton to leave the screen, so one that takes over from it continues its timing. */
+let lastEnded: { started: number; ended: number } | null = null;
+
 /** Whether a skeleton is up, its bones show, and the content that replaces it fades in. */
 function useSkeletonHold(loading: boolean) {
   const [span, setSpan] = useState<{ started: number; ended: number | null } | null>(() => (loading ? { started: Date.now(), ended: null } : null));
@@ -65,6 +68,18 @@ function useSkeletonHold(loading: boolean) {
   if (!loading && span !== null && span.ended === null) setSpan({ started: span.started, ended: Date.now() });
   const state = span ? skeletonState(span.started, span.ended, Date.now()) : null;
   const changeAt = state?.changeAt ?? null;
+  const showing = state?.skeleton ?? false;
+  const started = span?.started ?? 0;
+  // After the commit, when a skeleton this one replaced has run its cleanup: take over its timing.
+  useEffect(() => {
+    if (!showing) return;
+    const handed = skeletonStart(started, lastEnded);
+    if (handed !== started) setSpan(current => (current && current.ended === null ? { started: handed, ended: null } : current));
+  }, [showing, started]);
+  useEffect(() => {
+    if (!showing) return undefined;
+    return () => { lastEnded = { started, ended: Date.now() }; };
+  }, [showing, started]);
   useEffect(() => {
     if (changeAt === null) return undefined;
     const timer = setTimeout(() => rerender(count => count + 1), Math.max(0, changeAt - Date.now()));

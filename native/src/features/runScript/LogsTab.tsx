@@ -1,15 +1,16 @@
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useRef, useState, type ReactNode } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { LogsPanelState, ToolPanel } from '@shared/types/panels';
 
 import { useDaemon, useDaemonEvent, useDaemonQueryKey, useInvokeQuery } from '@/daemon';
 import { monoFontFamily, useTheme, withAlpha } from '@/theme';
-import { ErrorState, Icon, Text } from '@/ui';
+import { ErrorState, Icon, SkeletonSwap, Text } from '@/ui';
 
 import { TabFooter } from '../tabs/TabFooter';
+import { TerminalSkeleton } from '../terminal/TerminalSkeletons';
 import { appendLog, decodeLogEntry, type LogLine, logText } from './logs';
 
 /** How close to the end, in points, still counts as at the end. */
@@ -39,11 +40,11 @@ export function LogsTab({ panel }: { panel: ToolPanel }) {
   const list = useRef<LegendListRef>(null);
   const [following, setFollowing] = useState(true);
 
-  let body;
-  if (logs.isPending) body = <View style={styles.center}><ActivityIndicator color={colors.textMuted} /></View>;
-  else if (logs.isError) body = <ErrorState title="Couldn’t read the script’s output" error={logs.error} onRetry={() => void logs.refetch()} testID="logs-error" />;
-  else if (logs.data.length === 0) body = <View style={styles.center}><Text variant="subhead" style={{ color: terminal.brightBlack }}>No output yet.</Text></View>;
-  else {
+  // Nothing while the output is first read: SkeletonSwap draws its lines.
+  let body: ReactNode = null;
+  if (logs.isError) body = <ErrorState title="Couldn’t read the script’s output" error={logs.error} onRetry={() => void logs.refetch()} testID="logs-error" />;
+  else if (logs.data?.length === 0) body = <View style={styles.center}><Text variant="subhead" style={{ color: terminal.brightBlack }}>No output yet.</Text></View>;
+  else if (logs.data) {
     body = (
       <>
         <LegendList
@@ -98,7 +99,13 @@ export function LogsTab({ panel }: { panel: ToolPanel }) {
         </View>
         <Text variant="subhead" style={[styles.follow, { color: terminal.brightBlack }]}>{following ? 'Follows the end' : 'Paused'}</Text>
       </View>
-      <View style={styles.fill}>{body}</View>
+      <SkeletonSwap
+        loading={logs.isPending}
+        skeleton={<TerminalSkeleton testID="logs-skeleton" label="Loading the script’s output" lineHeight={19} style={styles.content} />}
+        style={styles.fill}
+      >
+        {body}
+      </SkeletonSwap>
       <TabFooter left="Read-only on the phone" right={`Start and stop on ${profile.label}`} />
     </View>
   );

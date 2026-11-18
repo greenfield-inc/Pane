@@ -10,7 +10,7 @@ import { invokeChannel, useDaemon } from '@/daemon';
 import { addChatImage } from '@/features/chatTab/chatAddedImages';
 import { chatImageProblem } from '@/features/chatTab/chatComposer';
 import { useTheme } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
 
 /** Frames over the phone's connection: about twice a second while the tab is shown. */
@@ -170,6 +170,11 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
         testID="device-screen"
         style={[styles.phone, fitted(stage, aspect), { borderColor: driver?.by === 'agent' ? colors.accent : colors.deviceBezel, backgroundColor: colors.deviceScreen }]}
       >
+        <SkeletonSwap
+          loading={live && !frame}
+          skeleton={<View testID="device-skeleton" accessible accessibilityLabel="Loading the device screen" style={styles.screenFill}><Skeleton radius={0} style={styles.screenFill} /></View>}
+          style={styles.screenFill}
+        >
         {live && frame
           ? (
             <Pressable testID="device-screen-touch" style={StyleSheet.absoluteFill} onPress={tap} onLayout={(event: LayoutChangeEvent) => setBox(event.nativeEvent.layout)} accessibilityLabel="Device screen">
@@ -181,7 +186,8 @@ export function DeviceTab({ panel, panels }: { panel: ToolPanel; panels: readonl
               />
             </Pressable>
           )
-          : <View style={styles.offScreen}><Text variant="subhead" style={[styles.offText, { color: colors.onAccent }]}>{live ? 'Loading the screen…' : 'Not running. Open it from the agent or on the computer.'}</Text></View>}
+          : <View style={styles.offScreen}><Text variant="subhead" style={[styles.offText, { color: colors.onAccent }]}>Not running. Open it from the agent or on the computer.</Text></View>}
+        </SkeletonSwap>
       </View>
       </View>
       <Text variant="footnote" tone="secondary" numberOfLines={1} style={styles.caption}>{notice ?? [state?.name ?? panel.title, state?.os, state?.machine].filter(Boolean).join(' · ')}</Text>
@@ -220,6 +226,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
   stage: { flex: 1, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
   phone: { borderRadius: 28, borderWidth: 6, overflow: 'hidden' },
+  screenFill: { flex: 1, height: '100%' },
   offScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16 },
   offText: { textAlign: 'center' },
   caption: { marginTop: 10 },

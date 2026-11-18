@@ -1,16 +1,15 @@
 import { useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { useDaemon } from '@/daemon';
 import { saveErrorMessage, useAffordances, useSaveHostSettings } from '@/features/hosts/hostSettings';
 import { VoiceKeyField } from '@/features/voice/VoiceKeyField';
 import { hostNeedsUpdate, maskSecrets, voiceKeysFor, type VoiceKey } from '@/features/voice/voiceKeys';
 import { useTheme } from '@/theme';
-import { Button, ErrorState, Screen, Text } from '@/ui';
+import { Button, ErrorState, Screen, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 /** Settings › Voice: which voice keys the host has, and replacing them. Saved there, never shown again. */
 export default function VoiceSettingsScreen() {
-  const theme = useTheme();
   const { profile } = useDaemon();
   const affordances = useAffordances();
   const save = useSaveHostSettings();
@@ -51,47 +50,64 @@ export default function VoiceSettingsScreen() {
       <Text variant="subhead" tone="secondary" style={styles.inset}>
         Dictation runs on <Text variant="subhead" style={styles.bold}>{profile.label}</Text>. Live mode needs a Deepgram key and recorded mode a fal key. With an OpenRouter key, the host also cleans up the text.
       </Text>
-      {affordances.isPending ? (
-        <ActivityIndicator color={theme.colors.textMuted} />
-      ) : affordances.isError ? (
-        <ErrorState error={affordances.error} onRetry={() => void affordances.refetch()} />
-      ) : (
-        <View style={styles.form}>
-          {keys.map(({ key, set, optional }) => (
-            <VoiceKeyField
-              key={key}
-              voiceKey={key}
-              set={set}
-              optional={optional}
-              asking={editing.includes(key)}
-              value={typed[key] ?? ''}
-              onChange={value => {
-                setSaved(false);
-                setTyped(current => ({ ...current, [key]: value }));
-              }}
-              onReplace={() => setEditing(current => [...current, key])}
-            />
-          ))}
-          {needsUpdate ? (
-            <Text variant="rowDetail" tone="secondary" testID="voice-settings-update" style={styles.inset}>
-              Update Pane on {profile.label} to use voice without OpenRouter.
-            </Text>
-          ) : null}
-          {error ? (
-            <Text variant="rowDetail" tone="danger" testID="voice-settings-error" accessibilityLiveRegion="polite" style={styles.inset}>{error}</Text>
-          ) : saved ? (
-            <Text variant="rowDetail" tone="secondary" testID="voice-settings-saved" accessibilityLiveRegion="polite" style={styles.inset}>Saved to {profile.label}.</Text>
-          ) : (
-            <Text variant="rowDetail" tone="muted" style={styles.inset}>
-              Sent once over this phone's connection and stored on {profile.label}. Pane never shows a saved key again.
-            </Text>
-          )}
-          {editing.length > 0 ? (
-            <Button testID="voice-settings-save" title="Save" disabled={entries.length === 0} loading={save.isPending} onPress={() => void submit()} />
-          ) : null}
-        </View>
-      )}
+      <SkeletonSwap loading={affordances.isPending} skeleton={<VoiceKeysSkeleton />}>
+        {affordances.isError ? (
+          <ErrorState error={affordances.error} onRetry={() => void affordances.refetch()} />
+        ) : (
+          <View style={styles.form}>
+            {keys.map(({ key, set, optional }) => (
+              <VoiceKeyField
+                key={key}
+                voiceKey={key}
+                set={set}
+                optional={optional}
+                asking={editing.includes(key)}
+                value={typed[key] ?? ''}
+                onChange={value => {
+                  setSaved(false);
+                  setTyped(current => ({ ...current, [key]: value }));
+                }}
+                onReplace={() => setEditing(current => [...current, key])}
+              />
+            ))}
+            {needsUpdate ? (
+              <Text variant="rowDetail" tone="secondary" testID="voice-settings-update" style={styles.inset}>
+                Update Pane on {profile.label} to use voice without OpenRouter.
+              </Text>
+            ) : null}
+            {error ? (
+              <Text variant="rowDetail" tone="danger" testID="voice-settings-error" accessibilityLiveRegion="polite" style={styles.inset}>{error}</Text>
+            ) : saved ? (
+              <Text variant="rowDetail" tone="secondary" testID="voice-settings-saved" accessibilityLiveRegion="polite" style={styles.inset}>Saved to {profile.label}.</Text>
+            ) : (
+              <Text variant="rowDetail" tone="muted" style={styles.inset}>
+                Sent once over this phone's connection and stored on {profile.label}. Pane never shows a saved key again.
+              </Text>
+            )}
+            {editing.length > 0 ? (
+              <Button testID="voice-settings-save" title="Save" disabled={entries.length === 0} loading={save.isPending} onPress={() => void submit()} />
+            ) : null}
+          </View>
+        )}
+      </SkeletonSwap>
     </Screen>
+  );
+}
+
+/** The three voice key fields as a skeleton: a label over a one-row card each. */
+function VoiceKeysSkeleton() {
+  const theme = useTheme();
+  return (
+    <View testID="voice-settings-skeleton" accessible accessibilityLabel="Loading voice keys" style={styles.form}>
+      {[0.45, 0.4, 0.6].map(width => (
+        <View key={width} style={styles.field}>
+          <View style={styles.inset}><Skeleton width={`${width * 100}%`} height={13} style={styles.labelBone} /></View>
+          <View style={[styles.keyBox, { borderRadius: theme.radius.card, backgroundColor: theme.colors.card, borderColor: theme.colors.cardBorder }]}>
+            <Skeleton width={64} height={16} />
+          </View>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -99,4 +115,8 @@ const styles = StyleSheet.create({
   bold: { fontWeight: '600' },
   form: { gap: 20 },
   inset: { paddingHorizontal: 4 },
+  // VoiceKeyField's label and one-row card.
+  field: { gap: 6 },
+  labelBone: { marginVertical: 2.5 },
+  keyBox: { minHeight: 58, justifyContent: 'center', paddingHorizontal: 16, borderWidth: StyleSheet.hairlineWidth },
 });

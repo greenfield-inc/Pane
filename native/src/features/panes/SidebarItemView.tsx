@@ -2,9 +2,9 @@ import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { useTheme } from '@/theme';
-import { Icon } from '@/ui';
+import { Icon, SkeletonSwap } from '@/ui';
 
-import { Notice, SectionHeader } from './PaneKit';
+import { LoadingRows, Notice, SectionHeader } from './PaneKit';
 import type { SidebarItem, SidebarSection } from './paneList';
 import { PaneRow } from './PaneRow';
 import { ArchivedRow, SessionRow, SidebarNote, SidebarSectionHeader } from './SidebarRows';
@@ -79,6 +79,8 @@ export function SidebarItemView({ item, previous, first, context }: {
       return item.kind === 'session'
         ? <ArchivedRow item={item} onRestore={() => actions.restoreSession(item.id)} />
         : <ArchivedRow item={item} onRestore={() => actions.restorePane(item.id)} onDelete={() => actions.deletePane(item)} />;
+    case 'loading':
+      return <SkeletonSwap loading skeleton={<LoadingRows archived />}>{null}</SkeletonSwap>;
     case 'note':
       return item.danger
         ? <Notice danger message={item.text} action={{ title: 'Try again', onPress: () => context.retry(item.retry ?? 'sessions') }} />
