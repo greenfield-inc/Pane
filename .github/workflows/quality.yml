@@ -113,7 +113,7 @@ jobs:
     # manifest check and runtime guard.
     - name: Run glasses tests and build the Glassly miniapp
       run: |
-        CI=1 pnpm --filter @pane/glasses exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+        CI=1 pnpm --filter @pane/glasses exec vitest run
         pnpm --filter @pane/glasses-glassly build
 
     # Catches hand edits to the generated contract files (docs, TS, Python,
