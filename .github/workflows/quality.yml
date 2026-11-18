@@ -240,13 +240,22 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
+    # pnpm test:renderer-selection in two parts: the tests' type check runs
+    # behind the browser install.
+    - name: Start renderer test type check
+      run: scripts/ci-background.sh start renderer-types pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json
+
     - name: Install Playwright browser dependencies
       run: pnpm exec playwright install --with-deps chromium
 
     - name: Verify renderer selection races
-      run: pnpm test:renderer-selection
+      run: pnpm exec playwright test --config=tests/renderer/playwright.config.ts
       env:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
+
+    - name: Check renderer test types
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh wait renderer-types
 
   functional-smoke-electron:
     name: Functional Smoke (Electron ${{ matrix.shard }})
