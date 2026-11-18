@@ -879,7 +879,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
 
   const approvalOpen = useApprovalColumnStore(state => state.open[`session:${view.session.id}`] !== undefined);
   // A new approval opens beside the chat on its own; shown inside another approval's column, it doesn't (D-114).
-  useEffect(() => (chrome.inline ? undefined : openNewSessionApprovals(view.session.id)), [chrome.inline, view.session.id]);
+  useEffect(() => (chrome.inline ? undefined : openNewSessionApprovals(view.session.id, view.panel.id)), [chrome.inline, view.session.id, view.panel.id]);
   const sessionControls = (<>
     {/* Shown inside another approval's column (its origin tab), the Session doesn't open approvals of its own. */}
     {!chrome.inline && <SessionApprovalsButton sessionId={view.session.id} />}

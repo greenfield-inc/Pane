@@ -65,6 +65,27 @@ describe('openNewSessionApprovals', () => {
     expect(opened()).toBeUndefined();
   });
 
+  it('holds a worker question while its orchestrator may answer it, and opens it when relayed', () => {
+    // Asked before the Session was shown; the orchestrator relays it afterwards.
+    const blocked = { ...approval('w1', Date.now() - 5 * 60_000), quiet: true, originKind: 'worker' as const };
+    useNotifyStore.setState({ snapshot: snapshotOf([old, blocked]) });
+    stop = openNewSessionApprovals('s1');
+
+    useNotifyStore.setState({ snapshot: snapshotOf([old, blocked, { ...approval('w2', Date.now()), quiet: true }]) });
+    expect(opened()).toBeUndefined();
+
+    useNotifyStore.setState({ snapshot: snapshotOf([old, { ...blocked, quiet: undefined }]) });
+    expect(opened()).toBe('w1');
+  });
+
+  it("leaves the Session chat's own prompts to the chat, which already shows them", () => {
+    stop = openNewSessionApprovals('s1', 'o1');
+
+    useNotifyStore.setState({ snapshot: snapshotOf([old, { ...approval('b1', Date.now()), optionsOnly: true }]) });
+
+    expect(opened()).toBeUndefined();
+  });
+
   it('opens a new approval once: closed with ✕, it stays closed', () => {
     stop = openNewSessionApprovals('s1');
     const q7 = approval('q7', Date.now());
