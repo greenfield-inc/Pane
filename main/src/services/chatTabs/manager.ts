@@ -687,6 +687,8 @@ export class ChatTabManager {
     tab.transcript?.dispose();
     tab.transcript = undefined;
     tab.notice = undefined;
+    // A new agent process runs none of the old one's tool calls (one that died mid-call never ended them).
+    tab.toolsRunning = undefined;
     const generation = tab.generation;
     // A resume from pause reads as idle while it starts; a crash Restart does not (watch must not see READY early).
     tab.resuming = !!this.required(panelId).paused;
@@ -713,7 +715,8 @@ export class ChatTabManager {
       generation,
       onUpdate: update => {
         this.lastUpdateAt = tab.activeAt = Date.now();
-        trackToolCall(tab, update);
+        // A replayed call is history: one it left open (Pane quit mid-call) runs in no turn now.
+        if (!tab.loading) trackToolCall(tab, update);
         let event: ChatTabEvent | undefined;
         try { event = transcript.accept(update); }
         catch (error) {
@@ -912,6 +915,9 @@ export class ChatTabManager {
       tab.ownTurnStartedAt = undefined;
       if (marker && !tab.loading) this.options.send('chat-tab:event', marker);
     }
+    // A tool call the turn left open is over with it, unless a prompt is still in flight: its
+    // calls share the map, and its own end forgets them.
+    if (outcome !== 'started' && !tab.delivering) tab.toolsRunning = undefined;
     if (tab.loading) return;
     this.publish(panelId);
     if (outcome !== 'started') this.drain(panelId);

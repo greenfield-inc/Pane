@@ -112,6 +112,66 @@ describe('chat tab manager', () => {
     await manager.cancel('p1');
   });
 
+  it('forgets a tool call the agent\'s own turn left open, so its next silent turn still stalls', { timeout: 30_000 }, async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-own', text: 'abandon-own' });
+    await expect.poll(() => manager.receipt('p1', 'op-own')?.state, { timeout: 10_000 }).toBe('completed');
+    // The first turn of its own ended with "sleep 30" open; the second runs silently with no prompt or release between.
+    await expect.poll(() => turnEnds(manager.view('p1')), { timeout: 10_000 }).toEqual(['end_turn', 'end_turn']);
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('working');
+    expect(manager.isMidTurn('p1')).toBe(true);
+    expect(manager.isMidTurn('p1', Date.now() + 5 * 60_000 + 1)).toBe(false);
+    await manager.cancel('p1');
+  });
+
+  it('keeps a prompt\'s running tool call when a turn of the agent\'s own ends during it', { timeout: 30_000 }, async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-overlap', text: 'overlap' });
+    await expect.poll(() => replyText(manager.view('p1')), { timeout: 10_000 }).toContain('Own turn over.');
+    // The prompt's "sleep 30" still runs, so the silent turn keeps counting.
+    expect(manager.isMidTurn('p1', Date.now() + 60 * 60_000)).toBe(true);
+    await manager.cancel('p1');
+  });
+
+  it('forgets a tool call the replayed history left open, so a silent turn of the agent\'s own after the load still stalls', { timeout: 30_000 }, async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_OWN_TURN_AFTER_LOAD: '1' });
+    // The conversation's last tool call never reported an end (Pane quit mid-call).
+    mkdirSync(path.join(directory, 'agent'), { recursive: true });
+    writeFileSync(path.join(directory, 'agent', 'history.json'), JSON.stringify({ cwd: directory, config: { model: 'default', mode: 'default' }, meta: null, updates: [
+      { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'hold 30' } },
+      { sessionUpdate: 'tool_call', toolCallId: 'tool-open', title: 'sleep 30', kind: 'execute', status: 'in_progress' },
+    ] }));
+    store.add('p1', { ...newTab(directory), acpSessionId: 'history' });
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('working');
+    expect(manager.isMidTurn('p1')).toBe(true);
+    expect(manager.isMidTurn('p1', Date.now() + 5 * 60_000 + 1)).toBe(false);
+    await manager.cancel('p1');
+  });
+
+  it('forgets the tool calls of an agent that exited mid-call in a turn of its own, so the next agent\'s silent turn of its own still stalls', { timeout: 30_000 }, async () => {
+    const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_OWN_TURN_AFTER_LOAD: '1' });
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-call', text: 'own-call' });
+    await expect.poll(() => manager.receipt('p1', 'op-call')?.state, { timeout: 10_000 }).toBe('completed');
+    // The agent dies while a turn of its own runs a tool call: neither ever reports an end.
+    await expect.poll(() => manager.isMidTurn('p1', Date.now() + 60 * 60_000), { timeout: 10_000 }).toBe(true);
+    const [pid] = manager.getSessionPids().get('pane-1') ?? [];
+    process.kill(pid, 'SIGKILL');
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('stopped');
+    // Started again without a Restart's release; the reloaded agent works on by itself, silently.
+    await manager.ensure('p1');
+    await expect.poll(() => manager.view('p1').status, { timeout: 10_000 }).toBe('working');
+    expect(manager.isMidTurn('p1')).toBe(true);
+    expect(manager.isMidTurn('p1', Date.now() + 5 * 60_000 + 1)).toBe(false);
+    await manager.cancel('p1');
+  });
+
   it('starts on first view, sends a message and ends idle, with viewers able to follow by events alone', async () => {
     const { manager, store, directory, events } = harness();
     store.add('p1', newTab(directory));
