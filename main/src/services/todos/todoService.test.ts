@@ -231,6 +231,48 @@ describe('TodoService', () => {
     });
   });
 
+  describe('approvals from a to-do\'s own hidden Session (T-19)', () => {
+    function promptInSession(id: string, sessionId: string, title = '{"title":"Allow pkill?"}') {
+      db.prepare(`INSERT INTO approvals (id, machine, connected_kind, connected_id, connected_name, origin_kind, session_id, addressee, state, item_json, created_at)
+        VALUES (?, 'm', 'session', ?, 'T-1 · Ship', 'claude-prompt', ?, 'person', 'waiting', ?, 1)`).run(id, sessionId, sessionId, title);
+    }
+
+    it('a permission prompt asked in its Session, with no --todo, makes it Waiting on you and shows on its page', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      const sessionId = service.require(todo.number).sessionId ?? '';
+      expect(sessionId).not.toBe('');
+      promptInSession('p1', sessionId);
+      expect(service.detail(todo.number).status).toMatchObject({ status: 'waiting' });
+      expect(service.detail(todo.number).approvalIds).toContain('p1');
+    });
+
+    it('another Session\'s prompt is not the to-do\'s', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      promptInSession('p2', 'some-other-session');
+      expect(service.detail(todo.number).status.status).not.toBe('waiting');
+      expect(service.detail(todo.number).approvalIds).not.toContain('p2');
+    });
+
+    it('a comment leaves a permission prompt for the person to answer', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      promptInSession('p3', service.require(todo.number).sessionId ?? '');
+      await service.comment(todo.number, 'go on', person);
+      expect(host.closed).toEqual([]);
+    });
+
+    it('asking for review again replaces the open review card, so one waits', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      await service.review(todo.number, { noAttachments: 'none' }, { kind: 'agent' });
+      const first = host.cards[0].id;
+      db.prepare(`INSERT INTO approvals (id, machine, connected_kind, connected_id, connected_name, origin_kind, addressee, state, item_json, created_at, todo_id)
+        VALUES (?, 'm', 'machine', 'm', 'm', 'pane', 'person', 'waiting', '{"title":"Review T-1: Ship"}', 1, ?)`).run(first, todo.number);
+      await service.review(todo.number, { noAttachments: 'none', summary: 'now with the report' }, { kind: 'agent' });
+      expect(host.closed).toEqual([{ id: first, summary: expect.stringContaining('newer review request') }]);
+      expect(host.cards).toHaveLength(2);
+      expect(host.cards[1].context).toContain('now with the report');
+    });
+  });
+
   describe('a comment on a to-do waiting on you (T-20)', () => {
     function waitingCard(id: string, number: number, title = '{"title":"Q-7: Which currency?"}') {
       db.prepare(`INSERT INTO approvals (id, machine, connected_kind, connected_id, connected_name, origin_kind, addressee, state, item_json, qn, created_at, todo_id)

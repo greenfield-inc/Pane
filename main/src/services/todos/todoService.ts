@@ -162,7 +162,8 @@ function labelOf(target: string): string {
   const pr = /\/pull\/(\d+)/.exec(target);
   if (pr) return `PR #${pr[1]}`;
   const trimmed = target.replace(/[?#].*$/, '').replace(/\/+$/, '');
-  return trimmed.slice(trimmed.lastIndexOf('/') + 1) || target;
+  // A Windows path names its file after the last backslash.
+  return trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1) || target;
 }
 
 /**
@@ -831,7 +832,8 @@ export class TodoService extends EventEmitter {
    */
   private commentAnswersWaiting(todo: TodoRecord, text: string): TodoRecord {
     const reminderCard = this.store.wake(todo.number)?.reminderCardId ?? null;
-    const cards = this.store.waitingApprovals().filter(approval => approval.todoNumber === todo.number && approval.id !== reminderCard);
+    // Only cards linked to the to-do: a permission prompt asked in its Session waits for the person's own answer.
+    const cards = this.store.waitingApprovals().filter(approval => approval.linked && approval.todoNumber === todo.number && approval.id !== reminderCard);
     if (todo.state !== 'in_review' && cards.length === 0 && todo.stuckCardId === null) return todo;
     const words = text.length > 300 ? `${text.slice(0, 299)}…` : text;
     // An agent waiting on its question gets this line as its answer; the comment itself also reaches the orchestrator's tab.
@@ -950,6 +952,11 @@ export class TodoService extends EventEmitter {
     this.refreshCopies(number);
     const groups = this.attachmentGroups(todo);
     const links: NotifyLink[] = groups.flatMap(group => group.attachments).slice(0, 6).map(attachment => /^https?:/.test(attachment.target) ? { label: attachment.label.slice(0, 80), url: attachment.target } : { label: attachment.label.slice(0, 80), path: attachment.target });
+    // Asking again replaces the open review card, so one waits (T-19).
+    const reviewTitle = `Review ${todo.ref}: `;
+    for (const open of this.store.waitingApprovals()) {
+      if (open.linked && open.todoNumber === number && open.title.startsWith(reviewTitle)) this.host.closeCard(open.id, 'Replaced by a newer review request');
+    }
     const id = randomUUID();
     const context = [options.summary?.trim(), count === 0 ? `No attachments: ${options.noAttachments?.trim()}` : `Attachments: ${groups.flatMap(group => group.attachments).map(attachment => `${attachment.kind} · ${attachment.label}`).join('; ')}`].filter(Boolean).join('\n\n');
     const updated = this.progress(todo, { state: 'in_review', ...this.endWake(number, `${this.actorName(actor)} asked for your review`) });

@@ -50,7 +50,7 @@ mid-turn, so it never goes stale. The first that applies wins:
 
 | Status | When |
 | --- | --- |
-| Waiting on you | An approval linked to the to-do, or to one of its open sub-to-dos, waits on you. A review counts. A snoozed to-do with a waiting approval reads Waiting on you, with "snoozed until …" after it. |
+| Waiting on you | An approval linked to the to-do, or to one of its open sub-to-dos, waits on you. A review counts, and so does anything asked inside the to-do's own Session without `--todo` (an agent's permission prompt, say), which also shows on its page. A snoozed to-do with a waiting approval reads Waiting on you, with "snoozed until …" after it. |
 | Snoozed | It is snoozed until a time. The reason reads "until Wed 9:00 AM" and the note's first line, or ends "· machine offline" when its machine can't be reached. See [Snoozing and reminders](#snoozing-and-reminders). |
 | Working | It is in progress or accepted, and the tab working it (or an open sub-to-do's) has been mid-turn for 10 seconds, by the same test as the Session spinner. |
 | Queued | The load gate is holding its start, or paused it. The reason says which, such as "devbox is busy · starts when load comes down". |
@@ -308,7 +308,7 @@ the desktop, and its approvals through `notify:remote-snapshot` and
 1. When every done-when check is met, the orchestrator runs
    `runpane todos review T-n --summary "<what to look at>"`. Pane raises a
    review approval listing the attachments, and the to-do reads Waiting on
-   you.
+   you. Asking again replaces the open review card, so only one waits.
 2. You choose **Accept** or **Ask for changes**. Asking for changes sends your
    note back and returns the to-do to In progress. Commenting in the to-do's
    chat instead does the same, and closes the review card.

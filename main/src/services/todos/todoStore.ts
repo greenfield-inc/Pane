@@ -273,12 +273,14 @@ export interface NewActivity {
 export interface LinkedApproval {
   id: string;
   todoNumber: number;
+  /** Linked by `todo_id`; false for one only asked inside the to-do's own Session (T-19), which Pane never closes for you. */
+  linked: boolean;
   title: string;
   qn?: string;
   createdAt: number;
 }
 
-const linkedRowSchema = boundary.object({ id: boundary.string, todo_id: boundary.number, qn: str, item_json: str, created_at: boundary.number });
+const linkedRowSchema = boundary.object({ id: boundary.string, todo_id: boundary.number, qn: str, item_json: str, created_at: boundary.number, linked: boundary.number });
 const itemTitleSchema = boundary.object({ title: boundary.optional(boundary.string) });
 
 function titleOf(itemJson: string | null): string {
@@ -524,10 +526,13 @@ export class TodoStore {
 
   /** Approvals waiting on the person, linked to a to-do, oldest first. */
   waitingApprovals(): LinkedApproval[] {
-    const rows = decodeBoundary(this.db.prepare(`SELECT id, todo_id, qn, item_json, created_at FROM approvals
-      WHERE todo_id IS NOT NULL AND state IN ('waiting', 'sent') AND item_json IS NOT NULL ORDER BY created_at, rowid`).all(), boundary.array(linkedRowSchema));
+    // Linked by `todo_id` (`--todo`, or Pane's own cards), or asked from inside a top-level to-do's own hidden
+    // Session without one (a permission prompt, say): the person must see those too (T-19).
+    const rows = decodeBoundary(this.db.prepare(`SELECT a.id, COALESCE(a.todo_id, t.number) AS todo_id, a.qn, a.item_json, a.created_at, a.todo_id IS NOT NULL AS linked
+      FROM approvals a LEFT JOIN todos t ON a.todo_id IS NULL AND a.session_id IS NOT NULL AND t.session_id = a.session_id AND t.parent_id IS NULL
+      WHERE (a.todo_id IS NOT NULL OR t.number IS NOT NULL) AND a.state IN ('waiting', 'sent') AND a.item_json IS NOT NULL ORDER BY a.created_at, a.rowid`).all(), boundary.array(linkedRowSchema));
     return rows.map(row => {
-      const linked: LinkedApproval = { id: row.id, todoNumber: row.todo_id, title: titleOf(row.item_json), createdAt: row.created_at };
+      const linked: LinkedApproval = { id: row.id, todoNumber: row.todo_id, title: titleOf(row.item_json), createdAt: row.created_at, linked: row.linked === 1 };
       if (row.qn) linked.qn = row.qn;
       return linked;
     });
@@ -543,13 +548,15 @@ export class TodoStore {
   approvalIds(todoNumbers: number[]): string[] {
     if (todoNumbers.length === 0) return [];
     const marks = todoNumbers.map(() => '?').join(', ');
-    return decodeBoundary(this.db.prepare(`SELECT id FROM approvals WHERE todo_id IN (${marks}) AND item_json IS NOT NULL ORDER BY created_at, rowid`).all(...todoNumbers), boundary.array(boundary.object({ id: boundary.string }))).map(row => row.id);
+    // As waitingApprovals: linked ones, and those asked inside these to-dos' own Sessions (T-19).
+    return decodeBoundary(this.db.prepare(`SELECT id FROM approvals WHERE item_json IS NOT NULL AND (todo_id IN (${marks})
+      OR (todo_id IS NULL AND session_id IN (SELECT session_id FROM todos WHERE number IN (${marks}) AND parent_id IS NULL AND session_id IS NOT NULL)))
+      ORDER BY created_at, rowid`).all(...todoNumbers, ...todoNumbers), boundary.array(boundary.object({ id: boundary.string }))).map(row => row.id);
   }
 
   // ── Retention ───────────────────────────────────────────────────────────
 
-  /** Deletes to-dos closed more than 30 days ago, with their rows. Files they point at are never touched. */
-  /** Deletes to-dos closed over 30 days ago, with their rows; returns their numbers. */
+  /** Deletes to-dos closed over 30 days ago, with their rows; returns their numbers (Pane's file copies go with them). */
   pruneClosed(now: number): number[] {
     return this.transaction(() => {
       const cutoff = now - TODO_RETENTION_MS;

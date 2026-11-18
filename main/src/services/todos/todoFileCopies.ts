@@ -30,7 +30,8 @@ export function keepCopy(root: string, todoNumber: number, attachmentId: number,
   if (source.size > KEPT_COPY_MAX_BYTES) return 'too-large';
   const copy = copyPathOf(root, todoNumber, attachmentId, original);
   const kept = statOrNull(copy);
-  if (kept && kept.size === source.size && kept.mtimeMs >= source.mtimeMs) return 'current';
+  // Timestamps are copied at millisecond precision, so allow under a millisecond's difference.
+  if (kept && kept.size === source.size && kept.mtimeMs + 1 >= source.mtimeMs) return 'current';
   fs.mkdirSync(path.dirname(copy), { recursive: true });
   // Written beside it, then renamed: a reader never sees half a copy.
   const partial = `${copy}.partial`;

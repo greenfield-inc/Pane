@@ -62,7 +62,7 @@ describe('TodoStore', () => {
     approvals.saveItem({ id: 'a1', ui: 'ask', title: 'Q-11: Merge #1352?', state: 'waiting', createdAt: 5, source: { name: 'w', agent: 'Claude', paneId: 'p', panelId: 't' } });
     const todo = store.create({ title: 'T', requester: person, createdBy: 'you', now: 1 });
     store.linkApproval('a1', todo.number);
-    expect(store.waitingApprovals()).toEqual([{ id: 'a1', todoNumber: todo.number, title: 'Q-11: Merge #1352?', qn: 'Q-11', createdAt: 5 }]);
+    expect(store.waitingApprovals()).toEqual([{ id: 'a1', todoNumber: todo.number, title: 'Q-11: Merge #1352?', qn: 'Q-11', createdAt: 5, linked: true }]);
     store.update(todo.number, { state: 'dropped', closedAt: 6 }, 6);
     store.pruneClosed(6 + TODO_RETENTION_MS + 1);
     expect(store.todoOfApproval('a1')).toBeUndefined();
