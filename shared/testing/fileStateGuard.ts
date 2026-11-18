@@ -2,7 +2,7 @@
 // files in turn, so whatever a file leaves behind becomes the next file's
 // starting state. Each project's setup file calls guardFileState() at the start
 // of every test file. It records the process state a file must leave as it
-// found it; after the file's last hook it restores that state, so the next file
+// found it (env, globals, cwd, timers, process.platform and process.arch); after the file's last hook it restores that state, so the next file
 // starts clean, and fails the file for anything the file itself left changed.
 //
 // Vitest is passed in rather than imported: main and frontend use different
@@ -38,6 +38,10 @@ function isLibraryGlobal(name: string): boolean {
   return name === 'self' || name.startsWith('__');
 }
 
+// Tests override these with Object.defineProperty to exercise another
+// platform; a value left behind changes what the next file runs or skips.
+const PROCESS_PROPERTIES = ['platform', 'arch'] as const;
+
 type Listener = (...args: unknown[]) => void;
 
 export function guardFileState({ afterAll, vi }: VitestHandles): void {
@@ -47,6 +51,7 @@ export function guardFileState({ afterAll, vi }: VitestHandles): void {
     Reflect.ownKeys(globalThis).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]),
   );
   const listeners = new Map<string, Listener[]>(PROCESS_EVENTS.map((event) => [event, processListeners(event)]));
+  const processProperties = new Map(PROCESS_PROPERTIES.map((name) => [name, Object.getOwnPropertyDescriptor(process, name)]));
 
   afterAll(() => {
     // vi.stubEnv and vi.stubGlobal are the clean way to change these, so their
@@ -90,6 +95,14 @@ export function guardFileState({ afterAll, vi }: VitestHandles): void {
         leaks.push(`globalThis.${String(key)} was replaced (use vi.stubGlobal, or restore it yourself)`);
         Object.defineProperty(globalThis, key, before);
       }
+    }
+
+    for (const [name, before] of processProperties) {
+      const now = Object.getOwnPropertyDescriptor(process, name);
+      if (Object.is(now?.value, before?.value) && Object.is(now?.get, before?.get)) continue;
+      leaks.push(`process.${name} changed (restore its descriptor in afterEach)`);
+      if (before) Object.defineProperty(process, name, before);
+      else Reflect.deleteProperty(process, name);
     }
 
     // Product modules register process-lifetime hooks such as
