@@ -75,7 +75,7 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
     setAspect(current => (Math.abs(current - next) / current < 0.01 ? current : next));
   }, [panel.id]);
   const root = useRef<HTMLDivElement>(null);
-  const width = useWidth(root);
+  const width = useSize(root)?.width ?? Number.POSITIVE_INFINITY;
   const narrow = width < NARROW_PX;
   const wraps = width < ONE_ROW_PX;
 
@@ -103,10 +103,12 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   // A frame read right after each input lands, so a remote screen shows it without waiting for the next poll.
   const readFrameNow = useRef<() => void>(() => undefined);
   const send = useMemo(() => deviceInputQueue(input => client.input(panel.id, input), () => readFrameNow.current()), [client, panel.id]);
+  // Turns and folds go in line with touches, and the screen is read right after, like any input.
   const act = useCallback((input: DeviceInput) => run(input.kind, async () => {
-    await client.input(panel.id, input);
+    const failure = await send(input);
+    if (failure) throw failure;
     refreshControls();
-  }), [client, panel.id, refreshControls, run]);
+  }), [refreshControls, run, send]);
 
   const [notice, setNotice] = useState<CaptureNotice>();
   const closeNotice = useCallback(() => setNotice(undefined), []);
@@ -250,7 +252,8 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
           </PhoneFrame>
           {error && <p className="mt-1 max-w-sm text-center text-xs text-status-error" role="alert">{error}</p>}
           {recordingNote && !error && (
-            <p className="mt-1 max-w-md break-words text-center text-xs text-text-secondary" role="status" data-testid="device-recording-note">
+            // Over the tab, not in its column, so the phone keeps its size while the note shows.
+            <p className="absolute left-1/2 top-2 z-10 w-max max-w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 break-words rounded-md border border-border-primary bg-surface-primary px-3 py-1.5 text-center text-xs text-text-secondary shadow-sm" role="status" data-testid="device-recording-note">
               {recordingNote.text}
               {staged && staged.path === recordingNote.path && ` Its path is typed at ${staged.agent}'s prompt.`}
             </p>
@@ -325,21 +328,6 @@ function useRecordingNote(ended: DevicePanelState['recordingEnded']): { text: st
 
 /** Keys with names that type into the device; other named keys (F1, Shift…) stay with Pane. */
 const TYPED_KEYS = new Set(['Enter', 'Backspace', 'Tab', 'Escape', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
-
-/** The width of `root` as it resizes; Infinity until measured, so the rail starts beside the phone. */
-function useWidth(root: RefObject<HTMLDivElement | null>): number {
-  const [width, setWidth] = useState(Number.POSITIVE_INFINITY);
-  useEffect(() => {
-    const element = root.current;
-    if (!element) return;
-    const measure = () => setWidth(element.getBoundingClientRect().width);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [root]);
-  return width;
-}
 
 /**
  * Change, on the banner of a device that runs on a linked Mac: Automatic and each saved Mac with
@@ -657,18 +645,18 @@ function pointOnImage(image: HTMLImageElement, clientX: number, clientY: number,
   return { x: (clientX - left) / width, y: (clientY - top) / height };
 }
 
-/** The size of `box` as it resizes. */
-function useBoxSize(box: RefObject<HTMLDivElement | null>): { width: number; height: number } {
-  const [size, setSize] = useState({ width: 0, height: 0 });
+/** The size of `element` as it resizes; undefined until measured. */
+function useSize(element: RefObject<HTMLDivElement | null>): { width: number; height: number } | undefined {
+  const [size, setSize] = useState<{ width: number; height: number }>();
   useEffect(() => {
-    const element = box.current;
-    if (!element) return;
-    const measure = () => { const { width, height } = element.getBoundingClientRect(); setSize(current => (current.width === width && current.height === height ? current : { width, height })); };
+    const target = element.current;
+    if (!target) return;
+    const measure = () => { const { width, height } = target.getBoundingClientRect(); setSize(current => (current?.width === width && current.height === height ? current : { width, height })); };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(element);
+    observer.observe(target);
     return () => observer.disconnect();
-  }, [box]);
+  }, [element]);
   return size;
 }
 
@@ -685,7 +673,7 @@ function TouchScreen({ platform, orientation, box, src, onScreenSize, onInput }:
   const [natural, setNatural] = useState({ width: 0, height: 0 });
   const turn = screenTurn(orientation, natural.width, natural.height);
   const sideways = turn === 90 || turn === 270;
-  const boxSize = useBoxSize(box);
+  const boxSize = useSize(box) ?? { width: 0, height: 0 };
   useEffect(() => {
     const measure = () => {
       const element = image.current;

@@ -27,7 +27,7 @@ describe('a simulator turned on its side', () => {
 
   it('turns a scroll down the upright screen into a scroll along the frame', () => {
     // Down on the upright screen runs from the frame's left edge to its right.
-    expect(frameDelta(90, { dx: 0, dy: 0.2 })).toEqual({ dx: 0.2, dy: -0 });
+    expect(frameDelta(90, { dx: 0, dy: 0.2 })).toEqual({ dx: 0.2, dy: expect.closeTo(0) });
     expect(frameDelta(0, { dx: 0.1, dy: 0.2 })).toEqual({ dx: 0.1, dy: 0.2 });
   });
 });

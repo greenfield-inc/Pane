@@ -92,6 +92,22 @@ describe('LiveFrames', () => {
     frames.closeAll();
   });
 
+  it('reads a frame whose bytes, end marker included, arrive split across chunks', async () => {
+    const opened: AbortSignal[] = [];
+    let push: (chunk: Uint8Array) => void = () => undefined;
+    const frames = new LiveFrames(async (_id, signal) => {
+      opened.push(signal);
+      return new Response(new ReadableStream<Uint8Array>({ start: controller => { push = chunk => controller.enqueue(chunk); } }));
+    }, 1_000);
+    const first = frames.latest('D1');
+    await tick();
+    push(Buffer.concat([Buffer.from('--frame\r\n'), Buffer.from([0xff, 0xd8]), Buffer.from('spl')]));
+    push(Buffer.concat([Buffer.from('it'), Buffer.from([0xff])]));
+    push(Buffer.concat([Buffer.from([0xd9]), Buffer.from('--frame\r\n')]));
+    expect((await first).toString('latin1')).toBe('\xff\xd8split\xff\xd9');
+    frames.closeAll();
+  });
+
   it('closes the stream when nobody has asked for a frame in a while, and opens a new one on the next ask', async () => {
     const hub = device();
     const frames = new LiveFrames(hub.open, 30);

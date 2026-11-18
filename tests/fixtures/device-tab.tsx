@@ -59,7 +59,9 @@ declare global { interface Window { qaInputs: DeviceInput[]; qaPower: string[]; 
 window.qaStaged = [];
 window.qaAttached = [];
 // ?fold=1 is a foldable, half open; otherwise a phone that turns.
-const controls: DeviceControls = params.get('fold') ? { orientation: 'portrait', fold: { posture: 'half' } } : { orientation: 'portrait' };
+// ?orientation=landscape_left turns it while its frames stay a portrait framebuffer, as a simulator's do.
+const turned = params.get('orientation') === 'landscape_left';
+const controls: DeviceControls = params.get('fold') ? { orientation: 'portrait', fold: { posture: 'half' } } : { orientation: turned ? 'landscape_left' : 'portrait' };
 window.qaInputs = [];
 window.qaPower = [];
 const landscape = landscapeScreen();

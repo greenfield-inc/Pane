@@ -17,8 +17,8 @@ const LEFT_SHIFT = 225;
 /** The hub's pose for each posture the tab offers. */
 const POSES = { closed: 'closed', half: 'laptop', open: 'open' } as const;
 const IDLE_CLOSE_MS = 60_000;
-/** How many times a socket that drops before the hub admits it reopens, carrying its waiting input. */
-const REOPENS = 3;
+/** The waits before each reopen of a socket that drops before the hub admits it, carrying its waiting input. */
+const REOPEN_DELAYS_MS = [200, 500, 1_000];
 
 /** `socket` is unset while Pane is still asking where the device's input goes. */
 interface InputSocket { socket?: WebSocket; admitted: boolean; queue: Buffer[]; timer?: NodeJS.Timeout }
@@ -124,20 +124,21 @@ export class DeviceInputSockets {
     for (const id of [...this.sockets.keys()]) this.close(id);
   }
 
-  private open(deviceId: string, stream: () => Promise<DeviceStreamInfo>, queue: Buffer[] = [], reopens = REOPENS): InputSocket {
+  private open(deviceId: string, stream: () => Promise<DeviceStreamInfo>, queue: Buffer[] = [], reopen = 0): InputSocket {
     const entry: InputSocket = { admitted: false, queue };
     this.sockets.set(deviceId, entry);
-    /** The socket failed: input still waiting goes on a new one, while reopens last. */
+    /** The socket failed: input still waiting goes on a new one after a short wait, while reopens last. */
     const failed = () => {
       if (this.sockets.get(deviceId) !== entry) return;
-      if (entry.queue.length > 0 && reopens > 0) {
-        const next = this.open(deviceId, stream, entry.queue, reopens - 1);
+      if (entry.queue.length > 0 && reopen < REOPEN_DELAYS_MS.length) {
+        const next = this.open(deviceId, stream, entry.queue, reopen + 1);
         next.timer = entry.timer;
         return;
       }
+      if (entry.queue.length > 0) console.warn(`[devices] dropped ${entry.queue.length} input message(s) for ${deviceId}: its hub refused the input socket ${REOPEN_DELAYS_MS.length + 1} times`);
       this.close(deviceId);
     };
-    stream().then((info) => {
+    const connect = () => stream().then((info) => {
       if (this.sockets.get(deviceId) !== entry) return;
       const socket = new WebSocket(info.inputUrl, { headers: { Authorization: `Bearer ${info.token}` } });
       entry.socket = socket;
@@ -149,6 +150,9 @@ export class DeviceInputSockets {
       socket.on('error', failed);
       socket.on('close', failed);
     }, failed);
+    // A reopen waits a moment first; input sent meanwhile joins this entry's queue.
+    if (reopen === 0) void connect();
+    else setTimeout(() => { if (this.sockets.get(deviceId) === entry) void connect(); }, REOPEN_DELAYS_MS[reopen - 1]).unref();
     return entry;
   }
 }

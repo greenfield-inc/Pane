@@ -931,7 +931,10 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     return null;
   }));
 
-  /** When the tab's recording started (epoch ms), or null when it is not recording: a tab shown again picks up its clock. */
+  /**
+   * When the tab's recording started (epoch ms), or null: what tabs read before the tab's state
+   * carried the recording. Kept for phones and browser apps from those versions.
+   */
   commandRegistry.register('devices:recording', (panelId: PaneCommandValue) => respond(() => {
     const { panel } = panelOf(panelId);
     return recordings.get(panel.id)?.startedAt ?? null;

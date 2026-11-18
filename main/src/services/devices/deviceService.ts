@@ -351,9 +351,7 @@ export class DeviceService {
   async act(caller: DeviceCaller, args: readonly string[], platform?: DevicePlatform): Promise<{ exitCode: number; output: string }> {
     if (args.length === 0) throw new PaneError('ERR_DEVICE_ACT_EMPTY', 'device_act needs an agent-device command, such as ["snapshot", "-i"].', 'Pass the command as args.');
     refuseRetarget(args);
-    const device = await this.leasedDevice(caller.paneId, platform);
-    const result = await runAgentDevice(this.paths().agentDevice, args, this.target(caller.paneId, device), { node: this.node, stateDir: this.stateDir() });
-    return { exitCode: result.code, output: `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`.trim() };
+    return this.runAgentDeviceFor(caller.paneId, await this.leasedDevice(caller.paneId, platform), args);
   }
 
   /**
@@ -363,7 +361,12 @@ export class DeviceService {
   async stopRecording(paneId: string, id: string): Promise<{ exitCode: number; output: string }> {
     const device = (await this.devices()).find(candidate => candidate.id === id);
     if (!device?.booted) throw new PaneError('ERR_DEVICE_OFF', 'The device is off, so its recording did not save.', 'Record again after booting it.');
-    const result = await runAgentDevice(this.paths().agentDevice, ['record', 'stop', '--json'], this.target(paneId, device), { node: this.node, stateDir: this.stateDir() });
+    return this.runAgentDeviceFor(paneId, device, ['record', 'stop', '--json']);
+  }
+
+  /** agent-device run on `device` in `paneId`'s session, with its exit code and output together. */
+  private async runAgentDeviceFor(paneId: string, device: HubDevice, args: readonly string[]): Promise<{ exitCode: number; output: string }> {
+    const result = await runAgentDevice(this.paths().agentDevice, args, this.target(paneId, device), { node: this.node, stateDir: this.stateDir() });
     return { exitCode: result.code, output: `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`.trim() };
   }
 
@@ -764,8 +767,11 @@ export class DeviceService {
   async isBooted(id: string): Promise<boolean | undefined> {
     if (!this.hub || this.stopping.has(id)) return undefined;
     if ((await this.recentDevice(id))?.booted) return true;
-    this.listed = { at: this.now(), devices: this.devices() };
-    return (await this.listed.devices).some(device => device.id === id && device.booted);
+    const listing = { at: this.now(), devices: this.devices() };
+    this.listed = listing;
+    // A listing that failed is not kept for the next ask.
+    const devices = await listing.devices.catch((cause: unknown) => { if (this.listed === listing) this.listed = undefined; throw cause; });
+    return devices.some(device => device.id === id && device.booted);
   }
 
   // ---- internals
@@ -879,6 +885,8 @@ export class DeviceService {
       return;
     }
     rmSync(this.hubFile(), { force: true });
+    // Never a signal to "every process" (0, -1) or init: only a real child process id.
+    if (!Number.isInteger(saved.pid) || saved.pid <= 1 || saved.pid === process.pid) return;
     try {
       process.kill(saved.pid, 0);
     } catch {

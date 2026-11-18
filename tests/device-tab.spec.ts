@@ -108,13 +108,29 @@ test('the whole screen shows, letterboxed inside the phone, at any tab size', as
       while (clip && getComputedStyle(clip).overflow !== 'hidden') clip = clip.parentElement;
       const clipBox = (clip ?? image).getBoundingClientRect();
       return {
+        contained: getComputedStyle(image).objectFit === 'contain',
         inside: box.left + (box.width - drawnWidth) / 2 >= clipBox.left - 0.5 && box.left + (box.width + drawnWidth) / 2 <= clipBox.right + 0.5
           && box.top + (box.height - drawnHeight) / 2 >= clipBox.top - 0.5 && box.top + (box.height + drawnHeight) / 2 <= clipBox.bottom + 0.5,
         onScreen: clipBox.top >= -0.5 && clipBox.left >= -0.5 && clipBox.bottom <= innerHeight + 0.5 && clipBox.right <= innerWidth + 0.5,
       };
     });
-    expect(fit, `${width}x${height}`).toEqual({ inside: true, onScreen: true });
+    expect(fit, `${width}x${height}`).toEqual({ contained: true, inside: true, onScreen: true });
   }
+});
+
+test('a simulator turned to landscape shows upright in a landscape phone, and a tap lands where it is drawn', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  // The fixture's phone streams its portrait framebuffer, as a simulator does, while turned landscape-left.
+  await open(page, 'view=pane&orientation=landscape_left');
+  const screen = page.getByTestId('device-screen');
+  await expect.poll(async () => { const box = await screen.boundingBox(); return box ? box.width / box.height : 0; }).toBeGreaterThan(2);
+  const box = await screen.boundingBox();
+  if (!box) throw new Error('No screen');
+  // The upright top-left corner is the framebuffer's bottom-left.
+  await page.mouse.click(box.x + box.width * 0.05, box.y + box.height * 0.05);
+  await expect.poll(() => page.evaluate(() => window.qaInputs.length)).toBe(2);
+  const tap = await page.evaluate(() => window.qaInputs[0]);
+  expect(tap.kind === 'touch' && tap.x < 0.1 && tap.y > 0.9).toBe(true);
 });
 
 test('turning the device mid-session reshapes the phone to landscape', async ({ page }) => {
@@ -190,7 +206,6 @@ test('a recording the limit stopped says so, and one the person stopped never do
   await expect(page.getByTestId('device-recording-note')).toContainText('The recording stopped at its 10-minute limit.');
   await expect(page.getByTestId('device-recording')).toHaveCount(0);
   await page.getByRole('button', { name: 'Record' }).click();
-  await page.waitForTimeout(5_500);
   await page.getByRole('button', { name: /Stop recording/ }).click();
   await expect(page.getByTestId('device-recording-note')).toContainText('You stopped the recording.');
   await expect(page.getByTestId('device-recording-note')).not.toContainText('limit');

@@ -136,7 +136,6 @@ interface ElectronAPI {
     capture: (panelId: string, image?: string) => Promise<IPCResponse<DeviceCapture>>;
     stage: (panelId: string, agentPanelId: string, text: string) => Promise<IPCResponse<boolean>>;
     record: (panelId: string, action: 'start' | 'stop') => Promise<IPCResponse<DeviceRecording | null>>;
-    recording: (panelId: string) => Promise<IPCResponse<number | null>>;
     logs: (panelId: string, since: number) => Promise<IPCResponse<DeviceLogPage>>;
     driver: (panelId: string, who: 'person' | 'agent') => Promise<IPCResponse<boolean>>;
     visible: (panelId: string, clientId: string, visible: boolean) => Promise<IPCResponse<boolean>>;
