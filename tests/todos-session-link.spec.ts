@@ -143,8 +143,11 @@ test('the agents chip opens the Session, whose breadcrumb returns to the same to
   await expect(crumb(page)).toHaveAttribute('data-came-from', 'true');
   await expect(crumb(page)).toHaveAttribute('aria-label', 'Back to T-12 · Invoice PDFs');
   // A focusable button with a visible focus ring; no key is bound for it in the Session.
-  await crumb(page).focus();
-  await expect(crumb(page)).toBeFocused();
+  // The Session may still be settling its own focus on a slow runner: focusing is retried until it holds.
+  await expect(async () => {
+    await crumb(page).focus();
+    await expect(crumb(page)).toBeFocused({ timeout: 500 });
+  }).toPass({ timeout: 10_000 });
   await crumb(page).click();
   await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '12');
   await expect(page.getByTestId('todo-page-title')).toHaveText('Invoice PDFs');

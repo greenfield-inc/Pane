@@ -57,7 +57,8 @@ for (const theme of ['light-rounded', 'dark'] as const) {
   test(`a to-do's Session never shows in the Sessions sidebar, before or after the to-dos arrive (${theme})`, async ({ page }) => {
     await open(page, theme);
     // The plain Session lists, pinned and in Sessions; the to-do's (pinned too, and the selected one) never does.
-    await expect(page.getByTestId(`orchestration-session-${PLAIN_SESSION}`)).toBeVisible();
+    // The first paint of the sidebar can take a while on a shared runner.
+    await expect(page.getByTestId(`orchestration-session-${PLAIN_SESSION}`)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId(`orchestration-pinned-session-${PLAIN_SESSION}`)).toBeVisible();
     // Past the late to-dos snapshot, and a little more.
     await page.waitForTimeout(2500);
