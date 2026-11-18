@@ -9,8 +9,16 @@ import { reportFindResult, syncFindMode, type FindAdapter, type FindMode, type F
 
 const MATCH_HIGHLIGHT = 'pane-find-match';
 const CURRENT_HIGHLIGHT = 'pane-find-current';
-/** Re-search this long after the content stops changing. */
+/** Re-check the tab's mode this long after the content stops changing. */
 const RERUN_DELAY_MS = 150;
+/**
+ * While the content changes, search again this long after the first change, then at most once
+ * per interval until it stops (the last change always gets a search). Each search re-reads the
+ * whole tab (about 55 ms for a 600-message chat), so a steady stream re-reads twice a second
+ * instead of on every chunk, and the count still moves while it streams.
+ */
+const RERUN_FIRST_MS = RERUN_DELAY_MS;
+const RERUN_INTERVAL_MS = 500;
 /**
  * Highlight at most this many matches either side of the current one, plus
  * the matches on screen; the count still covers every match. Painting 100k
@@ -200,6 +208,7 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
   let text: { root: HTMLElement; nodes: Text[]; prepared: PreparedText } | null = null;
   let observer: MutationObserver | null = null;
   let rerunTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastRerun = -Infinity;
   // Match indexes painted now, as [from, to) intervals.
   let painted: Array<[number, number]> = [];
   let scrollRoot: HTMLElement | null = null;
@@ -327,28 +336,32 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
     rerunTimer = null;
   };
 
-  // Previews re-render (a file reloads, a notebook output arrives): search again.
+  const rerun = () => {
+    rerunTimer = null;
+    lastRerun = performance.now();
+    const latest = getRoot();
+    if (!query || !latest) return;
+    // The tab now shows the code editor or a no-text preview: don't search it.
+    if (pageTextFindMode(latest) !== 'text') {
+      syncFindMode(panelId);
+      return;
+    }
+    const previous = current;
+    matches = findInPrepared(pageText(latest).prepared, query);
+    current = matches.length ? Math.min(Math.max(previous, 1), matches.length) : 0;
+    paint(false);
+    reportFindResult(panelId, result());
+  };
+
+  // Previews re-render (a file reloads, a notebook output arrives) and chats stream: search again.
   const observe = (root: HTMLElement) => {
     if (observer) return;
     observer = new MutationObserver((records) => {
       if (records.every(record => record.target instanceof Element && record.target.closest('[data-find-bar]'))) return;
       text = null;
-      if (rerunTimer) clearTimeout(rerunTimer);
-      rerunTimer = setTimeout(() => {
-        rerunTimer = null;
-        const latest = getRoot();
-        if (!query || !latest) return;
-        // The tab now shows the code editor or a no-text preview: don't search it.
-        if (pageTextFindMode(latest) !== 'text') {
-          syncFindMode(panelId);
-          return;
-        }
-        const previous = current;
-        matches = findInPrepared(pageText(latest).prepared, query);
-        current = matches.length ? Math.min(Math.max(previous, 1), matches.length) : 0;
-        paint(false);
-        reportFindResult(panelId, result());
-      }, RERUN_DELAY_MS);
+      // A search is already due: it reads the content as it is then.
+      if (rerunTimer) return;
+      rerunTimer = setTimeout(rerun, Math.max(RERUN_FIRST_MS, lastRerun + RERUN_INTERVAL_MS - performance.now()));
     });
     observer.observe(root, { childList: true, subtree: true, characterData: true });
   };
