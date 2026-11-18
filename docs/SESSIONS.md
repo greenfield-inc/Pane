@@ -531,12 +531,13 @@ summary says which files wait where.
 If anything fails before the other machine starts the tabs, it removes
 everything it set up, this machine restarts the tabs, and the dialog says what
 happened and what to fix. The other machine writes down how to undo each step
-before it takes it, so that clean-up also happens if Pane there quit partway
+as it takes it, so that clean-up also happens if Pane there quit partway
 through: when it starts again, it removes the Panes, worktrees, tabs,
 conversations and arriving Session it made, and puts back what it had replaced.
-A clean-up step that keeps failing (a permissions or disk problem) is retried,
-and after five tries Pane there shows one notice naming what was left and how
-to fix it. After the freeze, the other machine records
+Clean-up undoes the newest step first and stops at a step that fails, so an
+older step never puts something back that the failed one still has to remove.
+That step is retried (a permissions or disk problem), and after five tries Pane
+there shows one notice naming what was left and how to fix it. After the freeze, the other machine records
 its one decision on disk before acting on it: that the move started there, or
 that it was rolled back and can never start. This machine keeps the Session
 paused as "Moving to <machine>" and keeps asking until it hears that decision,

@@ -624,6 +624,29 @@ describe('MoveImporter full roll-back after a restart (D-1)', () => {
     expect(machine.tabs.panels.has('t-second')).toBe(false);
   });
 
+  it('an undo that failed runs again before any older step, so it never deletes the archived tab it would restore (F-16)', async () => {
+    const machine = targetMachine(target);
+    await earlierCopy(machine);
+    // The arriving tab has the same ID as the archived Pane's tab.
+    const pane = member('p1');
+    pane.tabs = [{ id: 't-old', type: 'terminal', title: 'Incoming tab', metadata: { createdAt: '', lastActiveAt: '', position: 0 }, state: { from: 'incoming' }, working: false, interrupted: false, running: false }];
+    const { moveId, importer } = await builtOn(machine, [ownerWithAgent(), pane], { 'panes/p1.bundle': bundle });
+    // Deleting the arriving tab fails once.
+    const remove = machine.tabs.deletePanel;
+    let fail = true;
+    machine.tabs.deletePanel = async id => {
+      if (id === 't-old' && fail) { fail = false; throw new Error('one transient tab deletion failure'); }
+      await remove(id);
+    };
+    await importer.abort(moveId);
+    // The replay stopped at the failed deletion: the archived tab still waits, set aside, behind it.
+    expect(machine.tabs.panels.get(`t-old.p1.moving-${moveId}`)?.state.customState).toEqual({ conversationId: 'c-1' });
+    await machine.restart().resume();
+    expect(machine.tabs.panels.get('t-old')?.state.customState).toEqual({ conversationId: 'c-1' });
+    expect(machine.rows.get('p1')?.archived).toBe(true);
+    expect(JSON.parse(fs.readFileSync(ledgerFile(moveId), 'utf8')).rollbackDone).toBe(true);
+  });
+
   it('a step that keeps failing is retried at each start and, after five tries, shown once to the person', async () => {
     const machine = targetMachine(target);
     await earlierCopy(machine);
@@ -635,9 +658,9 @@ describe('MoveImporter full roll-back after a restart (D-1)', () => {
     expect(machine.notices).toHaveLength(1);
     expect(machine.notices[0].title).toMatch(/Pane p1/);
     expect(machine.notices[0].context).toMatch(/EACCES/);
-    // Everything else was undone; the archived Pane of the same ID waits, set aside, so a later retry never deletes it.
-    expect(fs.existsSync(path.join(root, 'worktrees', 'p1'))).toBe(false);
+    // Newer steps were undone; older ones wait behind the failed one, so the archived Pane of the same ID stays set aside and safe.
     expect(machine.tabs.panels.has('t-agent')).toBe(false);
+    expect(machine.sessions).toEqual([]);
     expect(machine.rows.get(`p1.moving-${moveId}`)?.archived).toBe(true);
     expect(machine.tabs.panels.get(`t-old.p1.moving-${moveId}`)).toBeDefined();
   });

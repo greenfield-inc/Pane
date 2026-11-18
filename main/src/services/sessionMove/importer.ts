@@ -208,23 +208,6 @@ async function readTextFile(file: string, relative: string): Promise<string | nu
   }
 }
 
-/** Steps on the same thing: a failed one holds back the later ones until it succeeds. */
-function undoKey(step: UndoStep): string | undefined {
-  switch (step.kind) {
-    case 'removePane':
-    case 'restoreAside': return `pane:${step.kind === 'removePane' ? step.paneId : step.id}`;
-    case 'deletePanel':
-    case 'putBackPanel': return `panel:${step.panelId}`;
-    case 'restoreRef': return `ref:${step.repo}:${step.ref}`;
-    case 'restoreBranch': return `ref:${step.repo}:refs/heads/${step.branch}`;
-    case 'removeWorktree': return `path:${step.path}`;
-    case 'restoreFolder': return `path:${step.target}`;
-    case 'removeArriving': return `session:${step.sessionId}`;
-    case 'deleteRefs':
-    case 'undoConversation': return undefined;
-  }
-}
-
 const ABORTED = (): PaneError => new PaneError('ERR_MOVE_ABORTED', 'The move was cancelled while this machine set it up.', 'Nothing was kept here. Start the move again.');
 
 function tabCommand(tab: MoveTab): string | undefined {
@@ -832,9 +815,9 @@ export class MoveImporter {
   /**
    * Undoes everything the move made here, from its journal alone, newest step first, so it works
    * the same during the build and after a restart. Each step that succeeds is marked, so a
-   * roll-back cut short resumes where it stopped. A step that fails holds back the later steps on
-   * the same Pane, tab, ref or folder (restoring an archived Pane before its arriving copy is
-   * removed would let a retry delete it); the rest go on, and the failed ones are tried again.
+   * roll-back cut short resumes where it stopped. A step that fails stops the replay, and the next
+   * try starts with it, before any older step: an older step may restore what it still has to
+   * remove (an archived Pane's tab with the same ID as an arriving one), so it must never run first.
    */
   private rollBack(moveId: string): Promise<void> {
     const running = this.rollingBack.get(moveId);
@@ -847,45 +830,36 @@ export class MoveImporter {
   private async runRollBack(moveId: string): Promise<void> {
     const entry = this.ledger.get(moveId);
     if (!entry || entry.decision !== 'rolledBack' || entry.rollbackDone) return;
-    const blocked = new Set<string>();
-    const failed: JournalRecord[] = [];
     for (let index = entry.journal.length - 1; index >= 0; index -= 1) {
       const record = entry.journal[index];
       if (record.undone) continue;
-      const key = undoKey(record.step);
-      if (key && blocked.has(key)) {
-        failed.push(record);
-        continue;
-      }
       try {
         await this.undo(moveId, record.step);
         this.ledger.undoResult(moveId, index);
       } catch (error) {
+        // Stop here (F-16): an older step may restore what this one still has to remove, and a
+        // retry of this one after that would delete the restored copy. The next try starts here.
         console.error(`[SessionMove] Undoing ${record.label} for move ${moveId} failed:`, error);
-        failed.push(this.ledger.undoResult(moveId, index, reasonOf(error)));
-        if (key) blocked.add(key);
+        const failed = this.ledger.undoResult(moveId, index, reasonOf(error));
+        const tries = failed.failures ?? 1;
+        if (tries >= NOTICE_AFTER_FAILURES && !this.ledger.get(moveId)?.noticed) this.tellLeftovers(moveId, entry.journal.slice(0, index + 1).filter(item => !item.undone), failed);
+        setTimeout(() => void this.rollBack(moveId).catch(retry => console.error(`[SessionMove] Roll-back of ${moveId} failed:`, retry)), Math.min(UNDO_RETRY_MS * 2 ** Math.max(0, tries - 1), 60 * 60_000)).unref();
+        return;
       }
     }
     await this.receiver.remove(moveId).catch(() => undefined);
-    if (failed.length === 0) {
-      this.ledger.mark(moveId, 'rollbackDone');
-      return;
-    }
-    const tries = Math.max(...failed.map(record => record.failures ?? 0));
-    if (tries >= NOTICE_AFTER_FAILURES && !this.ledger.get(moveId)?.noticed) this.tellLeftovers(moveId, failed);
-    setTimeout(() => void this.rollBack(moveId), Math.min(UNDO_RETRY_MS * 2 ** Math.max(0, tries - 1), 60 * 60_000)).unref();
+    this.ledger.mark(moveId, 'rollbackDone');
   }
 
   /** The only manual path (D-1): steps that kept failing, named once, with what to do. */
-  private tellLeftovers(moveId: string, failed: JournalRecord[]): void {
+  private tellLeftovers(moveId: string, left: JournalRecord[], failed: JournalRecord): void {
     this.ledger.mark(moveId, 'noticed');
-    const first = failed[0];
-    const more = failed.length > 1 ? ` and ${failed.length - 1} more` : '';
-    const reason = failed.find(record => record.lastError)?.lastError ?? 'it kept failing';
+    const more = left.length > 1 ? ` and ${left.length - 1} more` : '';
+    const reason = failed.lastError ?? 'it kept failing';
     void this.services.notifyService?.queue.ask({
       question: {
         ui: 'info',
-        title: `A cancelled move left ${first.label}${more} on this machine`,
+        title: `A cancelled move left ${failed.label}${more} on this machine`,
         context: `Pane tried ${NOTICE_AFTER_FAILURES} times to undo it and couldn't: ${reason}. Fix that (permissions or free disk space), then restart Pane to finish the clean-up; or remove it yourself. The Session itself is safe on the other machine.`,
       },
       source: { name: 'Pane', agent: 'Pane' },
