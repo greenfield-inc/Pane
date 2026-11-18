@@ -101,8 +101,8 @@ export function waitingLine(progress: SessionMoveProgress): string {
 }
 
 export function confirmingLine(target: string): string {
-  return `${target} hasn’t confirmed it started the Session. It stays paused here until ${target} confirms, so two copies never run. `
-    + `Check that Pane is open on ${target}, then check again.`;
+  return `${target} hasn’t confirmed it started the Session. Pane keeps asking ${target} on its own: it finishes the move once ${target} confirms, `
+    + `or runs the Session here again once ${target} confirms it rolled the move back. Until then it stays paused here, so two copies never run.`;
 }
 
 interface MoveSummaryLine {
