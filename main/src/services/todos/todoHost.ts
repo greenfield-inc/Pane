@@ -64,6 +64,8 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
       const atLaunch = terminalPanelManager.launchShellIsPosix();
       const view = await manager.create({
         name: input.name, isPinned: false, launchCommand: '', customResume: null,
+        // The record says it is the to-do's from its first write, so no Sessions list ever shows it (T-7).
+        todoNumber: input.todoNumber,
         agent: isConfiguredAgent(input.agent) ? input.agent : undefined,
         openingPrompt: atLaunch ? `${PANE_ONE_TIME_PROMPT_OPENING}, to start a to-do. ${input.openingPrompt}` : undefined,
       });

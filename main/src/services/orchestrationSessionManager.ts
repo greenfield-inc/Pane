@@ -247,6 +247,28 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
+  /**
+   * To-dos (T-7): a to-do's Session made before Sessions carried `todoNumber` gets it here, at startup,
+   * so every Session list hides it from its first read instead of waiting for the to-dos snapshot.
+   */
+  async markTodoSessions(links: ReadonlyArray<{ sessionId: string; todoNumber: number }>): Promise<void> {
+    await withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const numbers = new Map(links.map(link => [link.sessionId, link.todoNumber]));
+      const marked: string[] = [];
+      const sessions = data.sessions.map(session => {
+        const todoNumber = numbers.get(session.id);
+        if (todoNumber === undefined || session.todoNumber !== undefined) return session;
+        marked.push(session.id);
+        return { ...session, todoNumber };
+      });
+      if (!marked.length) return;
+      this.store.write({ ...data, sessions });
+      for (const sessionId of marked) this.emit('changed', { sessionId, kind: 'updated' });
+    });
+  }
+
   /** The target removes a Session it was building when the move fails, or the old archived copy it replaced is put back. */
   async removeArriving(sessionId: string, restore?: OrchestrationSessionRecord): Promise<void> {
     await withLock('orchestration-sessions', async () => {
@@ -375,6 +397,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         promotedFrom: sourcePanel && sourcePane ? { paneId: sourcePane.id, panelId: sourcePanel.id } : undefined,
         archived: false,
         isPinned: input.isPinned ?? false,
+        todoNumber: input.todoNumber,
         agent,
         launchCommand,
         customResume,
@@ -1706,6 +1729,9 @@ function openCodeSessionLaunchError(cause: unknown): PaneError {
 function validateCreateInput(input: OrchestrationSessionCreateInput): void {
   if (!input.name || input.name.trim().length === 0) throw new Error('Session name is required');
   if (input.customResume) validateCustomCommandResume(input.customResume);
+  if (input.todoNumber !== undefined && !(Number.isInteger(input.todoNumber) && input.todoNumber > 0)) {
+    throw new PaneError('ERR_SESSION_TODO_NUMBER', `A Session's to-do number must be a positive whole number, not ${input.todoNumber}; the Session was not created.`, 'Pass the to-do\'s number (12 for T-12), or leave it out.');
+  }
   if (input.resume !== undefined) {
     if (!/^[A-Za-z0-9._:-]{1,200}$/.test(input.resume)) throw new Error('Session resume must be a native session id');
     if (input.customResume) throw new Error('A Session resumes either a native session id or a custom resume command, not both');

@@ -5,13 +5,14 @@ import { paneHasWaitingQuestion, useNotifyStore } from '../stores/notifyStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useTodoSessionIds } from '../stores/todosStore';
 import type { Session } from '../types/session';
+import { isTodoSession } from '../components/orchestrationSessionVisibility';
 
 /** The Panes of this machine's to-dos' own Sessions, which live under To-dos (D-409). */
 function useTodoSessionPaneIds(): ReadonlySet<string> {
   const todoSessionIds = useTodoSessionIds();
   const sessions = useOrchestrationSessionStore(s => s.sessions);
   return useMemo(() => new Set(sessions
-    .filter(session => todoSessionIds.has(session.id))
+    .filter(session => isTodoSession(session, todoSessionIds))
     .flatMap(session => session.associations.map(association => association.paneId))), [sessions, todoSessionIds]);
 }
 

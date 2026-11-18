@@ -51,6 +51,8 @@ import {
 } from '../stores/orchestrationSessionStore';
 import type { SidebarNavigationScope } from '../stores/navigationStore';
 import { restoreArchivedPanes } from './orchestrationSessionActions';
+import { useTodoSessionIds } from '../stores/todosStore';
+import { isTodoSession } from './orchestrationSessionVisibility';
 import {
   createProjectById,
   flattenSessionsByProjects,
@@ -1289,15 +1291,17 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
   const orchestrationSessions = useOrchestrationSessionStore(s => s.sessions);
+  const todoSessionIds = useTodoSessionIds();
   const orchestrationAvailability = useOrchestrationSessionStore(s => s.availability);
   const refreshOrchestrationSessions = useOrchestrationSessionStore(s => s.refresh);
   const updateOrchestrationSession = useOrchestrationSessionStore(s => s.update);
   const archivedOrchestrationSessions = useMemo(
     () => orchestrationSessions
-      .filter(session => isArchivedOrchestrationSession(session))
+      // A to-do's own Session archives with its to-do and stays under To-dos (D-409, T-7).
+      .filter(session => isArchivedOrchestrationSession(session) && !isTodoSession(session, todoSessionIds))
       .slice()
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [orchestrationSessions],
+    [orchestrationSessions, todoSessionIds],
   );
   const archivedPaneCount = useMemo(
     () => archivedProjects.reduce((sum, project) => sum + project.sessions.length, 0),

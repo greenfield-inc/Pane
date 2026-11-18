@@ -20,7 +20,10 @@ export class FakeHost implements TodoHost {
   private nextSession = 1;
 
   machineName() { return 'This Mac'; }
-  async createSession(input: { name: string; openingPrompt: string }) {
+  /** Every to-do number a created Session was marked with, in order. */
+  createdFor: number[] = [];
+  async createSession(input: { name: string; openingPrompt: string; todoNumber: number }) {
+    this.createdFor.push(input.todoNumber);
     const id = `s${this.nextSession++}`;
     const panelId = `${id}-orch`;
     this.sessions.set(id, { id, name: input.name, orchestratorPanelId: panelId, archived: false, paneIds: [] });

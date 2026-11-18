@@ -64,7 +64,7 @@ export interface TodoCard {
 export interface TodoHost {
   machineName(): string;
   /** Creates the to-do's own hidden Session; `prompted` says the opening prompt rode on its launch (else Pane types it once ready). */
-  createSession(input: { name: string; projectId: number | null; agent: string | null; openingPrompt: string }): Promise<CreatedTodoSession>;
+  createSession(input: { name: string; projectId: number | null; agent: string | null; openingPrompt: string; todoNumber: number }): Promise<CreatedTodoSession>;
   session(sessionId: string): TodoSessionInfo | null;
   panel(panelId: string): TodoPanelInfo | null;
   projectName(projectId: number): string | null;
@@ -252,6 +252,11 @@ export class TodoService extends EventEmitter {
       cpuPercent: latest?.cpuPercent ?? undefined,
       memoryPressure: latest?.memory,
     };
+  }
+
+  /** Each top-level to-do's own Session (T-7: startup marks those Sessions). */
+  sessionLinks(): Array<{ sessionId: string; todoNumber: number }> {
+    return this.store.sessionLinks();
   }
 
   snapshot(options: { closedSince?: number } = {}): TodosSnapshot {
@@ -457,7 +462,7 @@ export class TodoService extends EventEmitter {
       const subs = this.store.children(number);
       const openingPrompt = orchestratorStartText({ ...todo, state: 'in_progress' }, this.attachmentGroups(todo), subs, todo.projectId !== null ? this.host.projectName(todo.projectId) : null);
       const { sessionId, orchestratorPanelId, prompted } = await this.host.createSession({
-        name: `${todo.ref} · ${todo.title}`.slice(0, 120), projectId: todo.projectId, agent: todo.agent, openingPrompt,
+        name: `${todo.ref} · ${todo.title}`.slice(0, 120), projectId: todo.projectId, agent: todo.agent, openingPrompt, todoNumber: number,
       });
       if (!prompted && orchestratorPanelId) this.enqueue({ panelId: orchestratorPanelId, text: openingPrompt, todoNumber: number, resumeIfDown: false });
       this.store.transaction(() => {

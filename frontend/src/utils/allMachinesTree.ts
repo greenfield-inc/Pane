@@ -169,7 +169,7 @@ export function buildAllMachinesTree(views: readonly MachineView[], arrangement:
     const permissions = [...snapshot.permissions].sort((a, b) => a.timestamp - b.timestamp);
     const paneById = new Map<string, AllMachinesPane>();
     const hiddenPanes = new Set(snapshot.sessions
-      .filter(session => hiddenSessions.has(`${machine.id}:${session.id}`))
+      .filter(session => session.todoNumber != null || hiddenSessions.has(`${machine.id}:${session.id}`))
       .flatMap(session => session.associations.map(association => association.paneId)));
 
     for (const project of snapshot.projects) {
@@ -203,7 +203,8 @@ export function buildAllMachinesTree(views: readonly MachineView[], arrangement:
 
     const activity = new Map(snapshot.activity.map(item => [item.sessionId, item]));
     for (const session of snapshot.sessions) {
-      if (session.archived || hiddenSessions.has(`${machine.id}:${session.id}`)) continue;
+      // A to-do's own Session (its record says so, or its machine's to-dos list it) lives under To-dos (D-409, T-7).
+      if (session.archived || session.todoNumber != null || hiddenSessions.has(`${machine.id}:${session.id}`)) continue;
       const live = offline ? undefined : activity.get(session.id);
       sessions.push({
         key: `${machine.id}:${session.id}`,

@@ -292,6 +292,12 @@ export class TodoStore {
   }
 
   /** Session ids that belong to a top-level to-do: kept out of the sidebar. */
+  /** Each top-level to-do's own Session, by to-do number (T-7: startup marks the Sessions). */
+  sessionLinks(): Array<{ sessionId: string; todoNumber: number }> {
+    return decodeBoundary(this.db.prepare('SELECT number, session_id FROM todos WHERE parent_id IS NULL AND session_id IS NOT NULL').all(), boundary.array(boundary.object({ number: boundary.number, session_id: boundary.string })))
+      .map(row => ({ sessionId: row.session_id, todoNumber: row.number }));
+  }
+
   ownSessionIds(): string[] {
     return decodeBoundary(this.db.prepare('SELECT DISTINCT session_id FROM todos WHERE parent_id IS NULL AND session_id IS NOT NULL').all(), boundary.array(boundary.object({ session_id: boundary.string }))).map(row => row.session_id);
   }

@@ -35,6 +35,8 @@ describe('TodoService', () => {
       expect(opening).toContain('requested by Billing rewrite orchestrator');
       expect(opening).toContain('plan: invoice.html — /plans/invoice.html (on This Mac)');
       expect(service.ownSessionIds()).toEqual(['s1']);
+      // The Session record says it is T-1's from its first write, before the to-do stores its id (T-7).
+      expect(host.createdFor).toEqual([todo.number]);
     });
 
     it('with Start now off, saves it as To do with no Session until Start', async () => {

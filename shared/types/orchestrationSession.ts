@@ -116,6 +116,11 @@ export interface OrchestrationSessionRecord {
   archivedAt?: string;
   /** Durable UI pin marker. Older records omit this field and read as unpinned. */
   isPinned?: boolean;
+  /**
+   * The to-do this Session belongs to (T-n), written with the record's first write so no list shows
+   * it as a Session of its own, even before the to-do stores the Session's id. Older records omit it.
+   */
+  todoNumber?: number;
   /** Set while the Session's chat and every Pane in it are paused. Computed when read, never stored. */
   paused?: TerminalPausedMark;
   agent: PaneChatAgent;
@@ -257,6 +262,8 @@ export interface OrchestrationSessionCreateInput {
   /** The person left the name blank; the Session agent names the Session once it understands the work. */
   nameFromFirstMessage?: boolean;
   isPinned?: boolean;
+  /** The to-do (T-n) this Session is created for; see `OrchestrationSessionRecord.todoNumber`. */
+  todoNumber?: number;
   agent?: PaneChatAgent;
   launchCommand?: string;
   customResume?: CustomCommandResume | null;

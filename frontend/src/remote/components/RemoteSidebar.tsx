@@ -16,6 +16,8 @@ import { useRemoteSidebarSectionsStore, type RemoteSidebarSection } from '../sto
 import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from '../../components/ui/Skeleton';
 import { useRemoteExpandedSessionsStore } from '../stores/remoteExpandedSessionsStore';
 import { RemoteTodosEntry } from './RemoteTodos';
+import { useTodoSessionIds } from '../../stores/todosStore';
+import { isTodoSession } from '../../components/orchestrationSessionVisibility';
 
 /** Sidebar actions. Panes are the PWA's "sessions"; Sessions are orchestration Sessions. */
 export interface RemoteSidebarActions {
@@ -92,11 +94,14 @@ export function RemoteSidebar({
     () => getPinnedSessions([...paneById.values()], createProjectById(projects)),
     [paneById, projects],
   );
-  const activeSessions = useMemo(() => sessions.filter(session => session.archived !== true), [sessions]);
+  // A to-do's own Session lives under To-dos (D-409): no list here shows it (T-7).
+  const todoSessionIds = useTodoSessionIds();
+  const listedSessions = useMemo(() => sessions.filter(session => !isTodoSession(session, todoSessionIds)), [sessions, todoSessionIds]);
+  const activeSessions = useMemo(() => listedSessions.filter(session => session.archived !== true), [listedSessions]);
   const pinnedSessions = useMemo(() => activeSessions.filter(session => session.isPinned === true), [activeSessions]);
   const archivedSessions = useMemo(
-    () => sessions.filter(session => session.archived === true).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [sessions],
+    () => listedSessions.filter(session => session.archived === true).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [listedSessions],
   );
 
   // Each host has its own opened Sessions on this device.

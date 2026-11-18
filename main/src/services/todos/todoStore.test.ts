@@ -44,6 +44,7 @@ describe('TodoStore', () => {
     expect(store.children(parent.number).map(todo => todo.number)).toEqual([child.number]);
     expect(store.ownerOfSession('s1')?.number).toBe(parent.number);
     expect(store.ownSessionIds()).toEqual(['s1']);
+    expect(store.sessionLinks()).toEqual([{ sessionId: 's1', todoNumber: parent.number }]);
   });
 
   it('detaches an attachment without losing its record', () => {

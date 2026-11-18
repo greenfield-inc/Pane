@@ -214,6 +214,16 @@ describe('buildAllMachinesTree', () => {
       ['build-box-profile:s1', 'Backup rotation', ['nightly-backup']],
     ]);
   });
+
+  it('leaves out a to-do\'s Session and its Panes from its record alone, before that machine\'s to-dos arrive (T-7)', () => {
+    const tree = buildAllMachinesTree([
+      view(build, snapshot([project(1, 'infra', [pane('p1', 'nightly-backup'), pane('p2', 'invoice-pdfs')])], {
+        sessions: [record('s1', 'Backup rotation', ['p1']), record('s2', 'T-26 · Invoice PDFs', ['p2'], { todoNumber: 26 })],
+      })),
+    ]);
+    expect(tree.sessions.map(row => row.key)).toEqual(['build-box-profile:s1']);
+    expect(tree.panes.map(row => row.pane.name)).toEqual(['nightly-backup']);
+  });
 });
 
 describe('savedOrderAfterMove', () => {
