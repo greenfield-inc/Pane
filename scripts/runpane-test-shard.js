@@ -1,6 +1,7 @@
 // Splits a runpane wrapper suite across CI jobs. With RUNPANE_TEST_SHARD=<index>/<count>
-// a suite runs only its index-th part: item k (0-based, in registration order) belongs
-// to shard (k % count) + 1, so shards 1..count together run every item exactly once.
+// a suite runs only its index-th part. Items are dealt out in registration order,
+// back and forth (1..count, then count..1, and so on), so shards 1..count together run
+// every item exactly once, and a list ordered slowest first spreads evenly.
 // Unset, everything runs.
 const nodeTest = require('node:test');
 
@@ -19,7 +20,10 @@ const shard = parseShard(process.env.RUNPANE_TEST_SHARD);
 
 /** Whether the item at this 0-based position runs in this shard. */
 function inShard(position) {
-  return !shard || position % shard.count === shard.index - 1;
+  if (!shard) return true;
+  const round = Math.floor(position / shard.count);
+  const offset = position % shard.count;
+  return (round % 2 === 0 ? offset : shard.count - 1 - offset) === shard.index - 1;
 }
 
 let registered = 0;

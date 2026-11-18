@@ -7282,8 +7282,8 @@ function runPythonParityTests() {
 }
 
 // Each runs in one RUNPANE_TEST_SHARD part (scripts/runpane-test-shard.js),
-// dealt out in turn, so the list runs slowest first (Windows CI times) to give
-// each part a fair share of the slow checks. The two prerequisites above the
+// dealt out back and forth, so the list runs slowest first (Windows CI times)
+// to give each part a fair share of the slow checks. The two prerequisites above the
 // list run in every part.
 const checks = [
   checkWatchStreamParity,
