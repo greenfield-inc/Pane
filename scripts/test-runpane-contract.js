@@ -5529,13 +5529,26 @@ sys.stdout.buffer.write(json.dumps({"calls": calls, "codes": codes, "errors": er
   if (originalPanel === undefined) delete process.env.PANE_PANEL_ID;
   else process.env.PANE_PANEL_ID = originalPanel;
 
+  // Python with no tz database (3.8, or Windows without tzdata) reads and prints snooze times in the
+  // machine's local time instead of $TZ. Then only what doesn't depend on the zone is compared.
+  const pythonZones = runPythonSnippet('from runpane import todo_times\nprint(todo_times._zone_info("America/Los_Angeles") is not None)') === 'True';
+  const clockFree = (text) => (pythonZones || text === null ? text : text.replace(/[^\n]*\d:\d\d [AP]M[^\n]*/g, '<time>'));
+  if (!pythonZones) {
+    console.log('runpane todos parity: Python has no tz database here; snooze times are compared without their zone');
+    for (const call of python.calls.filter((entry) => entry.channel === 'runpane:todos:snooze')) {
+      assert.ok(['localtime', 'America/Los_Angeles'].includes(call.args[0].zone), call.args[0].zone);
+      assert.strictEqual(typeof call.args[0].until, 'number');
+      call.args[0].zone = 'America/Los_Angeles';
+      call.args[0].until = snoozeAt;
+    }
+  }
   assert.deepStrictEqual(python.calls, calls);
   assert.deepStrictEqual(python.codes, codes);
-  assert.deepStrictEqual(python.errors, errors);
+  assert.deepStrictEqual(python.errors.map(clockFree), errors.map(clockFree));
   assert.deepStrictEqual(python.parseErrors, nodeParseErrors);
   assert.ok(nodeParseErrors.every((message) => message !== null), nodeParseErrors.join('\n'));
   // Both wrappers print the same bytes, --json included.
-  assert.strictEqual(python.stdout, lines.map((line) => `${line}\n`).join(''));
+  assert.strictEqual(clockFree(python.stdout), clockFree(lines.map((line) => `${line}\n`).join('')));
   assert.strictEqual(JSON.parse(lines[0]).todo.doneWhen[0].text, 'Sheet opens with ?');
   assert.deepStrictEqual(Object.keys(JSON.parse(lines[0]).todo), ['ref', 'number', 'title', 'state', 'status', 'reason', 'parent', 'sessionId', 'requester', 'assignee', 'summary', 'doneWhen', 'attachmentCount', 'updatedAt']);
 

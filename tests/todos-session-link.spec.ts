@@ -158,9 +158,10 @@ test('back from the Session, the to-do shows the tab and scroll you left it on',
   await expect(tabs(page).nth(1)).toHaveAttribute('aria-selected', 'true');
   const scroll = page.getByTestId('todo-page-scroll');
   // The thread fills in after the page opens: scroll once there is room to.
-  await expect.poll(() => scroll.evaluate((node) => node.scrollHeight - node.clientHeight)).toBeGreaterThan(60);
-  const top = await scroll.evaluate((node) => { node.scrollTop = 60; return node.scrollTop; });
-  expect(top).toBe(60);
+  await expect.poll(() => scroll.evaluate((node) => node.scrollHeight - node.clientHeight)).toBeGreaterThan(20);
+  // Halfway down: fonts differ between machines, so the room to scroll does too.
+  const top = await scroll.evaluate((node) => { node.scrollTop = Math.floor((node.scrollHeight - node.clientHeight) / 2); return node.scrollTop; });
+  expect(top).toBeGreaterThan(9);
   await page.getByTestId('todo-chip-agents').click();
   await expect(page.locator('[data-session-content-id="s-12"]')).toBeVisible();
   await crumb(page).click();
