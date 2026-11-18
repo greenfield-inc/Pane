@@ -653,9 +653,13 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             // Dismiss answers nothing: the item stays in the list (and leaves the floating strip).
             closeLabel="Dismiss"
             onClose={() => {
-              if (selected.state === 'waiting') runNotify({ type: 'dismiss', id: selected.id });
+              // The column goes, its row stays: a focus inside the column moves to that row.
+              const hadFocus = Boolean(document.activeElement?.closest('[data-testid="approvals-beside"]'));
+              const id = selected.id;
+              if (selected.state === 'waiting') runNotify({ type: 'dismiss', id });
               setDismissed(true);
               selectApproval(null);
+              if (hadFocus) whenShown(() => listRef.current?.querySelector<HTMLElement>(`[data-testid="approvals-row"][data-item-id="${CSS.escape(id)}"]`) ?? null, (row) => row.focus());
             }}
             inChat={undefined}
             renderOrigin={() => origin}

@@ -585,8 +585,9 @@ function QuestionCard({
         else answerChoice(index);
         return true;
       }
-      if (key === 'Enter' && expanded && selected >= 0) {
-        answerChoice(selected, note);
+      // Enter is Send: the pick with its note, or the note alone as a reply.
+      if (key === 'Enter' && expanded && canSendChoice) {
+        sendChoiceOrNote();
         return true;
       }
       return false;
@@ -849,7 +850,9 @@ function QuestionCard({
   return (
     <div
       ref={rootRef}
-      className={cardShell(form, narrow, className)}
+      // Focus lands on the card itself when Dismiss removes the one before it (not on a choice, so Enter can't answer).
+      tabIndex={-1}
+      className={cardShell(form, narrow, cn('outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle', className))}
       data-testid="notify-card" data-pane-part="notify-card"
       data-notify-ui={item.ui}
       // The floating strip takes the keyboard only when clicked, so typing elsewhere never answers it.

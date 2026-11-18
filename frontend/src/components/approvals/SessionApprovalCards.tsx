@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, CircleAlert, Loader2, Navigation, Sparkles, X } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { approvalStatus, approvalQn, type ApprovalStatus } from '../../../../shared/approvalStatus';
@@ -11,6 +11,8 @@ import { useNow } from '../notify/useNow';
 import { dockApprovals, dockKey, latestReplied, questionsOf, referenceCount, statusKey } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
 import { ApprovalKeyTip } from './ApprovalColumn';
+import { whenShown } from './approvalKeys';
+import { focusChatSoon } from '../../services/regionFocus';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 
@@ -39,10 +41,11 @@ export function SessionApprovalCards({ sessionId, chatPanelId }: { sessionId: st
     // The column's pager follows when it's open.
     if (openId) openSessionApproval(sessionId, next.id);
   };
+  const cardsRef = useRef<HTMLDivElement>(null);
   const status = <ReplyStatusLine sessionId={sessionId} />;
   if (!item) return <div className="mx-auto w-full max-w-[var(--thread-max-width)] px-6 empty:hidden">{status}</div>;
   return (
-    <div className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col gap-2 px-6 pb-2" data-testid="session-approval-cards">
+    <div ref={cardsRef} className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col gap-2 px-6 pb-2" data-testid="session-approval-cards">
       {status}
       <CompactCard item={item} index={index} total={pager.length} open={item.id === openId} onStep={step}
         onOpen={(tab) => useApprovalColumnStore.getState().openApproval(`session:${sessionId}`, item.id, tab)}
@@ -50,9 +53,18 @@ export function SessionApprovalCards({ sessionId, chatPanelId }: { sessionId: st
           // Same as Dismiss elsewhere: no answer, it leaves the strip and keeps waiting in Approvals.
           // This chat leaves it out until it changes (a new version, reply or ready-again).
           const columns = useApprovalColumnStore.getState();
+          const hadFocus = cardsRef.current?.contains(document.activeElement) ?? false;
+          // The next card takes its place (the one before, when it was last), and the focus with it.
+          // After the first card the next one leads anyway, as does a changed item that comes back.
+          const next = pager[index + 1] ?? pager[index - 1];
+          if (index > 0 && next) setShownId(next.id);
           if (item.state === 'waiting') runNotify({ type: 'dismiss', id: item.id });
           columns.dismissDocked(chat, item.id, dockKey(item));
           if (item.id === openId) columns.close(`session:${sessionId}`);
+          if (!hadFocus) return;
+          // None left: the chat's message box.
+          if (!next) { focusChatSoon(chatPanelId); return; }
+          whenShown(() => cardsRef.current?.querySelector<HTMLElement>(`[data-testid="session-approval-card"][data-item-id="${CSS.escape(next.id)}"]`) ?? null, (card) => card.focus());
         }} />
     </div>
   );
@@ -71,7 +83,8 @@ function CompactCard({ item, index, total, open, onStep, onOpen, onDismiss }: {
   return (
     // The card open on the right gets a darker neutral outline and an "Open" label; blue stays for
     // whichever side has keyboard focus (D-336, D-343).
-    <div className={cn('rounded-2xl bg-surface-primary px-4 pb-2.5 pt-3 shadow-card ring-1', open ? 'ring-text-tertiary' : item.source.autopilot ? 'ring-autopilot-border' : 'ring-border-secondary')}
+    // Focusable itself, for the focus Dismiss hands on from the card before it.
+    <div tabIndex={-1} className={cn('rounded-2xl bg-surface-primary px-4 pb-2.5 pt-3 shadow-card outline-none ring-1 focus-visible:ring-2 focus-visible:ring-focus-ring-subtle', open ? 'ring-text-tertiary' : item.source.autopilot ? 'ring-autopilot-border' : 'ring-border-secondary')}
       data-testid="session-approval-card" data-item-id={item.id} data-open={open || undefined}>
       <div className="flex items-center gap-1.5 text-[12.5px] text-text-tertiary">
         {/* Fixed box: the icon swaps, never its size. */}

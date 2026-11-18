@@ -115,3 +115,32 @@ test('Q-389: Dismiss on the chat\'s card closes it without answering; it stays i
   await expect(page.getByTestId('session-approval-card-pager')).toHaveText('1 of 2');
   await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
 });
+
+test("T-11: Dismiss with the keyboard moves focus to the chat's next card, the one before when it was last, then the message box", async ({ page }) => {
+  await openChat(page, [q42, q44, q45]);
+  const card = page.getByTestId('session-approval-card');
+  const pager = page.getByTestId('session-approval-card-pager');
+  await page.getByTestId('session-approval-card-next').click();
+  await expect(pager).toHaveText('2 of 3');
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q44.title);
+
+  // The middle card: the next one takes its place, and the focus.
+  await page.getByTestId('session-approval-card-dismiss').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q42.title);
+  await expect(pager).toHaveText('2 of 2');
+  await expect(card).toBeFocused();
+
+  // The last card: the one before it.
+  await page.getByTestId('session-approval-card-dismiss').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('session-approval-card-title')).toHaveText(q45.title);
+  await expect(card).toBeFocused();
+
+  // None left: the chat's message box.
+  await page.getByTestId('session-approval-card-dismiss').focus();
+  await page.keyboard.press('Enter');
+  await expect(card).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Message Claude' })).toBeFocused();
+  await expect.poll(() => notifyCommands(page)).toEqual([{ type: 'dismiss', id: 'q44' }, { type: 'dismiss', id: 'q42' }, { type: 'dismiss', id: 'q45' }]);
+});

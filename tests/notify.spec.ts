@@ -163,6 +163,17 @@ test.describe('Approvals in the main window', () => {
     await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
   });
 
+  test("Dismiss with the keyboard returns focus to the approval's row in the list", async ({ page }) => {
+    await boot(page);
+    await page.getByTestId('approvals-nav').click();
+    const column = page.getByTestId('approval-column');
+    await expect(column.getByTestId('approval-title')).toHaveText('Which session store should the refactor use?');
+    await column.getByRole('button', { name: 'Dismiss' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(column).toHaveCount(0);
+    await expect(page.getByTestId('approvals-queue').getByTestId('approvals-row').filter({ hasText: 'Which session store' })).toBeFocused();
+  });
+
   test("an Autopilot answer is overridden with a click on a choice, and its notes don't hide Send behind Details", async ({ page }) => {
     const fixture = notifyFixture();
     const [options] = fixture.items;
