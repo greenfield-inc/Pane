@@ -1570,6 +1570,9 @@ default), a Session has one voice to the person: its orchestrator.
   `--questions` (checked as `runpane notify` checks them) first. A question
   that ends with options in brackets ("(A / B)") and has no buttons from
   either source is refused with `ERR_REPORT_PACKED_OPTIONS`, showing nothing.
+  A bracketed unit with a spaced slash ("(requests / second)") reads as
+  options too; word a value's unit as prose ("in requests per second") or
+  drop the spaces ("(requests/second)").
   From a JSON status file or a bare `needs_you`
   block, the card takes its question and `why` as
   context, its question's `options` as answer buttons (a `(recommended)`
