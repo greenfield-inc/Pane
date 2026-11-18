@@ -55,6 +55,16 @@ const memoryDatabase = () => new Database(':memory:');
 // Transcript reads are real file I/O; these tests script what the transcript says.
 const findUserTurnSince = vi.spyOn(agentTranscripts, 'findUserTurnSince');
 
+// Doctor's executable health probes PATH with `where`/`sh -lc` (5 s limit each); report no installed Pane instead.
+vi.mock('../daemon/remoteDaemonExecutableHealth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../daemon/remoteDaemonExecutableHealth')>();
+  return {
+    ...actual,
+    collectRemoteDaemonExecutableHealthAsync: async (paneDir: string) =>
+      actual.collectRemoteDaemonExecutableHealth(paneDir, { candidates: [], resolveCommandPath: () => null }),
+  };
+});
+
 vi.spyOn(panelManager, 'createPanel');
 vi.spyOn(panelManager, 'getPanel');
 vi.spyOn(panelManager, 'getPanelsForSession');
