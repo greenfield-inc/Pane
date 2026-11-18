@@ -115,3 +115,15 @@ test('each skippable job skips only through the manifest', () => {
     assert.match(block, new RegExp(`^ {4}if: \\$\\{\\{ !fromJSON\\(needs\\.changes\\.outputs\\.skip\\)\\['${job}'\\] \\}\\}$`, 'm'), job);
   }
 });
+
+// A matrix job reports one result for all its lanes, so a dropped lane would
+// leave part of the wrapper suites unrun with CI result still green.
+test('the wrapper lanes are package plus 1/n to n/n, with none missing', () => {
+  const block = WORKFLOW.replace(/\r\n/g, '\n').split(/^ {2}runpane-wrapper-tests:\n/m)[1].split(/^ {2}\S/m)[0];
+  const lanes = /^ {8}lane: \[([^\]]*)\]$/m.exec(block);
+  assert.ok(lanes, 'runpane-wrapper-tests has a one-line lane list');
+  const [first, ...parts] = lanes[1].split(',').map((lane) => lane.trim());
+  assert.equal(first, 'package');
+  assert.ok(parts.length > 0, 'at least one numbered lane');
+  assert.deepEqual(parts, parts.map((_, index) => `${index + 1}/${parts.length}`));
+});
