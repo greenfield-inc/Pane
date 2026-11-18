@@ -9,7 +9,9 @@ answer its questions and accept the result on the to-do's page.
 - **One list.** The To-dos screen lists every to-do on every machine, once
   each, with the status you need: waiting on you, working, queued or idle. A
   saved machine that is this computer (or, in remote mode, the computer the
-  window shows) isn't read a second time.
+  window shows) isn't read a second time. Opening another machine's to-do
+  (its row reads Open on devbox) switches the window to that machine and
+  shows the to-do there; an offline machine says so instead.
 - **Kept moving.** A plain-code supervisor on each machine notices a to-do
   that has gone quiet, reminds its orchestrator, restarts it, and then asks
   you. See [The supervisor](#the-supervisor).

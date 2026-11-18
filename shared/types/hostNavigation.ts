@@ -25,6 +25,8 @@ export interface HostNavigationMemory {
   paneId: string | null;
   /** Selected Session on this desktop. Absent in memories saved before it was kept. */
   orchestrationSessionId?: string | null;
+  /** The to-do open in the To-dos view (T-18: a row on another machine opens it there). Absent in older memories. */
+  todoNumber?: number | null;
 }
 
 /** The chat tab a launch reopens: the tab in front in the last Pane this computer showed. */
@@ -61,6 +63,7 @@ const hostNavigationMemorySchema: BoundarySchema<HostNavigationMemory> = boundar
   projectId: boundary.nullable(boundary.number),
   paneId: boundary.nullable(boundary.string),
   orchestrationSessionId: boundary.optional(boundary.nullable(boundary.string)),
+  todoNumber: boundary.optional(boundary.nullable(boundary.number)),
 });
 
 /** Returns null for anything that is not a usable memory, including older shapes. */

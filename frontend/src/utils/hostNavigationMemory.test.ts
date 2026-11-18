@@ -101,6 +101,14 @@ describe('restoreHostNavigation', () => {
     expect(useSessionStore.getState().activeSessionId).toBeNull();
   });
 
+  it('opens the to-do a row on another machine asked for (T-18)', async () => {
+    storedMemories.set(REMOTE_HOST_ID, { view: 'todos', projectId: null, paneId: null, todoNumber: 12 });
+    const { restoreHostNavigation, useNavigationStore } = await loadHostNavigationMemory();
+    await restoreHostNavigation();
+    expect(useNavigationStore.getState().activeView).toBe('todos');
+    expect(useNavigationStore.getState().selectedTodoNumber).toBe(12);
+  });
+
   it('reopens the Pane the host was left on', async () => {
     storedMemories.set(REMOTE_HOST_ID, { view: 'sessions', projectId: null, paneId: 'pane-2' });
     const { restoreHostNavigation, useNavigationStore, useSessionStore } = await loadHostNavigationMemory();

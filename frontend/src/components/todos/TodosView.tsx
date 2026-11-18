@@ -3,6 +3,7 @@ import { ChevronDown, Gauge, Plus, SlidersHorizontal } from 'lucide-react';
 import { todoRef, type TodoAction } from '../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { useNavigationStore } from '../../stores/navigationStore';
+import { openOnMachine } from '../../utils/machineRowActions';
 import { useRemoteTodosPoll, useTodosStore, type CreatedTodo } from '../../stores/todosStore';
 import { cn } from '../../utils/cn';
 import { Dropdown } from '../ui/Dropdown';
@@ -146,9 +147,11 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
   }, [current]);
 
   const openEntry = useCallback((entry: TodoEntry | undefined) => {
-    if (!entry || entry.remote) return;
+    if (!entry) return;
     setSelectedKey(entry.key);
-    onOpen(entry.row.todo.number);
+    // Another machine's to-do opens on that machine: the window switches to it and shows the to-do (T-18).
+    if (entry.remote) void openOnMachine(entry.machineId, { kind: 'todo', id: entry.row.todo.number, name: `${todoRef(entry.row.todo.number)} ${entry.row.todo.title}` });
+    else onOpen(entry.row.todo.number);
   }, [onOpen]);
 
   const askAction = useCallback((entry: TodoEntry, kind: TodoRowActionKind, anchor?: DOMRect) => {

@@ -65,7 +65,6 @@ export function TodoRow({ entry, grouping, selected, flash, now, onSelect, onOpe
   const reasonClass = status.alert ? 'text-status-error' : status.status === 'waiting' ? 'text-text-secondary' : 'text-text-tertiary';
   const requester = requesterLabel(row);
   // A saved machine's to-do acts there; its page opens on that machine, not here.
-  const hasActions = entry.remote ? action !== null : true;
   const title = entry.remote ? `${todo.title} · on ${row.machine}${entry.offline ? ', which can’t be reached' : ''}` : undefined;
 
   return (
@@ -96,7 +95,7 @@ export function TodoRow({ entry, grouping, selected, flash, now, onSelect, onOpe
         {todo.title}
         {status.reason && <span className={cn('ml-2 font-normal', reasonClass)} data-testid="todo-row-reason">{status.reason}</span>}
       </span>
-      <span className={cn('inline-flex shrink-0 items-center gap-2', hasActions && (selected ? 'hidden' : 'group-hover:hidden'))}>
+      <span className={cn('inline-flex shrink-0 items-center gap-2', selected ? 'hidden' : 'group-hover:hidden')}>
         {row.unread ? (
           <span className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full bg-interactive/15 px-2 text-[12px] font-semibold text-interactive-text" title="New replies">
             <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />{row.unread}
@@ -117,16 +116,13 @@ export function TodoRow({ entry, grouping, selected, flash, now, onSelect, onOpe
         <AgentTile agentId={row.agentId ?? todo.agent ?? undefined} />
         <span className="w-[38px] shrink-0 text-right text-[12.5px] text-text-tertiary">{relativeAge(todo.updatedAt, now)}</span>
       </span>
-      {hasActions && (
-        <span className={cn('shrink-0 gap-1', selected ? 'inline-flex' : 'hidden group-hover:inline-flex')} onMouseDown={event => event.stopPropagation()}>
-          {action && <ActionButton kind={action} onClick={event => { event.stopPropagation(); onAction(action, event.currentTarget.getBoundingClientRect()); }} />}
-          {!entry.remote && (
-            <button type="button" className={TODOS_BUTTON} onClick={event => { event.stopPropagation(); onOpen(); }} data-testid="todo-row-open">
-              Open <KeyCap>↵</KeyCap>
-            </button>
-          )}
-        </span>
-      )}
+      <span className={cn('shrink-0 gap-1', selected ? 'inline-flex' : 'hidden group-hover:inline-flex')} onMouseDown={event => event.stopPropagation()}>
+        {action && <ActionButton kind={action} onClick={event => { event.stopPropagation(); onAction(action, event.currentTarget.getBoundingClientRect()); }} />}
+        {/* Another machine's to-do opens there (T-18): the window switches to that machine. */}
+        <button type="button" className={TODOS_BUTTON} onClick={event => { event.stopPropagation(); onOpen(); }} data-testid="todo-row-open" title={entry.remote ? `Switch to ${row.machine} and open it` : undefined}>
+          {entry.remote ? `Open on ${row.machine}` : 'Open'} <KeyCap>↵</KeyCap>
+        </button>
+      </span>
     </div>
   );
 }

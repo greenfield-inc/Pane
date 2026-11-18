@@ -325,7 +325,7 @@ export async function restoreHostNavigation(
   if (memory.view === 'todos') {
     await setActiveSession(null);
     if (!ownsRuntime()) return;
-    navigation.navigateToTodos({ number: null });
+    navigation.navigateToTodos({ number: memory.todoNumber ?? null });
     return;
   }
 

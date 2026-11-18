@@ -22,6 +22,7 @@ const machine = (id: string, label: string, installId: string): MachineState => 
 
 async function open(page: Page) {
   await installElectronApiMock(page, {
+    computers: [{ id: 'devbox', label: 'devbox', routes: [{ id: 'public:http://devbox.test:7777', kind: 'public', source: 'manual', baseUrl: 'http://devbox.test:7777', token: 'token' }] }],
     initialProjects: [], initialSessions: [], initialConfig: { theme: 'light-rounded', appearanceMode: 'fixed' },
     todos: { snapshot },
     machineConnections: {
@@ -41,4 +42,14 @@ test('T-8: this computer saved as a machine lists its to-dos once; another machi
   await expect(page.locator('[data-testid="todo-row"][data-todo="7"]')).toHaveCount(1);
   await expect(page.locator('[data-testid="todo-row"]')).toHaveCount(3);
   await expect(page.locator('[data-testid="todo-row"][data-machine="self"]')).toHaveCount(0);
+});
+
+test('T-18: another machine\'s to-do opens there: the window switches to it with the to-do remembered', async ({ page }) => {
+  await open(page);
+  const row = page.locator('[data-testid="todo-row"][data-machine="devbox"]');
+  await expect(row).toHaveCount(1);
+  await row.hover();
+  await expect(row.getByTestId('todo-row-open')).toHaveText(/Open on devbox/);
+  await row.click();
+  await expect.poll(() => page.evaluate(() => window.__paneTestElectronMock.getNavigationMemory('devbox'))).toMatchObject({ view: 'todos', todoNumber: 1 });
 });
