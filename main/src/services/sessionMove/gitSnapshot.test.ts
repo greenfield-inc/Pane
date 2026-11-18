@@ -11,6 +11,7 @@ import {
   createBundle,
   createSnapshot,
   deleteRefs,
+  putBackRef,
   ignoredPaths,
   importBundle,
   MoveGitError,
@@ -373,5 +374,22 @@ describe('gitSnapshot', () => {
 
     const snap = await createSnapshot(a, SNAPSHOT_REF);
     expect(git(a, ['show', `${snap.commit}:other.txt`])).toBe('other unstaged\n');
+  });
+
+  it('a move that didn\'t happen puts the snapshot ref back as it was: gone, or the earlier one for Restore (QA r3 finding 3)', async () => {
+    const { a } = setupRepos();
+    makeMess(a);
+    const first = await createSnapshot(a, SNAPSHOT_REF);
+    expect(first.previous).toBeNull();
+    await putBackRef(a, SNAPSHOT_REF, first.previous);
+    expect(git(a, ['for-each-ref', '--format=%(refname)', SNAPSHOT_REF])).toBe('');
+    // An earlier move's ref (kept for Restore) is overwritten by a new move, then comes back when it fails.
+    git(a, ['update-ref', SNAPSHOT_REF, 'HEAD']);
+    const earlier = git(a, ['rev-parse', SNAPSHOT_REF]).trim();
+    const second = await createSnapshot(a, SNAPSHOT_REF);
+    expect(second.previous).toBe(earlier);
+    await putBackRef(a, SNAPSHOT_REF, second.previous);
+    await putBackRef(a, SNAPSHOT_REF, second.previous);
+    expect(git(a, ['rev-parse', SNAPSHOT_REF]).trim()).toBe(earlier);
   });
 });

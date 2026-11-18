@@ -529,8 +529,9 @@ can't be set aside, that Pane stays here, paused, with its worktree, and the
 summary says which files wait where.
 
 If anything fails before the other machine starts the tabs, it removes
-everything it set up, this machine restarts the tabs, and the dialog says what
-happened and what to fix. The other machine writes down how to undo each step
+everything it set up, this machine restarts the tabs and removes the snapshot
+refs the move made (putting back an earlier move's, kept for Restore), and the
+dialog says what happened and what to fix. The other machine writes down how to undo each step
 as it takes it, so that clean-up also happens if Pane there quit partway
 through: when it starts again, it removes the Panes, worktrees, tabs,
 conversations and arriving Session it made, and puts back what it had replaced.
@@ -548,7 +549,8 @@ only once the other machine confirms it rolled the move back. A start cut short
 by a restart there finishes on its own when that Pane starts again. While the
 other machine doesn't answer, or can't say, the Session stays paused here, so it
 never runs twice, and the dialog says which: not answering means open Pane
-there; answering without a decision means open the Session there. A record
+there; answering without a decision (including an error from Pane there, such
+as a record it can't read) means check the Session there. A record
 there that can't be read counts as no answer, never as a roll-back. **Check
 again** asks at once, and retries a start that failed
 there before any tab started.

@@ -36,7 +36,7 @@ import { sessionWorkspacePath } from '../sessionWorkspace';
 import { terminalPanelManager } from '../terminalPanelManager';
 import { databaseService } from '../database';
 import { locateConversation } from './conversations';
-import { createBundle, createSnapshot, ignoredPaths } from './gitSnapshot';
+import { createBundle, createSnapshot, ignoredPaths, putBackRef } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
 import { agentFarmProfileOf, heldBackChecks, sessionOpenApprovals } from './rules';
 import { keepIgnoredFiles } from './ignoredFiles';
@@ -111,6 +111,8 @@ interface SourceJob {
   cancelled: boolean;
   /** Panes whose run script the move stopped, restarted on cancel. */
   scripts: string[];
+  /** Snapshot refs the pack wrote, with what they pointed at before, put back if the move doesn't happen. */
+  snapshotRefs: Array<{ worktree: string; ref: string; previous: string | null }>;
   outDir: string;
   lastHeard: number;
   /** The after-freeze loop, while it runs: one per move. */
@@ -186,7 +188,7 @@ export class MoveCoordinator {
   // ── The manifest ───────────────────────────────────────────────────────
 
   /** The manifest without package files (preflight), or with them (`pack`). */
-  private async manifest(record: OrchestrationSessionRecord, moveId: string, pack?: { outDir: string; tabs: MovedTab[] }): Promise<{ manifest: MoveManifest; sources: Map<string, string> }> {
+  private async manifest(record: OrchestrationSessionRecord, moveId: string, pack?: { outDir: string; tabs: MovedTab[]; snapshotRefs: SourceJob['snapshotRefs'] }): Promise<{ manifest: MoveManifest; sources: Map<string, string> }> {
     const sources = new Map<string, string>();
     const panes: MovePane[] = [];
     const agentVersions: Record<string, string | null> = {};
@@ -221,6 +223,7 @@ export class MoveCoordinator {
         if (pack) {
           const ref = `refs/pane/move/${paneId}`;
           const created = await createSnapshot(worktreePath, ref);
+          pack.snapshotRefs.push({ worktree: worktreePath, ref, previous: created.previous });
           snapshot = { ref, commit: created.commit };
           bundle = `panes/${paneId}.bundle`;
           const out = path.join(pack.outDir, 'panes', `${paneId}.bundle`);
@@ -384,7 +387,7 @@ export class MoveCoordinator {
     const tabs = this.tabsOf(record);
     const job: SourceJob = {
       record, peer: resolvePeer(target, this.services.configManager), paneIds: [record.internalSessionId, ...this.memberPaneIds(record)], tabs,
-      stopNow: false, cancelled: false, scripts: [], outDir: path.join(getAppDirectory(), 'moves-out', moveId), lastHeard: Date.now(),
+      stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], outDir: path.join(getAppDirectory(), 'moves-out', moveId), lastHeard: Date.now(),
       progress: {
         moveId, sessionId, sessionName: record.name, target, phase: 'waiting', waiting: [], stoppedTabs: 0, totalTabs: tabs.length,
         steps: steps(), frozen: false, updatedAt: new Date().toISOString(),
@@ -420,7 +423,7 @@ export class MoveCoordinator {
     }));
     const job: SourceJob = {
       record, peer: resolvePeer(record.move.machine, this.services.configManager), paneIds: [record.internalSessionId, ...this.memberPaneIds(record)],
-      tabs, stopNow: false, cancelled: false, scripts: [], outDir: path.join(getAppDirectory(), 'moves-out', record.move.moveId), lastHeard: Date.now(),
+      tabs, stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], outDir: path.join(getAppDirectory(), 'moves-out', record.move.moveId), lastHeard: Date.now(),
       progress: {
         moveId: record.move.moveId, sessionId, sessionName: record.name, target: record.move.machine, phase: 'confirming', waiting: [], stoppedTabs: tabs.length, totalTabs: tabs.length,
         steps: steps().map(step => ({ ...step, state: step.id === 'start' ? 'running' : 'done' })), frozen: true, updatedAt: new Date().toISOString(),
@@ -483,7 +486,7 @@ export class MoveCoordinator {
     // Asked again once every tab stopped: Stop now can leave a queue, and an approval can open while turns end.
     const held = this.heldBackChecks(record, true)[0];
     if (held) throw new PaneError('ERR_MOVE_HELD_BACK', `${held.title}, so the Session didn't move.`, held.detail ?? 'Check again.');
-    const { manifest, sources } = await this.manifest(record, job.progress.moveId, { outDir: job.outDir, tabs: job.tabs });
+    const { manifest, sources } = await this.manifest(record, job.progress.moveId, { outDir: job.outDir, tabs: job.tabs, snapshotRefs: job.snapshotRefs });
     this.setStep(job, 'pack', 'done', `${manifest.panes.filter(pane => pane.role === 'member').length} Panes, ${manifest.panes.reduce((sum, pane) => sum + pane.tabs.filter(tab => tab.conversation).length, 0)} conversations, the Session folder`);
     this.checkCancelled(job);
 
@@ -566,6 +569,9 @@ export class MoveCoordinator {
         return;
       case 'unknown':
         this.touch(job, { phase: 'confirming', waitReason: 'undecided', error: { message: `${target} answers but can't say yet whether the move finished${wait.status.error ? ` (${wait.status.error.message})` : ''}.`, next: `${stays} Open the Session on ${target} to check it there.` } });
+        return;
+      case 'answeredError':
+        this.touch(job, { phase: 'confirming', waitReason: 'undecided', error: { message: `${target} answers but can't say yet whether the move finished: ${wait.message}`, next: `${stays} ${wait.next ?? `Open Pane on ${target} to check it.`}` } });
         return;
       case 'unreachable':
         if (Date.now() - wait.since < SILENCE_AFTER_FREEZE_MS && job.progress.phase !== 'confirming') return;
@@ -750,6 +756,10 @@ export class MoveCoordinator {
       }
     }
     await restartRunScripts(this.registry, job.scripts);
+    // The move didn't happen: its snapshot refs go, and an earlier move's ref (kept for Restore) comes back.
+    for (const { worktree, ref, previous } of job.snapshotRefs) {
+      await putBackRef(worktree, ref, previous).catch(error => console.warn(`[SessionMove] ${ref} wasn't put back:`, error));
+    }
     await fs.promises.rm(job.outDir, { recursive: true, force: true }).catch(() => undefined);
     return cleaned;
   }

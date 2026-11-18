@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { settleAfterFreeze, type FreezeTarget, type FreezeWait } from './afterFreeze';
+import { PaneDaemonClientError } from '../../../../packages/runpane/src/daemonClient';
+import { PaneError } from '../../../../shared/paneError';
+import { asTargetAnswer, settleAfterFreeze, TargetAnswerError, type FreezeTarget, type FreezeWait } from './afterFreeze';
 import type { TargetStatus } from './importer';
 
 /**
@@ -96,5 +98,27 @@ describe('settleAfterFreeze', () => {
     const { target, calls } = scripted([at('started', { resumed: 1 })]);
     expect((await settleAfterFreeze(target, hooks().hooks))?.kind).toBe('committed');
     expect(calls).toEqual(['status']);
+  });
+
+  it('an error B answers with is B answering without a decision, not silence; A stays frozen (QA r3 finding 2)', async () => {
+    const { target, calls } = scripted([new TargetAnswerError('ERR_MOVE_LEDGER_UNREADABLE', 'This machine\'s record of move m-1 can\'t be read (EACCES).', 'Check the permissions.')]);
+    const { hooks: wait, waits } = hooks(5);
+    expect(await settleAfterFreeze(target, wait)).toBeUndefined();
+    expect(calls).not.toContain('rollBack');
+    expect(waits.at(-1)).toEqual({ kind: 'answeredError', message: 'This machine\'s record of move m-1 can\'t be read (EACCES).', next: 'Check the permissions.' });
+  });
+
+  it('tells an error B sent from a call that never reached it', () => {
+    const answered = asTargetAnswer(new PaneDaemonClientError('Session x is arriving here, but its record is missing.', 'ERR_MOVE_LEDGER_MISSING', false, 'Check again.'));
+    expect(answered).toBeInstanceOf(TargetAnswerError);
+    expect(answered).toMatchObject({ code: 'ERR_MOVE_LEDGER_MISSING', next: 'Check again.' });
+    const timeout = new PaneDaemonClientError('Timed out waiting for Pane daemon response.', 'ERR_RUNPANE_DAEMON_TIMEOUT', false);
+    expect(asTargetAnswer(timeout)).toBe(timeout);
+    const lost = new PaneDaemonClientError('Lost the connection.', 'ECONNRESET', false);
+    expect(asTargetAnswer(lost)).toBe(lost);
+    const refused = new PaneDaemonClientError('Could not connect.', 'ECONNREFUSED', true);
+    expect(asTargetAnswer(refused)).toBe(refused);
+    const unreachable = new PaneError('ERR_MOVE_UNREACHABLE', 'Pane on b didn\'t answer.');
+    expect(asTargetAnswer(unreachable)).toBe(unreachable);
   });
 });
