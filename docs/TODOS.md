@@ -116,6 +116,17 @@ such as `plan.md` the `plan`). A file stays a path on its machine and opens
 from there. On the page, **+ Attach** takes a dropped file or a pasted link,
 and clicking an attachment opens it in the split beside the chat.
 
+**Pane keeps a copy of each attached file.** When a file on this machine is
+attached, Pane copies it into its data folder (`todos/files/T-n/` under
+`PANE_DIR`). The original stays the source while it exists: the copy is
+refreshed when the file is opened, when the to-do goes for review and when it
+is done. Once the original is gone (its worker's Pane archived, its scratch
+folder cleaned), the to-do opens the copy instead, on this machine, from
+another machine and in the web app. Links are never copied, nor are folders or
+files over 25 MB; for those the to-do's chat says it keeps no copy. Attachments
+made before copies were kept get one at startup, where the file is still
+there. Copies go when the to-do is deleted, 30 days after it closes.
+
 **Inheritance is read, not copied.** A sub-to-do shows its own attachments,
 then its parent's under "From T-12 (parent)". A parent shows its own, then
 each sub-to-do's under "From T-14". A later attachment on the parent shows on
@@ -249,6 +260,14 @@ to it. If that tab is closed, the reply goes to the orchestrator and the
 thread says so. A reply can only reach a tab in the to-do's own Session or a
 sub-to-do's assignee; anything else is refused (`ERR_TODO_REPLY_TARGET`).
 
+**A comment on a to-do that is Waiting on you is your answer.** It goes to
+the orchestrator as usual, resuming it if it is down, and the to-do moves
+again: a review is reopened (back to In progress, as Ask for changes would),
+and its own waiting cards close with your words: the review card, a stuck
+card, or its orchestrator's question (the agent gets your words as a message
+in its tab). A sub-to-do's cards, and a reminder card, are left to be
+answered themselves. A comment on a snoozed to-do is held until it wakes.
+
 **Images.** An image you paste, drop or pick in a comment or reply shows
 under its words as a thumbnail; other files show as chips. An image attached
 to the to-do itself (a file dropped on the split or on the details'
@@ -291,7 +310,8 @@ the desktop, and its approvals through `notify:remote-snapshot` and
    review approval listing the attachments, and the to-do reads Waiting on
    you.
 2. You choose **Accept** or **Ask for changes**. Asking for changes sends your
-   note back and returns the to-do to In progress.
+   note back and returns the to-do to In progress. Commenting in the to-do's
+   chat instead does the same, and closes the review card.
 3. Accept moves it to Accepted. The orchestrator does the wrap-up: merging
    only if you asked for that, cleaning up, and archiving the to-do's Panes
    (`runpane todos archive T-n`). The supervisor keeps an Accepted to-do
@@ -535,7 +555,7 @@ upgrade (`main/src/database/todosSchema.ts`):
 Approvals gain a `todo_id` column. All of it is additive (`reply_to` is added
 to databases from earlier to-do builds when they open), so an older Pane
 opening the same database still starts. The snooze columns are added the same way. Done and dropped to-dos, their
-attachments and activity are deleted 30 days after they close.
+attachments, activity and kept file copies are deleted 30 days after they close.
 
 ## From the CLI
 

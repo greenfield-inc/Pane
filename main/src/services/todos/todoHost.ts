@@ -1,3 +1,4 @@
+import path from 'path';
 import { isConfiguredAgent } from '../../../../shared/agents';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { NotifyQuestion, NotifySource } from '../../../../shared/types/notify';
@@ -7,6 +8,7 @@ import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import { typeIntoLocalTab } from '../../ipc/notify';
 import { archiveTodoSessionPanes } from '../../ipc/runpane';
 import type { AppServices } from '../../ipc/types';
+import { getAppDirectory } from '../../utils/appDirectory';
 import { thisMachineName } from '../approvals/approvalStore';
 import { getChatTabManager } from '../chatTabs';
 import { readMemoryPressure } from '../machineHealth/memoryPressure';
@@ -57,6 +59,7 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
 
   return {
     machineName: () => thisMachineName(),
+    filesRoot: () => path.join(getAppDirectory(), 'todos', 'files'),
 
     async createSession(input): Promise<CreatedTodoSession> {
       const manager = sessions();

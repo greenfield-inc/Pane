@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { PaneError } from '../../../../shared/paneError';
 import type { NotifyItem, NotifyLink, NotifyResult, NotifyTodoLink } from '../../../../shared/types/notify';
@@ -16,6 +17,7 @@ import {
 } from './todoMessages';
 import { clockText, durationText, isKnownZone, nextMorning, snoozeWhen } from './snoozeClock';
 import { SUPERVISOR, dayOf, decideSupervisorAction, lastMovedAt, reminderText, attachReminderText, stuckCardText, type SupervisorInputs } from './supervisorRules';
+import { forgetCopies, keepCopy, keptCopy, type KeepOutcome } from './todoFileCopies';
 import { STATUS_ORDER, deriveTodoStatus, workingTabOf } from './todoStatus';
 import { NO_WAKE, type LinkedApproval, type StoredWake, type TodoPatch, type TodoStore } from './todoStore';
 
@@ -66,6 +68,8 @@ export interface TodoCard {
 /** What TodoService needs from the rest of Pane. The adapter in todoHost.ts wires the real services. */
 export interface TodoHost {
   machineName(): string;
+  /** The folder Pane keeps copies of attached files in (T-21); null keeps none. */
+  filesRoot(): string | null;
   /** Creates the to-do's own hidden Session; `prompted` says the opening prompt rode on its launch (else Pane types it once ready). */
   createSession(input: { name: string; projectId: number | null; agent: string | null; openingPrompt: string; todoNumber: number }): Promise<CreatedTodoSession>;
   session(sessionId: string): TodoSessionInfo | null;
@@ -614,9 +618,58 @@ export class TodoService extends EventEmitter {
     });
     this.progress(todo);
     const how = { attached: '', pr: ' (its PR)', approval: ' (from an approval)', opened: ' (opened beside you)' }[attachment.source];
-    this.event(todo, `${attachment.addedBy === 'you' ? 'You' : attachment.addedBy} attached ${attachment.kind}: ${attachment.label}${how}`, actor.kind === 'person' ? 'person' : attachment.source === 'attached' ? 'agent' : 'pane', attachment.addedBy);
+    const tooLarge = this.keepCopyOf(attachment) === 'too-large' ? ' (over 25 MB: Pane keeps no copy, so it opens only while the file is there)' : '';
+    this.event(todo, `${attachment.addedBy === 'you' ? 'You' : attachment.addedBy} attached ${attachment.kind}: ${attachment.label}${how}${tooLarge}`, actor.kind === 'person' ? 'person' : attachment.source === 'attached' ? 'agent' : 'pane', attachment.addedBy);
     this.changed();
     return attachment;
+  }
+
+  // ── Kept copies of attached files (T-21) ─────────────────────────────────
+
+  /** Copies a file on this machine into Pane's own folder, or refreshes that copy. Links and other machines' files: none. */
+  private keepCopyOf(attachment: TodoAttachment): KeepOutcome | null {
+    const root = this.host.filesRoot();
+    if (!root || !attachment.machine || attachment.machine !== this.host.machineName()) return null;
+    try {
+      return keepCopy(root, attachment.todoNumber, attachment.id, attachment.target);
+    } catch (error) {
+      this.host.log(`[Todos] could not keep a copy of ${attachment.target}`, error instanceof Error ? error : String(error));
+      return null;
+    }
+  }
+
+  /** The latest version of a to-do's files (and its sub-to-dos'), taken when it goes for review or is done. */
+  private refreshCopies(number: number): void {
+    for (const todo of [this.require(number), ...this.store.children(number)]) {
+      for (const attachment of this.store.attachments(todo.number)) this.keepCopyOf(attachment);
+    }
+  }
+
+  /**
+   * The file to read for an attached path: the original while it exists (refreshing the copy), else Pane's copy.
+   * Anything that isn't an attached file comes back as it is.
+   */
+  documentFile(file: string): string {
+    const attachments = this.store.attachmentsWithTarget(file);
+    if (attachments.length === 0) return file;
+    if (fs.existsSync(file)) {
+      for (const attachment of attachments) this.keepCopyOf(attachment);
+      return file;
+    }
+    const root = this.host.filesRoot();
+    if (!root) return file;
+    for (const attachment of attachments) {
+      const copy = keptCopy(root, attachment.todoNumber, attachment.id, attachment.target);
+      if (copy) return copy;
+    }
+    return file;
+  }
+
+  /** At startup: a copy of every attachment made before copies were kept, where its file is still there. */
+  keepExistingCopies(): number {
+    let kept = 0;
+    for (const attachment of this.store.localAttachments()) if (this.keepCopyOf(attachment) === 'kept') kept += 1;
+    return kept;
   }
 
   detach(number: number, attachmentId: number, actor: TodoActor): void {
@@ -736,7 +789,8 @@ export class TodoService extends EventEmitter {
       if (reply?.gone) this.event(todo, `${reply.gone}’s tab is closed; sent to the orchestrator`);
       // Snoozed (round 9): held, undelivered, until it wakes; then it goes inside the wake message.
       if (target.panelId && !this.holdsComments(number)) this.enqueue({ panelId: target.panelId, text: personChatText(todo, text), todoNumber: number, activityId: message.id, resumeIfDown: true });
-      this.progress(todo);
+      const moving = this.holdsComments(number) ? todo : this.commentAnswersWaiting(todo, text);
+      this.progress(moving);
       this.changed();
       void this.flush();
       return message;
@@ -768,6 +822,28 @@ export class TodoService extends EventEmitter {
     this.progress(todo);
     this.changed();
     return message;
+  }
+
+  /**
+   * Your comment on a to-do waiting on you is your answer (T-20): a review goes back to In progress (as Ask for
+   * changes would), and its own waiting cards (the review, a stuck card, its orchestrator's question) close with your
+   * words, so it reads Working again. Sub-to-dos' cards and a reminder card are left to be answered themselves.
+   */
+  private commentAnswersWaiting(todo: TodoRecord, text: string): TodoRecord {
+    const reminderCard = this.store.wake(todo.number)?.reminderCardId ?? null;
+    const cards = this.store.waitingApprovals().filter(approval => approval.todoNumber === todo.number && approval.id !== reminderCard);
+    if (todo.state !== 'in_review' && cards.length === 0 && todo.stuckCardId === null) return todo;
+    const words = text.length > 300 ? `${text.slice(0, 299)}…` : text;
+    // An agent waiting on its question gets this line as its answer; the comment itself also reaches the orchestrator's tab.
+    const why = `Answered by your comment in the to-do's chat: ${words}`;
+    for (const card of cards) this.host.closeCard(card.id, why);
+    if (todo.stuckCardId && !cards.some(card => card.id === todo.stuckCardId)) this.host.closeCard(todo.stuckCardId, why);
+    const reopened = todo.state === 'in_review';
+    const patch: TodoPatch = { stuckCardId: null };
+    if (reopened) patch.state = 'in_progress';
+    const moved = this.store.update(todo.number, patch, this.now());
+    if (reopened) this.event(moved, 'You commented, so the review is reopened: back to In progress', 'person', 'you');
+    return moved;
   }
 
   /**
@@ -871,6 +947,7 @@ export class TodoService extends EventEmitter {
       throw new PaneError('ERR_TODO_REVIEW_NO_ATTACHMENTS', `${todo.ref} has no attachments, so there is nothing for the person to review. Nothing was sent.`,
         `Attach what you are asking them to review (runpane todos attach ${todo.ref} <file|url>), or pass --no-attachments "<why>".`);
     }
+    this.refreshCopies(number);
     const groups = this.attachmentGroups(todo);
     const links: NotifyLink[] = groups.flatMap(group => group.attachments).slice(0, 6).map(attachment => /^https?:/.test(attachment.target) ? { label: attachment.label.slice(0, 80), url: attachment.target } : { label: attachment.label.slice(0, 80), path: attachment.target });
     const id = randomUUID();
@@ -918,6 +995,7 @@ export class TodoService extends EventEmitter {
       throw new PaneError('ERR_TODO_DONE_NEEDS_REVIEW', `${todo.ref} is a top-level to-do the person hasn't accepted, so an agent can't mark it done. Nothing changed.`,
         `Ask for review with runpane todos review ${todo.ref}; after they Accept, wrap up and run runpane todos done ${todo.ref}. If they told you to close it, pass --person-said "<their words>".`);
     }
+    this.refreshCopies(number);
     const done = this.store.update(number, { state: 'done', closedAt: this.now(), loadHold: null, loadHoldSince: null, stuckSince: null, ...this.endWake(number, `Done · marked by ${this.actorName(actor)}`) }, this.now());
     if (personSaid) this.store.addActivity({ todoNumber: number, kind: 'message', authorKind: 'agent', authorName: this.actorName(actor), body: `Marked done because you said: “${personSaid}”`, now: this.now() });
     this.event(done, `Done · marked by ${this.actorName(actor)}`, actor.kind === 'person' ? 'person' : 'agent', this.actorName(actor));
@@ -1744,6 +1822,8 @@ export class TodoService extends EventEmitter {
 
   /** Retention: closed to-dos go 30 days after closing. */
   prune(): void {
-    this.store.pruneClosed(this.now());
+    const pruned = this.store.pruneClosed(this.now());
+    const root = this.host.filesRoot();
+    if (root && pruned.length > 0) forgetCopies(root, pruned);
   }
 }

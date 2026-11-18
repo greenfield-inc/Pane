@@ -581,6 +581,15 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   void services.orchestrationSessionManager?.markTodoSessions(todoService.sessionLinks()).catch((error: Error) => {
     console.warn('[todos] Could not mark older to-do Sessions; the Sessions list hides them once the to-dos load:', error);
   });
+  // T-21: attachments made before Pane kept copies get one now, where the file is still there (off the startup path).
+  setTimeout(() => {
+    try {
+      const kept = todoService.keepExistingCopies();
+      if (kept > 0) console.info(`[todos] Kept a copy of ${kept} attached file(s), so they still open after their Pane is archived`);
+    } catch (error) {
+      console.warn('[todos] Could not keep copies of earlier attachments; they open while their files are there:', error);
+    }
+  }, 5_000).unref();
   daemonServices.todoService = todoService;
   let todosChangedTimer: ReturnType<typeof setTimeout> | undefined;
   todoService.on('changed', () => {

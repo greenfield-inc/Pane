@@ -21,7 +21,10 @@ export class FakeHost implements TodoHost {
   archiveResult = { archived: ['clean'], kept: [{ name: 'keyboard-approvals', reason: '2 unpushed commits' }], sessionArchived: false };
   private nextSession = 1;
 
+  /** Where Pane keeps attached files' copies; null keeps none (T-21). */
+  filesDir: string | null = null;
   machineName() { return 'This Mac'; }
+  filesRoot() { return this.filesDir; }
   /** Every to-do number a created Session was marked with, in order. */
   createdFor: number[] = [];
   async createSession(input: { name: string; openingPrompt: string; todoNumber: number }) {

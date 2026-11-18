@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TodoService } from './todoService';
@@ -151,6 +154,140 @@ describe('TodoService', () => {
       expect(service.require(todo.number).state).toBe('in_progress');
       await service.flush();
       expect(host.typedInto('s1-orch').at(-1)).toContain('Changes asked for: add dark mode');
+    });
+  });
+
+  describe('a copy of each attached file (T-21)', () => {
+    let dir: string;
+    beforeEach(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'todo-files-'));
+      host.filesDir = path.join(dir, 'pane', 'todos', 'files');
+    });
+    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    function workerFile(name: string, text: string): string {
+      const file = path.join(dir, 'worktrees', 'worker', name);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+      return file;
+    }
+
+    it('still opens after the worker\'s worktree is gone; links are left alone', async () => {
+      const todo = await service.create({ title: 'Pane Selection' }, person);
+      const file = workerFile('t1-findings.md', 'root cause: stale index');
+      service.attach(todo.number, { target: file }, { kind: 'agent', panelId: 's1-orch' });
+      service.attach(todo.number, { target: 'https://github.com/acme/x/pull/1' }, { kind: 'agent', panelId: 's1-orch' });
+      expect(service.documentFile(file)).toBe(file);
+      fs.rmSync(path.join(dir, 'worktrees'), { recursive: true });
+      const kept = service.documentFile(file);
+      expect(kept).not.toBe(file);
+      expect(fs.readFileSync(kept, 'utf8')).toBe('root cause: stale index');
+      expect(service.documentFile('https://github.com/acme/x/pull/1')).toBe('https://github.com/acme/x/pull/1');
+    });
+
+    it('takes the latest version at review, so later edits survive too', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      const file = workerFile('findings.md', 'draft');
+      service.attach(todo.number, { target: file }, { kind: 'agent', panelId: 's1-orch' });
+      fs.writeFileSync(file, 'final findings');
+      fs.utimesSync(file, new Date(), new Date(Date.now() + 5_000));
+      await service.review(todo.number, {}, { kind: 'agent' });
+      fs.rmSync(file);
+      expect(fs.readFileSync(service.documentFile(file), 'utf8')).toBe('final findings');
+    });
+
+    it('says when a file is too large to keep, and still attaches it', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      const file = workerFile('huge.bin', '');
+      fs.truncateSync(file, 26 * 1024 * 1024);
+      service.attach(todo.number, { target: file }, person);
+      expect(service.detail(todo.number).attachments.flatMap(group => group.attachments).map(a => a.label)).toContain('huge.bin');
+      expect(service.detail(todo.number).activity.map(row => row.body)).toContainEqual(expect.stringContaining('over 25 MB'));
+    });
+
+    it('keeps copies of attachments made before this, where the file is still there', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      const file = workerFile('plan.md', 'the plan');
+      const missing = workerFile('gone.md', 'x');
+      const kept = host.filesDir;
+      host.filesDir = null;
+      service.attach(todo.number, { target: file }, person);
+      service.attach(todo.number, { target: missing }, person);
+      fs.rmSync(missing);
+      host.filesDir = kept;
+      expect(service.keepExistingCopies()).toBe(1);
+      fs.rmSync(file);
+      expect(fs.readFileSync(service.documentFile(file), 'utf8')).toBe('the plan');
+    });
+
+    it('forgets a pruned to-do\'s copies', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      const file = workerFile('a.md', 'a');
+      service.attach(todo.number, { target: file }, person);
+      service.drop(todo.number, {}, person);
+      now += 31 * 24 * 60 * 60 * 1000;
+      service.prune();
+      expect(fs.existsSync(path.join(host.filesDir ?? '', 'T-1'))).toBe(false);
+    });
+  });
+
+  describe('a comment on a to-do waiting on you (T-20)', () => {
+    function waitingCard(id: string, number: number, title = '{"title":"Q-7: Which currency?"}') {
+      db.prepare(`INSERT INTO approvals (id, machine, connected_kind, connected_id, connected_name, origin_kind, addressee, state, item_json, qn, created_at, todo_id)
+        VALUES (?, 'm', 'machine', 'm', 'm', 'agent', 'person', 'waiting', ?, 'Q-7', 1, ?)`).run(id, title, number);
+    }
+
+    it('on review: back to In progress, the review card closes, the orchestrator gets the comment', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      await service.flush();
+      await service.review(todo.number, { noAttachments: 'none' }, { kind: 'agent' });
+      waitingCard(host.cards[0].id, todo.number, '{"title":"Review T-1: Ship"}');
+      expect(service.detail(todo.number).status.status).toBe('waiting');
+      await service.comment(todo.number, 'Can you include a root cause report?', person);
+      expect(service.require(todo.number).state).toBe('in_progress');
+      expect(host.closed).toEqual([{ id: host.cards[0].id, summary: expect.stringContaining('Answered by your comment') }]);
+      await service.flush();
+      expect(host.typedInto('s1-orch').at(-1)).toContain('Can you include a root cause report?');
+      expect(service.detail(todo.number).activity.map(row => row.body)).toContainEqual(expect.stringContaining('review is reopened'));
+    });
+
+    it('on review, Accept still marks it done when there was no comment', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      await service.review(todo.number, { noAttachments: 'none' }, { kind: 'agent' });
+      host.cards[0].answer({ answer: 'Accept' });
+      await settle();
+      expect(service.require(todo.number).state).toBe('accepted');
+      expect(host.closed).toEqual([]);
+    });
+
+    it('on the orchestrator\'s question: the card closes with your words and the orchestrator is woken with the comment', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      await service.flush();
+      waitingCard('q7', todo.number);
+      host.down.add('s1-orch');
+      await service.comment(todo.number, 'Use EUR', person);
+      expect(host.closed).toEqual([{ id: 'q7', summary: expect.stringContaining('Use EUR') }]);
+      await service.flush();
+      expect(host.resumed).toContain('s1-orch');
+      expect(host.typedInto('s1-orch').at(-1)).toContain('Use EUR');
+    });
+
+    it('on a stuck card: the card closes and the to-do moves again', async () => {
+      const todo = await service.create({ title: 'Ship' }, person);
+      await service.flush();
+      db.prepare('UPDATE todos SET stuck_card_id = ? WHERE number = ?').run('stuck1', todo.number);
+      waitingCard('stuck1', todo.number, '{"title":"T-1 is stuck"}');
+      await service.comment(todo.number, 'Keep going, try the other fix', person);
+      expect(host.closed).toEqual([{ id: 'stuck1', summary: expect.stringContaining('Answered by your comment') }]);
+      expect(service.require(todo.number).stuckCardId).toBeNull();
+    });
+
+    it('leaves a sub-to-do\'s question to its own card', async () => {
+      const parent = await service.create({ title: 'P' }, person);
+      const sub = await service.create({ title: 'S', parentNumber: parent.number }, person);
+      waitingCard('sq', sub.number);
+      await service.comment(parent.number, 'general note', person);
+      expect(host.closed).toEqual([]);
     });
   });
 

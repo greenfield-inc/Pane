@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { RunpaneTodo } from '../shared/types/todos';
 import { launchIsolated, runpane, type IsolatedPane } from './isolatedPane';
-import { AGENT, approvals, createSession, detail, json, ownCaller, setup, shot, transcript } from './todosHarness';
+import { AGENT, approvals, createSession, detail, json, ownCaller, setup, shot, statusOf, transcript } from './todosHarness';
 
 // To-dos round 7 (D-423): the to-do page in a real, isolated Pane (D-288) with the scripted agent. The
 // renderer-only journeys (todos-page-frame and todos-thread specs) cover layout with fixtures; this one
@@ -218,6 +218,42 @@ test('round 8: a started to-do\'s Session never shows in the sidebar, its Sessio
 
     // T-7: never named in the sidebar, not when it started and not while it was open.
     expect(await page.locator('html').getAttribute('data-todo-session-seen')).toBeNull();
+  } finally {
+    await close();
+  }
+});
+
+test('a comment on a to-do waiting for your review reopens it; a findings file still opens after its worktree is gone (T-20, T-21)', async ({ baseURL }) => {
+  test.setTimeout(240_000);
+  const { pane, page, close } = await setup('pane-todos-t20', { VITE_PORT: new URL(baseURL ?? 'http://localhost:4521').port, PANE_TODOS_TIME_SCALE: '1' });
+  try {
+    const sessionA = await createSession(page, 'Pane Selection');
+    await json<{ todo: RunpaneTodo }>(pane, ['todos', 'create', 'Pane Selection', '--summary', 'Wrong Session selected by hotkeys'], sessionA);
+    const orchestrator = await ownCaller(page, 1);
+    await expect.poll(() => transcript(page, orchestrator.panelId), { timeout: 30_000 }).toContain('You are the orchestrator for T-1');
+
+    // T-21: a worker's findings in its own worktree, attached, then the worktree goes (its Pane archived).
+    const worktree = path.join(pane.root, 'worktrees', 't1-session-select-wrong');
+    mkdirSync(worktree, { recursive: true });
+    const findings = path.join(worktree, 't1-findings.md');
+    writeFileSync(findings, '# T-1 findings\n\nRoot cause: the hotkey index is stale after a reorder.');
+    await json(pane, ['todos', 'attach', 'T-1', findings, '--kind', 'findings'], orchestrator);
+    rmSync(worktree, { recursive: true, force: true });
+    await openTodo(page, 1);
+    await page.getByTestId('todo-split-tab').filter({ hasText: 't1-findings.md' }).click();
+    await expect(page.getByTestId('todo-split')).toContainText('Root cause: the hotkey index is stale after a reorder.', { timeout: 15_000 });
+    await expect(page.getByTestId('todo-split')).not.toContainText('anymore');
+
+    // T-20: the orchestrator asks for review; your comment reopens it and reaches the orchestrator.
+    await json(pane, ['todos', 'review', 'T-1', '--summary', 'Findings attached'], orchestrator);
+    await expect.poll(() => statusOf(page, 1), { timeout: 15_000 }).toBe('waiting');
+    await page.getByTestId('todo-composer-input').fill('Can you include a root cause report?');
+    await page.getByTestId('todo-composer-input').press('ControlOrMeta+Enter');
+    await expect.poll(async () => (await detail(page, 1)).todo.state, { timeout: 15_000 }).toBe('in_progress');
+    await expect.poll(() => statusOf(page, 1), { timeout: 15_000 }).not.toBe('waiting');
+    await expect.poll(() => transcript(page, orchestrator.panelId), { timeout: 30_000 }).toContain('Can you include a root cause report?');
+    await expect.poll(async () => (await approvals(page)).items.filter(item => item.todo?.number === 1 && item.state === 'waiting').length, { timeout: 15_000 }).toBe(0);
+    await shot(page, 't20-reopened-light');
   } finally {
     await close();
   }

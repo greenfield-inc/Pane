@@ -189,7 +189,7 @@ export function registerAutopilotHandlers(services: AutopilotServices, commandRe
   commandRegistry.register('autopilot:read-doc', (file: PaneCommandValue, options?: PaneCommandValue) => readDocument(
     manager,
     decodeBoundary(file, boundary.nonEmptyString),
-    { inline: decodeBoundary(options ?? {}, readDocOptionsSchema).inline === true, links: () => [...itemLinkPaths(notify), ...(services.todoService?.attachedFiles() ?? [])] },
+    { inline: decodeBoundary(options ?? {}, readDocOptionsSchema).inline === true, links: () => [...itemLinkPaths(notify), ...(services.todoService?.attachedFiles() ?? [])], resolve: (target) => services.todoService?.documentFile(target) ?? target },
   ));
 
   // runpane and the pane MCP.
@@ -311,27 +311,32 @@ function itemLinkPaths(notify: Pick<NotifyService, 'queue'>): string[] {
 const IMAGE_LIMIT_BYTES = 8 * 1024 * 1024;
 const IMAGE_TYPES = new Map([['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg'], ['gif', 'image/gif'], ['webp', 'image/webp'], ['svg', 'image/svg+xml']]);
 
-export function readDocument(manager: Pick<AutopilotManager, 'snapshot'>, file: string, options: { inline?: boolean; links?: () => string[] } = {}): AutopilotDocument {
+/**
+ * `resolve` names the file to actually read for a path (a to-do's kept copy once the attached file is gone, T-21);
+ * the document still answers to the path that was asked for.
+ */
+export function readDocument(manager: Pick<AutopilotManager, 'snapshot'>, file: string, options: { inline?: boolean; links?: () => string[]; resolve?: (file: string) => string } = {}): AutopilotDocument {
   const { stack, run } = manager.snapshot();
   // Only documents something put on the stack, the run's own docs, or a waiting item's links open here.
   const known = stack.entries.some(entry => entry.tabs.some(tab => tab.kind === 'file' && tab.path === file))
     || (!!run && !path.relative(run.folder, file).startsWith('..'))
     || (options.links?.() ?? []).includes(file);
   if (!known) return { kind: 'missing', path: file, message: 'This file is not on Autopilot\'s stack.' };
+  const source = options.resolve?.(file) ?? file;
   let stat: fs.Stats;
-  try { stat = fs.statSync(file); } catch { return { kind: 'missing', path: file, message: `There is no file at ${file} any more.` }; }
+  try { stat = fs.statSync(source); } catch { return { kind: 'missing', path: file, message: `There is no file at ${file} any more.` }; }
   if (!stat.isFile()) return { kind: 'missing', path: file, message: `${file} is not a file.` };
   const image = IMAGE_TYPES.get(path.extname(file).slice(1).toLowerCase());
   if (image) {
     // An image (a to-do's pasted screenshot, say) comes back as a data URL, which any screen can show.
     // An SVG too: screens show it through <img>, which runs none of its scripts.
     if (stat.size > IMAGE_LIMIT_BYTES) return { kind: 'missing', path: file, message: `${path.basename(file)} is larger than 8 MiB; open it in Pane instead.` };
-    return { kind: 'image', path: file, dataUrl: `data:${image};base64,${fs.readFileSync(file).toString('base64')}` };
+    return { kind: 'image', path: file, dataUrl: `data:${image};base64,${fs.readFileSync(source).toString('base64')}` };
   }
   const html = /\.html?$/i.test(file);
-  if (html && !options.inline) return { kind: 'html', url: pathToFileURL(file).toString(), path: file };
+  if (html && !options.inline) return { kind: 'html', url: pathToFileURL(source).toString(), path: file };
   if (stat.size > TEXT_LIMIT_BYTES) return { kind: 'missing', path: file, message: `${path.basename(file)} is larger than 2 MiB; open it in Pane instead.` };
-  const text = fs.readFileSync(file, 'utf8');
-  if (html) return { kind: 'html', url: pathToFileURL(file).toString(), path: file, html: text };
+  const text = fs.readFileSync(source, 'utf8');
+  if (html) return { kind: 'html', url: pathToFileURL(source).toString(), path: file, html: text };
   return { kind: 'text', text, path: file };
 }
