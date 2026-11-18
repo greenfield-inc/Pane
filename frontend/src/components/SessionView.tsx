@@ -1369,7 +1369,7 @@ export const SessionView = memo(() => {
         <LaunchProfileDialog profile={launchingProfile} defaults={{ repoId: activeSession.projectId }} onClose={() => setLaunchingProfile(null)} onLaunched={() => setLaunchingProfile(null)} />
       )}
     </div>
-  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen, launchingProfile]);
+  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen, launchingProfile, profilesOn]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
