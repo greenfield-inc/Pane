@@ -100,6 +100,19 @@ export function waitingLine(progress: SessionMoveProgress): string {
     + `${progress.stoppedTabs} of ${plural(progress.totalTabs, 'tab')} ${progress.stoppedTabs === 1 ? 'has' : 'have'} stopped.`;
 }
 
+/** Why a frozen move still waits, shown under the confirming line so each case reads differently. */
+export function confirmingReason(progress: SessionMoveProgress): { title: string; detail: string } | undefined {
+  if (progress.phase !== 'confirming' || !progress.waitReason) return undefined;
+  const target = progress.target;
+  const title = {
+    unreachable: `${target} isn’t answering`,
+    undecided: `${target} answers, but hasn’t decided the move yet`,
+    startFailed: `${target} couldn’t start the Session`,
+  }[progress.waitReason];
+  const detail = progress.error ? `${progress.error.message} ${progress.error.next}` : '';
+  return { title, detail };
+}
+
 export function confirmingLine(target: string): string {
   return `${target} hasn’t confirmed it started the Session. Pane keeps asking ${target} on its own: it finishes the move once ${target} confirms, `
     + `or runs the Session here again once ${target} confirms it rolled the move back. Until then it stays paused here, so two copies never run.`;

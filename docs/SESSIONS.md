@@ -530,7 +530,13 @@ summary says which files wait where.
 
 If anything fails before the other machine starts the tabs, it removes
 everything it set up, this machine restarts the tabs, and the dialog says what
-happened and what to fix. After the freeze, the other machine records
+happened and what to fix. The other machine writes down how to undo each step
+before it takes it, so that clean-up also happens if Pane there quit partway
+through: when it starts again, it removes the Panes, worktrees, tabs,
+conversations and arriving Session it made, and puts back what it had replaced.
+A clean-up step that keeps failing (a permissions or disk problem) is retried,
+and after five tries Pane there shows one notice naming what was left and how
+to fix it. After the freeze, the other machine records
 its one decision on disk before acting on it: that the move started there, or
 that it was rolled back and can never start. This machine keeps the Session
 paused as "Moving to <machine>" and keeps asking until it hears that decision,
@@ -540,7 +546,10 @@ retires its copy once the move started there, and runs the Session here again
 only once the other machine confirms it rolled the move back. A start cut short
 by a restart there finishes on its own when that Pane starts again. While the
 other machine doesn't answer, or can't say, the Session stays paused here, so it
-never runs twice; **Check again** asks at once, and retries a start that failed
+never runs twice, and the dialog says which: not answering means open Pane
+there; answering without a decision means open the Session there. A record
+there that can't be read counts as no answer, never as a roll-back. **Check
+again** asks at once, and retries a start that failed
 there before any tab started.
 
 Not moved: secret values and keychain items, running processes (restart them

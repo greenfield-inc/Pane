@@ -559,17 +559,17 @@ export class MoveCoordinator {
     const stays = `The Session stays paused here so it never runs twice; Pane keeps asking ${target}.`;
     switch (wait.kind) {
       case 'starting':
-        this.touch(job, { phase: 'moving', error: undefined });
+        this.touch(job, { phase: 'moving', error: undefined, waitReason: undefined });
         return;
       case 'startFailed':
-        this.touch(job, { phase: 'confirming', error: { message: wait.status.error?.message ?? `${target} couldn't start the Session.`, next: wait.status.error?.next ?? 'Check again to retry.' } });
+        this.touch(job, { phase: 'confirming', waitReason: 'startFailed', error: { message: wait.status.error?.message ?? `${target} couldn't start the Session.`, next: wait.status.error?.next ?? 'Check again to retry.' } });
         return;
       case 'unknown':
-        this.touch(job, { phase: 'confirming', error: { message: `${target} can't say whether the move finished${wait.status.error ? ` (${wait.status.error.message})` : ''}.`, next: `${stays} Open the Session on ${target} to check it there.` } });
+        this.touch(job, { phase: 'confirming', waitReason: 'undecided', error: { message: `${target} answers but can't say yet whether the move finished${wait.status.error ? ` (${wait.status.error.message})` : ''}.`, next: `${stays} Open the Session on ${target} to check it there.` } });
         return;
       case 'unreachable':
         if (Date.now() - wait.since < SILENCE_AFTER_FREEZE_MS && job.progress.phase !== 'confirming') return;
-        this.touch(job, { phase: 'confirming', error: { message: `${target} isn't answering (${wait.error}).`, next: `${stays} Check that Pane is open on ${target}.` } });
+        this.touch(job, { phase: 'confirming', waitReason: 'unreachable', error: { message: `${target} isn't answering (${wait.error}).`, next: `${stays} Open Pane on ${target}.` } });
     }
   }
 
