@@ -43,10 +43,12 @@ test('a booting device shows a phone-shaped skeleton until its first frame, then
     await expect(skeleton).toHaveAttribute('data-skeleton', 'visible');
     await expect(page.getByTestId('device-panel')).toHaveAttribute('data-phase', 'booting');
     await expect(page.getByTestId('device-overlay')).toHaveCount(0);
+    await expect(page.getByRole('status', { name: 'Booting iPhone 17 Pro' })).toHaveCount(1);
     await shoot(page, `device-tab-booting-${theme}`);
     // Live, but no frame yet: the same skeleton stays.
     await expect(page.getByTestId('device-panel')).toHaveAttribute('data-phase', 'live');
     await expect(skeleton).toBeVisible();
+    await expect(page.getByRole('status', { name: 'Connecting to iPhone 17 Pro' })).toHaveCount(1);
     await shoot(page, `device-tab-first-frame-wait-${theme}`);
     await expect(page.getByTestId('device-screen')).toBeVisible();
     await expect(skeleton).toHaveCount(0);

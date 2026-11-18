@@ -19,9 +19,11 @@ export function DeviceScreenSkeleton({ chain, label, fading }: {
   fading: boolean;
 }) {
   return (
+    <>
+    {/* Beside the skeleton: its root is aria-hidden. */}
+    {!fading && <LoadingStatus label={label} />}
     <Skeleton testId="device-screen-skeleton" chain={chain}
       className={cn('absolute inset-0 bg-device-screen [container-type:size]', fading && 'skeleton-fade-out')}>
-      <LoadingStatus label={label} />
       <div className="flex justify-between px-[7cqmin] pt-[4.5cqmin]">
         <Bone className="h-[3.5cqmin] w-[11cqmin] rounded-full bg-device-bone" />
         <Bone className="h-[3.5cqmin] w-[15cqmin] rounded-full bg-device-bone" />
@@ -33,5 +35,6 @@ export function DeviceScreenSkeleton({ chain, label, fading }: {
         {Array.from({ length: DOCK_ICONS }, (_, index) => <Bone key={index} className="h-[15cqmin] w-[15cqmin] rounded-[3.5cqmin] bg-device-bone" />)}
       </div>
     </Skeleton>
+    </>
   );
 }

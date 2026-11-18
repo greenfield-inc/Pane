@@ -23,7 +23,7 @@ export function devicePhaseCopy(state: Pick<DevicePanelState, 'phase' | 'name' |
     case 'in-use':
       return { title: `In use by ${state.heldBy?.paneName ?? 'another Pane'}`, detail: 'One simulator per machine. Taking over moves it to this Pane.', action: 'take-over' };
     case 'error':
-      return { title: `${state.name} did not start`, detail: 'The agent\'s tool call says why.', action: 'boot' };
+      return { title: `${state.name} did not start`, detail: 'The message under the phone, or the agent\'s tool call, says why.', action: 'boot' };
     default:
       return undefined;
   }

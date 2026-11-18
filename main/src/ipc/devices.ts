@@ -225,6 +225,11 @@ async function setPanelState(panel: ToolPanel, patch: Partial<DevicePanelState>,
   await panelManager.updatePanel(panel.id, update);
 }
 
+/** A device tab whose open found the device held by another Pane: in use, naming the device and that Pane. */
+function inUseState(services: AppServices, cause: DeviceBusyError): Partial<DevicePanelState> {
+  return { phase: 'in-use', deviceId: cause.deviceId, name: cause.deviceName, heldBy: { paneId: cause.holder, paneName: paneNameOf(services, cause.holder) } };
+}
+
 /** Device tabs follow their device: live while their Pane holds it, in use or off otherwise. */
 async function followDeviceChange(change: DeviceChange): Promise<void> {
   for (const panelId of tabsByDevice.get(change.id) ?? []) {
@@ -377,7 +382,7 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
       };
     } catch (cause) {
       if (cause instanceof DeviceBusyError) {
-        await setPanelState(panel, { phase: 'in-use', deviceId: cause.deviceId, name: cause.deviceName, heldBy: { paneId: cause.holder, paneName: paneNameOf(services, cause.holder) } });
+        await setPanelState(panel, inUseState(services, cause));
       } else {
         await setPanelState(panel, { phase: 'error' });
       }
@@ -815,6 +820,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     // iOS on a computer without Xcode always runs on a Mac, including Try again after the Mac was offline.
     if (state.machineId || (state.platform === 'ios' && !(await devices().probe()).ios.ready)) {
       // On a linked Mac: Shut down ends the lease there (the Mac shuts it down after its warm window); Boot opens it again.
+      if (action !== 'shutdown') await setPanelState(panel, { phase: 'booting' });
       await remoteDevices(services).close(caller.paneId).catch(() => undefined);
       if (action === 'shutdown') {
         await setPanelState(panel, { phase: 'off' });
@@ -836,7 +842,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
       const opened = await devices().open(caller, state.deviceId ? { platform: state.platform, device: state.deviceId } : { platform: state.platform });
       await setPanelState(panel, { deviceId: opened.device.id, phase: 'live', heldBy: undefined });
     } catch (cause) {
-      if (cause instanceof DeviceBusyError) await setPanelState(panel, { phase: 'in-use', heldBy: { paneId: cause.holder, paneName: paneNameOf(services, cause.holder) } });
+      if (cause instanceof DeviceBusyError) await setPanelState(panel, inUseState(services, cause));
       else await setPanelState(panel, { phase: 'error' });
       throw cause;
     }

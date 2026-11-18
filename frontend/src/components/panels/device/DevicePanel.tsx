@@ -83,10 +83,11 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const shown = live && isActive && pageVisible;
   const streaming = live && isActive && client.streamUrl !== undefined && state.platform === 'ios';
   const [controls, frameRate, refreshControls] = useDeviceStatus(client, panel.id, shown, streaming);
-  // Booting (or reaching a linked Mac), then until the screen paints its first frame: a skeleton.
+  // Booting (or reaching a linked Mac), then until the shown screen paints its first frame: a skeleton.
+  // A hidden window starts no wait, so showing it again gets the full delay before any bones.
   const [painted, setPainted] = useState(false);
   const skeletonChain = `device:${panel.id}`;
-  const screenHold = useSkeletonHold(state.phase === 'booting' || (live && isActive && !painted), skeletonChain);
+  const screenHold = useSkeletonHold(state.phase === 'booting' || (shown && !painted), skeletonChain);
   const send = useCallback((input: DeviceInput) => { void client.input(panel.id, input).catch(() => undefined); }, [client, panel.id]);
   const act = useCallback((input: DeviceInput) => run(input.kind, async () => {
     await client.input(panel.id, input);
