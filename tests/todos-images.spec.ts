@@ -151,3 +151,12 @@ test('T-5 a file dropped on the thread goes to the composer', async ({ page }) =
   await expect(page.getByTestId('todo-composer-attached')).toContainText('from-thread.png');
   expect((await todoActs(page)).some((act) => act.kind === 'comment')).toBe(false);
 });
+
+test('T-5 a file dropped on a reply goes with that reply, not the main composer', async ({ page }) => {
+  await open(page, 'light-rounded');
+  const reply = page.getByTestId('todo-thread-reply-box').first();
+  await reply.scrollIntoViewIfNeeded();
+  await sendPng(page, '[data-testid="todo-thread-reply-box"]', 'for-reply.png', 'drop');
+  await expect(reply).toContainText('for-reply.png');
+  await expect(page.getByTestId('todo-composer')).not.toContainText('for-reply.png');
+});

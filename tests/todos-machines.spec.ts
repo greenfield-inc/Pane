@@ -53,3 +53,17 @@ test('T-18: another machine\'s to-do opens there: the window switches to it with
   await row.click();
   await expect.poll(() => page.evaluate(() => window.__paneTestElectronMock.getNavigationMemory('devbox'))).toMatchObject({ view: 'todos', todoNumber: 1 });
 });
+
+test('T-6: at 700 px with the sidebar open, the list header and footer stay inside the list', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 800 });
+  await open(page);
+  await expect(page.locator('[data-testid="todo-row"]').first()).toBeVisible();
+  const inside = await page.getByTestId('todos-view').evaluate((view) => {
+    const right = view.getBoundingClientRect().right + 1;
+    return ['todos-group', 'todos-new', 'todos-footer'].map((id) => {
+      const target = id === 'todos-footer' ? view.querySelector(`[data-testid="${id}"] > span:last-child`) : view.querySelector(`[data-testid="${id}"]`);
+      return target ? target.getBoundingClientRect().right <= right : false;
+    });
+  });
+  expect(inside).toEqual([true, true, true]);
+});

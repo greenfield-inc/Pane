@@ -150,6 +150,23 @@ test('the agents chip opens the Session, whose breadcrumb returns to the same to
   await expect(page.getByTestId('todo-page-title')).toHaveText('Invoice PDFs');
 });
 
+test('back from the Session, the to-do shows the tab and scroll you left it on', async ({ page }) => {
+  await open(page);
+  await page.setViewportSize({ width: 1440, height: 420 });
+  await openTodo(page, 12);
+  await tabs(page).nth(1).click();
+  await expect(tabs(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+  const scroll = page.getByTestId('todo-page-scroll');
+  const top = await scroll.evaluate((node) => { node.scrollTop = 120; return node.scrollTop; });
+  expect(top).toBeGreaterThan(0);
+  await page.getByTestId('todo-chip-agents').click();
+  await expect(page.locator('[data-session-content-id="s-12"]')).toBeVisible();
+  await crumb(page).click();
+  await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '12');
+  await expect(tabs(page).nth(1)).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => scroll.evaluate((node) => node.scrollTop)).toBe(top);
+});
+
 test('a sub-to-do opens its parent’s Session and comes back to itself', async ({ page }) => {
   await open(page);
   await openTodo(page, 12);

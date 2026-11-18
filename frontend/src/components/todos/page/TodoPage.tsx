@@ -25,13 +25,14 @@ import { TodoChips } from './TodoChips';
 import { TodoDetailsSidebar, type TodoDetailsTab } from './TodoDetailsSidebar';
 import { TodoSplit, splitTabLabel, useSplitOverviewSession, type TodoApprovalOpen } from './TodoSplit';
 import { openTodoSession } from './todoNavigation';
-import { initialSplit, splitAttachmentItems, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem } from './splitTabs';
+import { initialSplit, splitAttachmentItems, splitItemKey, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem } from './splitTabs';
 
 /** The thread's narrowest usable width beside the split and the details (round 7 QA, R8). */
 const THREAD_FLOOR_PX = 360;
 /** The split's narrowest useful width. */
 const SPLIT_FLOOR_PX = 240;
 import { pruneSplitMemory, readSplitHidden, todoSplitKey, writeSplitHidden } from './todoSplitMemory';
+import { recallTodoView, rememberTodoView, restoreActiveTab } from './todoPageView';
 
 export interface TodoPageProps {
   number: number;
@@ -129,11 +130,40 @@ function safeRead(key: string): boolean {
   }
 }
 
+/** The split's scrolled area (an Overview or a document), found when it exists. */
+function splitScroller(): HTMLElement | null {
+  const root = document.querySelector<HTMLElement>('[data-testid="todo-split"]');
+  if (!root) return null;
+  for (const element of root.querySelectorAll<HTMLElement>('*')) {
+    const overflow = getComputedStyle(element).overflowY;
+    if ((overflow === 'auto' || overflow === 'scroll') && element.scrollHeight > element.clientHeight) return element;
+  }
+  return null;
+}
+
+/** Scrolls the split back once its content has loaded (it may arrive a few frames late); stops after a second. */
+function restoreSplitScroll(top: number): () => void {
+  let frames = 0;
+  let id = 0;
+  const step = () => {
+    const scroller = splitScroller();
+    if (scroller && scroller.scrollHeight - scroller.clientHeight >= top) {
+      scroller.scrollTop = top;
+      return;
+    }
+    if (++frames < 60) id = requestAnimationFrame(step);
+  };
+  id = requestAnimationFrame(step);
+  return () => cancelAnimationFrame(id);
+}
+
 function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDetail; areaPx: number; onBack: () => void; onOpenTodo: (number: number) => void }) {
   const number = detail.todo.number;
   const { hiddenAtOpen, remember } = useSplitMemory(detail, areaPx);
   const overview = useSplitOverviewSession(detail);
-  const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => initialSplit(detail.attachments, hiddenAtOpen, overview));
+  const viewKey = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, number);
+  const [leftAs] = useState(() => recallTodoView(viewKey));
+  const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => restoreActiveTab(initialSplit(detail.attachments, hiddenAtOpen, overview), leftAs?.tab ?? null));
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsTab, setDetailsTab] = useState<TodoDetailsTab>('details');
   const [approval, setApproval] = useState<TodoApprovalOpen | null>(null);
@@ -143,6 +173,23 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
   const returnFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => { dispatch({ type: 'sync', groups: detail.attachments, overview }); }, [detail.attachments, overview]);
+  // Back from the Session (or another to-do), the page is as you left it: its tab and both scrolls.
+  const splitRef = useRef(split);
+  splitRef.current = split;
+  useLayoutEffect(() => {
+    const page = scrollRef.current;
+    if (page && leftAs) page.scrollTop = leftAs.pageScroll;
+    const stopRestore = leftAs && leftAs.splitScroll > 0 ? restoreSplitScroll(leftAs.splitScroll) : null;
+    return () => {
+      stopRestore?.();
+      const shown = splitRef.current.items[splitRef.current.active];
+      rememberTodoView(viewKey, {
+        tab: shown ? splitItemKey(shown) : null,
+        pageScroll: page?.scrollTop ?? 0,
+        splitScroll: splitScroller()?.scrollTop ?? 0,
+      });
+    };
+  }, [viewKey, leftAs]);
   // Focus starts on the title, so Tab walks the page from the top.
   useEffect(() => { titleRef.current?.focus({ preventScroll: true }); }, []);
   // The split's hidden state is remembered as it changes (never for the state it opened with).

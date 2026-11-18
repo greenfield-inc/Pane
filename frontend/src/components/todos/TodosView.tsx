@@ -232,7 +232,7 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
     <div ref={viewRef} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary text-[14px] text-text-primary" data-testid="todos-view">
       <div className="flex h-[50px] shrink-0 items-center gap-2 border-b border-border-primary px-4">
         <h1 className="mr-1.5 shrink-0 whitespace-nowrap text-[15px] font-semibold">To-dos</h1>
-        <div role="tablist" aria-label="Which to-dos" className="flex items-center gap-2">
+        <div role="tablist" aria-label="Which to-dos" className="scrollbar-none flex min-w-0 items-center gap-2 overflow-x-auto">
           {TABS.map(item => (
             <button
               key={item.id}
@@ -242,7 +242,7 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
               aria-label={narrow && item.short ? item.label : undefined}
               data-testid={`todos-tab-${item.id}`}
               onClick={() => { setTab(item.id); setSelectedKey(null); }}
-              className={cn(TODOS_PILL, tab === item.id ? TODOS_PILL_ON : TODOS_PILL_OFF)}
+              className={cn(TODOS_PILL, 'shrink-0', tab === item.id ? TODOS_PILL_ON : TODOS_PILL_OFF)}
             >
               {narrow && item.short ? item.short : item.label}
               {item.id === 'waiting' && <b className="font-semibold text-status-warning" data-testid="todos-waiting-count">{counts.waiting}</b>}
@@ -252,7 +252,7 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
         <span className="flex-1" />
         <Dropdown
           trigger={(
-            <button type="button" className={TODOS_HEADER_BUTTON} data-testid="todos-group" aria-label={`Group by ${TODOS_GROUPING_LABEL[grouping]}`}>
+            <button type="button" className={cn(TODOS_HEADER_BUTTON, 'shrink-0')} data-testid="todos-group" aria-label={`Group by ${TODOS_GROUPING_LABEL[grouping]}`}>
               <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
               {narrow ? TODOS_GROUPING_LABEL[grouping] : `Group: ${TODOS_GROUPING_LABEL[grouping]}`}
               <ChevronDown className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />
@@ -265,7 +265,7 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
           position="bottom-right"
           width="md"
         />
-        <button type="button" className={TODOS_HEADER_BUTTON} onClick={() => setCreating(true)} data-testid="todos-new" aria-label="New to-do" title="New to-do">
+        <button type="button" className={cn(TODOS_HEADER_BUTTON, 'shrink-0')} onClick={() => setCreating(true)} data-testid="todos-new" aria-label="New to-do" title="New to-do">
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />{narrow ? null : 'New to-do'}
         </button>
       </div>
@@ -311,13 +311,15 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
       </div>
 
       <div className="flex h-8 shrink-0 items-center gap-4 overflow-hidden whitespace-nowrap border-t border-border-primary px-4 text-[12px] text-text-tertiary" data-testid="todos-footer">
-        <KeyHint keys={['J', 'K']} label="move" />
-        <KeyHint keys={['↵']} label="open" />
-        <KeyHint keys={['S']} label="stop" />
-        <KeyHint keys={['R']} label="resume" />
-        {!narrow && <KeyHint keys={['G']} label="group by" />}
-        {!narrow && <KeyHint keys={['C']} label="new to-do" />}
-        <span className="flex-1" />
+        {/* The hints give way first: the open count always shows. */}
+        <div className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden">
+          <KeyHint keys={['J', 'K']} label="move" />
+          <KeyHint keys={['↵']} label="open" />
+          <KeyHint keys={['S']} label="stop" />
+          <KeyHint keys={['R']} label="resume" />
+          {!narrow && <KeyHint keys={['G']} label="group by" />}
+          {!narrow && <KeyHint keys={['C']} label="new to-do" />}
+        </div>
         <span className="shrink-0">{counts.open} open</span>
       </div>
 

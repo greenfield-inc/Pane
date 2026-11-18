@@ -11,7 +11,7 @@ import { focusTodoTab } from '../todoNavigation';
 import { AgentAvatar, COMPACT_MARKDOWN } from '../TodoPageParts';
 import { attachedLabel, attachmentAt, attachmentNamed, commentWithFiles, eventFiles } from './threadInputs';
 import { TodoImageThumb } from './TodoImage';
-import { sendThreadComment, useComposerAttach } from './useThreadSend';
+import { sendThreadComment, useComposerAttach, useFileDropZone } from './useThreadSend';
 
 /** What every card reads from the page. */
 export interface ThreadContext {
@@ -388,6 +388,8 @@ function ReplyBox({ ctx, replyTo, placeholder }: { ctx: ThreadContext; replyTo: 
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  // A file dropped on the reply goes with the reply, not with the next comment in the main composer.
+  const drop = useFileDropZone((files) => void attach.addFiles(files), attach.available);
   const ready = text.trim().length > 0 || attach.files.length > 0;
   const send = async () => {
     if (!ready || sending) return;
@@ -416,7 +418,15 @@ function ReplyBox({ ctx, replyTo, placeholder }: { ctx: ThreadContext; replyTo: 
     void attach.addFiles(files);
   };
   return (
-    <div className="border-t border-border-secondary" data-testid="todo-thread-reply-box" data-reply-to={replyTo}>
+    <div
+      onDragOver={drop.onDragOver}
+      onDragLeave={drop.onDragLeave}
+      onDrop={drop.onDrop}
+      className={cn('border-t', drop.dragging ? 'border-interactive bg-interactive/5' : 'border-border-secondary')}
+      data-testid="todo-thread-reply-box"
+      data-reply-to={replyTo}
+      data-dragging={drop.dragging || undefined}
+    >
       {attach.files.length > 0 && <div className="px-3 pt-2"><AttachedChips files={attach.files} onRemove={attach.remove} /></div>}
       <div className="flex items-center gap-2 py-[7px] pl-3 pr-2.5">
         <Avatar name="You" small />
