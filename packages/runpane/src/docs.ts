@@ -68,7 +68,8 @@ export function runDocsSearch(parsed: ParsedArgs): number {
   const results = loadDocs(parsed.paneDir)
     .map((doc) => ({ doc, score: score(doc, terms) }))
     .filter((hit) => hit.score > 0)
-    .sort((a, b) => b.score - a.score || a.doc.path.localeCompare(b.doc.path))
+    // On a tie, a guide comes before a command's reference: it says how the commands fit together.
+    .sort((a, b) => b.score - a.score || Number(a.doc.kind === 'command') - Number(b.doc.kind === 'command') || a.doc.path.localeCompare(b.doc.path))
     .slice(0, limit)
     .map(({ doc }) => ({ path: doc.path, title: doc.title, kind: doc.kind, excerpt: excerpt(doc.text, terms) }));
   if (parsed.json) {
