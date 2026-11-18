@@ -4,7 +4,7 @@ import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Arch
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
+import { isMissionControlEnabled, isProfilesEnabled, useConfigStore } from '../stores/configStore';
 import { SETTINGS_PREFERENCE_KEYS, normalizeSidebarPaneRowLayout, type SidebarPaneRowLayout } from '../types/settings';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { AddProjectDialog } from './AddProjectDialog';
@@ -779,6 +779,8 @@ export function LoopsNavRow({ active }: { active: boolean }) {
 
 /** Opens the Profiles page: teams of agents and the workflows Pane runs for them. */
 export function ProfilesNavRow({ active }: { active: boolean }) {
+  const profilesOn = useConfigStore(state => isProfilesEnabled(state.config));
+  if (!profilesOn) return null;
   return (
     <button
       type="button"

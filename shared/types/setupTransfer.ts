@@ -120,6 +120,7 @@ export interface SetupPreferenceConfig {
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   missionControlEnabled?: boolean;
   notesEnabled?: boolean;
+  profilesEnabled?: boolean;
   sessionCreationPreferences?: SetupSessionCreationPreferences;
 }
 

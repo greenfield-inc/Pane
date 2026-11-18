@@ -9,7 +9,7 @@ import { dismissDialogs, isolatedPane, launchIsolated, runpane, type IsolatedPan
 // orchestrators are the scripted ACP agent; workers run the fake terminal agent, which replays
 // real Claude Code and Codex captures (main/src/services/agentStatus/__fixtures__/screens), or
 // plain shells. A recorder watches each Session row's icon and logs every change with its time.
-// Every journey runs in its own Session, all at once, so the whole run takes about four minutes.
+// Every journey runs in its own Session, all at once, so the whole run takes about three minutes.
 
 const AGENT = path.resolve('main/src/services/chatTabs/testing/scriptedAgent.mjs');
 const FAKE = path.resolve('tests/fixtures/fakeTerminalAgent.mjs');
@@ -148,8 +148,8 @@ test('the Session icon spins only for real turns, with no flicker (J1–J10, J12
     const j9a = await worker(pane, repo, s['J9 archive'], 'j9-archive', loop(120), 'claude');
     const j9b = await worker(pane, repo, s['J9 close'], 'j9-close', loop(120), 'claude');
     const j9c = await worker(pane, repo, s['J9 detach'], 'j9-detach', loop(120), 'claude');
-    await worker(pane, repo, s['J10 long command'], 'j10-claude', loop(180), 'claude');
-    await worker(pane, repo, s['J10 long command'], 'j10-codex', fake('codex-long-command', '--from', 'turn-start', '--loop', 'working:command-late:180', '--to', 'turn-end'), 'codex');
+    await worker(pane, repo, s['J10 long command'], 'j10-claude', loop(60), 'claude');
+    await worker(pane, repo, s['J10 long command'], 'j10-codex', fake('codex-long-command', '--from', 'turn-start', '--loop', 'working:command-late:60', '--to', 'turn-end'), 'codex');
 
     // J4: a collapsed Session with a working worker spins and says "1 working".
     const j4Row = page.getByTestId(`orchestration-session-${s['J4 worker'].id}`);
@@ -170,9 +170,15 @@ test('the Session icon spins only for real turns, with no flicker (J1–J10, J12
     await runpane(pane, ['panels', 'close', '--panel', j9b.panelId, '--force', '--yes', '--json']);
     await runpane(pane, ['sessions', 'detach', '--session', s['J9 detach'].id, '--pane', j9c.paneId, '--yes', '--json']);
 
-    // Let the long ones finish: J10's 180 s loop (which ends at a loop's end, up to 35 s later),
-    // its reply, and 10 s of quiet after.
-    await page.waitForTimeout(Math.max(0, t0 + 300_000 - Date.now()));
+    // Let the long ones finish: J10's 60 s loop (which ends at a loop's end, up to 35 s later)
+    // and its reply, with no Session left spinning, then 10 s of quiet after.
+    await expect.poll(async () => {
+      const j10Done = transitions(await changes(page, s['J10 long command'])).at(-1) === 'idle';
+      const spinning = [];
+      for (const name of names) if ((await changes(page, s[name])).at(-1)?.state === 'working') spinning.push(name);
+      return j10Done ? spinning : ['J10 long command', ...spinning];
+    }, { timeout: Math.max(0, t0 + 180_000 - Date.now()), intervals: [500] }).toEqual([]);
+    await page.waitForTimeout(10_000);
     clearInterval(poller);
     await shot(page, 'after');
     const log = (name: string) => changes(page, s[name]);
@@ -227,7 +233,8 @@ test('the Session icon spins only for real turns, with no flicker (J1–J10, J12
       expect(transitions(j9), name).toEqual(['working', 'idle']);
       expect(firstAt(j9, 'idle', j9At)! - j9At, name).toBeLessThanOrEqual(10_000);
     }
-    // J10: a long silent command spins once and holds, with no dips, until the turn ends.
+    // J10: a silent command longer than the 25 s frozen-screen window (J7) spins once and holds,
+    // with no dips, until the turn ends.
     expect(transitions(await log('J10 long command'))).toEqual(['working', 'idle']);
     for (const name of names) {
       const log = await changes(page, s[name]);

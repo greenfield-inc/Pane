@@ -1,0 +1,24 @@
+# dcouple/ideate: written by `node scripts/import-agent-farm-profiles.js` from Agent Farm's dcouple plugin 0.1.27; don't edit by hand.
+# A single agent step: the run ends when the agent reports done.
+format: pane-profile/1
+name: dcouple-ideate
+version: 0.1.27
+title: Talk through a new idea or an existing ticket, with mockups and plain explanations when useful, and turn it into a clear ticket or brief ready to plan.
+
+agents:
+  ideate:
+    runs: codex/gpt-6-astra
+    effort: high
+    reads: [agents/ideate-astra]
+    skills: [create-ticket, ui-mockup, explain-visually, eli5, html-explainer, research-web, deep-dive, tech-deep-dive, product-compare]
+
+flow:
+  start: work
+  work:
+    agent: ideate
+    goal: Talk through a new idea or an existing ticket, with mockups and plain explanations when useful, and turn it into a clear ticket or brief ready to plan
+    outcomes: {done: end}
+
+samples:
+  work:
+    done: ["Done: what it did, with links to what it made.", "Done: what it found, and what is left for you to decide."]

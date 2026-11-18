@@ -236,6 +236,8 @@ describe('relay agent', () => {
       const before = relay.link.pings;
       vi.advanceTimersByTime(5_000);
       await waitFor(() => relay.link.pings === before + 1 || relay.hellos.length > 1, 'a ping');
+      // The relay has written its answer; one I/O turn lets the agent read it before time moves on.
+      await new Promise((resolve) => setImmediate(resolve));
     };
 
     for (let i = 0; i < 6; i++) await ping();

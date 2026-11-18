@@ -103,14 +103,11 @@ jobs:
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
-    # CI retries a failed unit test once; the retry report lists every retried
-    # test in the job summary, so flaky tests stay visible (--retry, see
-    # CONTRIBUTING.md). Playwright journeys are never retried.
     - name: Run main process test suite
-      run: CI=1 pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: CI=1 pnpm --filter main exec vitest run
 
     - name: Run frontend unit tests
-      run: CI=1 pnpm --filter frontend exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: CI=1 pnpm --filter frontend exec vitest run
 
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
@@ -166,42 +163,43 @@ jobs:
   markdown-links:
     name: Markdown Links
     runs-on: ubuntu-latest
+    env:
+      LYCHEE_VERSION: 0.24.2
+      LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
 
-    # The action downloads lychee from GitHub's releases, which fail for hours
-    # at a time, so a failed first try runs once more. A broken link fails both.
+    # lychee is a pinned release binary kept in the Actions cache, so a run
+    # downloads nothing. A cache miss downloads it once; that download is not
+    # retried, so a failure there fails the job.
+    - name: Restore lychee
+      id: lychee-cache
+      uses: actions/cache@v5
+      with:
+        path: ${{ runner.temp }}/lychee
+        key: lychee-${{ env.LYCHEE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Download lychee
+      if: steps.lychee-cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p "$RUNNER_TEMP/lychee"
+        curl -fsSL -o "$RUNNER_TEMP/lychee.tar.gz" "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-x86_64-unknown-linux-gnu.tar.gz"
+        echo "${LYCHEE_SHA256}  $RUNNER_TEMP/lychee.tar.gz" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP/lychee" --strip-components=1
+
     - name: Check markdown links
-      id: links
-      continue-on-error: true
-      uses: lycheeverse/lychee-action@v2
-      with:
-        args: >-
-          --offline --include-fragments --no-progress
-          --exclude-path node_modules --exclude-path dist-electron
-          './**/*.md'
-        fail: true
+      run: >-
+        "$RUNNER_TEMP/lychee/lychee"
+        --offline --include-fragments --no-progress
+        --exclude-path node_modules --exclude-path dist-electron
+        './**/*.md'
 
-    - name: Wait before checking links again
-      if: steps.links.outcome == 'failure'
-      run: sleep 20
-
-    - name: Check markdown links again
-      if: steps.links.outcome == 'failure'
-      uses: lycheeverse/lychee-action@v2
-      with:
-        args: >-
-          --offline --include-fragments --no-progress
-          --exclude-path node_modules --exclude-path dist-electron
-          './**/*.md'
-        fail: true
-
-  # The smoke suites run beside quality-checks in three jobs. The two browser
+  # The smoke suites run beside quality-checks in seven jobs. The two browser
   # shards split the minimal suite, which loads the renderer from Vite with a
-  # mocked Electron API. The Electron job runs the renderer selection races
-  # (also Vite) while better-sqlite3 rebuilds for Electron, then the journeys
-  # that launch main/dist in real Electron.
+  # mocked Electron API; the two renderer selection race shards also run from
+  # Vite alone. The three Electron shards launch main/dist in real Electron; each
+  # runs the specs playwright.chat-tabs.config.ts lists for it.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke-browser:
@@ -228,9 +226,51 @@ jobs:
     - name: Run maintained functional smoke tests
       run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/2
 
-  functional-smoke-electron:
-    name: Functional Smoke (Electron)
+  # One worker per shard: the tests are CPU-bound, so four workers on one
+  # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
+  renderer-selection:
+    name: Renderer Selection Races (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    # pnpm test:renderer-selection in two parts: the tests' type check runs
+    # once, in shard 1, behind the browser install.
+    - name: Start renderer test type check
+      if: ${{ matrix.shard == 1 }}
+      run: scripts/ci-background.sh start renderer-types pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json
+
+    - name: Install Playwright browser dependencies
+      run: pnpm exec playwright install --with-deps chromium
+
+    - name: Verify renderer selection races
+      run: pnpm exec playwright test --config=tests/renderer/playwright.config.ts --shard=${{ matrix.shard }}/2
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
+
+    - name: Check renderer test types
+      if: ${{ !cancelled() && matrix.shard == 1 }}
+      run: scripts/ci-background.sh wait renderer-types
+
+  functional-smoke-electron:
+    name: Functional Smoke (Electron ${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [session-activity, autopilot, journeys]
 
     steps:
     - name: Checkout code
@@ -270,19 +310,11 @@ jobs:
     - name: Finish Playwright browser dependencies install
       run: scripts/ci-background.sh wait playwright
 
-    # Needs no native module, so the rebuild finishes behind it; only the
-    # Electron launches below wait for it.
-    - name: Verify renderer selection races
-      run: pnpm test:renderer-selection
-      env:
-        PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
-
     - name: Finish native module rebuild for Electron
-      if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait electron-rebuild
 
     - name: Verify sandboxed Electron preload
-      if: ${{ !cancelled() }}
+      if: ${{ matrix.shard == 'journeys' }}
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
@@ -291,6 +323,7 @@ jobs:
       run: xvfb-run -a pnpm test:chat-tabs
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+        PANE_ELECTRON_SHARD: ${{ matrix.shard }}
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Each OS is tested once at
@@ -465,7 +498,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
     - name: Finish main process type checking
       if: ${{ !cancelled() && matrix.shard == 1 }}
@@ -558,7 +591,7 @@ jobs:
   # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
+    needs: [changes, quality-checks, typecheck-lint, markdown-links, functional-smoke-browser, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
