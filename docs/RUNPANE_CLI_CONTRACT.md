@@ -351,6 +351,21 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `devices close`: Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. The device stays warm for 10 minutes.
 - `devices usage`: Report every simulator and emulator on this machine, and the memory and disk they, Pane's device tools and build checkouts use.
 - `devices free`: Shut down unused devices (--idle), or also delete every unused device Pane made and the build checkouts no Pane holds (--all).
+- `browser open`: Pane's browser, shared with the person, signed in as them. Open a URL in a browser tab beside you, in a split, owned by you.
+- `browser tabs`: Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, and any pending dialog.
+- `browser close`: Pane's browser, shared with the person, signed in as them. Close a browser tab you opened.
+- `browser snapshot`: Pane's browser, shared with the person, signed in as them. Read the page as an accessibility tree with element refs (e12), plus its URL and title.
+- `browser screenshot`: Pane's browser, shared with the person, signed in as them. Capture the tab as a PNG image.
+- `browser click`: Pane's browser, shared with the person, signed in as them. Click an element by its ref from browser_snapshot, or a point in the page.
+- `browser type`: Pane's browser, shared with the person, signed in as them. Type text into a field by its ref from browser_snapshot.
+- `browser press`: Pane's browser, shared with the person, signed in as them. Press a key or chord, such as Enter, Escape, Tab, ArrowDown or Meta+A.
+- `browser select`: Pane's browser, shared with the person, signed in as them. Choose options in a select element by its ref from browser_snapshot.
+- `browser scroll`: Pane's browser, shared with the person, signed in as them. Scroll the page, or an element by its ref, by a number of pixels.
+- `browser navigate`: Pane's browser, shared with the person, signed in as them. Go to a URL in a tab, or go back, forward, or reload.
+- `browser wait`: Pane's browser, shared with the person, signed in as them. Wait until the page shows some text, reaches a URL, or shows an element.
+- `browser dialog`: Pane's browser, shared with the person, signed in as them. Answer the alert, confirm or prompt dialog the page has open.
+- `browser evaluate`: Pane's browser, shared with the person, signed in as them. Run JavaScript in the page and return its value.
+- `browser upload`: Pane's browser, shared with the person, signed in as them. Put files from your worktree into a file input, or into the file picker the page opened.
 - `theme read`: Show Pane's own theme: what is selected, the Custom theme, every colour token with its current value, the stable selectors, and the guide for restyling Pane.
 - `theme set`: Restyle Pane itself, only when the person asks to change Pane's look: write the Custom theme (a base theme, colour tokens and CSS) and select it, or switch to another theme. Pane restyles within a second.
 - `theme reset`: Delete the Custom theme and go back to the theme it was built on.
@@ -493,6 +508,21 @@ runpane devices run [--platform <ios|android>] [--background] [--wait-ms <millis
 runpane devices close [--platform <ios|android>] [--json] [--pane-dir <path>]
 runpane devices usage [--json] [--pane-dir <path>]
 runpane devices free (--idle|--all) --yes [--json] [--pane-dir <path>]
+runpane browser open --url <url> [--json] [--pane-dir <path>]
+runpane browser tabs [--json] [--pane-dir <path>]
+runpane browser close [--tab <tab-id>] [--json] [--pane-dir <path>]
+runpane browser snapshot [--tab <tab-id>] [--json] [--pane-dir <path>]
+runpane browser screenshot [--tab <tab-id>] [--full-page] [--json] [--pane-dir <path>]
+runpane browser click [--tab <tab-id>] (--ref <ref>|--x <x> --y <y>) [--button <left|right|middle>] [--double] [--json] [--pane-dir <path>]
+runpane browser type [--tab <tab-id>] --ref <ref> --text <text> [--clear] [--submit] [--json] [--pane-dir <path>]
+runpane browser press [--tab <tab-id>] --key <key> [--ref <ref>] [--json] [--pane-dir <path>]
+runpane browser select [--tab <tab-id>] --ref <ref> --values <values> [--json] [--pane-dir <path>]
+runpane browser scroll [--tab <tab-id>] [--ref <ref>] [--dx <pixels>] [--dy <pixels>] [--json] [--pane-dir <path>]
+runpane browser navigate [--tab <tab-id>] (--url <url>|--back|--forward|--reload) [--json] [--pane-dir <path>]
+runpane browser wait [--tab <tab-id>] [--text <text>] [--url <url>] [--ref <ref>] [--timeout-ms <milliseconds>] [--json] [--pane-dir <path>]
+runpane browser dialog [--tab <tab-id>] (--accept|--dismiss) [--text <text>] [--json] [--pane-dir <path>]
+runpane browser evaluate [--tab <tab-id>] --expression <js> [--ref <ref>] [--json] [--pane-dir <path>]
+runpane browser upload [--tab <tab-id>] [--ref <ref>] --paths <paths> [--json] [--pane-dir <path>]
 runpane theme read [--json] [--pane-dir <path>]
 runpane theme set [--base <theme>] [--colors <json>] [--css <text>] [--name <text>] [--json] [--pane-dir <path>]
 runpane theme set --theme <id> [--json] [--pane-dir <path>]
@@ -691,6 +721,8 @@ Profiles: a profile is a team of agents and a fixed workflow in one file. Once P
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 
 Devices: the `device_*` MCP tools (or `runpane devices`) open an iOS simulator or Android emulator as a tab in the calling Pane, then drive it. `runpane docs read --doc docs/DEVICES.md` has the rest.
+
+Browser work in Pane: for any work in a web page (opening it, reading a signed-in page, clicking, typing, screenshots, checking your own change), use Pane's browser tools, browser_* or runpane browser. They drive Pane's browser, which is shared with the person and signed in as them. Use another browser tool (Claude in Chrome, Playwright MCP, a Playwright or Puppeteer script, curl on a page that needs sign-in) only when browser_* is unavailable, when it fails twice on the same step, or when the person names that tool. Public pages you only need to read may use web fetch.
 
 MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = "npx"` and `args = ["--yes", "runpane@latest", "mcp"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too.
 ```

@@ -22,6 +22,8 @@ const DEFAULT_TOOLSETS = ['core'];
 const SERVER_V8_FLAGS = '--optimize-for-size';
 const DOCS_URI_PREFIX = 'runpane-docs:';
 
+/** D-127: inside Pane, browser work goes through browser_*; stated once, in the agent context Pane writes into repos. */
+const BROWSER_RULE = RUNPANE_CONTRACT.agentContext.managedBlock.find((line) => line.startsWith('Browser work in Pane:')) ?? '';
 // Every request an agent makes carries these, so they hold only what it needs before it picks a
 // tool; each tool's description, read when the agent loads it, says the rest.
 const TOOL_GUIDE = [
@@ -32,6 +34,8 @@ const TOOL_GUIDE = [
   '- Pass `yes: true` to a tool that changes state only when the user asked for that change or your Pane instructions authorize it; without it the call is refused and nothing happens.',
   '- `panels_open` shows the user a page, report, file or local dev server as a tab beside the agent.',
   '- `device_open` boots an iOS simulator or Android emulator for this Pane and shows it in a tab beside you (iOS runs on a linked Mac when this machine has no Xcode); then `device_screenshot`, `device_act` (agent-device commands: `open <app id>`, `snapshot -i`, `press @eN`), `device_run` to build and run your app, and `device_close`.',
+  '- `browser_open` opens a page in a browser tab beside you; read it with `browser_snapshot`, act by ref with `browser_click`, `browser_type` and the other `browser_*` tools, and see it with `browser_screenshot`.',
+  `- ${BROWSER_RULE}`,
   '- `docs_search` and `docs_read` answer how Pane works.',
 ];
 const INSTRUCTIONS = [
@@ -381,7 +385,7 @@ export function runCliProcess(
 
 const imageResultSchema = boundary.object({ mimeType: boundary.literal('image/png'), path: boundary.string });
 
-/** A result that names a PNG on this machine (device_screenshot) also carries the image, so the model sees it. */
+/** A result that names a PNG on this machine (device_screenshot, browser_screenshot) also carries the image, so the model sees it. */
 function imageContent(result: JsonObject): { type: 'image'; data: string; mimeType: string } | undefined {
   try {
     const image = decodeBoundary(result, imageResultSchema);

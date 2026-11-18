@@ -128,6 +128,7 @@ COMMAND_GROUP_HELP_TOPICS.add("profiles")
 COMMAND_GROUP_HELP_TOPICS.add("secrets")
 COMMAND_GROUP_HELP_TOPICS.add("autopilot")
 COMMAND_GROUP_HELP_TOPICS.add("devices")
+COMMAND_GROUP_HELP_TOPICS.add("browser")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
@@ -914,7 +915,7 @@ def split_inline_values(raw_args: List[str]) -> Tuple[List[str], Set[int]]:
 
 
 def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
-    if parsed.command.startswith("devices "):
+    if parsed.command.startswith(("devices ", "browser ")):
         # npm-only: any of its options gets its help and the npm-only message.
         own_args = raw_args[: raw_args.index("--")] if "--" in raw_args else raw_args
         if "-h" in own_args or "--help" in own_args:
@@ -1902,6 +1903,21 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "devices close": lambda parsed, context: run_unsupported_contract(parsed, context),
     "devices usage": lambda parsed, context: run_unsupported_contract(parsed, context),
     "devices free": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser open": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser tabs": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser close": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser snapshot": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser screenshot": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser click": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser type": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser press": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser select": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser scroll": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser navigate": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser wait": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser dialog": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser evaluate": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser upload": lambda parsed, context: run_unsupported_contract(parsed, context),
     "handoff": lambda parsed, context: run_unsupported_contract(parsed, context),
     "ask": lambda parsed, context: run_unsupported_contract(parsed, context),
     "models": lambda parsed, context: run_unsupported_contract(parsed, context),
