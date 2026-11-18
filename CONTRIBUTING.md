@@ -432,3 +432,5 @@ better-sqlite3-multiple-ciphers` for Node tests, then `pnpm electron:rebuild`
 before running Electron again; only one ABI can be installed at a time.
 
 For native update/reconnect QA, set `PANE_DISABLE_OS_INTEGRATION=1` as well as an isolated `PANE_DIR` and `--user-data-dir`. This disables login-item, URL-protocol, MCP-registration, and managed home-skill writes (including removal when the setting is off). Use an isolated app/install target; it does not make a real user installation a safe test target. Close every test app and supervisor after collecting evidence.
+
+[Throwaway probe for PR #1519, reverted before merge](./no-such-file-ci-probe.md)
