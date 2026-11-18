@@ -37,6 +37,10 @@ export interface PortsTest {
   openedLocally: string[];
   /** The error the next `openExternal` call fails with; null succeeds. */
   openExternalError: string | null;
+  /** When set, `openLocalPage` answers only once this is called, as a slow copy from the host does. */
+  finishLocalOpen: (() => void) | null;
+  /** Makes the next `openLocalPage` calls wait for `finishLocalOpen`. */
+  holdLocalOpens(): void;
 }
 
 declare global {
@@ -48,6 +52,7 @@ declare global {
 const portLists = answeredByTest<ListeningPortsSnapshot>();
 const connectionStates = answeredByTest<RemotePaneConnectionState>();
 let emitPorts: (snapshot: ListeningPortsSnapshot) => void = () => {};
+let localOpenHeld = false;
 
 const portsTest: PortsTest = {
   answerPortsList: portLists.answer,
@@ -63,6 +68,8 @@ const portsTest: PortsTest = {
   openedExternally: [],
   openedLocally: [],
   openExternalError: null,
+  finishLocalOpen: null,
+  holdLocalOpens: () => { localOpenHeld = true; },
 };
 
 Object.assign(window, {
@@ -72,8 +79,9 @@ Object.assign(window, {
       portsTest.openedExternally.push(target);
       return portsTest.openExternalError === null ? { success: true } : { success: false, error: portsTest.openExternalError };
     },
-    openLocalPage: async (fileUrl: string) => {
-      portsTest.openedLocally.push(fileUrl);
+    openLocalPage: async (fileUrl: string, panelId?: string) => {
+      portsTest.openedLocally.push(panelId === undefined ? fileUrl : `${fileUrl} ${panelId}`);
+      if (localOpenHeld) await new Promise<void>(resolve => { portsTest.finishLocalOpen = resolve; });
       return { success: true };
     },
     invoke: (channel: string) => {

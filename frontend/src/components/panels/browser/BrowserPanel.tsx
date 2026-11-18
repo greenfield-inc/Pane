@@ -34,6 +34,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [url, setUrl] = useState('');
   const [inputUrl, setInputUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // A host's file page is copied over the relay first, so a click can take seconds; further clicks wait for it.
+  const [openingExternally, setOpeningExternally] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [refusals, setRefusals] = useState<FileRefusal[]>([]);
   const [canGoBack, setCanGoBack] = useState(false);
@@ -391,16 +393,17 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   };
 
   // The page the tab shows now, in host form: main maps a host port to where this computer reaches it.
-  const externalUrl = shownUrl || url;
+  // A target the tab can't load never navigates, so the tab's own address names it.
+  const externalUrl = target.kind === 'load' ? shownUrl || url : url;
   const isLocalPage = hasFileProtocol(externalUrl);
-  // Why the button can't open this page, shown as its tooltip; null when it can.
+  // Why the button can't open this page, shown as its tooltip and, on a click, under the address bar; null when it can.
+  // A remote desktop opens a copy of a host file page, so only the page type matters there.
   const openExternalBlock = ((): string | null => {
     if (!externalUrl) return 'Open a page first';
     if (isLocalPage) {
-      if (isRemoteMode) return `This file is on ${ports?.host ?? 'the host'}, so your browser on this computer can't open it`;
       const page = new URL(externalUrl);
       // A file URL's host is another computer's share, except the hosts Windows serves local WSL files from.
-      if (page.host && !/^wsl(?:\.localhost|\$)$/i.test(page.hostname)) return `This file is on ${page.hostname}, not this computer`;
+      if (!isRemoteMode && page.host && !/^wsl(?:\.localhost|\$)$/i.test(page.hostname)) return `This file is on ${page.hostname}, not this computer`;
       return /\.html?$/i.test(page.pathname) ? null : 'Only .html and .htm files open in your browser';
     }
     if (!/^https?:/i.test(externalUrl)) return 'Only http, https and .html pages open in your browser';
@@ -409,12 +412,18 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     if (external.kind === 'unreachable') return `Port ${external.port} on ${ports?.host ?? 'the host'} isn't forwarded to this computer`;
     return null;
   })();
-  const canOpenExternal = openExternalBlock === null;
   const handleOpenExternal = () => {
-    const open = isLocalPage ? window.electronAPI.openLocalPage : window.electronAPI.openExternal;
-    void open(externalUrl).then(result => {
+    if (openingExternally) return;
+    if (openExternalBlock !== null) {
+      setUrlError(`Pane can't open this page in your browser: ${openExternalBlock}.`);
+      return;
+    }
+    setOpeningExternally(true);
+    const opening = isLocalPage ? window.electronAPI.openLocalPage(externalUrl, panel.id) : window.electronAPI.openExternal(externalUrl);
+    void opening.then(result => {
       if (!result.success) setUrlError(result.error || 'Pane could not open this page in your browser');
-    });
+    }, (error: Error) => setUrlError(error.message || 'Pane could not open this page in your browser'))
+      .finally(() => setOpeningExternally(false));
   };
 
   const handleViewSource = () => {
@@ -688,12 +697,13 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
         <button
           type="button"
           onClick={handleOpenExternal}
-          disabled={!canOpenExternal}
+          disabled={!externalUrl}
           className={cn(
             'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
-            !canOpenExternal && 'opacity-30 cursor-not-allowed'
+            !externalUrl && 'opacity-30 cursor-not-allowed'
           )}
-          title={openExternalBlock ? `Can't open in your browser: ${openExternalBlock}` : 'Open in your browser'}
+          aria-busy={openingExternally}
+          title={openingExternally ? 'Opening in your browser…' : openExternalBlock ? `Can't open in your browser: ${openExternalBlock}` : 'Open in your browser'}
         >
           <ExternalLink className="w-3.5 h-3.5" />
         </button>
