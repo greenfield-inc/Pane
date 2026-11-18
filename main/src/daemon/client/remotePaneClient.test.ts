@@ -24,6 +24,8 @@ interface TestRemoteServer {
   refuseChannel(channel: string): void;
   /** Cut off the next `count` invoke responses mid-body; all of them by default. */
   truncateInvoke(count?: number): void;
+  /** Answer the next `count` invokes as a proxy with no route to the host does: a 404 page, not Pane's answer. */
+  proxyMissInvoke(count: number): void;
   /** Answer each invoke after `ms`. */
   delayInvoke(ms: number): void;
   /** Say in the ready event that this host runs a write once per request id, as P1 hosts do. */
@@ -652,6 +654,20 @@ describe('RemotePaneClient writes through a drop', () => {
     expect(second.requestId).toBe(first.requestId);
     expect(server.getApplied()).toEqual([{ channel: 'sessions:create', args: [{ prompt: 'hi' }] }]);
     expect(server.getEventRequestCount()).toBe(1);
+    await client.disconnect();
+  });
+
+  it('resends a write that a proxy without a route to the host answered, and the host runs it once', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    server.deduplicateRequestIds();
+    const client = new RemotePaneClient(profileFor(server, 'proxy-miss'));
+    await client.connect();
+    server.proxyMissInvoke(1);
+
+    await expect(client.invoke('devices:input', ['panel', { kind: 'touch', phase: 'end', x: 0.5, y: 0.5 }]))
+      .resolves.toEqual({ channel: 'devices:input', args: ['panel', { kind: 'touch', phase: 'end', x: 0.5, y: 0.5 }] });
+    expect(server.getApplied()).toEqual([{ channel: 'devices:input', args: ['panel', { kind: 'touch', phase: 'end', x: 0.5, y: 0.5 }] }]);
     await client.disconnect();
   });
 
@@ -1323,6 +1339,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
   let emitReadyEvent = true;
   const refusedChannels = new Set<string>();
   let truncateInvokes = 0;
+  let proxyMisses = 0;
   let invokeDelayMs = 0;
   let invokeCount = 0;
   let deduplicates = false;
@@ -1361,6 +1378,12 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
             next: 'Update Pane with `runpane update`, then restart it.',
           },
         }));
+        return;
+      }
+      if (proxyMisses > 0) {
+        proxyMisses -= 1;
+        response.writeHead(404, { 'Content-Type': 'text/html' });
+        response.end('<html><body>404 page not found</body></html>');
         return;
       }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -1423,6 +1446,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
   return {
     baseUrl: `http://${host.includes(':') ? `[${host}]` : host}:${address.port}${normalizedBasePath}`,
     truncateInvoke(count = Infinity) { truncateInvokes = count; },
+    proxyMissInvoke(count) { proxyMisses = count; },
     delayInvoke(ms: number) { invokeDelayMs = ms; },
     deduplicateRequestIds() { deduplicates = true; },
     getInvokes() { return invokes; },

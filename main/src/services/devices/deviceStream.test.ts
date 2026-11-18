@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { StreamFrameRates, streamSize } from './deviceStream';
+import { StreamFrameRates, streamSize, LiveFrames } from './deviceStream';
 
 /** A multipart MJPEG body as the hub sends it: a boundary, headers, then a tiny JPEG per frame. */
 function part(): Uint8Array {
@@ -60,5 +60,52 @@ describe('streamSize', () => {
     expect(streamSize('9000')).toBe(4096);
     expect(streamSize(null)).toBeUndefined();
     expect(streamSize('abc')).toBeUndefined();
+  });
+});
+
+describe('LiveFrames', () => {
+  /** A device stream the test feeds: each `send` is one JPEG-shaped frame carrying `label`. */
+  function device() {
+    const opened: AbortSignal[] = [];
+    let push: (chunk: Uint8Array) => void = () => undefined;
+    const open = async (_id: string, signal: AbortSignal) => {
+      opened.push(signal);
+      return new Response(new ReadableStream<Uint8Array>({ start: controller => { push = chunk => controller.enqueue(chunk); } }));
+    };
+    const send = (label: string) => push(Buffer.concat([Buffer.from('--frame\r\n'), Buffer.from([0xff, 0xd8]), Buffer.from(label), Buffer.from([0xff, 0xd9])]));
+    return { opened, open, send };
+  }
+  const tick = () => new Promise(resolve => setTimeout(resolve, 5));
+
+  it('answers with the newest frame from one open stream, not the first', async () => {
+    const hub = device();
+    const frames = new LiveFrames(hub.open, 1_000);
+    const first = frames.latest('D1');
+    await tick();
+    hub.send('old');
+    expect((await first).subarray(2, 5).toString()).toBe('old');
+    hub.send('tap');
+    hub.send('new');
+    await tick();
+    expect((await frames.latest('D1')).subarray(2, 5).toString()).toBe('new');
+    expect(hub.opened).toHaveLength(1);
+    frames.closeAll();
+  });
+
+  it('closes the stream when nobody has asked for a frame in a while, and opens a new one on the next ask', async () => {
+    const hub = device();
+    const frames = new LiveFrames(hub.open, 30);
+    const first = frames.latest('D1');
+    await tick();
+    hub.send('one');
+    await first;
+    await new Promise(resolve => setTimeout(resolve, 60));
+    expect(hub.opened[0].aborted).toBe(true);
+    const next = frames.latest('D1');
+    await tick();
+    hub.send('two');
+    expect((await next).subarray(2, 5).toString()).toBe('two');
+    expect(hub.opened).toHaveLength(2);
+    frames.closeAll();
   });
 });

@@ -863,8 +863,9 @@ export class RemotePaneClient {
       try {
         payload = parseJsonResponse(response, 'Remote daemon returned an invalid invoke response', remoteInvokeResponseSchema);
       } catch (error) {
-        // A host that de-duplicates answers every write with an envelope; a 5xx without one came from the path to it.
-        if (requestId && response.statusCode >= 500) throw new Error(`HTTP ${response.statusCode} without an answer`);
+        // A host that de-duplicates answers every write with an envelope; a response without one (a
+        // proxy's 404 or 5xx while the route is down) came from the path to it, so the write is resent.
+        if (requestId) throw new Error(`HTTP ${response.statusCode} without an answer`);
         throw error;
       }
       this.failedRequestsInARow = 0;

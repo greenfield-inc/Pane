@@ -21,8 +21,8 @@ interface EndedLease { paneId: string; id: string }
 /** What a sweep decided: leases that idled out, and devices to shut down now. */
 export interface SweepResult { ended: EndedLease[]; shutdown: string[] }
 
-/** What archiving a Pane decided: devices to erase, and leases it ended. */
-export interface ArchiveResult { erase: string[]; ended: EndedLease[] }
+/** What archiving a Pane decided: devices to erase, leases it ended, and devices Pane booted to shut down now. */
+export interface ArchiveResult { erase: string[]; ended: EndedLease[]; shutdown: string[] }
 
 const DEVICE_IDLE_MS = 10 * 60_000;
 const DEVICE_WARM_MS = 10 * 60_000;
@@ -37,6 +37,7 @@ interface Lease { paneId: string; id: string; platform: DevicePlatform; lastCall
  * - One booted device per platform per machine by default (`cap`); Panes share it by lease.
  * - A lease ends after `DEVICE_IDLE_MS` with no device call and its tab on screen nowhere.
  * - After device_close the device stays booted for `DEVICE_WARM_MS`, then shuts down.
+ * - Pane shuts down only devices it booted (`booted()`); a device the person booted keeps running.
  * - Pane picks only devices it made; the person's own are used only when named.
  */
 export class DeviceLifecycle {
@@ -44,7 +45,7 @@ export class DeviceLifecycle {
   private readonly warmUntil = new Map<string, number>();
   /** Every Pane that has leased each device since it was last erased. */
   private readonly users = new Map<string, Set<string>>();
-  /** The person's devices Pane booted, so they shut down like Pane's own. */
+  /** The devices Pane booted: the only ones it shuts down on its own. */
   private readonly bootedByPane = new Set<string>();
 
   constructor(private readonly options: { now: () => number; cap: (platform: DevicePlatform) => number }) {}
@@ -73,6 +74,22 @@ export class DeviceLifecycle {
     const users = this.users.get(id) ?? new Set<string>();
     users.add(paneId);
     this.users.set(id, users);
+  }
+
+  /** A device Pane booted before it restarted (from the devices state file). */
+  restoreBooted(id: string): void {
+    this.bootedByPane.add(id);
+  }
+
+  /** The devices Pane booted and has not shut down, for the state file and for quitting. */
+  booted(): string[] {
+    return [...this.bootedByPane];
+  }
+
+  /** `id` shut down: Pane no longer owes it a shutdown. */
+  shutDown(id: string): void {
+    this.bootedByPane.delete(id);
+    this.warmUntil.delete(id);
   }
 
   /** A Pane that used `id` before Pane restarted (from the devices state file). */
@@ -141,18 +158,16 @@ export class DeviceLifecycle {
     const now = this.options.now();
     const ended: EndedLease[] = [];
     const shutdown: string[] = [];
-    const pane = (id: string) => devices.find(device => device.id === id)?.paneMade === true || this.bootedByPane.has(id);
     for (const lease of [...this.leases.values()]) {
       if (lease.visibleIn.size === 0 && now - lease.lastCallAt >= DEVICE_IDLE_MS) {
         this.leases.delete(lease.id);
         ended.push({ paneId: lease.paneId, id: lease.id });
-        // A device the person booted keeps running; Pane shuts down only what it made or booted.
-        if (pane(lease.id)) shutdown.push(lease.id);
+        if (this.bootedByPane.has(lease.id)) shutdown.push(lease.id);
       }
     }
     for (const device of devices) {
       if (!device.booted || this.leases.has(device.id) || shutdown.includes(device.id)) continue;
-      if (!device.paneMade && !this.bootedByPane.has(device.id)) continue;
+      if (!this.bootedByPane.has(device.id)) continue;
       const until = this.warmUntil.get(device.id);
       if (until === undefined) this.warmUntil.set(device.id, now + DEVICE_WARM_MS);
       else if (now >= until) shutdown.push(device.id);
@@ -164,7 +179,10 @@ export class DeviceLifecycle {
     return { ended, shutdown };
   }
 
-  /** A Pane was archived: its leases end, and Pane-made devices no other Pane used are erased. */
+  /**
+   * A Pane was archived: its leases end, Pane-made devices no other Pane used are erased, and the
+   * devices Pane booted for it shut down now rather than after their warm window.
+   */
   archived(paneId: string, devices: readonly DeviceRecord[]): ArchiveResult {
     const ended = this.leasesOf(paneId).map(id => ({ paneId, id }));
     for (const { id } of ended) this.leases.delete(id);
@@ -177,7 +195,8 @@ export class DeviceLifecycle {
         this.users.delete(device.id);
       }
     }
-    return { erase, ended };
+    const shutdown = ended.map(({ id }) => id).filter(id => this.bootedByPane.has(id) && !erase.includes(id) && devices.some(device => device.id === id && device.booted));
+    return { erase, ended, shutdown };
   }
 
   /** Pane-made devices unused for `DEVICE_STALE_MS`, which Pane deletes. */

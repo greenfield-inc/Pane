@@ -69,3 +69,79 @@ export class StreamFrameRates {
     return times.filter(at => at >= now - WINDOW_MS).length;
   }
 }
+
+const JPEG_START = Buffer.from([0xff, 0xd8]);
+const JPEG_END = Buffer.from([0xff, 0xd9]);
+/** A frame larger than this is not a frame: the stream is broken. */
+const MAX_FRAME_BYTES = 16 * 1024 * 1024;
+
+interface FrameReader { latest?: Buffer; first: Promise<Buffer>; controller: AbortController; idle?: NodeJS.Timeout }
+
+/**
+ * The newest frame of each device's MJPEG stream, from one connection that stays open while
+ * frames are asked for and closes `keepMs` after the last ask. A new connection starts with
+ * whatever frame the hub last kept, which can be a second old; a stream that stays open
+ * shows a tap within a frame or two.
+ */
+export class LiveFrames {
+  private readonly readers = new Map<string, FrameReader>();
+
+  constructor(private readonly open: (id: string, signal: AbortSignal) => Promise<Response>, private readonly keepMs = 10_000, private readonly firstWithinMs = 10_000) {}
+
+  /** The newest frame of `id`, waiting for the first when its stream has just opened. */
+  async latest(id: string): Promise<Buffer> {
+    const reader = this.readers.get(id) ?? this.start(id);
+    clearTimeout(reader.idle);
+    reader.idle = setTimeout(() => this.close(id, reader), this.keepMs);
+    reader.idle.unref();
+    return reader.latest ?? reader.first;
+  }
+
+  closeAll(): void {
+    for (const [id, reader] of [...this.readers]) this.close(id, reader);
+  }
+
+  private close(id: string, reader: FrameReader): void {
+    clearTimeout(reader.idle);
+    reader.controller.abort();
+    if (this.readers.get(id) === reader) this.readers.delete(id);
+  }
+
+  private start(id: string): FrameReader {
+    const controller = new AbortController();
+    let resolveFirst: (frame: Buffer) => void = () => undefined;
+    let rejectFirst: (cause: Error) => void = () => undefined;
+    const first = new Promise<Buffer>((resolve, reject) => { resolveFirst = resolve; rejectFirst = reject; });
+    first.catch(() => undefined);
+    const reader: FrameReader = { first, controller };
+    this.readers.set(id, reader);
+    const firstTimer = setTimeout(() => { rejectFirst(new Error(`no frame within ${this.firstWithinMs / 1000} s`)); this.close(id, reader); }, this.firstWithinMs);
+    firstTimer.unref();
+    void (async () => {
+      const response = await this.open(id, controller.signal);
+      if (!response.ok || !response.body) throw new Error(`the stream answered ${response.status}`);
+      const body = response.body.getReader();
+      let buffered = Buffer.alloc(0);
+      for (;;) {
+        const { value, done } = await body.read();
+        if (done) throw new Error('the stream ended');
+        buffered = Buffer.concat([buffered, Buffer.from(value)]);
+        for (;;) {
+          const start = buffered.indexOf(JPEG_START);
+          const end = start === -1 ? -1 : buffered.indexOf(JPEG_END, start + 2);
+          if (end === -1) break;
+          reader.latest = Buffer.from(buffered.subarray(start, end + 2));
+          clearTimeout(firstTimer);
+          resolveFirst(reader.latest);
+          buffered = buffered.subarray(end + 2);
+        }
+        if (buffered.length > MAX_FRAME_BYTES) throw new Error('the stream sent no whole frame');
+      }
+    })().catch((cause: unknown) => {
+      clearTimeout(firstTimer);
+      rejectFirst(cause instanceof Error ? cause : new Error(String(cause)));
+      this.close(id, reader);
+    });
+    return reader;
+  }
+}

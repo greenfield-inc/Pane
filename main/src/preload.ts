@@ -389,7 +389,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** The device tab (docs/DEVICES.md): the local screen, frames, and the person's own controls. */
   devices: {
     input: (panelId: string, input: DeviceInput): Promise<IPCResponse> => invokeIpc('devices:input', panelId, input),
-    frame: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame', panelId),
+    frame: (panelId: string, maxPx?: number): Promise<IPCResponse> => invokeIpc('devices:frame', panelId, maxPx),
     frameRate: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame-rate', panelId),
     controls: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:controls', panelId),
     capture: (panelId: string, image?: string): Promise<IPCResponse> => invokeIpc('devices:capture', panelId, image),

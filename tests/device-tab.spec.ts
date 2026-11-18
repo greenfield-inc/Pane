@@ -93,6 +93,30 @@ test('a turned device fits its frame uncropped, and a tap lands where it is clic
   }
 });
 
+test('the whole screen shows, letterboxed inside the phone, at any tab size', async ({ page }) => {
+  for (const [width, height, view] of [[1400, 900, 'pane'], [1400, 420, 'pane'], [760, 1000, 'pane'], [390, 844, 'phone'], [390, 500, 'phone']] as const) {
+    await page.setViewportSize({ width, height });
+    await open(page, `view=${view}`);
+    await expect(page.getByTestId('device-screen')).toBeVisible();
+    // Where the image draws (object-contain) against the rounded box that clips it, and the window.
+    const fit = await page.getByTestId('device-screen').evaluate((image: HTMLImageElement) => {
+      const box = image.getBoundingClientRect();
+      const ratio = image.naturalWidth / image.naturalHeight;
+      const drawnWidth = Math.min(box.width, box.height * ratio);
+      const drawnHeight = drawnWidth / ratio;
+      let clip = image.parentElement;
+      while (clip && getComputedStyle(clip).overflow !== 'hidden') clip = clip.parentElement;
+      const clipBox = (clip ?? image).getBoundingClientRect();
+      return {
+        inside: box.left + (box.width - drawnWidth) / 2 >= clipBox.left - 0.5 && box.left + (box.width + drawnWidth) / 2 <= clipBox.right + 0.5
+          && box.top + (box.height - drawnHeight) / 2 >= clipBox.top - 0.5 && box.top + (box.height + drawnHeight) / 2 <= clipBox.bottom + 0.5,
+        onScreen: clipBox.top >= -0.5 && clipBox.left >= -0.5 && clipBox.bottom <= innerHeight + 0.5 && clipBox.right <= innerWidth + 0.5,
+      };
+    });
+    expect(fit, `${width}x${height}`).toEqual({ inside: true, onScreen: true });
+  }
+});
+
 test('turning the device mid-session reshapes the phone to landscape', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await open(page, 'view=pane');
@@ -143,7 +167,33 @@ test('the rail turns the device, folds a foldable, and records with a running ti
   await expect(page.getByTestId('device-recording')).toHaveText('0:01', { timeout: 3000 });
   await shoot(page, 'device-tab-foldable-recording-light');
   await page.getByRole('button', { name: /Stop recording/ }).click();
-  await expect(page.getByText(/Recording saved/)).toContainText('pane-1.mp4');
+  const note = page.getByTestId('device-recording-note');
+  await expect(note).toHaveText('You stopped the recording. Saved: /tmp/pane/devices/recordings/__orchestration_session_6d95f4ea__terminal__-1795029515252.mp4');
+  // The whole note shows, wrapping rather than cut off.
+  expect(await note.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await shoot(page, 'device-tab-recording-stopped-light');
+});
+
+test('the recording clock counts from the click when the host\'s clock runs apart', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, 'view=pane&hostClock=-8000');
+  await page.getByRole('button', { name: 'Record' }).click();
+  await expect(page.getByTestId('device-recording')).toHaveText('0:00');
+});
+
+test('a recording the limit stopped says so, and one the person stopped never does', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await open(page, 'view=pane');
+  await page.getByRole('button', { name: 'Record' }).click();
+  await expect(page.getByTestId('device-recording')).toBeVisible();
+  await page.evaluate(() => window.qaEndRecording('limit'));
+  await expect(page.getByTestId('device-recording-note')).toContainText('The recording stopped at its 10-minute limit.');
+  await expect(page.getByTestId('device-recording')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Record' }).click();
+  await page.waitForTimeout(5_500);
+  await page.getByRole('button', { name: /Stop recording/ }).click();
+  await expect(page.getByTestId('device-recording-note')).toContainText('You stopped the recording.');
+  await expect(page.getByTestId('device-recording-note')).not.toContainText('limit');
 });
 
 test('a phone with no fold shows no fold buttons', async ({ page }) => {
@@ -207,6 +257,21 @@ test('at phone width the rail lies under the phone as a bar', async ({ page }) =
     expect(rail.y).toBeGreaterThan(screen.y + screen.height);
     await shoot(page, `device-tab-phone-${theme}`);
   }
+});
+
+test('in a narrow tab every rail control stays inside the tab', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 700 });
+  await open(page, 'view=phone&width=170');
+  await expect(page.getByTestId('device-screen')).toBeVisible();
+  const tab = await page.getByTestId('device-panel').boundingBox();
+  if (!tab) throw new Error('No tab');
+  for (const name of ['Home', 'Rotate', 'Screenshot to chat', 'Record', 'Mark up', 'Logs', 'More']) {
+    const button = await page.getByRole('button', { name, exact: true }).boundingBox();
+    if (!button) throw new Error(`No ${name}`);
+    expect(button.x, name).toBeGreaterThanOrEqual(tab.x);
+    expect(button.x + button.width, name).toBeLessThanOrEqual(tab.x + tab.width);
+  }
+  await shoot(page, 'device-tab-narrow-light');
 });
 
 test('a chat shows the device it opened as a live card that opens the device tab', async ({ page }) => {

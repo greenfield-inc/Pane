@@ -17,6 +17,8 @@ const LEFT_SHIFT = 225;
 /** The hub's pose for each posture the tab offers. */
 const POSES = { closed: 'closed', half: 'laptop', open: 'open' } as const;
 const IDLE_CLOSE_MS = 60_000;
+/** How many times a socket that drops before the hub admits it reopens, carrying its waiting input. */
+const REOPENS = 3;
 
 /** `socket` is unset while Pane is still asking where the device's input goes. */
 interface InputSocket { socket?: WebSocket; admitted: boolean; queue: Buffer[]; timer?: NodeJS.Timeout }
@@ -87,7 +89,8 @@ function clamp(value: number): number {
 
 /**
  * One input socket per device, held in main so the hub token never reaches a renderer. Input
- * waits until the hub admits it; a socket idle for a minute closes.
+ * waits until the hub admits it, and a socket that drops first reopens with that input still
+ * waiting, so a tap is never lost to a socket that failed; a socket idle for a minute closes.
  */
 export class DeviceInputSockets {
   private readonly sockets = new Map<string, InputSocket>();
@@ -121,9 +124,19 @@ export class DeviceInputSockets {
     for (const id of [...this.sockets.keys()]) this.close(id);
   }
 
-  private open(deviceId: string, stream: () => Promise<DeviceStreamInfo>): InputSocket {
-    const entry: InputSocket = { admitted: false, queue: [] };
+  private open(deviceId: string, stream: () => Promise<DeviceStreamInfo>, queue: Buffer[] = [], reopens = REOPENS): InputSocket {
+    const entry: InputSocket = { admitted: false, queue };
     this.sockets.set(deviceId, entry);
+    /** The socket failed: input still waiting goes on a new one, while reopens last. */
+    const failed = () => {
+      if (this.sockets.get(deviceId) !== entry) return;
+      if (entry.queue.length > 0 && reopens > 0) {
+        const next = this.open(deviceId, stream, entry.queue, reopens - 1);
+        next.timer = entry.timer;
+        return;
+      }
+      this.close(deviceId);
+    };
     stream().then((info) => {
       if (this.sockets.get(deviceId) !== entry) return;
       const socket = new WebSocket(info.inputUrl, { headers: { Authorization: `Bearer ${info.token}` } });
@@ -133,9 +146,9 @@ export class DeviceInputSockets {
         entry.admitted = true;
         for (const message of entry.queue.splice(0)) socket.send(message);
       });
-      socket.on('error', () => this.close(deviceId));
-      socket.on('close', () => { if (this.sockets.get(deviceId) === entry) this.sockets.delete(deviceId); });
-    }, () => this.close(deviceId));
+      socket.on('error', failed);
+      socket.on('close', failed);
+    }, failed);
     return entry;
   }
 }

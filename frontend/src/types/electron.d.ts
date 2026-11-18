@@ -130,7 +130,7 @@ interface ElectronAPI {
   /** The device tab (docs/DEVICES.md). */
   devices: {
     input: (panelId: string, input: DeviceInput) => Promise<IPCResponse<boolean>>;
-    frame: (panelId: string) => Promise<IPCResponse<string>>;
+    frame: (panelId: string, maxPx?: number) => Promise<IPCResponse<string>>;
     frameRate: (panelId: string) => Promise<IPCResponse<number | null>>;
     controls: (panelId: string) => Promise<IPCResponse<DeviceControls>>;
     capture: (panelId: string, image?: string) => Promise<IPCResponse<DeviceCapture>>;

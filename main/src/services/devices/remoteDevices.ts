@@ -35,6 +35,7 @@ export const macDeviceRequestSchema = boundary.object({
   waitMs: boundary.optional(boundary.number),
   visible: boundary.optional(boundary.boolean),
   task: boundary.optional(boundary.string),
+  shutdown: boundary.optional(boundary.boolean),
 });
 
 export interface MacDeviceRequest {
@@ -56,7 +57,12 @@ export interface MacDeviceRequest {
   visible?: boolean;
   /** `await`: the task a slow call answered with. */
   task?: string;
+  /** `close`: shut the device down now if the Mac's Pane booted it (the person's Shut down, or this computer quitting). */
+  shutdown?: boolean;
 }
+
+/** How long quitting waits for linked Macs to close this computer's devices. */
+const QUIT_CLOSE_MS = 5_000;
 
 /** A request's fields besides its op, caller and Pane. */
 type MacDeviceFields = Omit<MacDeviceRequest, 'op' | 'from' | 'paneId'>;
@@ -216,10 +222,11 @@ export class RemoteDevices {
     return { synced: true, job: { ...job, owner: paneId } };
   }
 
-  async close(paneId: string): Promise<{ closed: string[]; jobsStopped: number }> {
+  /** Ends the Pane's lease on the Mac; with `shutdown`, the Mac also shuts the device down now if its Pane booted it. */
+  async close(paneId: string, options: { shutdown?: boolean } = {}): Promise<{ closed: string[]; jobsStopped: number }> {
     const lease = this.leases.get(paneId);
     if (!lease) return { closed: [], jobsStopped: 0 };
-    const result = decodeOrThrow(await this.call(this.mac(lease), 'close', paneId, {}), closeSchema, lease.macName);
+    const result = decodeOrThrow(await this.call(this.mac(lease), 'close', paneId, options.shutdown ? { shutdown: true } : {}), closeSchema, lease.macName);
     this.setLease(paneId, undefined);
     return result;
   }
@@ -252,9 +259,21 @@ export class RemoteDevices {
     return Buffer.from(decodeOrThrow(await this.call(this.mac(lease), 'frame', paneId, {}), frameSchema, lease.macName).data, 'base64');
   }
 
-  async dispose(): Promise<void> {
+  /**
+   * This computer is quitting: each Pane's device on a Mac is closed there and shut down if that
+   * Mac's Pane booted it, within `QUIT_CLOSE_MS`; answers the Panes closed. The leases stay saved,
+   * so archiving a Pane later still cleans its checkout on the Mac.
+   */
+  async dispose(): Promise<string[]> {
+    const closed: string[] = [];
+    const closing = [...this.leases.entries()].map(([paneId, lease]) => Promise.resolve()
+      .then(() => this.callOnce(this.mac(lease), 'close', paneId, { shutdown: true }))
+      .then(() => { closed.push(paneId); }, () => undefined));
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([Promise.all(closing), new Promise((resolve) => { timer = setTimeout(resolve, QUIT_CLOSE_MS); })]).finally(() => clearTimeout(timer));
     await Promise.all([...this.tunnels.values()].map(({ tunnel }) => tunnel.close()));
     this.tunnels.clear();
+    return closed;
   }
 
   // ---- internals

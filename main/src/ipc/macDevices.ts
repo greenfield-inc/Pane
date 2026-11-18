@@ -143,7 +143,7 @@ export function registerMacDeviceHandler(commandRegistry: PaneCommandRegistry, d
             : { jobId: job.jobId, state: job.state, logTail: job.logTail, cwd: checkout, exitCode: job.exitCode };
         }
         case 'close':
-          return service.close(caller);
+          return service.close(caller, undefined, { shutdown: request.shutdown === true });
         case 'archived':
           await service.paneArchived(key);
           rmSync(checkout, { recursive: true, force: true });
