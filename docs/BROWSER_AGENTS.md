@@ -2,7 +2,8 @@
 
 Any agent in a Pane can open, read and act on that Pane's browser tabs with the `browser_*`
 tools (or `runpane browser`). The tab opens beside the agent, signed in as you, and you watch
-it work: the tab shows who is driving, and touching the page takes over.
+it work. The tab shows who is driving. Touch the page and you drive it; press **Take over** to
+hold it until you hand it back.
 
 ## Which browser tool an agent uses
 
@@ -33,7 +34,7 @@ opened one tab, or when the Pane has one; with several, the call fails with
 | `browser_select` | `runpane browser select --ref e9 --values '["Canada"]'` | Chooses options in a select |
 | `browser_scroll` | `runpane browser scroll --dy 600` | Scrolls the page, or an element by ref |
 | `browser_navigate` | `runpane browser navigate --url <url>` | Loads a URL, or `--back`, `--forward`, `--reload` |
-| `browser_wait` | `runpane browser wait --text "Saved"` | Returns once the page shows the text, URL or element |
+| `browser_wait` | `runpane browser wait --text "Saved"` | Returns once the page shows some text or element, or its URL matches |
 | `browser_dialog` | `runpane browser dialog --accept` | Answers the open alert, confirm or prompt |
 | `browser_evaluate` | `runpane browser evaluate --expression document.title` | Runs a script in the page and returns its value, cut off at 64 KB; stopped after 30 seconds |
 | `browser_upload` | `runpane browser upload --ref e4 --paths '["report.pdf"]'` | Puts worktree files into a file input, or into the file picker a click opened |
@@ -55,8 +56,8 @@ during an agent's call; the result tells the agent to fill it with `browser_uplo
 ## Who may act on a tab
 
 - An agent acts on the tabs it opened and on the tabs you opened.
-- Another agent's tab it may read (`browser_tabs`, `browser_snapshot`, `browser_screenshot`,
-  `browser_wait`) but not act on: that fails with `ERR_BROWSER_NOT_YOURS`.
+- It may read another agent's tab (`browser_tabs`, `browser_snapshot`, `browser_screenshot`,
+  `browser_wait`) but not act on it; acting fails with `ERR_BROWSER_NOT_YOURS`.
 - Tabs in other Panes are out of reach.
 - `browser_navigate` and `browser_open` load only `http:` and `https:` pages.
 - `browser_upload` sends only files inside the Pane's worktree, and never a `.env` file, a key
@@ -73,16 +74,17 @@ outside its worktree. The Settings switch is the off button.
 
 While an agent's call runs, the tab is outlined, its address bar reads "Claude Code is driving ·
 Take over" (with the agent's name), and a pointer marks each click. The chip stays 2 seconds
-after the agent's last call, so a run of calls reads as one.
+after the agent's last call, so a run of calls reads as one. While you drive, it reads "You're
+driving · Hand to" and the agent's name.
 
 - **Touch the page** (click, type or scroll in it) while the agent drives, and you drive until
   750 ms after your last input. The agent's next call waits, then runs.
 - **Take over** in the chip makes you the driver until you press **Hand to** and the agent's
   name.
 
-Either way the agent's refs from before are revoked, so its next call that uses one fails with
-`ERR_BROWSER_STALE_REF` until it snapshots again. A call that waits 4 minutes fails with
-`ERR_BROWSER_PERSON_DRIVING`. With DevTools open on a tab, an agent's actions on it fail with
+Either way the agent's refs from before are revoked: a call that uses one fails at once with
+`ERR_BROWSER_STALE_REF`, and the agent snapshots again. Any other action waits while you drive,
+and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open on a tab, an agent's actions on it fail with
 `ERR_BROWSER_DEVTOOLS_OPEN`.
 
 ## Where a tab must be

@@ -362,7 +362,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `browser select`: Pane's browser, shared with the person, signed in as them. Choose options in a select element by its ref from browser_snapshot.
 - `browser scroll`: Pane's browser, shared with the person, signed in as them. Scroll the page, or an element by its ref, by a number of pixels.
 - `browser navigate`: Pane's browser, shared with the person, signed in as them. Go to a URL in a tab, or go back, forward, or reload.
-- `browser wait`: Pane's browser, shared with the person, signed in as them. Wait until the page shows some text, reaches a URL, or shows an element.
+- `browser wait`: Pane's browser, shared with the person, signed in as them. Wait until the page shows some text or element, or its URL matches.
 - `browser dialog`: Pane's browser, shared with the person, signed in as them. Answer the alert, confirm or prompt dialog the page has open.
 - `browser evaluate`: Pane's browser, shared with the person, signed in as them. Run JavaScript in the page and return its value.
 - `browser upload`: Pane's browser, shared with the person, signed in as them. Put files from your worktree into a file input, or into the file picker the page opened.

@@ -13,7 +13,7 @@ export function BrowserSettings({ persistence }: { persistence: SettingsPersiste
         <SettingRow
           settingId="browser-agent-tools"
           label="Agent browser tools"
-          description="Let agents in a Pane use that Pane's browser tabs. They act with your sign-ins, can run scripts on pages, and can upload files from their worktree."
+          description="Let agents in a Pane use that Pane's browser tabs. They act with your sign-ins, can run scripts on pages, and can upload files from their worktree. On by default."
           saveState={persistence.saveStates['browser-agent-tools']}
         >
           <Toggle checked={browser.agentTools} onChange={(agentTools) => { void persistence.saveConfig('browser-agent-tools', { browser: { ...browser, agentTools } }); }} />

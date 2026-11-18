@@ -1192,7 +1192,7 @@ export const RUNPANE_CONTRACT = {
     {
       "name": "browser wait",
       "mcpName": "browser_wait",
-      "summary": "Pane's browser, shared with the person, signed in as them. Wait until the page shows some text, reaches a URL, or shows an element.",
+      "summary": "Pane's browser, shared with the person, signed in as them. Wait until the page shows some text or element, or its URL matches.",
       "usage": [
         "runpane browser wait [--tab <tab-id>] [--text <text>] [--url <url>] [--ref <ref>] [--timeout-ms <milliseconds>] [--json] [--pane-dir <path>]"
       ],
@@ -6372,7 +6372,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Close a browser tab you opened. Refuses the person's tabs and other agents' tabs with ERR_BROWSER_NOT_YOURS.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
       ],
@@ -6383,7 +6383,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Read the page as an accessibility tree with element refs (e12), plus its URL and title. Act on elements by their refs. Password values are masked. Long pages are cut off with a note. A new snapshot, a navigation, or the person taking over makes older refs stale.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
       ],
@@ -6394,7 +6394,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Capture the tab as a PNG image. Returns the PNG's path; MCP clients also get the image itself.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --full-page                    Capture the whole page, not only what is in view",
         "  --json                         Print machine-readable output",
         "  --pane-dir <path>              Connect to a specific Pane data directory"
@@ -6406,7 +6406,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Click an element by its ref from browser_snapshot, or a point in the page. Waits for the element to be visible and enabled, scrolls it into view, and clicks it as real mouse input. When the click opens a dialog, the result says so; answer it with browser_dialog. When it opens a file picker, the result says so; fill it with browser_upload.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --ref <ref>                    The element's ref from browser_snapshot",
         "  --x <x>                        A point in the page, in CSS pixels from the left of the view, instead of a ref",
         "  --y <y>                        A point in the page, in CSS pixels from the top of the view, instead of a ref",
@@ -6422,7 +6422,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Type text into a field by its ref from browser_snapshot. The text always lands in the page, never in Pane's own window. Signing in stays with the person: never type a password you read from somewhere.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --ref <ref>                    The field's ref from browser_snapshot",
         "  --text <text>                  The text to type",
         "  --clear                        Clear the field first",
@@ -6437,7 +6437,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Press a key or chord, such as Enter, Escape, Tab, ArrowDown or Meta+A. With --ref, the element gets focus first.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --key <key>                    A KeyboardEvent key name, with modifiers joined by + (Shift+Tab, Control+Enter, Meta+A)",
         "  --ref <ref>                    The element to focus first",
         "  --json                         Print machine-readable output",
@@ -6450,7 +6450,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Choose options in a select element by its ref from browser_snapshot. Matches each value against the options' values, then their labels.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --ref <ref>                    The select element's ref",
         "  --values <values>              The options to choose, as a JSON array of values or labels",
         "  --json                         Print machine-readable output",
@@ -6463,7 +6463,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Scroll the page, or an element by its ref, by a number of pixels. Positive --dy scrolls down and positive --dx scrolls right. With --ref and no distance, scrolls the element into view.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --ref <ref>                    The element to scroll, or to scroll into view",
         "  --dx <pixels>                  Pixels to scroll right (negative for left)",
         "  --dy <pixels>                  Pixels to scroll down (negative for up)",
@@ -6477,7 +6477,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Go to a URL in a tab, or go back, forward, or reload. Only http and https URLs load; file:, javascript:, data: and chrome: fail with ERR_BROWSER_URL_REFUSED. Returns once the page has loaded.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --url <url>                    An http or https URL",
         "  --back                         Go back one page",
         "  --forward                      Go forward one page",
@@ -6489,10 +6489,10 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane browser wait [--tab <tab-id>] [--text <text>] [--url <url>] [--ref <ref>] [--timeout-ms <milliseconds>] [--json] [--pane-dir <path>]",
         "",
-        "Pane's browser, shared with the person, signed in as them. Wait until the page shows some text, reaches a URL, or shows an element. Returns once every condition given holds, or fails with ERR_BROWSER_WAIT_TIMEOUT after --timeout-ms (default 10000, at most 120000). --url matches when the page's URL contains it.",
+        "Pane's browser, shared with the person, signed in as them. Wait until the page shows some text or element, or its URL matches. Returns once every condition given holds, or fails with ERR_BROWSER_WAIT_TIMEOUT after --timeout-ms (default 10000, at most 120000). --url matches when the page's URL contains it.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --text <text>                  Text the page must show",
         "  --url <url>                    Text the page's URL must contain",
         "  --ref <ref>                    An element from the last snapshot that must be visible",
@@ -6507,7 +6507,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Answer the alert, confirm or prompt dialog the page has open. browser_tabs and the result of the action that opened it show the pending dialog. --text is the answer to a prompt.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --accept                       Press OK",
         "  --dismiss                      Press Cancel",
         "  --text <text>                  The text to answer a prompt with",
@@ -6521,7 +6521,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Run JavaScript in the page and return its value. With --ref, the expression is a function that receives the element: `el => el.textContent`. Promises are awaited. Results over 64 KB are cut off with a note. A script still running after 30 seconds is stopped and fails with ERR_BROWSER_EVALUATE_TIMEOUT.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --expression <js>              A JavaScript expression, or with --ref a function of the element",
         "  --ref <ref>                    An element from the last snapshot to pass to the function",
         "  --json                         Print machine-readable output",
@@ -6534,7 +6534,7 @@ export const RUNPANE_CONTRACT = {
         "Pane's browser, shared with the person, signed in as them. Put files from your worktree into a file input, or into the file picker the page opened. Paths must be inside the Pane's worktree; credential files (.env, .pem, .key, anything under .ssh) fail with ERR_BROWSER_PATH_REFUSED. Leave --ref out to answer a file picker a click opened.",
         "",
         "Options:",
-        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use",
+        "  --tab <tab-id>                 The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise",
         "  --ref <ref>                    The file input's ref. Leave it out to answer the picker the page opened",
         "  --paths <paths>                The files, as a JSON array of paths in your worktree",
         "  --json                         Print machine-readable output",
@@ -28987,7 +28987,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--json",
@@ -29023,7 +29023,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--json",
@@ -29059,7 +29059,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--full-page",
@@ -29100,7 +29100,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--ref",
@@ -29180,7 +29180,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--ref",
@@ -29239,7 +29239,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--key",
@@ -29288,7 +29288,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--ref",
@@ -29344,7 +29344,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--ref",
@@ -29405,7 +29405,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--url",
@@ -29454,7 +29454,7 @@ export const RUNPANE_CONTRACT = {
       },
       "browser wait": {
         "name": "browser wait",
-        "summary": "Pane's browser, shared with the person, signed in as them. Wait until the page shows some text, reaches a URL, or shows an element.",
+        "summary": "Pane's browser, shared with the person, signed in as them. Wait until the page shows some text or element, or its URL matches.",
         "details": "Returns once every condition given holds, or fails with ERR_BROWSER_WAIT_TIMEOUT after --timeout-ms (default 10000, at most 120000). --url matches when the page's URL contains it.",
         "requiresPaneDaemon": true,
         "mutates": false,
@@ -29463,7 +29463,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--text",
@@ -29526,7 +29526,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--accept",
@@ -29579,7 +29579,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--expression",
@@ -29628,7 +29628,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--tab",
             "value": "<tab-id>",
             "required": false,
-            "description": "The browser tab, by id from browser_tabs. Leave it out when the Pane has one browser tab you can use."
+            "description": "The browser tab, by id from browser_tabs. Leave it out when you opened only one tab, or the Pane has only one; required otherwise."
           },
           {
             "name": "--ref",
