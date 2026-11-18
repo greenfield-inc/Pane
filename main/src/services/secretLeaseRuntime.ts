@@ -1,5 +1,4 @@
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
-import { secretLeaseRenewCommand } from '../../../shared/types/paneSecrets';
 import type { NotifyQueue } from './notify/notifyQueue';
 import type { ConfigManager } from './configManager';
 import type { MachineConnections } from './machineConnections';
@@ -68,7 +67,7 @@ export function startSecretLeases(deps: {
         question: {
           ui: 'approve',
           title: `Extend the lease on ${names.length === 1 ? `${lease.project}/${names[0]}` : `${names.length} ${lease.project} secrets`}?`,
-          context: `It ends at ${new Date(lease.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. Agents that use it then get an error naming \`${secretLeaseRenewCommand(lease.project, names)}\`.`,
+          context: `It ends at ${new Date(lease.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. Extending reads 1Password again; ignored, it ends on time.`,
           lease: { project: lease.project, names, renews: lease.id, lengthMs },
         },
         source: { name: 'Pane', agent: 'Pane' },

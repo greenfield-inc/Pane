@@ -130,10 +130,11 @@ export function registerPaneSecretHandlers(
     const { project, names } = decode(request, resolveSchema);
     const store = secrets();
     await leases().ready();
-    // Without --only: every typed secret, and each 1Password one that has a live lease here.
+    // Without --only: every secret of the project. A 1Password one with no live lease fails the whole
+    // exec with its lease command, rather than running the command without it.
     const wanted = names ?? [
       ...store.list(project).map(secret => secret.name),
-      ...store.listReferences(project).map(reference => reference.name).filter(name => leases().has(project, name)),
+      ...store.listReferences(project).map(reference => reference.name),
     ];
     for (const name of wanted) {
       validatePaneSecretAddress(project, name);

@@ -29,7 +29,10 @@ function systemOpRunner(): OpRunner {
       reject(opMissing());
       return;
     }
-    const child = execFile(executable, [...args], {
+    // op reads stdin only from a pipe or a terminal, and Node hands a child a socket on macOS and
+    // Linux, so op would see no input: there a `cat |` gives it a real pipe. Values never touch disk.
+    const [file, argv] = process.platform === 'win32' ? [executable, [...args]] : ['/bin/sh', ['-c', 'cat | "$0" "$@"', executable, ...args]];
+    const child = execFile(file, argv, {
       timeout: OP_TIMEOUT_MS,
       encoding: 'utf8',
       maxBuffer: 4 * 1024 * 1024,

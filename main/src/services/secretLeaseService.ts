@@ -179,7 +179,8 @@ export class SecretLeaseService {
       project: request.project,
       secrets,
       expiresInMs: lengthMs,
-      requestedBy: request.requestedBy,
+      // A renewal keeps who first asked; the Extend card itself is Pane's.
+      requestedBy: previous?.requestedBy ?? request.requestedBy,
       grantedOn: this.deps.hostLabel(),
     });
     const { pushed, refused } = await this.pushTo(targets, lease.id);
