@@ -1,0 +1,24 @@
+# dcouple/raw: written by `node scripts/import-agent-farm-profiles.js` from Agent Farm's dcouple plugin 0.1.27; don't edit by hand.
+# A single agent step: the run ends when the agent reports done.
+format: pane-profile/1
+name: dcouple-raw
+version: 0.1.27
+title: The AI model on its own, plus a few good habits for pull requests, tickets, testing, and checking its work. Best for small, clear tasks.
+
+agents:
+  raw:
+    runs: claude/claude-opus-5-5
+    effort: medium
+    reads: [agents/raw-claude]
+    skills: [prepare-pr, create-ticket, babysit-pr, tdd, codebase-design, handoff, smallest-test, investigate, quick-verify, pr-test-automation, ui-mockup, research-web, refactor-simple, session-trace, pr-understanding-check]
+
+flow:
+  start: work
+  work:
+    agent: raw
+    goal: The AI model on its own, plus a few good habits for pull requests, tickets, testing, and checking its work. Best for small, clear tasks
+    outcomes: {done: end}
+
+samples:
+  work:
+    done: ["Done: what it did, with links to what it made.", "Done: what it found, and what is left for you to decide."]

@@ -12,7 +12,7 @@ const execFileAsync = promisify(execFile);
 /** The npm package Pane ships (pinned in package.json and main/package.json). */
 const AGENT_FARM_PACKAGE = '@greenfieldco/agent-farm';
 /** Plugins the bundled package carries that Pane installs into its own config root; greenfield first. */
-export const BUNDLED_AGENT_FARM_PLUGINS = ['greenfield', 'orchestra', 'bigbrain', 'machine-security'] as const;
+export const BUNDLED_AGENT_FARM_PLUGINS = ['greenfield', 'dcouple'] as const;
 const MANIFEST_FILE = 'pane-manifest.json';
 
 /** The bundled Agent Farm package: its CLI entry, version and plugin sources. */

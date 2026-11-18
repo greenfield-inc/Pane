@@ -13,6 +13,8 @@ export interface DeviceJobResult {
 
 const TAIL_BYTES = 16 * 1024;
 const TAIL_CUT = '[earlier output cut]\n';
+/** How long a job waits for its output after the shell exits (as workspaceMachine's execOnMachine does). */
+const OUTPUT_DRAIN_MS = 500;
 
 interface Job {
   id: string;
@@ -55,7 +57,17 @@ export class DeviceJobs {
     child.stderr?.on('data', append);
     job.exited = new Promise<void>((resolve) => {
       child.once('error', (error) => { append(Buffer.from(`\n${error.message}\n`)); job.exitCode = 127; resolve(); });
-      child.once('exit', (code, signal) => { job.exitCode = code ?? (signal ? 128 : 1); resolve(); });
+      // 'exit' can fire before the last output is read, and a background process (`server &`) can hold
+      // the pipes open long after it: answer at 'close', or OUTPUT_DRAIN_MS after 'exit' at the latest.
+      child.once('exit', (code, signal) => {
+        const finish = () => { job.exitCode ??= code ?? (signal ? 128 : 1); resolve(); };
+        const drain = setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          finish();
+        }, OUTPUT_DRAIN_MS);
+        child.once('close', () => { clearTimeout(drain); finish(); });
+      });
     });
     this.jobs.set(job.id, job);
     return this.wait(owner, job.id, waitMs);

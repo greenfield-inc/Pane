@@ -26,6 +26,7 @@ export const EXPECTED_JOBS = [
   'typecheck-lint',
   'markdown-links',
   'functional-smoke-browser',
+  'renderer-selection',
   'functional-smoke-electron',
   'runpane-wrapper-tests',
   'cross-os-main-tests',
