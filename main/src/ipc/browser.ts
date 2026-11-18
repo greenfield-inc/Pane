@@ -31,8 +31,8 @@ export interface BrowserHost {
   page(panelId: string): BrowserPageContents | undefined;
   /** Whether this Pane has a window that can show a tab (headless hosts have none). */
   hasWindow(): boolean;
-  /** Where screenshots go. */
-  shotsDirectory(): string;
+  /** Where a Pane's screenshots go: its scratch folder, deleted with the Pane. */
+  shotsDirectory(paneId: string): Promise<string>;
   /** Shows the agent's cursor where it clicked, in the tab. */
   showCursor(panelId: string, x: number, y: number): void;
 }
@@ -383,7 +383,7 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     const { tab: tabId, fullPage } = decode('screenshot', request, schemas.screenshot);
     return onTab(caller, tabId, false, async (page, tab) => {
       const shot = await page.screenshot(fullPage === true);
-      const directory = host.shotsDirectory();
+      const directory = await host.shotsDirectory(tab.sessionId);
       await mkdir(directory, { recursive: true });
       const file = path.join(directory, `${tab.id}-${Date.now()}.png`);
       await writeFile(file, shot.png);

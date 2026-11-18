@@ -92,7 +92,7 @@ function setup(initial: ToolPanel[] = []): Fixture {
     update: async (tab, state) => { tab.state = { ...tab.state, customState: state }; },
     page: (id) => pages.get(id),
     hasWindow: () => true,
-    shotsDirectory: () => path.join(worktree, '.shots'),
+    shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: () => undefined,
   };
   const services: BrowserServices = {

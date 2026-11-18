@@ -5,7 +5,8 @@ import type { BrowserPanelState } from '../../../../shared/types/panels';
 import { getPaneWebviewContextMap } from '../../core/runtime';
 import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import type { BrowserHost } from '../../ipc/browser';
-import { getAppDirectory } from '../../utils/appDirectory';
+import os from 'os';
+import { paneScratchDirectory } from '../paneScratch';
 import { panelManager } from '../panelManager';
 
 /** The renderer hears where an agent clicked, to draw its cursor on the tab. */
@@ -40,7 +41,7 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     },
     page: (panelId) => newestPage(panelId),
     hasWindow: () => getMainWindow() !== null,
-    shotsDirectory: () => path.join(getAppDirectory(), 'browser', 'screenshots'),
+    shotsDirectory: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-screenshots'),
     showCursor: (panelId, x, y) => getMainWindow()?.webContents.send(BROWSER_AGENT_CURSOR_EVENT, { panelId, x, y }),
   };
 }
