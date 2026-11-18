@@ -135,7 +135,7 @@ def _profile_state(profile: Dict[str, Any]) -> str:
         errors = profile.get("errors") or []
         return f"invalid: {errors[0].get('message') if errors else 'no reason given'}"
     if profile.get("teamOnly"):
-        return "team only"
+        return "no flow"
     return "launchable" if profile.get("launchable") else "not launchable"
 
 
@@ -169,7 +169,7 @@ def _describe_profile(profile: Dict[str, Any]) -> List[str]:
                 if step.get("next"):
                     lines.append(f"    (answer) → {step['next']}")
         else:
-            lines.extend(["", "Steps: none (a team only, with no workflow to launch)"])
+            lines.extend(["", "Steps: none (no flow, so nothing to launch)"])
     errors = profile.get("errors") or []
     if errors:
         lines.extend(["", "Errors:"])

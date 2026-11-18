@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { expect, test, type Page } from '@playwright/test';
 import { flowEdges } from '../shared/profiles/flowGraph';
-import type { LibraryProfile, OwnAgentFarmView, ProfileLaunchInput, ProfileLibraryView } from '../shared/types/profiles';
+import type { LibraryProfile, ProfileLaunchInput, ProfileLibraryView } from '../shared/types/profiles';
 import { loadProfiles, type ProfileSource } from '../main/src/services/profiles/profileLoader';
 import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 
@@ -10,7 +10,8 @@ type MockWindow = Window & { __paneTestElectronMock: { getInvokeCalls(channel: s
 
 const REPO = path.join(__dirname, '..');
 const BUNDLED = path.join(REPO, 'main/src/services/profiles/bundled');
-const INVALID = path.join(REPO, 'shared/profiles/fixtures/invalid');
+const FIXTURES = path.join(REPO, 'shared/profiles/fixtures');
+const INVALID = path.join(FIXTURES, 'invalid');
 const PLUGINS = path.join(path.dirname(require.resolve('@greenfieldco/agent-farm/package.json', { paths: [path.join(REPO, 'main')] })), 'plugins');
 const SCREENSHOTS = process.env.PROFILES_SCREENSHOT_DIR;
 
@@ -22,19 +23,19 @@ interface MockLibrary {
   yaml: Record<string, string>;
 }
 
-/** The library as main builds it: the shipped profiles (reads in the bundled plugin) and three broken ones of yours. */
+/** The library as main builds it: the shipped profiles (reads in the bundled plugin), one of yours with no flow and three broken ones. */
 function library(): MockLibrary {
-  const sources: ProfileSource[] = readdirSync(BUNDLED).filter((file) => file.endsWith('.profile.yaml')).map((file) => ({ file: path.join(BUNDLED, file), origin: 'bundled', filesRoot: path.join(PLUGINS, file.replace('.profile.yaml', '')) }));
+  const sources: ProfileSource[] = readdirSync(BUNDLED).filter((file) => file.endsWith('.profile.yaml')).map((file) => ({ file: path.join(BUNDLED, file), origin: 'bundled', filesRoot: path.join(PLUGINS, file.split('.')[0]) }));
+  sources.push({ file: path.join(FIXTURES, 'team-only.profile.yaml'), origin: 'yours' });
   for (const name of ['one-sample', 'missing-step', 'unreachable']) sources.push({ file: path.join(INVALID, `${name}.profile.yaml`), origin: 'yours' });
   const profiles: LibraryProfile[] = loadProfiles(sources).map((profile) => ({ ...profile, enabled: profile.origin === 'yours' || profile.name === 'greenfield' }));
   return { view: { profiles }, yaml: Object.fromEntries(profiles.map((profile) => [profile.name, readFileSync(profile.file, 'utf8')])) };
 }
 
-async function openProfiles(page: Page, width = 1_440, theme = 'dark', own?: OwnAgentFarmView) {
+async function openProfiles(page: Page, width = 1_440, theme = 'dark') {
   const { view, yaml } = library();
   await page.setViewportSize({ width, height: 900 });
-  const options: ElectronApiMockOptions = { initialProjects: projects, initialSessions: [], initialConfig: { theme, appearanceMode: 'fixed' }, profileLibrary: view, profileYaml: yaml };
-  if (own) options.ownAgentFarm = own;
+  const options: ElectronApiMockOptions = { initialProjects: projects, initialSessions: [], initialConfig: { theme, appearanceMode: 'fixed', profilesEnabled: true }, profileLibrary: view, profileYaml: yaml };
   await installElectronApiMock(page, options);
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.getByTestId('profiles-nav').click();
@@ -56,7 +57,12 @@ test('J3: greenfield\'s flow has one box per step and one labelled arrow per out
   await expect(page.getByTestId('profile-flow-edge')).toHaveCount(18);
   for (const step of flow.steps) await expect(page.locator(`[data-testid="profile-flow-step"][data-step="${step.id}"]`)).toHaveAttribute('data-kind', step.kind);
   for (const edge of flowEdges(flow)) await expect(page.locator(`[data-testid="profile-flow-edge"][data-from="${edge.from}"][data-label="${edge.label}"]`)).toHaveCount(1);
+  // The page opens on the graph alone: samples, example runs and Team sit under Details (D-109).
+  await expect(page.getByTestId('profile-sample-button')).toHaveCount(0);
+  await expect(page.getByTestId('profile-tab-team')).toHaveCount(0);
+  await expect(page.getByTestId('profile-launch-sentence')).toHaveText('Launch runs this flow in a new Pane, one tab per step, and asks you at each of its questions.');
   await shoot(page, 'j3-graph');
+  await page.getByTestId('profile-details-toggle').click();
 
   // Example runs light different paths over the same boxes.
   await page.getByTestId('profile-run-toggle-A').click();
@@ -83,11 +89,11 @@ test('J3: greenfield\'s flow has one box per step and one labelled arrow per out
   await expect(page.getByTestId('profile-yaml')).toContainText('qa-lead:');
 });
 
-test('J8: team-only and invalid profiles are listed with Launch disabled and the exact error', async ({ page }) => {
+test('J8: a profile with no flow and invalid ones are listed with Launch disabled and the exact error', async ({ page }) => {
   await openProfiles(page);
-  await page.locator('[data-testid="profile-list-item"][data-profile="orchestra"]').click();
-  await expect(page.getByTestId('profile-viewer')).toHaveAttribute('data-profile', 'orchestra');
-  await expect(page.getByTestId('profile-badge').last()).toHaveText('team only');
+  await page.locator('[data-testid="profile-list-item"][data-profile="team-only"]').click();
+  await expect(page.getByTestId('profile-viewer')).toHaveAttribute('data-profile', 'team-only');
+  await expect(page.getByTestId('profile-badge').last()).toHaveText('no flow');
   await expect(page.getByTestId('profile-flow-team-only')).toBeVisible();
   await expect(page.getByTestId('profile-launch')).toBeDisabled();
 
@@ -102,19 +108,74 @@ test('J8: team-only and invalid profiles are listed with Launch disabled and the
   await shoot(page, 'j8-invalid');
 });
 
-test('"Your Agent Farm" lists the person\'s own profiles, and is absent when it lists none', async ({ page }) => {
-  await openProfiles(page, 1_440, 'dark', { profiles: [] });
-  await expect(page.getByRole('heading', { name: 'Your Agent Farm' })).toHaveCount(0);
-  await openProfiles(page, 1_440, 'dark', { profiles: [{ name: 'team/helper', source: 'plugin team 1.0.0', harness: 'claude' }] });
-  await expect(page.getByRole('heading', { name: 'Your Agent Farm' })).toBeVisible();
-  await expect(page.getByTestId('own-agent-farm-profile')).toHaveText(/team\/helper/);
+test('the library lists greenfield under On and every dcouple profile under Ready to add, each launchable once added', async ({ page }) => {
+  await openProfiles(page);
+  await expect(page.getByRole('heading', { name: 'On', exact: true })).toBeVisible();
+  const ready = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Ready to add' }) });
+  await expect(ready.getByTestId('profile-list-item')).toHaveCount(9);
+  await expect(page.getByText('team only')).toHaveCount(0);
+  await ready.locator('[data-profile="dcouple-raw"]').click();
+  await expect(page.getByTestId('profile-flow-step')).toHaveCount(1);
+  await expect(page.getByTestId('profile-launch-sentence')).toHaveText('Launch runs this agent on your request in a new Pane.');
+  await expect(page.getByTestId('profile-toggle-enabled')).toHaveText('Add');
+  await expect(page.getByTestId('profile-launch')).toBeDisabled();
+  await shoot(page, 'library-dcouple');
 });
+
+test('Profiles is hidden until Settings turns it on, and appears without a restart', async ({ page }) => {
+  await installElectronApiMock(page, { initialProjects: projects, initialSessions: [], initialConfig: { theme: 'dark', appearanceMode: 'fixed' }, profileLibrary: library().view });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('button', { name: 'Settings' }).first()).toBeVisible();
+  await expect(page.getByTestId('profiles-nav')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Settings' }).first().click();
+  await page.getByRole('button', { name: 'Advanced', exact: true }).click();
+  const toggle = page.getByRole('switch', { name: 'Profiles' });
+  await expect(toggle).not.toBeChecked();
+  await shoot(page, 'settings-off');
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+  await shoot(page, 'settings-on');
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(page.getByTestId('profiles-nav')).toBeVisible();
+});
+
+const now = new Date(0).toISOString();
+const plusMenuSession = {
+  id: 'profiles-plus-menu', name: 'Plus menu', worktreePath: '/tmp/pane/plus-menu', prompt: '',
+  status: 'stopped', createdAt: now, lastActivity: now, output: [], jsonMessages: [], isRunning: false,
+  permissionMode: 'ignore', projectId: projects[0].id, displayOrder: 0, isFavorite: false, toolType: 'none', archived: false,
+  gitStatus: { state: 'clean', ahead: 0, behind: 0, hasUncommittedChanges: false, hasUntrackedFiles: false, filesChanged: 0 },
+};
+const plusMenuPanel = {
+  id: 'profiles-plus-menu-terminal', sessionId: plusMenuSession.id, type: 'terminal', title: 'Terminal',
+  state: { isActive: true, hasBeenViewed: true, customState: { isInitialized: false } },
+  metadata: { createdAt: now, lastActiveAt: now, position: 0, permanent: true },
+};
+
+for (const profilesEnabled of [false, true]) {
+  test(`with chat tabs off, the + menu offers Profile… only when Profiles is on (${profilesEnabled ? 'on' : 'off'})`, async ({ page }) => {
+    await installElectronApiMock(page, {
+      initialProjects: projects, initialSessions: [plusMenuSession], initialPanels: [plusMenuPanel], activeProjectId: projects[0].id,
+      initialConfig: { theme: 'dark', appearanceMode: 'fixed', profilesEnabled }, profileLibrary: library().view,
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: /^Expand project Pane$/ }).click();
+    await page.getByRole('button', { name: 'Plus menu', exact: true }).click();
+    await page.getByRole('button', { name: 'Add tool', exact: true }).click();
+    await expect(page.getByRole('menuitem', { name: /^Terminal/ }).first()).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Profile…', exact: true })).toHaveCount(profilesEnabled ? 1 : 0);
+    if (!profilesEnabled) return;
+    await page.getByRole('menuitem', { name: 'Profile…', exact: true }).click();
+    await expect(page.getByTestId('profile-picker-list')).toContainText('greenfield');
+  });
+}
 
 test('launch dialog: a CLI per agent, and "Other…" marks the run baseline only', async ({ page }) => {
   await openProfiles(page);
   await page.getByTestId('profile-launch').click();
   const dialog = page.getByTestId('launch-profile-dialog');
   await expect(dialog.getByTestId('launch-agent-row')).toHaveCount(5);
+  await expect(page.getByRole('button', { name: 'Close modal' })).toHaveCount(1);
   await expect(dialog.getByTestId('launch-baseline-note')).toHaveCount(0);
   await dialog.getByLabel('CLI for implementer').selectOption({ label: 'Other…' });
   await dialog.getByLabel('Command for implementer').fill('node ./stub-agent.js');
