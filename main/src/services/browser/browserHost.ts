@@ -1,7 +1,7 @@
 import { webContents, type BrowserWindow } from 'electron';
 import path from 'path';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
-import type { BrowserPanelState, ToolPanel } from '../../../../shared/types/panels';
+import type { BrowserPanelState } from '../../../../shared/types/panels';
 import { getPaneWebviewContextMap } from '../../core/runtime';
 import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import type { BrowserHost } from '../../ipc/browser';

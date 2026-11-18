@@ -1,4 +1,3 @@
-import type { IpcMain } from 'electron';
 import { EventEmitter } from 'events';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'fs';
 import os from 'os';
@@ -9,7 +8,6 @@ import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { BrowserPageContents } from '../services/browser/pageDriver';
-import type { AppServices } from './types';
 import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost, type BrowserServices } from './browser';
 import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
 
