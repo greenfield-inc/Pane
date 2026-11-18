@@ -321,6 +321,9 @@ Approvals, **More** (or **Details**, when choices have notes) opens the card in
 place with every choice, its note and **Send**.
 
 ✕ (**Dismiss**) hides a question from the strip without answering it; it keeps waiting in Approvals.
+A dismissed question no longer counts as open for its Session: the Session's
+count and badge leave it out, and it doesn't hold back a move to another
+machine. It counts again when it changes (a new version, Undo or a reopen).
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
 switch to Pane. The clock at the bottom right of a card snoozes it for 3, 5
 or 15 minutes: it leaves the strip, then comes back in its place in the

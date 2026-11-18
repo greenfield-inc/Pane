@@ -123,4 +123,13 @@ describe('the approval card', () => {
     expect(readyCount(list)).toBe(1);
     expect(firstToOpen([older])?.id).toBe('older');
   });
+
+  it('a Session whose approvals were dismissed has none open, so no count or badge', () => {
+    const dismissed = [{ ...q20, dismissedAt: 2_000 }, { ...q20, id: 'q21', dismissedAt: 2_500 }];
+    expect(sessionApprovals(dismissed, 's1')).toEqual([]);
+    expect(readyCount(sessionApprovals(dismissed, 's1'))).toBe(0);
+    expect(firstToOpen(sessionApprovals(dismissed, 's1'))).toBeUndefined();
+    // A dismissed one beside a waiting one: only the waiting one counts.
+    expect(sessionApprovals([...dismissed, { ...q20, id: 'open' }], 's1').map(item => item.id)).toEqual(['open']);
+  });
 });
