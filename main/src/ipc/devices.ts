@@ -232,6 +232,8 @@ async function followDeviceChange(change: DeviceChange): Promise<void> {
     if (!panel) continue;
     const state = panelState(panel);
     if (!state || state.deviceId !== change.id) continue;
+    // A booting tab (Boot, Restart) ends live or with its open's error; a release or shutdown on the way is part of it.
+    if (state.phase === 'booting' && change.kind !== 'held') continue;
     if (change.kind === 'held') {
       if (panel.sessionId === change.paneId) await setPanelState(panel, { phase: 'live', heldBy: undefined });
       else await setPanelState(panel, { phase: 'in-use', heldBy: { paneId: change.paneId, paneName: appServices ? paneNameOf(appServices, change.paneId) : change.paneId } });
@@ -822,14 +824,22 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
       await openOnMac(services, caller, state.machineId ? state.deviceId : undefined);
       return true;
     }
-    if (state.deviceId && (action === 'shutdown' || action === 'restart')) await devices().shutdownDevice(state.deviceId);
     if (action === 'shutdown') {
+      if (state.deviceId) await devices().shutdownDevice(state.deviceId);
       await setPanelState(panel, { phase: 'off' });
       return true;
     }
+    // Booting from the first moment, so a restart shows the booting skeleton through its shutdown too.
     await setPanelState(panel, { phase: 'booting' });
-    const opened = await devices().open(caller, state.deviceId ? { platform: state.platform, device: state.deviceId } : { platform: state.platform });
-    await setPanelState(panel, { deviceId: opened.device.id, phase: 'live', heldBy: undefined });
+    try {
+      if (state.deviceId && action === 'restart') await devices().shutdownDevice(state.deviceId);
+      const opened = await devices().open(caller, state.deviceId ? { platform: state.platform, device: state.deviceId } : { platform: state.platform });
+      await setPanelState(panel, { deviceId: opened.device.id, phase: 'live', heldBy: undefined });
+    } catch (cause) {
+      if (cause instanceof DeviceBusyError) await setPanelState(panel, { phase: 'in-use', heldBy: { paneId: cause.holder, paneName: paneNameOf(services, cause.holder) } });
+      else await setPanelState(panel, { phase: 'error' });
+      throw cause;
+    }
     return true;
   }));
 
