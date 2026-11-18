@@ -10,6 +10,7 @@ const BILLING = '__orchestration_session_billing__';
 const OTHER = '__orchestration_session_other__';
 const HIDDEN = '__orchestration_session_todo3__';
 const NOW = Date.UTC(2026, 10, 18, 22, 0);
+const SHOTS = process.env.TODO_SIDEBAR_SHOTS_DIR;
 
 const projects = [
   { id: 1, name: 'billing', path: '/tmp/billing', active: true, created_at: '2026-10-01T00:00:00.000Z', updated_at: '2026-10-01T00:00:00.000Z' },
@@ -75,4 +76,5 @@ test('the Session that requested a to-do counts its review and the permission pr
   await expect(page.getByTestId(`orchestration-session-${OTHER}`).getByTestId('session-approvals-count')).toHaveCount(0);
   // The to-do's own Session stays out of the list (T-7).
   await expect(page.getByTestId(`orchestration-session-${HIDDEN}`)).toHaveCount(0);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/T22-session-row-light.png` });
 });
