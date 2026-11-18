@@ -4,6 +4,7 @@ import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoLis
 import { isMac } from '../utils/platformUtils';
 import { LOCAL_MACHINE_ID, type MachineCommand, type MachineConnectionsEvent, type MachineEventChannel, type MachineState } from '../../../shared/types/machineConnections';
 import { otherMachines } from '../components/todos/todoList';
+import { todoApprovalScope, type TodoApprovalScope } from '../components/todos/sessionTodos';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { useConfigStore } from './configStore';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
@@ -461,4 +462,20 @@ function detailAsThisMachine(detail: TodoDetail): TodoDetail {
 /** Each approval linked to a to-do, with its state: what a to-do's status reads from Approvals. */
 function approvalStates(snapshot: NotifySnapshot | null): string {
   return (snapshot?.items ?? []).filter(item => item.todo).map(item => `${item.id}:${item.state}`).join(',');
+}
+
+/** The to-do rows of one machine: this computer's (`local` or absent) or a saved machine's. */
+function machineRows(state: Pick<TodosState, 'snapshot' | 'remote'>, machineId?: string): readonly TodoListRow[] | undefined {
+  return machineId === undefined || machineId === LOCAL_MACHINE_ID ? state.snapshot?.rows : state.remote[machineId]?.snapshot?.rows;
+}
+
+/** A Session's to-dos' approvals scope (T-22), read once from the store's current state. */
+export function sessionTodoScope(sessionId: string, machineId?: string): TodoApprovalScope {
+  return todoApprovalScope(machineRows(useTodosStore.getState(), machineId) ?? [], sessionId);
+}
+
+/** As sessionTodoScope, kept current: its row's count and its Approvals column include its to-dos' approvals. */
+export function useSessionTodoScope(sessionId: string, machineId?: string): TodoApprovalScope {
+  const rows = useTodosStore(state => machineRows(state, machineId));
+  return useMemo(() => todoApprovalScope(rows ?? [], sessionId), [rows, sessionId]);
 }

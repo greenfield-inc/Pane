@@ -57,6 +57,13 @@ mid-turn, so it never goes stale. The first that applies wins:
 | Idle | Anything else that is open, with a reason: not started, stopped, waiting for a usage limit, machine offline, or quiet. A to-do quiet for 10 minutes reads red. |
 | Done | It was marked done after you accepted it, or you marked it done. |
 
+**Where a to-do's approvals show.** Every approval of a to-do (its review,
+a stuck card, its agents' questions and permission prompts, including ones
+asked inside its own hidden Session) shows in Approvals, labelled with the
+to-do, and on the to-do's page. It also counts on the sidebar row of the
+Session that requested the to-do, and opens in that Session's Approvals
+column, each counted once, in All machines too.
+
 ## Creating a to-do
 
 **On the To-dos page**, press **New to-do** (or C). Give it a title, and

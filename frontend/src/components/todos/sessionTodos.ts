@@ -1,0 +1,37 @@
+import type { NotifyItem } from '../../../../shared/types/notify';
+import { isOpenTodoState, type TodoListRow } from '../../../../shared/types/todos';
+
+/**
+ * A Session's to-dos (T-22, T-23): the top-level to-dos it requested (its orchestrator created them), or, for a
+ * to-do's own hidden Session, that to-do. Any state, in list order; callers that need only open ones filter.
+ */
+export function sessionTodos(rows: readonly TodoListRow[], sessionId: string): TodoListRow[] {
+  return rows.filter(({ todo }) => todo.parentNumber === null
+    && (todo.sessionId === sessionId || (todo.requester.kind === 'orchestrator' && todo.requester.sessionId === sessionId)));
+}
+
+/** Where a Session's to-dos' approvals come from: their own hidden Sessions, and the to-dos (with their sub-to-dos) themselves. */
+export interface TodoApprovalScope {
+  sessionIds: ReadonlySet<string>;
+  todoNumbers: ReadonlySet<number>;
+}
+
+export const EMPTY_TODO_SCOPE: TodoApprovalScope = { sessionIds: new Set(), todoNumbers: new Set() };
+
+/** The open to-dos a Session requested or owns, as the approvals scope its row and column add (T-22). */
+export function todoApprovalScope(rows: readonly TodoListRow[], sessionId: string): TodoApprovalScope {
+  const own = sessionTodos(rows, sessionId).filter(({ todo }) => isOpenTodoState(todo.state));
+  if (own.length === 0) return EMPTY_TODO_SCOPE;
+  const numbers = new Set(own.map(({ todo }) => todo.number));
+  for (const { todo } of rows) if (todo.parentNumber !== null && numbers.has(todo.parentNumber) && isOpenTodoState(todo.state)) numbers.add(todo.number);
+  const sessionIds = new Set(own.flatMap(({ todo }) => (todo.sessionId && todo.sessionId !== sessionId ? [todo.sessionId] : [])));
+  return { sessionIds, todoNumbers: numbers };
+}
+
+/** Whether an approval belongs to one of those to-dos: asked in its hidden Session, connected to it, or linked to it. */
+export function inTodoScope(item: NotifyItem, scope: TodoApprovalScope): boolean {
+  if (scope.todoNumbers.size === 0) return false;
+  if (item.todo && scope.todoNumbers.has(item.todo.number)) return true;
+  if (item.source.session && scope.sessionIds.has(item.source.session.id)) return true;
+  return item.connected?.kind === 'session' && scope.sessionIds.has(item.connected.id);
+}

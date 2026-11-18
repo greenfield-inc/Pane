@@ -3,11 +3,14 @@ import type { NotifyItem } from '../../../../shared/types/notify';
 import { selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { bridgedFrom, firstToOpen, sessionApprovals } from './approvalCard';
+import { sessionTodoScope, useSessionTodoScope } from '../../stores/todosStore';
 
 /** A Session's waiting approvals, oldest first, as its pager walks them (J14). */
-export function useSessionApprovals(sessionId: string): NotifyItem[] {
+export function useSessionApprovals(sessionId: string, machineId?: string): NotifyItem[] {
   const items = useNotifyStore(selectNotifyItems);
-  return useMemo(() => sessionApprovals(items, sessionId), [items, sessionId]);
+  // With its to-dos' approvals, their own hidden Sessions' included (T-22).
+  const todos = useSessionTodoScope(sessionId, machineId);
+  return useMemo(() => sessionApprovals(items, sessionId, todos), [items, sessionId, todos]);
 }
 
 /**
@@ -25,9 +28,9 @@ export function openNewSessionApprovals(sessionId: string, chatPanelId?: string)
   const notice = (items: readonly NotifyItem[]) => {
     for (const item of items) if (item.quiet) quiet.add(item.id);
   };
-  notice(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId));
+  notice(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId, sessionTodoScope(sessionId)));
   return useNotifyStore.subscribe((state) => {
-    const items = sessionApprovals(selectNotifyItems(state), sessionId);
+    const items = sessionApprovals(selectNotifyItems(state), sessionId, sessionTodoScope(sessionId));
     // Asked before the Session was shown (a first snapshot, a machine's list arriving late): the count
     // opens those, unless it was a quiet worker question relayed since.
     const fresh = items.filter(item => !item.quiet && !seen.has(item.id) && !bridgedFrom(item, chatPanelId)
@@ -45,6 +48,6 @@ export function openNewSessionApprovals(sessionId: string, chatPanelId?: string)
  */
 export function openApprovalsFromCount(target: EventTarget, sessionId: string): void {
   if (!(target instanceof Element) || target.closest('[data-opens-approvals]')?.getAttribute('data-opens-approvals') !== sessionId) return;
-  const first = firstToOpen(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId));
+  const first = firstToOpen(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId, sessionTodoScope(sessionId)));
   if (first) openSessionApproval(sessionId, first.id);
 }

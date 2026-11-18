@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { sessionWaitingCount, useNotifyStore } from '../../stores/notifyStore';
 import { readyCount } from './approvalCard';
 import { useSessionApprovals } from './useSessionApprovals';
+import { useSessionTodoScope } from '../../stores/todosStore';
 
 /**
  * A Session row's indicator (D-38): the amber count of approvals waiting from it, or, at zero,
@@ -11,8 +12,10 @@ import { useSessionApprovals } from './useSessionApprovals';
  * click opens the Session.
  */
 export function SessionApprovalsCount({ sessionId, machineId, otherwise, opensApprovals = false }: { sessionId: string; machineId?: string; otherwise: ReactNode; opensApprovals?: boolean }) {
-  const count = useNotifyStore((state) => sessionWaitingCount(state.snapshot, sessionId, machineId));
-  const waiting = useSessionApprovals(sessionId);
+  // Its to-dos' approvals (their own hidden Sessions' too) count on its row, each once (T-22).
+  const todos = useSessionTodoScope(sessionId, machineId);
+  const count = useNotifyStore((state) => sessionWaitingCount(state.snapshot, sessionId, machineId, todos));
+  const waiting = useSessionApprovals(sessionId, machineId);
   const ready = readyCount(waiting);
   return (
     <span className="pointer-events-none ml-auto inline-flex h-[18px] shrink-0 items-center justify-end gap-1.5">

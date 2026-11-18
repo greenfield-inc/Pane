@@ -1,4 +1,5 @@
 import type { NotifyChoice, NotifyItem, NotifyLink, NotifySubQuestion, NotifyVersion } from '../../../../shared/types/notify';
+import { EMPTY_TODO_SCOPE, inTodoScope, type TodoApprovalScope } from '../todos/sessionTodos';
 import { isOpenForSession } from '../../../../shared/approvalOpen';
 import { approvalStatus, replyReader, sentenceStart } from '../../../../shared/approvalStatus';
 import { todoRef } from '../../../../shared/types/todos';
@@ -206,10 +207,10 @@ export function askedBy(item: NotifyItem): string[] {
 }
 
 /** Items open for a Session (its own, its workers', Autopilot's about it; not dismissed), oldest first. */
-export function sessionApprovals(items: readonly NotifyItem[], sessionId: string): NotifyItem[] {
+export function sessionApprovals(items: readonly NotifyItem[], sessionId: string, todos: TodoApprovalScope = EMPTY_TODO_SCOPE): NotifyItem[] {
   return items
     .filter(item => isOpenForSession(item) && !item.relay && item.staleSince === undefined
-      && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId)))
+      && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId) || inTodoScope(item, todos)))
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { EMPTY_TODO_SCOPE, inTodoScope, type TodoApprovalScope } from '../components/todos/sessionTodos';
 import { isOpenForSession } from '../../../shared/approvalOpen';
 import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import { showActionError } from './errorStore';
@@ -204,8 +205,9 @@ export function waitingCount(snapshot: NotifySnapshot | null): number {
  * with `machineId`, only that machine's (`local` for this computer). A dismissed item still waits in
  * Approvals but isn't open for its Session (`isOpenForSession`), so the row's count leaves it out.
  */
-export function sessionWaitingCount(snapshot: NotifySnapshot | null, sessionId: string, machineId?: string): number {
-  return snapshot?.items.filter((item) => countsAsWaiting(item) && isOpenForSession(item) && item.source.session?.id === sessionId
+export function sessionWaitingCount(snapshot: NotifySnapshot | null, sessionId: string, machineId?: string, todos: TodoApprovalScope = EMPTY_TODO_SCOPE): number {
+  // With `todos`, the approvals of the to-dos this Session requested count too, each once (T-22).
+  return snapshot?.items.filter((item) => countsAsWaiting(item) && isOpenForSession(item) && (item.source.session?.id === sessionId || inTodoScope(item, todos))
     && (machineId === undefined || (item.machineId ?? 'local') === machineId)).length ?? 0;
 }
 
