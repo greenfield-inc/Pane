@@ -6,7 +6,7 @@ import { agentIdIcon } from '../ui/brandIconRegistry';
 import { relativeAge } from '../notify/notifyFormat';
 import { TodoStatusIcon } from './TodoStatusIcon';
 import { entryAction, requesterLabel, type TodoEntry, type TodoRowActionKind, type TodosGrouping } from './todoList';
-import { TODOS_BUTTON, TODOS_CHIP } from './todoStyles';
+import { TODOS_BUTTON, TODOS_CHIP, TODOS_REF_COLUMN, TODOS_ROW_LEAD } from './todoStyles';
 
 interface TodoRowProps {
   entry: TodoEntry;
@@ -47,8 +47,8 @@ function ActionButton({ kind, onClick }: { kind: TodoRowActionKind; onClick: (ev
 /** The agent working it, as a small tile, or a dash when nobody is. */
 function AgentTile({ agentId }: { agentId: string | undefined }) {
   return (
-    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface-tertiary text-[10.5px] font-bold text-text-tertiary" aria-hidden="true">
-      {agentId ? agentIdIcon(agentId, 'h-3 w-3 text-text-primary') : '–'}
+    <span className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md bg-surface-tertiary text-[11px] font-bold text-text-tertiary" aria-hidden="true">
+      {agentId ? agentIdIcon(agentId, 'h-3.5 w-3.5 text-text-primary') : '–'}
     </span>
   );
 }
@@ -84,37 +84,38 @@ export function TodoRow({ entry, grouping, selected, flash, now, onSelect, onOpe
       onClick={onOpen}
       onKeyDown={event => { if (event.key === 'Enter' && event.target === event.currentTarget) { event.preventDefault(); onOpen(); } }}
       className={cn(
-        'group flex h-[38px] cursor-default items-center gap-2.5 whitespace-nowrap border-b border-border-secondary pl-3.5 pr-4 text-[13px]',
+        'group flex h-11 cursor-default items-center whitespace-nowrap border-b border-border-secondary pr-4 text-[14px]',
+        TODOS_ROW_LEAD,
         selected ? 'bg-surface-selected' : 'hover:bg-surface-hover',
         flash && 'animate-todo-flash motion-reduce:animate-none',
       )}
     >
-      <span className="w-10 shrink-0 text-[12.5px] tabular-nums text-text-tertiary">{todoRef(todo.number)}</span>
-      <TodoStatusIcon status={status.status} />
+      <span className={cn(TODOS_REF_COLUMN, 'text-[13px] tabular-nums text-text-tertiary')}>{todoRef(todo.number)}</span>
+      <TodoStatusIcon status={status.status} size="lg" />
       <span className="min-w-0 flex-1 truncate font-medium text-text-primary">
         {todo.title}
         {status.reason && <span className={cn('ml-2 font-normal', reasonClass)} data-testid="todo-row-reason">{status.reason}</span>}
       </span>
       <span className={cn('inline-flex shrink-0 items-center gap-2', hasActions && (selected ? 'hidden' : 'group-hover:hidden'))}>
         {row.unread ? (
-          <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-interactive/15 px-[7px] text-[11.5px] font-semibold text-interactive-text" title="New replies">
-            <MessageSquare className="h-3 w-3" aria-hidden="true" />{row.unread}
+          <span className="inline-flex h-6 shrink-0 items-center gap-1 rounded-full bg-interactive/15 px-2 text-[12px] font-semibold text-interactive-text" title="New replies">
+            <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />{row.unread}
           </span>
         ) : null}
         {row.subCounts && row.subCounts.total > 0 && <span className={TODOS_CHIP} title="Sub-to-dos">{row.subCounts.done}/{row.subCounts.total}</span>}
         {row.pr && <span className={TODOS_CHIP}>{row.pr.label}</span>}
         {grouping !== 'requester' && (
           <span className={TODOS_CHIP} title={todo.requester.gone ? `Requested by ${requester} (gone)` : `Requested by ${requester}`}>
-            <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-text-tertiary" aria-hidden="true" />
+            <span className="h-2 w-2 shrink-0 rounded-full bg-text-tertiary" aria-hidden="true" />
             {requester}
           </span>
         )}
         {grouping !== 'repo' && row.projectName && <span className={TODOS_CHIP}>{row.projectName}</span>}
         {grouping !== 'machine' && entry.remote && (
-          <span className={TODOS_CHIP}><Monitor className="h-3 w-3" aria-hidden="true" />{row.machine}</span>
+          <span className={TODOS_CHIP}><Monitor className="h-3.5 w-3.5" aria-hidden="true" />{row.machine}</span>
         )}
         <AgentTile agentId={row.agentId ?? todo.agent ?? undefined} />
-        <span className="w-[34px] shrink-0 text-right text-[12px] text-text-tertiary">{relativeAge(todo.updatedAt, now)}</span>
+        <span className="w-[38px] shrink-0 text-right text-[12.5px] text-text-tertiary">{relativeAge(todo.updatedAt, now)}</span>
       </span>
       {hasActions && (
         <span className={cn('shrink-0 gap-1', selected ? 'inline-flex' : 'hidden group-hover:inline-flex')} onMouseDown={event => event.stopPropagation()}>

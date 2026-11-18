@@ -5,7 +5,9 @@ import { useTodosStore } from '../../../stores/todosStore';
 import { cn } from '../../../utils/cn';
 import { useNow } from '../../notify/useNow';
 import { relativeAge } from '../../notify/notifyFormat';
+import { SkeletonSwap } from '../../ui/Skeleton';
 import { TodoStatusIcon } from '../TodoStatusIcon';
+import { PhoneTodoListSkeleton } from '../TodoSkeletons';
 import { groupTodos, requesterLabel, tabCounts, type TodoEntry, type TodosTab } from '../todoList';
 import { TODOS_PILL_OFF, TODOS_PILL_ON } from '../todoStyles';
 import { useTodoEntries } from '../useTodoEntries';
@@ -55,12 +57,13 @@ export function PhoneTodoList({ onOpen, onNew, lead }: PhoneTodoListProps) {
     scrollRef.current?.scrollTo({ top: 0 });
   };
 
-  // Back from a to-do lands where the list was, once its rows are there to scroll to.
+  // Back from a to-do lands where the list was, once its rows are there to scroll to (after the skeleton).
+  const [rowsShown, setRowsShown] = useState(false);
   useLayoutEffect(() => {
-    if (restored.current || !loaded || !scrollRef.current) return;
+    if (restored.current || !rowsShown || !scrollRef.current) return;
     restored.current = true;
     scrollRef.current.scrollTop = recalledScroll(SCROLL_KEY);
-  }, [loaded]);
+  }, [rowsShown]);
 
   return (
     <PhoneScreen testId="phone-todos-list">
@@ -86,22 +89,31 @@ export function PhoneTodoList({ onOpen, onNew, lead }: PhoneTodoListProps) {
         ))}
       </div>
       <div ref={scrollRef} onScroll={(event) => rememberScroll(SCROLL_KEY, event.currentTarget.scrollTop)} className={PHONE_SCROLL} role="list" aria-label="To-dos" data-testid="phone-todos-scroll">
-        {!loaded && <p className="p-6 text-center text-[14px] text-text-tertiary" role="status">Loading to-dos…</p>}
-        {loaded && groups.length === 0 && <p className="p-6 text-center text-[14px] text-text-tertiary">Nothing here.</p>}
-        {groups.map((group) => (
-          <div key={group.key} role="presentation">
-            <div className="sticky top-0 z-[1] flex h-[34px] items-center gap-2 border-b border-border-secondary bg-surface-secondary pl-[max(1rem,env(safe-area-inset-left))] pr-4 text-[13px] font-semibold" data-testid="phone-todos-group">
-              {group.status && <TodoStatusIcon status={group.status} />}
-              <span className="truncate">{group.label}</span>
-              <span className="font-medium text-text-tertiary">{group.entries.length}</span>
+        <SkeletonSwap loading={!loaded} skeleton={<PhoneTodoListSkeleton />}>
+          {loaded && groups.length === 0 && <p className="p-6 text-center text-[14px] text-text-tertiary">Nothing here.</p>}
+          {groups.map((group) => (
+            <div key={group.key} role="presentation">
+              <div className="sticky top-0 z-[1] flex h-[34px] items-center gap-2 border-b border-border-secondary bg-surface-secondary pl-[max(1rem,env(safe-area-inset-left))] pr-4 text-[13px] font-semibold" data-testid="phone-todos-group">
+                {group.status && <TodoStatusIcon status={group.status} />}
+                <span className="truncate">{group.label}</span>
+                <span className="font-medium text-text-tertiary">{group.entries.length}</span>
+              </div>
+              {group.entries.map((entry) => <PhoneTodoRow key={entry.key} entry={entry} now={now} onOpen={onOpen} />)}
             </div>
-            {group.entries.map((entry) => <PhoneTodoRow key={entry.key} entry={entry} now={now} onOpen={onOpen} />)}
-          </div>
-        ))}
+          ))}
+          {loaded && <OnShown run={() => setRowsShown(true)} />}
+        </SkeletonSwap>
         <div className="h-[env(safe-area-inset-bottom)]" aria-hidden="true" />
       </div>
     </PhoneScreen>
   );
+}
+
+/** Runs once its content is on screen: rendered inside a SkeletonSwap, after the skeleton steps aside. */
+function OnShown({ run }: { run: () => void }) {
+  const ran = useRef(run);
+  useLayoutEffect(() => { ran.current(); }, []);
+  return null;
 }
 
 /** "T-12 · Which currencies…", "T-20 · You · 6m": its reason, else who asked for it, and its age. */

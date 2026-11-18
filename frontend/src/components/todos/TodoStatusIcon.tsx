@@ -12,28 +12,36 @@ export const TODO_STATUS_LABEL = {
   dropped: 'Dropped',
 } as const satisfies Record<TodoShownStatus, string>;
 
+/** The icon's box and glyph sizes: 14 px on the page, rail and sidebar; 16 px in the To-dos list (T-6). */
+const ICON_SIZES = {
+  md: { box: 'w-3.5 h-3.5', glyph: 'w-3.5 h-3.5', spinner: 'w-3 h-3' },
+  lg: { box: 'w-4 h-4', glyph: 'w-4 h-4', spinner: 'w-3.5 h-3.5' },
+} as const;
+
 /**
- * A to-do's status icon. Every status shares one fixed 14 px box so swapping never shifts a row, and
- * each has its own shape so it reads without colour (J6). Working is the Session activity spinner,
- * with the same period (AGENTS.md: animations on one surface share a period).
+ * A to-do's status icon. Every status shares one fixed box (14 px, or 16 px at `size="lg"`) so
+ * swapping never shifts a row, and each has its own shape so it reads without colour (J6). Working
+ * is the Session activity spinner, with the same period (AGENTS.md: animations on one surface share
+ * a period).
  */
-export function TodoStatusIcon({ status, className }: { status: TodoShownStatus; className?: string }) {
+export function TodoStatusIcon({ status, className, size = 'md' }: { status: TodoShownStatus; className?: string; size?: keyof typeof ICON_SIZES }) {
   const label = TODO_STATUS_LABEL[status];
+  const { box, glyph, spinner } = ICON_SIZES[size];
   return (
     <span
-      className={cn('inline-flex items-center justify-center w-3.5 h-3.5 flex-shrink-0', className)}
+      className={cn('inline-flex items-center justify-center flex-shrink-0', box, className)}
       role="img"
       aria-label={label}
       title={label}
       data-testid="todo-status-icon"
       data-status={status}
     >
-      {status === 'working' && <span className="inline-block box-border w-3 h-3 rounded-full border-2 border-status-info/30 border-t-status-info animate-spin" />}
-      {status === 'waiting' && <CircleHelp className="w-3.5 h-3.5 text-status-warning" strokeWidth={2.25} />}
-      {status === 'queued' && <Clock className="w-3.5 h-3.5 text-text-secondary" strokeWidth={2.25} />}
-      {status === 'idle' && <CircleMinus className="w-3.5 h-3.5 text-text-muted" strokeWidth={2.25} />}
-      {status === 'done' && <CircleCheck className="w-3.5 h-3.5 text-status-success" strokeWidth={2.25} />}
-      {status === 'dropped' && <CircleX className="w-3.5 h-3.5 text-text-muted" strokeWidth={2.25} />}
+      {status === 'working' && <span className={cn('inline-block box-border rounded-full border-2 border-status-info/30 border-t-status-info animate-spin', spinner)} />}
+      {status === 'waiting' && <CircleHelp className={cn(glyph, 'text-status-warning')} strokeWidth={2.25} />}
+      {status === 'queued' && <Clock className={cn(glyph, 'text-text-secondary')} strokeWidth={2.25} />}
+      {status === 'idle' && <CircleMinus className={cn(glyph, 'text-text-muted')} strokeWidth={2.25} />}
+      {status === 'done' && <CircleCheck className={cn(glyph, 'text-status-success')} strokeWidth={2.25} />}
+      {status === 'dropped' && <CircleX className={cn(glyph, 'text-text-muted')} strokeWidth={2.25} />}
     </span>
   );
 }

@@ -5,11 +5,13 @@ import type { TodoAttachment } from '../../../../../shared/types/todos';
 import { todosApi, useTodoDetail } from '../../../stores/todosStore';
 import { cn } from '../../../utils/cn';
 import { AutopilotWebPage } from '../../autopilot/AutopilotDocument';
+import { SkeletonSwap } from '../../ui/Skeleton';
 import { useNow } from '../../notify/useNow';
 import { relativeAge } from '../../notify/notifyFormat';
 import { ATTACHMENT_KIND_ICON, attachmentFileName, isWebTarget } from '../page/TodoAttach';
 import { splitTabLabel } from '../page/TodoSplit';
 import { attachmentTabs, splitItemKey, type TodoSplitItem } from '../page/splitTabs';
+import { PhoneFileSkeleton } from '../TodoSkeletons';
 import { PHONE_ICON_BUTTON, PHONE_SCROLL, PhoneHeader, PhoneScreen } from './phoneParts';
 
 export interface PhoneTodoFilesProps {
@@ -42,16 +44,17 @@ export function PhoneTodoFiles({ number, tab, onTab, onBack }: PhoneTodoFilesPro
         back={{ label: `T-${number}`, onBack }}
         right={attachment ? <OpenOutside attachment={attachment} /> : null}
       />
-      {!detail && <p className="m-auto text-[14px] text-text-tertiary" role="status">Opening T-{number}…</p>}
-      {detail && items.length === 0 && <p className="m-auto px-6 text-center text-[14px] text-text-tertiary">Nothing attached yet.</p>}
-      {items.length > 0 && (
-        <div ref={strip} role="tablist" aria-label="Attachments" className="scrollbar-none flex shrink-0 gap-0.5 overflow-x-auto border-b border-border-primary bg-surface-secondary pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))]" data-testid="phone-files-tabs">
-          {items.map((item) => (
-            <FileTab key={splitItemKey(item)} item={item} label={splitTabLabel(item, items)} active={item === active} onPick={() => onTab(splitItemKey(item))} />
-          ))}
-        </div>
-      )}
-      {attachment && detail && <AttachmentBody key={attachment.id} attachment={attachment} machine={attachment.machine ?? detail.machine} from={active?.kind === 'attachment' ? active.from : undefined} />}
+      <SkeletonSwap loading={!detail} skeleton={<PhoneFileSkeleton label={`T-${number}`} />}>
+        {detail && items.length === 0 && <p className="m-auto px-6 text-center text-[14px] text-text-tertiary">Nothing attached yet.</p>}
+        {items.length > 0 && (
+          <div ref={strip} role="tablist" aria-label="Attachments" className="scrollbar-none flex shrink-0 gap-0.5 overflow-x-auto border-b border-border-primary bg-surface-secondary pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))]" data-testid="phone-files-tabs">
+            {items.map((item) => (
+              <FileTab key={splitItemKey(item)} item={item} label={splitTabLabel(item, items)} active={item === active} onPick={() => onTab(splitItemKey(item))} />
+            ))}
+          </div>
+        )}
+        {attachment && detail && <AttachmentBody key={attachment.id} attachment={attachment} machine={attachment.machine ?? detail.machine} from={active?.kind === 'attachment' ? active.from : undefined} />}
+      </SkeletonSwap>
     </PhoneScreen>
   );
 }
@@ -188,17 +191,25 @@ function FileAttachment({ attachment, machine }: { attachment: TodoAttachment; m
       </div>
     );
   }
-  if (!doc) return <p className="m-auto text-[14px] text-text-tertiary" role="status">Opening {attachment.label}…</p>;
+  return (
+    <SkeletonSwap loading={!doc} skeleton={<PhoneFileSkeleton label={attachment.label} />}>
+      {doc && <FileDoc doc={doc} label={attachment.label} />}
+    </SkeletonSwap>
+  );
+}
+
+/** A read file, as a page (no scripts), text, an image, or why it can't show. */
+function FileDoc({ doc, label }: { doc: AutopilotDocument; label: string }) {
   if (doc.kind === 'html') {
     // Read as its text (the web app): shown with no scripts, forms or navigation. The desktop loads the file itself.
     return doc.html !== undefined
-      ? <SandboxedPage html={doc.html} title={attachment.label} />
-      : <AutopilotWebPage src={doc.url} title={attachment.label} />;
+      ? <SandboxedPage html={doc.html} title={label} />
+      : <AutopilotWebPage src={doc.url} title={label} />;
   }
   if (doc.kind === 'image') {
     return (
       <div className={cn(PHONE_SCROLL, 'flex items-start justify-center p-4')}>
-        <img src={doc.dataUrl} alt={attachment.label} className="max-w-full rounded-md border border-border-primary" />
+        <img src={doc.dataUrl} alt={label} className="max-w-full rounded-md border border-border-primary" />
       </div>
     );
   }

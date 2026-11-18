@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { ChevronDown, Gauge, Plus, SlidersHorizontal } from 'lucide-react';
 import { todoRef, type TodoAction } from '../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
@@ -17,22 +17,26 @@ import {
   type TodoEntry, type TodoRowActionKind, type TodosGrouping, type TodosTab,
 } from './todoList';
 import { isTypingTarget, leaveTodos, overlayOpen } from './todosNavigation';
-import { TODOS_BUTTON, TODOS_PILL, TODOS_PILL_OFF, TODOS_PILL_ON } from './todoStyles';
+import { TODOS_HEADER_BUTTON, TODOS_PILL, TODOS_PILL_OFF, TODOS_PILL_ON, TODOS_REF_COLUMN, TODOS_ROW_LEAD } from './todoStyles';
 import { useTodoEntries } from './useTodoEntries';
 
 interface TabItem {
   id: TodosTab;
   label: string;
+  /** Its label in a narrow list. */
+  short?: string;
 }
 
 const TABS: readonly TabItem[] = [
   { id: 'open', label: 'Open' },
-  { id: 'waiting', label: 'Waiting on you' },
+  { id: 'waiting', label: 'Waiting on you', short: 'Waiting' },
   { id: 'done', label: 'Done' },
   { id: 'all', label: 'All' },
 ];
 
 const GROUPING_PREFERENCE = 'pane-todos-grouping';
+/** Under this width the header and footer shorten their words so nothing wraps or clips (T-6). */
+const NARROW_LIST_PX = 720;
 const FLASH_MS = 1800;
 
 function readGrouping(): TodosGrouping {
@@ -54,11 +58,25 @@ function actionOf(kind: TodoRowActionKind, number: number): TodoAction {
   return { kind, number };
 }
 
+/** Whether the list is narrower than NARROW_LIST_PX, measured before paint and on every resize. */
+function useNarrow(ref: RefObject<HTMLElement | null>): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    setNarrow(element.clientWidth < NARROW_LIST_PX);
+    const observer = new ResizeObserver(([entry]) => setNarrow(entry.contentRect.width < NARROW_LIST_PX));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return narrow;
+}
+
 function KeyHint({ keys, label }: { keys: string[]; label: string }) {
   return (
     <span className="inline-flex items-center gap-1">
       {keys.map(key => (
-        <kbd key={key} className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-b-2 border-border-primary bg-surface-primary px-1 font-mono text-[10.5px] leading-none text-text-secondary">{key}</kbd>
+        <kbd key={key} className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-b-2 border-border-primary bg-surface-primary px-1 font-mono text-[11px] leading-none text-text-secondary">{key}</kbd>
       ))}
       <span className="ml-0.5">{label}</span>
     </span>
@@ -99,6 +117,7 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
   const [flashKey, setFlashKey] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<HTMLDivElement>(null);
+  const narrow = useNarrow(viewRef);
 
   const counts = useMemo(() => tabCounts(entries), [entries]);
   const groups = useMemo(() => groupTodos(entries, tab, grouping), [entries, tab, grouping]);
@@ -207,9 +226,9 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
   const loadLine = gate && gate.state !== 'normal' && gate.line ? gate.line : null;
 
   return (
-    <div ref={viewRef} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary text-[13px] text-text-primary" data-testid="todos-view">
-      <div className="flex h-[46px] shrink-0 items-center gap-2 border-b border-border-primary px-4">
-        <h1 className="mr-1.5 text-[14px] font-semibold">To-dos</h1>
+    <div ref={viewRef} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary text-[14px] text-text-primary" data-testid="todos-view">
+      <div className="flex h-[50px] shrink-0 items-center gap-2 border-b border-border-primary px-4">
+        <h1 className="mr-1.5 shrink-0 whitespace-nowrap text-[15px] font-semibold">To-dos</h1>
         <div role="tablist" aria-label="Which to-dos" className="flex items-center gap-2">
           {TABS.map(item => (
             <button
@@ -217,11 +236,12 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
               type="button"
               role="tab"
               aria-selected={tab === item.id}
+              aria-label={narrow && item.short ? item.label : undefined}
               data-testid={`todos-tab-${item.id}`}
               onClick={() => { setTab(item.id); setSelectedKey(null); }}
               className={cn(TODOS_PILL, tab === item.id ? TODOS_PILL_ON : TODOS_PILL_OFF)}
             >
-              {item.label}
+              {narrow && item.short ? item.short : item.label}
               {item.id === 'waiting' && <b className="font-semibold text-status-warning" data-testid="todos-waiting-count">{counts.waiting}</b>}
             </button>
           ))}
@@ -229,10 +249,10 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
         <span className="flex-1" />
         <Dropdown
           trigger={(
-            <button type="button" className={TODOS_BUTTON} data-testid="todos-group" aria-label={`Group by ${TODOS_GROUPING_LABEL[grouping]}`}>
-              <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
-              Group: {TODOS_GROUPING_LABEL[grouping]}
-              <ChevronDown className="h-3 w-3 text-text-tertiary" aria-hidden="true" />
+            <button type="button" className={TODOS_HEADER_BUTTON} data-testid="todos-group" aria-label={`Group by ${TODOS_GROUPING_LABEL[grouping]}`}>
+              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+              {narrow ? TODOS_GROUPING_LABEL[grouping] : `Group: ${TODOS_GROUPING_LABEL[grouping]}`}
+              <ChevronDown className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />
             </button>
           )}
           header="Group by"
@@ -242,8 +262,8 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
           position="bottom-right"
           width="md"
         />
-        <button type="button" className={TODOS_BUTTON} onClick={() => setCreating(true)} data-testid="todos-new">
-          <Plus className="h-3.5 w-3.5" aria-hidden="true" />New to-do
+        <button type="button" className={TODOS_HEADER_BUTTON} onClick={() => setCreating(true)} data-testid="todos-new" aria-label="New to-do" title="New to-do">
+          <Plus className="h-3.5 w-3.5" aria-hidden="true" />{narrow ? null : 'New to-do'}
         </button>
       </div>
 
@@ -258,14 +278,15 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
         {flat.length === 0 && loaded && <p className="p-6 text-text-tertiary">Nothing here.</p>}
         {groups.map(group => (
           <div key={group.key} role="presentation">
-            <div className="sticky top-0 z-[1] flex h-[34px] items-center gap-2 border-b border-border-secondary bg-surface-secondary pl-3.5 pr-4 text-[12.5px] font-semibold" data-testid="todos-group-header" data-group={group.key}>
-              {group.status && <TodoStatusIcon status={group.status} />}
+            <div className="sticky top-0 z-[1] flex h-[38px] items-center gap-2 border-b border-border-secondary bg-surface-secondary pl-3.5 pr-4 text-[13.5px] font-semibold" data-testid="todos-group-header" data-group={group.key}>
+              {group.status && <TodoStatusIcon status={group.status} size="lg" />}
               <span className="truncate">{group.label}</span>
               <span className="font-medium text-text-tertiary">{group.entries.length}</span>
             </div>
             {group.status === 'queued' && loadLine && (
-              <div className="flex h-[30px] items-center gap-2 border-b border-border-secondary pl-[38px] pr-4 text-[12px] text-text-secondary" data-testid="todos-load-line">
-                <Gauge className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
+              <div className={cn('flex h-8 items-center border-b border-border-secondary pr-4 text-[12.5px] text-text-secondary', TODOS_ROW_LEAD)} data-testid="todos-load-line">
+                <span className={TODOS_REF_COLUMN} aria-hidden="true" />
+                <Gauge className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
                 <span className="truncate">{loadLine} · queued to-dos start when load comes down</span>
               </div>
             )}
@@ -286,15 +307,15 @@ function TodosList({ onOpen, lastOpened }: { onOpen: (number: number) => void; l
         ))}
       </div>
 
-      <div className="flex h-[30px] shrink-0 items-center gap-3.5 border-t border-border-primary px-4 text-[11.5px] text-text-tertiary" data-testid="todos-footer">
+      <div className="flex h-8 shrink-0 items-center gap-4 overflow-hidden whitespace-nowrap border-t border-border-primary px-4 text-[12px] text-text-tertiary" data-testid="todos-footer">
         <KeyHint keys={['J', 'K']} label="move" />
         <KeyHint keys={['↵']} label="open" />
         <KeyHint keys={['S']} label="stop" />
         <KeyHint keys={['R']} label="resume" />
-        <KeyHint keys={['G']} label="group by" />
-        <KeyHint keys={['C']} label="new to-do" />
+        {!narrow && <KeyHint keys={['G']} label="group by" />}
+        {!narrow && <KeyHint keys={['C']} label="new to-do" />}
         <span className="flex-1" />
-        <span>{counts.open} open</span>
+        <span className="shrink-0">{counts.open} open</span>
       </div>
 
       {confirm && <TodoConfirm request={confirm} onCancel={cancelConfirm} onConfirm={runConfirmed} />}

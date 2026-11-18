@@ -3,6 +3,8 @@ import { ChevronRight, FileText, MoreHorizontal } from 'lucide-react';
 import type { TodoAction, TodoDetail } from '../../../../../shared/types/todos';
 import { todosApi, useTodoDetail, useTodosStore } from '../../../stores/todosStore';
 import { Dropdown, type DropdownItem } from '../../ui/Dropdown';
+import { SkeletonSwap } from '../../ui/Skeleton';
+import { PhoneTodoPageSkeleton } from '../TodoSkeletons';
 import { TodoCard, todoSubTodosAnchor } from '../page/TodoCard';
 import { TodoChatTimeline, TodoComposer } from '../page/TodoChat';
 import { TodoChips } from '../page/TodoChips';
@@ -39,9 +41,9 @@ export function PhoneTodoPage(props: PhoneTodoPageProps) {
         back={{ label: parent ? parent.todo.ref : 'To-dos', onBack: props.onBack }}
         right={detail ? <MoreMenu detail={detail} onOpenSession={props.onOpenSession} /> : null}
       />
-      {detail
-        ? <PhoneTodoBody key={props.number} detail={detail} {...props} />
-        : <p className="m-auto text-[14px] text-text-tertiary" role="status">Opening T-{props.number}…</p>}
+      <SkeletonSwap loading={!detail} skeleton={<PhoneTodoPageSkeleton number={props.number} />}>
+        {detail && <PhoneTodoBody key={props.number} detail={detail} {...props} />}
+      </SkeletonSwap>
     </PhoneScreen>
   );
 }
