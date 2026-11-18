@@ -171,3 +171,54 @@ test('a database from an earlier to-dos build opens: reply_to is added and its a
     await run.close();
   }
 });
+
+test('round 8: a started to-do\'s Session never shows in the sidebar, its Session and back in one click, Overview in the split, an agent\'s image inline (T-4, T-5, T-7)', async ({ baseURL }) => {
+  test.setTimeout(240_000);
+  const { pane, page, close } = await setup('pane-todos-r8', { VITE_PORT: new URL(baseURL ?? 'http://localhost:4521').port, PANE_TODOS_TIME_SCALE: '1' });
+  try {
+    const sessionA = await createSession(page, 'Billing rewrite');
+    // T-7: from before the to-do starts, any moment the sidebar names its Session marks the page.
+    await page.evaluate(() => {
+      const watch = () => {
+        const named = [...document.querySelectorAll('[data-testid^="orchestration-session-"], [data-testid^="orchestration-pinned-session-"]')]
+          .some(node => node.textContent?.includes('T-1 ·'));
+        if (named) document.documentElement.dataset.todoSessionSeen = 'yes';
+      };
+      new MutationObserver(watch).observe(document, { childList: true, subtree: true, characterData: true });
+    });
+    await json<{ todo: RunpaneTodo }>(pane, ['todos', 'create', 'Invoice PDFs', '--summary', 'Render invoices as PDFs'], sessionA);
+    const orchestrator = await ownCaller(page, 1);
+    await expect.poll(() => transcript(page, orchestrator.panelId), { timeout: 30_000 }).toContain('You are the orchestrator for T-1');
+    await expect(page.getByTestId(`orchestration-session-${sessionA.id}`)).toBeVisible();
+
+    // T-5: the agent attaches a screenshot with runpane; it shows inline and opens fitted in the split.
+    const png = path.join(pane.root, 'checkout.png');
+    writeFileSync(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR4nGNgYGD4z8DAwMDEwMDAAAAOAAGwVv0IAAAAAElFTkSuQmCC', 'base64'));
+    await json(pane, ['todos', 'attach', 'T-1', png], orchestrator);
+    await openTodo(page, 1);
+    const image = page.locator('[data-testid="todo-thread-event"][data-image="checkout.png"] [data-testid="todo-thread-image"] img');
+    await expect(image).toBeVisible({ timeout: 15_000 });
+    await image.click();
+    await expect(page.locator('[data-testid="todo-split-tab"][aria-selected="true"]')).toContainText('checkout.png');
+    await expect(page.getByTestId('autopilot-image-doc')).toHaveAttribute('data-fit', 'contain');
+
+    // T-4: the Overview tab in the split shows the to-do's Session.
+    await page.getByTestId('todo-split-tab').filter({ hasText: 'Overview' }).click();
+    await expect(page.getByTestId('todo-split')).toContainText('T-1 · Invoice PDFs');
+    await shot(page, 'r8-overview-light');
+
+    // T-4: the agents chip opens the Session chat; its bar returns to the same to-do in one click.
+    await page.getByTestId('todo-chip-agents').click();
+    const crumb = page.getByTestId('session-todo-crumb');
+    await expect(crumb).toContainText('T-1');
+    await expect(crumb).toContainText('Invoice PDFs');
+    await shot(page, 'r8-crumb-light');
+    await crumb.click();
+    await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '1');
+
+    // T-7: never named in the sidebar, not when it started and not while it was open.
+    expect(await page.locator('html').getAttribute('data-todo-session-seen')).toBeNull();
+  } finally {
+    await close();
+  }
+});
