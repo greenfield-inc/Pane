@@ -1,11 +1,11 @@
 /** A load that finishes sooner shows no skeleton at all. */
-export const SKELETON_DELAY_MS = 150;
+const SKELETON_DELAY_MS = 150;
 /** A skeleton that appeared stays at least this long, so it never blinks. */
-export const SKELETON_MIN_VISIBLE_MS = 300;
+const SKELETON_MIN_VISIBLE_MS = 300;
 /** Content that replaces a shown skeleton fades in over this long. */
 export const SKELETON_REVEAL_MS = 120;
 /** A skeleton that starts this soon after another one ended continues its timing. */
-export const SKELETON_HANDOFF_MS = 100;
+const SKELETON_HANDOFF_MS = 100;
 
 /**
  * When a load starting at `now` counts as started: a skeleton that takes over from one that just
