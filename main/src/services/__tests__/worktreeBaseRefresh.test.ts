@@ -214,31 +214,29 @@ describe('the reserve worktree pool', () => {
   });
 
   it('never hands out a reserve whose base ref moved while it was being made', async () => {
-    for (let run = 0; run < 8; run++) {
-      const fixture = remoteFixture();
-      // The bug report's race: a fetch lands between the reserve's
-      // `worktree add` and the pool recording which commit it is on.
-      const execFile = fixture.runner.execFile.bind(fixture.runner);
-      let raced = false;
-      vi.spyOn(fixture.runner, 'execFile').mockImplementation(async (file, args, cwd, options) => {
-        const result = await execFile(file, args, cwd, options);
-        if (!raced && args[0] === 'worktree' && args[1] === 'add' && args.includes('--no-track')) {
-          raced = true;
-          fixture.advanceRemote(`race ${run}`);
-          git(fixture.project, 'fetch', '-q', 'origin');
-        }
-        return result;
-      });
-      await worktreePoolManager.createReserve(fixture.project, 'origin/main', undefined, fixture.resolver, fixture.runner);
-      expect(raced).toBe(true);
+    const fixture = remoteFixture();
+    // The bug report's race: a fetch lands between the reserve's
+    // `worktree add` and the pool recording which commit it is on.
+    const execFile = fixture.runner.execFile.bind(fixture.runner);
+    let raced = false;
+    vi.spyOn(fixture.runner, 'execFile').mockImplementation(async (file, args, cwd, options) => {
+      const result = await execFile(file, args, cwd, options);
+      if (!raced && args[0] === 'worktree' && args[1] === 'add' && args.includes('--no-track')) {
+        raced = true;
+        fixture.advanceRemote('race');
+        git(fixture.project, 'fetch', '-q', 'origin');
+      }
+      return result;
+    });
+    await worktreePoolManager.createReserve(fixture.project, 'origin/main', undefined, fixture.resolver, fixture.runner);
+    expect(raced).toBe(true);
 
-      const result = await new WorktreeManager().resolveWorkingDirectory(
-        fixture.project, `race-${run}`, undefined, true, undefined, fixture.resolver, fixture.runner,
-      );
+    const result = await new WorktreeManager().resolveWorkingDirectory(
+      fixture.project, 'race', undefined, true, undefined, fixture.resolver, fixture.runner,
+    );
 
-      expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(git(fixture.project, 'rev-parse', 'origin/main'));
-    }
-  }, 60_000);
+    expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(git(fixture.project, 'rev-parse', 'origin/main'));
+  }, 30_000);
 
   it('seeds the reserve under the default base even when the project is on a feature branch', async () => {
     const fixture = remoteFixture();

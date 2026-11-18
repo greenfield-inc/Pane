@@ -195,11 +195,11 @@ jobs:
         --exclude-path node_modules --exclude-path dist-electron
         './**/*.md'
 
-  # The smoke suites run beside quality-checks in seven jobs. The two browser
+  # The smoke suites run beside quality-checks in five jobs. The two browser
   # shards split the minimal suite, which loads the renderer from Vite with a
   # mocked Electron API; the two renderer selection race shards also run from
-  # Vite alone. The three Electron shards launch main/dist in real Electron; each
-  # runs the specs playwright.chat-tabs.config.ts lists for it.
+  # Vite alone. The Electron job launches main/dist in real Electron and runs the
+  # specs playwright.chat-tabs.config.ts lists.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke-browser:
@@ -265,12 +265,8 @@ jobs:
       run: scripts/ci-background.sh wait renderer-types
 
   functional-smoke-electron:
-    name: Functional Smoke (Electron ${{ matrix.shard }})
+    name: Functional Smoke (Electron)
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [session-activity, autopilot, journeys]
 
     steps:
     - name: Checkout code
@@ -314,7 +310,6 @@ jobs:
       run: scripts/ci-background.sh wait electron-rebuild
 
     - name: Verify sandboxed Electron preload
-      if: ${{ matrix.shard == 'journeys' }}
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
@@ -323,12 +318,13 @@ jobs:
       run: xvfb-run -a pnpm test:chat-tabs
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
-        PANE_ELECTRON_SHARD: ${{ matrix.shard }}
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
-  # change on a PR; always runs on pushes to main. Each OS is tested once at
-  # the runtime floors (Node 22.23.4 / Python 3.8) and once at current (Node 24.22.1 /
-  # Python 3.13) instead of the full Node x Python cross product. The Linux
+  # change on a PR; always runs on pushes to main. Linux is tested at the
+  # runtime floors (Node 22.23.4 / Python 3.8) and at current (Node 24.22.1 /
+  # Python 3.13); Windows at the floors only, since every Windows defect it has
+  # caught failed both Windows legs. No macOS leg: its one catch (#939) failed
+  # on Windows too. The Linux
   # floor entry runs on ubuntu-24.04. It was pinned there because setup-python
   # has no Python 3.8 build for Ubuntu 26.04 (ubuntu-latest); uv now installs
   # 3.8, so that reason no longer applies.
@@ -343,10 +339,7 @@ jobs:
         include:
           - { os: ubuntu-24.04, node-version: '22.23.4', python-version: '3.8' }
           - { os: ubuntu-latest, node-version: '24.22.1', python-version: '3.13' }
-          - { os: macos-latest, node-version: '22.23.4', python-version: '3.8' }
-          - { os: macos-latest, node-version: '24.22.1', python-version: '3.13' }
           - { os: windows-2022, node-version: '22.23.4', python-version: '3.8' }
-          - { os: windows-2022, node-version: '24.22.1', python-version: '3.13' }
 
     steps:
     - name: Checkout code
@@ -357,7 +350,7 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
 
-    # Python 3.8 is not preinstalled on macOS or Windows runners, and
+    # Python 3.8 is not preinstalled on Windows runners, and
     # setup-python took 31-56 s to fetch it there. uv installs its standalone
     # CPython build in a few seconds. The test scripts read PYTHON.
     - name: Setup Python
@@ -438,11 +431,10 @@ jobs:
       shell: bash
       run: scripts/ci-background.sh wait handoff
 
-  # Ubuntu is already covered by quality-checks above; this job only adds the
-  # other platforms, and only when main-process code (or its deps) changed.
-  # Windows runs the suite in two vitest shards, each about half of it. macOS
-  # runs it whole: the org has 5 macOS runners, and a second macOS job waited
-  # longer for one than the shard saved.
+  # Ubuntu is already covered by quality-checks above; this job only adds
+  # Windows, and only when main-process code (or its deps) changed. It runs the
+  # suite in two vitest shards, each about half of it. Type Check and Lint
+  # already type-checks main, and a type check gives the same result on any OS.
   cross-os-main-tests:
     name: Main Process Tests (${{ matrix.os }}${{ matrix.shards > 1 && format(', {0}/{1}', matrix.shard, matrix.shards) || '' }})
     needs: changes
@@ -452,7 +444,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, shard: 1, shards: 1 }
           - { os: windows-2022, shard: 1, shards: 2 }
           - { os: windows-2022, shard: 2, shards: 2 }
 
@@ -484,11 +475,6 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    - name: Start main process type checking
-      if: matrix.shard == 1
-      shell: bash
-      run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
-
     # The unit tests load the real electron package (main/src/utils/shellPath.ts);
     # without this, each test worker downloads Electron and they collide on Windows.
     - name: Fetch Electron
@@ -499,11 +485,6 @@ jobs:
 
     - name: Run main process unit tests
       run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}
-
-    - name: Finish main process type checking
-      if: ${{ !cancelled() && matrix.shard == 1 }}
-      shell: bash
-      run: scripts/ci-background.sh wait typecheck
 
   # The relay (Rust) and the computer side of QR pairing against it: a real relay
   # with its DNS helper, and Pebble validating certificates through that DNS.
