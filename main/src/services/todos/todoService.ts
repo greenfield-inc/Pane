@@ -1289,6 +1289,8 @@ export class TodoService extends EventEmitter {
   private async superviseOne(todo: TodoRecord, children: readonly TodoRecord[], waiting: Map<number, LinkedApproval[]>, now: number): Promise<void> {
     // Cheap checks first: most to-dos are skipped here without reading a tab.
     if (!MOVING_TODO_STATES.includes(todo.state) || todo.loadHold !== null || todo.stuckCardId !== null || !todo.sessionId) return;
+    // A Just-remind-me card is out (or about to be raised again after a restart): it is the person's turn.
+    if (this.store.wake(todo.number)?.reminderCardId) return;
     const waitingOnYou = (waiting.get(todo.number)?.length ?? 0) > 0 || children.some(child => (waiting.get(child.number)?.length ?? 0) > 0);
     if (waitingOnYou) return;
     const orchestrator = this.orchestratorOf(todo);
@@ -1405,7 +1407,7 @@ export class TodoService extends EventEmitter {
       throw new PaneError('todo_snooze_time', `"${zone}" is not a time zone Pane knows, so nothing was snoozed.`, 'Pass an IANA zone such as Europe/London, or leave it out to use this machine’s.');
     }
     if (until <= now) {
-      throw new PaneError('todo_snooze_past', `${snoozeWhen(until, now, zone, { full: true })} has already passed, so nothing was snoozed.`, 'Pick a time in the future, for example --until tomorrow or --until 2h.');
+      throw new PaneError('todo_snooze_past', `${snoozeWhen(until, now, zone, { full: true })} has already passed, so nothing was snoozed.`, 'Pick a time in the future, such as tomorrow morning or in 2 hours.');
     }
     if (until - now > TODO_SNOOZE_MAX_MS) {
       throw new PaneError('todo_snooze_time', `${snoozeWhen(until, now, zone, { full: true })} is more than a year away, and a snooze can run a year at most. Nothing was snoozed.`, 'Pick a time within a year; to wait longer, snooze it again when it wakes.');

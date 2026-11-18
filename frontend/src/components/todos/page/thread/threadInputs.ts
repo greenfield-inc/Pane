@@ -33,7 +33,9 @@ export function todoThreadApprovals(items: readonly NotifyItem[], approvalIds: r
     const approval: TodoThreadApproval = { id, question: view.question, state: view.state, createdAt: item.createdAt };
     if (view.qn) approval.qn = view.qn;
     if (item.source.panelId) approval.askerTab = item.source.panelId;
-    if (item.source.name) approval.askerName = item.source.session?.orchestrator ? 'orchestrator' : item.source.name;
+    // Pane's own cards (a reminder, a stuck to-do) are asked by Pane, not by the to-do.
+    if (item.source.agent === 'Pane' && !item.source.panelId) approval.askerName = 'Pane';
+    else if (item.source.name) approval.askerName = item.source.session?.orchestrator ? 'orchestrator' : item.source.name;
     if (view.answer) approval.answer = view.answer;
     const options = item.choices?.length ?? item.questions?.length;
     if (options) approval.optionCount = options;

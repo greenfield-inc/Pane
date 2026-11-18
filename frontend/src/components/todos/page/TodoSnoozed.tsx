@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Moon } from 'lucide-react';
 import type { TodoAction, TodoDetail, TodoRecord, TodoSnooze } from '../../../../../shared/types/todos';
 import { useTodosStore } from '../../../stores/todosStore';
@@ -17,6 +17,15 @@ import type { SnoozeChoice, SnoozeTarget } from '../SnoozeMenu';
 const MINUTE = 60_000;
 
 /** Top-level, open, and not In review or Accepted: what the service lets you snooze. */
+/**
+ * A pure reminder: no Session of its own (nor a parent's), so the only one acting is Pane. Snoozed, or waiting on
+ * its reminder card once the time came (no agent exists to ask anything else).
+ */
+export function isReminderOnly(detail: TodoDetail): boolean {
+  if (detail.todo.sessionId || detail.parent?.todo.sessionId) return false;
+  return detail.todo.snooze !== undefined || detail.status.status === 'waiting';
+}
+
 export function canSnoozeTodo(todo: TodoRecord): boolean {
   return todo.parentNumber === null && (todo.state === 'todo' || todo.state === 'in_progress' || todo.state === 'stopped');
 }
@@ -75,14 +84,30 @@ function wakeWords(detail: TodoDetail, snooze: TodoSnooze): string {
  * The banner under the chips: the full time, what will happen, and the note, with Change and Wake
  * now.
  */
+/** Under this width the banner's buttons go below its words. */
+const BANNER_STACK_PX = 480;
+
 export function SnoozeBanner({ detail, onChange, onWake, stacked = false }: { detail: TodoDetail; onChange: () => void; onWake: () => void; stacked?: boolean }) {
   const snooze = detail.todo.snooze;
   const zone = useMemo(viewerZone, []);
+  // In a narrow page column (the split beside it) the buttons go under the words, not beside them.
+  const ref = useRef<HTMLElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  const shown = snooze !== undefined;
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    setNarrow(element.clientWidth < BANNER_STACK_PX);
+    const observer = new ResizeObserver(([entry]) => setNarrow(entry.contentRect.width < BANNER_STACK_PX));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [shown]);
   if (!snooze) return null;
   const note = snooze.note.trim();
   const where = zoneNote(snooze, zone);
+  const under = stacked || narrow;
   return (
-    <section className="mt-3 flex items-start gap-2.5 rounded-[10px] border border-status-snoozed-border bg-status-snoozed-subtle px-3.5 py-3 text-[13.5px] leading-[1.5] text-text-primary" aria-label="Snoozed" data-testid="todo-snooze-banner">
+    <section ref={ref} className="mt-3 flex items-start gap-2.5 rounded-[10px] border border-status-snoozed-border bg-status-snoozed-subtle px-3.5 py-3 text-[13.5px] leading-[1.5] text-text-primary" aria-label="Snoozed" data-testid="todo-snooze-banner">
       <Moon className="mt-[3px] h-4 w-4 shrink-0 text-status-snoozed" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <p>
@@ -90,9 +115,9 @@ export function SnoozeBanner({ detail, onChange, onWake, stacked = false }: { de
           {wakeWords(detail, snooze)}{note ? ':' : '.'}
         </p>
         {note && <p className="mt-1 whitespace-pre-wrap text-text-secondary [overflow-wrap:anywhere]" data-testid="todo-snooze-note">“{note}”</p>}
-        {stacked && <BannerButtons onChange={onChange} onWake={onWake} className="mt-2.5" large />}
+        {under && <BannerButtons onChange={onChange} onWake={onWake} className="mt-2.5" large={stacked} />}
       </div>
-      {!stacked && <BannerButtons onChange={onChange} onWake={onWake} className="shrink-0" />}
+      {!under && <BannerButtons onChange={onChange} onWake={onWake} className="shrink-0" />}
     </section>
   );
 }

@@ -236,6 +236,30 @@ describe('TodoService snoozing (round 9)', () => {
     expect(typedSince('s1-orch', before)).toEqual([]);
   });
 
+  it('S5: after a restart, launch resume and the supervisor leave a Just-remind-me to-do alone while its card is out (QA round 9 F1)', async () => {
+    const todo = await running();
+    service.snooze(todo.number, { until: START + HOUR, zone: ZONE, note: 'look at the dashboard', action: 'remind' }, person);
+    await flushAll();
+    await service.resumeOnLaunch();
+    now = START + HOUR;
+    await service.wakeTick();
+    await flushAll();
+    expect(host.cards).toHaveLength(1);
+    // Pane quits before the person answers: the card is gone and the orchestrator is down.
+    now += 2 * 60_000;
+    const { again, host2 } = restart();
+    host2.down.add('s1-orch');
+    const before = host2.typedInto('s1-orch').length;
+    await again.resumeOnLaunch();
+    await flushAll(again);
+    now += 30 * 60_000;
+    await again.supervisorPass();
+    await flushAll(again);
+    expect(host2.cards).toEqual([expect.objectContaining({ kind: 'reminder' })]);
+    expect(host2.resumed).toEqual([]);
+    expect(typedSince('s1-orch', before, host2)).toEqual([]);
+  });
+
   describe('S6: Pane restarts past the time', () => {
     it('wakes once after launch resume, overdue by 3h, and its orchestrator is restarted once', async () => {
       const todo = await running();

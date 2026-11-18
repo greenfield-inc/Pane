@@ -9,7 +9,7 @@ import { AttachedChips } from './ThreadCards';
 import { commentWithFiles, eventFiles } from './threadInputs';
 import { sendThreadComment, useComposerAttach, useComposerFileInbox, useFileDropZone } from './useThreadSend';
 import { useTodosStore } from '../../../../stores/todosStore';
-import { HeldHint } from '../TodoSnoozed';
+import { HeldHint, isReminderOnly } from '../TodoSnoozed';
 
 const ICON_BUTTON = 'inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:opacity-50';
 
@@ -131,7 +131,7 @@ export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
                 menuLabel="Send to"
               />
             </span>
-          ) : <span data-testid="todo-composer-to">Comments go to the orchestrator</span>}
+          ) : <span data-testid="todo-composer-to">{isReminderOnly(detail) ? 'Comments stay here: no agent works on this reminder' : 'Comments go to the orchestrator'}</span>}
           <span className="flex-1" />
           {attach.available && <button type="button" onClick={() => void attach.pick()} disabled={attach.busy} aria-label="Attach a file" title="Attach a file (or paste or drop one)" className={cn(ICON_BUTTON, 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary')} data-testid="todo-composer-attach">
             <Paperclip className="h-3.5 w-3.5" aria-hidden="true" />

@@ -81,7 +81,7 @@ function approvals(): NotifySnapshot {
     id: 'r23', ui: 'options', title: 'Reminder: T-23 Renew the Northwind contract', state: 'waiting', createdAt: NOW - MIN,
     context: 'Due Fri 10:00 AM, overdue by 22h: Pane was closed.\n\nCheck the inbox for a reply from Northwind. If nothing, send the follow-up from the template.',
     choices: [{ label: 'Done' }, { label: 'Hand to an agent' }, { label: 'Snooze 1 hour' }, { label: 'Snooze to the next morning' }],
-    source: { name: 'Pane', agent: 'Pane' }, todo: { number: 23, title: 'Renew the Northwind contract', kind: 'reminder' },
+    source: { name: 'T-23', agent: 'Pane' }, todo: { number: 23, title: 'Renew the Northwind contract', kind: 'reminder' },
   };
   return {
     settings: { ...DEFAULT_NOTIFY_SETTINGS }, items: [reminder], queue: ['r23'], hidden: [], strip: null, stripSurface: null,
@@ -392,4 +392,29 @@ test('the reminder card: "Snooze to another time…" opens the to-do with the sn
   await page.getByTestId('approval-reminder-snooze').click();
   await expect(page.getByTestId('snooze-menu')).toBeVisible();
   await expect(page.getByTestId('snooze-menu')).toContainText('T-23 Renew the Northwind contract');
+});
+
+test('a pure reminder reads as Pane\'s: no orchestrator chip, Pane asks you, comments stay on it (QA round 9 F3)', async ({ page }) => {
+  await open(page);
+  await todoRow(page, 23).click();
+  await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '23');
+  await expect(page.getByTestId('todo-chip-agents')).toHaveCount(0);
+  await expect(page.getByTestId('todo-composer-to')).toHaveText('Comments stay here: no agent works on this reminder');
+  await expect(page.getByTestId('todo-chat')).toContainText('Pane asks you');
+  await expect(page.getByTestId('todo-chat')).not.toContainText('T-23 asks you');
+});
+
+test('in a narrow page column the snooze banner puts Change and Wake now under its words (QA round 9 F2)', async ({ page }) => {
+  await open(page);
+  await page.getByTestId('todos-tab-snoozed').click();
+  await todoRow(page, 19).click();
+  await expect(page.getByTestId('todo-snooze-banner')).toBeVisible();
+  // Narrowed while on the page: the split stays beside it and the page column is about 300 px.
+  await page.setViewportSize({ width: 900, height: 900 });
+  const banner = page.getByTestId('todo-snooze-banner');
+  await expect.poll(async () => {
+    const words = await banner.locator('p').first().boundingBox();
+    const change = await page.getByTestId('todo-snooze-change').boundingBox();
+    return words && change ? change.y >= words.y + words.height - 1 : false;
+  }).toBe(true);
 });

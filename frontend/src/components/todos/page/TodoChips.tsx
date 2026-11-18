@@ -6,7 +6,7 @@ import { TODO_STATUS_LABEL, TodoStatusIcon } from '../TodoStatusIcon';
 import { openTodoSession } from './todoNavigation';
 import { AgentAvatar } from './TodoPageParts';
 import { AttachField } from './TodoAttach';
-import { useSnoozeWords } from './TodoSnoozed';
+import { isReminderOnly, useSnoozeWords } from './TodoSnoozed';
 
 /** The status chip's tint for the statuses that carry one; the rest stay plain. */
 const STATUS_TINT = {
@@ -85,13 +85,13 @@ export function TodoChips({ detail, splitCount, splitLead, splitHidden, onOpenAp
           <Bell className="h-3.5 w-3.5" aria-hidden="true" />{todo.sessionId ? 'Reminder' : 'Reminder · no agent'}
         </span>
       )}
-      <Chip label={worker ? `Open its Session: orchestrator and ${worker.name ?? 'its agent'}` : 'Open its Session'} onClick={onOpenSession ?? (() => openTodoSession(detail))} disabled={!hasSession} testId="todo-chip-agents">
+      {!isReminderOnly(detail) && <Chip label={worker ? `Open its Session: orchestrator and ${worker.name ?? 'its agent'}` : 'Open its Session'} onClick={onOpenSession ?? (() => openTodoSession(detail))} disabled={!hasSession} testId="todo-chip-agents">
         <span className="inline-flex items-center">
           <AgentAvatar agentId={detail.orchestrator?.agentId ?? todo.agent ?? undefined} name="orchestrator" className="h-4 w-4 rounded" />
           {worker && <AgentAvatar agentId={detail.agentId} name={worker.name ?? 'agent'} className="-ml-[3px] h-4 w-4 rounded ring-[1.5px] ring-surface-primary" />}
         </span>
         <b className="font-medium text-text-primary">orchestrator</b>
-      </Chip>
+      </Chip>}
       {pr && (
         <Chip label={`Open ${pr.label}`} onClick={onOpenPr} testId="todo-chip-pr">
           <GitPullRequest className="h-3.5 w-3.5" aria-hidden="true" />
