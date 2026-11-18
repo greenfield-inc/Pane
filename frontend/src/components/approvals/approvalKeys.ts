@@ -1,7 +1,6 @@
-import { normalizeKeyboardShortcutOverrides, resolveEffectiveChord } from '../../../../shared/utils/keyboardBindings';
 import type { KeyboardShortcutId } from '../../../../shared/constants/keyboardShortcuts';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
-import { chordForEvent, rendererKeyPlatform } from '../../stores/hotkeyStore';
+import { chordForEvent, effectiveCatalogChord } from '../../stores/hotkeyStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -23,19 +22,12 @@ function isShown(element: Element): boolean {
   return element.isConnected && element.getClientRects().length > 0;
 }
 
-/** The key a catalog command answers to now ('' when it has none). */
-function effectiveChord(id: KeyboardShortcutId): string {
-  const config = useConfigStore.getState().config;
-  const overrides = normalizeKeyboardShortcutOverrides(config?.keyboardShortcutOverrides).overrides;
-  return resolveEffectiveChord(id, overrides, rendererKeyPlatform()) ?? '';
-}
-
 /** Whether a key press is one of these commands' keys, as the hotkey store would read it. */
 export function pressedCommand<T extends KeyboardShortcutId>(event: KeyboardEvent, ids: readonly T[]): T | null {
   if (!areKeyboardShortcutsEnabled(useConfigStore.getState().config)) return null;
   const chord = chordForEvent(event);
   if (!chord) return null;
-  return ids.find((id) => effectiveChord(id) === chord) ?? null;
+  return ids.find((id) => effectiveCatalogChord(id) === chord) ?? null;
 }
 
 // --- Focus ---
