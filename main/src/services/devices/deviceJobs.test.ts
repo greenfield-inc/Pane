@@ -57,4 +57,17 @@ describe.skipIf(process.platform === 'win32')('DeviceJobs', () => {
     const started = await jobs.start('pane-a', 'sleep 30', dir, 0);
     await expect(jobs.wait('pane-b', started.jobId, 0)).rejects.toThrow('No device job');
   });
+
+  it('reports output still in the pipe when the shell exits', async () => {
+    // The shell exits at once; a background process keeps its stdout open 200 ms longer.
+    const result = await jobs.start('pane-a', '(sleep 0.2; echo build ok) & exit 3', dir, 10_000);
+    expect(result.exitCode).toBe(3);
+    expect(result.logTail).toContain('build ok');
+  });
+
+  it('reports a command as exited when a process it left behind still holds its output', async () => {
+    const result = await jobs.start('pane-a', 'sleep 5 & echo build done; exit 0', dir, 2_000);
+    expect(result).toMatchObject({ state: 'exited', exitCode: 0 });
+    expect(result.logTail).toContain('build done');
+  });
 });
