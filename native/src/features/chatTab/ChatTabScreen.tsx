@@ -69,6 +69,8 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   const view = snapshot.view;
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  /** A message tapped while the connection comes back waits for it; nothing else goes out meanwhile. */
+  const [awaitingConnection, setAwaitingConnection] = useState(false);
   const [settings, setSettings] = useState(false);
   const working = view?.status === 'working' || view?.status === 'blocked';
   const messages = snapshot.transcript?.messages ?? [];
@@ -97,11 +99,14 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
   };
   /** One request per message; a lost answer is resolved by its receipt, never by sending again blind. */
   const deliver = async (request: ChatTabSend, retry: boolean) => {
+    setAwaitingConnection(true);
     try {
       await whenConnected();
     } catch (error) {
       viewer.setError(`${errorText(error)} Your message is still in the box.`);
       return;
+    } finally {
+      setAwaitingConnection(false);
     }
     viewer.setPendingDelivery(request);
     try {
@@ -127,7 +132,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     let request: ChatTabSend | undefined;
     try { request = chatSendFromComposer(newOperationId(), composed); }
     catch (error) { viewer.setError(errorText(error)); return; }
-    if (disabled || snapshot.pendingDelivery || !request) return;
+    if (disabled || awaitingConnection || snapshot.pendingDelivery || !request) return;
     Keyboard.dismiss();
     // Typing while an approval waits tells the agent what to do instead.
     for (const permission of view?.permissions ?? []) {
@@ -143,7 +148,7 @@ export function ChatTabScreen({ panelId, workers, onOpenWorker, onOpenDevice, on
     // locks for a running turn; Stop is Pane's own button.
     isRunning: false,
     isLoading: !snapshot.transcript && view?.status !== 'stopped',
-    isSendDisabled: disabled || pending,
+    isSendDisabled: disabled || pending || awaitingConnection,
     hasEarlier: (snapshot.transcript?.start ?? 0) > 0,
     onLoadEarlier: () => viewer.loadEarlier(),
     unstable_persistsHistory: true, unstable_enableToolInvocations: false,
