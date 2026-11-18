@@ -121,8 +121,9 @@ jobs:
         }
 
   # Type checking and lint get their own runner: beside the unit tests they
-  # competed for its CPUs and slowed the tests by about 30s. They run in
-  # parallel here; the Finish steps print each output and fail on errors.
+  # competed for its CPUs and slowed the tests by about 30s. Lint runs first,
+  # alone, then the type check and Knip run in parallel; the Finish steps print
+  # each output and fail on errors.
   typecheck-lint:
     name: Type Check and Lint
     runs-on: ubuntu-latest
@@ -137,22 +138,24 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    - name: Start type checking
-      run: scripts/ci-background.sh start typecheck pnpm typecheck
-
+    # Beside the type check, lint shared the 4 CPUs and took 21-23s.
     - name: Start lint
       run: scripts/ci-background.sh start lint pnpm lint:code
 
+    - name: Finish lint
+      run: scripts/ci-background.sh wait lint
+
+    - name: Start type checking
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh start typecheck pnpm typecheck
+
     - name: Start dead-code check
+      if: ${{ !cancelled() }}
       run: scripts/ci-background.sh start deadcode pnpm deadcode
 
     - name: Finish type checking
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait typecheck
-
-    - name: Finish lint
-      if: ${{ !cancelled() }}
-      run: scripts/ci-background.sh wait lint
 
     - name: Finish dead-code check
       if: ${{ !cancelled() }}
