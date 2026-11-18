@@ -355,4 +355,23 @@ describe('gitSnapshot', () => {
     await deleteRefs(a, PREFIX);
     expect(git(a, ['for-each-ref', '--format=%(refname)', 'refs/pane-move/'])).toBe('refs/pane-move/keep\n');
   });
+
+  it('keeps a same-size edit made in the index\'s timestamp window', async () => {
+    const { a } = setupRepos();
+    // ctime can't be set from a test, so git is told not to trust it; mtime and size then match the index entry.
+    git(a, ['config', 'core.trustctime', 'false']);
+    const file = path.join(a, 'other.txt');
+    const stamp = new Date(Math.floor(Date.now() / 1000 - 60) * 1000);
+    fs.utimesSync(file, stamp, stamp);
+    git(a, ['add', 'other.txt']);
+    write(file, 'other unstaged\n');
+    fs.utimesSync(file, stamp, stamp);
+    // A valid cache tree means write-tree leaves the first copy alone, so the second copy is checked too.
+    git(a, ['write-tree']);
+    fs.utimesSync(path.join(a, '.git', 'index'), stamp, stamp);
+    expect(git(a, ['diff', '--name-only'])).toBe('other.txt\n');
+
+    const snap = await createSnapshot(a, SNAPSHOT_REF);
+    expect(git(a, ['show', `${snap.commit}:other.txt`])).toBe('other unstaged\n');
+  });
 });
