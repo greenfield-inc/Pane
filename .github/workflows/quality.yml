@@ -195,10 +195,10 @@ jobs:
         --exclude-path node_modules --exclude-path dist-electron
         './**/*.md'
 
-  # The smoke suites run beside quality-checks in six jobs. The two browser
+  # The smoke suites run beside quality-checks in seven jobs. The two browser
   # shards split the minimal suite, which loads the renderer from Vite with a
-  # mocked Electron API, and the renderer selection races also run from Vite
-  # alone. The three Electron shards launch main/dist in real Electron; each
+  # mocked Electron API; the two renderer selection race shards also run from
+  # Vite alone. The three Electron shards launch main/dist in real Electron; each
   # runs the specs playwright.chat-tabs.config.ts lists for it.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
@@ -226,9 +226,15 @@ jobs:
     - name: Run maintained functional smoke tests
       run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/2
 
+  # One worker per shard: the tests are CPU-bound, so four workers on one
+  # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
   renderer-selection:
-    name: Renderer Selection Races
+    name: Renderer Selection Races (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
     - name: Checkout code
@@ -241,20 +247,21 @@ jobs:
       run: pnpm install --ignore-scripts
 
     # pnpm test:renderer-selection in two parts: the tests' type check runs
-    # behind the browser install.
+    # once, in shard 1, behind the browser install.
     - name: Start renderer test type check
+      if: ${{ matrix.shard == 1 }}
       run: scripts/ci-background.sh start renderer-types pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json
 
     - name: Install Playwright browser dependencies
       run: pnpm exec playwright install --with-deps chromium
 
     - name: Verify renderer selection races
-      run: pnpm exec playwright test --config=tests/renderer/playwright.config.ts
+      run: pnpm exec playwright test --config=tests/renderer/playwright.config.ts --shard=${{ matrix.shard }}/2
       env:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
 
     - name: Check renderer test types
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && matrix.shard == 1 }}
       run: scripts/ci-background.sh wait renderer-types
 
   functional-smoke-electron:
