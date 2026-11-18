@@ -29,7 +29,7 @@ const WEEKDAY_ALIASES = new Map<string, number>([
   ['tues', 2], ['thur', 4], ['thurs', 4],
 ]);
 
-export const SNOOZE_TIME_FORMS = 'an ISO 8601 time (2026-11-18T09:00, 2026-11-18 09:00-08:00 or 2026-11-18T17:00Z), '
+const SNOOZE_TIME_FORMS = 'an ISO 8601 time (2026-11-18T09:00, 2026-11-18 09:00-08:00 or 2026-11-18T17:00Z), '
   + 'a date alone (2026-11-18, meaning 9:00 AM that day), a duration (45m, 2h, 3d, or "in 2h"), '
   + 'or tomorrow or a weekday name (monday), meaning the next one, at 9:00 AM or at a time after it ("tomorrow 14:30", "fri 10am")';
 

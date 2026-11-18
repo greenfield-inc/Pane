@@ -152,13 +152,15 @@ test('the agents chip opens the Session, whose breadcrumb returns to the same to
 
 test('back from the Session, the to-do shows the tab and scroll you left it on', async ({ page }) => {
   await open(page);
-  await page.setViewportSize({ width: 1440, height: 420 });
+  await page.setViewportSize({ width: 1440, height: 360 });
   await openTodo(page, 12);
   await tabs(page).nth(1).click();
   await expect(tabs(page).nth(1)).toHaveAttribute('aria-selected', 'true');
   const scroll = page.getByTestId('todo-page-scroll');
-  const top = await scroll.evaluate((node) => { node.scrollTop = 120; return node.scrollTop; });
-  expect(top).toBeGreaterThan(0);
+  // The thread fills in after the page opens: scroll once there is room to.
+  await expect.poll(() => scroll.evaluate((node) => node.scrollHeight - node.clientHeight)).toBeGreaterThan(60);
+  const top = await scroll.evaluate((node) => { node.scrollTop = 60; return node.scrollTop; });
+  expect(top).toBe(60);
   await page.getByTestId('todo-chip-agents').click();
   await expect(page.locator('[data-session-content-id="s-12"]')).toBeVisible();
   await crumb(page).click();

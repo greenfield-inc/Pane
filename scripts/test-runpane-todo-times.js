@@ -153,7 +153,8 @@ for text, now, zone, _ in data["refusals"]:
         refusals.append({"code": error.code, "message": str(error), "next": error.next})
 formats = [todo_times.format_snooze_time(at, zone) for at, zone, _ in data["formats"]]
 relative = [todo_times.format_until(at, now) for at, now, _ in data["relative"]]
-print(json.dumps({"reads": reads, "refusals": refusals, "formats": formats, "relative": relative}))
+zones = todo_times._zone_info("America/Los_Angeles") is not None
+print(json.dumps({"reads": reads, "refusals": refusals, "formats": formats, "relative": relative, "zones": zones}))
 `;
   const output = childProcess.execFileSync(findPython(), ['-c', source], {
     cwd: rootDir,
@@ -184,11 +185,17 @@ function checkTodoSnoozeTimes() {
   RELATIVE.forEach(([, , expected], index) => assert.strictEqual(node.relative[index], expected));
 
   // Python reads, refuses and prints the same, byte for byte.
+  // Without a tz database (Python 3.8, or Windows without tzdata) Python reads every zone in the
+  // system's local time, which is what its CLI uses there; only the UTC rows can be compared then.
   const python = pythonResults();
-  assert.deepStrictEqual(python.reads, node.reads);
-  assert.deepStrictEqual(python.refusals, node.refusals);
-  assert.deepStrictEqual(python.formats, node.formats);
+  const comparable = (zone) => python.zones || zone === 'UTC';
+  const pick = (values, rows, zoneAt) => values.filter((_, index) => comparable(rows[index][zoneAt]));
+  if (!python.zones) console.log('runpane todos snooze times: Python has no tz database here; compared the UTC rows only');
+  assert.deepStrictEqual(pick(python.reads, READS, 2), pick(node.reads, READS, 2));
+  assert.deepStrictEqual(pick(python.refusals, REFUSALS, 2), pick(node.refusals, REFUSALS, 2));
+  assert.deepStrictEqual(pick(python.formats, FORMATS, 1), pick(node.formats, FORMATS, 1));
   assert.deepStrictEqual(python.relative, node.relative);
+  assert.ok(pick(node.reads, READS, 2).length > 0, 'some rows are compared');
 }
 
 module.exports = { checkTodoSnoozeTimes };

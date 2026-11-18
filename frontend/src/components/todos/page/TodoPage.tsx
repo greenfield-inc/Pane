@@ -141,19 +141,19 @@ function splitScroller(): HTMLElement | null {
   return null;
 }
 
-/** Scrolls the split back once its content has loaded (it may arrive a few frames late); stops after a second. */
-function restoreSplitScroll(top: number): () => void {
+/** Scrolls back once the content is tall enough (it may arrive a few frames late); stops after a second. */
+function restoreScroll(find: () => HTMLElement | null, top: number): () => void {
   let frames = 0;
   let id = 0;
   const step = () => {
-    const scroller = splitScroller();
+    const scroller = find();
     if (scroller && scroller.scrollHeight - scroller.clientHeight >= top) {
       scroller.scrollTop = top;
       return;
     }
     if (++frames < 60) id = requestAnimationFrame(step);
   };
-  id = requestAnimationFrame(step);
+  step();
   return () => cancelAnimationFrame(id);
 }
 
@@ -178,16 +178,23 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
   splitRef.current = split;
   useLayoutEffect(() => {
     const page = scrollRef.current;
-    if (page && leftAs) page.scrollTop = leftAs.pageScroll;
-    const stopRestore = leftAs && leftAs.splitScroll > 0 ? restoreSplitScroll(leftAs.splitScroll) : null;
+    const stopPage = leftAs && leftAs.pageScroll > 0 ? restoreScroll(() => page, leftAs.pageScroll) : null;
+    const stopSplit = leftAs && leftAs.splitScroll > 0 ? restoreScroll(splitScroller, leftAs.splitScroll) : null;
+    // Read as you scroll: by unmount the content may already be gone and the browser has clamped the scroll.
+    const scrolled = { page: leftAs?.pageScroll ?? 0, split: leftAs?.splitScroll ?? 0 };
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target === page) scrolled.page = target.scrollTop;
+      else if (target.closest('[data-testid="todo-split"]')) scrolled.split = target.scrollTop;
+    };
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
     return () => {
-      stopRestore?.();
+      stopPage?.();
+      stopSplit?.();
+      document.removeEventListener('scroll', onScroll, { capture: true });
       const shown = splitRef.current.items[splitRef.current.active];
-      rememberTodoView(viewKey, {
-        tab: shown ? splitItemKey(shown) : null,
-        pageScroll: page?.scrollTop ?? 0,
-        splitScroll: splitScroller()?.scrollTop ?? 0,
-      });
+      rememberTodoView(viewKey, { tab: shown ? splitItemKey(shown) : null, pageScroll: scrolled.page, splitScroll: scrolled.split });
     };
   }, [viewKey, leftAs]);
   // Focus starts on the title, so Tab walks the page from the top.

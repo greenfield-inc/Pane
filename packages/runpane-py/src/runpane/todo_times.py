@@ -67,7 +67,7 @@ def _zone_info(zone: str) -> Optional[tzinfo]:
     """The zone's rules; None means read it in the system's own zone (Python 3.8, or no tz database)."""
     if zone == "UTC":
         return timezone.utc
-    if ZoneInfo is None:
+    if ZoneInfo is None or zone == LOCAL_TIME:
         return None
     try:
         return ZoneInfo(zone)
@@ -83,8 +83,13 @@ def _known_zone(name: str) -> bool:
     return _zone_info(name) is not None
 
 
+# Not a zone name: read times in the system's own local time (Windows has no /etc/localtime, and may
+# have no tz database). The host shows such a snooze in its own zone.
+LOCAL_TIME = "localtime"
+
+
 def cli_time_zone() -> str:
-    """The zone this CLI reads times in: $TZ, else the machine's, else UTC."""
+    """The zone this CLI reads times in: $TZ, else the machine's, else the system's local time."""
     candidates: List[str] = []
     tz = (os.environ.get("TZ") or "").strip()
     candidates.append(tz[1:] if tz.startswith(":") else tz)
@@ -102,7 +107,7 @@ def cli_time_zone() -> str:
     for candidate in candidates:
         if _known_zone(candidate):
             return candidate
-    return "UTC"
+    return LOCAL_TIME
 
 
 def read_snooze_time(text: str, now: int, zone: str) -> int:
