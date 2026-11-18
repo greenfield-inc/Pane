@@ -1,11 +1,12 @@
 import { useState, type ReactNode } from 'react';
-import { Check, FileText, ListTree, Monitor, GitPullRequest, Paperclip } from 'lucide-react';
+import { Bell, Check, FileText, ListTree, Monitor, GitPullRequest, Paperclip } from 'lucide-react';
 import type { TodoDetail, TodoShownStatus } from '../../../../../shared/types/todos';
 import { cn } from '../../../utils/cn';
 import { TODO_STATUS_LABEL, TodoStatusIcon } from '../TodoStatusIcon';
 import { openTodoSession } from './todoNavigation';
 import { AgentAvatar } from './TodoPageParts';
 import { AttachField } from './TodoAttach';
+import { useSnoozeWords } from './TodoSnoozed';
 
 /** The status chip's tint for the statuses that carry one; the rest stay plain. */
 const STATUS_TINT = {
@@ -13,7 +14,7 @@ const STATUS_TINT = {
   working: 'border-status-info/40',
   queued: 'bg-surface-tertiary',
   idle: '',
-  snoozed: '',
+  snoozed: 'border-status-snoozed-border bg-status-snoozed-subtle',
   done: '',
   dropped: '',
 } as const satisfies Record<TodoShownStatus, string>;
@@ -63,18 +64,27 @@ export function TodoChips({ detail, splitCount, splitLead, splitHidden, onOpenAp
   const subTotal = detail.subTodos.length;
   const subDone = detail.subTodos.filter((row) => row.status.status === 'done').length;
   const pr = detail.pr ?? attachedPr(detail);
+  // Snoozed (round 9): "Snoozed until Wed 9:00 AM", then "wakes in 17h · set by the orchestrator", every minute.
+  const snoozed = useSnoozeWords(status.status === 'snoozed' ? todo.snooze : undefined);
+  const reminder = status.status === 'snoozed' && todo.snooze && (todo.snooze.action === 'remind' || !todo.sessionId);
+  const shownReason = snoozed ? snoozed.after : reason;
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="todo-chips">
       <Chip
-        label={waitingId ? `${TODO_STATUS_LABEL[status.status]}: answer` : TODO_STATUS_LABEL[status.status]}
+        label={waitingId ? `${TODO_STATUS_LABEL[status.status]}: answer` : snoozed ? `${snoozed.chip} (${snoozed.tooltip})` : TODO_STATUS_LABEL[status.status]}
         onClick={waitingId ? () => onOpenApproval(waitingId) : onOpenDetails}
         className={cn('font-medium text-text-primary', STATUS_TINT[status.status])}
         testId="todo-chip-status"
       >
         <TodoStatusIcon status={status.status} />
-        {TODO_STATUS_LABEL[status.status]}
+        {snoozed ? snoozed.chip : TODO_STATUS_LABEL[status.status]}
       </Chip>
-      {reason && <span className={cn('max-w-[280px] truncate text-[12px]', status.alert ? 'text-status-error' : 'text-text-tertiary')} title={reason} data-testid="todo-status-reason">{reason}</span>}
+      {shownReason && <span className={cn('max-w-[280px] truncate text-[12px]', status.alert ? 'text-status-error' : 'text-text-tertiary')} title={snoozed ? snoozed.tooltip : shownReason} data-testid="todo-status-reason">{shownReason}</span>}
+      {reminder && (
+        <span className={cn(CHIP, 'cursor-default hover:border-border-primary hover:text-text-secondary')} data-testid="todo-chip-reminder">
+          <Bell className="h-3.5 w-3.5" aria-hidden="true" />{todo.sessionId ? 'Reminder' : 'Reminder · no agent'}
+        </span>
+      )}
       <Chip label={worker ? `Open its Session: orchestrator and ${worker.name ?? 'its agent'}` : 'Open its Session'} onClick={onOpenSession ?? (() => openTodoSession(detail))} disabled={!hasSession} testId="todo-chip-agents">
         <span className="inline-flex items-center">
           <AgentAvatar agentId={detail.orchestrator?.agentId ?? todo.agent ?? undefined} name="orchestrator" className="h-4 w-4 rounded" />

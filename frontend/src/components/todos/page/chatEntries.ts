@@ -32,10 +32,13 @@ export function approvalCardView(item: NotifyItem): ApprovalCardView {
 }
 
 /** The small icon an event row carries, read from its words (Pane writes events as plain lines). */
-export type TodoEventIcon = 'done' | 'queued' | 'created' | 'stopped' | 'started' | 'waiting' | 'alert' | 'attached' | 'note';
+export type TodoEventIcon = 'done' | 'queued' | 'created' | 'stopped' | 'started' | 'waiting' | 'alert' | 'attached' | 'note' | 'snoozed' | 'reminder';
 
 export function todoEventIcon(body: string): TodoEventIcon {
   const text = body.toLowerCase();
+  // Round 9: a reminder raised, and snoozing and waking.
+  if (/^reminder\b/u.test(text)) return 'reminder';
+  if (/^(snoozed until|snooze changed|snooze cleared|woke at|woken early)\b/u.test(text)) return 'snoozed';
   if (/\b(stuck|quiet|failed|restart(ed)?)\b/u.test(text)) return 'alert';
   if (/\b(asks?|asked|waits? on you|question)\b/u.test(text)) return 'waiting';
   if (/\b(held|queued|load)\b/u.test(text)) return 'queued';

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { TodoListRow, TodoRecord, TodoShownStatus, TodoState, TodosSnapshot } from '../../../../shared/types/todos';
 import type { RemoteTodos } from '../../stores/todosStore';
 import {
-  actionForKey, entryAction, flattenGroups, groupTodos, mergeTodoEntries, moveSelection, navSummary, nextGrouping, otherMachines, rowAction, tabCounts,
+  actionForKey, canSnooze, entryAction, flattenGroups, foldKey, groupTodos, isFolded, listStops, mergeTodoEntries, moveSelection, navSummary, nextGrouping,
+  nextWake, otherMachines, readFolds, resolveStop, rowAction, stopAfterLeaving, tabCounts, withFold, type TodoFolds,
 } from './todoList';
 import type { MachineState } from '../../../../shared/types/machineConnections';
 
@@ -15,6 +16,9 @@ interface RowSeed {
   requester?: string;
   project?: string;
   machine?: string;
+  /** Snoozed until this time (ms). */
+  until?: number;
+  remind?: boolean;
 }
 
 function row(seed: RowSeed): TodoListRow {
@@ -26,7 +30,10 @@ function row(seed: RowSeed): TodoListRow {
     acceptedAt: null, closedAt: null, lastProgressAt: null, stuckSince: null, episodeReminders: 0, episodeRestarts: 0, stallsToday: 0,
     stallsDay: null, attachRemindedAt: null, workMs: 0, loadHold: null, loadHoldSince: null, loadOverride: null, stuckCardId: null,
   };
-  return { todo, status: { status: seed.status ?? 'working', reason: '' }, projectName: seed.project, machine: seed.machine ?? 'This Mac' };
+  if (seed.until !== undefined) {
+    todo.snooze = { until: seed.until, zone: 'UTC', note: '', action: seed.remind ? 'remind' : 'agents', by: 'you', from: 'in_progress', reminderCardId: null };
+  }
+  return { todo, status: { status: seed.status ?? (seed.until !== undefined ? 'snoozed' : 'working'), reason: '' }, projectName: seed.project, machine: seed.machine ?? 'This Mac' };
 }
 
 function snapshot(rows: TodoListRow[]): TodosSnapshot {
@@ -68,7 +75,7 @@ describe('tabs and counts', () => {
   const entries = mergeTodoEntries(local, []);
 
   it('counts each tab', () => {
-    expect(tabCounts(entries)).toEqual({ open: 4, waiting: 1, done: 1, all: 5 });
+    expect(tabCounts(entries)).toEqual({ open: 4, waiting: 1, snoozed: 0, done: 1, all: 5 });
   });
 
   it('groups by status in order, skipping empty groups', () => {
@@ -146,5 +153,112 @@ describe('otherMachines (T-8)', () => {
   it('keeps saved machines whose install id is not known yet, and every machine when this computer has none', () => {
     expect(otherMachines([machine('local', 'local', 'mac-1'), machine('new', 'remote')]).map(m => m.id)).toEqual(['new']);
     expect(otherMachines([machine('local', 'local'), machine('devbox', 'remote', 'box-9')]).map(m => m.id)).toEqual(['devbox']);
+  });
+});
+
+describe('snoozed (round 9, T-17)', () => {
+  const snoozed = snapshot([
+    row({ number: 1, status: 'working', updatedAt: 50, project: 'Pane' }),
+    row({ number: 2, state: 'stopped', status: 'idle', updatedAt: 40, project: 'Pane' }),
+    row({ number: 19, state: 'stopped', until: 9_000, updatedAt: 99, project: 'Pane' }),
+    row({ number: 21, state: 'todo', until: 3_000, remind: true, updatedAt: 98, project: 'docs-site' }),
+  ]);
+  const entries = mergeTodoEntries(snoozed, []);
+
+  it('groups Snoozed after Idle, soonest first, with its own tab and count', () => {
+    const groups = groupTodos(entries, 'open', 'status');
+    expect(groups.map(group => group.label)).toEqual(['Working', 'Idle', 'Snoozed']);
+    expect(groups[2].entries.map(entry => entry.row.todo.number)).toEqual([21, 19]);
+    expect(nextWake(groups[2])).toBe(3_000);
+    expect(nextWake(groups[0])).toBeNull();
+    expect(tabCounts(entries)).toMatchObject({ open: 4, snoozed: 2 });
+    expect(flattenGroups(groupTodos(entries, 'snoozed', 'status')).map(entry => entry.row.todo.number)).toEqual([21, 19]);
+  });
+
+  it('R wakes a snoozed row now; Z snoozes top-level open to-dos that are not in review or accepted', () => {
+    const asleep = entries.find(entry => entry.row.todo.number === 19)!;
+    expect(rowAction(asleep.row)).toBe('wake');
+    expect(actionForKey(asleep.row, 'r')).toBe('wake');
+    expect(actionForKey(asleep.row, 's')).toBeNull();
+    expect(canSnooze(asleep)).toBe(true);
+    expect(canSnooze(entries.find(entry => entry.row.todo.number === 1)!)).toBe(true);
+    expect(canSnooze(mergeTodoEntries(snapshot([row({ number: 5, state: 'in_review', status: 'waiting' })]), [])[0])).toBe(false);
+    expect(canSnooze(mergeTodoEntries(snapshot([row({ number: 6, state: 'done', status: 'done' })]), [])[0])).toBe(false);
+  });
+
+  it('keeps a snoozed to-do Snoozed while its machine is offline (its row adds "machine offline")', () => {
+    const remote: RemoteTodos = { machineId: 'devbox', label: 'devbox', offline: true, snapshot: snapshot([row({ number: 7, state: 'stopped', until: 5_000 })]) };
+    const [entry] = mergeTodoEntries(null, [remote]);
+    expect(entry.row.status.status).toBe('snoozed');
+    expect(entryAction(entry)).toBeNull();
+    expect(canSnooze(entry)).toBe(false);
+  });
+});
+
+describe('folding groups (D-432)', () => {
+  const entries = mergeTodoEntries(snapshot([
+    row({ number: 1, status: 'working', updatedAt: 50, project: 'Pane' }),
+    row({ number: 3, status: 'working', updatedAt: 45, project: 'Pane' }),
+    row({ number: 2, state: 'stopped', status: 'idle', updatedAt: 40, project: 'docs-site' }),
+    row({ number: 19, state: 'stopped', until: 9_000, updatedAt: 99, project: 'Pane' }),
+    row({ number: 21, state: 'todo', until: 3_000, updatedAt: 98, project: 'docs-site' }),
+  ]), []);
+  const none: TodoFolds = {};
+
+  it('Snoozed starts folded where there are other groups, and open in the Snoozed tab', () => {
+    const open = groupTodos(entries, 'open', 'status');
+    expect(open.map(group => isFolded(none, 'open', 'status', group, open.length))).toEqual([false, false, true]);
+    const tab = groupTodos(entries, 'snoozed', 'status');
+    expect(isFolded(none, 'snoozed', 'status', tab[0], tab.length)).toBe(false);
+  });
+
+  it('remembers each fold per tab × grouping × group, and an opened Snoozed stays open', () => {
+    const open = groupTodos(entries, 'open', 'status');
+    let folds = withFold(none, 'open', 'status', 'status:idle', true);
+    folds = withFold(folds, 'open', 'status', 'status:snoozed', false);
+    expect(open.map(group => isFolded(folds, 'open', 'status', group, open.length))).toEqual([false, true, false]);
+    expect(folds[foldKey('open', 'status', 'status:idle')]).toBe(true);
+    // Idle folded in Open by status doesn't fold it under Waiting on you, or in Open by repo.
+    expect(isFolded(folds, 'all', 'status', open[1], open.length)).toBe(false);
+    const repo = groupTodos(entries, 'open', 'repo');
+    expect(repo.map(group => isFolded(folds, 'open', 'repo', group, repo.length))).toEqual([false, false]);
+  });
+
+  it('J/K stops: every row of an open group, and a folded group once, by its header', () => {
+    const groups = groupTodos(entries, 'open', 'status');
+    const stops = listStops(groups, group => isFolded(none, 'open', 'status', group, groups.length));
+    expect(stops.map(stop => stop.key)).toEqual(['local:1', 'local:3', 'local:2', 'group:status:snoozed']);
+    const folded = withFold(none, 'open', 'status', 'status:working', true);
+    expect(listStops(groups, group => isFolded(folded, 'open', 'status', group, groups.length)).map(stop => stop.key))
+      .toEqual(['group:status:working', 'local:2', 'group:status:snoozed']);
+  });
+
+  it('a selected row whose group folds resolves to that header; an unknown key to the first stop', () => {
+    const groups = groupTodos(entries, 'open', 'status');
+    const stops = listStops(groups, group => isFolded(none, 'open', 'status', group, groups.length));
+    expect(resolveStop(stops, groups, 'local:21')).toBe(3);
+    expect(resolveStop(stops, groups, 'local:3')).toBe(1);
+    expect(resolveStop(stops, groups, 'nope')).toBe(0);
+    expect(resolveStop([], groups, 'local:1')).toBe(-1);
+  });
+
+  it('a row leaving for a folded group hands the selection to the next stop, or the one before at the end', () => {
+    const groups = groupTodos(entries, 'open', 'status');
+    const stops = listStops(groups, group => isFolded(none, 'open', 'status', group, groups.length));
+    expect(stopAfterLeaving(stops, 'local:3')).toBe('local:2');
+    expect(stopAfterLeaving(stops.slice(0, 3), 'local:2')).toBe('local:3');
+    expect(stopAfterLeaving(stops, 'missing')).toBeNull();
+  });
+
+  it('reads saved folds, and anything unreadable as none', () => {
+    const storage = new Map<string, string>();
+    const store = { getItem: (key: string) => storage.get(key) ?? null };
+    expect(readFolds(store)).toEqual({});
+    storage.set('pane-todos-folds', '{"open|status|status:idle":true,"open|status|status:snoozed":false}');
+    expect(readFolds(store)).toEqual({ 'open|status|status:idle': true, 'open|status|status:snoozed': false });
+    storage.set('pane-todos-folds', '{"bad":"x"}');
+    expect(readFolds(store)).toEqual({});
+    storage.set('pane-todos-folds', 'not json');
+    expect(readFolds(store)).toEqual({});
   });
 });

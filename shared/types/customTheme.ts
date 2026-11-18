@@ -115,6 +115,11 @@ export const THEME_COLOR_TOKENS = [
   '--color-autopilot-subtle',
   '--color-autopilot-border',
   '--color-autopilot-on-tint',
+  // Snoozed to-dos (round 9).
+  '--color-status-snoozed',
+  '--color-status-snoozed-subtle',
+  '--color-status-snoozed-border',
+  '--color-status-snoozed-on-tint',
   // A phone's bezel and dark screen in a device tab.
   '--color-device-bezel',
   '--color-device-screen',

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { CircleDashed, ImageIcon, Plus, X } from 'lucide-react';
+import { ChevronDown, CircleDashed, ImageIcon, Moon, Plus, X } from 'lucide-react';
 import type { TodoAttachmentKind, TodoCreateInput } from '../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
@@ -17,6 +17,8 @@ import { isMac } from '../../utils/platformUtils';
 import type { Project } from '../../types/project';
 import { Dropdown, type DropdownItem } from '../ui/Dropdown';
 import { TodoStatusIcon } from './TodoStatusIcon';
+import { SnoozeMenu, type SnoozeChoice } from './SnoozeMenu';
+import { snoozeWhen, viewerZone } from './snoozeTime';
 import { TODOS_BUTTON, TODOS_DIALOG_CHIP } from './todoStyles';
 
 interface NewTodoDialogProps {
@@ -102,6 +104,10 @@ export function NewTodoDialog({ onClose, onCreated }: NewTodoDialogProps) {
   const [images, setImages] = useState<DraftImage[]>([]);
   const [savingImages, setSavingImages] = useState(0);
   const [startNow, setStartNow] = useState(true);
+  // Round 9: Remind me…, the status chip's third choice: created not started, snoozed until this time.
+  const [reminder, setReminder] = useState<SnoozeChoice | null>(null);
+  const [reminderAnchor, setReminderAnchor] = useState<DOMRect | null>(null);
+  const statusRef = useRef<HTMLButtonElement>(null);
   const [projects, setProjects] = useState<RepoOption[]>([]);
   const [projectId, setProjectId] = useState<number | null>(null);
   const agents = useMemo(orchestratorAgents, []);
@@ -208,10 +214,11 @@ export function NewTodoDialog({ onClose, onCreated }: NewTodoDialogProps) {
       subTodos,
       projectId,
       agent,
-      startNow,
+      startNow: reminder ? false : startNow,
       // Pasted images are files on this machine, so only a to-do made here attaches them.
       attach: remote ? [] : images.map(image => ({ target: image.target, kind: imageKind, label: image.label })),
     };
+    if (reminder) input.snooze = { until: reminder.until, zone: reminder.zone, note: reminder.note, action: reminder.action };
     if (remote) {
       const created = await createOn(machineId, input);
       setSubmitting(false);
@@ -264,7 +271,7 @@ export function NewTodoDialog({ onClose, onCreated }: NewTodoDialogProps) {
           onKeyDown={onDialogKey}
           onOpenAutoFocus={event => { event.preventDefault(); titleRef.current?.focus(); }}
           // A menu open inside takes Esc first; the dialog stays.
-          onEscapeKeyDown={event => { if (document.querySelector('[role="menu"]')) event.preventDefault(); }}
+          onEscapeKeyDown={event => { if (document.querySelector('[role="menu"], [data-testid="snooze-menu"]')) event.preventDefault(); }}
           className="fixed inset-x-0 top-[12vh] z-modal mx-auto w-[min(660px,calc(100vw-24px))] outline-none"
         >
           <Dialog.Title className="sr-only">New to-do</Dialog.Title>
@@ -337,10 +344,29 @@ export function NewTodoDialog({ onClose, onCreated }: NewTodoDialogProps) {
               </div>
             )}
             <div className="flex flex-wrap gap-1.5 px-4 pb-3 pt-2">
-              <button type="button" className={TODOS_DIALOG_CHIP} onClick={() => setStartNow(on => !on)} data-testid="new-todo-status" title="In progress starts it now; To do saves it without starting">
-                {startNow ? <TodoStatusIcon status="working" /> : <CircleDashed className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />}
-                <b className="font-medium text-text-primary">{startNow ? 'In progress' : 'To do'}</b>
-              </button>
+              <Dropdown
+                trigger={(
+                  <button ref={statusRef} type="button" className={TODOS_DIALOG_CHIP} data-testid="new-todo-status" title="In progress starts it now; To do saves it without starting; Remind me… snoozes it until a time">
+                    {reminder ? <Moon className="h-3.5 w-3.5 text-status-snoozed" aria-hidden="true" /> : startNow ? <TodoStatusIcon status="working" /> : <CircleDashed className="h-3.5 w-3.5 text-text-tertiary" aria-hidden="true" />}
+                    <b className="font-medium text-text-primary">{reminder ? `Remind me · ${snoozeWhen(reminder.until, Date.now(), viewerZone())}` : startNow ? 'In progress' : 'To do'}</b>
+                    <ChevronDown className="h-3 w-3 text-text-tertiary" aria-hidden="true" />
+                  </button>
+                )}
+                items={[
+                  { id: 'start', label: 'In progress', description: 'Starts it now', onClick: () => { setReminder(null); setStartNow(true); } },
+                  { id: 'todo', label: 'To do', description: 'Saved, not started', onClick: () => { setReminder(null); setStartNow(false); } },
+                  {
+                    id: 'remind', label: 'Remind me…', description: 'Snoozed until a time, then a reminder card',
+                    // After the menu closes and gives focus back, so the snooze menu keeps it.
+                    onClick: () => window.setTimeout(() => setReminderAnchor(statusRef.current?.getBoundingClientRect() ?? null), 0),
+                  },
+                ]}
+                selectedId={reminder ? 'remind' : startNow ? 'start' : 'todo'}
+                selectedMark="check"
+                header="Status"
+                position="bottom-left"
+                width="md"
+              />
               <Dropdown
                 trigger={<button type="button" className={TODOS_DIALOG_CHIP} data-testid="new-todo-repo">Repo <b className="font-medium text-text-primary">{repoName}</b></button>}
                 items={repoItems}
@@ -379,17 +405,19 @@ export function NewTodoDialog({ onClose, onCreated }: NewTodoDialogProps) {
               <button
                 type="button"
                 role="switch"
-                aria-checked={startNow}
-                onClick={() => setStartNow(on => !on)}
+                aria-checked={startNow && !reminder}
+                onClick={() => { setReminder(null); setStartNow(on => !on || reminder !== null); }}
                 data-testid="new-todo-start-now"
                 className="inline-flex select-none items-center gap-2 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
               >
-                <span className={cn('relative h-4 w-7 rounded-full transition-colors', startNow ? 'bg-interactive' : 'bg-surface-tertiary')} aria-hidden="true">
-                  <span className={cn('absolute top-0.5 h-3 w-3 rounded-full bg-surface-primary shadow-sm transition-[left]', startNow ? 'left-3.5' : 'left-0.5')} />
+                <span className={cn('relative h-4 w-7 rounded-full transition-colors', startNow && !reminder ? 'bg-interactive' : 'bg-surface-tertiary')} aria-hidden="true">
+                  <span className={cn('absolute top-0.5 h-3 w-3 rounded-full bg-surface-primary shadow-sm transition-[left]', startNow && !reminder ? 'left-3.5' : 'left-0.5')} />
                 </span>
                 Start now
               </button>
-              <span className="text-text-tertiary">{startNow ? 'Creates its Session and starts an orchestrator' : 'Saved as not started; no Session until Start'}</span>
+              <span className="text-text-tertiary" data-testid="new-todo-start-line">{reminder
+                ? `Snoozed until ${snoozeWhen(reminder.until, Date.now(), viewerZone())}; ${reminder.action === 'remind' ? 'then a reminder card, no Session' : 'then Pane starts it'}`
+                : startNow ? 'Creates its Session and starts an orchestrator' : 'Saved as not started; no Session until Start'}</span>
               <span className="flex-1" />
               <span className="inline-flex items-center gap-1" aria-hidden="true">
                 <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-b-2 border-border-primary bg-surface-primary px-1 font-mono text-[10.5px] leading-none text-text-secondary">{isMac() ? '⌘' : 'Ctrl'}</kbd>
@@ -406,6 +434,15 @@ export function NewTodoDialog({ onClose, onCreated }: NewTodoDialogProps) {
               </button>
             </div>
             </div>
+            {reminderAnchor && (
+              <SnoozeMenu
+                target={{ title: title.trim() || 'New to-do', sessionId: null, snooze: reminder ? { ...reminder, by: 'you', from: 'todo', reminderCardId: null } : undefined }}
+                anchor={reminderAnchor}
+                verb="Remind me"
+                onSubmit={choice => { setReminder(choice); setReminderAnchor(null); }}
+                onClose={() => setReminderAnchor(null)}
+              />
+            )}
           </PortalContainerProvider>
           <div ref={setPortalContainer} className="pointer-events-none fixed inset-0" />
         </Dialog.Content>

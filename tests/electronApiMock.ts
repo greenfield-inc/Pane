@@ -25,7 +25,7 @@ import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../s
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
 import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
 import type { AutopilotDocument } from '../shared/types/autopilot';
-import type { TodoAction, TodoActivity, TodoAttachment, TodoDetail, TodosSnapshot } from '../shared/types/todos';
+import type { TodoAction, TodoActivity, TodoAttachment, TodoCreateInput, TodoDetail, TodoSnooze, TodoStatus, TodosSnapshot } from '../shared/types/todos';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -56,9 +56,16 @@ interface TodoActCall {
   args: [TodoAction];
 }
 
+/** One `todos:create` the New to-do dialog sent (round 9): the mock records it and still refuses it. */
+interface TodoCreateCall {
+  channel: 'todos:create';
+  args: [TodoCreateInput];
+}
+
 /** The to-do hooks on `window.__paneTestElectronMock`, for a spec's `declare global`. */
 export interface TodosMockHooks {
   getInvokeCalls(channel: 'todos:act'): TodoActCall[];
+  getInvokeCalls(channel: 'todos:create'): TodoCreateCall[];
   /** While on, a reply (a comment with `replyTo`) fails as main refuses a bad target; returns the words the page shows. */
   setTodoReplyRefusal(on: boolean): string;
 }
@@ -1076,7 +1083,37 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         else detail.attachments.push({ attachments: [attachment] });
       }
       if (action.kind === 'detach' && own) own.attachments = own.attachments.filter((attachment) => attachment.id !== action.attachmentId);
+      if (action.kind === 'snooze' || action.kind === 'wake') applySnooze(state, detail, action);
       if (mockOptions.todos?.recordActivity) recordTodoActivity(detail, action);
+    };
+    // Round 9 (T-17): snooze and wake change the to-do as main would: Snoozed until the time (stored stopped), and
+    // woken to Working, or to Waiting on you for a reminder; held comments are delivered on waking.
+    const applySnooze = (state: TodosMockState, detail: TodoDetail, action: Extract<TodoAction, { kind: 'snooze' | 'wake' }>) => {
+      const todo = detail.todo;
+      let status: TodoStatus;
+      if (action.kind === 'snooze') {
+        const from = todo.snooze?.from ?? (todo.state === 'todo' || todo.state === 'stopped' ? todo.state : 'in_progress');
+        const snooze: TodoSnooze = {
+          until: action.until, zone: action.zone, note: action.note ?? '', action: action.action ?? (todo.sessionId ? 'agents' : 'remind'), by: 'you', from, reminderCardId: null,
+        };
+        todo.snooze = snooze;
+        todo.state = 'stopped';
+        status = { status: 'snoozed', reason: `until ${new Date(action.until).toISOString()}` };
+      } else {
+        const was = todo.snooze;
+        delete todo.snooze;
+        const reminder = !was || was.action === 'remind' || !todo.sessionId;
+        todo.state = reminder ? was?.from ?? 'todo' : 'in_progress';
+        status = reminder ? { status: 'waiting', reason: 'reminder' } : { status: 'working', reason: '' };
+        for (const row of detail.activity) if (row.kind === 'message' && row.authorKind === 'person' && row.deliveredAt === undefined) row.deliveredAt = Date.now();
+      }
+      todo.updatedAt = Date.now();
+      detail.status = status;
+      const listed = state.snapshot.rows.find((row) => row.todo.number === todo.number);
+      if (listed) {
+        listed.todo = clone(todo);
+        listed.status = clone(status);
+      }
     };
     // The rows main adds for a comment or an attach, with recordActivity on.
     const recordTodoActivity = (detail: TodoDetail, action: TodoAction) => {
@@ -1094,7 +1131,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const todosApi = todosState ? {
       snapshot: () => success(clone(todosState.snapshot)),
       detail: (number: number) => success(clone(todosState.details[number] ?? null)),
-      create: () => Promise.resolve({ success: false, error: 'This mock does not create to-dos.' }),
+      create: (input: TodoCreateInput) => {
+        trackCall('todos:create', [clone(input)]);
+        return Promise.resolve({ success: false, error: 'This mock does not create to-dos.' });
+      },
       act: (action: TodoAction) => {
         trackCall('todos:act', [clone(action)]);
         if (todoRepliesRefused && action.kind === 'comment' && action.replyTo !== undefined) {

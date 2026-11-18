@@ -1,4 +1,5 @@
 import { LOCAL_MACHINE_ID, type MachineState } from '../../../../shared/types/machineConnections';
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { isOpenTodoState, type TodoListRow, type TodoShownStatus, type TodoStatus, type TodosSnapshot } from '../../../../shared/types/todos';
 import type { RemoteTodos } from '../../stores/todosStore';
 import { TODO_STATUS_LABEL } from './TodoStatusIcon';
@@ -8,7 +9,7 @@ import { TODO_STATUS_LABEL } from './TodoStatusIcon';
  * which rows each tab shows, how they group, the counts, and what S, R and Start anyway do.
  */
 
-const TODOS_TABS = ['open', 'waiting', 'done', 'all'] as const;
+const TODOS_TABS = ['open', 'waiting', 'snoozed', 'done', 'all'] as const;
 export type TodosTab = typeof TODOS_TABS[number];
 
 export const TODOS_GROUPINGS = ['status', 'requester', 'repo', 'machine'] as const;
@@ -21,8 +22,8 @@ export const TODOS_GROUPING_LABEL = {
   machine: 'Machine',
 } as const satisfies Record<TodosGrouping, string>;
 
-/** Status groups in the order the list shows them: what needs you first. */
-const STATUS_ORDER: readonly TodoShownStatus[] = ['waiting', 'working', 'queued', 'idle', 'done', 'dropped'];
+/** Status groups in the order the list shows them: what needs you first; Snoozed after Idle (round 9). */
+const STATUS_ORDER: readonly TodoShownStatus[] = ['waiting', 'working', 'queued', 'idle', 'snoozed', 'done', 'dropped'];
 
 /** One row of the list: a top-level to-do on this machine or a saved one. */
 export interface TodoEntry {
@@ -48,15 +49,20 @@ export interface TodoGroup {
 export interface TodosTabCounts {
   open: number;
   waiting: number;
+  snoozed: number;
   done: number;
   all: number;
 }
 
 const OFFLINE_STATUS: TodoStatus = { status: 'idle', reason: 'machine offline', idleReason: 'offline' };
 
-/** A saved machine's to-do while that machine is unreachable: Idle · machine offline, unless closed. */
+/**
+ * A saved machine's to-do while that machine is unreachable: Idle · machine offline, unless closed,
+ * or Snoozed, which its own host wakes (round 9): its row adds "machine offline" until it reconnects.
+ */
 function offlineRow(row: TodoListRow, machine: string): TodoListRow {
   const closed = row.status.status === 'done' || row.status.status === 'dropped';
+  if (row.todo.snooze && !closed) return { ...row, machine, status: { status: 'snoozed', reason: 'machine offline' } };
   return { ...row, machine, status: closed ? row.status : OFFLINE_STATUS };
 }
 
@@ -96,6 +102,7 @@ function inTab(entry: TodoEntry, tab: TodosTab): boolean {
   switch (tab) {
     case 'open': return !isClosed(entry);
     case 'waiting': return !isClosed(entry) && entry.row.status.status === 'waiting';
+    case 'snoozed': return !isClosed(entry) && entry.row.status.status === 'snoozed';
     case 'done': return isClosed(entry);
     case 'all': return true;
   }
@@ -105,6 +112,7 @@ export function tabCounts(entries: readonly TodoEntry[]): TodosTabCounts {
   return {
     open: entries.filter(entry => inTab(entry, 'open')).length,
     waiting: entries.filter(entry => inTab(entry, 'waiting')).length,
+    snoozed: entries.filter(entry => inTab(entry, 'snoozed')).length,
     done: entries.filter(entry => inTab(entry, 'done')).length,
     all: entries.length,
   };
@@ -133,6 +141,8 @@ export function groupTodos(entries: readonly TodoEntry[], tab: TodosTab, groupin
   if (grouping === 'status') {
     return STATUS_ORDER.flatMap((status): TodoGroup[] => {
       const members = shown.filter(entry => entry.row.status.status === status);
+      // Snoozed: soonest first.
+      if (status === 'snoozed') members.sort((a, b) => (a.row.todo.snooze?.until ?? 0) - (b.row.todo.snooze?.until ?? 0));
       return members.length ? [{ key: `status:${status}`, label: TODO_STATUS_LABEL[status], status, entries: members }] : [];
     });
   }
@@ -164,7 +174,7 @@ export function moveSelection(index: number, count: number, step: 1 | -1): numbe
   return Math.min(count - 1, Math.max(0, index + step));
 }
 
-export type TodoRowActionKind = 'stop' | 'resume' | 'start' | 'start-anyway';
+export type TodoRowActionKind = 'stop' | 'resume' | 'start' | 'start-anyway' | 'wake';
 
 /**
  * The one action a row offers: Start anyway while queued, Start before it ever ran, Resume once
@@ -178,17 +188,114 @@ export function entryAction(entry: TodoEntry): TodoRowActionKind | null {
 export function rowAction(row: TodoListRow): TodoRowActionKind | null {
   const { state } = row.todo;
   if (!isOpenTodoState(state)) return null;
+  // Snoozed (round 9): Wake now.
+  if (row.todo.snooze) return 'wake';
   if (row.status.status === 'queued') return 'start-anyway';
   if (state === 'todo') return 'start';
   if (state === 'stopped') return 'resume';
   return 'stop';
 }
 
-/** The key that asks for an action: S stops, R resumes or starts. */
+/** The key that asks for an action: S stops, R resumes or starts, or wakes a snoozed to-do now. */
 export function actionForKey(row: TodoListRow, key: 's' | 'r'): TodoRowActionKind | null {
   const action = rowAction(row);
   if (key === 's') return action === 'stop' ? 'stop' : null;
-  return action === 'resume' || action === 'start' ? action : null;
+  return action === 'resume' || action === 'start' || action === 'wake' ? action : null;
+}
+
+/** Z: a top-level open to-do that isn't In review or Accepted, on a machine that answers (round 9). */
+export function canSnooze(entry: TodoEntry): boolean {
+  const { todo } = entry.row;
+  return !entry.offline && todo.parentNumber === null && (todo.state === 'todo' || todo.state === 'in_progress' || todo.state === 'stopped');
+}
+
+/** The soonest wake in a group, for the folded Snoozed header ("next wakes Wed 9:00 AM"). */
+export function nextWake(group: TodoGroup): number | null {
+  const times = group.entries.map(entry => entry.row.todo.snooze?.until).filter((until): until is number => until !== undefined);
+  return times.length ? Math.min(...times) : null;
+}
+
+// ── Folding groups (D-432) ──────────────────────────────────────────────────
+
+/** Folds the person chose, by tab × grouping × group key: true folded, false opened. Absent: the default. */
+export interface TodoFolds {
+  readonly [foldKey: string]: boolean;
+}
+
+const foldsSchema = boundary.record(boundary.boolean);
+
+const FOLDS_STORAGE_KEY = 'pane-todos-folds';
+const SNOOZED_GROUP = 'status:snoozed';
+
+export function foldKey(tab: TodosTab, grouping: TodosGrouping, groupKey: string): string {
+  return `${tab}|${grouping}|${groupKey}`;
+}
+
+/** Whether a group shows folded: as chosen, else Snoozed starts folded wherever there are other groups. */
+export function isFolded(folds: TodoFolds, tab: TodosTab, grouping: TodosGrouping, group: TodoGroup, groupCount: number): boolean {
+  const chosen = folds[foldKey(tab, grouping, group.key)];
+  if (chosen !== undefined) return chosen;
+  return group.key === SNOOZED_GROUP && groupCount > 1;
+}
+
+export function withFold(folds: TodoFolds, tab: TodosTab, grouping: TodosGrouping, groupKey: string, folded: boolean): TodoFolds {
+  return { ...folds, [foldKey(tab, grouping, groupKey)]: folded };
+}
+
+/** The saved folds; anything unreadable reads as none. */
+export function readFolds(storage: Pick<Storage, 'getItem'>): TodoFolds {
+  try {
+    const raw = storage.getItem(FOLDS_STORAGE_KEY);
+    if (raw === null) return {};
+    return decodeOptionalBoundary(JSON.parse(raw), foldsSchema) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeFolds(storage: Pick<Storage, 'setItem'>, folds: TodoFolds): void {
+  try {
+    storage.setItem(FOLDS_STORAGE_KEY, JSON.stringify(folds));
+  } catch {
+    // Storage blocked: folds last for this visit only.
+  }
+}
+
+/** A folded group's header as a stop: its selection key. */
+export function headerKey(groupKey: string): string {
+  return `group:${groupKey}`;
+}
+
+/** Where J and K stop: each row of an open group, and a folded group once, on its header. */
+export type TodoListStop =
+  | { kind: 'row'; key: string; entry: TodoEntry; group: TodoGroup }
+  | { kind: 'header'; key: string; group: TodoGroup };
+
+export function listStops(groups: readonly TodoGroup[], folded: (group: TodoGroup) => boolean): TodoListStop[] {
+  return groups.flatMap((group): TodoListStop[] => folded(group)
+    ? [{ kind: 'header', key: headerKey(group.key), group }]
+    : group.entries.map(entry => ({ kind: 'row', key: entry.key, entry, group })));
+}
+
+/**
+ * The stop a selection key lands on: itself, or for a row inside a folded group that group's
+ * header (Esc back from a to-do, a woken row whose new group is folded); else the first stop.
+ */
+export function resolveStop(stops: readonly TodoListStop[], groups: readonly TodoGroup[], selectedKey: string | null): number {
+  if (stops.length === 0) return -1;
+  if (selectedKey === null) return 0;
+  const direct = stops.findIndex(stop => stop.key === selectedKey);
+  if (direct >= 0) return direct;
+  const home = groups.find(group => group.entries.some(entry => entry.key === selectedKey));
+  const header = home ? stops.findIndex(stop => stop.key === headerKey(home.key)) : -1;
+  return header >= 0 ? header : 0;
+}
+
+/** A row about to leave the visible list (snoozed into a folded Snoozed): the stop after it, or before it at the end. */
+export function stopAfterLeaving(stops: readonly TodoListStop[], key: string): string | null {
+  const at = stops.findIndex(stop => stop.key === key);
+  if (at < 0) return null;
+  return (stops[at + 1] ?? stops[at - 1])?.key ?? null;
 }
 
 /** Waiting count and whether anything is worked on, for the sidebar entry. */

@@ -161,6 +161,11 @@ const config = {
           'error-on-tint': 'var(--color-status-error-on-tint)',
           'info-on-tint': 'var(--color-status-info-on-tint)',
           'neutral': 'var(--color-status-neutral)',
+          // Snoozed to-dos (round 9): violet, derived per theme.
+          'snoozed': 'var(--color-status-snoozed)',
+          'snoozed-subtle': 'var(--color-status-snoozed-subtle)',
+          'snoozed-border': 'var(--color-status-snoozed-border)',
+          'snoozed-on-tint': 'var(--color-status-snoozed-on-tint)',
         },
         // Autopilot's accent (violet)
         'autopilot': {

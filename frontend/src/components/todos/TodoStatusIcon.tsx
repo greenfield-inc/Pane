@@ -41,7 +41,7 @@ export function TodoStatusIcon({ status, className, size = 'md' }: { status: Tod
       {status === 'waiting' && <CircleHelp className={cn(glyph, 'text-status-warning')} strokeWidth={2.25} />}
       {status === 'queued' && <Clock className={cn(glyph, 'text-text-secondary')} strokeWidth={2.25} />}
       {status === 'idle' && <CircleMinus className={cn(glyph, 'text-text-muted')} strokeWidth={2.25} />}
-      {status === 'snoozed' && <Moon className={cn(glyph, 'text-text-secondary')} strokeWidth={2.25} />}
+      {status === 'snoozed' && <Moon className={cn(glyph, 'text-status-snoozed')} strokeWidth={2.25} />}
       {status === 'done' && <CircleCheck className={cn(glyph, 'text-status-success')} strokeWidth={2.25} />}
       {status === 'dropped' && <CircleX className={cn(glyph, 'text-text-muted')} strokeWidth={2.25} />}
     </span>

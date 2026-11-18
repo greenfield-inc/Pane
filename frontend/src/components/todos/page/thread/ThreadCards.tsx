@@ -1,5 +1,5 @@
 import { useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { ArrowUp, ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck, CircleDashed, CircleHelp, CirclePause, Clock, ExternalLink, File, GripVertical, Paperclip, X } from 'lucide-react';
+import { ArrowUp, Bell, ChevronDown, ChevronRight, ChevronUp, Circle, CircleAlert, CircleCheck, CircleDashed, CircleHelp, CirclePause, Clock, ExternalLink, File, GripVertical, Moon, Paperclip, X } from 'lucide-react';
 import type { TodoActivity, TodoDetail } from '../../../../../../shared/types/todos';
 import { commentAttachments, type TodoThreadApproval, type TodoThreadComment, type TodoThreadDelivery, type TodoThreadFile, type TodoThreadFold, type TodoThreadReply, type TodoThreadRun } from '../../../../../../shared/todoThread';
 import { MarkdownPreview } from '../../../MarkdownPreview';
@@ -9,6 +9,7 @@ import { TodoStatusIcon } from '../../TodoStatusIcon';
 import { todoEventIcon, type TodoEventIcon } from '../chatEntries';
 import { focusTodoTab } from '../todoNavigation';
 import { AgentAvatar, COMPACT_MARKDOWN } from '../TodoPageParts';
+import { heldText } from '../TodoSnoozed';
 import { attachedLabel, attachmentAt, attachmentNamed, commentWithFiles, eventFiles } from './threadInputs';
 import { TodoImageThumb } from './TodoImage';
 import { sendThreadComment, useComposerAttach, useFileDropZone } from './useThreadSend';
@@ -51,6 +52,8 @@ function EventIcon({ icon }: { icon: TodoEventIcon }) {
       {icon === 'alert' && <CircleAlert className="h-3 w-3 text-status-error" strokeWidth={2} />}
       {icon === 'note' && <Circle className="h-1.5 w-1.5" strokeWidth={3} />}
       {icon === 'attached' && <Paperclip className="h-3 w-3" strokeWidth={2} />}
+      {icon === 'snoozed' && <Moon className="h-3 w-3 text-status-snoozed" strokeWidth={2} />}
+      {icon === 'reminder' && <Bell className="h-3 w-3 text-status-warning" strokeWidth={2} />}
     </span>
   );
 }
@@ -225,8 +228,14 @@ function deliveryText(delivery: TodoThreadDelivery): string {
   return 'Waiting for the agent to finish its turn';
 }
 
-function DeliveryLine({ delivery, className }: { delivery: TodoThreadDelivery; className?: string }) {
-  return <div className={cn('text-[11.5px] text-text-tertiary', className)} data-testid="todo-thread-delivery" data-delivered={delivery.delivered}>{deliveryText(delivery)}</div>;
+/** A comment's delivery; while the to-do is snoozed an undelivered one is held for the wake message (round 9). */
+function DeliveryLine({ delivery, ctx, className }: { delivery: TodoThreadDelivery; ctx: ThreadContext; className?: string }) {
+  const held = !delivery.delivered && ctx.detail.todo.snooze !== undefined;
+  return (
+    <div className={cn('text-[11.5px]', held ? 'text-status-snoozed-on-tint' : 'text-text-tertiary', className)} data-testid="todo-thread-delivery" data-delivered={delivery.delivered} data-held={held || undefined}>
+      {held ? heldText(ctx.detail) : deliveryText(delivery)}
+    </div>
+  );
 }
 
 function authorLabel(activity: TodoActivity): string {
@@ -245,7 +254,7 @@ function Replies({ replies, ctx }: { replies: readonly TodoThreadReply[]; ctx: T
             {relativeAge(reply.activity.createdAt, ctx.now)}
           </div>
           <MessageBody body={reply.activity.body} ctx={ctx} className="pl-[22px] pt-[3px] text-[13.5px]" markdownClassName={COMPACT_MARKDOWN} />
-          {reply.delivery && <DeliveryLine delivery={reply.delivery} className="pl-[22px] pt-0.5" />}
+          {reply.delivery && <DeliveryLine delivery={reply.delivery} ctx={ctx} className="pl-[22px] pt-0.5" />}
         </div>
       ))}
     </>
@@ -309,7 +318,7 @@ export function CommentCard({ comment, ctx }: { comment: TodoThreadComment; ctx:
         {relativeAge(activity.createdAt, ctx.now)}
       </div>
       <MessageBody body={activity.body} ctx={ctx} className="pb-2.5 pl-[38px] pr-3 pt-1 text-[13.5px] leading-[1.55]" markdownClassName={cn(COMPACT_MARKDOWN, '!text-[13.5px]')} />
-      {comment.delivery && <DeliveryLine delivery={comment.delivery} className="-mt-1.5 pb-2 pl-[38px] pr-3" />}
+      {comment.delivery && <DeliveryLine delivery={comment.delivery} ctx={ctx} className="-mt-1.5 pb-2 pl-[38px] pr-3" />}
       <Replies replies={comment.replies} ctx={ctx} />
       <ReplyBox ctx={ctx} replyTo={comment.replyTarget} placeholder="Leave a reply…" />
     </div>

@@ -572,6 +572,14 @@
   --color-autopilot-border: color-mix(in srgb, var(--color-autopilot) 45%, transparent);
   --color-autopilot-on-tint: color-mix(in oklch, var(--color-autopilot) 75%, var(--color-text-primary));
 
+  /* Snoozed to-dos (round 9, T-17): their moon, chip, banner and "until …" words.
+     A violet mixed toward each theme's text colour, as Autopilot's is, so every
+     theme gets a fitting shade; tints and on-tint text derive from it. */
+  --color-status-snoozed: color-mix(in oklch, rgb(124 58 237) 72%, var(--color-text-primary));
+  --color-status-snoozed-subtle: color-mix(in srgb, var(--color-status-snoozed) 9%, transparent);
+  --color-status-snoozed-border: color-mix(in srgb, var(--color-status-snoozed) 45%, transparent);
+  --color-status-snoozed-on-tint: color-mix(in oklch, var(--color-status-snoozed) 80%, var(--color-text-primary));
+
   /* Context-Aware Text Tokens - Dark Mode */
   --color-text-on-primary: rgb(230 237 243);
   --color-text-on-secondary: rgb(200 208 217);

@@ -150,6 +150,9 @@ interface TodosState {
   actOn: (machineId: string, action: TodoAction) => Promise<boolean>;
   /** Creates a to-do (and its Session) on a saved machine; null after showing why it failed. */
   createOn: (machineId: string, input: TodoCreateInput) => Promise<CreatedTodo | null>;
+  /** Round 9: a to-do whose page should open its snooze menu (a reminder card's "Snooze to another time…"). */
+  snoozeRequest: number | null;
+  requestSnooze: (number: number | null) => void;
 }
 
 let refreshGeneration = 0;
@@ -160,6 +163,8 @@ export const useTodosStore = create<TodosState>((set, get) => ({
   snapshot: null,
   details: new Map(),
   watched: new Map(),
+  snoozeRequest: null,
+  requestSnooze: (number) => set({ snoozeRequest: number }),
 
   refresh: async () => {
     const api = todosApi();

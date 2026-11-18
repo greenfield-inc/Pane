@@ -37,6 +37,10 @@ function copyFor(kind: TodoRowActionKind, row: TodoListRow): ConfirmCopy {
       return { title: `Resume ${ref}?`, body: `Pane tells ${ref}’s orchestrator to pick it up where it stopped. Reminders come back on: after 10 quiet minutes Pane reminds the orchestrator, and after 40 it asks you.`, confirm: 'Resume' };
     case 'start':
       return { title: `Start ${ref}?`, body: 'Pane makes its Session and starts an orchestrator on it, as soon as machine load allows. Reminders are on from the start.', confirm: 'Start' };
+    case 'wake':
+      return { title: `Wake ${ref} now?`, body: row.todo.snooze?.action === 'remind' || !row.todo.sessionId
+        ? `Pane ends the snooze now and raises its reminder card, as if its time had come.`
+        : `Pane ends the snooze now: it sets ${ref} back to In progress and types the wake-up note to its orchestrator, with any held comments.`, confirm: 'Wake now' };
     case 'start-anyway':
       return { title: `Start ${ref} anyway?`, body: `${row.machine} is busy, so Pane is holding new agents. Starting anyway adds one more agent now; Pane won’t pause this to-do for load.`, confirm: 'Start anyway' };
   }

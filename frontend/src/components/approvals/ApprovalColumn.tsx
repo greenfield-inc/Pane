@@ -27,6 +27,7 @@ import { useNow } from '../notify/useNow';
 import { FindBar } from '../find/FindBar';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
+import { ReminderSnoozeLink } from '../todos/ReminderSnoozeLink';
 import {
   askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
@@ -404,6 +405,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
                 showTitle={questions.length > 1 || question.title !== item.title}
               />
             ))}
+            {item.todo?.kind === 'reminder' && waiting && <ReminderSnoozeLink number={item.todo.number} />}
             {item.ui === 'approve' && item.detail && (
               <details className="mt-3 rounded-lg border border-border-secondary">
                 <summary className="cursor-pointer px-3 py-2 text-[13px] text-text-secondary">{item.detailLabel ?? 'Show details'}</summary>

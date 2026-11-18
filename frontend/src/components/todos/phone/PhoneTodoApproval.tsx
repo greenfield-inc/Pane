@@ -1,8 +1,8 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { leadingQn } from '../../../../../shared/autopilotDecision';
 import { countsAsWaiting, selectNotifyItems, useNotifyStore } from '../../../stores/notifyStore';
 import { todoApprovalSurface, useApprovalColumnStore } from '../../../stores/approvalColumnStore';
-import { useTodoDetail } from '../../../stores/todosStore';
+import { useTodoDetail, useTodosStore } from '../../../stores/todosStore';
 import { ApprovalColumn } from '../../approvals/ApprovalColumn';
 import { PhoneHeader, PhoneScreen } from './phoneParts';
 
@@ -37,6 +37,14 @@ export function PhoneTodoApproval({ number, id, onSelect, onBack }: PhoneTodoApp
   }, [surface, id]);
   // The column is this screen's alone: leaving it forgets it.
   useEffect(() => () => useApprovalColumnStore.getState().close(surface), [surface]);
+  // A reminder's "Snooze to another time…" (round 9): back to the to-do, whose page opens the snooze sheet.
+  const snoozeAsked = useTodosStore((state) => state.snoozeRequest === number);
+  const wentBack = useRef(false);
+  useEffect(() => {
+    if (!snoozeAsked || wentBack.current) return;
+    wentBack.current = true;
+    onBack();
+  }, [snoozeAsked, onBack]);
   const title = (item && leadingQn(item.title)) ?? (detail?.status.waitingApprovalId === id ? detail.status.waitingQn : undefined) ?? 'Approval';
   return (
     <PhoneScreen testId="phone-todo-approval">

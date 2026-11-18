@@ -12,6 +12,8 @@ import { stateAction } from '../page/TodoPage';
 import { splitTabLabel } from '../page/TodoSplit';
 import { attachmentTabs, splitItemKey } from '../page/splitTabs';
 import { PHONE_ICON_BUTTON, PHONE_SCROLL, PHONE_SIDES, PhoneHeader, PhoneScreen, recalledScroll, rememberScroll, useKeyboardInset } from './phoneParts';
+import { SnoozeBanner, canSnoozeTodo, snoozeActionOf } from '../page/TodoSnoozed';
+import { PhoneSnoozeSheet } from './PhoneSnoozeSheet';
 
 export interface PhoneTodoPageProps {
   number: number;
@@ -34,21 +36,42 @@ export interface PhoneTodoPageProps {
 export function PhoneTodoPage(props: PhoneTodoPageProps) {
   const detail = useTodoDetail(props.number);
   const parent = detail?.parent;
+  // Round 9: the snooze sheet, from ⋯, the banner's Change, or a reminder card's "Snooze to another time…".
+  const [snoozing, setSnoozing] = useState(false);
+  const request = useTodosStore((state) => state.snoozeRequest);
+  const act = useTodosStore((state) => state.act);
+  useEffect(() => {
+    if (request !== props.number || !detail) return;
+    useTodosStore.getState().requestSnooze(null);
+    if (canSnoozeTodo(detail.todo)) setSnoozing(true);
+  }, [request, props.number, detail]);
+  const wake = () => {
+    setSnoozing(false);
+    void act({ kind: 'wake', number: props.number });
+  };
   return (
     <PhoneScreen testId="phone-todo-page">
       <PhoneHeader
         title={`T-${props.number}`}
         back={{ label: parent ? parent.todo.ref : 'To-dos', onBack: props.onBack }}
-        right={detail ? <MoreMenu detail={detail} onOpenSession={props.onOpenSession} /> : null}
+        right={detail ? <MoreMenu detail={detail} onOpenSession={props.onOpenSession} onSnooze={() => setSnoozing(true)} /> : null}
       />
       <SkeletonSwap loading={!detail} skeleton={<PhoneTodoPageSkeleton number={props.number} />}>
-        {detail && <PhoneTodoBody key={props.number} detail={detail} {...props} />}
+        {detail && <PhoneTodoBody key={props.number} detail={detail} {...props} onChangeSnooze={() => setSnoozing(true)} onWake={wake} />}
       </SkeletonSwap>
+      {detail && snoozing && (
+        <PhoneSnoozeSheet
+          detail={detail}
+          onSubmit={(choice) => { setSnoozing(false); void act(snoozeActionOf(props.number, choice)); }}
+          onWake={detail.todo.snooze ? wake : undefined}
+          onClose={() => setSnoozing(false)}
+        />
+      )}
     </PhoneScreen>
   );
 }
 
-function PhoneTodoBody({ detail, onOpenTodo, onOpenFiles, onOpenApproval, onAddSubTodo, onOpenSession }: PhoneTodoPageProps & { detail: TodoDetail }) {
+function PhoneTodoBody({ detail, onOpenTodo, onOpenFiles, onOpenApproval, onAddSubTodo, onOpenSession, onChangeSnooze, onWake }: PhoneTodoPageProps & { detail: TodoDetail; onChangeSnooze: () => void; onWake: () => void }) {
   const number = detail.todo.number;
   const scrollKey = `todo:${number}`;
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -103,6 +126,7 @@ function PhoneTodoBody({ detail, onOpenTodo, onOpenFiles, onOpenApproval, onAddS
             onAttached={() => undefined}
             onOpenSession={onOpenSession && sessionId ? () => onOpenSession(sessionId) : undefined}
           />
+          <SnoozeBanner detail={detail} onChange={onChangeSnooze} onWake={onWake} stacked />
           {files.length > 0 && (
             <button type="button" onClick={() => onOpenFiles()} className="mb-0.5 mt-3 flex h-10 w-full items-center gap-2 rounded-[10px] border border-border-primary bg-surface-secondary px-3 text-[14px] text-text-primary outline-none active:bg-surface-hover focus-visible:ring-2 focus-visible:ring-interactive" data-testid="phone-todo-files">
               <FileText className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden="true" />
@@ -122,7 +146,7 @@ function PhoneTodoBody({ detail, onOpenTodo, onOpenFiles, onOpenApproval, onAddS
 }
 
 /** ⋯: the state action (Start, Resume, Stop), Mark done, Drop or Archive and Reopen, and its Session. */
-function MoreMenu({ detail, onOpenSession }: { detail: TodoDetail; onOpenSession?: (sessionId: string) => void }) {
+function MoreMenu({ detail, onOpenSession, onSnooze }: { detail: TodoDetail; onOpenSession?: (sessionId: string) => void; onSnooze: () => void }) {
   const act = useTodosStore((state) => state.act);
   const [notice, setNotice] = useState<string | null>(null);
   const run = (action: TodoAction) => {
@@ -133,7 +157,10 @@ function MoreMenu({ detail, onOpenSession }: { detail: TodoDetail; onOpenSession
   const primary = stateAction(detail);
   const sessionId = detail.todo.sessionId ?? detail.parent?.todo.sessionId;
   const items: DropdownItem[] = [];
-  if (primary) items.push({ id: 'state', label: primary.label, onClick: () => run(primary.action) });
+  const snoozed = detail.todo.snooze !== undefined;
+  if (canSnoozeTodo(detail.todo)) items.push({ id: 'snooze', label: snoozed ? 'Change snooze…' : 'Snooze…', onClick: onSnooze });
+  if (snoozed) items.push({ id: 'wake', label: 'Wake now', onClick: () => run({ kind: 'wake', number }) });
+  else if (primary) items.push({ id: 'state', label: primary.label, onClick: () => run(primary.action) });
   if (closed) {
     items.push({ id: 'archive', label: 'Archive', description: 'Archives its Session’s Panes that are safe to archive', onClick: () => run({ kind: 'archive', number }) });
     items.push({ id: 'reopen', label: 'Reopen', onClick: () => run({ kind: 'reopen', number }) });

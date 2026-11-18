@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type MutableRefObject } from 'react';
 import { ChevronLeft, ChevronRight, Columns2, MoreHorizontal, PanelRight, Play, Square } from 'lucide-react';
 import type { TodoAction, TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
@@ -33,6 +33,8 @@ const THREAD_FLOOR_PX = 360;
 const SPLIT_FLOOR_PX = 240;
 import { pruneSplitMemory, readSplitHidden, todoSplitKey, writeSplitHidden } from './todoSplitMemory';
 import { recallTodoView, rememberTodoView, restoreActiveTab } from './todoPageView';
+import { SnoozeMenu } from '../SnoozeMenu';
+import { SnoozeBanner, SnoozeHeaderButton, canSnoozeTodo, snoozeTarget, usePageSnooze } from './TodoSnoozed';
 
 export interface TodoPageProps {
   number: number;
@@ -171,6 +173,10 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
   const titleRef = useRef<HTMLHeadingElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+  // Round 9: the snooze menu, from Z, the header, the banner's Change or a reminder card.
+  const snoozeAnchor = useRef<HTMLElement | null>(null);
+  const anchorOf = useCallback(() => (snoozeAnchor.current ?? document.querySelector<HTMLElement>('[data-testid="todo-page-more"]'))?.getBoundingClientRect() ?? null, []);
+  const snooze = usePageSnooze(detail, anchorOf);
 
   useEffect(() => { dispatch({ type: 'sync', groups: detail.attachments, overview }); }, [detail.attachments, overview]);
   // Back from the Session (or another to-do), the page is as you left it: its tab and both scrolls.
@@ -281,6 +287,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
         onBack={onBack}
         onOpenTodo={onOpenTodo}
         onNotice={setNotice}
+        snooze={{ anchorRef: snoozeAnchor, onOpen: snooze.open }}
         split={{ shown: splitShown, enabled: hasTabs, chord: splitChord, onToggle: toggleSplit }}
         details={{ open: detailsOpen, onToggle: () => setDetailsOpen((open) => !open) }}
       />
@@ -302,6 +309,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
                 onAttached={attached}
               />
               {notice && <p className="mt-2 text-[12.5px] text-text-secondary" role="status" data-testid="todo-page-notice">{notice}</p>}
+              <SnoozeBanner detail={detail} onChange={snooze.open} onWake={snooze.wake} />
               <TodoCard detail={detail} onOpenTodo={onOpenTodo} onOpenImage={(src, label) => openItem({ kind: 'image', src, label })} />
               <TodoChatTimeline
                 detail={detail}
@@ -313,6 +321,9 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
           </div>
           <TodoComposer key={detail.chatTarget.panelId ?? 'orchestrator'} detail={detail} />
         </div>
+        {snooze.anchor && (
+          <SnoozeMenu target={snoozeTarget(detail)} anchor={snooze.anchor} onSubmit={snooze.submit} onWake={detail.todo.snooze ? snooze.wake : undefined} onClose={snooze.close} />
+        )}
         {splitHere && (
           <div className="relative flex min-h-0 shrink-0 border-l border-border-primary bg-bg-primary" style={{ width: splitPx }} data-testid="todo-page-split">
             {splitResize.separatorVisible && (
@@ -429,11 +440,16 @@ export function stateAction(detail: TodoDetail): StateAction | null {
   return { label: 'Stop', action: { kind: 'stop', number }, primary: false };
 }
 
-/** ⋯: Drop while open; Archive (with its result line) and Reopen once closed; and its Session. */
-function moreMenu(detail: TodoDetail, run: (action: TodoAction) => Promise<void>): DropdownItem[] {
+/** ⋯: Snooze… (round 9) and Drop while open; Archive (with its result line) and Reopen once closed; and its Session. */
+function moreMenu(detail: TodoDetail, run: (action: TodoAction) => Promise<void>, onSnooze?: () => void): DropdownItem[] {
   const number = detail.todo.number;
   const closed = detail.status.status === 'done' || detail.status.status === 'dropped';
   const items: DropdownItem[] = [];
+  if (onSnooze && canSnoozeTodo(detail.todo)) {
+    items.push({ id: 'snooze', label: detail.todo.snooze ? 'Change snooze…' : 'Snooze…', description: 'Z · until a time, with a wake-up note', onClick: onSnooze });
+  }
+  // While snoozed the header's button stands in for the state action and Mark done.
+  if (detail.todo.snooze) items.push({ id: 'done', label: 'Mark done', onClick: () => void run({ kind: 'done', number }) });
   if (closed) {
     items.push({ id: 'archive', label: 'Archive', description: 'Archives its Session’s Panes that are safe to archive', onClick: () => void run({ kind: 'archive', number }) });
     items.push({ id: 'reopen', label: 'Reopen', onClick: () => void run({ kind: 'reopen', number }) });
@@ -458,12 +474,19 @@ interface DetailsToggle {
   onToggle: () => void;
 }
 
+interface SnoozeControl {
+  /** The header's snooze button, which the menu opens under. */
+  anchorRef: MutableRefObject<HTMLElement | null>;
+  onOpen: () => void;
+}
+
 interface PageHeaderProps {
   number: number;
   detail: TodoDetail | null;
   onBack: () => void;
   onOpenTodo: (number: number) => void;
   onNotice: (line: string | null) => void;
+  snooze?: SnoozeControl;
   split?: SplitToggle;
   details?: DetailsToggle;
 }
@@ -472,7 +495,7 @@ interface PageHeaderProps {
  * "‹ To-dos   <Session> › T-12", or on a sub-to-do "‹ T-12   <Session> › T-12 › T-14"; then the
  * actions, and the split and details toggles at the right edge.
  */
-function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, split, details }: PageHeaderProps) {
+function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, split, details }: PageHeaderProps) {
   const act = useTodosStore((state) => state.act);
   const run = async (action: TodoAction) => {
     const result = await act(action);
@@ -487,7 +510,8 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, split, detai
     : detail?.sessionName ? { name: detail.sessionName, open: () => openTodoSession(detail) } : null;
   const closed = detail ? detail.status.status === 'done' || detail.status.status === 'dropped' : false;
   const primary = detail ? stateAction(detail) : null;
-  const menu = detail ? moreMenu(detail, run) : [];
+  const menu = detail ? moreMenu(detail, run, snooze?.onOpen) : [];
+  const snoozed = detail?.todo.snooze;
   const splitWords = split?.shown ? 'Hide split' : 'Show split';
   return (
     <div className="flex h-[46px] shrink-0 items-center gap-2 border-b border-border-primary pl-4 pr-3" data-testid="todo-page-header">
@@ -511,13 +535,14 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, split, detai
         <b className="shrink-0 font-semibold text-text-primary" aria-current="page">T-{number}</b>
       </nav>
       <span className="flex-1" />
-      {primary && (
+      {snoozed && snooze && <SnoozeHeaderButton ref={(element) => { snooze.anchorRef.current = element; }} snooze={snoozed} onOpen={snooze.onOpen} />}
+      {primary && !snoozed && (
         <button type="button" onClick={() => void run(primary.action)} className={primary.primary ? PRIMARY_BUTTON : PLAIN_BUTTON} data-testid="todo-page-state-action">
           {primary.primary ? <Play className="h-3 w-3 fill-current" aria-hidden="true" /> : <Square className="h-2.5 w-2.5 fill-current" aria-hidden="true" />}
           {primary.label}
         </button>
       )}
-      {detail && !closed && <button type="button" onClick={() => void run({ kind: 'done', number })} className={PLAIN_BUTTON} data-testid="todo-page-done">Mark done</button>}
+      {detail && !closed && !snoozed && <button type="button" onClick={() => void run({ kind: 'done', number })} className={PLAIN_BUTTON} data-testid="todo-page-done">Mark done</button>}
       {detail && (
         <Dropdown
           trigger={<button type="button" aria-label="More" className="inline-flex h-7 w-8 items-center justify-center rounded-[7px] text-text-secondary hover:bg-surface-hover" data-testid="todo-page-more"><MoreHorizontal className="h-4 w-4" aria-hidden="true" /></button>}

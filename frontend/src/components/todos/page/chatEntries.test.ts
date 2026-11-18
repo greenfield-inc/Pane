@@ -38,6 +38,16 @@ describe('todoEventIcon', () => {
     expect(todoEventIcon('planner attached plan: Plan')).toBe('attached');
     expect(todoEventIcon('Renamed')).toBe('note');
   });
+
+  it('gives snoozing, waking and reminders their own icons (round 9)', () => {
+    expect(todoEventIcon('Snoozed until Wed 9:00 AM by the orchestrator: check Sentry')).toBe('snoozed');
+    expect(todoEventIcon('Snooze changed to Thu 9:00 AM by you')).toBe('snoozed');
+    expect(todoEventIcon('Woke at 9:00 AM')).toBe('snoozed');
+    expect(todoEventIcon('Woken early by you')).toBe('snoozed');
+    expect(todoEventIcon('Reminder at 8:04 AM, overdue by 22h: Pane asked you')).toBe('reminder');
+    expect(todoEventIcon('Stopped by you (no longer snoozed)')).toBe('stopped');
+    expect(todoEventIcon('Wake queued: devbox is busy · wakes when load comes down')).toBe('queued');
+  });
 });
 
 describe('isWebTarget', () => {

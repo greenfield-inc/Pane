@@ -8,6 +8,8 @@ import { AgentAvatar } from '../TodoPageParts';
 import { AttachedChips } from './ThreadCards';
 import { commentWithFiles, eventFiles } from './threadInputs';
 import { sendThreadComment, useComposerAttach, useComposerFileInbox, useFileDropZone } from './useThreadSend';
+import { useTodosStore } from '../../../../stores/todosStore';
+import { HeldHint } from '../TodoSnoozed';
 
 const ICON_BUTTON = 'inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-interactive disabled:opacity-50';
 
@@ -36,8 +38,9 @@ export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
   const canSwitch = chatTarget.kind === 'assignee';
   const ready = text.trim().length > 0 || attach.files.length > 0;
 
-  const send = async () => {
-    if (!ready || sending) return;
+  const act = useTodosStore((state) => state.act);
+  const send = async (): Promise<boolean> => {
+    if (!ready || sending) return false;
     setSending(true);
     setError(null);
     const body = commentWithFiles(text, attach.files);
@@ -53,6 +56,13 @@ export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
       setError(result.error ?? 'The comment was not sent.');
     }
     box.current?.focus();
+    return result.ok;
+  };
+  // Snoozed (round 9): comments are held until it wakes; "Wake now and send" sends this one, then wakes it,
+  // so it goes inside the wake message at once.
+  const wakeAndSend = async () => {
+    if (ready && !await send()) return;
+    await act({ kind: 'wake', number: todo.number });
   };
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -84,6 +94,7 @@ export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
         className={cn('mx-auto rounded-[10px] border', phone ? 'max-w-none' : 'max-w-[760px]', 'bg-surface-primary px-3 pb-1.5 pt-2.5 focus-within:border-border-hover', drop.dragging ? 'border-interactive' : 'border-border-primary')}
         data-dragging={drop.dragging || undefined}
       >
+        {todo.snooze && <HeldHint snooze={todo.snooze} onWakeAndSend={() => void wakeAndSend()} />}
         <AttachedChips files={attach.files} onRemove={attach.remove} />
         <textarea
           ref={box}
@@ -92,7 +103,7 @@ export function ThreadComposer({ detail, phone = false }: ThreadComposerProps) {
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKey}
           onPaste={onPaste}
-          placeholder="Leave a comment…"
+          placeholder={todo.snooze ? 'Comment… held until it wakes' : 'Leave a comment…'}
           aria-label={`Comment on ${todo.ref}`}
           className={cn('w-full resize-none bg-transparent p-0 leading-normal text-text-primary outline-none placeholder:text-text-tertiary', phone ? 'max-h-[120px] min-h-[24px] text-[16px]' : 'max-h-[160px] min-h-[40px] text-[13px]')}
           data-testid="todo-composer-input"
