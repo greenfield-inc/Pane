@@ -5537,7 +5537,7 @@ sys.stdout.buffer.write(json.dumps({"calls": calls, "codes": codes, "errors": er
     console.log('runpane todos parity: Python has no tz database here; snooze times are compared without their zone');
     for (const call of python.calls.filter((entry) => entry.channel === 'runpane:todos:snooze')) {
       assert.ok(['localtime', 'America/Los_Angeles'].includes(call.args[0].zone), call.args[0].zone);
-      assert.strictEqual(typeof call.args[0].until, 'number');
+      assert.ok(Number.isFinite(call.args[0].until), String(call.args[0].until));
       call.args[0].zone = 'America/Los_Angeles';
       call.args[0].until = snoozeAt;
     }
