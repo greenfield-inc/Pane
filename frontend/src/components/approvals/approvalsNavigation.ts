@@ -4,6 +4,7 @@ import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionS
 import { useSessionStore } from '../../stores/sessionStore';
 import { holdFocusOn } from '../../services/regionFocus';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
+import { isTypingTarget } from '../../utils/typingTarget';
 
 /**
  * Approvals there and back (D-239, D-251): one key opens Approvals and the
@@ -257,13 +258,6 @@ export function toggleApprovals(): void {
   leaveApprovals();
 }
 
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const element = target;
-  return element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.isContentEditable
-    || element.closest('.xterm') !== null;
-}
-
 /**
  * Esc in Approvals goes back too (D-251), except while typing an answer or
  * with a menu or dialog open, which take their own Esc first.
@@ -271,7 +265,8 @@ function isTypingTarget(target: EventTarget | null): boolean {
 export function handleApprovalsEscape(event: KeyboardEvent): void {
   if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
   if (useNavigationStore.getState().activeView !== 'notify') return;
-  if (isTypingTarget(event.target)) return;
+  // A focused <select> doesn't hold Esc here: Esc still leaves Approvals, as it always has.
+  if (isTypingTarget(event.target, { selects: false })) return;
   if (document.querySelector('[role="menu"], [role="listbox"], [aria-modal="true"]')) return;
   event.preventDefault();
   leaveApprovals();

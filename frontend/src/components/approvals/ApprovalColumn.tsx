@@ -27,6 +27,7 @@ import { useNow } from '../notify/useNow';
 import { FindBar } from '../find/FindBar';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
+import { isTypingTarget } from '../../utils/typingTarget';
 import {
   askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
@@ -172,8 +173,7 @@ function resolveApproval(items: readonly NotifyItem[], ref: string): string | un
 function pagerKey(event: React.KeyboardEvent, step: (direction: 1 | -1) => void): void {
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-  const target = event.target instanceof HTMLElement ? event.target : null;
-  if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName) || target.closest('[role="menu"], [role="tablist"], [role="radiogroup"], .xterm'))) return;
+  if (isTypingTarget(event.target) || (event.target instanceof Element && event.target.closest('[role="menu"], [role="tablist"], [role="radiogroup"]'))) return;
   event.preventDefault();
   event.stopPropagation();
   step(event.key === 'ArrowLeft' ? -1 : 1);

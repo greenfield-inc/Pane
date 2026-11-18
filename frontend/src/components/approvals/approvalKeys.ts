@@ -38,12 +38,6 @@ export function pressedCommand<T extends KeyboardShortcutId>(event: KeyboardEven
   return ids.find((id) => effectiveChord(id) === chord) ?? null;
 }
 
-/** A text field, where single keys type. */
-export function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName) || target.closest('.xterm') !== null;
-}
-
 // --- Focus ---
 
 /** Into an approval: its first question's focused option, else the column itself. */
