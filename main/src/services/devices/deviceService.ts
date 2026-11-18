@@ -20,7 +20,7 @@ const BUSY_WAIT_MS = 60_000;
 const SWEEP_MS = 30_000;
 const SHUTDOWN_WAIT_MS = 60_000;
 /** How long quitting waits for the devices Pane booted to shut down. */
-const QUIT_SHUTDOWN_MS = 20_000;
+const QUIT_SHUTDOWN_MS = 10_000;
 /** How long a device listing answers the device tab's frequent lookups. */
 const RECENT_LISTING_MS = 5_000;
 const PANE_DEVICE_NAMES = { ios: 'Pane iPhone', android: 'Pane_Android' } satisfies Record<DevicePlatform, string>;
@@ -125,6 +125,10 @@ export class DeviceService {
    * when the state file predates that list (Pane-made devices still booted count then).
    */
   private leftovers: Set<string> | 'unknown';
+  /** Set when Pane quits: the hub never starts again in this run. */
+  private disposed = false;
+  /** How each Pane's lease last ended, for a linked computer's tab that asks (`status`). */
+  private readonly lastStop = new Map<string, { id: string; by: DeviceStopCause; booted: boolean }>();
   /** Devices Pane is shutting down now, so a check for one stopped outside Pane skips them. */
   private readonly stopping = new Set<string>();
   /** iOS frames from a stream kept open while they are asked for (remote tabs, phones). */
@@ -373,24 +377,31 @@ export class DeviceService {
 
   /**
    * Ends the Pane's lease on `platform`'s device, or on all of them; its jobs stop with its last
-   * lease. A device Pane booted stays warm for the next open, or with `shutdown` (its Pane's
-   * computer is quitting) shuts down now.
+   * lease. A device Pane booted stays warm for the next open. With `shutdownBy`, it shuts down
+   * now: `person` (the Shut down a linked computer's tab sent) shuts down whatever the lease held,
+   * as the tab's Shut down does here; `quit` (that computer is quitting) only a device Pane booted.
    */
-  async close(caller: DeviceCaller, platform?: DevicePlatform, options: { shutdown?: boolean } = {}): Promise<{ closed: string[]; jobsStopped: number }> {
+  async close(caller: DeviceCaller, platform?: DevicePlatform, options: { shutdownBy?: 'person' | 'quit' } = {}): Promise<{ closed: string[]; jobsStopped: number; shutDown: string[] }> {
     const one = platform ? this.lifecycle.leaseOf(caller.paneId, platform) : undefined;
     const ids = platform ? (one ? [one] : []) : this.lifecycle.leasesOf(caller.paneId);
     const devices = ids.length > 0 ? await this.devices() : [];
+    const shutDown: string[] = [];
     for (const id of ids) {
       const device = devices.find(candidate => candidate.id === id);
-      await this.options.beforeRelease?.(caller.paneId, id, 'agent').catch(() => undefined);
+      const by = options.shutdownBy === 'person' ? 'person' : 'agent';
+      await this.options.beforeRelease?.(caller.paneId, id, by === 'person' ? 'device' : 'agent').catch(() => undefined);
       if (device) await this.agentDevice(caller.paneId, device, ['close']).catch(() => undefined);
       this.lifecycle.release(caller.paneId, id);
-      this.options.onChange?.({ kind: 'released', id, paneId: caller.paneId, reason: 'closed', by: 'agent' });
-      if (device?.booted && options.shutdown && this.lifecycle.booted().includes(id)) await this.shutdown(device, 'quit');
+      this.stopped(caller.paneId, id, by, true);
+      this.options.onChange?.({ kind: 'released', id, paneId: caller.paneId, reason: 'closed', by });
+      const shuts = options.shutdownBy === 'person' || (options.shutdownBy === 'quit' && this.lifecycle.booted().includes(id));
+      if (device?.booted && options.shutdownBy && shuts) {
+        await this.shutdown(device, options.shutdownBy).then(() => { shutDown.push(id); }, (cause) => this.options.log?.(`[devices] shutdown ${id} failed: ${reasonOf(cause)}`));
+      }
     }
     const jobsStopped = this.lifecycle.leasesOf(caller.paneId).length === 0 ? await this.jobs.stopAll(caller.paneId) : 0;
     if (ids.length > 0) this.scheduleSweep();
-    return { closed: ids, jobsStopped };
+    return { closed: ids, jobsStopped, shutDown };
   }
 
   /** The person pressed Take over in `paneId`'s device tab. */
@@ -582,6 +593,7 @@ export class DeviceService {
       await this.options.beforeRelease?.(holder, id, 'device').catch(() => undefined);
       await this.agentDevice(holder, device, ['close']).catch(() => undefined);
       this.lifecycle.release(holder, id);
+      this.stopped(holder, id, 'person', true);
       this.options.onChange?.({ kind: 'released', id, paneId: holder, reason: 'closed', by: 'person' });
     }
     await this.shutdown(device, 'person');
@@ -644,6 +656,7 @@ export class DeviceService {
       const device = devices.find(candidate => candidate.id === lease.id);
       await this.options.beforeRelease?.(lease.paneId, lease.id, 'device').catch(() => undefined);
       if (device) await this.agentDevice(lease.paneId, device, ['close']).catch(() => undefined);
+      this.stopped(lease.paneId, lease.id, 'idle', true);
       this.options.onChange?.({ kind: 'released', id: lease.id, paneId: lease.paneId, reason: 'idle' });
     }
     for (const id of shutdown) {
@@ -657,8 +670,10 @@ export class DeviceService {
     await this.stopIfIdle();
   }
 
-  /** Pane is quitting: jobs stop, every device Pane booted shuts down, then the helpers stop. */
+  /** Pane is quitting: jobs stop, every device Pane booted shuts down, then the helpers stop for good. */
   async dispose(): Promise<void> {
+    // A shutdown still running when quitting's bound passes must not start the hub again.
+    this.disposed = true;
     for (const owner of new Set(this.jobs.running().map(job => job.owner))) await this.jobs.stopAll(owner);
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.sweepTimer = undefined;
@@ -699,13 +714,14 @@ export class DeviceService {
   private async shutDownBooted(by: DeviceStopCause, ids: readonly string[] = this.lifecycle.booted(), listed?: readonly HubDevice[]): Promise<string[]> {
     const devices = listed ?? await this.devices();
     const stopped: string[] = [];
-    for (const id of ids) {
+    // All at once: quitting has a bound, and each shutdown mostly waits for its device.
+    await Promise.all(ids.map(async (id) => {
       const device = devices.find(candidate => candidate.id === id);
-      if (!device) continue;
+      if (!device) return;
       if (!device.booted) {
         // Off already, unless this run is booting it now.
         if (!this.lifecycle.holderOf(id)) this.lifecycle.shutDown(id);
-        continue;
+        return;
       }
       try {
         await this.shutdown(device, by);
@@ -713,9 +729,32 @@ export class DeviceService {
       } catch (cause) {
         this.options.log?.(`[devices] shutdown ${id} failed: ${reasonOf(cause)}`);
       }
-    }
+    }));
     this.saveBooted();
     return stopped;
+  }
+
+  /**
+   * Whether `paneId` still holds a device and it runs, or how its lease ended: what a linked
+   * computer's tab asks to show the real cause of a stop that happened here.
+   */
+  async status(paneId: string): Promise<{ held: boolean; booted?: boolean; stoppedBy?: DeviceStopCause }> {
+    const id = this.lifecycle.leaseOf(paneId);
+    if (id) {
+      const booted = await this.isBooted(id);
+      return booted === false ? { held: true, booted: false, stoppedBy: 'outside' } : { held: true, booted: true };
+    }
+    const last = this.lastStop.get(paneId);
+    return last ? { held: false, booted: last.booted, stoppedBy: last.by } : { held: false };
+  }
+
+  /** Records how `paneId`'s lease on `id` ended, and that a shutdown followed for every Pane that used it. */
+  private stopped(paneId: string | undefined, id: string, by: DeviceStopCause, booted: boolean): void {
+    if (paneId) {
+      this.lastStop.set(paneId, { id, by, booted });
+      return;
+    }
+    for (const [pane, last] of this.lastStop) if (last.id === id) this.lastStop.set(pane, { id, by, booted: false });
   }
 
   /**
@@ -801,6 +840,7 @@ export class DeviceService {
   }
 
   private ensureHub(onInstall?: () => void): Promise<RunningHub> {
+    if (!this.hub && this.disposed) return Promise.reject(new PaneError('ERR_DEVICE_QUITTING', 'Pane is quitting, so its device tools are stopping.', 'Open Pane again to use devices.'));
     this.hub ??= (async () => {
       await this.stopPreviousHub();
       const paths = await this.helpers.ensure(() => { onInstall?.(); this.options.onInstall?.(); });
@@ -949,6 +989,7 @@ export class DeviceService {
     }
     this.lifecycle.shutDown(device.id);
     this.saveBooted();
+    this.stopped(undefined, device.id, by, false);
     this.options.onChange?.({ kind: 'shutdown', id: device.id, by });
   }
 

@@ -172,10 +172,8 @@ export class DeviceLifecycle {
       if (until === undefined) this.warmUntil.set(device.id, now + DEVICE_WARM_MS);
       else if (now >= until) shutdown.push(device.id);
     }
-    for (const id of shutdown) {
-      this.warmUntil.delete(id);
-      this.bootedByPane.delete(id);
-    }
+    // The mark that Pane booted it stays until the shutdown is seen to work, so a failed one is tried again.
+    for (const id of shutdown) this.warmUntil.delete(id);
     return { ended, shutdown };
   }
 
@@ -187,15 +185,19 @@ export class DeviceLifecycle {
     const ended = this.leasesOf(paneId).map(id => ({ paneId, id }));
     for (const { id } of ended) this.leases.delete(id);
     const erase: string[] = [];
+    // The devices this Pane held or used: one it closed earlier may still be warm.
+    const used = new Set(ended.map(({ id }) => id));
     for (const device of devices) {
       const users = this.users.get(device.id);
       if (!users?.delete(paneId)) continue;
+      used.add(device.id);
       if (users.size === 0 && device.paneMade) {
         erase.push(device.id);
         this.users.delete(device.id);
       }
     }
-    const shutdown = ended.map(({ id }) => id).filter(id => this.bootedByPane.has(id) && !erase.includes(id) && devices.some(device => device.id === id && device.booted));
+    const shutdown = [...used].filter(id => this.bootedByPane.has(id) && !erase.includes(id) && !this.leases.has(id) && devices.some(device => device.id === id && device.booted));
+    for (const id of shutdown) this.warmUntil.delete(id);
     return { erase, ended, shutdown };
   }
 

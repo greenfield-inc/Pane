@@ -9,7 +9,7 @@ import type { ToolPanel } from '../../../shared/types/panels';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import { isRemotePaneCommand, paneCommandCaller, paneCommandSignal, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { panelManager } from '../services/panelManager';
-import { defaultProbeEnvironment } from '../services/devices/deviceProbe';
+import { defaultProbeEnvironment, type ProbeEnvironment } from '../services/devices/deviceProbe';
 import { DeviceBusyError, DeviceService, type DeviceCaller, type DeviceChange } from '../services/devices/deviceService';
 import { findExecutableInPath } from '../utils/shellPath';
 import { DeviceInputSockets, inputMessages } from '../services/devices/deviceInput';
@@ -138,7 +138,7 @@ function deviceService(services: AppServices): DeviceService {
     machineName: localMachineName,
     machineLabel: localMachineLabel,
     findExecutable: findExecutableInPath,
-    probeEnvironment: () => defaultProbeEnvironment(findExecutableInPath),
+    probeEnvironment: () => (deviceOptions.probeEnvironment ?? defaultProbeEnvironment)(findExecutableInPath),
     maxBooted: () => deviceSettings(services).maxBooted,
     paneName: (paneId) => paneNameOf(services, paneId),
     onChange: (change) => { void followDeviceChange(change); },
@@ -266,17 +266,21 @@ async function followDeviceChange(change: DeviceChange): Promise<void> {
       // The other Pane let go, so this tab's Boot can open the device again.
       await setPanelState(panel, { phase: 'closed', heldBy: undefined, stoppedBy: undefined });
     } else if (change.kind === 'shutdown') {
+      fittedFrames.delete(panel.id);
       await setPanelState(panel, { phase: 'off', stoppedBy: change.by });
     } else {
       continue;
     }
     // A device that stopped with no lease ending first (Pane quitting, a crash): its recording ended with it.
-    if (change.kind === 'shutdown' && recordings.has(panel.id)) {
-      clearTimeout(recordings.get(panel.id)?.cap);
-      recordings.delete(panel.id);
-      await setPanelState(panel, { recording: undefined, recordingEnded: { by: 'device', problem: 'It did not save.', at: Date.now() } });
-    }
+    if (change.kind === 'shutdown' && recordings.has(panel.id)) await endRecording(panel, { by: 'device', problem: 'It did not save.', at: Date.now() });
   }
+}
+
+/** Ends the tab's recording in main and in its state, saying how it ended. */
+async function endRecording(panel: ToolPanel, ended: DeviceRecordingEnd): Promise<void> {
+  clearTimeout(recordings.get(panel.id)?.cap);
+  recordings.delete(panel.id);
+  await setPanelState(panel, { recording: undefined, recordingEnded: ended });
 }
 
 /** Stops and saves the recordings `paneId`'s tabs are making on device `id`, before its lease ends. */
@@ -290,13 +294,11 @@ async function stopRecordingsOn(services: AppServices, paneId: string, id: strin
 async function agentStoppedRecording(paneId: string, platform: DevicePlatform | undefined, stopped: { exitCode: number; output: string }): Promise<void> {
   for (const panel of devicePanels(paneId)) {
     if (!recordings.has(panel.id) || (platform && panelState(panel)?.platform !== platform)) continue;
-    clearTimeout(recordings.get(panel.id)?.cap);
-    recordings.delete(panel.id);
     const state = panelState(panel);
     const ended: DeviceRecordingEnd = { by: 'agent', at: Date.now() };
     const file = stopped.exitCode === 0 ? savedRecording(stopped.output) : undefined;
     if (file) ended.recording = state?.machineId ? { path: file, machine: state.machine } : { path: file };
-    await setPanelState(panel, { recording: undefined, recordingEnded: ended });
+    await endRecording(panel, ended);
   }
 }
 
@@ -378,7 +380,7 @@ async function openOnMac(services: AppServices, caller: DeviceCaller, device: st
     const why = lease.reason === 'pinned'
       ? `Runs on ${lease.macName}, pinned in Settings > Devices. This computer has no Xcode.`
       : `Runs on ${lease.macName}. This computer has no Xcode.`;
-    await setPanelState(panel, { deviceId: summary.id, name: summary.name, os: summary.os, machine: lease.macName, machineId: lease.macId, machineReason: { kind: lease.reason, text: why }, phase: 'live', heldBy: undefined }, summary.name);
+    await setPanelState(panel, { deviceId: summary.id, name: summary.name, os: summary.os, machine: lease.macName, machineId: lease.macId, machineReason: { kind: lease.reason, text: why }, phase: 'live', heldBy: undefined, stoppedBy: undefined }, summary.name);
     const marker: DeviceOpenMarker = { kind: 'pane-device', panelId: panel.id, name: summary.name, machine: lease.macName };
     if (summary.os) marker.os = summary.os;
     return {
@@ -435,7 +437,14 @@ function driving<Result>(caller: DeviceCaller, platform: DevicePlatform | undefi
   return tab ? drivers.run(tab.id, callerAgent(caller), paneCommandSignal(), work) : work();
 }
 
-export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices, commandRegistry: PaneCommandRegistry): void {
+/** How the device handlers probe what this machine can run; tests pass a stand-in machine. */
+export interface DeviceHandlerOptions {
+  probeEnvironment?: (findExecutable: (name: string) => string | null) => ProbeEnvironment;
+}
+let deviceOptions: DeviceHandlerOptions = {};
+
+export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, services: AppServices, commandRegistry: PaneCommandRegistry, options: DeviceHandlerOptions = {}): void {
+  deviceOptions = options;
   appServices = services;
   const devices = () => deviceService(services);
 
@@ -536,10 +545,13 @@ export function registerDeviceHandlers(ipcMain: Pick<IpcMain, 'handle'>, service
       let jobsStopped = 0;
       const macLease = remote?.leaseOf(caller.paneId);
       if (macLease && (platform === undefined || platform === macLease.platform)) {
+        const macTabs = devicePanels(caller.paneId).filter(panel => panelState(panel)?.machineId);
+        // A recording stops, and saves, while the Mac still holds the device.
+        for (const panel of macTabs) if (recordings.has(panel.id)) await finishRecording(services, panel, 'agent').catch(() => undefined);
         const onTheMac = await remoteDevices(services).close(caller.paneId);
         closed.push(...onTheMac.closed);
         jobsStopped += onTheMac.jobsStopped;
-        for (const panel of devicePanels(caller.paneId)) if (panelState(panel)?.machineId) await setPanelState(panel, { phase: 'closed' });
+        for (const panel of macTabs) await setPanelState(panel, { phase: 'closed', stoppedBy: 'agent' });
       }
       if (platform === undefined || !macLease || platform !== macLease.platform) {
         const here = await devices().close(caller, platform);
@@ -692,15 +704,28 @@ function withPosture(posture: DevicePosture | undefined): NonNullable<DeviceCont
   return posture ? { posture } : {};
 }
 
-/** `frame` scaled so its longest side is at most `maxPx`, as a JPEG; unchanged when it already fits or no size is asked. */
-function fitFrame(frame: Buffer, maxPx: number | undefined): Buffer {
+/**
+ * Each tab's last frame and its scaled copy: a still screen sends the same bytes again (as a new
+ * buffer), and comparing bytes costs far less than scaling them.
+ */
+const fittedFrames = new Map<string, { source: Buffer; maxPx: number; fitted: Buffer }>();
+
+/**
+ * `frame` scaled so its longest side is at most `maxPx`, as a JPEG; unchanged when it already fits
+ * or no size is asked. `panelId` keys the copy kept for a frame that repeats.
+ */
+function fitFrame(panelId: string, frame: Buffer, maxPx: number | undefined): Buffer {
   if (maxPx === undefined) return frame;
+  const cached = fittedFrames.get(panelId);
+  if (cached && cached.maxPx === maxPx && cached.source.equals(frame)) return cached.fitted;
   const image = nativeImage.createFromBuffer(frame);
   const { width, height } = image.getSize();
   const longest = Math.max(width, height);
   if (longest <= maxPx) return frame;
   const scale = maxPx / longest;
-  return image.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: 'good' }).toJPEG(FRAME_JPEG_QUALITY);
+  const fitted = image.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: 'good' }).toJPEG(FRAME_JPEG_QUALITY);
+  fittedFrames.set(panelId, { source: frame, maxPx, fitted });
+  return fitted;
 }
 
 /** JPEG quality for a scaled frame: sharp text at a fraction of the bytes. */
@@ -781,7 +806,7 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     if (!state.deviceId) throw new PaneError('ERR_DEVICE_NOT_OPEN', 'This tab has no device yet.', 'Wait for it to boot.');
     const frame = state.machineId ? await remoteDevices(services).frame(panel.sessionId) : await devices().latestFrame(state.deviceId);
     const px = decodeOptionalBoundary(maxPx, boundary.number);
-    return imageDataUrl(fitFrame(frame, px === undefined ? undefined : streamSize(String(px))));
+    return imageDataUrl(fitFrame(panel.id, frame, px === undefined ? undefined : streamSize(String(px))));
   }));
 
   /** What the device can do now (turn, fold) and how it is turned and folded, for the tab's controls. */
@@ -799,8 +824,17 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
       if (fold?.fold?.supported) controls.fold = withPosture(fold.fold.posture === 'closed' ? 'closed' : fold.fold.posture === 'half_opened' ? 'half' : fold.fold.posture === 'opened' ? 'open' : undefined);
       return controls;
     }
-    // A device shut down outside Pane (Simulator's menu, a crash) leaves the tab saying why.
-    if (!state.machineId && await devices().isBooted(deviceId) === false) {
+    // A device that stopped while the tab showed it (outside Pane here; idle, freed or outside on a
+    // linked Mac) leaves the tab saying why.
+    if (state.machineId) {
+      const onMac = await remoteDevices(services).status(panel.sessionId);
+      if (onMac && (!onMac.held || onMac.booted === false)) {
+        const phase = onMac.booted === false ? 'off' : 'closed';
+        await setPanelState(panel, onMac.stoppedBy ? { phase, stoppedBy: onMac.stoppedBy } : { phase });
+        if (recordings.has(panel.id)) await endRecording(panel, { by: 'device', problem: 'It did not save.', at: Date.now() });
+        return {};
+      }
+    } else if (await devices().isBooted(deviceId) === false) {
       await setPanelState(panel, { phase: 'off', stoppedBy: 'outside' });
       if (recordings.has(panel.id)) await finishRecording(services, panel, 'device').catch(() => undefined);
       return {};
@@ -953,11 +987,15 @@ function registerDeviceTabChannels(ipcMain: Pick<IpcMain, 'handle'>, services: A
     const caller = { paneId: panel.sessionId, paneName: session?.name ?? panel.sessionId };
     // iOS on a computer without Xcode always runs on a Mac, including Try again after the Mac was offline.
     if (state.machineId || (state.platform === 'ios' && !(await devices().probe()).ios.ready)) {
-      // On a linked Mac: Shut down ends the lease there and shuts the device down if Pane booted it; Boot opens it again.
+      // On a linked Mac: Shut down stops a recording while the Mac still holds the device, then the
+      // Mac shuts the device down; Boot and Restart open it again.
+      if (action === 'shutdown' && recordings.has(panel.id)) await finishRecording(services, panel, 'device').catch(() => undefined);
       if (action !== 'shutdown') await setPanelState(panel, { phase: 'booting' });
-      await remoteDevices(services).close(caller.paneId, { shutdown: action === 'shutdown' }).catch(() => undefined);
+      const closedOnMac = await remoteDevices(services).close(caller.paneId, action === 'shutdown' ? { shutdownBy: 'person' } : {}).catch(() => undefined);
       if (action === 'shutdown') {
-        await setPanelState(panel, { phase: 'off', stoppedBy: 'person' });
+        // Off only when the Mac says it shut the device down; an older Mac does not say, so the tab trusts the request.
+        const off = !closedOnMac?.shutDown || (state.deviceId !== undefined && closedOnMac.shutDown.includes(state.deviceId));
+        await setPanelState(panel, { phase: off ? 'off' : 'closed', stoppedBy: 'person' });
         return true;
       }
       // The same open an agent's device_open does, so the tab names the device and Mac again.
@@ -1012,14 +1050,13 @@ export async function disposeDevices(): Promise<void> {
   emulatorLogs.stopAll();
   // A recording does not outlive Pane: its tab says so now, not 5 s into the next start.
   for (const panelId of [...recordings.keys()]) {
-    clearTimeout(recordings.get(panelId)?.cap);
-    recordings.delete(panelId);
     const panel = panelManager.getPanel(panelId);
-    if (panel) await setPanelState(panel, { recording: undefined, recordingEnded: { by: 'quit', problem: 'It did not save.', at: Date.now() } }).catch(() => undefined);
+    if (panel) await endRecording(panel, { by: 'quit', problem: 'It did not save.', at: Date.now() }).catch(() => undefined);
+    else recordings.delete(panelId);
   }
-  const closedOnMacs = await remote?.dispose() ?? [];
+  // Linked Macs and this machine shut their devices down at the same time, each within its own bound.
+  const [closedOnMacs] = await Promise.all([remote?.dispose() ?? Promise.resolve([]), service?.dispose()]);
   for (const paneId of closedOnMacs) {
     for (const panel of devicePanels(paneId)) if (panelState(panel)?.machineId) await setPanelState(panel, { phase: 'off', stoppedBy: 'quit' }).catch(() => undefined);
   }
-  await service?.dispose();
 }

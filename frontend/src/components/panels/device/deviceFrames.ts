@@ -3,6 +3,8 @@ import type { DeviceTabClient } from './deviceClient';
 
 /** Frames over a connection: about twice a second (phones, the browser app, a remote desktop). */
 export const FRAME_POLL_MS = 500;
+/** The least time between reads, so a burst of input asks for a frame at most this often. */
+const READ_GAP_MS = 100;
 
 /**
  * The device's latest frame as a data URL, read every `everyMs` while the page is visible (off
@@ -19,9 +21,11 @@ export function useDeviceFrames(client: DeviceTabClient, panelId: string, everyM
     let timer: number | undefined;
     let reading = false;
     let again = false;
+    let lastRead = 0;
     const tick = async () => {
       window.clearTimeout(timer);
       reading = true;
+      lastRead = performance.now();
       if (document.visibilityState === 'visible') {
         const next = await client.frame(panelId, maxPx).catch(() => undefined);
         if (cancelled) return;
@@ -36,8 +40,14 @@ export function useDeviceFrames(client: DeviceTabClient, panelId: string, everyM
       timer = window.setTimeout(() => { void tick(); }, everyMs);
     };
     readNow.current = () => {
-      if (reading) again = true;
-      else void tick();
+      if (reading) {
+        again = true;
+        return;
+      }
+      const wait = READ_GAP_MS - (performance.now() - lastRead);
+      window.clearTimeout(timer);
+      if (wait <= 0) void tick();
+      else timer = window.setTimeout(() => { void tick(); }, wait);
     };
     void tick();
     return () => {

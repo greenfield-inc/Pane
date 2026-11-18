@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import type { WebSocket } from 'ws';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import type { DeviceMac, DevicePlatform, DeviceStreamInfo, DeviceSummary } from '../../../../shared/types/devices';
+import type { DeviceMac, DevicePlatform, DeviceStopCause, DeviceStreamInfo, DeviceSummary } from '../../../../shared/types/devices';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { createPortTunnel, type PortTunnel } from '../../daemon/client/portTunnel';
 import type { DeviceJobResult } from './deviceJobs';
@@ -18,7 +18,7 @@ const CHUNK_BYTES = 4 * 1024 * 1024;
 
 /** What a linked computer sends the Mac on MAC_DEVICES_CHANNEL; the Mac decodes it with `macDeviceRequestSchema`. */
 export const macDeviceRequestSchema = boundary.object({
-  op: boundary.enumeration('probe', 'list', 'open', 'screenshot', 'act', 'stream', 'frame', 'visible', 'sync-begin', 'sync-chunk', 'sync-end', 'run', 'close', 'archived', 'await'),
+  op: boundary.enumeration('probe', 'list', 'open', 'screenshot', 'act', 'stream', 'frame', 'visible', 'sync-begin', 'sync-chunk', 'sync-end', 'run', 'close', 'archived', 'await', 'status'),
   from: boundary.object({ id: boundary.string, name: boundary.string }),
   paneId: boundary.string,
   paneName: boundary.optional(boundary.string),
@@ -35,11 +35,11 @@ export const macDeviceRequestSchema = boundary.object({
   waitMs: boundary.optional(boundary.number),
   visible: boundary.optional(boundary.boolean),
   task: boundary.optional(boundary.string),
-  shutdown: boundary.optional(boundary.boolean),
+  shutdownBy: boundary.optional(boundary.enumeration('person', 'quit')),
 });
 
 export interface MacDeviceRequest {
-  op: 'probe' | 'list' | 'open' | 'screenshot' | 'act' | 'stream' | 'frame' | 'visible' | 'sync-begin' | 'sync-chunk' | 'sync-end' | 'run' | 'close' | 'archived' | 'await';
+  op: 'probe' | 'list' | 'open' | 'screenshot' | 'act' | 'stream' | 'frame' | 'visible' | 'sync-begin' | 'sync-chunk' | 'sync-end' | 'run' | 'close' | 'archived' | 'await' | 'status';
   from: { id: string; name: string };
   paneId: string;
   paneName?: string;
@@ -57,8 +57,15 @@ export interface MacDeviceRequest {
   visible?: boolean;
   /** `await`: the task a slow call answered with. */
   task?: string;
-  /** `close`: shut the device down now if the Mac's Pane booted it (the person's Shut down, or this computer quitting). */
-  shutdown?: boolean;
+  /** `close`: shut the device down now: for the person's Shut down, whatever the lease held; for this computer quitting, only a device the Mac's Pane booted. */
+  shutdownBy?: 'person' | 'quit';
+}
+
+/** Whether a Pane still holds its device on a Mac and it runs, or how its lease there ended. */
+export interface MacDeviceStatus {
+  held: boolean;
+  booted?: boolean;
+  stoppedBy?: DeviceStopCause;
 }
 
 /** How long quitting waits for linked Macs to close this computer's devices. */
@@ -134,7 +141,9 @@ const shotSchema = boundary.object({ data: boundary.string, width: boundary.opti
 const actSchema = boundary.object({ exitCode: boundary.number, output: boundary.string });
 const jobSchema = boundary.object({ jobId: boundary.string, state: boundary.enumeration('running', 'exited'), exitCode: boundary.optional(boundary.number), logTail: boundary.string, cwd: boundary.string });
 const syncBeginSchema = boundary.object({ has: boundary.boolean });
-const closeSchema = boundary.object({ closed: boundary.array(boundary.string), jobsStopped: boundary.number });
+const closeSchema = boundary.object({ closed: boundary.array(boundary.string), jobsStopped: boundary.number, shutDown: boundary.optional(boundary.array(boundary.string)) });
+const stopCause = boundary.enumeration('person', 'agent', 'idle', 'freed', 'archived', 'quit', 'outside');
+const statusSchema = boundary.object({ held: boundary.boolean, booted: boundary.optional(boundary.boolean), stoppedBy: boundary.optional(stopCause) });
 const frameSchema = boundary.object({ data: boundary.string });
 
 function decodeOrThrow<Value>(value: JsonValue, schema: BoundarySchema<Value>, mac: string): Value {
@@ -222,11 +231,14 @@ export class RemoteDevices {
     return { synced: true, job: { ...job, owner: paneId } };
   }
 
-  /** Ends the Pane's lease on the Mac; with `shutdown`, the Mac also shuts the device down now if its Pane booted it. */
-  async close(paneId: string, options: { shutdown?: boolean } = {}): Promise<{ closed: string[]; jobsStopped: number }> {
+  /**
+   * Ends the Pane's lease on the Mac; with `shutdownBy`, the Mac also shuts the device down now (see
+   * DeviceService.close). `shutDown` names what it shut down; an older Mac never says.
+   */
+  async close(paneId: string, options: { shutdownBy?: 'person' | 'quit' } = {}): Promise<{ closed: string[]; jobsStopped: number; shutDown?: string[] }> {
     const lease = this.leases.get(paneId);
     if (!lease) return { closed: [], jobsStopped: 0 };
-    const result = decodeOrThrow(await this.call(this.mac(lease), 'close', paneId, options.shutdown ? { shutdown: true } : {}), closeSchema, lease.macName);
+    const result = decodeOrThrow(await this.call(this.mac(lease), 'close', paneId, options.shutdownBy ? { shutdownBy: options.shutdownBy } : {}), closeSchema, lease.macName);
     this.setLease(paneId, undefined);
     return result;
   }
@@ -254,6 +266,21 @@ export class RemoteDevices {
     if (lease) await this.call(this.mac(lease), 'visible', paneId, { visible });
   }
 
+  /** Whether the Pane still holds its device on the Mac, and if not, why it stopped; undefined from a Mac that cannot say. */
+  async status(paneId: string): Promise<MacDeviceStatus | undefined> {
+    const lease = this.leases.get(paneId);
+    if (!lease) return undefined;
+    try {
+      const status = decodeOrThrow(await this.callOnce(this.mac(lease), 'status', paneId, {}), statusSchema, lease.macName);
+      const answer: MacDeviceStatus = { held: status.held };
+      if (status.booted !== undefined) answer.booted = status.booted;
+      if (status.stoppedBy) answer.stoppedBy = status.stoppedBy;
+      return answer;
+    } catch {
+      return undefined;
+    }
+  }
+
   async frame(paneId: string): Promise<Buffer> {
     const lease = this.require(paneId);
     return Buffer.from(decodeOrThrow(await this.call(this.mac(lease), 'frame', paneId, {}), frameSchema, lease.macName).data, 'base64');
@@ -267,7 +294,7 @@ export class RemoteDevices {
   async dispose(): Promise<string[]> {
     const closed: string[] = [];
     const closing = [...this.leases.entries()].map(([paneId, lease]) => Promise.resolve()
-      .then(() => this.callOnce(this.mac(lease), 'close', paneId, { shutdown: true }))
+      .then(() => this.callOnce(this.mac(lease), 'close', paneId, { shutdownBy: 'quit' }))
       .then(() => { closed.push(paneId); }, () => undefined));
     let timer: NodeJS.Timeout | undefined;
     await Promise.race([Promise.all(closing), new Promise((resolve) => { timer = setTimeout(resolve, QUIT_CLOSE_MS); })]).finally(() => clearTimeout(timer));

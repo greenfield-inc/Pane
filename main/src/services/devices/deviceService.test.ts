@@ -203,7 +203,31 @@ describe('devices Pane booted, when Pane stops', () => {
   it('shuts it down at once when a linked computer quitting closes its Pane\'s device', async () => {
     const { service, stops } = setup({ booted: false });
     await service.open(paneA, { platform: 'ios' });
-    await service.close(paneA, undefined, { shutdown: true });
+    await service.close(paneA, undefined, { shutdownBy: 'quit' });
     expect(stops()).toEqual(['released closed by agent', 'shutdown by quit']);
+  }, 20_000);
+
+  it('leaves a device the person booted running when their linked computer quits', async () => {
+    const { service, stops } = setup({ booted: true });
+    await service.open(paneA, { platform: 'ios' });
+    expect(await service.close(paneA, undefined, { shutdownBy: 'quit' })).toMatchObject({ shutDown: [] });
+    expect(stops()).toEqual(['released closed by agent']);
+  }, 20_000);
+
+  it('shuts down even a device the person booted when they press Shut down on a linked computer, and says so when asked', async () => {
+    const { service, stops } = setup({ booted: true });
+    await service.open(paneA, { platform: 'ios' });
+    expect(await service.status('pane-a')).toEqual({ held: true, booted: true });
+    expect(await service.close(paneA, undefined, { shutdownBy: 'person' })).toMatchObject({ closed: ['D1'], shutDown: ['D1'] });
+    expect(stops()).toEqual(['released closed by person', 'shutdown by person']);
+    expect(await service.status('pane-a')).toEqual({ held: false, booted: false, stoppedBy: 'person' });
+  }, 20_000);
+
+  it('tells a linked computer its device idled out here', async () => {
+    const { service, clock } = setup({ booted: false });
+    await service.open(paneA, { platform: 'ios' });
+    clock.now = 11 * 60_000;
+    await service.sweep();
+    expect(await service.status('pane-a')).toEqual({ held: false, booted: false, stoppedBy: 'idle' });
   }, 20_000);
 });

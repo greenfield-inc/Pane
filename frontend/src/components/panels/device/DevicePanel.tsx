@@ -572,7 +572,10 @@ function LiveScreen({ client, panelId, platform, orientation, onScreenSize, onPa
   // Simulators stream MJPEG where the client can; an emulator's screen comes as frames, sized to this box.
   const streams = platform === 'ios' && client.streamUrl !== undefined;
   const stream = streams && streamPx ? client.streamUrl?.(panelId, streamPx) : undefined;
-  const [polled, readNow] = useDeviceFrames(client, panelId, streams || !streamPx ? undefined : FRAME_POLL_MS, streamPx);
+  // A client without a local stream reads frames over a connection: sized to this box so the host
+  // sends no pixels the tab throws away. This desktop's own Android frames come whole, over IPC.
+  const remoteFrames = client.streamUrl === undefined;
+  const [polled, readNow] = useDeviceFrames(client, panelId, streams || !streamPx ? undefined : FRAME_POLL_MS, remoteFrames ? streamPx : undefined);
   useEffect(() => {
     readFrameNow.current = readNow;
     return () => { readFrameNow.current = () => undefined; };

@@ -101,7 +101,8 @@ describe('DeviceLifecycle', () => {
     expect(life.sweep([iphone('D1', { booted: true })]).shutdown).toEqual([]);
     advance(11 * MINUTE);
     expect(life.sweep([iphone('D1', { booted: true })]).shutdown).toEqual(['D1']);
-    expect(life.booted()).toEqual([]);
+    // Pane still owes it a shutdown until one works.
+    expect(life.booted()).toEqual(['D1']);
   });
 
   it('leaves a Pane-made device running when the person booted it, even after a lease idles out', () => {
@@ -111,6 +112,13 @@ describe('DeviceLifecycle', () => {
     expect(life.sweep([iphone('D1', { booted: true })])).toEqual({ ended: [{ paneId: 'pane-a', id: 'D1' }], shutdown: [] });
     advance(60 * MINUTE);
     expect(life.sweep([iphone('D1', { booted: true })]).shutdown).toEqual([]);
+  });
+
+  it('shuts down at once a device Pane booted that an archived Pane had already closed', () => {
+    const { life } = setup();
+    life.lease('pane-a', 'OURS', 'ios', { bootedByPane: true });
+    life.release('pane-a', 'OURS');
+    expect(life.archived('pane-a', [iphone('OURS', { paneMade: false, booted: true })]).shutdown).toEqual(['OURS']);
   });
 
   it('shuts down at once the device Pane booted for an archived Pane, and leaves the person\'s running', () => {
