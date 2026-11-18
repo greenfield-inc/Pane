@@ -55,7 +55,7 @@ function landscapeScreen(): string {
   return canvas.toDataURL('image/jpeg', 0.9);
 }
 
-declare global { interface Window { qaInputs: DeviceInput[]; qaPower: string[]; qaRotate: () => void; qaStaged: string[]; qaAttached: string[] } }
+declare global { interface Window { qaInputs: DeviceInput[]; qaPower: string[]; qaRotate: () => void; qaStaged: string[]; qaAttached: string[]; qaFinishBoot: () => void; qaSendFirstFrame: () => void } }
 window.qaStaged = [];
 window.qaAttached = [];
 // ?fold=1 is a foldable, half open; otherwise a phone that turns.
@@ -67,13 +67,14 @@ const portrait = screen();
 // ?shape=landscape starts turned; qaRotate() turns the device mid-session.
 let frame = params.get('shape') === 'landscape' ? landscape : portrait;
 window.qaRotate = () => { frame = landscape; };
-// ?firstFrame=<ms> holds the first frame that long, as a device still connecting does.
-const firstFrameAt = performance.now() + Number(params.get('firstFrame') ?? 0);
+// ?holdFirstFrame=1 holds the first frame, as a device still connecting does, until qaSendFirstFrame().
+let sendFirstFrame = () => {};
+const firstFrameSent = params.get('holdFirstFrame') ? new Promise<void>(resolve => { sendFirstFrame = resolve; }) : Promise.resolve();
+window.qaSendFirstFrame = () => sendFirstFrame();
 const client: DeviceTabClient = {
   clientId: 'fixture',
   frame: async () => {
-    const wait = firstFrameAt - performance.now();
-    if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+    await firstFrameSent;
     return frame;
   },
   controls: async () => controls,
@@ -157,12 +158,11 @@ if (params.get('fold')) {
   paneState.os = 'Android 16';
 }
 
-/** ?view=boot: the tab boots for ?boot=<ms>, then goes live. */
+/** ?view=boot: the tab boots until qaFinishBoot(), then goes live. */
 function BootingTab() {
   const [phase, setPhase] = useState<DevicePanelPhase>('booting');
   useEffect(() => {
-    const timer = setTimeout(() => setPhase('live'), Number(params.get('boot') ?? 1000));
-    return () => clearTimeout(timer);
+    window.qaFinishBoot = () => setPhase('live');
   }, []);
   return <DevicePanel panel={devicePanel('device', { ...paneState, phase })} panels={[agentPanel]} isActive />;
 }
