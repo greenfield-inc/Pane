@@ -432,11 +432,6 @@ export async function restoreRemoteConnection(page: Page): Promise<void> {
   });
 }
 
-/** Sends a host event, such as `panel:agentStatus`, to the connected PWA. */
-export async function emitRemoteEvent(page: Page, channel: string, payload: JsonValue): Promise<void> {
-  await emitRemoteHostEvent(page, channel, payload);
-}
-
 declare global {
   interface Window {
     /** Installed by `openConnectedRemotePwa`; see `dropRemoteConnection`. */

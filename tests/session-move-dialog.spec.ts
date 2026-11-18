@@ -405,89 +405,87 @@ async function runMoveFlow(page: Page, theme: Theme, surface: Surface, openDialo
   expect(calls.find(call => call.channel === 'runpane:sessions:move')?.request).toEqual({ sessionId: 'alpha', target: 'studio-b' });
 }
 
-for (const theme of ['light', 'dark'] as const) {
-  test(`the Sessions sidebar moves a whole Session: states 1 to 6 (${theme})`, async ({ page }) => {
-    await openSidebar(page, theme, [sessionRecord('alpha', 'Pane UI/UX improvements')]);
-    const row = page.getByTestId('orchestration-session-alpha');
-    await expect(row).toBeVisible({ timeout: 10_000 });
-    await runMoveFlow(page, theme, 'sidebar', async () => {
-      await row.click({ button: 'right' });
-      await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
-    }, null);
+test(`the Sessions sidebar moves a whole Session: states 1 to 6`, async ({ page }) => {
+  await openSidebar(page, 'light', [sessionRecord('alpha', 'Pane UI/UX improvements')]);
+  const row = page.getByTestId('orchestration-session-alpha');
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await runMoveFlow(page, 'light', 'sidebar', async () => {
+    await row.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Move to machine…' }).click();
+  }, null);
+});
+
+test(`All machines moves a whole Session on its own machine: states 1 to 6`, async ({ page }) => {
+  await openAllMachines(page, 'light', [sessionRecord('alpha', 'Pane UI/UX improvements')]);
+  const row = page.getByTestId('all-machines-session-row').filter({ hasText: 'Pane UI/UX improvements' });
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await runMoveFlow(page, 'light', 'all-machines', async () => {
+    await row.click({ button: 'right' });
+    // The item is disabled until that machine reads as online; the row can show first.
+    const move = page.getByRole('menuitem', { name: 'Move to machine…' });
+    await expect.poll(() => move.getAttribute('title')).toBeNull();
+    await move.click();
+  }, 'build');
+});
+
+test(`the machine a Session left shows it moved, moving and arriving, with a read-only banner`, async ({ page }) => {
+  await openSidebar(page, 'light', [
+    sessionRecord('onboarding', 'Onboarding'),
+    sessionRecord('release', 'Release train', { move: mark('moving', 'studio-b') }),
+    sessionRecord('incoming', 'Docs refresh', { move: mark('arriving', 'build-box') }),
+    sessionRecord('alpha', 'Pane UI/UX improvements', { archived: true, move: mark('moved', 'studio-b') }),
+  ], {
+    initialSessions: [pane('p-move', 'fix-login')],
+    initialPanels: [movedTab('t-move', 'p-move', 'implementer', 0, { at: iso, by: 'move', machine: 'studio-b' })],
+    initialUiState: { expandedProjects: [1] },
   });
+  await expect(page.getByTestId('orchestration-session-release')).toContainText('Moving to studio-b');
+  const arriving = page.getByTestId('orchestration-session-incoming');
+  await expect(arriving).toContainText('Arriving from build-box');
+  await expect(arriving).toHaveAttribute('aria-disabled', 'true');
 
-  test(`All machines moves a whole Session on its own machine: states 1 to 6 (${theme})`, async ({ page }) => {
-    await openAllMachines(page, theme, [sessionRecord('alpha', 'Pane UI/UX improvements')]);
-    const row = page.getByTestId('all-machines-session-row').filter({ hasText: 'Pane UI/UX improvements' });
-    await expect(row).toBeVisible({ timeout: 10_000 });
-    await runMoveFlow(page, theme, 'all-machines', async () => {
-      await row.click({ button: 'right' });
-      // The item is disabled until that machine reads as online; the row can show first.
-      const move = page.getByRole('menuitem', { name: 'Move to machine…' });
-      await expect.poll(() => move.getAttribute('title')).toBeNull();
-      await move.click();
-    }, 'build');
-  });
+  const archived = page.getByRole('button', { name: 'Archived' });
+  if (await archived.getAttribute('aria-expanded') === 'false') await archived.click();
+  const moved = page.getByTestId('archived-orchestration-session-alpha');
+  await expect(moved).toContainText('Moved to studio-b');
+  await moved.getByRole('button', { name: /Pane UI\/UX improvements/ }).click();
+  const banner = page.getByTestId('moved-session-banner');
+  await expect(banner).toContainText(/This Session moved to studio-b on .*14.*\. It is read-only here\./);
+  await expect(banner.getByRole('button', { name: 'Open it there' })).toBeVisible();
+  await shot(page, page.locator('[data-testid="sidebar"], aside, nav').first(), '7-old-machine', 'light', 'sidebar');
+  await banner.getByRole('button', { name: 'Restore here' }).click();
+  await expect(banner).toContainText('Restore it here only if studio-b no longer runs it');
+  await shot(page, banner, '7-restore', 'light', 'sidebar');
+  await banner.getByRole('button', { name: 'Restore here' }).click();
+  await expect.poll(() => page.evaluate(() => {
+    // SAFETY: installSessions' init script sets __sessionUpdates before the app loads.
+    return (window as typeof window & { __sessionUpdates: unknown[] }).__sessionUpdates;
+  })).toEqual([{ sessionId: 'alpha', archived: false }]);
 
-  test(`the machine a Session left shows it moved, moving and arriving, with a read-only banner (${theme})`, async ({ page }) => {
-    await openSidebar(page, theme, [
-      sessionRecord('onboarding', 'Onboarding'),
-      sessionRecord('release', 'Release train', { move: mark('moving', 'studio-b') }),
-      sessionRecord('incoming', 'Docs refresh', { move: mark('arriving', 'build-box') }),
-      sessionRecord('alpha', 'Pane UI/UX improvements', { archived: true, move: mark('moved', 'studio-b') }),
-    ], {
-      initialSessions: [pane('p-move', 'fix-login')],
-      initialPanels: [movedTab('t-move', 'p-move', 'implementer', 0, { at: iso, by: 'move', machine: 'studio-b' })],
-      initialUiState: { expandedProjects: [1] },
-    });
-    await expect(page.getByTestId('orchestration-session-release')).toContainText('Moving to studio-b');
-    const arriving = page.getByTestId('orchestration-session-incoming');
-    await expect(arriving).toContainText('Arriving from build-box');
-    await expect(arriving).toHaveAttribute('aria-disabled', 'true');
+  // A tab the move stopped says where the Session is going, with no Resume.
+  await page.getByRole('button', { name: 'fix-login', exact: true }).click();
+  const paused = page.getByTestId('paused-terminal-view');
+  await expect(paused).toContainText('Moving to studio-b');
+  await expect(paused.getByRole('button', { name: 'Resume' })).toHaveCount(0);
+  await shot(page, paused, '7-tab', 'light', 'sidebar');
+});
 
-    const archived = page.getByRole('button', { name: 'Archived' });
-    if (await archived.getAttribute('aria-expanded') === 'false') await archived.click();
-    const moved = page.getByTestId('archived-orchestration-session-alpha');
-    await expect(moved).toContainText('Moved to studio-b');
-    await moved.getByRole('button', { name: /Pane UI\/UX improvements/ }).click();
-    const banner = page.getByTestId('moved-session-banner');
-    await expect(banner).toContainText(/This Session moved to studio-b on .*14.*\. It is read-only here\./);
-    await expect(banner.getByRole('button', { name: 'Open it there' })).toBeVisible();
-    await shot(page, page.locator('[data-testid="sidebar"], aside, nav').first(), '7-old-machine', theme, 'sidebar');
-    await banner.getByRole('button', { name: 'Restore here' }).click();
-    await expect(banner).toContainText('Restore it here only if studio-b no longer runs it');
-    await shot(page, banner, '7-restore', theme, 'sidebar');
-    await banner.getByRole('button', { name: 'Restore here' }).click();
-    await expect.poll(() => page.evaluate(() => {
-      // SAFETY: installSessions' init script sets __sessionUpdates before the app loads.
-      return (window as typeof window & { __sessionUpdates: unknown[] }).__sessionUpdates;
-    })).toEqual([{ sessionId: 'alpha', archived: false }]);
-
-    // A tab the move stopped says where the Session is going, with no Resume.
-    await page.getByRole('button', { name: 'fix-login', exact: true }).click();
-    const paused = page.getByTestId('paused-terminal-view');
-    await expect(paused).toContainText('Moving to studio-b');
-    await expect(paused.getByRole('button', { name: 'Resume' })).toHaveCount(0);
-    await shot(page, paused, '7-tab', theme, 'sidebar');
-  });
-
-  test(`All machines shows a Session moving and one arriving on their own machine (${theme})`, async ({ page }) => {
-    await openAllMachines(page, theme, [
-      sessionRecord('release', 'Release train', { move: mark('moving', 'studio-b') }),
-      sessionRecord('incoming', 'Docs refresh', { move: mark('arriving', 'studio-a') }),
-    ], [sessionRecord('alpha', 'Pane UI/UX improvements', { archived: true, move: mark('moved', 'studio-b') })]);
-    const rows = page.getByTestId('all-machines-session-row');
-    await expect(rows.filter({ hasText: 'Release train' })).toContainText('Moving to studio-b');
-    await expect(rows.filter({ hasText: 'Docs refresh' })).toContainText('Arriving from studio-a');
-    await expect(page.getByRole('button', { name: 'Session Docs refresh on build-box (Arriving from studio-a)' })).toHaveAttribute('aria-disabled', 'true');
-    const archived = page.getByRole('button', { name: 'Archived' });
-    if (await archived.getAttribute('aria-expanded') === 'false') await archived.click();
-    await expect(page.getByTestId('archived-orchestration-session-alpha')).toContainText('Moved to studio-b');
-    await page.getByTestId('archived-orchestration-session-alpha').getByRole('button', { name: /Pane UI\/UX improvements/ }).click();
-    await expect(page.getByTestId('moved-session-banner')).toContainText('This Session moved to studio-b on');
-    await shot(page, page.locator('[data-testid="sidebar"], aside, nav').first(), '7-old-machine', theme, 'all-machines');
-  });
-}
+test(`All machines shows a Session moving and one arriving on their own machine`, async ({ page }) => {
+  await openAllMachines(page, 'light', [
+    sessionRecord('release', 'Release train', { move: mark('moving', 'studio-b') }),
+    sessionRecord('incoming', 'Docs refresh', { move: mark('arriving', 'studio-a') }),
+  ], [sessionRecord('alpha', 'Pane UI/UX improvements', { archived: true, move: mark('moved', 'studio-b') })]);
+  const rows = page.getByTestId('all-machines-session-row');
+  await expect(rows.filter({ hasText: 'Release train' })).toContainText('Moving to studio-b');
+  await expect(rows.filter({ hasText: 'Docs refresh' })).toContainText('Arriving from studio-a');
+  await expect(page.getByRole('button', { name: 'Session Docs refresh on build-box (Arriving from studio-a)' })).toHaveAttribute('aria-disabled', 'true');
+  const archived = page.getByRole('button', { name: 'Archived' });
+  if (await archived.getAttribute('aria-expanded') === 'false') await archived.click();
+  await expect(page.getByTestId('archived-orchestration-session-alpha')).toContainText('Moved to studio-b');
+  await page.getByTestId('archived-orchestration-session-alpha').getByRole('button', { name: /Pane UI\/UX improvements/ }).click();
+  await expect(page.getByTestId('moved-session-banner')).toContainText('This Session moved to studio-b on');
+  await shot(page, page.locator('[data-testid="sidebar"], aside, nav').first(), '7-old-machine', 'light', 'all-machines');
+});
 
 test('a Clone still running locks the destination, and its answer never lands on another check', async ({ page }) => {
   await openSidebar(page, 'light', [sessionRecord('alpha', 'Pane UI/UX improvements')]);

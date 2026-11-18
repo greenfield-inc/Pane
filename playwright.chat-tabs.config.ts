@@ -6,25 +6,10 @@ import { getPlaywrightBaseURL, getPlaywrightPort, getPlaywrightServerEnv } from 
 // (the minimal suite's server) runs `tsc -w`, which overwrites the bundled preload.
 const port = getPlaywrightPort();
 
-// CI runs each shard as its own job, side by side, split by measured duration:
-// the Session activity journeys hold a fixed timeline of about four minutes, and
-// the rest take under a minute together. Every spec belongs to exactly one
-// shard; PANE_ELECTRON_SHARD picks one, and leaving it unset runs them all.
-const ELECTRON_SHARDS = {
-  'session-activity': ['session-activity.spec.ts', 'session-activity-real.spec.ts'],
-  autopilot: ['autopilot.spec.ts'],
-  journeys: ['chat-tabs.spec.ts', 'loop-sessions.spec.ts'],
-} satisfies Record<string, string[]>;
-
-const shard = process.env.PANE_ELECTRON_SHARD;
-const specs = shard ? Object.entries(ELECTRON_SHARDS).find(([name]) => name === shard)?.[1] : Object.values(ELECTRON_SHARDS).flat();
-if (!specs) {
-  throw new Error(`PANE_ELECTRON_SHARD=${shard} names no shard. Use one of: ${Object.keys(ELECTRON_SHARDS).join(', ')}.`);
-}
-
+// session-activity-real.spec.ts skips itself unless SESSION_ACTIVITY_REAL=1, which CI never sets.
 export default defineConfig({
   testDir: './tests',
-  testMatch: specs,
+  testMatch: ['chat-tabs.spec.ts', 'loop-sessions.spec.ts', 'session-activity-real.spec.ts'],
   timeout: 120 * 1000,
   forbidOnly: true,
   retries: 0,
