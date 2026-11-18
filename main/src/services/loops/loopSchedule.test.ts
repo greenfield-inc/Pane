@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { decideLoop, nextLoopRun, previewLoopSchedule } from './loopSchedule';
 
 // The expected instants below are worked by hand for New York, where 2026's
 // clocks go forward on March 8 and back on November 1.
-process.env.TZ = 'America/New_York';
+vi.stubEnv('TZ', 'America/New_York');
 
 const utc = (iso: string) => Date.parse(iso);
 

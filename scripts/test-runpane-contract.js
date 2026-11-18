@@ -1453,7 +1453,7 @@ async function checkProfiles() {
   const [listText, showText, brokenText, runsText, launchText] = texts.npm;
   assert.strictEqual(listText, [
     'greenfield 1.0.0 · bundled · on · launchable',
-    'reviewers 0.2.0 · bundled · off · team only',
+    'reviewers 0.2.0 · bundled · off · no flow',
     'broken - · yours · on · invalid: Step plan points to "nowhere".',
     'Agent Farm 0.9.0: installing',
     'Your Agent Farm: mine',

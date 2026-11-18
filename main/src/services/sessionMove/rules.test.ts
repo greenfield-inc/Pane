@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { agentFarmProfileOf, movedLine, heldBackChecks } from './rules';
+import type { NotifyItem } from '../../../../shared/types/notify';
+import { agentFarmProfileOf, movedLine, heldBackChecks, sessionOpenApprovals } from './rules';
 import { buildPathMap } from './pathMap';
 
 describe('agentFarmProfileOf', () => {
@@ -33,5 +34,31 @@ describe('heldBackChecks', () => {
     // Once every tab stopped (Stop now), even a running tab's queue stays behind.
     expect(heldBackChecks(0, [tab(3, true)], true)).toEqual([expect.objectContaining({ title: '3 messages waiting in Chat' })]);
     expect(heldBackChecks(0, [tab(0, false)], true)).toEqual([]);
+  });
+});
+
+describe('sessionOpenApprovals', () => {
+  const item = (id: string, extra: Partial<NotifyItem> = {}): NotifyItem => ({
+    id, ui: 'approve', title: `Q-${id}: Ship it?`, state: 'waiting', createdAt: 1,
+    source: { name: 'worker', agent: 'Claude', paneId: 'member-pane', panelId: 'tab-1', session: { id: 'session-1', name: 'Doozy', paneId: 'orch-pane' } },
+    ...extra,
+  });
+  const ids = ['session-1', 'orch-pane', 'member-pane'];
+
+  it('lets a Session whose only approvals were dismissed pass the move check', () => {
+    const open = sessionOpenApprovals([item('1', { dismissedAt: 5 }), item('2', { dismissedAt: 6 })], ids);
+    expect(open).toEqual([]);
+    expect(heldBackChecks(open.length, [], false)).toEqual([]);
+  });
+
+  it('still blocks a Session with a dismissed and a genuinely open approval', () => {
+    const open = sessionOpenApprovals([item('1', { dismissedAt: 5 }), item('2')], ids);
+    expect(open.map(approval => approval.id)).toEqual(['2']);
+    expect(heldBackChecks(open.length, [], false)).toEqual([expect.objectContaining({ id: 'approvals', level: 'block', title: '1 open approval in this Session' })]);
+  });
+
+  it('holds the move for an answer in its Undo hold, and ignores other Sessions\' approvals', () => {
+    const elsewhere = item('3', { source: { name: 'w', agent: 'Claude', paneId: 'other-pane', panelId: 't', session: { id: 'session-2', name: 'X', paneId: 'x' } } });
+    expect(sessionOpenApprovals([item('1', { state: 'sent' }), elsewhere, item('4', { state: 'answered' })], ids).map(approval => approval.id)).toEqual(['1']);
   });
 });

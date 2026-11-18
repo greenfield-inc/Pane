@@ -12,7 +12,7 @@ import type {
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
-import type { OwnAgentFarmView, ProfileLibraryView } from '../shared/types/profiles';
+import type { ProfileLibraryView } from '../shared/types/profiles';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
@@ -104,8 +104,6 @@ export type ElectronApiMockOptions = {
   initialLoops?: Loop[];
   /** profiles:list answer (the Profiles page); profiles:get reads each file's text from profileYaml. */
   profileLibrary?: ProfileLibraryView;
-  /** profiles:own-agent-farm answer ("Your Agent Farm"); absent: no agent-farm installed. */
-  ownAgentFarm?: OwnAgentFarmView;
   profileYaml?: Record<string, string>;
   /** remote-daemon:list-tailnet-machines answer. */
   tailnetMachines?: TailnetMachineList;
@@ -1679,7 +1677,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       profiles: namespace({
         list: () => success(clone(mockProfiles)),
-        ownAgentFarm: () => success(mockOptions.ownAgentFarm ? clone(mockOptions.ownAgentFarm) : null),
         get: (name: string) => {
           const profile = mockProfiles.profiles.find((candidate) => candidate.name === name);
           return profile ? success({ profile: clone(profile), yaml: mockOptions.profileYaml?.[name] ?? '' }) : Promise.resolve({ success: false, error: `No profile is named "${name}".` });

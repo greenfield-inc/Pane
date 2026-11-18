@@ -1,5 +1,6 @@
 export { DaemonProvider, useDaemon } from './DaemonProvider';
 export { useInvokeQuery } from './hooks';
+export { ScreenFocus, useScreenReads } from './screenFocus';
 /** @public API for feature screens. */
 export { useDaemonEvent, useDaemonQueryKey, useInvokeMutation } from './hooks';
 /** @public API for feature screens. */

@@ -91,7 +91,10 @@ Session go under "Not in a Session". Items Autopilot asks itself go under
   `needs_you` lists them). A question that ends with its options in brackets
   ("(A / B)") and gives no buttons either way is refused
   (`ERR_REPORT_PACKED_OPTIONS`) and nothing is shown; a question with no
-  options is an open question, answered in words. That question is a card at once, with an answer box, and it
+  options is an open question, answered in words. A unit in brackets with a
+  spaced slash, "(requests / second)", reads as options too: when you ask for
+  a value, word it as prose ("in requests per second") or drop the spaces
+  ("(requests/second)"); the refusal says so. That question is a card at once, with an answer box, and it
   rings once the orchestrator relays it or after 10 minutes, so the orchestrator
   first settles what the plan already answers. Your answer goes straight to the
   worker's tab (`answer: Q-n → <answer> (by you)`), even with the orchestrator
@@ -267,7 +270,7 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   and → while it has focus) and ✕ closes it. On the Approvals screen ✕ is
   **Dismiss**: the column closes without answering, the item stays in the list
   (and leaves the floating strip), and no other item opens until you pick a
-  row. Its tabs are **Decide** (the
+  row; keyboard focus goes to that row. Its tabs are **Decide** (the
   subtitle, each question with its why and options, recommended ones
   marked but none selected until you pick, the references and one reply box that grows up to half the
   column), **Summary** (one HTML page: the asker's own, an `.html` passed as a
@@ -279,7 +282,11 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   it was asked, left out when you're already in it. In a **Session**, the
   column lays over the Session's right split view without resizing it, and ✕
   ("Back to <tab>") shows the split again as it was; with no split open it
-  opens a split of its own, and ✕ ("Close split") collapses it. There it is a
+  opens a split of its own, and ✕ ("Close split") collapses it. A new
+  approval asked while the Session is shown opens there on its own, once,
+  unless the column already shows one; it never moves keyboard focus. A
+  worker's question waits while its orchestrator may answer it and opens when
+  relayed, and the chat's own prompts stay in the chat. There it is a
   focus stop of its own: Focus Right (⌘⌥→) and F6 move into it from the chat,
   the tab keys (⌘⇧[ ⌘⇧], ⌘⇧1-9) walk its tabs while it has focus, Focus Left
   or Esc go back to the chat's message box, and its active tab carries the
@@ -300,7 +307,8 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   with the column's. Its ✕ (**Dismiss**) takes the card out of that chat
   without answering it (and closes the column if it was open there): it
   keeps waiting in Approvals, and comes back to the chat only when it changes
-  (a new version, a reply or ready again). The chat's own AskUserQuestion isn't docked: the chat
+  (a new version, a reply or ready again). Focus moves to the next card (the
+  one before when it was last), or to the message box when none is left. The chat's own AskUserQuestion isn't docked: the chat
   already shows Claude's card, and Approvals and the phone keep the copy.
   **Send** closes the column, and a status line in the chat names the agent
   reading the reply ("okta-sso-account is reading your reply to Q-42"), then
@@ -333,9 +341,14 @@ box) stay there, even with the pointer over a card. The floating strip over
 another app takes keys once you click it, so typing in that app never answers
 by accident. Keys work whatever Pane's keyboard-shortcuts setting says. On
 Approvals, **More** (or **Details**, when choices have notes) opens the card in
-place with every choice, its note and **Send**.
+place with every choice, its note and **Send**; ↵ there does what **Send**
+does, sending the pick with its note, or the note alone as a reply.
 
 ✕ (**Dismiss**) hides a question from the strip without answering it; it keeps waiting in Approvals.
+Keyboard focus moves to the card the strip shows next.
+A dismissed question no longer counts as open for its Session: the Session's
+count and badge leave it out, and it doesn't hold back a move to another
+machine. It counts again when it changes (a new version, Undo or a reopen).
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
 switch to Pane. The clock at the bottom right of a card snoozes it for 3, 5
 or 15 minutes: it leaves the strip, then comes back in its place in the

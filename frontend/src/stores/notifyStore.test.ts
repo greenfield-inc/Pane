@@ -42,6 +42,15 @@ describe('Approvals counts', () => {
     expect(paneHasWaitingQuestion(withItems(item('stale', { staleSince: 5, source: { name: 'x', agent: 'Claude', paneId: 'p' } })), 'p')).toBe(false);
   });
 
+  it("leaves dismissed items out of their Session's row count, which still counts a genuinely open one", () => {
+    const dismissed = withItems(item('a', { dismissedAt: 5 }), item('b', { dismissedAt: 6, machineId: 'studio' }));
+    expect(sessionWaitingCount(dismissed, 'session-launch')).toBe(0);
+    expect(sessionWaitingCount(dismissed, 'session-launch', 'studio')).toBe(0);
+    // Still waiting in Approvals: the overall count keeps them.
+    expect(waitingCount(dismissed)).toBe(2);
+    expect(sessionWaitingCount(withItems(item('a', { dismissedAt: 5 }), item('open')), 'session-launch')).toBe(1);
+  });
+
   it('says how many wait on machines other than the one the app is on', () => {
     const snapshot = withItems(
       item('here'),

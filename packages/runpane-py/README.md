@@ -402,8 +402,9 @@ shared installer behavior:
   behavior.
 - If daemon setup flags change, update docs, README files, and wrapper tests
   together.
-- Keep the CI wrapper matrix green: Linux, macOS, Windows, Node 22.23.4/24.22.1, and
-  Python 3.8/3.13 (runs on PRs that touch the wrappers or contract).
+- Keep the CI wrapper matrix green: Linux at Node 22.23.4/Python 3.8 and Node
+  24.22.1/Python 3.13, and Windows at Node 22.23.4/Python 3.8 (runs on PRs that
+  touch the wrappers or contract).
 
 ## Publishing
 

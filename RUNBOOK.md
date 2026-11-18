@@ -20,7 +20,7 @@ each computer its `runpane.net` address for QR pairing.
 | Android build check | `Native Android Build` (`native-android.yml`) | pull requests and pushes to `main` whose Expo Android fingerprint changed, or that change the workflow; weekly; manual | Builds the Android dev client APK with the Firebase config. Pull requests build `arm64-v8a` only; pushes to `main`, the weekly run and manual runs build all four ABIs, one job per ABI |
 | Relays | `Deploy Pane relays` (`relay-deploy.yml`) | manual only | Builds `relay/`, pushes the image to Google Artifact Registry, and creates or updates the three relay VMs; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
-| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux, macOS and Windows, the runpane wrapper matrix, and the Playwright smoke suite |
+| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux and Windows, the runpane wrapper matrix, and the Playwright smoke suite |
 | React review | `React Doctor` (`react-doctor.yml`) | pull requests that touch `frontend/` | Comments on new React findings; advisory, never blocks |
 | Traffic snapshot | `GitHub traffic → PostHog` (`traffic-snapshot.yml`) | daily 06:00 UTC | Copies GitHub traffic and release download counts into PostHog |
 
@@ -220,10 +220,18 @@ interactive `mcp-publisher login github` cannot publish to an organization
 namespace. Check the listing with
 `curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=runpane"`.
 
-`CI result` is the check branch protection requires. It fails if another
-`Code Quality` job fails or is cancelled, except Markdown Links, which it does
-not wait for. It is the only check a merge waits
-for; how to merge a pull request or a stack is in
+`CI result` is the check branch protection requires. It runs even when the
+run is cancelled, and passes only when every `Code Quality` job named in
+`scripts/ci-gate.mjs` `EXPECTED_JOBS` succeeded, or skipped with a reason from
+the manifest that Detect changed areas writes (a pull request that changes no
+wrapper, main or relay files skips those jobs). A job that fails, is
+cancelled, is skipped without a reason, or is missing from the workflow or
+from `CI result`'s needs fails it, and so does a `Code Quality` job the list
+does not name. Add a new job to `EXPECTED_JOBS` and to `CI result`'s needs in
+the same change; `scripts/ci-gate.test.mjs` (run by Type Check and Lint, and
+by `node --test scripts/ci-gate.test.mjs` locally) checks they match the
+workflow. It is the only check a merge waits for; how
+to merge a pull request or a stack is in
 [CONTRIBUTING.md](CONTRIBUTING.md#merging).
 
 `node scripts/ci-timings.mjs --since <date> --until <time>` writes
@@ -231,7 +239,10 @@ for; how to merge a pull request or a stack is in
 of every successful run of the CI, release and deploy workflows in that window,
 annotated with the CI speed PRs each run contains. It reads the API through
 `gh` and caches each run's jobs, so a re-run of the same window makes only the
-listing calls.
+listing calls. `--run <id> --attempt <n>` records a single run attempt
+instead: each job's head SHA, runner, and waiting, setup, running and teardown
+seconds. `CI result` writes that record to its job summary and log on every
+`Code Quality` run.
 
 ## Recovery and rollback
 

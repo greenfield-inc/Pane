@@ -58,6 +58,10 @@ function savePreferences(preferences: PushPreferences): void {
   void secureStore.setItem(PREFERENCES_KEY, JSON.stringify(preferences)).catch(() => undefined);
 }
 
+/** How long after a return to the app bookkeeping waits, so the screen's reads go first. */
+/** A return to the app registers this long after, out of the way of the screen's own reads. */
+export const AFTER_RETURN_MS = 3_000;
+
 /** Orders Sign Out after any registration write to that computer. */
 const gate = createWriteGate();
 
@@ -66,12 +70,12 @@ let running = false;
 let pending = false;
 
 /** Registers this phone with every saved computer, sending the current switches. Debounced. */
-export function requestPushRegistration(): void {
+export function requestPushRegistration(delayMs = REGISTER_DEBOUNCE_MS): void {
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
     void run();
-  }, REGISTER_DEBOUNCE_MS);
+  }, delayMs);
 }
 
 async function run(): Promise<void> {
@@ -145,12 +149,16 @@ export function PushRegistrationSync() {
   }, [profiles]);
 
   useEffect(() => {
+    // After a return, the screen's own reads go first.
+    let later: ReturnType<typeof setTimeout> | undefined;
     const appState = AppState.addEventListener('change', status => {
-      if (status === 'active') requestPushRegistration();
+      if (status === 'active') later = setTimeout(requestPushRegistration, AFTER_RETURN_MS);
+      else clearTimeout(later);
     });
     // Registering asks the OS for the token, which can fire this listener with the same token: only a new one re-registers.
     const token = Notifications.addPushTokenListener(next => { if (!isLastToken(String(next.data))) requestPushRegistration(); });
     return () => {
+      clearTimeout(later);
       appState.remove();
       token.remove();
     };

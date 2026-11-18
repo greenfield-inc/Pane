@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigManager } from './configManager';
 import { applyRoutesReport, decodeComputers, routesReachableHere, upsertComputer, type RemoteComputer } from '../../../shared/types/remoteComputers';
 
@@ -38,12 +38,12 @@ describe('computers (D-51)', () => {
 
   beforeEach(async () => {
     paneDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-computers-'));
-    process.env.PANE_DIR = paneDir;
+    vi.stubEnv('PANE_DIR', paneDir);
     configPath = path.join(paneDir, 'config.json');
   });
 
   afterEach(async () => {
-    delete process.env.PANE_DIR;
+    vi.unstubAllEnvs();
     await fs.rm(paneDir, { recursive: true, force: true });
   });
 

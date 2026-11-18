@@ -11,7 +11,7 @@ import {
   type SessionMoveWhere,
 } from '../utils/sessionMoveClient';
 import {
-  blockingChecks, confirmingLine, doneView, isMoveRunning, moveIntro, needsFixLine, progressHeading, shownProgress, targetCheckLabel, waitingLine,
+  blockingChecks, confirmingLine, confirmingReason, doneView, isMoveRunning, moveIntro, needsFixLine, progressHeading, shownProgress, targetCheckLabel, waitingLine,
   wholeMoveTargets, workingFor,
 } from '../utils/sessionMoveView';
 import type { SessionMoveCheck, SessionMovePreflight, SessionMoveProgress, SessionMoveStep } from '../../../shared/types/sessionMove';
@@ -399,11 +399,17 @@ export function MoveSessionToHostDialog({ target: moving, onClose, onMoved }: Mo
       );
     } else if (progress.phase === 'moving' || progress.phase === 'confirming') {
       const confirming = progress.phase === 'confirming';
+      const reason = confirmingReason(progress);
       body = (
         <>
           <p className="text-sm text-text-secondary">
             {confirming ? confirmingLine(target) : 'The Session is paused here. Don’t close Pane on either machine.'}
           </p>
+          {reason && (
+            <p className="mt-2 text-sm text-text-primary" data-testid="move-confirming-reason">
+              <span className="font-medium">{reason.title}.</span> {reason.detail}
+            </p>
+          )}
           <ul className="mt-3" aria-label="Move steps">
             {progress.steps.map(step => (
               <Line key={step.id} testId={`move-step-${step.id}`} kind={STEP_INDICATOR[step.state]} label={STEP_STATE_LABEL[step.state]} title={step.title} detail={step.detail} />

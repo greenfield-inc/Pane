@@ -156,11 +156,13 @@ To test approvals' timers without waiting, start a dev build with
   `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
-  CI runs: smoke, health check, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
+  CI runs: smoke, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
 - `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey
   (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
+  CI runs the specs `playwright.chat-tabs.config.ts` lists, in one job. A new
+  spec runs only once it is listed there.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
   (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
   start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port
@@ -311,11 +313,10 @@ happened, why, what changed, and what to do next.
 4. Open the pull request with a clear description, linked issues, the commands
    you ran, and screenshots for UI changes.
 
-CI runs typecheck, lint, a markdown link check, unit tests on Linux, macOS and
-Windows, and the Playwright smoke suite. CI retries a failed unit test once
-(`--retry=1`; local runs never retry) and lists every retried test in the job
-summary, with a warning on each test that passed only on its retry: that test
-is flaky, so fix it. Playwright journeys are not retried. React Doctor also comments on new React
+CI runs typecheck, lint, a markdown link check, unit tests on Linux and
+Windows, and the Playwright smoke suite. CI retries nothing: a test, link
+check or download that fails once fails the run. A flaky test is a bug to fix
+in its own PR. React Doctor also comments on new React
 findings in `frontend/`; it is advisory. To see its findings before you push:
 
 ```bash
@@ -335,11 +336,11 @@ Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
 A pull request is ready to merge when `CI result` is green and its review is
 done. Watch only the required check (`gh pr checks <number> --required`; a PR
 based on another branch has no required checks, so watch its `CI result`
-check by name until it targets `main`). The other checks (Markdown Links,
-Native Android Build, Native OTA Updates, Native Runtime, React Doctor, Notes
+check by name until it targets `main`). `CI result` waits for every
+`Code Quality` job, Markdown Links included. The other workflows' checks
+(Native Android Build, Native OTA Updates, Native Runtime, React Doctor, Notes
 Native QA, the package builds) are advisory: look at them when they fail, but
-they never hold a merge. `CI result` does not wait for Markdown Links, so check
-it yourself when you change docs.
+they never hold a merge.
 
 A single pull request is squash-merged.
 

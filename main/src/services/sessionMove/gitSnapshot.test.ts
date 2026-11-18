@@ -11,6 +11,7 @@ import {
   createBundle,
   createSnapshot,
   deleteRefs,
+  putBackRef,
   ignoredPaths,
   importBundle,
   MoveGitError,
@@ -354,5 +355,41 @@ describe('gitSnapshot', () => {
     git(a, ['update-ref', 'refs/pane-move/keep', 'HEAD']);
     await deleteRefs(a, PREFIX);
     expect(git(a, ['for-each-ref', '--format=%(refname)', 'refs/pane-move/'])).toBe('refs/pane-move/keep\n');
+  });
+
+  it('keeps a same-size edit made in the index\'s timestamp window', async () => {
+    const { a } = setupRepos();
+    // ctime can't be set from a test, so git is told not to trust it; mtime and size then match the index entry.
+    git(a, ['config', 'core.trustctime', 'false']);
+    const file = path.join(a, 'other.txt');
+    const stamp = new Date(Math.floor(Date.now() / 1000 - 60) * 1000);
+    fs.utimesSync(file, stamp, stamp);
+    git(a, ['add', 'other.txt']);
+    write(file, 'other unstaged\n');
+    fs.utimesSync(file, stamp, stamp);
+    // A valid cache tree means write-tree leaves the first copy alone, so the second copy is checked too.
+    git(a, ['write-tree']);
+    fs.utimesSync(path.join(a, '.git', 'index'), stamp, stamp);
+    expect(git(a, ['diff', '--name-only'])).toBe('other.txt\n');
+
+    const snap = await createSnapshot(a, SNAPSHOT_REF);
+    expect(git(a, ['show', `${snap.commit}:other.txt`])).toBe('other unstaged\n');
+  });
+
+  it('a move that didn\'t happen puts the snapshot ref back as it was: gone, or the earlier one for Restore (QA r3 finding 3)', async () => {
+    const { a } = setupRepos();
+    makeMess(a);
+    const first = await createSnapshot(a, SNAPSHOT_REF);
+    expect(first.previous).toBeNull();
+    await putBackRef(a, SNAPSHOT_REF, first.previous);
+    expect(git(a, ['for-each-ref', '--format=%(refname)', SNAPSHOT_REF])).toBe('');
+    // An earlier move's ref (kept for Restore) is overwritten by a new move, then comes back when it fails.
+    git(a, ['update-ref', SNAPSHOT_REF, 'HEAD']);
+    const earlier = git(a, ['rev-parse', SNAPSHOT_REF]).trim();
+    const second = await createSnapshot(a, SNAPSHOT_REF);
+    expect(second.previous).toBe(earlier);
+    await putBackRef(a, SNAPSHOT_REF, second.previous);
+    await putBackRef(a, SNAPSHOT_REF, second.previous);
+    expect(git(a, ['rev-parse', SNAPSHOT_REF]).trim()).toBe(earlier);
   });
 });

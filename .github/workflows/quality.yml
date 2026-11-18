@@ -21,6 +21,9 @@ jobs:
       runpane: ${{ steps.filter.outputs.runpane }}
       main: ${{ steps.filter.outputs.main }}
       relay: ${{ steps.filter.outputs.relay }}
+      # The jobs this run may skip, each with its reason (scripts/ci-gate.mjs).
+      # Skippable jobs read it in their `if:`, and CI result allows only these skips.
+      skip: ${{ steps.manifest.outputs.skip }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -63,6 +66,14 @@ jobs:
             - 'pnpm-workspace.yaml'
             - '.github/workflows/quality.yml'
 
+    - name: Declare the jobs this run may skip
+      id: manifest
+      env:
+        CHANGED_RUNPANE: ${{ steps.filter.outputs.runpane }}
+        CHANGED_MAIN: ${{ steps.filter.outputs.main }}
+        CHANGED_RELAY: ${{ steps.filter.outputs.relay }}
+      run: node scripts/ci-gate.mjs manifest >> "$GITHUB_OUTPUT"
+
   quality-checks:
     name: Quality Checks
     runs-on: ubuntu-latest
@@ -92,14 +103,11 @@ jobs:
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
-    # CI retries a failed unit test once; the retry report lists every retried
-    # test in the job summary, so flaky tests stay visible (--retry, see
-    # CONTRIBUTING.md). Playwright journeys are never retried.
     - name: Run main process test suite
-      run: CI=1 pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: CI=1 pnpm --filter main exec vitest run
 
     - name: Run frontend unit tests
-      run: CI=1 pnpm --filter frontend exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: CI=1 pnpm --filter frontend exec vitest run
 
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
@@ -143,47 +151,55 @@ jobs:
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait lint
 
+    # CI result's gate and its contract with this file (expected jobs, needs,
+    # skip manifest). Here rather than in CI result, which runs it every time
+    # at the end of the critical path.
+    - name: Test the CI result gate
+      if: ${{ !cancelled() }}
+      run: node --test scripts/ci-gate.test.mjs
+
   # Offline check of relative links and #anchors in every tracked markdown file.
   # External URLs are not fetched, so the check never flakes on the network.
   markdown-links:
     name: Markdown Links
     runs-on: ubuntu-latest
+    env:
+      LYCHEE_VERSION: 0.24.2
+      LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
 
-    # The action downloads lychee from GitHub's releases, which fail for hours
-    # at a time, so a failed first try runs once more. A broken link fails both.
+    # lychee is a pinned release binary kept in the Actions cache, so a run
+    # downloads nothing. A cache miss downloads it once; that download is not
+    # retried, so a failure there fails the job.
+    - name: Restore lychee
+      id: lychee-cache
+      uses: actions/cache@v5
+      with:
+        path: ${{ runner.temp }}/lychee
+        key: lychee-${{ env.LYCHEE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Download lychee
+      if: steps.lychee-cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p "$RUNNER_TEMP/lychee"
+        curl -fsSL -o "$RUNNER_TEMP/lychee.tar.gz" "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-x86_64-unknown-linux-gnu.tar.gz"
+        echo "${LYCHEE_SHA256}  $RUNNER_TEMP/lychee.tar.gz" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP/lychee" --strip-components=1
+
     - name: Check markdown links
-      id: links
-      continue-on-error: true
-      uses: lycheeverse/lychee-action@v2
-      with:
-        args: >-
-          --offline --include-fragments --no-progress
-          --exclude-path node_modules --exclude-path dist-electron
-          './**/*.md'
-        fail: true
+      run: >-
+        "$RUNNER_TEMP/lychee/lychee"
+        --offline --include-fragments --no-progress
+        --exclude-path node_modules --exclude-path dist-electron
+        './**/*.md'
 
-    - name: Wait before checking links again
-      if: steps.links.outcome == 'failure'
-      run: sleep 20
-
-    - name: Check markdown links again
-      if: steps.links.outcome == 'failure'
-      uses: lycheeverse/lychee-action@v2
-      with:
-        args: >-
-          --offline --include-fragments --no-progress
-          --exclude-path node_modules --exclude-path dist-electron
-          './**/*.md'
-        fail: true
-
-  # The smoke suites run beside quality-checks in three jobs. The two browser
+  # The smoke suites run beside quality-checks in five jobs. The two browser
   # shards split the minimal suite, which loads the renderer from Vite with a
-  # mocked Electron API. The Electron job runs the renderer selection races
-  # (also Vite) while better-sqlite3 rebuilds for Electron, then the journeys
-  # that launch main/dist in real Electron.
+  # mocked Electron API; the two renderer selection race shards also run from
+  # Vite alone. The Electron job launches main/dist in real Electron and runs the
+  # specs playwright.chat-tabs.config.ts lists.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke-browser:
@@ -209,6 +225,44 @@ jobs:
 
     - name: Run maintained functional smoke tests
       run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/2
+
+  # One worker per shard: the tests are CPU-bound, so four workers on one
+  # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
+  renderer-selection:
+    name: Renderer Selection Races (${{ matrix.shard }}/2)
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    # pnpm test:renderer-selection in two parts: the tests' type check runs
+    # once, in shard 1, behind the browser install.
+    - name: Start renderer test type check
+      if: ${{ matrix.shard == 1 }}
+      run: scripts/ci-background.sh start renderer-types pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json
+
+    - name: Install Playwright browser dependencies
+      run: pnpm exec playwright install --with-deps chromium
+
+    - name: Verify renderer selection races
+      run: pnpm exec playwright test --config=tests/renderer/playwright.config.ts --shard=${{ matrix.shard }}/2
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
+
+    - name: Check renderer test types
+      if: ${{ !cancelled() && matrix.shard == 1 }}
+      run: scripts/ci-background.sh wait renderer-types
 
   functional-smoke-electron:
     name: Functional Smoke (Electron)
@@ -252,19 +306,10 @@ jobs:
     - name: Finish Playwright browser dependencies install
       run: scripts/ci-background.sh wait playwright
 
-    # Needs no native module, so the rebuild finishes behind it; only the
-    # Electron launches below wait for it.
-    - name: Verify renderer selection races
-      run: pnpm test:renderer-selection
-      env:
-        PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
-
     - name: Finish native module rebuild for Electron
-      if: ${{ !cancelled() }}
       run: scripts/ci-background.sh wait electron-rebuild
 
     - name: Verify sandboxed Electron preload
-      if: ${{ !cancelled() }}
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
@@ -275,16 +320,18 @@ jobs:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
-  # change on a PR; always runs on pushes to main. Each OS is tested once at
-  # the runtime floors (Node 22.23.4 / Python 3.8) and once at current (Node 24.22.1 /
-  # Python 3.13) instead of the full Node x Python cross product. The Linux
+  # change on a PR; always runs on pushes to main. Linux is tested at the
+  # runtime floors (Node 22.23.4 / Python 3.8) and at current (Node 24.22.1 /
+  # Python 3.13); Windows at the floors only, since every Windows defect it has
+  # caught failed both Windows legs. No macOS leg: its one catch (#939) failed
+  # on Windows too. The Linux
   # floor entry runs on ubuntu-24.04. It was pinned there because setup-python
   # has no Python 3.8 build for Ubuntu 26.04 (ubuntu-latest); uv now installs
   # 3.8, so that reason no longer applies.
   runpane-wrapper-tests:
     name: Runpane Wrapper (${{ matrix.os }}, Node ${{ matrix.node-version }}, Python ${{ matrix.python-version }})
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.runpane == 'true'
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['runpane-wrapper-tests'] }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -292,10 +339,7 @@ jobs:
         include:
           - { os: ubuntu-24.04, node-version: '22.23.4', python-version: '3.8' }
           - { os: ubuntu-latest, node-version: '24.22.1', python-version: '3.13' }
-          - { os: macos-latest, node-version: '22.23.4', python-version: '3.8' }
-          - { os: macos-latest, node-version: '24.22.1', python-version: '3.13' }
           - { os: windows-2022, node-version: '22.23.4', python-version: '3.8' }
-          - { os: windows-2022, node-version: '24.22.1', python-version: '3.13' }
 
     steps:
     - name: Checkout code
@@ -306,7 +350,7 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
 
-    # Python 3.8 is not preinstalled on macOS or Windows runners, and
+    # Python 3.8 is not preinstalled on Windows runners, and
     # setup-python took 31-56 s to fetch it there. uv installs its standalone
     # CPython build in a few seconds. The test scripts read PYTHON.
     - name: Setup Python
@@ -387,21 +431,19 @@ jobs:
       shell: bash
       run: scripts/ci-background.sh wait handoff
 
-  # Ubuntu is already covered by quality-checks above; this job only adds the
-  # other platforms, and only when main-process code (or its deps) changed.
-  # Windows runs the suite in two vitest shards, each about half of it. macOS
-  # runs it whole: the org has 5 macOS runners, and a second macOS job waited
-  # longer for one than the shard saved.
+  # Ubuntu is already covered by quality-checks above; this job only adds
+  # Windows, and only when main-process code (or its deps) changed. It runs the
+  # suite in two vitest shards, each about half of it. Type Check and Lint
+  # already type-checks main, and a type check gives the same result on any OS.
   cross-os-main-tests:
     name: Main Process Tests (${{ matrix.os }}${{ matrix.shards > 1 && format(', {0}/{1}', matrix.shard, matrix.shards) || '' }})
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.main == 'true'
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['cross-os-main-tests'] }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, shard: 1, shards: 1 }
           - { os: windows-2022, shard: 1, shards: 2 }
           - { os: windows-2022, shard: 2, shards: 2 }
 
@@ -433,11 +475,6 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    - name: Start main process type checking
-      if: matrix.shard == 1
-      shell: bash
-      run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
-
     # The unit tests load the real electron package (main/src/utils/shellPath.ts);
     # without this, each test worker downloads Electron and they collide on Windows.
     - name: Fetch Electron
@@ -447,12 +484,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
-
-    - name: Finish main process type checking
-      if: ${{ !cancelled() && matrix.shard == 1 }}
-      shell: bash
-      run: scripts/ci-background.sh wait typecheck
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
   # The relay (Rust) and the computer side of QR pairing against it: a real relay
   # with its DNS helper, and Pebble validating certificates through that DNS.
@@ -460,7 +492,7 @@ jobs:
   relay-tests:
     name: Relay Tests
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.relay == 'true'
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['relay-tests'] }}
     runs-on: ubuntu-latest
     env:
       # The relay, Pebble and pane-direct suites fail here instead of skipping when a binary is missing.
@@ -534,14 +566,45 @@ jobs:
     - name: Run runpane relay against the relay
       run: pnpm run test:runpane-relay
 
-  # The one check branch protection requires. Skipped jobs pass; failed or
-  # cancelled ones fail it.
+  # The one check branch protection requires. It runs even when the run is
+  # cancelled, and fails unless every job in scripts/ci-gate.mjs EXPECTED_JOBS
+  # succeeded or skipped with a reason from Detect changed areas' manifest.
+  # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, typecheck-lint, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
-    if: ${{ !cancelled() }}
+    needs: [changes, quality-checks, typecheck-lint, markdown-links, functional-smoke-browser, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
-    - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-      run: exit 1
+    # Three files at the run's exact commit, read in parallel: about 2 s
+    # faster than actions/checkout and its post step. Any failed read fails.
+    - name: Fetch the gate
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        pids=()
+        for file in .github/workflows/quality.yml scripts/ci-gate.mjs scripts/ci-timings.mjs; do
+          mkdir -p "$(dirname "$file")"
+          gh api -H 'Accept: application/vnd.github.raw' "repos/$GITHUB_REPOSITORY/contents/$file?ref=$GITHUB_SHA" > "$file" &
+          pids+=("$!")
+        done
+        for pid in "${pids[@]}"; do wait "$pid"; done
+
+    - name: Decide
+      env:
+        NEEDS_JSON: ${{ toJSON(needs) }}
+      run: node scripts/ci-gate.mjs decide
+
+    # Each job's head SHA, runner and waiting/setup/running seconds, in the
+    # job summary and the log, for measuring CI speed (scripts/ci-timings.mjs).
+    - name: Record job timings
+      if: ${{ always() }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        node scripts/ci-timings.mjs --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/ci-run-timings.json" --summary "$GITHUB_STEP_SUMMARY"
+        cat "$RUNNER_TEMP/ci-run-timings.json"

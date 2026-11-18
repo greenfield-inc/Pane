@@ -30,9 +30,14 @@
 //   call COMMAND        a tool call for COMMAND (not run) that stays in progress until cancelled
 //   abandon             ends its turn with a tool call left open (as some agents do on cancel), then
 //                       runs a silent turn of its own that sends nothing until stopped
+//   abandon-own         replies, then runs a turn of its own that ends with a tool call left open, then
+//                       another silent turn of its own that sends nothing until stopped
+//   own-call            replies, then runs a turn of its own whose tool call stays in progress until stopped
+//   overlap             runs a silent tool call until cancelled, and meanwhile a turn of its own starts and ends
 //   background          replies, then runs a turn of its own with no prompt open (as Claude does for a
 //                       finished background task), announced as an async task to a client that takes them
 //
+// SCRIPTED_AGENT_OWN_TURN_AFTER_LOAD=1 runs a silent turn of its own shortly after each load.
 // SCRIPTED_AGENT_NO_STEERING=1 does not offer steering; SCRIPTED_AGENT_STEER_FAILS=1 answers each steer `failed` (as codex-acp can); SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired; SCRIPTED_AGENT_LIST_FAILS=1 refuses session/list.
 import { agent, methods, ndJsonStream, RequestError } from '@agentclientprotocol/sdk';
 import { Readable, Writable } from 'node:stream';
@@ -96,6 +101,16 @@ const app = agent()
     sessions.set(params.sessionId, session);
     for (const update of session.updates) await client.notify(methods.client.session.update, { sessionId: params.sessionId, update });
     await commands(client, params.sessionId);
+    if (process.env.SCRIPTED_AGENT_OWN_TURN_AFTER_LOAD === '1') {
+      // A silent turn of its own, soon after the load: sends nothing until stopped.
+      const send = update => client.notify(methods.client.session.update, { sessionId: params.sessionId, update });
+      setTimeout(() => void (async () => {
+        const asyncTaskId = `autonomous-turn-${randomUUID()}`;
+        await send({ sessionUpdate: 'async_task_spawned', asyncTaskId, name: 'Claude is working', taskType: 'turn', description: 'A background task finished.', showInTranscript: false, canStop: true });
+        while (!session.ownTurnStopped) await new Promise(resolve => setTimeout(resolve, 100));
+        await send({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: 'stopped' });
+      })(), 200);
+    }
     return { configOptions: configOptions(session) };
   })
   .onRequest(methods.agent.session.setConfigOption, ({ params }) => {
@@ -305,6 +320,47 @@ async function prompt({ params, client }) {
         while (!session.ownTurnStopped) await new Promise(resolve => setTimeout(resolve, 100));
         await send({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: 'stopped' });
       })();
+      return { stopReason: 'cancelled' };
+    }
+    if (word === 'abandon-own') {
+      void (async () => {
+        await new Promise(resolve => setTimeout(resolve, 40));
+        const first = `autonomous-turn-${randomUUID()}`;
+        await send({ sessionUpdate: 'async_task_spawned', asyncTaskId: first, name: 'Claude is working', taskType: 'turn', description: 'A background task finished.', showInTranscript: false, canStop: true });
+        await send({ sessionUpdate: 'tool_call', toolCallId: `tool-${randomUUID()}`, title: 'sleep 30', kind: 'execute', status: 'in_progress' });
+        await send({ sessionUpdate: 'async_task_state_update', asyncTaskId: first, state: 'completed' });
+        await new Promise(resolve => setTimeout(resolve, 40));
+        const second = `autonomous-turn-${randomUUID()}`;
+        await send({ sessionUpdate: 'async_task_spawned', asyncTaskId: second, name: 'Claude is working', taskType: 'turn', description: 'A background task finished.', showInTranscript: false, canStop: true });
+        while (!session.ownTurnStopped) await new Promise(resolve => setTimeout(resolve, 100));
+        await send({ sessionUpdate: 'async_task_state_update', asyncTaskId: second, state: 'stopped' });
+      })();
+      await say('Started it.');
+      return { stopReason: 'end_turn' };
+    }
+    if (word === 'own-call') {
+      void (async () => {
+        await new Promise(resolve => setTimeout(resolve, 40));
+        const asyncTaskId = `autonomous-turn-${randomUUID()}`;
+        await send({ sessionUpdate: 'async_task_spawned', asyncTaskId, name: 'Claude is working', taskType: 'turn', description: 'A background task finished.', showInTranscript: false, canStop: true });
+        const toolCallId = `tool-${randomUUID()}`;
+        await send({ sessionUpdate: 'tool_call', toolCallId, title: 'sleep 30', kind: 'execute', status: 'in_progress' });
+        while (!session.ownTurnStopped) await new Promise(resolve => setTimeout(resolve, 100));
+        await send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'failed' });
+        await send({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: 'stopped' });
+      })();
+      await say('Started it.');
+      return { stopReason: 'end_turn' };
+    }
+    if (word === 'overlap') {
+      const toolCallId = `tool-${randomUUID()}`;
+      await send({ sessionUpdate: 'tool_call', toolCallId, title: 'sleep 30', kind: 'execute', status: 'in_progress' });
+      const asyncTaskId = `autonomous-turn-${randomUUID()}`;
+      await send({ sessionUpdate: 'async_task_spawned', asyncTaskId, name: 'Claude is working', taskType: 'turn', description: 'A background task finished.', showInTranscript: false, canStop: true });
+      await send({ sessionUpdate: 'async_task_state_update', asyncTaskId, state: 'completed' });
+      await send({ sessionUpdate: 'agent_message_chunk', messageId: randomUUID(), content: { type: 'text', text: 'Own turn over.' } });
+      while (!session.cancelled) await new Promise(resolve => setTimeout(resolve, 100));
+      await send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'failed' });
       return { stopReason: 'cancelled' };
     }
     if (word === 'background') {

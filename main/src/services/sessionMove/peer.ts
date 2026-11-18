@@ -5,6 +5,7 @@ import { PaneError } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { callWorkspace, locateTailnetCandidate, readTailscaleStatus, savedSecretKey, savedWorkspaceSecrets } from '../tailnetMachines';
 import { normalizeRemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
+import { asTargetAnswer, TargetAnswerError } from './afterFreeze';
 import type { ConfigManager } from '../configManager';
 
 /** The other Pane in a move: one call on its daemon at a time, each with its own deadline. */
@@ -35,7 +36,9 @@ function socketPeer(name: string, paneDir: string): MovePeer {
   return {
     name,
     async invoke(channel, args, schema, timeoutMs) {
-      const result = await invokeDaemon(channel, args, runpaneBoundary.json, { paneDir, timeoutMs });
+      const result = await invokeDaemon(channel, args, runpaneBoundary.json, { paneDir, timeoutMs }).catch(error => {
+        throw error instanceof Error ? asTargetAnswer(error) : error;
+      });
       return decodeBoundary(result, schema);
     },
   };
@@ -59,7 +62,8 @@ function tailnetPeer(name: string, configManager: Pick<ConfigManager, 'getConfig
         if (answer.statusCode === 404 && answer.code === 'ERR_UNKNOWN_CHANNEL') {
           throw new PaneError('ERR_MOVE_TARGET_OUTDATED', `Pane on ${name} is too old to receive a Session move.`, `Update Pane on ${name}, then try again.`);
         }
-        throw new PaneError(answer.code ?? 'ERR_MOVE_TARGET_FAILED', answer.message ?? `${name} refused the call (HTTP ${answer.statusCode}).`, `Check Pane on ${name}, then try again.`);
+        // Pane on the target answered, with an error.
+        throw new TargetAnswerError(answer.code ?? 'ERR_MOVE_TARGET_FAILED', answer.message ?? `${name} refused the call (HTTP ${answer.statusCode}).`, `Check Pane on ${name}, then try again.`);
       }
       return decodeBoundary(answer.result ?? null, schema);
     },

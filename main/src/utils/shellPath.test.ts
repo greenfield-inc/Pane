@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearShellPathCache, findExecutableInPath, getShellPath, warmShellPath } from './shellPath';
 
 // A stand-in login shell: logs each run, fails its first run when asked, and
@@ -55,7 +55,7 @@ describe.skipIf(process.platform === 'win32')('shellPath', () => {
     ['getShellPath', async () => getShellPath()],
     ['warmShellPath', async () => { await warmShellPath(); return getShellPath(); }],
   ])('%s falls back to the next probe when the first one fails', async (_name, resolveShellPath) => {
-    process.env.FAIL_FIRST_PROBE = '1';
+    vi.stubEnv('FAIL_FIRST_PROBE', '1');
 
     const shellPath = await resolveShellPath();
 

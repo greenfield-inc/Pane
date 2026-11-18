@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { isOpenForSession } from '../../../shared/approvalOpen';
 import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import { showActionError } from './errorStore';
 
@@ -200,10 +201,11 @@ export function waitingCount(snapshot: NotifySnapshot | null): number {
 
 /**
  * How many items from this Session (its orchestrator, worker prompts, fallback items) wait on you;
- * with `machineId`, only that machine's (`local` for this computer).
+ * with `machineId`, only that machine's (`local` for this computer). A dismissed item still waits in
+ * Approvals but isn't open for its Session (`isOpenForSession`), so the row's count leaves it out.
  */
 export function sessionWaitingCount(snapshot: NotifySnapshot | null, sessionId: string, machineId?: string): number {
-  return snapshot?.items.filter((item) => countsAsWaiting(item) && item.source.session?.id === sessionId
+  return snapshot?.items.filter((item) => countsAsWaiting(item) && isOpenForSession(item) && item.source.session?.id === sessionId
     && (machineId === undefined || (item.machineId ?? 'local') === machineId)).length ?? 0;
 }
 

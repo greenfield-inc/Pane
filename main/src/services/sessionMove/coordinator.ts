@@ -36,13 +36,14 @@ import { sessionWorkspacePath } from '../sessionWorkspace';
 import { terminalPanelManager } from '../terminalPanelManager';
 import { databaseService } from '../database';
 import { locateConversation } from './conversations';
-import { createBundle, createSnapshot, ignoredPaths } from './gitSnapshot';
+import { createBundle, createSnapshot, ignoredPaths, putBackRef } from './gitSnapshot';
 import { agentFarmProfiles, cliVersion, type TargetPreflight, type TargetStatus } from './importer';
-import { agentFarmProfileOf, heldBackChecks } from './rules';
+import { agentFarmProfileOf, heldBackChecks, sessionOpenApprovals } from './rules';
 import { keepIgnoredFiles } from './ignoredFiles';
 import { runpaneWaits } from '../agentStatus/midTurn';
 import { readTabFields, sessionMoveCheckSchema, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveTab, type PackageFile } from './manifest';
 import { resolvePeer, type MovePeer } from './peer';
+import { settleAfterFreeze, type FreezeOutcome, type FreezeWait } from './afterFreeze';
 import { listSessionFolder } from './sessionFolder';
 import { sendFile, writeResultSchema, type ChunkSender, type WriteRequest } from './transfer';
 
@@ -52,6 +53,8 @@ const CALL_TIMEOUT_MS = 60_000;
 const WRITE_TIMEOUT_MS = 130_000;
 /** How long the target may stay silent before the freeze before the move gives up and restarts the tabs here. */
 const SILENCE_BEFORE_FREEZE_MS = 3 * 60_000;
+/** After the freeze, how long the target may stay silent before the dialog says so (the source keeps asking). */
+const SILENCE_AFTER_FREEZE_MS = 2 * 60_000;
 
 const targetPreflightSchema = boundary.object({
   machine: boundary.string,
@@ -72,6 +75,8 @@ const targetStatusSchema = boundary.object({
   leftBehind: boundary.optional(boundary.array(boundary.string)),
   missingEnv: boundary.optional(boundary.array(boundary.string)),
   retryable: boundary.optional(boundary.boolean),
+  rolledBack: boundary.optional(boundary.boolean),
+  durable: boundary.optional(boundary.boolean),
 });
 const doctorSchema = boundary.object({ daemon: boundary.optional(boundary.object({ features: boundary.optional(boundary.array(boundary.string)) })) });
 
@@ -106,8 +111,14 @@ interface SourceJob {
   cancelled: boolean;
   /** Panes whose run script the move stopped, restarted on cancel. */
   scripts: string[];
+  /** Snapshot refs the pack wrote, with what they pointed at before, put back if the move doesn't happen. */
+  snapshotRefs: Array<{ worktree: string; ref: string; previous: string | null }>;
   outDir: string;
   lastHeard: number;
+  /** The after-freeze loop, while it runs: one per move. */
+  settling?: Promise<void>;
+  /** Ends the loop's current wait early (Check again). */
+  wake?: () => void;
 }
 
 const STEP_TITLES = {
@@ -177,7 +188,7 @@ export class MoveCoordinator {
   // ── The manifest ───────────────────────────────────────────────────────
 
   /** The manifest without package files (preflight), or with them (`pack`). */
-  private async manifest(record: OrchestrationSessionRecord, moveId: string, pack?: { outDir: string; tabs: MovedTab[] }): Promise<{ manifest: MoveManifest; sources: Map<string, string> }> {
+  private async manifest(record: OrchestrationSessionRecord, moveId: string, pack?: { outDir: string; tabs: MovedTab[]; snapshotRefs: SourceJob['snapshotRefs'] }): Promise<{ manifest: MoveManifest; sources: Map<string, string> }> {
     const sources = new Map<string, string>();
     const panes: MovePane[] = [];
     const agentVersions: Record<string, string | null> = {};
@@ -212,6 +223,7 @@ export class MoveCoordinator {
         if (pack) {
           const ref = `refs/pane/move/${paneId}`;
           const created = await createSnapshot(worktreePath, ref);
+          pack.snapshotRefs.push({ worktree: worktreePath, ref, previous: created.previous });
           snapshot = { ref, commit: created.commit };
           bundle = `panes/${paneId}.bundle`;
           const out = path.join(pack.outDir, 'panes', `${paneId}.bundle`);
@@ -288,11 +300,7 @@ export class MoveCoordinator {
   private openApprovals(record: OrchestrationSessionRecord, paneIds: string[]): JsonObject[] {
     const store = this.services.approvalStore;
     if (!store) return [];
-    const ids = new Set([record.id, ...paneIds]);
-    return store.openItems().filter(item => {
-      const text = JSON.stringify(item);
-      return [...ids].some(id => text.includes(id));
-    }).map(item => toJsonObject(item));
+    return sessionOpenApprovals(store.openItems(), [record.id, ...paneIds]).map(item => toJsonObject(item));
   }
 
   // ── Preflight ──────────────────────────────────────────────────────────
@@ -375,11 +383,15 @@ export class MoveCoordinator {
       throw new PaneError('ERR_MOVE_NOT_READY', here ? `The Session can't move yet: ${block?.title}.` : `${target} isn't ready: ${block?.title ?? 'a check failed'}.`, here ? block?.detail ?? 'Check again.' : 'Fix what the dialog lists, then move again.');
     }
     const record = await this.manager().get({ sessionId });
+    // Another start may have begun the move during those awaits: join it rather than replace it, so
+    // there is never a second job whose clean-up could put back the running move's snapshot refs.
+    const active = this.jobs.get(sessionId);
+    if (active && !['done', 'failed', 'cancelled'].includes(active.progress.phase)) return { ...active.progress };
     const moveId = randomUUID();
     const tabs = this.tabsOf(record);
     const job: SourceJob = {
       record, peer: resolvePeer(target, this.services.configManager), paneIds: [record.internalSessionId, ...this.memberPaneIds(record)], tabs,
-      stopNow: false, cancelled: false, scripts: [], outDir: path.join(getAppDirectory(), 'moves-out', moveId), lastHeard: Date.now(),
+      stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], outDir: path.join(getAppDirectory(), 'moves-out', moveId), lastHeard: Date.now(),
       progress: {
         moveId, sessionId, sessionName: record.name, target, phase: 'waiting', waiting: [], stoppedTabs: 0, totalTabs: tabs.length,
         steps: steps(), frozen: false, updatedAt: new Date().toISOString(),
@@ -395,27 +407,45 @@ export class MoveCoordinator {
     const job = this.jobs.get(sessionId) ?? await this.recoverFrozen(sessionId);
     if (!job) return null;
     if (recheck && job.progress.phase === 'confirming') void this.recheck(job).catch(() => undefined);
+    else if (job.progress.frozen) this.settle(job);
     return { ...job.progress, waiting: [...job.progress.waiting], steps: job.progress.steps.map(step => ({ ...step })) };
   }
 
   /**
    * A Session still frozen as Moving after Pane restarted mid-move: the target may run it, so it
-   * stays frozen, and the dialog can ask the target again (Check again) to retire it here.
+   * stays frozen, and the move carries on asking the target until its record decides it.
    */
   private async recoverFrozen(sessionId: string): Promise<SourceJob | undefined> {
     const record = await this.manager().get({ sessionId }).catch(() => undefined);
     if (record?.move?.state !== 'moving') return undefined;
+    const existing = this.jobs.get(sessionId);
+    if (existing) return existing;
+    // Every tab was stopped by the move; an agent tab starts again on its conversation if the move is rolled back.
+    const tabs = this.tabsOf(record).map(tab => ({
+      ...tab, stopped: true,
+      running: tab.running || tab.kind === 'chat' || !!readTabFields(toJsonObject(tab.panel.state.customState ?? {})).agentId,
+    }));
     const job: SourceJob = {
       record, peer: resolvePeer(record.move.machine, this.services.configManager), paneIds: [record.internalSessionId, ...this.memberPaneIds(record)],
-      tabs: this.tabsOf(record), stopNow: false, cancelled: false, scripts: [], outDir: path.join(getAppDirectory(), 'moves-out', record.move.moveId), lastHeard: Date.now(),
+      tabs, stopNow: false, cancelled: false, scripts: [], snapshotRefs: [], outDir: path.join(getAppDirectory(), 'moves-out', record.move.moveId), lastHeard: Date.now(),
       progress: {
-        moveId: record.move.moveId, sessionId, sessionName: record.name, target: record.move.machine, phase: 'confirming', waiting: [], stoppedTabs: 0, totalTabs: 0,
+        moveId: record.move.moveId, sessionId, sessionName: record.name, target: record.move.machine, phase: 'confirming', waiting: [], stoppedTabs: tabs.length, totalTabs: tabs.length,
         steps: steps().map(step => ({ ...step, state: step.id === 'start' ? 'running' : 'done' })), frozen: true, updatedAt: new Date().toISOString(),
-        error: { message: `${record.move.machine} hasn't confirmed the move yet.`, next: `The Session stays paused here so it never runs twice. Check again, or open it on ${record.move.machine}.` },
+        error: { message: `Asking ${record.move.machine} whether the move finished.`, next: `The Session stays paused here until ${record.move.machine} answers, so it never runs twice.` },
       },
     };
     this.jobs.set(sessionId, job);
+    this.settle(job);
     return job;
+  }
+
+  /** On app start: every Session left frozen by a move carries on to its outcome without the dialog. */
+  async resume(): Promise<void> {
+    const sessions = (await this.services.orchestrationSessionManager?.list())?.sessions ?? [];
+    for (const session of sessions) {
+      if (session.move?.state !== 'moving') continue;
+      await this.recoverFrozen(session.id).catch(error => console.warn(`[SessionMove] The move of ${session.name} didn't resume:`, error));
+    }
   }
 
   stopNow({ sessionId }: SessionRequest): SessionMoveProgress {
@@ -460,7 +490,7 @@ export class MoveCoordinator {
     // Asked again once every tab stopped: Stop now can leave a queue, and an approval can open while turns end.
     const held = this.heldBackChecks(record, true)[0];
     if (held) throw new PaneError('ERR_MOVE_HELD_BACK', `${held.title}, so the Session didn't move.`, held.detail ?? 'Check again.');
-    const { manifest, sources } = await this.manifest(record, job.progress.moveId, { outDir: job.outDir, tabs: job.tabs });
+    const { manifest, sources } = await this.manifest(record, job.progress.moveId, { outDir: job.outDir, tabs: job.tabs, snapshotRefs: job.snapshotRefs });
     this.setStep(job, 'pack', 'done', `${manifest.panes.filter(pane => pane.role === 'member').length} Panes, ${manifest.panes.reduce((sum, pane) => sum + pane.tabs.filter(tab => tab.conversation).length, 0)} conversations, the Session folder`);
     this.checkCancelled(job);
 
@@ -494,30 +524,71 @@ export class MoveCoordinator {
     this.touch(job, { frozen: true });
     this.setStep(job, 'start', 'running');
     await this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.start).catch(() => undefined);
-    await this.confirm(job, built);
+    this.settle(job, built);
+    await job.settling;
   }
 
   /** Check again after the freeze: a target whose start failed before any tab started is asked to start again. */
   private async recheck(job: SourceJob): Promise<void> {
     const status = await this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.status).catch(() => undefined);
     if (status?.stage === 'failed' && status.retryable) await this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.start).catch(() => undefined);
-    await this.confirm(job);
+    this.settle(job);
+    job.wake?.();
   }
 
-  /** After the freeze: wait for the target to start the tabs, then retire here. Contact lost → confirming, never a restart. */
-  private async confirm(job: SourceJob, built?: TargetStatus): Promise<void> {
-    if (job.progress.phase === 'done') return;
-    let status: TargetStatus;
-    try {
-      status = await this.waitFor(job, ['started'], () => undefined, 2 * 60_000);
-    } catch (error) {
-      if (error instanceof PaneError && error.code === 'ERR_MOVE_TARGET_FAILED') {
-        this.touch(job, { phase: 'confirming', error: { message: error.message, next: error.next ?? 'Check again.' } });
+  /**
+   * After the freeze: asks the target until its durable record decides the move (F-10, J9). It
+   * resends the start while the target says built, retires here once it started, and releases
+   * the Session here only on the target's proof it rolled back. Silence keeps it frozen.
+   */
+  private settle(job: SourceJob, built?: TargetStatus): void {
+    if (job.settling || job.progress.phase === 'done' || !job.progress.frozen) return;
+    const target = job.progress.target;
+    job.settling = settleAfterFreeze({
+      status: () => this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.status),
+      start: () => this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.start),
+      rollBack: () => this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.abort),
+    }, {
+      onWait: wait => this.showWait(job, wait),
+      stopped: () => job.progress.phase === 'done' || !job.progress.frozen || this.jobs.get(job.progress.sessionId) !== job,
+      sleep: ms => new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, ms);
+        job.wake = () => { clearTimeout(timer); resolve(); };
+      }),
+    }).then(outcome => outcome && this.finish(job, outcome, built)).catch(error => {
+      console.error(`[SessionMove] The move of ${job.progress.sessionName} couldn't finish:`, error);
+      this.touch(job, { phase: 'confirming', error: { message: `The move to ${target} couldn't finish here: ${reasonOf(error)}.`, next: `The Session stays paused here so it never runs twice. Check again, or open it on ${target}.` } });
+    }).finally(() => { job.settling = undefined; });
+  }
+
+  private showWait(job: SourceJob, wait: FreezeWait): void {
+    const target = job.progress.target;
+    const stays = `The Session stays paused here so it never runs twice; Pane keeps asking ${target}.`;
+    switch (wait.kind) {
+      case 'starting':
+        this.touch(job, { phase: 'moving', error: undefined, waitReason: undefined });
         return;
-      }
-      this.touch(job, { phase: 'confirming', error: { message: `${job.progress.target} hasn't confirmed the move yet.`, next: `The Session stays paused here so it never runs twice. Check again, or open it on ${job.progress.target}.` } });
+      case 'startFailed':
+        this.touch(job, { phase: 'confirming', waitReason: 'startFailed', error: { message: wait.status.error?.message ?? `${target} couldn't start the Session.`, next: wait.status.error?.next ?? 'Check again to retry.' } });
+        return;
+      case 'unknown':
+        this.touch(job, { phase: 'confirming', waitReason: 'undecided', error: { message: `${target} answers but can't say yet whether the move finished${wait.status.error ? ` (${wait.status.error.message})` : ''}.`, next: `${stays} Open the Session on ${target} to check it there.` } });
+        return;
+      case 'answeredError':
+        this.touch(job, { phase: 'confirming', waitReason: 'undecided', error: { message: `${target} answers but can't say yet whether the move finished: ${wait.message}`, next: `${stays} ${wait.next ?? `Open Pane on ${target} to check it.`}` } });
+        return;
+      case 'unreachable':
+        if (Date.now() - wait.since < SILENCE_AFTER_FREEZE_MS && job.progress.phase !== 'confirming') return;
+        this.touch(job, { phase: 'confirming', waitReason: 'unreachable', error: { message: `${target} isn't answering (${wait.error}).`, next: `${stays} Open Pane on ${target}.` } });
+    }
+  }
+
+  private async finish(job: SourceJob, outcome: FreezeOutcome, built?: TargetStatus): Promise<void> {
+    if (outcome.kind === 'rolledBack') {
+      await this.release(job);
       return;
     }
+    const status = outcome.status;
     const kept = await this.retire(job);
     this.setStep(job, 'start', 'done', `${status.resumed ?? 0} tabs resumed`);
     this.touch(job, {
@@ -528,6 +599,16 @@ export class MoveCoordinator {
       },
     });
     await fs.promises.rm(job.outDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+
+  /** The target proved the move rolled back there: the Session is unfrozen and its tabs restart here. */
+  private async release(job: SourceJob): Promise<void> {
+    const target = job.progress.target;
+    await this.manager().setMoveMark(job.record.id, undefined, `The move to ${target} was rolled back there; the Session runs here again.`);
+    this.touch(job, { frozen: false });
+    await this.restartHere(job, false);
+    this.setStep(job, 'start', 'failed');
+    this.touch(job, { phase: 'failed', error: { message: `${target} rolled the move back before it started the Session, so nothing runs there. The Session is running here again, unchanged.`, next: 'Move it again when you are ready.' } });
   }
 
   /** Archives the moved Panes here; returns what stayed behind instead, for the summary. */
@@ -651,10 +732,12 @@ export class MoveCoordinator {
     }
   }
 
-  /** Before the freeze: restarts the stopped tabs here and removes whatever the target made. */
-  /** Returns whether the target confirmed it removed what it had set up. */
-  private async restartHere(job: SourceJob): Promise<boolean> {
-    const cleaned = await job.peer.invoke(SESSION_MOVE_TARGET_CHANNELS.abort, [{ moveId: job.progress.moveId }], boundary.json, CALL_TIMEOUT_MS).then(() => true, error => {
+  /**
+   * Restarts the stopped tabs here; before the freeze it first asks the target to remove what it
+   * made (`askTarget`). Returns whether the target confirmed it removed what it had set up.
+   */
+  private async restartHere(job: SourceJob, askTarget = true): Promise<boolean> {
+    const cleaned = !askTarget || await job.peer.invoke(SESSION_MOVE_TARGET_CHANNELS.abort, [{ moveId: job.progress.moveId }], boundary.json, CALL_TIMEOUT_MS).then(() => true, error => {
       console.warn('[SessionMove] The target could not be told to clean up:', error);
       return false;
     });
@@ -677,6 +760,10 @@ export class MoveCoordinator {
       }
     }
     await restartRunScripts(this.registry, job.scripts);
+    // The move didn't happen: its snapshot refs go, and an earlier move's ref (kept for Restore) comes back.
+    for (const { worktree, ref, previous } of job.snapshotRefs) {
+      await putBackRef(worktree, ref, previous).catch(error => console.warn(`[SessionMove] ${ref} wasn't put back:`, error));
+    }
     await fs.promises.rm(job.outDir, { recursive: true, force: true }).catch(() => undefined);
     return cleaned;
   }

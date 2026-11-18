@@ -54,6 +54,14 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   first, and keep refits hidden behind its loading overlay (`isRefreshing`).
 - UI: theme tokens only; swapping indicators share a fixed-size box; animations
   on one surface share a period.
+- Unit test cleanup: Vitest runs many test files in one worker, in shuffled
+  file order. A test file leaves the process as it found it: real timers,
+  `process.env` (use `vi.stubEnv`), globals (use `vi.stubGlobal`),
+  `process.platform` and `process.arch`, and the working directory. The setup
+  files (`main/src/test/setup.ts`, `frontend/src/test/setup.ts`) reset modules
+  and `process` listeners between files and fail any file that leaves the rest
+  behind. To replay a run's order, pass the seed it prints:
+  `vitest run --sequence.seed=<seed>`.
 - Errors say what happened, why, what changed, and the next step: throw
   `PaneError` (main) or `RunpaneError` (CLI) with a `code` and `next`. See
   [How Pane reports errors](CONTRIBUTING.md#how-pane-reports-errors).
@@ -89,7 +97,7 @@ Loops: before `runpane loops create` or `loops update`, read its `--help`. A loo
 
 To-dos: `runpane todos` (or the `todos_*` MCP tools) is a work list Pane keeps moving. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists, with `runpane todos attach <T-n> <file|url>`; ask questions about a to-do with `--todo <T-n>`; to check back later (after a deploy, or for a reply), snooze it with `runpane todos snooze <T-n> --until <time> --note <text>` instead of waiting in a turn; `runpane docs read --doc docs/TODOS.md` has the rest.
 
-Profiles: a profile is a team of agents and a fixed workflow in one file. `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `"$PANE_RUNPANE_BIN" report --outcome "<outcome>"`, using one of the outcomes its first message lists.
+Profiles: a profile is a team of agents and a fixed workflow in one file. Once Profiles is on (Settings › Advanced › Profiles), `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `"$PANE_RUNPANE_BIN" report --outcome "<outcome>"`, using one of the outcomes its first message lists.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 

@@ -53,9 +53,7 @@ describe('installBundledAgentFarm', () => {
     expect(Object.keys(status.plugins)).toEqual([...BUNDLED_AGENT_FARM_PLUGINS]);
     expect(calls.map((call) => call.args.slice(1))).toEqual([
       ['plugin', 'install', '--config-root', path.join(paneDir, 'agent-farm')],
-      ['plugin', 'install', 'orchestra', '--config-root', path.join(paneDir, 'agent-farm')],
-      ['plugin', 'install', 'bigbrain', '--config-root', path.join(paneDir, 'agent-farm')],
-      ['plugin', 'install', 'machine-security', '--config-root', path.join(paneDir, 'agent-farm')],
+      ['plugin', 'install', 'dcouple', '--config-root', path.join(paneDir, 'agent-farm')],
     ]);
     expect(calls.every((call) => call.env.ELECTRON_RUN_AS_NODE === '1')).toBe(true);
     const manifest = JSON.parse(readFileSync(path.join(paneDir, 'agent-farm', 'pane-manifest.json'), 'utf8'));

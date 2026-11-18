@@ -132,6 +132,7 @@ export type SettingsSettingId =
   | 'autopilot'
   | 'autopilot-instructions'
   | 'notes'
+  | 'profiles'
   | 'usage-leaderboard';
 
 export interface SettingsTarget {

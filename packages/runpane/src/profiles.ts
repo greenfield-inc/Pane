@@ -183,7 +183,7 @@ async function launchRepo(parsed: ParsedArgs): Promise<RepoSelector> {
 
 function profileState(profile: LibraryProfileView): string {
   if (!profile.valid) return `invalid: ${profile.errors[0]?.message ?? 'no reason given'}`;
-  if (profile.teamOnly) return 'team only';
+  if (profile.teamOnly) return 'no flow';
   return profile.launchable ? 'launchable' : 'not launchable';
 }
 
@@ -211,7 +211,7 @@ function describeProfile(profile: LibraryProfileView): string[] {
         if (step.next) lines.push(`    (answer) → ${step.next}`);
       }
     } else {
-      lines.push('', 'Steps: none (a team only, with no workflow to launch)');
+      lines.push('', 'Steps: none (no flow, so nothing to launch)');
     }
   }
   if (profile.errors.length > 0) {

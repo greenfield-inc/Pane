@@ -310,7 +310,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   const theme = useTheme();
   useScreenJourney('terminal', panel.id);
   const { profile } = useDaemon();
-  const { presence } = useConnectionPresence();
+  const { live } = useConnectionPresence();
   const terminal = useTerminal(panel.id, panel.sessionId);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
@@ -326,8 +326,9 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   }, [voiceSaved]);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  // Input waits for a live terminal; until then its last screen stays up, dimmed.
-  const disabled = terminal.status !== 'ready' || presence !== 'connected';
+  // Input waits for a live terminal. While the connection comes back the last screen stays at full
+  // strength and keys wait for it (useTerminal); past the grace window it dims.
+  const disabled = terminal.status !== 'ready' || !live;
   const shown = terminal.status === 'ready' || terminal.hasContent;
   useJourneyMark('terminal', 'content', terminal.hasContent);
   useJourneyMark('terminal', 'live', !disabled);

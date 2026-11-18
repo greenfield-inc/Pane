@@ -1,4 +1,5 @@
 import type { NotifyChoice, NotifyItem, NotifyLink, NotifySubQuestion, NotifyVersion } from '../../../../shared/types/notify';
+import { isOpenForSession } from '../../../../shared/approvalOpen';
 import { approvalStatus, replyReader, sentenceStart } from '../../../../shared/approvalStatus';
 import { todoRef } from '../../../../shared/types/todos';
 
@@ -204,10 +205,10 @@ export function askedBy(item: NotifyItem): string[] {
   return parts;
 }
 
-/** Waiting items connected to a Session (its own, its workers', Autopilot's about it), oldest first. */
+/** Items open for a Session (its own, its workers', Autopilot's about it; not dismissed), oldest first. */
 export function sessionApprovals(items: readonly NotifyItem[], sessionId: string): NotifyItem[] {
   return items
-    .filter(item => item.state === 'waiting' && !item.relay && item.staleSince === undefined
+    .filter(item => isOpenForSession(item) && !item.relay && item.staleSince === undefined
       && (item.source.session?.id === sessionId || (item.connected?.kind === 'session' && item.connected.id === sessionId)))
     .sort((a, b) => a.createdAt - b.createdAt);
 }

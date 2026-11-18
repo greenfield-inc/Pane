@@ -281,10 +281,6 @@ export class API {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.profiles.list();
     },
-    async ownAgentFarm() {
-      if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.profiles.ownAgentFarm();
-    },
     async get(name: string) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.profiles.get(name);

@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
@@ -70,6 +71,15 @@ export default defineConfig(({ command }) => ({
     strictPort: true
   },
   base: './',
+  test: {
+    // One worker runs many files in turn; src/test/setup.ts resets modules and
+    // fails any file that leaves process state behind. File order is shuffled
+    // so a file that depends on another's leftovers fails too; the run prints
+    // its seed.
+    isolate: false,
+    sequence: { shuffle: { files: true, tests: false } },
+    setupFiles: ['./src/test/setup.ts'],
+  },
   build: {
     target: 'es2021',
     // Ensure assets are copied and paths are relative

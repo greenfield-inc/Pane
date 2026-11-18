@@ -1,6 +1,7 @@
 import { registerRemoteWorkspaceRestore } from '../utils/remoteRestoration';
 import { useApprovalColumnStore } from '../stores/approvalColumnStore';
 import { SessionApprovalColumn, SessionApprovalsButton } from './approvals/SessionApprovals';
+import { openNewSessionApprovals } from './approvals/useSessionApprovals';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Info, RefreshCw, Settings, Terminal, X } from 'lucide-react';
@@ -759,6 +760,8 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
   }, [onOverviewUpdate]);
 
   const approvalOpen = useApprovalColumnStore(state => state.open[`session:${view.session.id}`] !== undefined);
+  // A new approval opens beside the chat on its own; shown inside another approval's column, it doesn't (D-114).
+  useEffect(() => (chrome.inline ? undefined : openNewSessionApprovals(view.session.id, view.panel.id)), [chrome.inline, view.session.id, view.panel.id]);
   const sessionControls = (<>
     {/* Shown inside another approval's column (its origin tab), the Session doesn't open approvals of its own. */}
     {!chrome.inline && <SessionApprovalsButton sessionId={view.session.id} />}

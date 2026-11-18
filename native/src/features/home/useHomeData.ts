@@ -28,6 +28,8 @@ export function useCurrentMachine({ name, unreachable = false, retry }: { name?:
       ? { projects: projects.data ?? [], statuses: statuses.data, permissions: permissions.data, notify: notify.data, sessions: sessions.data?.sessions }
       : undefined,
     offlineSince: unreachable ? projects.dataUpdatedAt : undefined,
+    // Wait for statuses too, so dots don't flip from "No agent" to their real status.
+    waiting: { lists: projects.isPending || statuses.isPending, approvals: permissions.isPending || notify.isPending },
     // Connected, but the first read failed: say why, with Try again.
     error: !unreachable && !projects.data && projects.isError ? projects.error.message : undefined,
     retry: unreachable && retry ? retry : () => void projects.refetch(),
@@ -40,7 +42,6 @@ export function useCurrentMachine({ name, unreachable = false, retry }: { name?:
     notify,
     sessions,
     feed,
-    // Wait for statuses too, so dots don't flip from "No agent" to their real status.
     loading: projects.isPending || statuses.isPending,
     refetch: () => Promise.all([projects.refetch(), statuses.refetch(), permissions.refetch(), notify.refetch(), sessions.refetch()]),
   };

@@ -1,3 +1,5 @@
+import { isOpenForSession } from '../../../../shared/approvalOpen';
+import type { NotifyItem } from '../../../../shared/types/notify';
 import type { SessionMoveCheck } from '../../../../shared/types/sessionMove';
 import type { PathMap } from './pathMap';
 
@@ -39,4 +41,16 @@ export function heldBackChecks(approvals: number, tabs: readonly HeldBackTab[], 
     checks.push({ id: `queue:${tab.panelId}`, level: 'block', title: `${tab.queued} message${one ? '' : 's'} waiting in ${tab.title}`, detail: `Queued messages can't move yet. Start ${tab.title} so ${one ? 'it sends' : 'they send'}, or remove ${one ? 'it' : 'them'}, then check again.` });
   }
   return checks;
+}
+
+/**
+ * The approvals that hold a move back: open for the Session (a dismissed one doesn't count), or an
+ * answer still in its Undo hold, which has to reach its tab first. `ids` are the Session's and its Panes'.
+ */
+export function sessionOpenApprovals(items: readonly NotifyItem[], ids: readonly string[]): NotifyItem[] {
+  return items.filter(item => {
+    if (item.state !== 'sent' && !isOpenForSession(item)) return false;
+    const text = JSON.stringify(item);
+    return ids.some(id => text.includes(id));
+  });
 }

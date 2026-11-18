@@ -12,6 +12,9 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
 let pending = false;
 
+/** How long after a return to the app the sync waits, so the screen's reads go first. */
+const AFTER_RETURN_MS = 3_000;
+
 /**
  * Copies the newest integration keys between every host this phone has saved.
  * The phone relays keys and keeps no copy. Hosts too old to share keys, out of
@@ -63,10 +66,16 @@ export function SharedCredentialSync() {
   }, [profiles]);
 
   useEffect(() => {
+    // After a return, the screen's own reads go first.
+    let later: ReturnType<typeof setTimeout> | undefined;
     const subscription = AppState.addEventListener('change', status => {
-      if (status === 'active') requestSharedCredentialSync();
+      if (status === 'active') later = setTimeout(requestSharedCredentialSync, AFTER_RETURN_MS);
+      else clearTimeout(later);
     });
-    return () => subscription.remove();
+    return () => {
+      clearTimeout(later);
+      subscription.remove();
+    };
   }, []);
 
   return null;

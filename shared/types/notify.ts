@@ -356,6 +356,11 @@ export interface NotifyItem extends NotifyQuestion {
   /** Epoch ms when a snoozed question comes back to the strip. */
   snoozedUntil?: number;
   /**
+   * Epoch ms the person dismissed it (Dismiss on a card). It still waits in Approvals, but no longer
+   * counts as open for its Session (`isOpenForSession`) until it changes: a new version, Undo or a reopen.
+   */
+  dismissedAt?: number;
+  /**
    * Snapshot only, with `machine`: `local` (this computer) or the saved machine's id. A saved
    * machine's card has the id `<machineId>:<its id there>`, as the glasses key cards.
    */

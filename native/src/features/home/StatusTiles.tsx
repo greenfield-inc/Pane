@@ -14,7 +14,7 @@ const TILES: ReadonlyArray<{ id: BoardTile; label: string; color: keyof ThemeCol
 
 /** Four counts in a 2×2 grid. The selected tile wears its status color and filters the list below. */
 export function StatusTiles({ counts, selected, onSelect }: {
-  counts: Record<BoardTile, number> | undefined;
+  counts: Partial<Record<BoardTile, number>> | undefined;
   selected: BoardTile;
   onSelect: (tile: BoardTile) => void;
 }) {
