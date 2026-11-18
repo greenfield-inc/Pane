@@ -215,8 +215,15 @@ test('on a remote desktop, Open in your browser opens the host\'s .html page thr
   await loadConfig(page, 'remote');
   await answerPortsList(page, snapshot());
 
+  await page.evaluate(() => window.portsTest.holdLocalOpens());
   await page.getByTitle('Open in your browser').click();
   await expect.poll(() => page.evaluate(() => window.portsTest.openedLocally)).toEqual(['file:///Users/me/session/index.html browser-1']);
+
+  // Copying the page from the host takes a while: a second click waits for the first instead of opening another copy.
+  await page.getByTitle('Opening in your browser…').click();
+  await page.evaluate(() => window.portsTest.finishLocalOpen?.());
+  await expect(page.getByTitle('Open in your browser')).toBeVisible();
+  expect(await page.evaluate(() => window.portsTest.openedLocally)).toHaveLength(1);
 });
 
 test('on a remote desktop, Open in your browser waits for a forwarded port', async ({ page }) => {
