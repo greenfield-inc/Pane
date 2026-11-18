@@ -5,6 +5,7 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { holdFocusOn } from '../../services/regionFocus';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { isTypingTarget } from '../../utils/typingTarget';
+import { OPEN_MENU_OR_DIALOG } from './approvalDom';
 
 /**
  * Approvals there and back (D-239, D-251): one key opens Approvals and the
@@ -267,7 +268,7 @@ export function handleApprovalsEscape(event: KeyboardEvent): void {
   if (useNavigationStore.getState().activeView !== 'notify') return;
   // A focused <select> doesn't hold Esc here: Esc still leaves Approvals, as it always has.
   if (isTypingTarget(event.target, { selects: false })) return;
-  if (document.querySelector('[role="menu"], [role="listbox"], [aria-modal="true"]')) return;
+  if (document.querySelector(OPEN_MENU_OR_DIALOG)) return;
   event.preventDefault();
   leaveApprovals();
 }

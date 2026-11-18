@@ -1,3 +1,5 @@
+import { APPROVAL_COLUMN } from './approvalDom';
+
 /**
  * ⌘↩ (the send-approval command) sends from anywhere in an approval: each open Decide tab says
  * how to send it, and the command finds the one in the column that has keyboard focus.
@@ -14,7 +16,7 @@ export function registerApprovalSend(root: HTMLElement, send: () => void): () =>
 }
 
 function focusedSend(): (() => void) | null {
-  const column = document.activeElement?.closest('[data-testid="approval-column"]');
+  const column = document.activeElement?.closest(APPROVAL_COLUMN);
   if (!column) return null;
   for (const [root, send] of senders) {
     if (root.isConnected && column.contains(root)) return send;
