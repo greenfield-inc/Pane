@@ -110,7 +110,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const [resolvedRunScript, setResolvedRunScript] = useState<{ command: string; source: string } | null>(null);
   const { config, fetchConfig, updateConfig } = useConfigStore();
   const chatTabs = isChatTabsEnabled(config);
-  // Profile… waits for Settings › Advanced › Profiles (D-106).
+  // Pane's profiles wait for Settings › Advanced › Profiles (D-106); with chat tabs on, Profile… still opens an Agent Farm profile by name.
   const profilesOn = isProfilesEnabled(config);
   const chatAgents = menuChatAgents(useChatAgents(chatTabs ? window.electronAPI.chatTab : undefined));
   const [showDropdown, setShowDropdown] = useState(false);
@@ -638,18 +638,16 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                       <span className="truncate">{agent.label}</span>
                     </button>
                   ))}
-                  {profilesOn && (
-                    <button
-                      type="button"
-                      ref={itemRef()}
-                      role="menuitem"
-                      className={menuItemClass}
-                      onClick={() => { setShowDropdown(false); setProfileDialogOpen(true); }}
-                    >
-                      <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
-                      <span className="truncate">Profile…</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    ref={itemRef()}
+                    role="menuitem"
+                    className={menuItemClass}
+                    onClick={() => { setShowDropdown(false); setProfileDialogOpen(true); }}
+                  >
+                    <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span className="truncate">Profile…</span>
+                  </button>
                   <button
                     type="button"
                     ref={itemRef()}
@@ -898,7 +896,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
       <AgentFarmProfileDialog
         onClose={() => setProfileDialogOpen(false)}
         onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: session.id, launch }); }}
-        onLaunchProfile={profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); }}
+        onLaunchProfile={profilesOn ? profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); } : undefined}
         byName={chatTabs}
       />
     )}

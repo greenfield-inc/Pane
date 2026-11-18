@@ -66,8 +66,8 @@ function StepNode({ node, faded }: { node: FlowNodeLayout; faded: boolean }) {
       {step.kind === 'command' && step.title !== step.run && (
         // A titled command still shows the command it runs.
         <>
-            <text x={node.x} y={node.y - 3} textAnchor="middle" className={cn('text-[13px] font-semibold', step.outcomes.length === 0 ? 'fill-status-success' : 'fill-text-primary')}>{step.title}</text>
-            <text x={node.x} y={node.y + 14} textAnchor="middle" className="fill-text-secondary font-mono text-[11px]" data-testid="profile-flow-command">{step.run.length > Math.floor(node.width / 6.8) ? `${step.run.slice(0, Math.floor(node.width / 6.8) - 1)}…` : step.run}</text>
+          <text x={node.x} y={node.y - 3} textAnchor="middle" className={cn('text-[13px] font-semibold', step.outcomes.length === 0 ? 'fill-status-success' : 'fill-text-primary')}>{step.title}</text>
+          <text x={node.x} y={node.y + 14} textAnchor="middle" className="fill-text-secondary font-mono text-[11px]" data-testid="profile-flow-command">{step.run.length > Math.floor(node.width / 6.8) ? `${step.run.slice(0, Math.floor(node.width / 6.8) - 1)}…` : step.run}</text>
         </>
       )}
       {step.kind !== 'command' && (
@@ -108,56 +108,49 @@ function StoryCards({ profile, entries }: { profile: Profile; entries: readonly 
 /**
  * A profile's workflow drawn from its file, the same way for every profile (D-4): one box per
  * step and one labelled arrow per outcome, choice or next. An example run lights its path over
- * the same boxes; a page icon on an agent outcome opens its samples. The example runs, the key
- * and the samples show only with `details` (D-109): without it the page shows just the graph.
+ * the same boxes; a page icon on an agent outcome opens its samples.
  */
-export function ProfileFlow({ profile, details }: { profile: Profile; details: boolean }) {
+export function ProfileFlow({ profile }: { profile: Profile }) {
   const layout = useMemo(() => layoutProfileFlow(profile), [profile]);
   const runIds = Object.keys(profile.runs);
-  const [chosenView, setView] = useState<string>('graph');
-  const [chosenOpen, setOpen] = useState<OpenSample | null>(null);
-  const view = details ? chosenView : 'graph';
-  const open = details ? chosenOpen : null;
+  const [view, setView] = useState<string>('graph');
+  const [open, setOpen] = useState<OpenSample | null>(null);
   const entries = view === 'graph' ? undefined : profile.runs[view];
   const lit = entries ? litPath(entries) : undefined;
   const runSample = (from: string, label: string) => entries?.find((entry) => entry.step === from && entry.took === label && entry.sample)?.sample;
   const samples = open ? profile.samples[open.step]?.[open.outcome] ?? [] : [];
 
   if (!profile.flow) {
-    return <p className="text-sm text-text-secondary" data-testid="profile-flow-team-only">This profile has no flow yet, so there is nothing to draw or launch. Its agents are under Details › Team.</p>;
+    return <p className="text-sm text-text-secondary" data-testid="profile-flow-team-only">This profile is team only: it has no workflow yet, so there is nothing to draw or launch. Its agents are under Team.</p>;
   }
   return (
     <div className="flex flex-col gap-3" data-testid="profile-flow">
-      {details && (
-        <>
-        <div className="flex flex-wrap items-center gap-3">
-          <div role="tablist" aria-label="Example runs" className="inline-flex overflow-hidden rounded-md border border-border-primary">
-            {['graph', ...runIds].map((id) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={view === id}
-                data-testid={`profile-run-toggle-${id}`}
-                onClick={() => { setView(id); setOpen(null); }}
-                className={cn('px-3 py-1 text-xs', view === id ? 'bg-surface-selected font-medium text-text-primary' : 'text-text-secondary hover:bg-surface-hover')}
-              >
-                {id === 'graph' ? 'The graph' : `Example run ${id}`}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-text-tertiary">{entries ? 'Faded steps are not used in this run; its order is in the cards below.' : 'Same graph every time; only the lit path and the samples change. Click a page icon to see an outcome\'s samples.'}</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <div role="tablist" aria-label="Example runs" className="inline-flex overflow-hidden rounded-md border border-border-primary">
+          {['graph', ...runIds].map((id) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={view === id}
+              data-testid={`profile-run-toggle-${id}`}
+              onClick={() => { setView(id); setOpen(null); }}
+              className={cn('px-3 py-1 text-xs', view === id ? 'bg-surface-selected font-medium text-text-primary' : 'text-text-secondary hover:bg-surface-hover')}
+            >
+              {id === 'graph' ? 'The graph' : `Example run ${id}`}
+            </button>
+          ))}
         </div>
-        <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-secondary" aria-label="Key">
-          <li className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 rounded-md border border-status-info" />agent step (judgment)</li>
-          <li className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 border border-text-secondary" />command (mechanical)</li>
-          <li className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 border border-status-warning [clip-path:polygon(20%_0,80%_0,100%_50%,80%_100%,20%_100%,0_50%)] " />you're asked</li>
-          <li className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 rounded border border-status-success" />ends the run</li>
-          <li>arrow colour = who chose: <span className="text-status-info">agent</span> · <span className="text-status-warning">you</span> · <span className="text-text-secondary">command</span></li>
-          <li className="flex items-center gap-1"><FileText className="h-3 w-3" aria-hidden="true" />= samples of what the agent produced</li>
-        </ul>
-        </>
-      )}
+        <p className="text-xs text-text-tertiary">{entries ? 'Faded steps are not used in this run; its order is in the cards below.' : 'Same graph every time; only the lit path and the samples change. Click a page icon to see an outcome\'s samples.'}</p>
+      </div>
+      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-text-secondary" aria-label="Key">
+        <li className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 rounded-md border border-status-info" />agent step (judgment)</li>
+        <li className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 border border-text-secondary" />command (mechanical)</li>
+        <li className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 border border-status-warning [clip-path:polygon(20%_0,80%_0,100%_50%,80%_100%,20%_100%,0_50%)] " />you're asked</li>
+        <li className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 rounded border border-status-success" />ends the run</li>
+        <li>arrow colour = who chose: <span className="text-status-info">agent</span> · <span className="text-status-warning">you</span> · <span className="text-text-secondary">command</span></li>
+        <li className="flex items-center gap-1"><FileText className="h-3 w-3" aria-hidden="true" />= samples of what the agent produced</li>
+      </ul>
       {/* mx-auto centres a narrow drawing; a wide one starts at the left edge and scrolls, so none of it is out of reach. */}
       <div className="overflow-x-auto rounded-lg border border-border-primary bg-surface-primary" data-testid="profile-flow-scroll">
         <svg className="mx-auto block" width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="img" aria-label={`${profile.name} workflow`} data-testid="profile-flow-svg">
@@ -182,12 +175,11 @@ export function ProfileFlow({ profile, details }: { profile: Profile; details: b
           {layout.edges.map((edge) => {
             const faded = lit !== undefined && !lit.edges.has(edge.key);
             const width = edge.label.length * 7.2 + 14;
-            const samplesShown = details && edge.hasSamples;
             return (
-              <foreignObject key={`label-${edge.key}`} x={edge.labelX - width / 2 - (samplesShown ? 12 : 0)} y={edge.labelY - 11} width={width + (samplesShown ? 26 : 0)} height={22} className={cn(faded && 'opacity-25')}>
+              <foreignObject key={`label-${edge.key}`} x={edge.labelX - width / 2 - (edge.hasSamples ? 12 : 0)} y={edge.labelY - 11} width={width + (edge.hasSamples ? 26 : 0)} height={22} className={cn(faded && 'opacity-25')}>
                 <div className="flex h-full items-center justify-center gap-1">
                   <span className={cn('whitespace-nowrap rounded-full border border-border-primary bg-surface-primary px-1.5 text-[11px] leading-4', edge.chooser === 'command' && 'font-mono', CHOOSER_TEXT[edge.chooser])}>{edge.label}</span>
-                  {samplesShown && (
+                  {edge.hasSamples && (
                     <button
                       type="button"
                       aria-label={`Samples for ${edge.from} › ${edge.label}`}

@@ -1324,7 +1324,8 @@ export const SessionView = memo(() => {
             onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.label} chat`, error)); },
           })) : []),
           // Profiles run in terminal tabs, so "Profile…" is here with chat tabs off too.
-          ...(activeSession && profilesOn ? [{ key: 'chat-profile', label: 'Profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
+          // With Profiles off it still opens an Agent Farm profile by name as a chat tab.
+          ...(activeSession && (profilesOn || chatTabs) ? [{ key: 'chat-profile', label: 'Profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
           ...(chatTabs && activeSession ? [
             { key: 'chat-more', label: 'More agents…', icon: <Boxes className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => requestOpenSettings({ category: 'agents' }) },
           ] : []),
@@ -1361,7 +1362,7 @@ export const SessionView = memo(() => {
           onClose={() => setProfileDialogOpen(false)}
           // The new tab replaces this empty stage, so the parent closes the dialog itself.
           onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: activeSession.id, launch }); setProfileDialogOpen(false); }}
-          onLaunchProfile={profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); }}
+          onLaunchProfile={profilesOn ? profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); } : undefined}
           byName={chatTabs}
         />
       )}
