@@ -90,6 +90,24 @@ describe('NotifyQueue', () => {
     expect(queue.snapshot().items.find(item => item.id === id)).toMatchObject({ state: 'answered', answerSummary: 'Approved' });
   });
 
+  it('records a Dismiss on the item, which keeps waiting, and Undo of a later answer clears it', async () => {
+    const { queue } = makeQueue();
+    const call = ask(queue, migration);
+    const id = onlyId(queue);
+
+    queue.run({ type: 'dismiss', id });
+    const dismissed = queue.snapshot().items.find(item => item.id === id);
+    expect(dismissed).toMatchObject({ state: 'waiting', dismissedAt: expect.any(Number) });
+    expect(queue.snapshot().queue).toEqual([id]);
+    expect(queue.snapshot().hidden).toEqual([id]);
+
+    queue.run({ type: 'answer', id, answer: { approved: true } });
+    queue.run({ type: 'undo', id });
+    expect(queue.snapshot().items.find(item => item.id === id)?.dismissedAt).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(call.result).toBeUndefined();
+  });
+
   it('expires a question when the caller disconnects and says so on the strip for 3 seconds', async () => {
     const { queue } = makeQueue();
     const controller = new AbortController();

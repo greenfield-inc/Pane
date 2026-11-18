@@ -343,6 +343,7 @@ export class NotifyQueue extends EventEmitter {
         continue;
       }
       this.queue.push(item.id);
+      if (item.dismissedAt !== undefined) this.hidden.add(item.id);
       if (item.quiet) this.armRing(entry);
     }
     for (const entry of this.entries.values()) {
@@ -1039,6 +1040,7 @@ export class NotifyQueue extends EventEmitter {
     item.readyAgain = now;
     clearTimeout(entry.graceTimer);
     item.staleSince = undefined;
+    item.dismissedAt = undefined;
     this.hidden.delete(item.id);
     this.save(entry);
     // Ready again is quiet: a notice where the person is, and no chime (D-244).
@@ -1198,6 +1200,7 @@ export class NotifyQueue extends EventEmitter {
     entry.item.resolvedAt = undefined;
     entry.item.answeredOn = undefined;
     entry.item.staleSince = undefined;
+    entry.item.dismissedAt = undefined;
     entry.item.reopened = { by: 'you', at: Date.now(), closedBy: previous.by, closedReason: previous.reason };
     if (device) entry.item.reopened.device = device;
     entry.restored = true;
@@ -1887,6 +1890,7 @@ export class NotifyQueue extends EventEmitter {
     entry.item.answerSummary = undefined;
     entry.item.answeredOn = undefined;
     entry.item.answeredBy = undefined;
+    entry.item.dismissedAt = undefined;
     this.save(entry);
     this.queue = [id, ...this.queue];
     if (this.transient?.view.itemId === id) this.clearTransient();
@@ -1928,7 +1932,11 @@ export class NotifyQueue extends EventEmitter {
     }
     this.hidden.add(id);
     const entry = this.entries.get(id);
-    if (entry) endReminder(entry);
+    if (entry) {
+      endReminder(entry);
+      entry.item.dismissedAt = Date.now();
+      this.save(entry);
+    }
     this.changed();
   }
 

@@ -503,7 +503,9 @@ Pane then packs, sends and rebuilds the Session:
 - the Session folder is copied with its text files rewritten for that machine's
   paths. `moved.json` in the folder records the path map, for anything that
   still names the old paths (conversation history keeps them);
-- open approvals move with the Session, and terminal tabs keep their scrollback.
+- terminal tabs keep their scrollback. Open approvals don't move yet: the
+  check asks you to answer them first. One you dismissed doesn't count as open
+  and doesn't hold the move back; it stays behind in this machine's Approvals.
 
 Until it starts, the Session shows as "Arriving from <machine>" there. Once
 this machine has frozen its copy (shown as "Moving to <machine>"), the other
