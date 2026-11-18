@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import type { JsonValue } from '../shared/validation/boundaryDecoder';
 import path from 'node:path';
 import { dismissDialogs, isolatedPane, launchIsolated, runpane, type IsolatedPane } from './isolatedPane';
 
@@ -30,7 +31,8 @@ const SIGN_UP = `<!doctype html><html><head><meta charset="utf-8"><title>Sign up
 </body></html>`;
 const NEXT = '<!doctype html><html><head><title>Next</title></head><body><h1>Next page</h1></body></html>';
 
-interface Reply { ok: boolean; code?: string; [field: string]: unknown }
+/** A `runpane browser … --json` reply: the fields these journeys read, and the error's code. */
+interface Reply { ok: boolean; code?: string; tab?: string; snapshot?: string; dialog?: { type: string; message: string }; value?: JsonValue; truncated?: boolean; reused?: boolean; title?: string; mimeType?: string }
 interface Caller { paneId: string; panelId: string }
 
 /** `runpane browser <verb>` as the agent in `from` runs it; failures come back with their code. */
@@ -58,7 +60,11 @@ function serve(): Promise<{ server: Server; origin: string }> {
     response.setHeader('content-type', 'text/html');
     response.end(request.url === '/next' ? NEXT : SIGN_UP);
   });
-  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve({ server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` })));
+  return new Promise(resolve => server.listen(0, '127.0.0.1', () => {
+    // SAFETY: a server listening on a TCP port reports an AddressInfo.
+    const { port } = server.address() as AddressInfo;
+    resolve({ server, origin: `http://127.0.0.1:${port}` });
+  }));
 }
 
 async function newPane(pane: IsolatedPane, repo: string, name: string): Promise<Caller & { worktree: string }> {
@@ -152,7 +158,7 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
       expect((await browser(pane, agent, 'navigate', ['--url', url])).code).toBe('ERR_BROWSER_URL_REFUSED');
     }
     expect(await browser(pane, other, 'tabs')).toMatchObject({ ok: true, tabs: [] });
-    expect((await browser(pane, other, 'snapshot', ['--tab', opened.tab as string])).code).toBe('ERR_BROWSER_NO_TAB');
+    expect((await browser(pane, other, 'snapshot', ['--tab', opened.tab ?? ''])).code).toBe('ERR_BROWSER_NO_TAB');
     expect((await browser(pane, undefined, 'tabs')).code).toBe('ERR_BROWSER_NO_PANE');
     await page.evaluate(() => window.electronAPI.config.update({ browser: { agentTools: false } }));
     expect((await browser(pane, agent, 'tabs')).code).toBe('ERR_BROWSER_TOOLS_OFF');

@@ -95,7 +95,7 @@ export const WAIT_MAX_MS = 120_000;
 
 const MODIFIERS = new Map([['alt', 1], ['control', 2], ['ctrl', 2], ['meta', 4], ['cmd', 4], ['command', 4], ['shift', 8]]);
 /** A key as Electron's sendInputEvent takes it. */
-export interface KeyInput { type: 'keyDown' | 'char' | 'keyUp'; keyCode: string; modifiers?: Array<'alt' | 'control' | 'meta' | 'shift'> }
+interface KeyInput { type: 'keyDown' | 'char' | 'keyUp'; keyCode: string; modifiers?: Array<'alt' | 'control' | 'meta' | 'shift'> }
 /** A named key: its DOM code, Windows virtual key code, Electron's name for it, and the text it types. */
 interface NamedKey { code: string; keyCode: number; electron: string; text?: string }
 const NAMED_KEYS = new Map<string, NamedKey>([
