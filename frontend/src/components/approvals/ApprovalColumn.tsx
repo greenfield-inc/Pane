@@ -11,7 +11,7 @@ import { AutopilotDocument, AutopilotWebPage } from '../autopilot/AutopilotDocum
 import { isLightTheme, useTheme } from '../../contexts/ThemeContext';
 import { sentenceStart } from '../../../../shared/approvalStatus';
 import { readSummaryPage, type SummaryRead } from './summaryPage';
-import { withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
+import { SUMMARY_FRAME_SANDBOX, withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
 import { MachineDocument } from './MachineContext';
 import { linkedFileReadsHere } from './machineDoc';
 import { ItemCloseForm, NotifyCard } from '../notify/NotifyCard';
@@ -699,7 +699,7 @@ export function SummaryView({ item, page, onRetry }: { item: NotifyItem; page: S
         {(page?.kind === 'page' || page?.kind === 'template') && (
           // Sandboxed: no scripts, no forms, no navigation; the page's own policy blocks the network. Same origin (never
           // with scripts) only so Pane's find can read and highlight its text.
-          <iframe title={`Summary: ${item.title}`} sandbox="allow-same-origin" srcDoc={withSummaryPolicy(page.html)} data-find-frame="" className="min-h-0 w-full flex-1 border-0 bg-surface-primary" data-testid="approval-summary-frame" />
+          <iframe title={`Summary: ${item.title}`} sandbox={SUMMARY_FRAME_SANDBOX} srcDoc={withSummaryPolicy(page.html)} data-find-frame="" className="min-h-0 w-full flex-1 border-0 bg-surface-primary" data-testid="approval-summary-frame" />
         )}
         </SkeletonSwap>}
       </div>
