@@ -161,6 +161,9 @@ To test approvals' timers without waiting, start a dev build with
   (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
+  CI runs its specs in three parallel shards, listed in
+  `playwright.chat-tabs.config.ts`; `PANE_ELECTRON_SHARD=<name>` runs one. A new
+  spec runs only once it is in a shard there.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
   (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
   start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port
