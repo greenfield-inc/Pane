@@ -16,14 +16,16 @@ import { openOnMachine } from '../../../utils/machineRowActions';
 import { cn } from '../../../utils/cn';
 import { Dropdown, type DropdownItem } from '../../ui/Dropdown';
 import { OuterResizeSeparator } from '../../ui/OuterResizeSeparator';
+import { SkeletonSwap } from '../../ui/Skeleton';
+import { TodoPageSkeleton } from '../TodoSkeletons';
 import { isTypingTarget } from '../todosNavigation';
 import { TodoCard, todoSubTodosAnchor } from './TodoCard';
 import { TodoChatTimeline, TodoComposer } from './TodoChat';
 import { TodoChips } from './TodoChips';
 import { TodoDetailsSidebar, type TodoDetailsTab } from './TodoDetailsSidebar';
-import { TodoSplit, splitTabLabel, type TodoApprovalOpen } from './TodoSplit';
+import { TodoSplit, splitTabLabel, useSplitOverviewSession, type TodoApprovalOpen } from './TodoSplit';
 import { openTodoSession } from './todoNavigation';
-import { initialSplit, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem } from './splitTabs';
+import { initialSplit, splitAttachmentItems, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem } from './splitTabs';
 
 /** The thread's narrowest usable width beside the split and the details (round 7 QA, R8). */
 const THREAD_FLOOR_PX = 360;
@@ -66,14 +68,14 @@ function TodoPageView({ number, onBack, onOpenTodo }: TodoPageProps) {
   useEffect(() => () => useApprovalColumnStore.getState().close(todoApprovalSurface(number)), [number]);
   return (
     <div ref={ref} className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-primary" data-testid="todo-page" data-todo={number}>
-      {detail && areaPx !== null
-        ? <TodoPageLoaded detail={detail} areaPx={areaPx} onBack={onBack} onOpenTodo={onOpenTodo} />
-        : (
-          <>
-            <PageHeader number={number} detail={null} onBack={onBack} onOpenTodo={onOpenTodo} onNotice={() => undefined} />
-            <p className="m-auto text-[13px] text-text-tertiary" role="status">Opening T-{number}…</p>
-          </>
-        )}
+      <SkeletonSwap loading={!detail || areaPx === null} skeleton={
+        <>
+          <PageHeader number={number} detail={null} onBack={onBack} onOpenTodo={onOpenTodo} onNotice={() => undefined} />
+          <TodoPageSkeleton number={number} />
+        </>
+      }>
+        {detail && areaPx !== null && <TodoPageLoaded detail={detail} areaPx={areaPx} onBack={onBack} onOpenTodo={onOpenTodo} />}
+      </SkeletonSwap>
     </div>
   );
 }
@@ -130,7 +132,8 @@ function safeRead(key: string): boolean {
 function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDetail; areaPx: number; onBack: () => void; onOpenTodo: (number: number) => void }) {
   const number = detail.todo.number;
   const { hiddenAtOpen, remember } = useSplitMemory(detail, areaPx);
-  const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => initialSplit(detail.attachments, hiddenAtOpen));
+  const overview = useSplitOverviewSession(detail);
+  const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => initialSplit(detail.attachments, hiddenAtOpen, overview));
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsTab, setDetailsTab] = useState<TodoDetailsTab>('details');
   const [approval, setApproval] = useState<TodoApprovalOpen | null>(null);
@@ -139,7 +142,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
   const scrollRef = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
 
-  useEffect(() => { dispatch({ type: 'sync', groups: detail.attachments }); }, [detail.attachments]);
+  useEffect(() => { dispatch({ type: 'sync', groups: detail.attachments, overview }); }, [detail.attachments, overview]);
   // Focus starts on the title, so Tab walks the page from the top.
   useEffect(() => { titleRef.current?.focus({ preventScroll: true }); }, []);
   // The split's hidden state is remembered as it changes (never for the state it opened with).
@@ -212,7 +215,9 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
     dispatch({ type: 'set-hidden', hidden: false });
     if (crowded) setDetailsOpen(false);
   };
-  const lead = split.items[0] ? splitTabLabel(split.items[0], split.items) : null;
+  // "Plan · 3 files" counts the files; the Session's Overview tab isn't one.
+  const files = splitAttachmentItems(split.items);
+  const lead = files[0] ? splitTabLabel(files[0], split.items) : null;
 
   return (
     <>
@@ -232,7 +237,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo }: { detail: TodoDe
               <h1 ref={titleRef} tabIndex={-1} className="mb-2 mt-1 text-[21px] font-semibold leading-[1.3] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-border-focus" data-testid="todo-page-title">{detail.todo.title}</h1>
               <TodoChips
                 detail={detail}
-                splitCount={split.items.length}
+                splitCount={files.length}
                 splitLead={lead}
                 splitHidden={!splitHere}
                 onOpenApproval={openApproval}

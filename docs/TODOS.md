@@ -6,8 +6,10 @@ start its own [Session](SESSIONS.md) and orchestrator agent, and keeps an
 agent working on it until it is ready for your review. You read its progress,
 answer its questions and accept the result on the to-do's page.
 
-- **One list.** The To-dos screen lists every to-do on every machine, with
-  the status you need: waiting on you, working, queued or idle.
+- **One list.** The To-dos screen lists every to-do on every machine, once
+  each, with the status you need: waiting on you, working, queued or idle. A
+  saved machine that is this computer (or, in remote mode, the computer the
+  window shows) isn't read a second time.
 - **Kept moving.** A plain-code supervisor on each machine notices a to-do
   that has gone quiet, reminds its orchestrator, restarts it, and then asks
   you. See [The supervisor](#the-supervisor).
@@ -25,8 +27,10 @@ answer its questions and accept the result on the to-do's page.
 - **Its own Session.** Starting a top-level to-do creates a Session named
   "T-41 · Title" on its machine, with the repo you chose and an orchestrator
   running your default agent (or the agent you picked). These Sessions stay
-  out of the sidebar; open one from the to-do's page, sidebar search or
-  Approvals.
+  out of the Sessions sidebar, the web app's sidebar, All machines and Add to
+  Session, even while open: the Session records its to-do's number when it
+  is created, so no list waits for the to-dos to load to hide it. Open one
+  from the to-do's page, sidebar search or Approvals.
 - **A requester.** Whoever created the to-do: you, or the orchestrator of the
   Session whose chat it came from. Sub-to-dos share their parent's requester.
 - **A number.** To-dos are numbered T-1, T-2 and so on per machine, and a
@@ -157,6 +161,13 @@ with its **plan beside it** in a split at half the width.
   "Plan · N files" chip shows the split again, as does clicking any
   attachment or approval. When the to-do area is under 1,000 px wide, every
   to-do opens with the split hidden and showing it lasts for that visit.
+- **The Session's Overview** is a tab in the split, after the plan, when the
+  to-do (or its parent) has a Session on this machine: the same goal, next
+  step, decisions, Panes and activity as the Session's own Overview tab.
+- **To the Session and back.** The agents chip (or Session in the details)
+  opens the to-do's Session chat. A bar above the Session's tabs reads
+  "← T-12 · Invoice PDFs" with the to-do's status; one click returns to the
+  to-do. No key is bound there: Esc belongs to the agent's tab.
 - **The details sidebar** (the panel button at the top right, as in a
   Session) starts closed on every to-do. Its Details tab has the status,
   Session, requester, who manages and works it, repo, machine, machine load
@@ -202,6 +213,15 @@ from that tab threads under your reply while it is your newest unanswered one
 to it. If that tab is closed, the reply goes to the orchestrator and the
 thread says so. A reply can only reach a tab in the to-do's own Session or a
 sub-to-do's assignee; anything else is refused (`ERR_TODO_REPLY_TARGET`).
+
+**Images.** An image you paste, drop or pick in a comment or reply shows
+under its words as a thumbnail; other files show as chips. An image attached
+to the to-do itself (a file dropped on the split or on the details'
+Attachments, or an agent's `runpane todos attach T-n shot.png`) shows inline
+too: its line never folds away. A file dropped anywhere on the thread goes to
+the composer. Clicking a thumbnail opens the image in the split, fitted;
+click it again for its actual size. Thumbnails show on the web app too, which
+can't attach files.
 
 Pane types what you send into the tab only when it is idle and you have no
 unsent text there. **Agents reply** with `runpane todos comment T-n "<text>"`:

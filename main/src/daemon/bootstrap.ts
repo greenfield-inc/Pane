@@ -578,7 +578,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const todoService = new TodoService(new TodoStore(databaseService.getDb()), createTodoHost(services, commandRegistry), todoClock);
   services.todoService = todoService;
   // T-7: to-do Sessions made before Sessions carried their to-do's number get it now, so no list shows them.
-  void services.orchestrationSessionManager?.markTodoSessions(todoService.sessionLinks()).catch((error: unknown) => {
+  void services.orchestrationSessionManager?.markTodoSessions(todoService.sessionLinks()).catch((error: Error) => {
     console.warn('[todos] Could not mark older to-do Sessions; the Sessions list hides them once the to-dos load:', error);
   });
   daemonServices.todoService = todoService;

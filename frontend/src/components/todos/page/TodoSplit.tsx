@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
-import { ExternalLink, Image as ImageIcon, MoreHorizontal, Plus, X } from 'lucide-react';
+import { BarChart3, ExternalLink, Image as ImageIcon, MoreHorizontal, Plus, X } from 'lucide-react';
 import type { TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
 import { selectNotifyItems, useNotifyStore, countsAsWaiting } from '../../../stores/notifyStore';
 import { todoApprovalSurface, useApprovalColumnStore } from '../../../stores/approvalColumnStore';
 import { useAllMachinesStore } from '../../../stores/allMachinesStore';
 import { useTodosStore } from '../../../stores/todosStore';
+import { useOrchestrationSessionStore } from '../../../stores/orchestrationSessionStore';
+import { SessionOverviewOf } from '../../SessionOverviewPanel';
 import { ApprovalColumn } from '../../approvals/ApprovalColumn';
 import { ApprovalOrigin } from '../../approvals/ApprovalOrigin';
 import { SplitApprovalOverlay } from '../../approvals/SplitApprovalOverlay';
 import { MachineDocument } from '../../approvals/MachineContext';
-import { AutopilotDocument, AutopilotWebPage } from '../../autopilot/AutopilotDocument';
+import { AutopilotDocument, AutopilotWebPage, FittedImage } from '../../autopilot/AutopilotDocument';
 import { Dropdown } from '../../ui/Dropdown';
 import { useNow } from '../../notify/useNow';
 import { relativeAge } from '../../notify/notifyFormat';
@@ -20,6 +22,7 @@ import { splitItemKey, type TodoSplitAction, type TodoSplitItem, type TodoSplitS
 import {
   ATTACHMENT_KIND_ICON, AttachField, attachmentFileName, attachmentIsHere, isWebTarget, openAttachmentOutside, revealAttachment,
 } from './TodoAttach';
+import { useAttachDrop } from './thread/useThreadSend';
 
 /** An approval shown over the split (round 7): which, and the tab it covers ("‹ Back to Plan"). */
 export interface TodoApprovalOpen {
@@ -39,9 +42,23 @@ export interface TodoSplitProps {
   onAttached: (target: string) => void;
 }
 
-/** A tab's words: "Plan" for the first plan, otherwise the attachment's own label. */
+/**
+ * The Session whose Overview the split offers (round 8, T-4): the to-do's own, or its parent's for a
+ * sub-to-do, when it is on this machine and this machine's Sessions have it. A to-do on another
+ * machine has no Overview tab: its Sessions aren't read from here.
+ */
+export function useSplitOverviewSession(detail: TodoDetail): string | null {
+  const sessionId = detail.todo.sessionId ?? detail.parent?.todo.sessionId ?? null;
+  const activeMachineId = useAllMachinesStore((state) => state.entries.find((entry) => entry.active)?.id ?? LOCAL_MACHINE_ID);
+  const here = (detail.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID && activeMachineId === LOCAL_MACHINE_ID;
+  const known = useOrchestrationSessionStore((state) => sessionId !== null && state.sessions.some((session) => session.id === sessionId));
+  return here && known ? sessionId : null;
+}
+
+/** A tab's words: "Plan" for the first plan, "Overview" for the Session's, otherwise the attachment's own label. */
 export function splitTabLabel(item: TodoSplitItem, items: readonly TodoSplitItem[]): string {
   if (item.kind === 'image') return item.label;
+  if (item.kind === 'overview') return 'Overview';
   if (item.attachment.kind === 'plan') {
     const firstPlan = items.find((other) => other.kind === 'attachment' && other.attachment.kind === 'plan');
     if (firstPlan === item) return 'Plan';
@@ -59,6 +76,8 @@ export function TodoSplit({ detail, split, dispatch, approval, onOpenApproval, o
   const [attaching, setAttaching] = useState(false);
   const strip = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  // A file dropped on the split is attached to the to-do, and its tab shows (round 8, T-5).
+  const drop = useAttachDrop(detail.todo.number, onAttached);
   const onTabKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft' && event.key !== 'Home' && event.key !== 'End') return;
     event.preventDefault();
@@ -73,7 +92,8 @@ export function TodoSplit({ detail, split, dispatch, approval, onOpenApproval, o
     element.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
   }, [split.active]);
   return (
-    <section ref={sectionRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col" aria-label={`${detail.todo.ref} attachments`} data-testid="todo-split">
+    <section ref={sectionRef} onDragOver={drop.onDragOver} onDragLeave={drop.onDragLeave} onDrop={drop.onDrop} className="relative flex min-h-0 min-w-0 flex-1 flex-col" aria-label={`${detail.todo.ref} attachments`} data-testid="todo-split" data-dragging={drop.dragging || undefined}>
+      {drop.dragging && <div className="pointer-events-none absolute inset-1 z-10 rounded-lg border-2 border-dashed border-border-interactive bg-transparent" aria-hidden="true" />}
       {split.items.length > 0 && (
         <>
           <div className="flex h-9 shrink-0 items-stretch border-b border-border-primary bg-surface-secondary px-1">
@@ -93,9 +113,10 @@ export function TodoSplit({ detail, split, dispatch, approval, onOpenApproval, o
           </div>
           <div className="relative flex min-h-0 flex-1 flex-col">
             {active?.kind === 'attachment' && <SplitAttachment key={active.attachment.id} detail={detail} attachment={active.attachment} from={active.from} />}
+            {active?.kind === 'overview' && <SessionOverviewOf key={active.sessionId} sessionId={active.sessionId} />}
             {active?.kind === 'image' && (
-              <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto bg-surface-primary p-4" data-testid="todo-split-image">
-                <img src={active.src} alt={active.label} className="max-w-full rounded-md border border-border-primary" />
+              <div className="flex min-h-0 flex-1 flex-col" data-testid="todo-split-image">
+                <FittedImage src={active.src} label={active.label} />
               </div>
             )}
           </div>
@@ -107,7 +128,7 @@ export function TodoSplit({ detail, split, dispatch, approval, onOpenApproval, o
 }
 
 function SplitTab({ item, label, active, onPick, onClose }: { item: TodoSplitItem; label: string; active: boolean; onPick: () => void; onClose: () => void }) {
-  const Icon = item.kind === 'attachment' ? ATTACHMENT_KIND_ICON[item.attachment.kind] : ImageIcon;
+  const Icon = item.kind === 'attachment' ? ATTACHMENT_KIND_ICON[item.attachment.kind] : item.kind === 'overview' ? BarChart3 : ImageIcon;
   return (
     <div
       role="tab"
@@ -119,7 +140,7 @@ function SplitTab({ item, label, active, onPick, onClose }: { item: TodoSplitIte
         'flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-[12.5px] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus',
         active ? 'border-interactive bg-bg-primary font-semibold text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary',
       )}
-      title={item.kind === 'attachment' ? item.attachment.target : item.src}
+      title={item.kind === 'attachment' ? item.attachment.target : item.kind === 'overview' ? 'The Session’s Overview' : item.src}
       data-testid="todo-split-tab"
       data-key={splitItemKey(item)}
     >

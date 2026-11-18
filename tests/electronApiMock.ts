@@ -25,7 +25,7 @@ import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../s
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
 import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
 import type { AutopilotDocument } from '../shared/types/autopilot';
-import type { TodoAction, TodoAttachment, TodoDetail, TodosSnapshot } from '../shared/types/todos';
+import type { TodoAction, TodoActivity, TodoAttachment, TodoDetail, TodosSnapshot } from '../shared/types/todos';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -41,6 +41,13 @@ export interface TodosMockOptions {
   details: Record<number, TodoDetail>;
   /** autopilot.readDoc answers by path; any other path reads as the text `Contents of <path>`. */
   docs?: Record<string, AutopilotDocument>;
+  /** readDoc answers an image path (png, jpg, gif, webp, svg) not in `docs` as this image (round 8, T-5). */
+  imageDataUrl?: string;
+  /**
+   * Comments and attaches also add the rows main would (round 8, T-5): a comment becomes your message, an attach
+   * "You attached <kind>: <label>", so the thread shows what was sent. Off: the thread stays as the fixture has it.
+   */
+  recordActivity?: boolean;
 }
 
 /** One `todos:act` the page sent, as getInvokeCalls('todos:act') returns it. */
@@ -1069,6 +1076,20 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         else detail.attachments.push({ attachments: [attachment] });
       }
       if (action.kind === 'detach' && own) own.attachments = own.attachments.filter((attachment) => attachment.id !== action.attachmentId);
+      if (mockOptions.todos?.recordActivity) recordTodoActivity(detail, action);
+    };
+    // The rows main adds for a comment or an attach, with recordActivity on.
+    const recordTodoActivity = (detail: TodoDetail, action: TodoAction) => {
+      const id = Math.max(0, ...detail.activity.map((row) => row.id)) + 1;
+      const base = { id, todoNumber: detail.todo.number, authorKind: 'person' as const, authorName: 'you', createdAt: Date.now() };
+      if (action.kind === 'comment') {
+        const row: TodoActivity = { ...base, kind: 'message', body: action.body };
+        if (action.replyTo !== undefined) row.replyTo = action.replyTo;
+        detail.activity.push(row);
+      } else if (action.kind === 'attach') {
+        const kind = /\.(png|jpe?g|gif|webp|svg)$/i.test(action.target) ? 'image' : /^https?:/.test(action.target) ? 'link' : 'doc';
+        detail.activity.push({ ...base, kind: 'event', body: `You attached ${kind}: ${action.label ?? action.target.split('/').pop() ?? action.target}` });
+      }
     };
     const todosApi = todosState ? {
       snapshot: () => success(clone(todosState.snapshot)),
@@ -1088,7 +1109,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       },
     } : undefined;
     const readTodoDoc = (path: string): Promise<AutopilotDocument> =>
-      Promise.resolve(clone(mockOptions.todos?.docs?.[path] ?? { kind: 'text', path, text: `Contents of ${path}` }));
+      Promise.resolve(clone(mockOptions.todos?.docs?.[path] ?? mockTodoImage(path) ?? { kind: 'text', path, text: `Contents of ${path}` }));
+    function mockTodoImage(path: string): AutopilotDocument | undefined {
+      const dataUrl = mockOptions.todos?.imageDataUrl;
+      return dataUrl && /\.(png|jpe?g|gif|webp|svg)$/i.test(path) ? { kind: 'image', path, dataUrl } : undefined;
+    }
     // A to-do's files read through Autopilot's readDoc; the rest of Autopilot never answers, so it stays quiet.
     const quietAutopilotApi = () => new Proxy({ readDoc: readTodoDoc, onChanged: () => unsubscribe }, {
       get(target, prop: string | symbol) {
@@ -1705,6 +1730,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         preview: (cron: string) => success(previewLoopCron(cron)),
       }),
       sessions: namespace({
+        // Pasted or dropped files (a to-do's composer saves them so): each "saved" under /tmp/pane-images by its name.
+        saveImages: (_draftId: string, files: Array<{ name: string }>) => Promise.resolve(files.map((file) => `/tmp/pane-images/${file.name}`)),
         // The SSH view's hidden Session; other ids keep the generic empty answer.
         get: (sessionId: string) => {
           if (sessionId !== '__ssh_hosts_session__') return success();
