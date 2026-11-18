@@ -230,4 +230,15 @@ test('on a remote desktop, Open in your browser waits for a forwarded port', asy
   await emitPorts(page, { host: 'devbox', ports: [{ port: 5173, localPort: 5173, pid: 1, process: 'node', group: 'other', kind: 'web' }] });
   await page.getByTitle('Open in your browser').click();
   await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['http://localhost:5173/']);
+
+  // The tab moves to a port the host doesn't forward: the button names that port, not the page before it.
+  await page.locator('webview').evaluate(webview => {
+    Object.assign(webview, { getURL: () => 'http://localhost:5173/' });
+    webview.dispatchEvent(new Event('did-navigate'));
+  });
+  await page.getByPlaceholder('Enter a URL (e.g. localhost:3000)').fill('localhost:5174');
+  await page.keyboard.press('Enter');
+  await page.getByTitle("Can't open in your browser: Port 5174 on devbox isn't forwarded to this computer").click();
+  await expect(page.getByText("Pane can't open this page in your browser: Port 5174 on devbox isn't forwarded to this computer.")).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['http://localhost:5173/']);
 });

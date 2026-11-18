@@ -391,7 +391,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   };
 
   // The page the tab shows now, in host form: main maps a host port to where this computer reaches it.
-  const externalUrl = shownUrl || url;
+  // A target the tab can't load never navigates, so the tab's own address names it.
+  const externalUrl = target.kind === 'load' ? shownUrl || url : url;
   const isLocalPage = hasFileProtocol(externalUrl);
   // Why the button can't open this page, shown as its tooltip and, on a click, under the address bar; null when it can.
   // A remote desktop opens a copy of a host file page, so only the page type matters there.
