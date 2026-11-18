@@ -1,10 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LEGACY_ORCHESTRATION_SESSION_ID, type OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { databaseService } from './database';
 import { INTRO_OFFER_PREFERENCE, paneChatIntroOfferEligible } from './paneChatIntroOffer';
 
-const originalTimeZone = process.env.TZ;
 const originalPlatform = process.platform;
 
 function pane(id: string, createdAt: string, flags: { mainRepo?: boolean; hidden?: boolean; archived?: boolean } = {}): void {
@@ -33,7 +32,7 @@ function sessionRecord(id: string, archived = false): OrchestrationSessionRecord
 const builtInPaneChatOnly = [sessionRecord(LEGACY_ORCHESTRATION_SESSION_ID)];
 
 beforeEach(() => {
-  process.env.TZ = 'UTC';
+  vi.stubEnv('TZ', 'UTC');
   const db = databaseService.getDb();
   db.prepare('DELETE FROM user_preferences WHERE key = ?').run(INTRO_OFFER_PREFERENCE);
   db.prepare('DELETE FROM app_opens').run();
@@ -41,7 +40,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  process.env.TZ = originalTimeZone;
+  vi.unstubAllEnvs();
   Object.defineProperty(process, 'platform', { value: originalPlatform });
 });
 
@@ -84,7 +83,7 @@ describe('Pane Chat offer eligibility', () => {
     pane('second', '2026-10-21 02:00:00');
     opened('2026-10-21 06:00:00', '2026-10-22 12:00:00');
     expect(paneChatIntroOfferEligible(builtInPaneChatOnly, 'claude')).toBe(true);
-    process.env.TZ = 'America/Los_Angeles';
+    vi.stubEnv('TZ', 'America/Los_Angeles');
     expect(paneChatIntroOfferEligible(builtInPaneChatOnly, 'claude')).toBe(false);
   });
 

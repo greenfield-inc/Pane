@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { StoredLoop } from '../services/loops/loopRepository';
 import { prepareLoopSession, startLoopRun } from './loops';
@@ -6,7 +6,7 @@ import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 // Slot times are worked for New York: 07:00 UTC on Oct 24 2026 is 03:00 EDT.
-process.env.TZ = 'America/New_York';
+vi.stubEnv('TZ', 'America/New_York');
 
 const slotAtMs = Date.parse('2026-10-24T07:00:00Z');
 

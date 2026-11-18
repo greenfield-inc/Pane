@@ -10,7 +10,7 @@ import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const connectedClients: Array<RemoteDaemonBrowserClient | RemoteRuntimeAdapter> = [];
 const originalFetch = globalThis.fetch;
-const originalEventSource = globalThis.EventSource;
+const originalEventSource = Object.getOwnPropertyDescriptor(globalThis, 'EventSource');
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 
@@ -18,7 +18,11 @@ afterEach(() => {
   for (const client of connectedClients.splice(0)) client.disconnect();
   vi.restoreAllMocks();
   globalThis.fetch = originalFetch;
-  globalThis.EventSource = originalEventSource;
+  if (originalEventSource) {
+    Object.defineProperty(globalThis, 'EventSource', originalEventSource);
+  } else {
+    Reflect.deleteProperty(globalThis, 'EventSource');
+  }
 
   if (originalNavigator) {
     Object.defineProperty(globalThis, 'navigator', originalNavigator);

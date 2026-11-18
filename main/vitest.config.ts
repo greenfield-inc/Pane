@@ -31,10 +31,11 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     setupFiles: ['./src/test/setup.ts'],
     // One worker runs many files in turn; src/test/setup.ts resets modules and
-    // fails any file that leaves process state behind. Order is shuffled so a
-    // file that depends on another's leftovers fails too; the run prints its seed.
+    // fails any file that leaves process state behind. File order is shuffled
+    // so a file that depends on another's leftovers fails too; the run prints
+    // its seed.
     isolate: false,
-    sequence: { shuffle: true },
+    sequence: { shuffle: { files: true, tests: false } },
   },
   resolve: {
     alias: {

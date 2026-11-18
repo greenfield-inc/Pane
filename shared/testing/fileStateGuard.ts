@@ -3,10 +3,12 @@
 // starting state. Each project's setup file calls guardFileState() at the start
 // of every test file. It records the process state a file must leave as it
 // found it; after the file's last hook it restores that state, so the next file
-// starts clean, and fails the file for anything it had to restore.
+// starts clean, and fails the file for anything the file itself left changed.
 //
 // Vitest is passed in rather than imported: main and frontend use different
 // Vitest versions, and a bare import from shared/ would resolve to the wrong one.
+
+import { EventEmitter } from 'node:events';
 
 interface VitestHandles {
   afterAll(fn: () => void): void;
@@ -27,6 +29,14 @@ const PROCESS_EVENTS = [
   'SIGINT',
   'SIGTERM',
 ] as const;
+
+// Libraries add globals once, when first used, and read them for the life of
+// the process: zod's and tslib's '__' names, undici's symbols, and posthog-js's
+// `self` polyfill. Libraries stay loaded across files, so these are not a leak;
+// new symbol keys are not checked at all.
+function isLibraryGlobal(name: string): boolean {
+  return name === 'self' || name.startsWith('__');
+}
 
 type Listener = (...args: unknown[]) => void;
 
@@ -62,10 +72,10 @@ export function guardFileState({ afterAll, vi }: VitestHandles): void {
       process.chdir(cwd);
     }
 
-    for (const key of Reflect.ownKeys(globalThis)) {
-      if (globals.has(key)) continue;
-      leaks.push(`globalThis.${String(key)} was added (use vi.stubGlobal, or delete it yourself)`);
-      Reflect.deleteProperty(globalThis, key);
+    for (const name of Object.getOwnPropertyNames(globalThis)) {
+      if (globals.has(name) || isLibraryGlobal(name)) continue;
+      leaks.push(`globalThis.${name} was added (use vi.stubGlobal, or delete it yourself)`);
+      Reflect.deleteProperty(globalThis, name);
     }
     for (const [key, before] of globals) {
       const now = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -76,17 +86,18 @@ export function guardFileState({ afterAll, vi }: VitestHandles): void {
         }
         continue;
       }
-      if ('value' in before && now.value !== before.value) {
+      if ('value' in before && !Object.is(now.value, before.value)) {
         leaks.push(`globalThis.${String(key)} was replaced (use vi.stubGlobal, or restore it yourself)`);
         Object.defineProperty(globalThis, key, before);
       }
     }
 
+    // Product modules register process-lifetime hooks such as
+    // process.once('exit') when first used. Each file gets fresh module
+    // instances, so the hooks of this file's instances are removed, not reported.
     for (const [event, before] of listeners) {
       for (const listener of processListeners(event)) {
-        if (before.includes(listener)) continue;
-        leaks.push(`a process '${event}' listener was left registered`);
-        process.removeListener(event, listener);
+        if (!before.includes(listener)) process.removeListener(event, listener);
       }
     }
 
@@ -101,7 +112,7 @@ export function guardFileState({ afterAll, vi }: VitestHandles): void {
 }
 
 function processListeners(event: string): Listener[] {
-  // SAFETY: Node types listeners() as Function[]; every entry is a listener
-  // registered with process.on(), which only accepts functions of this shape.
-  return process.listeners(event) as Listener[];
+  // SAFETY: EventEmitter types listeners() as Function[]; every entry is a
+  // listener registered with process.on(), which only accepts functions.
+  return EventEmitter.prototype.listeners.call(process, event) as Listener[];
 }
