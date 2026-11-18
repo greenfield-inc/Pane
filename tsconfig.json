@@ -1,0 +1,15 @@
+// `pnpm typecheck` (bun check -b) checks every project listed here.
+{
+  "files": [],
+  "references": [
+    { "path": "frontend" },
+    { "path": "frontend/tsconfig.node.json" },
+    { "path": "main/tsconfig.check.json" },
+    { "path": "packages/runpane/tsconfig.check.json" },
+    { "path": "glasses" },
+    { "path": "mobile" },
+    { "path": "native" },
+    { "path": "native/terminal-web" },
+    { "path": "tests/renderer" }
+  ]
+}

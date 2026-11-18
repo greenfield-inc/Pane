@@ -78,10 +78,6 @@ if (spawnSync('lychee', ['--version'], { stdio: 'ignore', shell: process.platfor
   console.log('skip markdown links: lychee is not installed (brew install lychee, or cargo install lychee); CI still checks them.\n');
 }
 
-results.push(report(await run('renderer test types', 'pnpm', [
-  '--filter', 'frontend', 'exec', 'tsc', '--noEmit', '-p', '../tests/renderer/tsconfig.json',
-])));
-
 for (const workspace of workspaces) {
   const result = report(await run(`${workspace} unit tests (changed since ${base.slice(0, 12)})`, 'pnpm', [
     '--filter', workspace, 'exec', 'vitest', 'run', '--changed', base, '--passWithNoTests',

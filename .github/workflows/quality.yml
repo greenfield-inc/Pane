@@ -123,7 +123,8 @@ jobs:
   # Type checking and lint get their own runner: beside the unit tests they
   # competed for its CPUs and slowed the tests by about 30s. Oxlint runs
   # first, alone, then the type check, the lint checks and Knip run in parallel; the Finish steps print
-  # each output and fail on errors.
+  # each output and fail on errors. The type check is bun check over every
+  # tsconfig, the renderer tests' included.
   typecheck-lint:
     name: Type Check and Lint
     runs-on: ubuntu-latest
@@ -135,8 +136,10 @@ jobs:
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
 
+    # bun's install script puts its binary in place; it is the one script
+    # this job needs.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts && pnpm rebuild bun
 
     # Oxlint runs alone first: beside the type check it shared the 4 CPUs and
     # took 21-23s. The other lint:code checks run with the type check.
@@ -262,12 +265,6 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    # pnpm test:renderer-selection in two parts: the tests' type check runs
-    # once, in shard 1, behind the browser install.
-    - name: Start renderer test type check
-      if: ${{ matrix.shard == 1 }}
-      run: scripts/ci-background.sh start renderer-types pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json
-
     - name: Install Playwright browser dependencies
       run: pnpm exec playwright install --with-deps chromium
 
@@ -275,10 +272,6 @@ jobs:
       run: pnpm exec playwright test --config=tests/renderer/playwright.config.ts --shard=${{ matrix.shard }}/2
       env:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
-
-    - name: Check renderer test types
-      if: ${{ !cancelled() && matrix.shard == 1 }}
-      run: scripts/ci-background.sh wait renderer-types
 
   functional-smoke-electron:
     name: Functional Smoke (Electron)
