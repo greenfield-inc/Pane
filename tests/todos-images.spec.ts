@@ -34,6 +34,8 @@ async function open(page: Page, theme: 'light-rounded' | 'dark') {
   await page.getByTestId('todos-nav').click();
   await page.getByTestId('todo-row').first().click();
   await expect(page.getByTestId('todo-chat')).toBeVisible();
+  // The composer takes files from the thread once it is mounted, after the page's skeleton.
+  await expect(page.getByTestId('todo-composer-input')).toBeVisible();
 }
 
 function todoActs(page: Page) {

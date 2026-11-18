@@ -153,6 +153,8 @@ interface TodosState {
 }
 
 let refreshGeneration = 0;
+/** Each to-do's newest detail read, so an older answer never replaces a newer one. */
+const detailGenerations = new Map<number, number>();
 
 export const useTodosStore = create<TodosState>((set, get) => ({
   snapshot: null,
@@ -172,7 +174,12 @@ export const useTodosStore = create<TodosState>((set, get) => ({
   loadDetail: async (number) => {
     const api = todosApi();
     if (!api) return null;
+    // Reads overlap (an action's refresh and the change event): only the newest may land, or an older
+    // answer would put back a to-do without what was just attached (round 8 CI, T-5).
+    const generation = (detailGenerations.get(number) ?? 0) + 1;
+    detailGenerations.set(number, generation);
     const response = await api.detail(number).catch(() => null);
+    if (detailGenerations.get(number) !== generation) return get().details.get(number) ?? null;
     if (!response?.success || !response.data) return null;
     const detail = api.hostIsHere ? detailAsThisMachine(response.data) : response.data;
     set(state => ({ details: new Map(state.details).set(number, detail) }));
