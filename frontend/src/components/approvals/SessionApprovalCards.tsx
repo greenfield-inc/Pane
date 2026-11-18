@@ -55,9 +55,10 @@ export function SessionApprovalCards({ sessionId, chatPanelId }: { sessionId: st
           const columns = useApprovalColumnStore.getState();
           const hadFocus = cardsRef.current?.contains(document.activeElement) ?? false;
           // The next card takes its place (the one before, when it was last), and the focus with it.
-          // After the first card the next one leads anyway, as does a changed item that comes back.
+          // After the first card the next one leads once nothing is pinned (as a changed item that
+          // comes back does), so a card paged to earlier, through either pager, lets go.
           const next = pager[index + 1] ?? pager[index - 1];
-          if (index > 0 && next) setShownId(next.id);
+          setShownId(index > 0 ? next?.id : undefined);
           if (item.state === 'waiting') runNotify({ type: 'dismiss', id: item.id });
           columns.dismissDocked(chat, item.id, dockKey(item));
           if (item.id === openId) columns.close(`session:${sessionId}`);

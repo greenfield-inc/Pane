@@ -89,6 +89,19 @@ test.describe("Notify card's Enter", () => {
     });
   }
 
+  // Review F-1: Enter on a focused control is that control's, even with a reply typed.
+  for (const form of ['docked', 'strip'] as const) {
+    test(`${form}: Enter on a focused Dismiss dismisses, and sends no typed reply`, async ({ page }) => {
+      await open(page, `surface=card&form=${form}`);
+      const card = page.getByTestId('notify-card');
+      await card.getByPlaceholder(/Add a note for Claude/).fill('not ready to send this');
+      await card.getByText('Which session store should the refactor use?').click();
+      await card.getByTestId('notify-dismiss').focus();
+      await page.keyboard.press('Enter');
+      await expect.poll(() => commands(page)).toEqual([{ type: 'dismiss', id: 'q1' }]);
+    });
+  }
+
   test('sends nothing when the question takes only its options', async ({ page }) => {
     await open(page, 'surface=card&optionsOnly=1');
     const card = page.getByTestId('notify-card');
@@ -124,5 +137,14 @@ test.describe('Notify strip window', () => {
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('notify-card')).toHaveCount(0);
     await expect(page.getByTestId('notify-window')).toBeFocused();
+  });
+
+  test('the next card gets the focus whatever it shows: here a prompt asked only in its terminal', async ({ page }) => {
+    await open(page, 'surface=strip-window&next=in-terminal');
+    await page.getByTestId('notify-dismiss').focus();
+    await page.keyboard.press('Enter');
+    const next = page.getByTestId('notify-card');
+    await expect(next).toHaveAttribute('data-notify-view', 'in-terminal');
+    await expect(next).toBeFocused();
   });
 });

@@ -6,6 +6,7 @@ import { readAppearanceCache } from '../../utils/appearanceCache';
 import { runNotify, subscribeNotify, useNotifyStore } from '../../stores/notifyStore';
 import { cn } from '../../utils/cn';
 import { NotifyStrip } from './NotifyStrip';
+import { CARD_FOCUS_TARGET } from './NotifyCard';
 import { NotifyRound } from './NotifyRound';
 
 /**
@@ -112,7 +113,8 @@ function useFocusAfterCard(rootRef: React.RefObject<HTMLDivElement | null>): voi
       held = null;
       const active = document.activeElement;
       if (active && active !== document.body) return;
-      (root.querySelector<HTMLElement>('[data-testid="notify-card"][tabindex]') ?? root).focus();
+      // The card shown next, whatever it is; the window only when none is left.
+      (root.querySelector<HTMLElement>(CARD_FOCUS_TARGET) ?? root).focus();
     });
     root.addEventListener('focusin', focusIn);
     observer.observe(root, { childList: true, subtree: true });

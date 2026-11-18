@@ -8,7 +8,7 @@ import '../../frontend/src/index.css';
 
 // Notify's round (?surface=round), a card (?surface=card, docked in a terminal unless
 // ?form=strip|inbox), or the floating strip window (?surface=strip-window, two waiting questions:
-// Dismiss shows the next, as main does). One waiting question: ?ui=options (a recommended choice)
+// Dismiss shows the next, as main does; ?next=in-terminal makes that one a terminal prompt). One waiting question: ?ui=options (a recommended choice)
 // or ?ui=approve. ?optionsOnly=1 takes only its options.
 // Every command the surface sends lands in window.qaCommands.
 declare global { interface Window { qaCommands: NotifyCommand[] } }
@@ -27,7 +27,11 @@ const item: NotifyItem = {
   state: 'waiting',
   createdAt: Date.now(),
 };
-const second: NotifyItem = { ...item, id: 'q2', title: 'Ship the migration tonight?', ui: 'approve', choices: undefined, optionsOnly: undefined };
+// ?next=in-terminal: the next queued item now asks only in its terminal, so it shows another card.
+const second: NotifyItem = {
+  ...item, id: 'q2', title: 'Ship the migration tonight?', ui: 'approve', choices: undefined, optionsOnly: undefined,
+  agentPrompt: params.get('next') === 'in-terminal' ? { yes: 'Yes', no: 'No', inTerminal: true } : undefined,
+};
 const snapshot: NotifySnapshot = {
   settings: DEFAULT_NOTIFY_SETTINGS, items: [item], queue: [item.id], hidden: [], strip: null, stripSurface: null, pausedUntil: null,
   shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [], cardsOn: { kind: 'any' }, thisMachine: null,
