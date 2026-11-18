@@ -632,7 +632,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     detail: (number: number): Promise<IPCResponse> => invokeIpc('todos:detail', number),
     create: (input: TodoCreateInput): Promise<IPCResponse> => invokeIpc('todos:create', input),
     act: (action: TodoAction): Promise<IPCResponse> => invokeIpc('todos:act', action),
-  };
+  },
   // Profiles: the library, launches and runs (docs/PROFILES.md)
   profiles: {
     list: (): Promise<IPCResponse> => invokeIpc('profiles:list'),

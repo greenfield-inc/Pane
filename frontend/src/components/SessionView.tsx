@@ -1968,6 +1968,8 @@ export const SessionView = memo(() => {
 
   if (activeView === 'todos') {
     return <TodosView />;
+  }
+
   if (activeView === 'profiles') {
     return <ProfilesView />;
   }
