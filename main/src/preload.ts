@@ -288,6 +288,14 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  // An agent clicked in a browser tab's page: draw its cursor there.
+  ipcRenderer.on('browser-panel:agent-cursor', (_event: Electron.IpcRendererEvent, data: { panelId: string; x: number; y: number }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:agent-cursor', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:agent-cursor to window:', e);
+    }
+  });
   // A browser tab's page took keyboard focus (a click inside it never reaches this DOM).
   ipcRenderer.on('browser-panel:page-focused', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
     try {

@@ -76,7 +76,7 @@ The tool panel system supports 11 panel types (`ToolPanelType` in `shared/types/
    projects only.
 7. **Setup Tasks** (`setup-tasks`): project setup checklist. Singleton,
    permanent, projects only.
-8. **Browser** (`browser`): embedded browser. Worktrees only.
+8. **Browser** (`browser`): embedded browser. Worktrees only. Agents drive its tabs with the `browser_*` tools; see [BROWSER_AGENTS.md](BROWSER_AGENTS.md).
 9. **Notes** (`notes`): the Pane's notes. Singleton. Experimental: hidden
    until Settings → Advanced → Notes is on.
 10. **Device** (`device`): an iOS simulator or Android emulator's live screen,

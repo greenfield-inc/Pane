@@ -6,6 +6,7 @@ import {
   Boxes,
   BrainCircuit,
   Gauge,
+  Globe,
   Inbox,
   GitBranch,
   Keyboard,
@@ -146,6 +147,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     icon: Smartphone,
     settingIds: ['devices-enabled', 'devices-max-booted', 'devices-ios-machine'],
     aliases: ['simulator', 'simulators', 'emulator', 'emulators', 'ios', 'iphone', 'android', 'xcode', 'device tools', 'device_open', 'simslim', 'mac'],
+  },
+  {
+    id: 'browser',
+    label: 'Browser',
+    description: 'Pane\'s browser tabs, and what agents may do in them.',
+    icon: Globe,
+    settingIds: ['browser-agent-tools'],
+    aliases: ['browser tools', 'browser_open', 'browser_snapshot', 'agent browser', 'web', 'tabs', 'evaluate', 'upload', 'playwright'],
   },
   {
     id: 'integrations',

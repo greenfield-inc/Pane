@@ -261,6 +261,7 @@ export interface AppConfig {
 }
 
 export interface UpdateConfigRequest {
+  browser?: Partial<BrowserSettings>;
   verbose?: boolean;
   anthropicApiKey?: string;
   openaiApiKey?: string;

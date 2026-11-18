@@ -306,6 +306,8 @@ Pane Chat and named Sessions support Claude, Codex, Cursor, OpenCode, and Pi. Ch
 
 Any agent in a Pane can boot an iOS Simulator or Android emulator, see it, drive it, and build an app to it with the `device_*` tools (or `runpane devices`). The live screen opens in a tab beside the agent, and chat tabs show a live card. On Windows and Linux, iOS runs on a Mac you linked, with no SSH: Pane syncs the worktree there and builds it. Panes share a small pool of simulators that shut down when idle. See [Devices](docs/DEVICES.md).
 
+Agents can also drive the browser tabs of their Pane with the `browser_*` tools (or `runpane browser`): open a page beside the chat, read it as an accessibility tree, click, type, take screenshots and run scripts, signed in as you. You see who is driving and take over by touching the page. See [Browser tools](docs/BROWSER_AGENTS.md).
+
 ---
 
 ## Agent-Operable CLI

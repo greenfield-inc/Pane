@@ -21,6 +21,7 @@ import { FindBar } from '../../find/FindBar';
 import { usePanelFind } from '../../find/usePanelFind';
 import { closeFind, getFindBar, reportFindResult, setFindQuery, useFindBar } from '../../find/findController';
 import { createBrowserFindAdapter } from './browserFind';
+import { AgentOverlay, BrowserDriverChip } from './AgentDriving';
 
 const COPIED_FEEDBACK_MS = 1500;
 
@@ -90,6 +91,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const isHostFileUrl = hasFileProtocol(currentUrlFromPanelState);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
+  // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+  const driver = (panel.state.customState as BrowserPanelState | undefined)?.driver;
 
   const webviewRef = useRef<Electron.WebviewTag>(null);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
@@ -658,6 +661,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             <polyline points="8 6 2 12 8 18" />
           </svg>
         </button>
+        <BrowserDriverChip panelId={panel.id} driver={driver} />
         <form
           onSubmit={handleSubmit}
           className={cn(
@@ -830,6 +834,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             style={{ display: 'inline-flex' }}
           />}
           </SkeletonSwap>
+
+          <AgentOverlay panelId={panel.id} driver={driver} />
 
           {/* DevTools resize handle + placeholder div (overlaid by WebContentsView from main process) */}
           {devToolsOpen && (
