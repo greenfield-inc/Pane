@@ -8,6 +8,7 @@ export type HostFileReader = (url: string) => Promise<{ data: string }>;
 
 const COPY_PREFIX = 'pane-page-';
 const MAX_FILES = 200;
+const READS_IN_FLIGHT = 8;
 const MAX_BYTES = 64 * 1024 * 1024;
 const COPY_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -22,7 +23,12 @@ const CSS_REF = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)"'\s]+))\s*\)|@import\s+(?:"
  */
 export async function copyHostPage(pageUrl: string, read: HostFileReader): Promise<string> {
   const page = new URL(pageUrl);
-  const name = decodeURIComponent(page.pathname.slice(page.pathname.lastIndexOf('/') + 1));
+  let name = '';
+  try {
+    name = decodeURIComponent(page.pathname.slice(page.pathname.lastIndexOf('/') + 1));
+  } catch {
+    // A malformed escape names no page: refused below.
+  }
   if (page.protocol !== 'file:' || !/^[^/\\]+\.html?$/i.test(name)) {
     throw new PaneError(
       'ERR_LOCAL_PAGE_BLOCKED',
@@ -44,24 +50,35 @@ export async function copyHostPage(pageUrl: string, read: HostFileReader): Promi
   const pageBytes = Buffer.from(html.data, 'base64');
   await writeFile(pagePath, pageBytes);
 
-  const queue = referencesIn(pageBytes.toString('utf8'), page.href, folderUrl);
   const copied = new Set<string>([page.href]);
   let total = pageBytes.length;
-  while (queue.length > 0 && copied.size < MAX_FILES) {
-    const url = queue.shift();
-    if (url === undefined || copied.has(url)) continue;
-    copied.add(url);
-    const target = join(folder, ...decodeURIComponent(url.slice(folderUrl.length)).split('/'));
-    if (!target.startsWith(folder + sep)) continue;
-    // A file the host can't read stays missing in the copy, as it is in the tab.
-    const file = await read(url).catch(() => null);
-    if (!file) continue;
-    const bytes = Buffer.from(file.data, 'base64');
-    total += bytes.length;
-    if (total > MAX_BYTES) break;
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, bytes);
-    if (/\.css$/i.test(new URL(url).pathname)) queue.push(...referencesIn(bytes.toString('utf8'), url, folderUrl));
+  // Copies one referenced file and returns the files it references in turn. A file the host can't
+  // read, or this computer can't name, stays missing in the copy, as a missing file is in the tab.
+  const copyFile = async (url: string): Promise<string[]> => {
+    try {
+      const target = join(folder, ...decodeURIComponent(url.slice(folderUrl.length)).split('/'));
+      if (!target.startsWith(folder + sep)) return [];
+      const bytes = Buffer.from((await read(url)).data, 'base64');
+      total += bytes.length;
+      if (total > MAX_BYTES) return [];
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, bytes);
+      return /\.css$/i.test(new URL(url).pathname) ? referencesIn(bytes.toString('utf8'), url, folderUrl) : [];
+    } catch {
+      return [];
+    }
+  };
+  // Each round reads the files the previous round referenced, up to READS_IN_FLIGHT at once: every read crosses the relay.
+  let next = referencesIn(pageBytes.toString('utf8'), page.href, folderUrl);
+  while (next.length > 0) {
+    const round = [...new Set(next)].filter(url => !copied.has(url)).slice(0, MAX_FILES - copied.size);
+    for (const url of round) copied.add(url);
+    next = [];
+    let index = 0;
+    const reader = async () => {
+      while (index < round.length) next.push(...await copyFile(round[index++]));
+    };
+    await Promise.all(Array.from({ length: Math.min(READS_IN_FLIGHT, round.length) }, reader));
   }
   return pagePath;
 }

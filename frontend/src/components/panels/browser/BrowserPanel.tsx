@@ -34,6 +34,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [url, setUrl] = useState('');
   const [inputUrl, setInputUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // A host's file page is copied over the relay first, so a click can take seconds; further clicks wait for it.
+  const [openingExternally, setOpeningExternally] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [refusals, setRefusals] = useState<FileRefusal[]>([]);
   const [canGoBack, setCanGoBack] = useState(false);
@@ -411,14 +413,17 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     return null;
   })();
   const handleOpenExternal = () => {
+    if (openingExternally) return;
     if (openExternalBlock !== null) {
       setUrlError(`Pane can't open this page in your browser: ${openExternalBlock}.`);
       return;
     }
+    setOpeningExternally(true);
     const opening = isLocalPage ? window.electronAPI.openLocalPage(externalUrl, panel.id) : window.electronAPI.openExternal(externalUrl);
     void opening.then(result => {
       if (!result.success) setUrlError(result.error || 'Pane could not open this page in your browser');
-    });
+    }, (error: Error) => setUrlError(error.message || 'Pane could not open this page in your browser'))
+      .finally(() => setOpeningExternally(false));
   };
 
   const handleViewSource = () => {
@@ -697,7 +702,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !externalUrl && 'opacity-30 cursor-not-allowed'
           )}
-          title={openExternalBlock ? `Can't open in your browser: ${openExternalBlock}` : 'Open in your browser'}
+          aria-busy={openingExternally}
+          title={openingExternally ? 'Opening in your browser…' : openExternalBlock ? `Can't open in your browser: ${openExternalBlock}` : 'Open in your browser'}
         >
           <ExternalLink className="w-3.5 h-3.5" />
         </button>

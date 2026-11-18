@@ -71,6 +71,36 @@ describe('copyHostPage', () => {
     });
   });
 
+  it('reads up to 8 files from the host at once', async () => {
+    const images = Array.from({ length: 20 }, (_, i) => `img/${i}.png`);
+    const { pageUrl, read } = await hostPage({
+      'site/index.html': images.map(src => `<img src="${src}">`).join(''),
+      ...Object.fromEntries(images.map(src => [`site/${src}`, src])),
+    });
+    let reading = 0;
+    let most = 0;
+    const slowRead = async (url: string) => {
+      most = Math.max(most, ++reading);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      reading -= 1;
+      return read(url);
+    };
+
+    const files = await copiedFiles(await copyHostPage(pageUrl, slowRead));
+
+    expect(Object.keys(files)).toHaveLength(21);
+    expect(most).toBe(8);
+  });
+
+  it('leaves out only a reference this computer cannot name', async () => {
+    const { pageUrl, read } = await hostPage({ 'site/index.html': '<img src="bad%zz.png"><img src="ok.png">', 'site/ok.png': 'ok' });
+
+    expect(await copiedFiles(await copyHostPage(pageUrl, read))).toEqual({
+      'index.html': '<img src="bad%zz.png"><img src="ok.png">',
+      'ok.png': 'ok',
+    });
+  });
+
   it('opens the page when a file it names is missing on the host', async () => {
     const { pageUrl, read } = await hostPage({ 'site/index.html': '<img src="gone.png">' });
 
