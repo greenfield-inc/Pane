@@ -2,8 +2,10 @@ import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { NOTIFY_SUMMARY_CSP, type NotifyItem } from '../shared/types/notify';
+import { DEFAULT_NOTIFY_SETTINGS, NOTIFY_SUMMARY_CSP, type NotifyItem } from '../shared/types/notify';
+import { installElectronApiMock } from './electronApiMock';
 import { summaryPage } from '../main/src/services/notify/summaryPage';
+import { SUMMARY_FRAME_SANDBOX } from '../shared/utils/summaryPolicy';
 
 /**
  * An approval's Summary in a real HTML parser: the no-scripts policy must be the first element
@@ -43,8 +45,6 @@ const HOSTILE = {
   'text before the doctype': `x${PAGE}`,
 } satisfies Record<string, string>;
 
-const FRAME_SANDBOX = 'allow-same-origin'; // ApprovalColumn.tsx's Summary frame
-
 for (const [name, source] of Object.entries(HOSTILE)) {
   test(`Summary policy holds for a page with a ${name}`, async ({ page }) => {
     const html = served(name.replace(/\W+/g, '-'), source);
@@ -74,9 +74,59 @@ for (const [name, source] of Object.entries(HOSTILE)) {
       await loaded;
       await new Promise((resolve) => setTimeout(resolve, 200));
       const doc = frame.contentDocument;
-      return doc?.head.firstElementChild?.getAttribute('http-equiv') ?? null;
-    }, { srcdoc: html, sandbox: FRAME_SANDBOX });
-    expect(inFrame).toBe('Content-Security-Policy');
+      return { policy: doc?.head.firstElementChild?.getAttribute('http-equiv') ?? null, ran: doc?.documentElement.dataset.ran ?? 'no' };
+    }, { srcdoc: html, sandbox: SUMMARY_FRAME_SANDBOX });
+    expect(inFrame).toEqual({ policy: 'Content-Security-Policy', ran: 'no' });
     expect(requests).toEqual([]);
   });
 }
+
+// End to end: a hostile page read from the asker's machine, shown by the real approval column.
+test('the approval column\'s Summary frame keeps a hostile page off the network and its scripts off', async ({ page }) => {
+  const project = { id: 913, name: 'Summary fixture', path: '/tmp/summary-fixture', active: true, created_at: new Date(0).toISOString(), updated_at: new Date(0).toISOString() };
+  const session = {
+    id: 'summary-session', name: 'Summary pane', worktreePath: project.path, prompt: '', status: 'stopped', createdAt: new Date(0).toISOString(),
+    lastActivity: new Date(0).toISOString(), output: [], jsonMessages: [], isRunning: false, permissionMode: 'ignore', projectId: project.id,
+    displayOrder: 0, isFavorite: false, toolType: 'none', archived: false,
+  };
+  const terminal = {
+    id: 'summary-terminal', sessionId: session.id, type: 'terminal', title: 'Terminal',
+    state: { isActive: true, hasBeenViewed: true, customState: { isInitialized: true } },
+    metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position: 0, permanent: true },
+  };
+  const waiting: NotifyItem = { ...item, title: 'Q-1: Ship the hostile summary?', choices: [{ label: 'Ship it', recommended: true }, { label: 'Wait' }], source: { name: 'worker', agent: 'Claude', paneId: 'worker-pane', panelId: 'worker-panel' } };
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], initialPanels: [terminal], activeProjectId: project.id,
+    notifySnapshot: {
+      settings: { ...DEFAULT_NOTIFY_SETTINGS }, items: [waiting], queue: [waiting.id], hidden: [], strip: null, stripSurface: null,
+      pausedUntil: null, shortcutRegistered: true, showOutsideSupported: true, firstRun: false, instructionFiles: [],
+    },
+    machineConnections: {
+      machines: [{ id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null }],
+      reads: { local: { 'notify:summary-page': { kind: 'page', path: '/tmp/summary-fixture/summary.html', html: HOSTILE['leading no-break space'] } } },
+    },
+  });
+  const requests: string[] = [];
+  await page.route('https://beacon.test/**', (route) => {
+    requests.push(route.request().url());
+    return route.fulfill({ status: 200, body: '' });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByRole('button', { name: `Expand project ${project.name}`, exact: true }).click();
+  await page.getByRole('button', { name: session.name, exact: true }).click();
+  await page.getByTestId('approvals-nav').click();
+  await page.getByRole('tab', { name: /Summary/ }).click();
+  const frame = page.getByTestId('approval-summary-frame');
+  await expect(page.frameLocator('[data-testid="approval-summary-frame"]').locator('body')).toContainText('x');
+  expect(await frame.getAttribute('sandbox')).toBe(SUMMARY_FRAME_SANDBOX);
+  const inFrame = await frame.evaluate((element) => {
+    // SAFETY: the test reads the frame Pane renders; it is same-origin by design.
+    const doc = (element as HTMLIFrameElement).contentDocument;
+    const meta = doc?.head.firstElementChild;
+    return { policy: meta ? [meta.tagName, meta.getAttribute('http-equiv'), meta.getAttribute('content')] : null, ran: doc?.documentElement.dataset.ran ?? 'no' };
+  });
+  expect(inFrame).toEqual({ policy: ['META', 'Content-Security-Policy', NOTIFY_SUMMARY_CSP], ran: 'no' });
+  await page.waitForTimeout(300);
+  expect(requests).toEqual([]);
+});

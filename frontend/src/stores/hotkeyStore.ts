@@ -21,6 +21,7 @@ import { create } from 'zustand';
 import {
   getCatalogEntry,
   type HotkeyId,
+  type KeyboardShortcutId,
   type ShortcutCategory,
 } from '../../../shared/constants/keyboardShortcuts';
 import {
@@ -121,6 +122,15 @@ function currentOverrides() {
   ).overrides;
 }
 
+/**
+ * The key a catalog command answers to now: the person's override, else the
+ * platform's default (null when it has none). The one lookup for code that
+ * reads a command's key outside the registry (the approvals keys).
+ */
+export function effectiveCatalogChord(id: KeyboardShortcutId): string | null {
+  return resolveEffectiveChord(id, currentOverrides(), rendererKeyPlatform());
+}
+
 function registeredBinding(keys: string | undefined): string | null {
   if (!keys) return null;
   const parsed = parseChord(keys);
@@ -211,7 +221,7 @@ export function isBoundChordForEvent(event: KeyboardEventLike): boolean {
   const config = useConfigStore.getState().config;
   if (areKeyboardShortcutsEnabled(config)) return true;
   return isCommandPaletteShortcutEnabled(config)
-    && chord === resolveEffectiveChord('open-command-palette', currentOverrides(), rendererKeyPlatform());
+    && chord === effectiveCatalogChord('open-command-palette');
 }
 
 export function isTuiReleasableChordForEvent(event: KeyboardEventLike): boolean {

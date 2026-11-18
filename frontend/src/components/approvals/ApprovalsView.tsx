@@ -28,7 +28,8 @@ import { MachineContext } from './MachineContext';
 import { handleApprovalsEscape } from './approvalsNavigation';
 import { toggleApprovals } from './approvalsNavigation';
 import { useSidebarSessionOrder } from './useSidebarSessionOrder';
-import { focusFirstQuestion, isTypingTarget, pressedCommand, whenShown } from './approvalKeys';
+import { focusFirstQuestion, pressedCommand, whenShown } from './approvalKeys';
+import { isTypingTarget } from '../../utils/typingTarget';
 import { showApprovalColumnTab } from '../../services/regionFocus';
 import { useObservedContentBox } from '../../hooks/useObservedContentBox';
 import { useOuterPanelResize } from '../../hooks/useOuterPanelResize';
@@ -36,6 +37,7 @@ import { OuterResizeSeparator } from '../ui/OuterResizeSeparator';
 import { FindBar } from '../find/FindBar';
 import { APPROVALS_SCREEN_FIND_ID, useSurfaceFind } from '../find/surfaceFind';
 import { OUTER_PANEL_CONFIGS } from '../../utils/outerPanelSizing';
+import { APPROVALS_BESIDE_COLUMN, APPROVALS_BESIDE_ID, APPROVALS_ROW, APPROVALS_ROW_ID, APPROVALS_SORT_ID, OPEN_MENU_OR_DIALOG } from './approvalDom';
 
 /** Side by side from 1100px (the `min-[1100px]:` layout below); stacked under it. */
 const SIDE_BY_SIDE = '(min-width: 1100px)';
@@ -120,7 +122,7 @@ function ItemRow({ item, now, selected = false, tabbable, onSelect, onArchive }:
       tabIndex={tabbable ? 0 : -1}
       data-item-id={item.id}
       data-approval-selected={selected || undefined}
-      data-testid="approvals-row"
+      data-testid={APPROVALS_ROW_ID}
       className={cn(
         'flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-left hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle',
         selected && 'bg-surface-selected',
@@ -350,7 +352,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     const listElement = listRef.current;
     if (!listElement) return;
     const top = listElement.getBoundingClientRect().top;
-    setRowsAbove([...listElement.querySelectorAll('[data-testid="approvals-row"]')].filter((row) => row.getBoundingClientRect().bottom <= top + 1).length);
+    setRowsAbove([...listElement.querySelectorAll(APPROVALS_ROW)].filter((row) => row.getBoundingClientRect().bottom <= top + 1).length);
   };
 
   const beside: Beside = selected ? besideOf(selected, activeMachineId) : { kind: 'none' };
@@ -436,7 +438,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
       selectApproval(next ?? null);
     }
     archiveApprovals(targets);
-    if (hadFocus && next) whenShown(() => listRef.current?.querySelector<HTMLElement>(`[data-testid="approvals-row"][data-item-id="${CSS.escape(next)}"]`) ?? null, (row) => row.focus());
+    if (hadFocus && next) whenShown(() => listRef.current?.querySelector<HTMLElement>(`${APPROVALS_ROW}[data-item-id="${CSS.escape(next)}"]`) ?? null, (row) => row.focus());
   };
   const undo = () => {
     undoArchive();
@@ -456,12 +458,12 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   // ↑↓ move through the list and the approval follows; ↩ or → go into it (D-381).
   const listKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-    const row = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-testid="approvals-row"]') : null;
+    const row = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>(APPROVALS_ROW) : null;
     const id = row?.dataset.itemId;
     if (!row || !id) return;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      const rows = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[data-testid="approvals-row"]'));
+      const rows = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(APPROVALS_ROW));
       const next = rows[rows.indexOf(row) + (event.key === 'ArrowDown' ? 1 : -1)];
       if (!next?.dataset.itemId) return;
       next.focus();
@@ -480,7 +482,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     if (event.key === 'Enter' || event.key === 'ArrowRight') {
       event.preventDefault();
       selectApproval(id);
-      whenShown(() => document.querySelector<HTMLElement>(`[data-testid="approvals-beside"] [data-testid="approval-column"][data-item-id="${CSS.escape(id)}"]`), focusFirstQuestion);
+      whenShown(() => document.querySelector<HTMLElement>(`${APPROVALS_BESIDE_COLUMN}[data-item-id="${CSS.escape(id)}"]`), focusFirstQuestion);
     }
   };
   // Esc in the approval: back to its row (Esc on the list leaves Approvals). The tab keys switch
@@ -488,9 +490,9 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const screenKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
     const target = event.target instanceof HTMLElement ? event.target : null;
     if (!target || event.defaultPrevented) return;
-    const column = target.closest<HTMLElement>('[data-testid="approvals-beside"] [data-testid="approval-column"]');
+    const column = target.closest<HTMLElement>(APPROVALS_BESIDE_COLUMN);
     if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-      if (!column || isTypingTarget(target) || document.querySelector('[role="menu"], [role="listbox"], [aria-modal="true"]')) return;
+      if (!column || isTypingTarget(target) || document.querySelector(OPEN_MENU_OR_DIALOG)) return;
       const row = listRef.current?.querySelector<HTMLElement>('[data-approval-selected]');
       if (!row) return;
       event.preventDefault();
@@ -505,7 +507,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
       // Focus stays in the list: its row, else the tab now shown (the old rows are gone).
       requestAnimationFrame(() => {
         const queue = document.querySelector<HTMLElement>('[data-testid="approvals-queue"]');
-        (queue?.querySelector<HTMLElement>('[data-testid="approvals-row"][tabindex="0"]')
+        (queue?.querySelector<HTMLElement>(`${APPROVALS_ROW}[tabindex="0"]`)
           ?? queue?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'))?.focus();
       });
     } else if (column) {
@@ -570,7 +572,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
                 type="button"
                 aria-label={`Group by: ${APPROVALS_SORTS.find((option) => option.id === sort)?.label}`}
                 className="inline-flex items-center gap-1 rounded text-[12.5px] font-medium text-text-secondary hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
-                data-testid="approvals-sort"
+                data-testid={APPROVALS_SORT_ID}
               >
                 {APPROVALS_SORTS.find((option) => option.id === sort)?.label}
                 <ChevronDown className="h-3 w-3" aria-hidden="true" />
@@ -635,7 +637,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
         </div>
       </section>
 
-      <section aria-label="Beside the approval" className={cn('relative min-h-0 min-w-0 flex-1 flex-col', !selected ? 'hidden min-[1100px]:flex' : 'flex')} data-testid="approvals-beside">
+      <section aria-label="Beside the approval" className={cn('relative min-h-0 min-w-0 flex-1 flex-col', !selected ? 'hidden min-[1100px]:flex' : 'flex')} data-testid={APPROVALS_BESIDE_ID}>
         {/* Below the approval's header and tabs, as in a Session's column. */}
         <FindBar panelId={APPROVALS_SCREEN_FIND_ID} className={selected ? 'top-[5.5rem]' : undefined} />
         {/* On the list's edge (this section's left), above the list's own border. */}
