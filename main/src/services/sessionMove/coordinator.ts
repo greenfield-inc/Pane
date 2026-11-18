@@ -115,6 +115,8 @@ interface SourceJob {
   lastHeard: number;
   /** The after-freeze loop, while it runs: one per move. */
   settling?: Promise<void>;
+  /** Ends the loop's current wait early (Check again). */
+  wake?: () => void;
 }
 
 const STEP_TITLES = {
@@ -524,6 +526,7 @@ export class MoveCoordinator {
     const status = await this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.status).catch(() => undefined);
     if (status?.stage === 'failed' && status.retryable) await this.callTarget(job, SESSION_MOVE_TARGET_CHANNELS.start).catch(() => undefined);
     this.settle(job);
+    job.wake?.();
   }
 
   /**
@@ -541,7 +544,10 @@ export class MoveCoordinator {
     }, {
       onWait: wait => this.showWait(job, wait),
       stopped: () => job.progress.phase === 'done' || !job.progress.frozen || this.jobs.get(job.progress.sessionId) !== job,
-      sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+      sleep: ms => new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, ms);
+        job.wake = () => { clearTimeout(timer); resolve(); };
+      }),
     }).then(outcome => outcome && this.finish(job, outcome, built)).catch(error => {
       console.error(`[SessionMove] The move of ${job.progress.sessionName} couldn't finish:`, error);
       this.touch(job, { phase: 'confirming', error: { message: `The move to ${target} couldn't finish here: ${reasonOf(error)}.`, next: `The Session stays paused here so it never runs twice. Check again, or open it on ${target}.` } });
