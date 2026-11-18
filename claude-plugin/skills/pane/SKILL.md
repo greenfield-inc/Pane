@@ -144,7 +144,9 @@ orchestrator that relayed a worker's question, else Autopilot.
   as `--choices '<json>'` or `--questions '<json>'` (the JSON `notify`
   takes), or with `--summary-file <status file>` when you keep one, after
   writing the question in its `needs_you`. Never pack options into the
-  question as "(A / B)": Pane refuses that and shows nothing. Start the
+  question as "(A / B)": Pane refuses that and shows nothing (a unit
+  reads as options too: write "in requests per second", not
+  "(requests / second)"). Start the
   question with its Q-n when your orchestrator gave you one
   (`Q-3: <question>`), and pass each value as one literal argument: in a
   POSIX shell, single quotes with each `'` inside written `'\''`

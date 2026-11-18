@@ -246,6 +246,8 @@ function statusFileText(summaryPath: string): { text: string; overLimit: boolean
 /**
  * A question whose text ends with its options in brackets, "(A / B)" or "(A (recommended) / B)".
  * Each option may hold one bracketed note; a slash needs a space either side, so "(iOS/Android)" is prose.
+ * A unit such as "(requests / second)" matches too: telling it from "(Yes / No)" would take a parser
+ * for meaning, so the refusal names the rewording instead of guessing.
  */
 const PACKED_OPTIONS = /\((?:[^()]|\([^()]*\))*?\s\/\s(?:[^()]|\([^()]*\))*\)\s*[.?!]?\s*$/u;
 
@@ -256,7 +258,8 @@ function packedOptionsError(question: string): PaneError {
     `The question ends with its options in brackets, ${list}, but the report gives no buttons for them, so the person would get a card with nothing to press. Nothing was shown to the person.`,
     'Give the options as buttons: runpane report --state blocked --question \'Q-3: Use the invoice id?\' '
       + '--choices \'[{"label":"Invoice id","recommended":true},{"label":"Invoice number"}]\' (or --questions for several), '
-      + 'or pass your status file as --summary-file with the options in needs_you.questions[].options. Drop the bracketed list from --question.',
+      + 'or pass your status file as --summary-file with the options in needs_you.questions[].options. Drop the bracketed list from --question. '
+      + 'If the question asks for a value rather than a choice, word the unit as prose ("in requests per second") or drop the spaces around the slash ("(requests/second)").',
   );
 }
 

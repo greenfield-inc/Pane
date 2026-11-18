@@ -186,3 +186,52 @@ test.describe('the Approvals screen (D-381)', () => {
     await expect(row(page, 0)).toHaveAttribute('aria-current', 'true');
   });
 });
+
+test.describe('a Session chat\'s approval key (D-381)', () => {
+  /** ⌥⌘A on macOS; Ctrl+K, then Ctrl+A elsewhere (Ctrl+Alt+A is AltGr on many layouts). */
+  async function openSessionApprovalKey(page: Page) {
+    if (await page.evaluate(() => navigator.platform.toUpperCase().includes('MAC'))) {
+      await page.keyboard.press('Meta+Alt+KeyA');
+      return;
+    }
+    await page.keyboard.press('Control+KeyK');
+    await page.keyboard.press('Control+KeyA');
+  }
+
+  test('opens the Session\'s approval on its first question, and pressed again goes back to the chat with the draft kept', async ({ page }) => {
+    await page.goto('/renderer-tests/approval-keys.html?surface=session');
+    const composer = page.getByLabel('Chat composer');
+    await composer.click();
+    await page.keyboard.type('a half-written reply');
+    await expect(page.getByTestId('approval-column')).toHaveCount(0);
+
+    await openSessionApprovalKey(page);
+    const column = page.getByTestId('approval-column');
+    await expect(column).toBeVisible();
+    // The oldest waiting approval opens, with focus on its first question's option.
+    await expect(page.getByTestId('approval-title')).toHaveText('Q-13: Run the invoice migration on staging?');
+    await expect(column.getByRole('radio').first()).toBeFocused();
+
+    await openSessionApprovalKey(page);
+    await expect(composer).toBeFocused();
+    await expect(composer).toHaveValue('a half-written reply');
+    // The approval stays open beside the chat; the key only moved focus.
+    await expect(column).toBeVisible();
+
+    // And once more: back into the open approval.
+    await openSessionApprovalKey(page);
+    await expect(column.getByRole('radio').first()).toBeFocused();
+  });
+
+  test('with nothing waiting in the Session, says so and leaves focus in the chat', async ({ page }) => {
+    await page.goto('/renderer-tests/approval-keys.html?surface=session&waiting=none');
+    const composer = page.getByLabel('Chat composer');
+    await composer.click();
+    await page.keyboard.type('draft');
+    await openSessionApprovalKey(page);
+    await expect(page.getByTestId('key-hint')).toHaveText('Nothing in this Session is waiting on you.');
+    await expect(page.getByTestId('approval-column')).toHaveCount(0);
+    await expect(composer).toBeFocused();
+    await expect(composer).toHaveValue('draft');
+  });
+});

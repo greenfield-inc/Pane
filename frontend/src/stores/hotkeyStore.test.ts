@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { areKeyboardShortcutsEnabled, isCommandPaletteShortcutEnabled, useConfigStore } from './configStore';
 import {
   cancelKeySequence,
+  effectiveCatalogChord,
   isBoundChordForEvent,
   isTuiReleasableChordForEvent,
   KEY_SEQUENCE_TIMEOUT_MS,
@@ -259,6 +260,17 @@ describe('hotkeyStore keyboard shortcut preference', () => {
     keydownListener?.(newEvent);
     expect(action).toHaveBeenCalledOnce();
     expect(useHotkeyStore.getState().hotkeys.get('open-settings')?.keys).toBe('');
+  });
+
+  it('reads a catalog command\'s key without it being registered: the override, else this platform\'s default', () => {
+    useConfigStore.setState({ config: {} });
+    platform.mac = true;
+    expect(effectiveCatalogChord('open-session-approval')).toBe('mod+alt+a');
+    platform.mac = false;
+    expect(effectiveCatalogChord('open-session-approval')).toBe('mod+k mod+a');
+    useConfigStore.setState({ config: { keyboardShortcutOverrides: { 'open-session-approval': 'mod+alt+j', 'next-approval': null } } });
+    expect(effectiveCatalogChord('open-session-approval')).toBe('mod+alt+j');
+    expect(effectiveCatalogChord('next-approval')).toBeNull();
   });
 
   it('runs neither command when enabled candidates share a chord', () => {

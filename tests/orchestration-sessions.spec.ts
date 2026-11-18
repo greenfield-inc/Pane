@@ -4202,6 +4202,41 @@ for (const keys of JOURNEY_KEYS) {
   });
 }
 
+test('T-11: Dismissing the dock\'s first card shows the next one, after either pager moved the selection', async ({ page }) => {
+  const base = sessionApprovalsSnapshot();
+  const [, worker] = base.items;
+  const now = Date.now();
+  const items = (['A', 'B', 'C'] as const).map((name, at) => ({ ...worker, id: `q-${name}`, title: `Approval ${name}`, createdAt: now - (30 - at) * 60_000 }));
+  const at = new Date(0).toISOString();
+  // The Session's chat, where the dock sits above the composer.
+  const chat = { id: '__orchestration_panel_plans_claude', sessionId: '__orchestration_session_plansterminal__', type: 'chat', title: 'Plan demo · Claude Code',
+    state: { isActive: true, hasBeenViewed: true, customState: { agent: 'claude', launch: { kind: 'new' }, cwd: '/tmp/pane-fixtures', status: 'idle', orchestrationSessionId: 'plans' } },
+    metadata: { createdAt: at, lastActiveAt: at, position: 0 } };
+  await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', at)], [], {
+    notifySnapshot: { ...base, items, queue: items.map(item => item.id) }, initialPanels: [chat],
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-plans').click();
+  const title = page.getByTestId('session-approval-card-title');
+  const pager = page.getByTestId('session-approval-card-pager');
+  // The dock pages to C and opens it; the column's pager then wraps to A, which the dock follows.
+  await page.getByTestId('session-approval-card-prev').click();
+  await expect(title).toHaveText('Approval C');
+  await page.getByTestId('session-approval-card-open').click();
+  const column = page.getByTestId('approval-column');
+  await expect(column.getByTestId('approval-pager')).toHaveText('3 of 3');
+  await column.getByRole('button', { name: 'Next approval' }).click();
+  await expect(title).toHaveText('Approval A');
+
+  // Dismissing A shows B, the next one, with the focus on the card itself.
+  await page.getByTestId('session-approval-card-dismiss').focus();
+  await page.keyboard.press('Enter');
+  await expect(title).toHaveText('Approval B');
+  await expect(pager).toHaveText('1 of 2');
+  await expect(page.getByTestId('session-approval-card')).toBeFocused();
+});
+
 test('D-289: a worker\'s approval shows its asking tab live in the Session column\'s origin tab', async ({ page }) => {
   const now = new Date(0).toISOString();
   const workerTab = { id: 'panel-worker', sessionId: 'pane-worker', type: 'logs', title: 'doozy-overhaul logs', state: { isActive: true, hasBeenViewed: true }, metadata: { createdAt: now, lastActiveAt: now, position: 0 } };

@@ -171,6 +171,15 @@ describe('a blocked question with its options packed into the text', () => {
     expect(() => workerCard('Invoice PDFs', 'Ship it? (Yes / No)')).toThrow(expect.objectContaining({ code: 'ERR_REPORT_PACKED_OPTIONS' }));
   });
 
+  it('names the rewording when the brackets hold a unit, and accepts the reworded question', () => {
+    expect(() => workerCard(undefined, 'Q-1: What rate limit should we set (requests / second)?')).toThrow(expect.objectContaining({
+      code: 'ERR_REPORT_PACKED_OPTIONS',
+      next: expect.stringContaining('word the unit as prose ("in requests per second")'),
+    }));
+    expect(workerCard(undefined, 'Q-1: What rate limit should we set, in requests per second?').title).toBe('Q-1: What rate limit should we set, in requests per second?');
+    expect(workerCard(undefined, 'Q-1: What rate limit should we set (requests/second)?').choices).toBeUndefined();
+  });
+
   it('is accepted when --choices or the needs_you block gives the buttons', () => {
     expect(workerCard(undefined, packed, { choices: [{ label: 'Invoice id', recommended: true }, { label: 'Invoice number' }] }).choices).toHaveLength(2);
     const status = JSON.stringify({ needs_you: { questions: [{ q: 'Id or number?', options: ['Invoice id (recommended)', 'Invoice number'] }] } });
