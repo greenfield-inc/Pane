@@ -6,6 +6,9 @@ import { locateNativeSession, nativeStoreRoot } from '../../../../packages/runpa
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { claudeProjectDirName } from '../agentTranscript/claude';
 import { isSafePackagePath, type ConversationFile, type ConversationStore, type MoveConversation } from './manifest';
+import type { ConversationUndoPlan } from './ledger';
+
+export type ConversationUndo = ConversationUndoPlan;
 
 /**
  * Conversations travel byte for byte (Q-374.4: their history is never rewritten). On the source
@@ -130,6 +133,7 @@ export async function placeConversation(
   cwd: string,
   machine: { here: string; source: string },
   env: NodeJS.ProcessEnv = process.env,
+  onPlan?: (plan: ConversationUndo) => void,
 ): Promise<PlacedConversation> {
   if (conversation.files.length === 0) throw new PaneError('ERR_MOVE_CONVERSATION_EMPTY', `Conversation ${conversation.id} has no files in the package.`, 'Start the move again.');
   let existing: Awaited<ReturnType<typeof locateNativeSession>>;
@@ -168,17 +172,17 @@ export async function placeConversation(
   }
   const stale = (existing?.files ?? []).map(file => file.absolute).filter(file => !placements.some(placement => placement.target === file));
 
-  const done: Placement[] = [];
   // Folders this move creates go again on undo, so the store looks as it did before.
-  const created = new Set<string>();
-  const undo = async () => {
-    await undoPlacements(done);
-    for (const folder of [...created].sort((x, y) => y.length - x.length)) await fs.promises.rm(folder, { recursive: true, force: true });
+  const created = [...new Set(placements.map(placement => firstMissingAncestor(path.dirname(placement.target))).filter((folder): folder is string => !!folder))];
+  const plan: ConversationUndo = {
+    placements: placements.map(({ target, staged, previous, hadPrevious }) => ({ target, staged, previous, hadPrevious })),
+    created,
   };
+  // Recorded before the store changes, so a restart can still undo it from the plan alone.
+  onPlan?.(plan);
+  const done: Placement[] = [];
   try {
     for (const placement of placements) {
-      const first = firstMissingAncestor(path.dirname(placement.target));
-      if (first) created.add(first);
       await fs.promises.mkdir(path.dirname(placement.target), { recursive: true });
       await fs.promises.copyFile(placement.source, placement.staged);
     }
@@ -188,15 +192,14 @@ export async function placeConversation(
       done.push(placement);
     }
   } catch (error) {
-    for (const placement of placements) await fs.promises.rm(placement.staged, { force: true });
-    await undo();
+    await undoConversationPlacement(plan);
     throw new PaneError('ERR_MOVE_CONVERSATION_PLACE', `Conversation ${conversation.id} couldn't be filed on ${machine.here}: ${reasonOf(error)}. Its store was put back as it was.`, 'Check the disk on that machine, then move again.');
   }
   // One copy per id: a copy in another Claude folder (from an earlier move) goes on commit too.
   const leftovers = [...done.filter(placement => placement.hadPrevious).map(placement => placement.previous), ...stale];
   return {
     mainPath: placements[0].target,
-    undo,
+    undo: () => undoConversationPlacement(plan),
     commit: async () => {
       for (const file of leftovers) await fs.promises.rm(file, { force: true });
     },
@@ -213,9 +216,20 @@ function firstMissingAncestor(folder: string): string | undefined {
   return missing;
 }
 
-async function undoPlacements(done: Placement[]): Promise<void> {
-  for (const placement of [...done].reverse()) {
-    await fs.promises.rm(placement.target, { force: true });
-    if (placement.hadPrevious) await fs.promises.rename(placement.previous, placement.target).catch(() => undefined);
+/**
+ * Puts the store back as it was before a placement, from its plan alone. Safe whether the
+ * placement ran fully, partly or not at all, and when run twice: a previous copy that still exists
+ * goes back over the new one; a new copy with no previous is removed; staged copies always go.
+ */
+export async function undoConversationPlacement(plan: ConversationUndo): Promise<void> {
+  for (const placement of [...plan.placements].reverse()) {
+    await fs.promises.rm(placement.staged, { force: true });
+    if (!placement.hadPrevious) {
+      await fs.promises.rm(placement.target, { force: true });
+    } else if (fs.existsSync(placement.previous)) {
+      await fs.promises.rm(placement.target, { force: true });
+      await fs.promises.rename(placement.previous, placement.target);
+    }
   }
+  for (const folder of [...plan.created].sort((x, y) => y.length - x.length)) await fs.promises.rm(folder, { recursive: true, force: true });
 }

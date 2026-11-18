@@ -20,14 +20,14 @@ import { repositoryIdentityFromRemote } from '../repositoryIdentity';
 import { sessionWorkspacePath } from '../sessionWorkspace';
 import { thisMachineName } from '../approvals/approvalStore';
 import { isBinaryFile } from '../../utils/binaryFile';
-import { placeConversation, type PlacedConversation } from './conversations';
+import { placeConversation, undoConversationPlacement, type PlacedConversation } from './conversations';
 import { addWorktree, applySnapshot, deleteRefs, importBundle, MoveGitError, placeBranch, snapshotMatches } from './gitSnapshot';
 import { moveManifestSchema, panelBuffersSchema, readTabFields, sessionMoveFixSchema, toJsonObject, type MoveManifest, type MovePane, type MoveRepo, type MoveTab } from './manifest';
 import { buildPathMap, mapPath, rewriteText, type PathMap } from './pathMap';
 import { MoveReceiver, type WriteRequest, type WriteResult } from './transfer';
 import { isRegeneratedSessionFile, isTextFile } from './sessionFolder';
 import { agentFarmProfileOf, movedLine } from './rules';
-import { MoveLedger, type CommitPlan, type LedgerEntry, type LedgerTab } from './ledger';
+import { MoveLedger, type CommitPlan, type JournalRecord, type LedgerEntry, type LedgerTab, type UndoStep } from './ledger';
 
 const run = promisify(execFile);
 
@@ -78,8 +78,6 @@ interface Job {
   lastWriteAt: number;
   manifest?: MoveManifest;
   map?: PathMap;
-  /** Undo steps for everything this move made here, run in reverse on failure. */
-  cleanup: Array<{ label: string; undo: () => Promise<void> }>;
   conversations: PlacedConversation[];
   /** Tabs to start, and their cwd here. */
   tabs: Array<{ paneId: string; tab: MoveTab; cwd: string }>;
@@ -126,6 +124,11 @@ const liveTabs: ImporterTabs = {
 };
 
 const POSIX = new Set(['darwin', 'linux']);
+/** Tries of a roll-back step before the person is told what is left (D-1). */
+const NOTICE_AFTER_FAILURES = 5;
+/** A roll-back step that failed is tried again after this long, doubling up to an hour. */
+const UNDO_RETRY_MS = 5 * 60_000;
+
 /** How long a move may sit half-received with no new chunk before the target drops it. */
 const RECEIVE_IDLE_MS = 10 * 60_000;
 
@@ -205,6 +208,23 @@ async function readTextFile(file: string, relative: string): Promise<string | nu
   }
 }
 
+/** Steps on the same thing: a failed one holds back the later ones until it succeeds. */
+function undoKey(step: UndoStep): string | undefined {
+  switch (step.kind) {
+    case 'removePane':
+    case 'restoreAside': return `pane:${step.kind === 'removePane' ? step.paneId : step.id}`;
+    case 'deletePanel':
+    case 'putBackPanel': return `panel:${step.panelId}`;
+    case 'restoreRef': return `ref:${step.repo}:${step.ref}`;
+    case 'restoreBranch': return `ref:${step.repo}:refs/heads/${step.branch}`;
+    case 'removeWorktree': return `path:${step.path}`;
+    case 'restoreFolder': return `path:${step.target}`;
+    case 'removeArriving': return `session:${step.sessionId}`;
+    case 'deleteRefs':
+    case 'undoConversation': return undefined;
+  }
+}
+
 const ABORTED = (): PaneError => new PaneError('ERR_MOVE_ABORTED', 'The move was cancelled while this machine set it up.', 'Nothing was kept here. Start the move again.');
 
 function tabCommand(tab: MoveTab): string | undefined {
@@ -223,6 +243,8 @@ export class MoveImporter {
   readonly ledger: MoveLedger;
   /** Starts resumed from the ledger after a restart, by move. */
   private readonly resuming = new Map<string, Promise<void>>();
+  /** Roll-backs under way, by move, so two never undo the same step at once. */
+  private readonly rollingBack = new Map<string, Promise<void>>();
 
   constructor(
     private readonly services: AppServices,
@@ -422,7 +444,7 @@ export class MoveImporter {
     if (!this.jobs.has(parsed.moveId)) {
       const decided = this.ledger.get(parsed.moveId);
       if (decided) throw new PaneError('ERR_MOVE_STAGE', `Move ${parsed.moveId} was already ${decided.decision === 'rolledBack' ? 'rolled back' : decided.decision} here.`, 'Start the move again.');
-      this.jobs.set(parsed.moveId, { status: { moveId: parsed.moveId, stage: 'receiving', panesDone: 0, panesTotal: 0 }, lastWriteAt: Date.now(), cleanup: [], conversations: [], tabs: [], setAside: [] });
+      this.jobs.set(parsed.moveId, { status: { moveId: parsed.moveId, stage: 'receiving', panesDone: 0, panesTotal: 0 }, lastWriteAt: Date.now(), conversations: [], tabs: [], setAside: [] });
     }
     const job = this.job(parsed.moveId);
     job.lastWriteAt = Date.now();
@@ -434,9 +456,31 @@ export class MoveImporter {
     const job = this.jobs.get(moveId);
     if (job) return { ...job.status, durable: true };
     const entry = this.ledger.get(moveId);
-    if (entry) return this.fromLedger(entry);
-    // Moved here by a Pane from before the ledger: a Session this move started says so in its moved.json.
+    if (entry) return this.fromLedger(this.abandonStaleBuild(entry));
+    return this.noRecord(moveId);
+  }
+
+  /**
+   * A build this Pane was running when it quit can't go on (its package and in-memory state are
+   * gone): it is rolled back, from its journal, the first time anything asks about it.
+   */
+  private abandonStaleBuild(entry: LedgerEntry): LedgerEntry {
+    if (entry.decision !== 'building' || this.jobs.has(entry.moveId)) return entry;
+    const decided = this.ledger.decide(entry.moveId, 'rolledBack');
+    void this.rollBack(entry.moveId).catch(error => console.error(`[SessionMove] Roll-back of ${entry.moveId} failed:`, error));
+    return decided;
+  }
+
+  /**
+   * The answer for a move with no ledger entry. Every build writes its entry first, so this machine
+   * never committed it; unless something says otherwise (a Session still arriving for it, whose
+   * record went missing), which is unknown and throws, so the source stays frozen.
+   */
+  private async noRecord(moveId: string): Promise<TargetStatus> {
     for (const session of (await this.services.orchestrationSessionManager?.list())?.sessions ?? []) {
+      if (session.move?.moveId === moveId && session.move.state === 'arriving') {
+        throw new PaneError('ERR_MOVE_LEDGER_MISSING', `Session “${session.name ?? session.id}” is arriving here for move ${moveId}, but this machine's record of the move is missing, so it can't say how the move ended.`, 'The Session stays paused on the other machine. Check the Pane folder on this machine, then check again.');
+      }
       if (session.move?.state === 'arriving') continue;
       const record = await fs.promises.readFile(path.join(sessionWorkspacePath(session.id), 'moved.json'), 'utf8').catch(() => '');
       if (decodeOptionalBoundary(record ? JSON.parse(record) : null, boundary.object({ moveId: boundary.string }))?.moveId === moveId) {
@@ -451,6 +495,8 @@ export class MoveImporter {
     const base = { moveId: entry.moveId, panesDone: 0, panesTotal: 0, durable: true };
     const plan = entry.plan;
     switch (entry.decision) {
+      case 'building':
+        return { ...base, stage: 'building' };
       case 'built':
         return { ...base, stage: 'built', approvals: plan?.approvals ?? 0, leftBehind: plan?.leftBehind ?? [], missingEnv: plan?.missingEnv ?? [] };
       case 'committed':
@@ -474,11 +520,14 @@ export class MoveImporter {
     this.refuseTeammate();
     const job = this.job(moveId);
     if (job.status.stage !== 'receiving') return { ...job.status };
+    // The entry comes first: every step of the build is recorded in it before it runs.
+    this.ledger.begin(moveId);
     job.status = { ...job.status, stage: 'building', detail: 'Checking the package' };
     job.building = this.runBuild(job).catch(async error => {
       if (job.abortRequested) return; // abort undoes it, once this settles
       console.error(`[SessionMove] Build of ${moveId} failed:`, error);
-      await this.rollBack(job);
+      this.ledger.decide(moveId, 'rolledBack');
+      await this.rollBack(moveId);
       job.status = { ...job.status, stage: 'failed', error: moveError(error) };
     });
     return { ...job.status };
@@ -534,18 +583,16 @@ export class MoveImporter {
       job.status.detail = `Setting up ${pane.name}`;
       const repo = placement.projectPath;
       const incomingPrefix = `refs/pane/move-incoming/${pane.id}`;
-      job.cleanup.push({ label: `refs for ${pane.name}`, undo: () => deleteRefs(repo, incomingPrefix) });
+      this.journal(job, `refs for Pane “${pane.name}”`, { kind: 'deleteRefs', repo, prefix: incomingPrefix });
       const bundle = this.receiver.filePath(moveId, pane.bundle);
       // Moving back: the snapshot an earlier move left here (for Restore) comes back if this one fails.
       const previousSnapshot = await tryGit(repo, ['rev-parse', '--verify', '--quiet', pane.snapshot.ref]);
+      this.journal(job, `the saved work of Pane “${pane.name}”`, { kind: 'restoreRef', repo, ref: pane.snapshot.ref, previous: previousSnapshot });
       const imported = await importBundle(repo, bundle, { branch: pane.branch, snapshotRef: pane.snapshot.ref, incomingPrefix });
-      job.cleanup.push({ label: `snapshot of ${pane.name}`, undo: async () => {
-        if (previousSnapshot) await tryGit(repo, ['update-ref', pane.snapshot!.ref, previousSnapshot]);
-        else await tryGit(repo, ['update-ref', '-d', pane.snapshot!.ref]);
-      } });
       step();
       if (pane.branch && imported.branchHead) {
         const before = await tryGit(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${pane.branch}`]);
+        this.journal(job, `branch ${pane.branch}`, { kind: 'restoreBranch', repo, branch: pane.branch, before });
         try {
           await placeBranch(repo, pane.branch, `${incomingPrefix}/branch`);
         } catch (error) {
@@ -555,20 +602,13 @@ export class MoveImporter {
           }
           throw error;
         }
-        job.cleanup.push({ label: `branch ${pane.branch}`, undo: async () => {
-          if (before) await tryGit(repo, ['update-ref', `refs/heads/${pane.branch}`, before]);
-          else await tryGit(repo, ['branch', '-D', pane.branch!]);
-        } });
       }
       if (fs.existsSync(placement.worktreePath)) {
         throw new PaneError('ERR_MOVE_WORKTREE_EXISTS', `${placement.worktreePath} already exists on ${thisMachineName()}, so Pane “${pane.name}” can't get its worktree there.`, 'Move or remove that folder, then try again.');
       }
-      await addWorktree(repo, placement.worktreePath, pane.branch, imported.snapshot ? (await git(repo, ['rev-parse', `${imported.snapshot}^1`])) : (pane.head ?? 'HEAD'));
-      job.cleanup.push({ label: `worktree ${placement.worktreePath}`, undo: async () => {
-        await tryGit(repo, ['worktree', 'remove', '--force', placement.worktreePath]);
-        await fs.promises.rm(placement.worktreePath, { recursive: true, force: true });
-        await tryGit(repo, ['worktree', 'prune']);
-      } });
+      const base = imported.snapshot ? (await git(repo, ['rev-parse', `${imported.snapshot}^1`])) : (pane.head ?? 'HEAD');
+      this.journal(job, `worktree ${placement.worktreePath}`, { kind: 'removeWorktree', repo, path: placement.worktreePath });
+      await addWorktree(repo, placement.worktreePath, pane.branch, base);
       await applySnapshot(placement.worktreePath, imported.snapshot);
       // Checked right after reapplying and before setup, which may change tracked files itself.
       if (!(await snapshotMatches(placement.worktreePath, imported.snapshot))) {
@@ -588,7 +628,8 @@ export class MoveImporter {
         pane.record.noTool ? 'none' : undefined,
         pane.baseCommit ?? undefined, pane.baseBranch ?? undefined, false,
       );
-      job.cleanup.push({ label: `Pane ${pane.name}`, undo: () => this.removePane(created.id) });
+      // Recorded right after (createSessionWithId is synchronous): a Pane of this ID that was here already must never be removed.
+      this.journal(job, `Pane “${pane.name}”`, { kind: 'removePane', paneId: created.id });
       // Shown at once, the way a new Pane is (no reload), without taking focus; its own tabs follow.
       this.services.sessionManager.emitSessionCreated(created, { activateOnCreate: false, createDefaultTerminalOnCreate: false });
       if (pane.layout) sessionsDb.setSessionPanelLayout(pane.id, rewriteText(map, pane.layout));
@@ -610,12 +651,8 @@ export class MoveImporter {
     job.status.detail = 'Restoring the Session folder';
     const hadFolder = fs.existsSync(targetFolder);
     const backup = `${targetFolder}.pane-move-${moveId}`;
-    if (hadFolder) {
-      await fs.promises.rename(targetFolder, backup);
-      job.cleanup.push({ label: 'Session folder', undo: async () => { await fs.promises.rm(targetFolder, { recursive: true, force: true }); await fs.promises.rename(backup, targetFolder); } });
-    } else {
-      job.cleanup.push({ label: 'Session folder', undo: () => fs.promises.rm(targetFolder, { recursive: true, force: true }) });
-    }
+    this.journal(job, `the Session folder ${targetFolder}`, { kind: 'restoreFolder', target: targetFolder, backup: hadFolder ? backup : null });
+    if (hadFolder) await fs.promises.rename(targetFolder, backup);
     for (const relative of manifest.sessionFolder.files) {
       if (isRegeneratedSessionFile(relative)) continue;
       const source = this.receiver.filePath(moveId, `session/${relative}`);
@@ -650,8 +687,8 @@ export class MoveImporter {
     if (existing) {
       for (const panel of this.tabs.getPanelsForSession(existing.internalSessionId)) await this.setAsidePanel(job, panel);
     }
+    this.journal(job, `the arriving Session “${String(record.name ?? sessionId)}”`, { kind: 'removeArriving', sessionId, replaced: job.replacedSession ? toJsonObject(job.replacedSession) : null });
     await manager.importArriving(arriving);
-    job.cleanup.push({ label: 'Session record', undo: () => manager.removeArriving(sessionId, job.replacedSession) });
 
     // Tabs: the same IDs, titles, order and split, stopped and marked arriving; conversations filed here.
     job.status.detail = 'Filing conversations';
@@ -685,12 +722,14 @@ export class MoveImporter {
           if (buffers.alternate) state.alternateScreenBuffer = buffers.alternate;
         }
         if (tab.conversation) {
-          const placed = await placeConversation(tab.conversation, packagePath => this.receiver.filePath(moveId, packagePath), cwd, { here: thisMachineName(), source: manifest.source.machine });
+          const conversationId = tab.conversation.id;
+          const placed = await placeConversation(tab.conversation, packagePath => this.receiver.filePath(moveId, packagePath), cwd, { here: thisMachineName(), source: manifest.source.machine }, process.env,
+            plan => this.journal(job, `conversation ${conversationId}`, { kind: 'undoConversation', plan }));
           job.conversations.push(placed);
-          job.cleanup.push({ label: `conversation ${tab.conversation.id}`, undo: () => placed.undo() });
         }
         const existingPanel = this.tabs.getPanel(tab.id);
         if (existingPanel) await this.setAsidePanel(job, existingPanel);
+        this.journal(job, `tab ${tab.title}`, { kind: 'deletePanel', panelId: tab.id });
         await this.tabs.createPanel({
           id: tab.id, sessionId: paneId,
           // SAFETY: the type is the source's own panel record's ToolPanelType, from a Pane of the same manifest version.
@@ -700,7 +739,6 @@ export class MoveImporter {
           metadata: tab.metadata,
           activate: false,
         });
-        job.cleanup.push({ label: `tab ${tab.title}`, undo: async () => { await this.tabs.deletePanel(tab.id).catch(() => undefined); } });
         job.tabs.push({ paneId, tab, cwd });
       }
     }
@@ -745,19 +783,21 @@ export class MoveImporter {
     return new Set(this.projects().flatMap(project => this.services.databaseService.getProjectEnvVars(project.id).map(variable => variable.key)));
   }
 
-  /** Removes a tab that gives way to an arriving one; a failed move puts it back as it was. */
-  private async setAsidePanel(job: Job, panel: ToolPanel): Promise<void> {
-    if (this.tabs.isTerminalInitialized(panel.id)) await this.tabs.destroyTerminal(panel.id).catch(() => undefined);
-    await this.tabs.deletePanel(panel.id);
-    job.cleanup.push({ label: `earlier tab ${panel.title}`, undo: () => this.putBackPanel(panel) });
+  /** Records how to undo the next build step, before it runs. */
+  private journal(job: Job, label: string, step: UndoStep): void {
+    this.ledger.journal(job.status.moveId, label, step);
   }
 
-  private async putBackPanel(panel: ToolPanel): Promise<void> {
-    await this.tabs.createPanel({
+  /** Removes a tab that gives way to an arriving one; a failed move puts it back as it was. */
+  private async setAsidePanel(job: Job, panel: ToolPanel): Promise<void> {
+    // The tab as it was is saved beside the record first, so a restart can still put it back.
+    this.ledger.saveSide(job.status.moveId, panel.id, toJsonObject({
       id: panel.id, sessionId: panel.sessionId, type: panel.type, title: panel.title,
-      initialState: { customState: panel.state.customState ?? {} },
-      metadata: panel.metadata, activate: false,
-    });
+      customState: panel.state.customState ?? {}, metadata: panel.metadata ?? {},
+    }));
+    this.journal(job, `tab ${panel.title}`, { kind: 'putBackPanel', panelId: panel.id });
+    if (this.tabs.isTerminalInitialized(panel.id)) await this.tabs.destroyTerminal(panel.id).catch(() => undefined);
+    await this.tabs.deletePanel(panel.id);
   }
 
   /**
@@ -773,11 +813,9 @@ export class MoveImporter {
     this.services.sessionManager.forgetSession(paneId);
     const aside = db.setArchivedSessionAside(paneId, `${paneId}.moving-${job.status.moveId}`);
     if (!aside) return;
+    // Recorded right after: setting aside is one synchronous database step, and its undo needs what it returned.
+    this.journal(job, `the archived Pane ${paneId}`, { kind: 'restoreAside', ...aside });
     job.setAside.push(aside.asideId);
-    job.cleanup.push({ label: `archived Pane ${paneId}`, undo: async () => {
-      db.restoreSetAsideSession(aside);
-      job.setAside = job.setAside.filter(id => id !== aside.asideId);
-    } });
   }
 
   private async removePane(paneId: string): Promise<void> {
@@ -789,16 +827,141 @@ export class MoveImporter {
     db.deleteArchivedSessionPermanently(paneId);
   }
 
-  private async rollBack(job: Job): Promise<void> {
-    for (const step of [...job.cleanup].reverse()) {
+  // ── Roll-back ──────────────────────────────────────────────────────────
+
+  /**
+   * Undoes everything the move made here, from its journal alone, newest step first, so it works
+   * the same during the build and after a restart. Each step that succeeds is marked, so a
+   * roll-back cut short resumes where it stopped. A step that fails holds back the later steps on
+   * the same Pane, tab, ref or folder (restoring an archived Pane before its arriving copy is
+   * removed would let a retry delete it); the rest go on, and the failed ones are tried again.
+   */
+  private rollBack(moveId: string): Promise<void> {
+    const running = this.rollingBack.get(moveId);
+    if (running) return running;
+    const rolling = this.runRollBack(moveId).finally(() => this.rollingBack.delete(moveId));
+    this.rollingBack.set(moveId, rolling);
+    return rolling;
+  }
+
+  private async runRollBack(moveId: string): Promise<void> {
+    const entry = this.ledger.get(moveId);
+    if (!entry || entry.decision !== 'rolledBack' || entry.rollbackDone) return;
+    const blocked = new Set<string>();
+    const failed: JournalRecord[] = [];
+    for (let index = entry.journal.length - 1; index >= 0; index -= 1) {
+      const record = entry.journal[index];
+      if (record.undone) continue;
+      const key = undoKey(record.step);
+      if (key && blocked.has(key)) {
+        failed.push(record);
+        continue;
+      }
       try {
-        await step.undo();
+        await this.undo(moveId, record.step);
+        this.ledger.undoResult(moveId, index);
       } catch (error) {
-        console.error(`[SessionMove] Clean-up of ${step.label} failed:`, error);
+        console.error(`[SessionMove] Undoing ${record.label} for move ${moveId} failed:`, error);
+        failed.push(this.ledger.undoResult(moveId, index, reasonOf(error)));
+        if (key) blocked.add(key);
       }
     }
-    job.cleanup = [];
-    await this.receiver.remove(job.status.moveId).catch(() => undefined);
+    await this.receiver.remove(moveId).catch(() => undefined);
+    if (failed.length === 0) {
+      this.ledger.mark(moveId, 'rollbackDone');
+      return;
+    }
+    const tries = Math.max(...failed.map(record => record.failures ?? 0));
+    if (tries >= NOTICE_AFTER_FAILURES && !this.ledger.get(moveId)?.noticed) this.tellLeftovers(moveId, failed);
+    setTimeout(() => void this.rollBack(moveId), Math.min(UNDO_RETRY_MS * 2 ** Math.max(0, tries - 1), 60 * 60_000)).unref();
+  }
+
+  /** The only manual path (D-1): steps that kept failing, named once, with what to do. */
+  private tellLeftovers(moveId: string, failed: JournalRecord[]): void {
+    this.ledger.mark(moveId, 'noticed');
+    const first = failed[0];
+    const more = failed.length > 1 ? ` and ${failed.length - 1} more` : '';
+    const reason = failed.find(record => record.lastError)?.lastError ?? 'it kept failing';
+    void this.services.notifyService?.queue.ask({
+      question: {
+        ui: 'info',
+        title: `A cancelled move left ${first.label}${more} on this machine`,
+        context: `Pane tried ${NOTICE_AFTER_FAILURES} times to undo it and couldn't: ${reason}. Fix that (permissions or free disk space), then restart Pane to finish the clean-up; or remove it yourself. The Session itself is safe on the other machine.`,
+      },
+      source: { name: 'Pane', agent: 'Pane' },
+    }).catch(error => console.warn("[SessionMove] The leftovers notice wasn't shown:", error));
+  }
+
+  /** One undo step. Each is safe when its step never ran, ran in part, or was already undone. */
+  private async undo(moveId: string, step: UndoStep): Promise<void> {
+    switch (step.kind) {
+      case 'deleteRefs':
+        await deleteRefs(step.repo, step.prefix);
+        return;
+      case 'restoreRef':
+        if (step.previous) await git(step.repo, ['update-ref', step.ref, step.previous]);
+        else await tryGit(step.repo, ['update-ref', '-d', step.ref]);
+        return;
+      case 'restoreBranch':
+        if (step.before) await git(step.repo, ['update-ref', `refs/heads/${step.branch}`, step.before]);
+        else if (await tryGit(step.repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${step.branch}`]) !== null) await git(step.repo, ['branch', '-D', step.branch]);
+        return;
+      case 'removeWorktree':
+        await tryGit(step.repo, ['worktree', 'remove', '--force', step.path]);
+        await fs.promises.rm(step.path, { recursive: true, force: true });
+        await tryGit(step.repo, ['worktree', 'prune']);
+        return;
+      case 'removePane':
+        await this.removePane(step.paneId);
+        return;
+      case 'restoreAside': {
+        const db = this.services.databaseService;
+        if (db.getSession(step.asideId)) db.restoreSetAsideSession({ id: step.id, asideId: step.asideId, panelIds: step.panelIds, hidden: step.hidden });
+        const job = this.jobs.get(moveId);
+        if (job) job.setAside = job.setAside.filter(id => id !== step.asideId);
+        return;
+      }
+      case 'restoreFolder':
+        if (step.backup === null) {
+          await fs.promises.rm(step.target, { recursive: true, force: true });
+        } else if (fs.existsSync(step.backup)) {
+          await fs.promises.rm(step.target, { recursive: true, force: true });
+          await fs.promises.rename(step.backup, step.target);
+        }
+        return;
+      case 'removeArriving': {
+        const manager = this.services.orchestrationSessionManager;
+        if (!manager) return;
+        // SAFETY: `replaced` is the OrchestrationSessionRecord this machine had, saved as JSON by the build; the store sanitises it on write.
+        const replaced = step.replaced ? JSON.parse(JSON.stringify(step.replaced)) as OrchestrationSessionRecord : undefined;
+        await manager.removeArriving(step.sessionId, replaced).catch(error => {
+          // Never imported, or already replaced back: nothing of this move's is there.
+          if (error instanceof PaneError && error.code === 'ERR_MOVE_NOT_ARRIVING') return;
+          throw error;
+        });
+        return;
+      }
+      case 'putBackPanel': {
+        const saved = this.ledger.readSide(moveId, step.panelId);
+        if (!saved || this.tabs.getPanel(step.panelId)) return;
+        const panel = decodeBoundary(saved, boundary.object({ id: boundary.string, sessionId: boundary.string, type: boundary.string, title: boundary.string, customState: boundary.jsonObject, metadata: boundary.jsonObject }));
+        await this.tabs.createPanel({
+          id: panel.id, sessionId: panel.sessionId,
+          // SAFETY: the saved panel's own ToolPanelType, written by this Pane when it set the tab aside.
+          type: panel.type as ToolPanelType,
+          title: panel.title, initialState: { customState: panel.customState },
+          // SAFETY: the saved panel's own metadata, written by this Pane when it set the tab aside.
+          metadata: JSON.parse(JSON.stringify(panel.metadata)) as ToolPanel['metadata'], activate: false,
+        });
+        return;
+      }
+      case 'deletePanel':
+        if (this.tabs.getPanel(step.panelId)) await this.tabs.deletePanel(step.panelId);
+        return;
+      case 'undoConversation':
+        await undoConversationPlacement(step.plan);
+        return;
+    }
   }
 
   /**
@@ -816,7 +979,7 @@ export class MoveImporter {
       job.abortRequested = true;
       await job.building;
       this.ledger.decide(moveId, 'rolledBack');
-      await this.rollBack(job);
+      await this.rollBack(moveId);
       job.status = { ...job.status, stage: 'aborted', detail: undefined, rolledBack: true };
       return { ...job.status, durable: true };
     })();
@@ -824,29 +987,20 @@ export class MoveImporter {
   }
 
   /**
-   * Abort after a restart here: the build's undo steps are gone with it, so only the roll-back is
-   * recorded and the arriving Session record removed; a move this machine never built is fenced.
+   * Abort after a restart here: the roll-back is recorded, then undone from the build's journal. A
+   * move this machine never built is fenced; one that committed refuses; an unknown one throws.
    */
   private async abortFromLedger(moveId: string): Promise<TargetStatus> {
     const entry = this.ledger.get(moveId);
     if (entry?.decision === 'committed' || entry?.decision === 'started') {
       throw new PaneError('ERR_MOVE_STARTED', 'The Session already started here, so the move can no longer be undone.', 'Use the Session here.');
     }
-    if (!entry) {
-      const known = await this.status(moveId);
-      if (known.stage === 'started') throw new PaneError('ERR_MOVE_STARTED', 'The Session already started here, so the move can no longer be undone.', 'Use the Session here.');
+    if (!entry && (await this.noRecord(moveId)).stage === 'started') {
+      throw new PaneError('ERR_MOVE_STARTED', 'The Session already started here, so the move can no longer be undone.', 'Use the Session here.');
     }
     const decided = this.ledger.decide(moveId, 'rolledBack');
-    if (entry?.decision === 'built' && decided.plan) {
-      const sessionId = decided.plan.sessionId;
-      const manager = this.services.orchestrationSessionManager;
-      const arriving = (await manager?.list())?.sessions.find(session => session.id === sessionId);
-      if (manager && arriving?.move?.state === 'arriving' && arriving.move.moveId === moveId) {
-        await manager.removeArriving(sessionId).catch(error => console.warn(`[SessionMove] The arriving Session ${sessionId} wasn't removed:`, error));
-      }
-      console.warn(`[SessionMove] Move ${moveId} was rolled back after Pane restarted; its Panes and worktrees here stay for you to archive.`);
-    }
-    return this.fromLedger(decided);
+    await this.rollBack(moveId);
+    return this.fromLedger(this.ledger.get(moveId) ?? decided);
   }
 
   // ── Start ──────────────────────────────────────────────────────────────
@@ -874,8 +1028,9 @@ export class MoveImporter {
 
   /** Start after a restart here: a move built before it starts from its plan; one already decided answers as it stands. */
   private startFromLedger(moveId: string): TargetStatus {
-    const entry = this.ledger.get(moveId);
-    if (!entry) throw new PaneError('ERR_MOVE_UNKNOWN', `This machine has no move ${moveId} in progress.`, 'Start the move again from the other machine.');
+    const stored = this.ledger.get(moveId);
+    if (!stored) throw new PaneError('ERR_MOVE_UNKNOWN', `This machine has no move ${moveId} in progress.`, 'Start the move again from the other machine.');
+    const entry = this.abandonStaleBuild(stored);
     if (entry.decision === 'built' || entry.decision === 'committed') {
       void this.resumeCommitted(moveId);
       return { moveId, stage: 'starting', detail: 'Resuming tabs', panesDone: 0, panesTotal: 0, durable: true };
@@ -883,9 +1038,22 @@ export class MoveImporter {
     return this.fromLedger(entry);
   }
 
-  /** Finishes the start of every move this Pane had committed (or built and been asked to start) before it quit. */
+  /**
+   * When Pane starts: finishes every start it had committed, rolls back every build it was
+   * running when it quit, and finishes every roll-back cut short. A built move waits for the source.
+   */
   async resume(): Promise<void> {
-    await Promise.all(this.ledger.pending().filter(entry => entry.decision === 'committed').map(entry => this.resumeCommitted(entry.moveId)));
+    await Promise.all(this.ledger.pending().map(async entry => {
+      try {
+        if (entry.decision === 'committed') await this.resumeCommitted(entry.moveId);
+        else if (entry.decision === 'building') {
+          this.abandonStaleBuild(entry);
+          await this.rollBack(entry.moveId);
+        } else if (entry.decision === 'rolledBack') await this.rollBack(entry.moveId);
+      } catch (error) {
+        console.error(`[SessionMove] Move ${entry.moveId} didn't resume:`, error);
+      }
+    }));
   }
 
   private resumeCommitted(moveId: string): Promise<void> {
@@ -909,8 +1077,6 @@ export class MoveImporter {
     if (!plan) throw new PaneError('ERR_MOVE_NO_PLAN', `This machine's record of move ${moveId} has no start plan.`, 'Start the move again.');
     const manager = this.services.orchestrationSessionManager!;
     // From here the move is committed: no undo, the previous copies kept for it go.
-    const job = this.jobs.get(moveId);
-    if (job) job.cleanup = [];
     for (const asideId of plan.setAside) {
       try {
         this.services.databaseService.deleteArchivedSessionPermanently(asideId);

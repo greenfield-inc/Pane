@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { locateConversation, placeConversation } from './conversations';
+import { locateConversation, placeConversation, undoConversationPlacement, type ConversationUndo } from './conversations';
 
 const ID = '11111111-2222-4333-8444-555555555555';
 let dir: string;
@@ -76,6 +76,31 @@ describe('moving a Claude conversation', () => {
     await placed.undo();
     expect(fs.readFileSync(theirs, 'utf8')).toBe('{"turn":1}\n');
     expect(fs.existsSync(path.join(path.dirname(theirs), ID))).toBe(false);
+  });
+
+  it('undo from the plan recorded before the swap alone puts the store back, and doing it twice changes nothing (D-1)', async () => {
+    const theirs = path.join(b.HOME!, '.claude/projects/-Users-robert-b-new', `${ID}.jsonl`);
+    write(theirs, '{"turn":1}\n');
+    const { conversation, file } = await pack(a);
+    let plan: ConversationUndo | undefined;
+    await placeConversation(conversation, file, '/Users/robert-b/new', { here: 'b', source: 'a' }, b, recorded => { plan = recorded; });
+    // Pane restarted: only the recorded plan is left.
+    await undoConversationPlacement(plan!);
+    await undoConversationPlacement(plan!);
+    expect(fs.readFileSync(theirs, 'utf8')).toBe('{"turn":1}\n');
+    expect(fs.readdirSync(path.dirname(theirs)).sort()).toEqual([`${ID}.jsonl`]);
+  });
+
+  it('a plan recorded for a placement that never ran undoes to nothing (D-1)', async () => {
+    const theirs = path.join(b.HOME!, '.claude/projects/-Users-robert-b-new', `${ID}.jsonl`);
+    write(theirs, '{"turn":1}\n');
+    const { conversation, file } = await pack(a);
+    let plan: ConversationUndo | undefined;
+    // Pane quit right after recording the plan.
+    await expect(placeConversation(conversation, file, '/Users/robert-b/new', { here: 'b', source: 'a' }, b, recorded => { plan = recorded; throw new Error('quit'); })).rejects.toThrow('quit');
+    await undoConversationPlacement(plan!);
+    expect(fs.readFileSync(theirs, 'utf8')).toBe('{"turn":1}\n');
+    expect(fs.readdirSync(path.dirname(theirs)).sort()).toEqual([`${ID}.jsonl`]);
   });
 
   it('refuses a package path that climbs out of the store, writing nothing outside it', async () => {
