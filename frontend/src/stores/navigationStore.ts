@@ -104,6 +104,9 @@ interface NavigationState {
   todosReturn: ApprovalsReturn | null;
   /** Leaves To-dos for the view it was opened from, and says which Pane was active there. */
   leaveTodos: () => ApprovalsReturn;
+  /** The to-do a Session was last opened from (round 8, T-4): that Session's breadcrumb returns to it. */
+  todoSessionOrigin: TodoSessionOrigin | null;
+  setTodoSessionOrigin: (origin: TodoSessionOrigin | null) => void;
 }
 
 export interface TodosNavigationOptions {
@@ -116,6 +119,11 @@ export interface ApprovalsReturn {
   view: ActiveView;
   projectId: number | null;
   paneId: string | null;
+}
+
+export interface TodoSessionOrigin {
+  sessionId: string;
+  number: number;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -307,4 +315,6 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     set({ activeView: back.view === 'todos' ? 'sessions' : back.view, activeProjectId: back.projectId, todosReturn: null });
     return back;
   },
+  todoSessionOrigin: null,
+  setTodoSessionOrigin: (origin) => set({ todoSessionOrigin: origin }),
 }));

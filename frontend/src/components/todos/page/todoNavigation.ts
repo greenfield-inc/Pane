@@ -1,5 +1,6 @@
 import type { TodoDetail } from '../../../../../shared/types/todos';
 import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
+import { useNavigationStore } from '../../../stores/navigationStore';
 import { usePanelStore } from '../../../stores/panelStore';
 import { useOrchestrationSessionStore } from '../../../stores/orchestrationSessionStore';
 import { useSessionStore } from '../../../stores/sessionStore';
@@ -10,10 +11,14 @@ function machineOf(detail: TodoDetail): string {
   return detail.machineId ?? LOCAL_MACHINE_ID;
 }
 
-/** Session · Open: the to-do's own Session (hidden from the sidebar), or its parent's for a sub-to-do. */
+/**
+ * Session · Open: the to-do's own Session (hidden from the sidebar), or its parent's for a sub-to-do.
+ * The Session's breadcrumb then returns to this to-do, a sub-to-do included (round 8, T-4).
+ */
 export function openTodoSession(detail: TodoDetail): void {
   const sessionId = detail.todo.sessionId ?? detail.parent?.todo.sessionId;
   if (!sessionId) return;
+  useNavigationStore.getState().setTodoSessionOrigin({ sessionId, number: detail.todo.number });
   void openOnMachine(machineOf(detail), { kind: 'session', id: sessionId, name: detail.sessionName ?? detail.todo.ref });
 }
 
@@ -32,6 +37,7 @@ export function focusTodoTab(detail: TodoDetail, panelId: string): void {
   const machine = machineOf(detail);
   if (session && (!paneId || paneId === session.internalSessionId)) {
     usePanelStore.getState().requestActivation({ sessionId: session.internalSessionId, panelId });
+    useNavigationStore.getState().setTodoSessionOrigin({ sessionId: session.id, number: detail.todo.number });
     void openOnMachine(machine, { kind: 'session', id: session.id, name: detail.sessionName ?? session.name });
     return;
   }

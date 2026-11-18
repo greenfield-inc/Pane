@@ -4,11 +4,14 @@ import type { TodoAttachment, TodoAttachmentGroup, TodoAttachmentKind } from '..
  * The to-do page's right split (round 7, D-418, D-420): it opens with the to-do, its tabs are the
  * to-do's attachments, plan first, and a sub-to-do also shows its parent's. A description image
  * opens as an extra tab that ✕ closes. Approvals are not tabs: they cover the split instead.
+ * With a Session on this machine, its Overview is a tab too, after the plans (round 8, T-4).
  */
 export type TodoSplitItem =
   /** `from` names the parent the attachment is inherited from. */
   | { kind: 'attachment'; attachment: TodoAttachment; from?: number }
-  | { kind: 'image'; src: string; label: string };
+  | { kind: 'image'; src: string; label: string }
+  /** The to-do's Session Overview (its parent's for a sub-to-do), as the Session's own Overview tab shows it. */
+  | { kind: 'overview'; sessionId: string };
 
 export interface TodoSplitState {
   items: readonly TodoSplitItem[];
@@ -21,14 +24,14 @@ export interface TodoSplitState {
 }
 
 export type TodoSplitAction =
-  /** The to-do's attachments changed: rebuild the tabs, keeping the one shown. */
-  | { type: 'sync'; groups: readonly TodoAttachmentGroup[] }
+  /** The to-do's attachments or its Session changed: rebuild the tabs, keeping the one shown. */
+  | { type: 'sync'; groups: readonly TodoAttachmentGroup[]; overview?: string | null }
   /** Shows an item's tab (adding an image's), and shows the split. */
   | { type: 'open'; item: TodoSplitItem }
   | { type: 'activate'; index: number }
   /** ← and → on the tab strip, wrapping round. */
   | { type: 'step'; delta: 1 | -1 }
-  /** ✕ on an image tab; attachment tabs leave only by Detach. */
+  /** ✕ on an image tab; attachment tabs leave only by Detach, the Overview with the Session. */
   | { type: 'close'; index: number }
   | { type: 'set-hidden'; hidden: boolean }
   | { type: 'toggle-hidden' }
@@ -50,7 +53,22 @@ export const NARROW_TODO_AREA_PX = 1000;
 /** One key per tab, so opening it again shows its tab instead of adding another. */
 export function splitItemKey(item: TodoSplitItem): string {
   if (item.kind === 'attachment') return `attachment:${item.attachment.id}`;
+  if (item.kind === 'overview') return `overview:${item.sessionId}`;
   return `image:${item.src}`;
+}
+
+/** The split's file tabs, for "Plan · 3 files": every tab but the Overview. */
+export function splitAttachmentItems(items: readonly TodoSplitItem[]): TodoSplitItem[] {
+  return items.filter((item) => item.kind !== 'overview');
+}
+
+const isPlan = (item: TodoSplitItem) => item.kind === 'attachment' && item.attachment.kind === 'plan';
+
+/** The attachment tabs with the Session's Overview after the plans, when the to-do has a Session here. */
+function splitTabs(groups: readonly TodoAttachmentGroup[], overview: string | null | undefined): TodoSplitItem[] {
+  const tabs = attachmentTabs(groups);
+  if (overview) tabs.splice(tabs.filter(isPlan).length, 0, { kind: 'overview', sessionId: overview });
+  return tabs;
 }
 
 /** The to-do's own attachments and its parent's, in tab order; each kind in the order attached. */
@@ -66,14 +84,16 @@ export function attachmentTabs(groups: readonly TodoAttachmentGroup[]): TodoSpli
   return tabs.sort((a, b) => tabRank(a) - tabRank(b) || addedAt(a) - addedAt(b) || attachmentId(a) - attachmentId(b));
 }
 
-/** The plan if there is one, otherwise the first tab. */
+/** The plan if there is one, otherwise the first attachment, otherwise the first tab (the Overview). */
 function defaultTab(items: readonly TodoSplitItem[]): number {
-  const plan = items.findIndex((item) => item.kind === 'attachment' && item.attachment.kind === 'plan');
-  return Math.max(0, plan);
+  const plan = items.findIndex(isPlan);
+  if (plan >= 0) return plan;
+  return Math.max(0, items.findIndex((item) => item.kind === 'attachment'));
 }
 
-export function initialSplit(groups: readonly TodoAttachmentGroup[], hidden: boolean): TodoSplitState {
-  const items = attachmentTabs(groups);
+/** `overview` is the Session whose Overview the split offers: the to-do's own (or parent's) on this machine. */
+export function initialSplit(groups: readonly TodoAttachmentGroup[], hidden: boolean, overview: string | null = null): TodoSplitState {
+  const items = splitTabs(groups, overview);
   return { items, active: defaultTab(items), hidden, reveal: null };
 }
 
@@ -85,7 +105,7 @@ export function startsHidden(rememberedHidden: boolean, areaPx: number): boolean
 export function todoSplitReducer(state: TodoSplitState, action: TodoSplitAction): TodoSplitState {
   switch (action.type) {
     case 'sync':
-      return sync(state, action.groups);
+      return sync(state, action.groups, action.overview);
     case 'open': {
       const key = splitItemKey(action.item);
       const at = state.items.findIndex((item) => splitItemKey(item) === key);
@@ -119,9 +139,9 @@ export function todoSplitReducer(state: TodoSplitState, action: TodoSplitAction)
   }
 }
 
-function sync(state: TodoSplitState, groups: readonly TodoAttachmentGroup[]): TodoSplitState {
+function sync(state: TodoSplitState, groups: readonly TodoAttachmentGroup[], overview: string | null | undefined): TodoSplitState {
   const images = state.items.filter((item) => item.kind === 'image');
-  const items = [...attachmentTabs(groups), ...images];
+  const items = [...splitTabs(groups, overview), ...images];
   const revealed = state.reveal === null ? -1 : items.findIndex((item) => item.kind === 'attachment' && item.attachment.target === state.reveal);
   if (revealed >= 0) return { items, active: revealed, hidden: false, reveal: null };
   const shown = state.items[state.active];

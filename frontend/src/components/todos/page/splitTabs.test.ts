@@ -4,6 +4,7 @@ import {
   NARROW_TODO_AREA_PX,
   attachmentTabs,
   initialSplit,
+  splitAttachmentItems,
   splitItemKey,
   startsHidden,
   todoSplitReducer,
@@ -21,7 +22,7 @@ function own(...attachments: TodoAttachment[]): TodoAttachmentGroup {
 }
 
 function labels(state: TodoSplitState): string[] {
-  return state.items.map((item) => (item.kind === 'attachment' ? item.attachment.label : item.label));
+  return state.items.map((item) => (item.kind === 'attachment' ? item.attachment.label : item.kind === 'overview' ? 'Overview' : item.label));
 }
 
 describe('attachmentTabs', () => {
@@ -179,5 +180,68 @@ describe('startsHidden (the narrow rule)', () => {
   it('keeps the remembered choice in a wide area', () => {
     expect(startsHidden(false, NARROW_TODO_AREA_PX)).toBe(false);
     expect(startsHidden(true, 1400)).toBe(true);
+  });
+});
+
+describe('the Session Overview tab (round 8, T-4)', () => {
+  const plan = attachment('plan', 1, 12, 'plan');
+  const plan2 = attachment('plan', 2, 12, 'plan 2');
+  const pr = attachment('pr', 3, 12, 'pr');
+  const findings = attachment('findings', 4, 12, 'findings');
+
+  it('sits after the plan tabs', () => {
+    expect(labels(initialSplit([own(pr, plan, plan2, findings)], false, 's-12'))).toEqual(['plan', 'plan 2', 'Overview', 'pr', 'findings']);
+  });
+
+  it('is first without a plan, but the first attachment stays the default tab', () => {
+    const state = initialSplit([own(findings, pr)], false, 's-12');
+    expect(labels(state)).toEqual(['Overview', 'pr', 'findings']);
+    expect(labels(state)[state.active]).toBe('pr');
+  });
+
+  it('is never the default selection when a plan exists', () => {
+    const state = initialSplit([own(pr, plan)], false, 's-12');
+    expect(labels(state)[state.active]).toBe('plan');
+  });
+
+  it('is the one tab, and selected, when nothing is attached', () => {
+    const state = initialSplit([own()], false, 's-12');
+    expect(labels(state)).toEqual(['Overview']);
+    expect(state.active).toBe(0);
+  });
+
+  it('is left out without a Session here', () => {
+    expect(labels(initialSplit([own(plan)], false, null))).toEqual(['plan']);
+    expect(labels(initialSplit([own(plan)], false))).toEqual(['plan']);
+  });
+
+  it('has one key per Session, and opening it again shows its tab', () => {
+    expect(splitItemKey({ kind: 'overview', sessionId: 's-12' })).toBe('overview:s-12');
+    const state = initialSplit([own(plan, pr)], false, 's-12');
+    const opened = todoSplitReducer(state, { type: 'open', item: { kind: 'overview', sessionId: 's-12' } });
+    expect(opened.items).toHaveLength(3);
+    expect(labels(opened)[opened.active]).toBe('Overview');
+  });
+
+  it('sync adds it when the Session arrives, drops it when it goes, and keeps it shown across attachment changes', () => {
+    const before = initialSplit([own(plan, pr)], false);
+    const arrived = todoSplitReducer(before, { type: 'sync', groups: [own(plan, pr)], overview: 's-12' });
+    expect(labels(arrived)).toEqual(['plan', 'Overview', 'pr']);
+    expect(labels(arrived)[arrived.active]).toBe('plan');
+    const onOverview = todoSplitReducer(arrived, { type: 'activate', index: 1 });
+    const attached = todoSplitReducer(onOverview, { type: 'sync', groups: [own(plan, pr, findings)], overview: 's-12' });
+    expect(labels(attached)[attached.active]).toBe('Overview');
+    const gone = todoSplitReducer(attached, { type: 'sync', groups: [own(plan, pr, findings)], overview: null });
+    expect(labels(gone)).toEqual(['plan', 'pr', 'findings']);
+    expect(labels(gone)[gone.active]).toBe('plan');
+  });
+
+  it('does not close with ✕', () => {
+    const state = initialSplit([own(plan)], false, 's-12');
+    expect(todoSplitReducer(state, { type: 'close', index: 1 })).toBe(state);
+  });
+
+  it('attachment counts leave it out', () => {
+    expect(splitAttachmentItems(initialSplit([own(plan, pr)], false, 's-12').items).map((item) => item.kind)).toEqual(['attachment', 'attachment']);
   });
 });
