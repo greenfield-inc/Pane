@@ -628,7 +628,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Profiles: the library, launches and runs (docs/PROFILES.md)
   profiles: {
     list: (): Promise<IPCResponse> => invokeIpc('profiles:list'),
-    ownAgentFarm: (): Promise<IPCResponse> => invokeIpc('profiles:own-agent-farm'),
     get: (name: string): Promise<IPCResponse> => invokeIpc('profiles:get', name),
     setEnabled: (name: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('profiles:set-enabled', name, enabled),
     launch: (input: ProfileLaunchInput): Promise<IPCResponse> => invokeIpc('profiles:launch', input),

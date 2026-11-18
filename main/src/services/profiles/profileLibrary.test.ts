@@ -43,22 +43,28 @@ describe('the bundled profiles', () => {
     expect(agents.find((agent) => agent.id === 'orchestrator')?.skills).toContain('orchestrate-sessions');
   });
 
-  it('lists orchestra, bigbrain and machine-security as bundled, team only and off', () => {
-    const others = listProfiles({ paneDir: paneDir() }).filter((profile) => profile.name !== 'greenfield');
-    expect(others.map((profile) => profile.name).sort()).toEqual(['bigbrain', 'machine-security', 'orchestra']);
-    for (const profile of others) {
+  it('bundles each dcouple profile as one launchable agent step, off until added', () => {
+    const dcouple = listProfiles({ paneDir: paneDir() }).filter((profile) => profile.name !== 'greenfield');
+    expect(dcouple.map((profile) => profile.name).sort()).toEqual([
+      'dcouple-audits', 'dcouple-business', 'dcouple-ideate', 'dcouple-implementer', 'dcouple-product-researcher',
+      'dcouple-qa-and-fix', 'dcouple-raw', 'dcouple-reviewer', 'dcouple-seo',
+    ]);
+    for (const profile of dcouple) {
       expect(profile.errors).toEqual([]);
-      expect(profile).toMatchObject({ origin: 'bundled', valid: true, teamOnly: true, launchable: false, enabled: false });
-      expect(profile.profile?.agents.length).toBeGreaterThan(0);
+      expect(profile).toMatchObject({ origin: 'bundled', valid: true, launchable: true, enabled: false });
+      expect(profile.profile?.flow?.steps).toHaveLength(1);
     }
+    // Its agent reads its Agent Farm role prompt from the dcouple plugin.
+    expect(dcouple.find((profile) => profile.name === 'dcouple-raw')?.profile?.agents).toEqual([expect.objectContaining({ id: 'raw', cli: 'claude', reads: ['agents/raw-claude'] })]);
   });
 
   it('turns bundled profiles on and off from config, and lists yours as on', () => {
     const dir = paneDir();
     mkdirSync(userProfilesDir(dir), { recursive: true });
     copyFileSync(path.join(FIXTURES, 'team-only.profile.yaml'), path.join(userProfilesDir(dir), 'team-only.profile.yaml'));
-    const profiles = listProfiles({ paneDir: dir, enabled: ['orchestra'] });
-    expect(Object.fromEntries(profiles.map((profile) => [profile.name, profile.enabled]))).toEqual({ bigbrain: false, greenfield: false, 'machine-security': false, orchestra: true, 'team-only': true });
+    const profiles = listProfiles({ paneDir: dir, enabled: ['dcouple-raw'] });
+    const enabled = Object.fromEntries(profiles.map((profile) => [profile.name, profile.enabled]));
+    expect(enabled).toMatchObject({ greenfield: false, 'dcouple-raw': true, 'dcouple-seo': false, 'team-only': true });
     expect(profiles.find((profile) => profile.name === 'team-only')?.origin).toBe('yours');
   });
 

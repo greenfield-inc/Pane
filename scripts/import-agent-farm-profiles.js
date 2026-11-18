@@ -9,8 +9,9 @@
  *   agents/<name>), instruction files and skills come from the
  *   greenfield plugin's profile variant and agent definition named in GREENFIELD_AGENTS. The
  *   flow, samples and example runs around it are written by hand and never touched here.
- * - orchestra, bigbrain and machine-security: whole team-only profiles (no flow), one agent per
- *   Agent Farm profile, from its default variant. They become launchable once converted.
+ * - dcouple.<profile>.profile.yaml: one launchable profile per Agent Farm profile in the dcouple
+ *   plugin, from its default variant. dcouple's profiles have no flow, so each one is a single
+ *   agent step that ends the run when its agent reports `done`.
  *
  * Instruction files and skills are referenced from the bundled plugin, not copied.
  *
@@ -35,8 +36,8 @@ const GREENFIELD_AGENTS = {
   orchestrator: { profile: 'orchestrator', variant: 'claude' },
   'qa-lead': { profile: 'qa-and-fix', variant: 'claude' },
 };
-/** Team-only plugins, each with the profile whose agent describes the team. */
-const TEAM_ONLY = { orchestra: 'overseer', bigbrain: 'orchestrator', 'machine-security': 'audit' };
+/** Plugins whose every profile is bundled as a one-step profile of its own. */
+const SINGLE_STEP_PLUGINS = ['dcouple'];
 
 function pluginsRoot() {
   return path.join(path.dirname(require.resolve('@greenfieldco/agent-farm/package.json', { paths: [path.join(ROOT, 'main')] })), 'plugins');
@@ -97,30 +98,41 @@ function greenfieldProfile(current, pluginRoot) {
   return `${current.slice(0, start)}${block}${current.slice(end + END.length)}`;
 }
 
-/** A team-only profile for a bundled plugin: its agents, no flow. */
-function teamOnlyProfile(pluginRoot, lead) {
+/** The agent definition a profile's default variant runs. */
+function defaultDefinition(pluginRoot, profileName) {
+  const profile = readYaml(path.join(pluginRoot, 'profiles', `${profileName}.yaml`));
+  const variant = profile.variants?.[profile.default] ?? Object.values(profile.variants ?? {})[0] ?? profile;
+  return agentDefinition(pluginRoot, variant.agent);
+}
+
+/** One Agent Farm profile as a launchable Pane profile: its agent, in one step that ends the run. */
+function singleStepProfile(pluginRoot, profileName) {
   const plugin = readYaml(path.join(pluginRoot, 'plugin.yaml'));
-  const leadProfile = readYaml(path.join(pluginRoot, 'profiles', `${lead}.yaml`));
-  const leadVariant = leadProfile.variants?.[leadProfile.default] ?? Object.values(leadProfile.variants ?? {})[0] ?? leadProfile;
-  const description = agentDefinition(pluginRoot, leadVariant.agent).description;
-  const profiles = fs.readdirSync(path.join(pluginRoot, 'profiles')).filter((file) => file.endsWith('.yaml')).sort();
-  const agents = Object.fromEntries(profiles.map((file) => {
-    const name = path.basename(file, '.yaml');
-    return [name, importAgent(pluginRoot, name)];
-  }));
+  const description = String(defaultDefinition(pluginRoot, profileName).description ?? `Run ${plugin.name}/${profileName}`).trim();
   const header = {
     format: 'pane-profile/1',
-    name: plugin.name,
+    name: `${plugin.name}-${profileName}`,
     version: plugin.version,
-    title: `${plugin.name} (team only)`,
+    title: description,
   };
-  if (description) header.description = description;
+  const flow = {
+    start: 'work',
+    work: { agent: profileName, goal: description.replace(/\.$/u, ''), outcomes: { done: 'end' } },
+  };
+  const samples = {
+    work: { done: ['Done: what it did, with links to what it made.', 'Done: what it found, and what is left for you to decide.'] },
+  };
+  const dump = (value) => yaml.dump(value, { flowLevel: 3, lineWidth: 1000, noRefs: true, quotingType: '"' }).trimEnd();
   return [
-    `# ${plugin.name}, team only: written by \`node scripts/import-agent-farm-profiles.js\` from Agent Farm's ${plugin.name} plugin ${plugin.version}; don't edit by hand.`,
-    '# It has no flow yet, so Pane lists and shows it but does not launch it.',
-    yaml.dump(header, { lineWidth: 1000, quotingType: '"' }).trimEnd(),
+    `# ${plugin.name}/${profileName}: written by \`node scripts/import-agent-farm-profiles.js\` from Agent Farm's ${plugin.name} plugin ${plugin.version}; don't edit by hand.`,
+    '# A single agent step: the run ends when the agent reports done.',
+    dump(header),
     '',
-    dumpAgents(agents),
+    dumpAgents({ [profileName]: importAgent(pluginRoot, profileName) }),
+    '',
+    dump({ flow }),
+    '',
+    dump({ samples }),
     '',
   ].join('\n');
 }
@@ -128,7 +140,12 @@ function teamOnlyProfile(pluginRoot, lead) {
 /** Every bundled profile file this package produces: file name → contents. */
 function importedProfiles(root = pluginsRoot(), currentGreenfield = fs.readFileSync(path.join(OUT, 'greenfield.profile.yaml'), 'utf8')) {
   const files = { 'greenfield.profile.yaml': greenfieldProfile(currentGreenfield, path.join(root, 'greenfield')) };
-  for (const [name, lead] of Object.entries(TEAM_ONLY)) files[`${name}.profile.yaml`] = teamOnlyProfile(path.join(root, name), lead);
+  for (const plugin of SINGLE_STEP_PLUGINS) {
+    const pluginRoot = path.join(root, plugin);
+    for (const file of fs.readdirSync(path.join(pluginRoot, 'profiles')).filter((entry) => entry.endsWith('.yaml')).sort()) {
+      files[`${plugin}.${path.basename(file, '.yaml')}.profile.yaml`] = singleStepProfile(pluginRoot, path.basename(file, '.yaml'));
+    }
+  }
   return files;
 }
 

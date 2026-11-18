@@ -14,7 +14,6 @@ import { parseRepoSelector, resolveRepoSelector } from './runpane';
 
 const PROFILE_CHANNELS = [
   'profiles:list',
-  'profiles:own-agent-farm',
   'profiles:get',
   'profiles:set-enabled',
   'profiles:launch',
@@ -68,8 +67,15 @@ async function ownAgentFarmView(): Promise<OwnAgentFarmView | null> {
   catch (error) { return { profiles: [], error: reasonOf(error) }; }
 }
 
+/** Profiles is opt-in (D-106): launching and `runpane profiles` wait for Settings › Advanced › Profiles. Runs already started keep moving. */
+function requireProfilesOn(services: AppServices): void {
+  if (services.configManager.getConfig().profilesEnabled === true) return;
+  throw new PaneError('PROFILES_OFF', 'Profiles is off in this Pane, so nothing was listed or launched.', 'Turn it on in Settings › Advanced › Profiles, then run this again. Runs already started keep going.');
+}
+
 /** A run starts in the Session the launch names, or a new one, without starting that Session's own agent. */
 async function launchProfile(services: AppServices, input: ProfileLaunchInput): Promise<ProfileRun> {
+  requireProfilesOn(services);
   const runner = getProfileRunner();
   const loaded = currentProfiles().find((candidate) => candidate.name === input.profile);
   if (loaded && !loaded.enabled) throw new PaneError('PROFILE_NOT_LAUNCHABLE', `${input.profile} is off, so it can't launch.`, `Turn it on in Profiles (Add), then launch it again.`);
@@ -100,10 +106,11 @@ const runpaneLaunchSchema = boundary.object({
 
 /** `runpane profiles launch`: the repo by selector, the Session by id or name (new without one), and one CLI for every agent or per agent. */
 async function runpaneLaunch(services: AppServices, value: PaneCommandValue): Promise<ProfileRun> {
+  requireProfilesOn(services);
   const request = decodeBoundary(value, runpaneLaunchSchema);
   const loaded = currentProfiles().find((candidate) => candidate.name === request.name);
   if (!loaded) throw new PaneError('PROFILE_NOT_FOUND', `No profile is named "${request.name}".`, 'Run `runpane profiles list` to see the names.');
-  if (loaded.teamOnly && loaded.valid) throw new PaneError('PROFILE_TEAM_ONLY', `${request.name} is team only: it has no workflow to launch.`, 'Launch a profile with a flow; `runpane profiles list` marks them launchable.');
+  if (loaded.teamOnly && loaded.valid) throw new PaneError('PROFILE_TEAM_ONLY', `${request.name} has no flow, so there is nothing to launch.`, 'Add a flow to it, or launch a profile `runpane profiles list` marks launchable.');
   if (!loaded.launchable) throw new PaneError('PROFILE_NOT_LAUNCHABLE', `${request.name} can't launch: ${loaded.errors[0]?.message ?? 'it is invalid'}`, `${loaded.errors[0]?.fix ?? 'Fix the profile.'} Run \`runpane profiles show ${request.name}\` for every error.`);
   const repo = resolveRepoSelector(services.databaseService.getAllProjects(), request.repo === undefined ? { active: true } : parseRepoSelector(request.repo));
   let sessionId: string | undefined;
@@ -135,7 +142,6 @@ async function runpaneLaunch(services: AppServices, value: PaneCommandValue): Pr
 /** The Profiles page's commands. Daemon-owned like `loops:`, so the desktop and paired clients share them. */
 export function registerProfileHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   commandRegistry.register('profiles:list', () => respond(profileLibraryView));
-  commandRegistry.register('profiles:own-agent-farm', () => respond(ownAgentFarmView));
   commandRegistry.register('profiles:get', (name: PaneCommandValue) => respond((): ProfileDetailView => {
     const wanted = decodeBoundary(name, boundary.nonEmptyString);
     const profile = currentProfiles().find((candidate) => candidate.name === wanted);
@@ -162,17 +168,22 @@ export function registerProfileHandlers(ipcMain: IpcMain, services: AppServices,
   commandRegistry.bindChannels(ipcMain, PROFILE_CHANNELS);
 
   // runpane profiles list | show | launch | runs, and the pane MCP tools of the same names.
-  // The CLI also lists "Your Agent Farm" (the page loads it on its own, since it runs the person's agent-farm).
+  // The CLI also lists the person's own Agent Farm profiles (the page doesn't: they launch from + menu › Profile…).
   commandRegistry.register('runpane:profiles:list', async () => {
+    requireProfilesOn(services);
     const own = await ownAgentFarmView();
     return own ? { ok: true, ...profileLibraryView(), ownAgentFarm: own } : { ok: true, ...profileLibraryView() };
   });
   commandRegistry.register('runpane:profiles:show', (value: PaneCommandValue) => {
+    requireProfilesOn(services);
     const { name } = decodeBoundary(value, boundary.object({ name: boundary.nonEmptyString }));
     const profile = currentProfiles().find((candidate) => candidate.name === name);
     if (!profile) throw new PaneError('PROFILE_NOT_FOUND', `No profile is named "${name}".`, 'Run `runpane profiles list` to see the names.');
     return { ok: true, profile, yaml: readFileSync(profile.file, 'utf8') };
   });
   commandRegistry.register('runpane:profiles:launch', async (value: PaneCommandValue) => ({ ok: true, run: await runpaneLaunch(services, value) }));
-  commandRegistry.register('runpane:profiles:runs', () => ({ ok: true, runs: getProfileRunner().list() }));
+  commandRegistry.register('runpane:profiles:runs', () => {
+    requireProfilesOn(services);
+    return { ok: true, runs: getProfileRunner().list() };
+  });
 }

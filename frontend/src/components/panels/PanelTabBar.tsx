@@ -6,7 +6,7 @@ import { useHotkey } from '../../hooks/useHotkey';
 import { PanelTabBarProps, PanelCreateOptions } from '../../types/panelComponents';
 import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES } from '../../../../shared/types/panels';
 import { useSession } from '../../contexts/SessionContext';
-import { isChatTabsEnabled, isNotesEnabled, useConfigStore } from '../../stores/configStore';
+import { isChatTabsEnabled, isNotesEnabled, isProfilesEnabled, useConfigStore } from '../../stores/configStore';
 import { showActionError } from '../../stores/errorStore';
 
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
@@ -110,6 +110,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const [resolvedRunScript, setResolvedRunScript] = useState<{ command: string; source: string } | null>(null);
   const { config, fetchConfig, updateConfig } = useConfigStore();
   const chatTabs = isChatTabsEnabled(config);
+  // Profile… waits for Settings › Advanced › Profiles (D-106).
+  const profilesOn = isProfilesEnabled(config);
   const chatAgents = menuChatAgents(useChatAgents(chatTabs ? window.electronAPI.chatTab : undefined));
   const [showDropdown, setShowDropdown] = useState(false);
   // Read the catalog again each time the menu opens, so an agent installed meanwhile is offered.
@@ -636,16 +638,18 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                       <span className="truncate">{agent.label}</span>
                     </button>
                   ))}
-                  <button
-                    type="button"
-                    ref={itemRef()}
-                    role="menuitem"
-                    className={menuItemClass}
-                    onClick={() => { setShowDropdown(false); setProfileDialogOpen(true); }}
-                  >
-                    <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span className="truncate">Profile…</span>
-                  </button>
+                  {profilesOn && (
+                    <button
+                      type="button"
+                      ref={itemRef()}
+                      role="menuitem"
+                      className={menuItemClass}
+                      onClick={() => { setShowDropdown(false); setProfileDialogOpen(true); }}
+                    >
+                      <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate">Profile…</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     ref={itemRef()}
@@ -675,7 +679,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                 </>
               )}
               {/* Profiles run in terminal tabs, so "Profile…" is there with chat tabs off too. */}
-              {!chatTabs && session && (
+              {profilesOn && !chatTabs && session && (
                 <button
                   type="button"
                   ref={itemRef()}

@@ -24,7 +24,8 @@ entries and new Sessions open their orchestrator in a terminal. Open chat tabs k
   same.
 - **Remote PWA** and **phone**: *Add Tool* lists the host's installed chat
   agents and **Profile…** first when the host has chat tabs on.
-- **Profile…** on the desktop first lists Pane's profiles that are on
+- **Profile…** on the desktop appears once Profiles is on (Settings ›
+  Advanced › Profiles). It first lists Pane's profiles that are on
   ([PROFILES.md](PROFILES.md)); picking one opens its launch dialog. Profiles run in
   terminal tabs, so with chat tabs off the desktop + menu and empty Pane screen
   still offer **Profile…**, with this list alone. Below the list when chat tabs
@@ -523,7 +524,7 @@ with its Electron as Node and `--config-root <PANE_DIR>/agent-farm`, so a
 profile works on a fresh install. At each start
 (`main/src/services/agentFarm/bundledAgentFarm.ts`, called from
 `main/src/daemon/bootstrap.ts` without waiting) Pane installs the plugins that
-package carries (greenfield, orchestra, bigbrain and machine-security) into
+package carries for bundled profiles (greenfield and dcouple) into
 that folder, when the package's version or plugin files differ from what
 `<PANE_DIR>/agent-farm/pane-manifest.json` records; an unchanged bundle installs
 nothing and the log says so. An install that never finished (its lock or

@@ -40,6 +40,11 @@ export function isNotesEnabled(config: AppConfig | null): boolean {
   return config?.notesEnabled === true;
 }
 
+/** Profiles is opt-in (D-106): its page, nav entry and + menu entry wait for this. */
+export function isProfilesEnabled(config: AppConfig | null): boolean {
+  return config?.profilesEnabled === true;
+}
+
 /** Copy on select (Settings > Terminal); always on in remote mode, so text lands on this computer's clipboard. */
 export function isCopyOnSelectEnabled(config: AppConfig | null): boolean {
   return config?.terminalCopyOnSelect === true || config?.remoteDaemon?.client.mode === 'remote';

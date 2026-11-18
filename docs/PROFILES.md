@@ -2,9 +2,17 @@
 
 A profile is one YAML file that defines a team of agents and a fixed workflow.
 Pane draws the workflow, launches it on any agent CLI (Claude Code, Codex, or
-any other command), and runs it step by step from the file. greenfield is the
-first profile and ships with Pane, on by default. Its instructions and skills
-come from Agent Farm (`@greenfieldco/agent-farm`), which Pane bundles.
+any other command), and runs it step by step from the file. Pane bundles
+greenfield (plan, build and review) and one profile per dcouple agent; their
+instructions and skills come from Agent Farm (`@greenfieldco/agent-farm`),
+which Pane bundles too.
+
+Profiles is off until you turn it on in **Settings › Advanced › Profiles**
+(`profilesEnabled` in `<PANE_DIR>/config.json`). While it is off, the Profiles
+page, its sidebar entry and the + menu's **Profile…** are hidden, and `runpane
+profiles` and the profile MCP tools fail with `PROFILES_OFF` and say how to
+turn it on. Runs already started keep going. Turning it on shows everything at
+once, with no restart.
 
 ## The format: pane-profile/1
 
@@ -56,8 +64,8 @@ runs:                       # optional example runs the viewer lights up
   step; the Profiles page shows them in the drawing.
 - Top-level `runs:` lists example paths through the flow, which the page
   highlights; `plan ready #1` means that outcome with its first sample.
-- A profile without `flow` is **team only**: listed and viewable, not
-  launchable.
+- A profile without `flow` is listed and viewable, marked **no flow**, and
+  can't launch.
 
 Validation (`shared/profiles/validateProfile.ts`) names the step and outcome of
 each error and says how to fix it, for example: "Step review, outcome findings
@@ -70,9 +78,17 @@ profile with any error is listed as invalid and can't launch.
 
 | Kind | Where | On |
 | --- | --- | --- |
-| Bundled | `main/src/services/profiles/bundled/`; greenfield's agents, and the team-only orchestra, bigbrain and machine-security, are written by `node scripts/import-agent-farm-profiles.js` from the pinned Agent Farm | greenfield by default; `profiles.enabled` in `<PANE_DIR>/config.json` lists the bundled ones that are on |
+| Bundled | `main/src/services/profiles/bundled/`; greenfield's agents and the dcouple profiles are written by `node scripts/import-agent-farm-profiles.js` from the pinned Agent Farm | greenfield by default; `profiles.enabled` in `<PANE_DIR>/config.json` lists the bundled ones that are on |
 | Yours | `<PANE_DIR>/profiles/*.profile.yaml` | always |
-| Your Agent Farm | your own `agent-farm profiles list`, when one is on PATH (read-only; the page loads it on its own, since running it can take a while) | runs through your agent-farm (+ menu › Profile…) |
+
+A bundled file named `<plugin>.profile.yaml` or `<plugin>.<profile>.profile.yaml`
+reads its files from that Agent Farm plugin. dcouple's Agent Farm profiles have
+no flow, so each is bundled as `dcouple-<profile>`: its default variant's agent
+in one step that ends the run when the agent reports `done`.
+
+Your own Agent Farm profiles (`agent-farm profiles list`, when one is on PATH)
+aren't on the Profiles page: open one by name from + menu › **Profile…**, and
+`runpane profiles list --json` lists them.
 
 An overlay (`extends: <name>@<range>`) holds only its changes; agents and steps
 merge key by key and `null` removes one. Pane ships Agent Farm
@@ -82,7 +98,12 @@ merge key by key and `null` removes one. Pane ships Agent Farm
 
 ## Running a profile
 
-Launch from the Profiles page (sidebar, above Loops), the + menu's
+The Profiles page (sidebar, above Loops) lists the bundled profiles under
+**On** and **Ready to add**, then yours. A profile opens on its title, what
+Launch does, and its flow; **Details** shows its version, the Team and YAML
+tabs, the example runs, the key and each outcome's samples.
+
+Launch from the Profiles page, the + menu's
 **Profile…** (there with chat tabs off too), or `runpane profiles launch`. A
 bundled profile launches once it is on. The launch dialog lists the commands
 the profile runs on its own. A run belongs to a Session (one you pick, or a new

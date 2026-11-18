@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Workflow } from 'lucide-react';
-import type { LibraryProfile, OwnAgentFarmView, Profile, ProfileDetailView, ProfileLibraryView, ProfileRun } from '../../../../shared/types/profiles';
+import { ChevronRight, Workflow } from 'lucide-react';
+import type { LibraryProfile, Profile, ProfileDetailView, ProfileLibraryView, ProfileRun } from '../../../../shared/types/profiles';
 import { agentLabel } from '../../../../shared/agents';
 import { API } from '../../utils/api';
 import { cn } from '../../utils/cn';
@@ -10,12 +10,12 @@ import { ProfileFlow } from './ProfileFlow';
 
 type ViewerTab = 'flow' | 'team' | 'yaml';
 
-/** A profile's status as one short badge: invalid, team only, or on/off. */
+/** A profile's status as one short badge: invalid, no flow, or on/off. */
 function ProfileBadge({ profile }: { profile: LibraryProfile }) {
   const [label, tone] = !profile.valid
     ? ['invalid', 'border-status-error text-status-error']
     : profile.teamOnly
-      ? ['team only', 'border-border-primary text-text-secondary']
+      ? ['no flow', 'border-border-primary text-text-secondary']
       : profile.enabled
         ? ['on', 'border-status-success text-status-success']
         : ['off', 'border-border-primary text-text-tertiary'];
@@ -106,7 +106,16 @@ function RunRow({ run, profile, onChanged }: { run: ProfileRun; profile?: Profil
   );
 }
 
-/** The Profiles page: every profile (bundled, yours, your Agent Farm), one opened with its Flow, Team and YAML, and launched runs. */
+/** What Launch does for this profile, in one sentence. */
+function launchSentence(profile: Profile): string {
+  const steps = profile.flow?.steps ?? [];
+  if (steps.length === 1) return 'Launch runs this agent on your request in a new Pane.';
+  return steps.some((step) => step.kind === 'ask')
+    ? 'Launch runs this flow in a new Pane, one tab per step, and asks you at each of its questions.'
+    : 'Launch runs this flow in a new Pane, one tab per step.';
+}
+
+/** The Profiles page: bundled profiles and yours, one opened on its flow and Launch (Team, YAML and samples under Details), and launched runs. */
 export function ProfilesView() {
   const [library, setLibrary] = useState<ProfileLibraryView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -115,7 +124,7 @@ export function ProfilesView() {
   const [tab, setTab] = useState<ViewerTab>('flow');
   const [launching, setLaunching] = useState(false);
   const [runs, setRuns] = useState<ProfileRun[]>([]);
-  const [own, setOwn] = useState<OwnAgentFarmView | null>(null);
+  const [details, setDetails] = useState(false);
   const [toggleError, setToggleError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -127,12 +136,6 @@ export function ProfilesView() {
   useEffect(() => { void reload(); }, [reload]);
   // Runs move and the bundled Agent Farm finishes setting up while the page is open.
   useEffect(() => window.electronAPI?.events?.onProfilesChanged?.(() => { void reload(); }), [reload]);
-  // The person's own agent-farm is run to list its profiles (slow), so it loads on its own, once.
-  useEffect(() => {
-    let cancelled = false;
-    void API.profiles.ownAgentFarm().then((response) => { if (!cancelled && response.success) setOwn(response.data ?? null); }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, []);
 
   const profiles = useMemo(() => library?.profiles ?? [], [library]);
   // Opens on the first profile that is on and launchable (greenfield on a fresh install).
@@ -166,8 +169,8 @@ export function ProfilesView() {
   };
 
   const sections: Array<[string, LibraryProfile[]]> = [
-    ['Bundled, on', profiles.filter((profile) => profile.origin === 'bundled' && profile.enabled)],
-    ['Bundled, one click to add', profiles.filter((profile) => profile.origin === 'bundled' && !profile.enabled)],
+    ['On', profiles.filter((profile) => profile.origin === 'bundled' && profile.enabled)],
+    ['Ready to add', profiles.filter((profile) => profile.origin === 'bundled' && !profile.enabled)],
     ['Yours', profiles.filter((profile) => profile.origin === 'yours')],
   ];
 
@@ -188,18 +191,6 @@ export function ProfilesView() {
               {items.map((profile) => <LibraryItem key={`${profile.origin}-${profile.name}-${profile.file}`} profile={profile} selected={profile === selected} onSelect={() => { setSelectedName(profile.name); setTab('flow'); }} />)}
             </Section>
           ))}
-          {/* Your own Agent Farm shows only when it lists something, or why it couldn't. */}
-          {own && (own.profiles.length > 0 || own.error) && (
-            <Section title="Your Agent Farm">
-              {own.error && <p className="px-3 text-xs text-status-error">{own.error}</p>}
-              {own.profiles.map((entry) => (
-                <div key={entry.name} className="flex flex-col px-3 py-1.5" data-testid="own-agent-farm-profile">
-                  <span className="truncate text-[13px] text-text-primary">{entry.name}</span>
-                  <span className="truncate text-[11px] text-text-tertiary">{entry.source}{entry.harness ? ` · ${agentLabel(entry.harness)}` : ''} · runs through your agent-farm (+ menu › Profile…)</span>
-                </div>
-              ))}
-            </Section>
-          )}
         </nav>
       </aside>
       <main className={cn('min-w-0 flex-1 px-6 py-4', narrow ? '' : 'min-h-0 overflow-y-auto')}>
@@ -215,22 +206,17 @@ export function ProfilesView() {
           <div className="flex flex-col gap-4" data-testid="profile-viewer" data-profile={selected.name}>
             <header className="flex flex-wrap items-center gap-3">
               <h2 className="text-lg font-semibold text-text-primary">{selected.name}</h2>
-              {selected.version && <span className="rounded-full border border-border-primary px-2 text-xs text-text-secondary">{selected.version} · {selected.origin === 'bundled' ? 'bundled' : 'yours'}</span>}
               <ProfileBadge profile={selected} />
-              <div role="tablist" aria-label="Profile" className="inline-flex overflow-hidden rounded-md border border-border-primary">
-                {(['flow', 'team', 'yaml'] as const).map((id) => (
-                  <button key={id} type="button" role="tab" aria-selected={tab === id} data-testid={`profile-tab-${id}`} onClick={() => setTab(id)} className={cn('px-3 py-1 text-xs', tab === id ? 'bg-surface-selected font-medium text-text-primary' : 'text-text-secondary hover:bg-surface-hover')}>
-                    {id === 'flow' ? 'Flow' : id === 'team' ? 'Team' : 'YAML'}
-                  </button>
-                ))}
-              </div>
               <span className="flex-1" />
               {selected.origin === 'bundled' && selected.valid && (
                 <Button size="sm" variant="secondary" onClick={() => void toggle(selected)} data-testid="profile-toggle-enabled">{selected.enabled ? 'Turn off' : 'Add'}</Button>
               )}
-              <Button size="sm" disabled={!selected.launchable || !selected.enabled} title={!selected.launchable ? (selected.teamOnly ? 'Team only: this profile has no workflow to launch.' : 'Fix this profile\'s errors to launch it.') : selected.enabled ? undefined : 'Add this profile to launch it.'} onClick={() => setLaunching(true)} data-testid="profile-launch">Launch…</Button>
+              <Button size="sm" disabled={!selected.launchable || !selected.enabled} title={!selected.launchable ? (selected.teamOnly ? 'This profile has no flow to launch.' : 'Fix this profile\'s errors to launch it.') : selected.enabled ? undefined : 'Add this profile to launch it.'} onClick={() => setLaunching(true)} data-testid="profile-launch">Launch…</Button>
             </header>
-            {selected.title && <p className="text-sm text-text-secondary">{selected.title}</p>}
+            <div className="flex flex-col gap-1">
+              {selected.title && <p className="text-sm text-text-primary">{selected.title}</p>}
+              {selected.launchable && selected.profile && <p className="text-xs text-text-secondary" data-testid="profile-launch-sentence">{launchSentence(selected.profile)}</p>}
+            </div>
             {toggleError && <p className="text-xs text-status-error" role="alert">{toggleError}</p>}
             {selected.errors.length > 0 && (
               <ul className="flex flex-col gap-1 rounded-lg border border-status-error p-3" data-testid="profile-errors">
@@ -239,7 +225,25 @@ export function ProfilesView() {
                 ))}
               </ul>
             )}
-            {tab === 'flow' && selected.profile && <ProfileFlow key={selected.name} profile={selected.profile} />}
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" aria-expanded={details} onClick={() => { setDetails(!details); setTab('flow'); }} className="flex items-center gap-1 text-xs text-text-secondary hover:text-text-primary" data-testid="profile-details-toggle">
+                <ChevronRight className={cn('h-3.5 w-3.5', details && 'rotate-90')} aria-hidden="true" />
+                Details
+              </button>
+              {details && (
+                <>
+                  <div role="tablist" aria-label="Profile" className="inline-flex overflow-hidden rounded-md border border-border-primary">
+                    {(['flow', 'team', 'yaml'] as const).map((id) => (
+                      <button key={id} type="button" role="tab" aria-selected={tab === id} data-testid={`profile-tab-${id}`} onClick={() => setTab(id)} className={cn('px-3 py-1 text-xs', tab === id ? 'bg-surface-selected font-medium text-text-primary' : 'text-text-secondary hover:bg-surface-hover')}>
+                        {id === 'flow' ? 'Flow' : id === 'team' ? 'Team' : 'YAML'}
+                      </button>
+                    ))}
+                  </div>
+                  {selected.version && <span className="text-xs text-text-tertiary">{selected.version} · {selected.origin === 'bundled' ? 'bundled' : 'yours'}</span>}
+                </>
+              )}
+            </div>
+            {tab === 'flow' && selected.profile && <ProfileFlow key={selected.name} profile={selected.profile} details={details} />}
             {tab === 'team' && <TeamTab profile={selected} />}
             {tab === 'yaml' && <pre className="overflow-x-auto rounded-lg border border-border-primary bg-surface-secondary p-3 font-mono text-xs text-text-primary" data-testid="profile-yaml">{detail?.profile.name === selected.name ? detail.yaml : 'Loading…'}</pre>}
             {runs.length > 0 && (
