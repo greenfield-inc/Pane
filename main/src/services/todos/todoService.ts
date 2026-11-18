@@ -1272,12 +1272,13 @@ export class TodoService extends EventEmitter {
     const waiting = this.waitingByTodo();
     const open = this.store.listOpen();
     const children = this.childrenIndex(open);
+    const reminding = new Set(this.store.reminders().map(entry => entry.todo.number));
     let moving = false;
     for (const todo of open) {
       if (todo.parentNumber !== null) continue;
       moving ||= MOVING_TODO_STATES.includes(todo.state);
       try {
-        await this.superviseOne(todo, (children.get(todo.number) ?? []).filter(child => isOpenTodoState(child.state)), waiting, now);
+        await this.superviseOne(todo, (children.get(todo.number) ?? []).filter(child => isOpenTodoState(child.state)), waiting, reminding, now);
       } catch (error) {
         this.host.log(`[Todos] supervisor failed on ${todo.ref}`, error instanceof Error ? error : String(error));
       }
@@ -1286,11 +1287,11 @@ export class TodoService extends EventEmitter {
     if (moving) this.changed();
   }
 
-  private async superviseOne(todo: TodoRecord, children: readonly TodoRecord[], waiting: Map<number, LinkedApproval[]>, now: number): Promise<void> {
+  private async superviseOne(todo: TodoRecord, children: readonly TodoRecord[], waiting: Map<number, LinkedApproval[]>, reminding: ReadonlySet<number>, now: number): Promise<void> {
     // Cheap checks first: most to-dos are skipped here without reading a tab.
     if (!MOVING_TODO_STATES.includes(todo.state) || todo.loadHold !== null || todo.stuckCardId !== null || !todo.sessionId) return;
     // A Just-remind-me card is out (or about to be raised again after a restart): it is the person's turn.
-    if (this.store.wake(todo.number)?.reminderCardId) return;
+    if (reminding.has(todo.number)) return;
     const waitingOnYou = (waiting.get(todo.number)?.length ?? 0) > 0 || children.some(child => (waiting.get(child.number)?.length ?? 0) > 0);
     if (waitingOnYou) return;
     const orchestrator = this.orchestratorOf(todo);
