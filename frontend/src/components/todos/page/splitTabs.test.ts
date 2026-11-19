@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TodoAttachment, TodoAttachmentGroup, TodoAttachmentKind } from '../../../../../shared/types/todos';
 import {
   NARROW_TODO_AREA_PX,
+  todoLayoutFor,
   attachmentTabs,
   initialSplit,
   everyTabClosed,
@@ -360,5 +361,71 @@ describe('closing and reopening tabs (T-25)', () => {
   it('file tabs count every file, closed or not, and never the Overview', () => {
     const closed = todoSplitReducer(base, { type: 'close', index: 0 });
     expect(splitFileItems(closed).map(splitItemKey)).toEqual([plan, pr, findings].map((a) => `attachment:${a.id}`));
+  });
+});
+
+describe('todoLayoutFor (T-38: one rule for tabs or a split)', () => {
+  it('shows tabs in one column under the threshold, and the split beside the to-do from it up', () => {
+    expect(todoLayoutFor(NARROW_TODO_AREA_PX - 1)).toBe('tabs');
+    expect(todoLayoutFor(480)).toBe('tabs');
+    expect(todoLayoutFor(NARROW_TODO_AREA_PX)).toBe('split');
+    expect(todoLayoutFor(1600)).toBe('split');
+  });
+});
+
+describe('the To-do tab of the narrow layout (T-38)', () => {
+  const plan = attachment('plan', 1, 12, 'cover-sheet.html');
+  const doc = attachment('doc', 2, 12, 'p5-p8.html');
+  const base = initialSplit([own(plan, doc)], true);
+
+  it('a to-do opens on its To-do tab', () => {
+    expect(base.todoShown).toBe(true);
+  });
+
+  it('picking or opening a file shows its tab; the To-do tab comes back with show-todo', () => {
+    const picked = todoSplitReducer(base, { type: 'activate', index: 1 });
+    expect([picked.todoShown, labels(picked)[picked.active]]).toEqual([false, 'p5-p8.html']);
+    const opened = todoSplitReducer(base, { type: 'open', item: { kind: 'attachment', attachment: plan } });
+    expect([opened.todoShown, labels(opened)[opened.active]]).toEqual([false, 'cover-sheet.html']);
+    const back = todoSplitReducer(picked, { type: 'show-todo' });
+    expect([back.todoShown, labels(back)[back.active]]).toEqual([true, 'p5-p8.html']);
+  });
+
+  it('activating the tab already selected under the To-do tab still shows it, and in the split once wide', () => {
+    const picked = todoSplitReducer(base, { type: 'activate', index: base.active });
+    expect([picked.todoShown, picked.hidden]).toEqual([false, false]);
+  });
+
+  it('arrows walk To-do, then each file, wrapping round', () => {
+    const steps = [1, 1, 1, -1] as const;
+    const seen: string[] = [];
+    let state = base;
+    for (const delta of steps) {
+      state = todoSplitReducer(state, { type: 'step', delta, withTodo: true });
+      seen.push(state.todoShown ? 'To-do' : labels(state)[state.active]);
+    }
+    expect(seen).toEqual(['cover-sheet.html', 'p5-p8.html', 'To-do', 'p5-p8.html']);
+  });
+
+  it('closing the last file goes back to the To-do tab', () => {
+    const shown = todoSplitReducer(base, { type: 'activate', index: 0 });
+    const one = todoSplitReducer(shown, { type: 'close', index: 0 });
+    expect(one.todoShown).toBe(false);
+    const none = todoSplitReducer(one, { type: 'close', index: 0 });
+    expect(none.todoShown).toBe(true);
+  });
+
+  it('hiding the split (in the wide layout) leaves the To-do tab selected for a narrow one', () => {
+    const shown = todoSplitReducer(base, { type: 'activate', index: 1 });
+    expect(todoSplitReducer(shown, { type: 'set-hidden', hidden: true }).todoShown).toBe(true);
+    expect(todoSplitReducer(shown, { type: 'toggle-hidden' }).todoShown).toBe(true);
+    expect(todoSplitReducer(base, { type: 'set-hidden', hidden: false }).todoShown).toBe(false);
+  });
+
+  it('an attached file arriving shows its tab', () => {
+    const waiting = todoSplitReducer(base, { type: 'reveal', target: '/tmp/new.html' });
+    const fresh = { ...attachment('doc', 3, 12, 'new'), target: '/tmp/new.html' };
+    const arrived = todoSplitReducer(waiting, { type: 'sync', groups: [own(plan, doc, fresh)] });
+    expect([arrived.todoShown, labels(arrived)[arrived.active]]).toEqual([false, 'new']);
   });
 });

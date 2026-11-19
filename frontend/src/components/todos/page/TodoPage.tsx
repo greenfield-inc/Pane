@@ -23,10 +23,10 @@ import { TodoCard, todoSubTodosAnchor } from './TodoCard';
 import { TodoChatTimeline, TodoComposer } from './TodoChat';
 import { TodoChips } from './TodoChips';
 import { TodoDetailsSidebar, type TodoDetailsTab } from './TodoDetailsSidebar';
-import { TodoSplit, splitTabLabel, useSplitOverviewSession, type TodoApprovalOpen } from './TodoSplit';
+import { TodoNarrowTabs, TodoSplit, splitTabLabel, useSplitOverviewSession, type TodoApprovalOpen } from './TodoSplit';
 import { openTodoSession } from './todoNavigation';
 import {
-  everyTabClosed, initialSplit, splitFileItems, splitHasTabs, splitItemKey, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem,
+  everyTabClosed, initialSplit, splitFileItems, splitHasTabs, splitItemKey, startsHidden, todoLayoutFor, todoSplitReducer, type TodoSplitItem,
 } from './splitTabs';
 
 /** The thread's narrowest usable width beside the split and the details (round 7 QA, R8). */
@@ -116,7 +116,7 @@ function useAnsweredNow(detail: TodoDetail | null): TodoDetail | null {
 function useSplitMemory(detail: TodoDetail, areaPx: number) {
   const key = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, detail.todo.number);
   // A visit that opened under 1,000 px starts hidden, and showing the split lasts for that visit only.
-  const [narrowVisit] = useState(() => areaPx < NARROW_TODO_AREA_PX);
+  const [narrowVisit] = useState(() => todoLayoutFor(areaPx) === 'tabs');
   const [hiddenAtOpen] = useState(() => startsHidden(safeRead(key), areaPx));
   // Closed tabs are remembered whatever the width (T-25).
   const [closedAtOpen] = useState(() => safeReadClosed(key));
@@ -202,7 +202,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
   const overview = useSplitOverviewSession(detail);
   const viewKey = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, number);
   const [leftAs] = useState(() => recallTodoView(viewKey));
-  const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => restoreActiveTab(initialSplit(detail.attachments, hiddenAtOpen, overview, closedAtOpen), leftAs?.tab ?? null));
+  const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => restoreActiveTab(initialSplit(detail.attachments, hiddenAtOpen, overview, closedAtOpen), leftAs?.tab ?? null, leftAs?.todoShown ?? true));
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsTab, setDetailsTab] = useState<TodoDetailsTab>('details');
   const [approval, setApproval] = useState<TodoApprovalOpen | null>(null);
@@ -237,7 +237,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
       stopSplit?.();
       document.removeEventListener('scroll', onScroll, { capture: true });
       const shown = splitRef.current.items[splitRef.current.active];
-      rememberTodoView(viewKey, { tab: shown ? splitItemKey(shown) : null, pageScroll: scrolled.page, splitScroll: scrolled.split });
+      rememberTodoView(viewKey, { tab: shown ? splitItemKey(shown) : null, todoShown: splitRef.current.todoShown, pageScroll: scrolled.page, splitScroll: scrolled.split });
     };
   }, [viewKey, leftAs]);
   // Focus starts on the title, so Tab walks the page from the top.
@@ -257,17 +257,29 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
     rememberClosed(split.closed);
   }, [split.closed, rememberClosed]);
 
+  // One width rule (T-38): a narrow area shows the page and its files as tabs in one column, a wide
+  // one the files in a split beside the page. Both read the same tabs, so a change of width keeps them.
+  const tabs = todoLayoutFor(areaPx) === 'tabs';
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
   // With every tab closed the split can still be shown: its default tab comes back (T-25).
   const hasTabs = splitHasTabs(split);
   const splitShown = (split.items.length > 0 && !split.hidden) || approval !== null;
+  // Under the tabs, a file's tab or an approval's takes the page's place.
+  const tabShown = approval !== null || (!split.todoShown && split.items.length > 0);
   const toggleSplit = useCallback(() => dispatch({ type: 'toggle-hidden' }), []);
-  // In a Session's To-dos tab, ⌘\ stays the Session's Split Right.
-  const splitChord = useSplitShortcut(hasTabs && !embedded, toggleSplit);
+  // In a Session's To-dos tab, ⌘\ stays the Session's Split Right; under the tabs there is no split to toggle.
+  const splitChord = useSplitShortcut(hasTabs && !embedded && !tabs, toggleSplit);
 
   const active = split.items[split.active];
   const activeLabel = active ? splitTabLabel(active, split.items) : null;
   const openApproval = useCallback((id: string) => {
     if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) returnFocus.current = document.activeElement;
+    // Under the tabs the approval is a tab of its own, and closing it returns to the tab it covered.
+    if (tabsRef.current) {
+      setApproval({ id, returnTab: splitRef.current.todoShown ? 'To-do' : activeLabel ?? 'To-do' });
+      return;
+    }
     // With every tab closed the approval shows over an empty split, which hides again when it closes.
     if (splitRef.current.items.length > 0) dispatch({ type: 'set-hidden', hidden: false });
     setApproval({ id, returnTab: activeLabel ?? detail.todo.ref });
@@ -320,9 +332,11 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
   // The thread keeps THREAD_FLOOR_PX; with the details open and no room for both, the split steps aside for
   // this visit (its remembered state is untouched) and "Plan · N files" brings it back by closing the details.
   const room = splitContainer - THREAD_FLOOR_PX;
-  const crowded = detailsOpen && room < SPLIT_FLOOR_PX && approval === null;
+  const crowded = !tabs && detailsOpen && room < SPLIT_FLOOR_PX && approval === null;
   crowdedRef.current = crowded;
-  const splitHere = splitShown && !crowded;
+  const splitHere = !tabs && splitShown && !crowded;
+  // Where the split's content is on screen: beside the page, or in the page's place under the tabs.
+  const splitOnScreen = tabs ? tabShown : splitHere;
   const splitPx = Math.min(splitResize.bodyActive ? splitResize.renderedPx : Math.min(320, Math.floor(splitContainer / 2)), Math.max(SPLIT_FLOOR_PX, room));
   // "Plan · 3 files" shows the split; with every tab closed it opens the details' Files instead (T-25).
   const showSplit = () => {
@@ -343,7 +357,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
     if (approval) closeApproval();
     else dispatch({ type: 'close', index: splitRef.current.active });
   }, [approval, closeApproval]);
-  useChordShortcut('close-active-tab', splitHere && !embedded && (split.items.length > 0 || approval !== null), closeShown);
+  useChordShortcut('close-active-tab', splitOnScreen && !embedded && (split.items.length > 0 || approval !== null), closeShown);
 
   return (
     <>
@@ -354,12 +368,14 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
         onOpenTodo={onOpenTodo}
         onNotice={setNotice}
         snooze={{ anchorRef: snoozeAnchor, onOpen: snooze.open }}
-        split={{ shown: splitShown, enabled: hasTabs, chord: splitChord, onToggle: toggleSplit }}
+        split={tabs ? undefined : { shown: splitShown, enabled: hasTabs, chord: splitChord, onToggle: toggleSplit }}
         details={{ open: detailsOpen, onToggle: () => setDetailsOpen((open) => !open) }}
         embedded={embedded}
       />
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col" data-testid="todo-page-main">
+      {tabs && <TodoNarrowTabs detail={detail} split={split} dispatch={dispatch} approval={approval} onCloseApproval={closeApproval} onAttached={attached} />}
+      <div className="flex min-h-0 flex-1" data-layout={tabs ? 'tabs' : 'split'} data-testid="todo-page-body">
+        {/* Kept mounted under another tab, so its scroll and the composer's draft stay. */}
+        <div className={cn('min-w-0 flex-1 flex-col', tabs && tabShown ? 'hidden' : 'flex')} data-testid="todo-page-main">
           <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-7 pb-3 pt-5" data-testid="todo-page-scroll">
             <div className="mx-auto max-w-[760px]">
               <h1 ref={titleRef} tabIndex={-1} className="mb-2 mt-1 text-[21px] font-semibold leading-[1.3] text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-border-focus" data-testid="todo-page-title">{detail.todo.title}</h1>
@@ -391,9 +407,9 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
         {snooze.anchor && (
           <SnoozeMenu target={snoozeTarget(detail)} anchor={snooze.anchor} onSubmit={snooze.submit} onWake={detail.todo.snooze ? snooze.wake : undefined} onClose={snooze.close} />
         )}
-        {splitHere && (
-          <div className="relative flex min-h-0 shrink-0 border-l border-border-primary bg-bg-primary" style={{ width: splitPx }} data-testid="todo-page-split">
-            {splitResize.separatorVisible && (
+        {splitOnScreen && (
+          <div className={cn('relative flex min-h-0 bg-bg-primary', tabs ? 'min-w-0 flex-1' : 'shrink-0 border-l border-border-primary')} style={tabs ? undefined : { width: splitPx }} data-testid="todo-page-split">
+            {!tabs && splitResize.separatorVisible && (
               <OuterResizeSeparator label="Resize the split" orientation="vertical" value={splitResize.effectivePx}
                 minimum={splitResize.floor} maximum={splitResize.cap} {...splitResize.separatorHandlers} />
             )}
@@ -405,6 +421,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
               onOpenApproval={openApproval}
               onCloseApproval={closeApproval}
               onAttached={attached}
+              showStrip={!tabs}
             />
           </div>
         )}
@@ -418,7 +435,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
               detail={detail}
               tab={detailsTab}
               onTab={setDetailsTab}
-              openAttachmentId={splitShown && active?.kind === 'attachment' ? active.attachment.id : undefined}
+              openAttachmentId={(tabs ? tabShown && approval === null : splitShown) && active?.kind === 'attachment' ? active.attachment.id : undefined}
               closedTabs={split.closed}
               onOpenAttachment={openAttachment}
               onOpenTodo={onOpenTodo}
@@ -639,15 +656,18 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
         />
       )}
       {/* In a Session's To-dos tab the chips show the split and the details; the bar keeps the tab's own controls. */}
-      {split && details && !embedded && (
+      {/* Under the narrow layout's tabs there is no split to toggle: the files are tabs (T-38). */}
+      {details && !embedded && (
         <>
           <span className="mx-0.5 h-[18px] w-px shrink-0 bg-border-primary" aria-hidden="true" />
-          <button type="button" className={cn(TOGGLE, split.shown && 'bg-surface-hover text-text-primary')} disabled={!split.enabled}
-            aria-label={splitWords}
-            title={split.chord ? `${splitWords} (${split.chord})` : splitWords}
-            aria-pressed={split.shown}
-            onClick={split.onToggle}
-            data-testid="todo-split-toggle"><Columns2 className="h-4 w-4" aria-hidden="true" /></button>
+          {split && (
+            <button type="button" className={cn(TOGGLE, split.shown && 'bg-surface-hover text-text-primary')} disabled={!split.enabled}
+              aria-label={splitWords}
+              title={split.chord ? `${splitWords} (${split.chord})` : splitWords}
+              aria-pressed={split.shown}
+              onClick={split.onToggle}
+              data-testid="todo-split-toggle"><Columns2 className="h-4 w-4" aria-hidden="true" /></button>
+          )}
           <button type="button" className={cn(TOGGLE, details.open && 'bg-surface-hover text-text-primary')}
             aria-label={details.open ? 'Hide details' : 'Show details'}
             title={details.open ? 'Hide details' : 'Show details'}
