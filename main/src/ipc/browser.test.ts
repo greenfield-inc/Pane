@@ -69,7 +69,7 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
         params.set(method, given);
         if (method === 'DOM.setFileInputFiles') files.push(...(given?.files ?? []));
         if (method === 'Page.captureScreenshot') return { data: pngOf(780, 1688).toString('base64') };
-        if (method === 'Runtime.evaluate' && JSON.stringify(given).includes('innerWidth')) return { result: { value: { width: 800, height: 600 } } };
+        if (method === 'Runtime.evaluate' && JSON.stringify(given).includes('innerWidth')) return { result: { value: { width: 800, height: 600, x: 0, y: 120, ratio: 2 } } };
         if (method === 'Page.getLayoutMetrics') return { cssContentSize: { width: 800, height: 600 }, cssLayoutViewport: { clientWidth: 800, clientHeight: 600 } };
         if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
         if (method === 'DOM.querySelector') return { nodeId: 7 };
@@ -105,7 +105,7 @@ function agentTab(id: string, paneId: string, agent: string): ToolPanel {
   return { id, sessionId: paneId, type: 'terminal', title: agent, state: { isActive: false, customState: { agent } }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
 }
 
-function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: string[]; painting?: string[]; holds?: BrowserHoldSettings; loading?: boolean } = {}): Fixture {
+function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: string[]; painting?: string[]; holds?: Partial<BrowserHoldSettings>; loading?: boolean; window?: { open: boolean } } = {}): Fixture {
   const archived = new Set<string>();
   const goneListeners: Array<() => void> = [];
   const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-browser-tools-'));
@@ -135,7 +135,7 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
     close: async (tab) => { tabs.splice(tabs.indexOf(tab), 1); },
     update: async (tab, state) => { tab.state = { ...tab.state, customState: state }; },
     page: (id) => pages.get(id),
-    hasWindow: () => true,
+    hasWindow: () => options.window?.open ?? true,
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
     name: () => 'studio-mac',
@@ -454,6 +454,7 @@ describe('browser tabs: the screens that watch them', () => {
     const held: string[] = [];
     const fixture = setup(['t1', 't2', 't3'].map(id => browserTab(id, 'pane-a')).concat(browserTab('mine', 'pane-a', 'claude-a')), { held, holds });
     await call(fixture, 'snapshot', { tab: 'mine' });
+    await fromAfar(fixture, 't1', 'phone-1', phone);
     await fromAfar(fixture, 't1', 'phone-1', { ...phone, onScreen: false });
     await fromAfar(fixture, 't2', 'phone-1', phone);
     await fromAfar(fixture, 'mine', 'phone-1', phone);
@@ -526,6 +527,31 @@ describe('browser tabs: the screens that watch them', () => {
     expect(painting).toEqual([]);
   });
 
+  it('lets a screen that has the tab off screen neither keep the page running here nor hold it past the grace time', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { held, holds });
+    const page = fixture.pages.get('persons');
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(page).toMatchObject({ throttled: false });
+    // The phone's app goes to the background but keeps reporting, off screen.
+    const keepReporting = setInterval(() => void fromAfar(fixture, 'persons', 'phone-1', { ...phone, onScreen: false }), 50);
+    onTestFinished(() => clearInterval(keepReporting));
+    await vi.waitFor(() => expect(page).toMatchObject({ throttled: true }));
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+  });
+
+  it('lets the tabs only this window showed go when it closes, and keeps those another device watches', async () => {
+    const held: string[] = [];
+    const window = { open: true };
+    const fixture = setup([browserTab('mine', 'pane-a'), browserTab('streamed', 'pane-a')], { held, window, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000, graceMs: 60_000 } } });
+    await fromHere(fixture, 'mine', { kind: 'desktop', onScreen: true, width: 1200, height: 700 });
+    await fromHere(fixture, 'streamed', { kind: 'desktop', onScreen: false, width: 1200, height: 700 });
+    await fromAfar(fixture, 'streamed', 'phone-1', phone);
+    expect([...held].sort()).toEqual(['mine', 'streamed']);
+    window.open = false;
+    await vi.waitFor(() => expect(held).toEqual(['streamed']));
+  });
+
   it('takes reports only from Pane\'s own screens, never from an agent', async () => {
     const fixture = setup([browserTab('persons', 'pane-a')]);
     expect(await fixture.registry.invokeConnected('browser:watch', ['persons', 'v', phone], signal, claudeInA)).toMatchObject({ success: false });
@@ -560,6 +586,32 @@ describe('browser tabs: streaming a page to another screen', () => {
     setTimeout(() => paint(fixture, 'persons', 'bmV3'), 100);
     expect((await waiting).frame).toMatchObject({ data: 'data:image/jpeg;base64,bmV3', width: 390 });
     expect(page?.sent).toContain('Page.screencastFrameAck');
+  });
+
+  it('gives a screen that holds a frame number from before a host restart the newest frame at once', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    const first = await frame(fixture, 'persons', 0);
+    const started = Date.now();
+    const again = await frame(fixture, 'persons', (first.frame?.seq ?? 0) + 1_000_000_000);
+    expect(again.frame?.seq).toBe(first.frame?.seq);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('captures a new screen\'s still no larger than the frames, where the page is scrolled to', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    await frame(fixture, 'persons', 0);
+    // An 800x600 page at 2x is 1600 px wide; the phone needs 1170.
+    expect(fixture.pages.get('persons')?.params.get('Page.captureScreenshot')).toMatchObject({ format: 'jpeg', clip: { x: 0, y: 120, width: 800, height: 600, scale: 1170 / 1600 } });
+  });
+
+  it('refuses the screen channels to agents', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    for (const channel of ['browser:frame', 'browser:view']) {
+      expect(await code(fixture.registry.invokeConnected(channel, ['persons', 'v', 0], signal, claudeInA))).toBe('ERR_BROWSER_SCREENS_ONLY');
+    }
+    expect(await fixture.registry.invokeConnected('browser:input', ['persons', 'v', []], signal, claudeInA)).toMatchObject({ success: false });
   });
 
   it('acks each frame a screen reads, so Chromium keeps painting between reads', async () => {
@@ -615,8 +667,12 @@ describe('browser tabs: streaming a page to another screen', () => {
       { kind: 'touch', action: 'end', x: 10, y: 20 },
       { kind: 'wheel', x: 10, y: 20, dx: 0, dy: 300 },
     ])).toMatchObject({ success: true });
-    const inputs = (page?.sent ?? []).filter(method => method.startsWith('Input.'));
+    const sent = page?.sent ?? [];
+    const inputs = sent.filter(method => method.startsWith('Input.'));
     expect(inputs).toEqual(['Input.dispatchTouchEvent', 'Input.dispatchTouchEvent', 'Input.dispatchMouseEvent']);
+    // The page keeps its focus (a typeahead list stays open), and takes the screen's size only after the input landed.
+    expect(page?.params.get('Emulation.setFocusEmulationEnabled')).toEqual({ enabled: true });
+    expect(sent.indexOf('Emulation.setDeviceMetricsOverride')).toBeGreaterThan(sent.lastIndexOf('Input.dispatchMouseEvent'));
     expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"person"');
     // Taking control gave the page the phone's size.
     expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 844, mobile: true });

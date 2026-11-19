@@ -85,6 +85,7 @@ const refusalSchema = boundary.object({ stale: boundary.optional(boundary.string
 const pointSchema = boundary.object({ x: boundary.number, y: boundary.number });
 const checkSchema = boundary.object({ met: boundary.boolean, stale: boundary.optional(boundary.string) });
 const sizeSchema = boundary.object({ width: boundary.number, height: boundary.number });
+const stillViewSchema = boundary.object({ width: boundary.number, height: boundary.number, x: boundary.number, y: boundary.number, ratio: boundary.number });
 const layoutSchema = boundary.object({ cssContentSize: sizeSchema, cssLayoutViewport: boundary.object({ clientWidth: boundary.number, clientHeight: boundary.number }) });
 const screenshotSchema = boundary.object({ data: boundary.string });
 const nodeSchema = boundary.object({ nodeId: boundary.number });
@@ -160,6 +161,15 @@ export function agentInputInFlight(webContentsId: number): boolean {
 }
 
 /**
+ * Whether input arriving at this page now is synthetic: an agent's, or a person's sent from
+ * another screen. Neither may raise the host's own menus or run Pane's shortcuts on the host.
+ */
+export function syntheticInputInFlight(webContentsId: number): boolean {
+  const driver = drivers.get(webContentsId);
+  return driver !== undefined && (driver.isAgentInput() || driver.isForwardedInput());
+}
+
+/**
  * Drives one browser tab's page for agents. It is the only module that sends debugger commands,
  * and it sends only ALLOWED_CDP_METHODS, attached through attachDebugger. Reading the page and
  * resolving refs runs in an isolated world (pageScript.ts); input goes through the debugger as
@@ -225,9 +235,9 @@ export class PageDriver {
    * The person used the page: refs from before stop working, since the page may have changed.
    * On a linked computer this is also how the agent's computer learns the person is driving.
    */
-  notePersonInput(now = Date.now()): void {
+  notePersonInput(now = Date.now(), keepFocus = false): void {
     this.lastPersonInput = now;
-    this.revokeRefs();
+    this.revokeRefs(keepFocus);
   }
 
   /** Whether the person used the page in the last `holdMs` (they drive until they stop). */
@@ -236,9 +246,10 @@ export class PageDriver {
   }
 
   /** Refs from before now stop working until the next snapshot (the person took over). */
-  revokeRefs(): void {
+  revokeRefs(keepFocus = false): void {
     this.refsRevoked = true;
-    this.unfocusNow();
+    // A person typing from another screen keeps the page's focus: blurring it per batch would close a typeahead list.
+    if (!keepFocus) this.unfocusNow();
     void this.page('revoke').catch(() => undefined);
   }
 
@@ -342,14 +353,17 @@ export class PageDriver {
    * A JPEG of the page now, for a viewer that starts watching: an idle page paints nothing, so the
    * screencast alone would leave it blank.
    */
-  still(quality: number): Promise<ScreencastFrame> {
+  still(quality: number, settings?: ScreencastSettings): Promise<ScreencastFrame> {
     if (this.dialog) return Promise.reject(new PaneError('ERR_BROWSER_DIALOG_PENDING', 'The page has a dialog open, so it can give no picture now.', 'Answer the dialog.'));
     return this.capture(async () => {
       await this.attach();
       // The size screencast frames report (the view, scrollbars included, or a viewer's size), so
       // input on this still maps the same way as on frames.
-      const size = this.size ?? decodeBoundary(await this.send('Runtime.evaluate', { expression: '({ width: innerWidth, height: innerHeight })', returnByValue: true }), boundary.object({ result: boundary.object({ value: sizeSchema }) })).result.value;
-      const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'jpeg', quality }), screenshotSchema);
+      const view = decodeBoundary(await this.send('Runtime.evaluate', { expression: '({ width: innerWidth, height: innerHeight, x: scrollX, y: scrollY, ratio: devicePixelRatio })', returnByValue: true }), boundary.object({ result: boundary.object({ value: stillViewSchema }) })).result.value;
+      const size = this.size ?? view;
+      // No larger than the frames: a Retina host would otherwise send a 2560 px still on every load.
+      const scale = settings ? Math.min(1, settings.maxWidth / (size.width * view.ratio), settings.maxHeight / (size.height * view.ratio)) : 1;
+      const shot = decodeBoundary(await this.send('Page.captureScreenshot', { format: 'jpeg', quality, clip: { x: view.x, y: view.y, width: size.width, height: size.height, scale } }), screenshotSchema);
       return { data: shot.data, width: size.width, height: size.height };
     });
   }
@@ -465,11 +479,6 @@ export class PageDriver {
     return result;
   }
 
-  /** The kind of field at a page point, so a phone knows to open its keyboard. */
-  async fieldAt(x: number, y: number): Promise<'text' | 'password' | null> {
-    return decodeOptionalBoundary(await this.page('fieldAt', x, y).catch(() => null), fieldSchema) ?? null;
-  }
-
   /** Applies one input; returns the copied text for a copy or cut chord. */
   private async personOne(input: BrowserInput): Promise<string | undefined> {
     switch (input.kind) {
@@ -499,7 +508,8 @@ export class PageDriver {
         if (input.text) await this.contents.insertText(input.text);
         return undefined;
       case 'navigate':
-        await this.contents.loadURL(input.url).catch(() => undefined);
+        // Only web pages, as for agents: a screen never makes the host open a file: or app link.
+        if (/^https?:\/\//i.test(input.url)) await this.contents.loadURL(input.url).catch(() => undefined);
         return undefined;
       case 'history': {
         const history = this.contents.navigationHistory;
@@ -826,7 +836,8 @@ export class PageDriver {
     const { code, keyCode } = named;
     const chordOnly = (modifiers & ~8) !== 0;
     const text = chordOnly ? undefined : named.text;
-    const command = chordOnly ? CHORD_COMMANDS.get(key.toLowerCase()) : undefined;
+    // Shift+Cmd/Ctrl+Z redoes; the plain chord undoes.
+    const command = chordOnly ? ((modifiers & 8) !== 0 && key.toLowerCase() === 'z' ? 'redo' : CHORD_COMMANDS.get(key.toLowerCase())) : undefined;
     if (!command) {
       // Electron's input reaches a page without focus; the debugger's keys are dropped there.
       const held = MODIFIER_NAMES.filter(([bit]) => (modifiers & bit) !== 0).map(([, name]) => name);
