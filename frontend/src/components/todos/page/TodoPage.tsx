@@ -25,13 +25,15 @@ import { TodoChips } from './TodoChips';
 import { TodoDetailsSidebar, type TodoDetailsTab } from './TodoDetailsSidebar';
 import { TodoSplit, splitTabLabel, useSplitOverviewSession, type TodoApprovalOpen } from './TodoSplit';
 import { openTodoSession } from './todoNavigation';
-import { initialSplit, splitAttachmentItems, splitItemKey, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem } from './splitTabs';
+import {
+  everyTabClosed, initialSplit, splitFileItems, splitHasTabs, splitItemKey, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem,
+} from './splitTabs';
 
 /** The thread's narrowest usable width beside the split and the details (round 7 QA, R8). */
 const THREAD_FLOOR_PX = 360;
 /** The split's narrowest useful width. */
 const SPLIT_FLOOR_PX = 240;
-import { pruneSplitMemory, readSplitHidden, todoSplitKey, writeSplitHidden } from './todoSplitMemory';
+import { pruneSplitMemory, readClosedTabs, readSplitHidden, todoSplitKey, writeClosedTabs, writeSplitHidden } from './todoSplitMemory';
 import { recallTodoView, rememberTodoView, restoreActiveTab } from './todoPageView';
 import { SnoozeMenu } from '../SnoozeMenu';
 import { SnoozeBanner, SnoozeHeaderButton, canSnoozeTodo, snoozeTarget, usePageSnooze } from './TodoSnoozed';
@@ -116,6 +118,15 @@ function useSplitMemory(detail: TodoDetail, areaPx: number) {
   // A visit that opened under 1,000 px starts hidden, and showing the split lasts for that visit only.
   const [narrowVisit] = useState(() => areaPx < NARROW_TODO_AREA_PX);
   const [hiddenAtOpen] = useState(() => startsHidden(safeRead(key), areaPx));
+  // Closed tabs are remembered whatever the width (T-25).
+  const [closedAtOpen] = useState(() => safeReadClosed(key));
+  const rememberClosed = useCallback((keys: readonly string[]) => {
+    try {
+      writeClosedTabs(window.localStorage, key, keys);
+    } catch {
+      // Storage blocked: closed tabs simply aren't remembered.
+    }
+  }, [key]);
   const remember = useCallback((hidden: boolean) => {
     if (narrowVisit) return;
     try {
@@ -135,7 +146,7 @@ function useSplitMemory(detail: TodoDetail, areaPx: number) {
       // Storage blocked: nothing to prune.
     }
   }, [rows]);
-  return { hiddenAtOpen, remember };
+  return { hiddenAtOpen, remember, closedAtOpen, rememberClosed };
 }
 
 function safeRead(key: string): boolean {
@@ -143,6 +154,14 @@ function safeRead(key: string): boolean {
     return readSplitHidden(window.localStorage, key);
   } catch {
     return false;
+  }
+}
+
+function safeReadClosed(key: string): string[] {
+  try {
+    return readClosedTabs(window.localStorage, key);
+  } catch {
+    return [];
   }
 }
 
@@ -179,11 +198,11 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
     return () => onShown(false);
   }, [onShown]);
   const number = detail.todo.number;
-  const { hiddenAtOpen, remember } = useSplitMemory(detail, areaPx);
+  const { hiddenAtOpen, remember, closedAtOpen, rememberClosed } = useSplitMemory(detail, areaPx);
   const overview = useSplitOverviewSession(detail);
   const viewKey = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, number);
   const [leftAs] = useState(() => recallTodoView(viewKey));
-  const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => restoreActiveTab(initialSplit(detail.attachments, hiddenAtOpen, overview), leftAs?.tab ?? null));
+  const [split, dispatch] = useReducer(todoSplitReducer, undefined, () => restoreActiveTab(initialSplit(detail.attachments, hiddenAtOpen, overview, closedAtOpen), leftAs?.tab ?? null));
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsTab, setDetailsTab] = useState<TodoDetailsTab>('details');
   const [approval, setApproval] = useState<TodoApprovalOpen | null>(null);
@@ -230,9 +249,17 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
     rememberedHidden.current = split.hidden;
     remember(split.hidden);
   }, [split.hidden, remember]);
+  // So are its closed tabs (T-25).
+  const rememberedClosed = useRef(split.closed);
+  useEffect(() => {
+    if (rememberedClosed.current === split.closed) return;
+    rememberedClosed.current = split.closed;
+    rememberClosed(split.closed);
+  }, [split.closed, rememberClosed]);
 
-  const hasTabs = split.items.length > 0;
-  const splitShown = (hasTabs && !split.hidden) || approval !== null;
+  // With every tab closed the split can still be shown: its default tab comes back (T-25).
+  const hasTabs = splitHasTabs(split);
+  const splitShown = (split.items.length > 0 && !split.hidden) || approval !== null;
   const toggleSplit = useCallback(() => dispatch({ type: 'toggle-hidden' }), []);
   // In a Session's To-dos tab, ⌘\ stays the Session's Split Right.
   const splitChord = useSplitShortcut(hasTabs && !embedded, toggleSplit);
@@ -241,7 +268,8 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
   const activeLabel = active ? splitTabLabel(active, split.items) : null;
   const openApproval = useCallback((id: string) => {
     if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) returnFocus.current = document.activeElement;
-    dispatch({ type: 'set-hidden', hidden: false });
+    // With every tab closed the approval shows over an empty split, which hides again when it closes.
+    if (splitRef.current.items.length > 0) dispatch({ type: 'set-hidden', hidden: false });
     setApproval({ id, returnTab: activeLabel ?? detail.todo.ref });
   }, [activeLabel, detail.todo.ref]);
   const closeApproval = useCallback(() => {
@@ -251,24 +279,29 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
     // The control you came from may be gone (an answered card redraws): the title keeps focus on the page.
     requestAnimationFrame(() => (target?.isConnected ? target : titleRef.current)?.focus({ preventScroll: true }));
   }, []);
+  // Opening a file shows the split; where it was crowded out by the details, the details close (as "Plan · N files" does).
+  const crowdedRef = useRef(false);
   const openItem = useCallback((item: TodoSplitItem) => {
     setApproval(null);
     dispatch({ type: 'open', item });
+    if (crowdedRef.current) setDetailsOpen(false);
   }, []);
+  // A tab's own item (closed or not) when it has one; otherwise a sub-to-do's file, marked with where it is from.
   const openAttachment = useCallback((attachment: TodoAttachment) => {
-    const tab = split.items.find((item) => item.kind === 'attachment' && item.attachment.id === attachment.id);
-    openItem(tab ?? { kind: 'attachment', attachment });
-  }, [split.items, openItem]);
+    const tab = [...split.items, ...split.all].find((item) => item.kind === 'attachment' && item.attachment.id === attachment.id);
+    const from = detail.attachments.find((group) => group.attachments.some((candidate) => candidate.id === attachment.id))?.from;
+    openItem(tab ?? (from ? { kind: 'attachment', attachment, from: from.number } : { kind: 'attachment', attachment }));
+  }, [split.items, split.all, detail.attachments, openItem]);
   const openAttachmentById = useCallback((attachmentId: number) => {
     const attachment = detail.attachments.flatMap((group) => group.attachments).find((candidate) => candidate.id === attachmentId);
     if (attachment) openAttachment(attachment);
   }, [detail.attachments, openAttachment]);
   const attached = useCallback((target: string) => dispatch({ type: 'reveal', target }), []);
   const openPr = useCallback(() => {
-    const tab = split.items.find((item) => item.kind === 'attachment' && item.attachment.kind === 'pr');
+    const tab = split.all.find((item) => item.kind === 'attachment' && item.attachment.kind === 'pr');
     if (tab) openItem(tab);
     else if (detail.pr?.url) void window.electronAPI.openExternal(detail.pr.url);
-  }, [split.items, openItem, detail.pr?.url]);
+  }, [split.all, openItem, detail.pr?.url]);
   const scrollToSubTodos = useCallback(() => {
     const section = document.getElementById(todoSubTodosAnchor(number));
     section?.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -288,15 +321,29 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
   // this visit (its remembered state is untouched) and "Plan · N files" brings it back by closing the details.
   const room = splitContainer - THREAD_FLOOR_PX;
   const crowded = detailsOpen && room < SPLIT_FLOOR_PX && approval === null;
+  crowdedRef.current = crowded;
   const splitHere = splitShown && !crowded;
   const splitPx = Math.min(splitResize.bodyActive ? splitResize.renderedPx : Math.min(320, Math.floor(splitContainer / 2)), Math.max(SPLIT_FLOOR_PX, room));
+  // "Plan · 3 files" shows the split; with every tab closed it opens the details' Files instead (T-25).
   const showSplit = () => {
+    if (everyTabClosed(split)) {
+      setDetailsTab('files');
+      setDetailsOpen(true);
+      return;
+    }
     dispatch({ type: 'set-hidden', hidden: false });
     if (crowded) setDetailsOpen(false);
   };
-  // "Plan · 3 files" counts the files; the Session's Overview tab isn't one.
-  const files = splitAttachmentItems(split.items);
-  const lead = files[0] ? splitTabLabel(files[0], split.items) : null;
+  // "Plan · 3 files" counts the files, closed or not; the Session's Overview tab isn't one.
+  const files = splitFileItems(split);
+  const lead = files[0] ? splitTabLabel(files[0], split.all) : null;
+  // The close-tab key (⌘W) closes the split's shown tab, or the approval over it (T-25). In a Session's
+  // To-dos tab it stays the Session's.
+  const closeShown = useCallback(() => {
+    if (approval) closeApproval();
+    else dispatch({ type: 'close', index: splitRef.current.active });
+  }, [approval, closeApproval]);
+  useChordShortcut('close-active-tab', splitHere && !embedded && (split.items.length > 0 || approval !== null), closeShown);
 
   return (
     <>
@@ -372,6 +419,7 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
               tab={detailsTab}
               onTab={setDetailsTab}
               openAttachmentId={splitShown && active?.kind === 'attachment' ? active.attachment.id : undefined}
+              closedTabs={split.closed}
               onOpenAttachment={openAttachment}
               onOpenTodo={onOpenTodo}
               onAttached={attached}
@@ -387,12 +435,20 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
 /**
  * ⌘\ (Ctrl+\ elsewhere) shows or hides the split. It is the Split Right entry's chord, read from
  * the catalog with the person's rebinding, so one binding serves both: a to-do page has nothing to
- * split, so here the chord is this page's. Caught before the global hotkeys so Split Right doesn't
- * also run on the Session underneath. Returns the chord's label for the button's tooltip.
+ * split, so here the chord is this page's. Returns the chord's label for the button's tooltip.
  */
 function useSplitShortcut(enabled: boolean, toggle: () => void): string | null {
+  return useChordShortcut('split-right', enabled, toggle);
+}
+
+/**
+ * A Session's shortcut, by its catalog id and with the person's rebinding, run by this page while
+ * `enabled`. Caught before the global hotkeys so the Session's own command doesn't also run
+ * underneath. Returns the chord's label.
+ */
+function useChordShortcut(command: 'split-right' | 'close-active-tab', enabled: boolean, run: () => void): string | null {
   const config = useConfigStore((state) => state.config);
-  const chord = resolveEffectiveChord('split-right', normalizeKeyboardShortcutOverrides(config?.keyboardShortcutOverrides).overrides, rendererKeyPlatform());
+  const chord = resolveEffectiveChord(command, normalizeKeyboardShortcutOverrides(config?.keyboardShortcutOverrides).overrides, rendererKeyPlatform());
   const active = enabled && areKeyboardShortcutsEnabled(config) && chord !== null;
   useEffect(() => {
     if (!active || !chord) return;
@@ -401,11 +457,11 @@ function useSplitShortcut(enabled: boolean, toggle: () => void): string | null {
       if (event.target instanceof HTMLElement && event.target.closest('[aria-modal="true"]')) return;
       event.preventDefault();
       event.stopPropagation();
-      toggle();
+      run();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [active, chord, toggle]);
+  }, [active, chord, run]);
   return chord ? formatKeyDisplay(chord) : null;
 }
 

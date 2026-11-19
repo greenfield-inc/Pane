@@ -4,7 +4,10 @@ import {
   NARROW_TODO_AREA_PX,
   attachmentTabs,
   initialSplit,
+  everyTabClosed,
   splitAttachmentItems,
+  splitFileItems,
+  splitHasTabs,
   splitItemKey,
   startsHidden,
   todoSplitReducer,
@@ -116,8 +119,8 @@ describe('todoSplitReducer', () => {
     const closed = todoSplitReducer(opened, { type: 'close', index: 3 });
     expect(closed.items).toHaveLength(3);
     expect(closed.active).toBe(2);
-    // Attachment tabs don't close: they leave by Detach.
-    expect(todoSplitReducer(base, { type: 'close', index: 0 })).toBe(base);
+    // An image tab is gone once closed: it isn't remembered as closed.
+    expect(closed.closed).toEqual([]);
   });
 
   it('keeps the tab shown when attachments change, and keeps images', () => {
@@ -236,12 +239,126 @@ describe('the Session Overview tab (round 8, T-4)', () => {
     expect(labels(gone)[gone.active]).toBe('plan');
   });
 
-  it('does not close with ✕', () => {
+  it('closes with ✕ like any tab, and stays closed when the Session syncs again', () => {
     const state = initialSplit([own(plan)], false, 's-12');
-    expect(todoSplitReducer(state, { type: 'close', index: 1 })).toBe(state);
+    const closed = todoSplitReducer(state, { type: 'close', index: 1 });
+    expect(labels(closed)).toEqual(['plan']);
+    expect(closed.closed).toEqual(['overview:s-12']);
+    expect(labels(todoSplitReducer(closed, { type: 'sync', groups: [own(plan)], overview: 's-12' }))).toEqual(['plan']);
   });
 
   it('attachment counts leave it out', () => {
     expect(splitAttachmentItems(initialSplit([own(plan, pr)], false, 's-12').items).map((item) => item.kind)).toEqual(['attachment', 'attachment']);
+  });
+});
+
+describe('closing and reopening tabs (T-25)', () => {
+  const plan = attachment('plan', 1, 12, 'plan');
+  const pr = attachment('pr', 2, 12, 'pr');
+  const findings = attachment('findings', 3, 12, 'findings');
+  const subDoc = attachment('doc', 4, 14, 'sub doc');
+  const groups: TodoAttachmentGroup[] = [own(plan, pr, findings), { from: { number: 14, relation: 'sub' }, attachments: [subDoc] }];
+  const base = initialSplit(groups, false, 's-12');
+
+  it('closes an attachment tab and remembers its key; the next tab is shown', () => {
+    const onPr = todoSplitReducer(base, { type: 'activate', index: 2 });
+    const closed = todoSplitReducer(onPr, { type: 'close', index: 2 });
+    expect(labels(closed)).toEqual(['plan', 'Overview', 'findings']);
+    expect(closed.closed).toEqual([`attachment:${pr.id}`]);
+    expect(labels(closed)[closed.active]).toBe('findings');
+    expect(closed.hidden).toBe(false);
+  });
+
+  it('closing a tab before the shown one keeps the shown one', () => {
+    const onFindings = todoSplitReducer(base, { type: 'activate', index: 3 });
+    const closed = todoSplitReducer(onFindings, { type: 'close', index: 0 });
+    expect(labels(closed)[closed.active]).toBe('findings');
+  });
+
+  it('closing the last tab shows the one before it', () => {
+    const onFindings = todoSplitReducer(base, { type: 'activate', index: 3 });
+    const closed = todoSplitReducer(onFindings, { type: 'close', index: 3 });
+    expect(labels(closed)[closed.active]).toBe('pr');
+  });
+
+  it('closed tabs stay closed across syncs; a tab attached later shows as usual', () => {
+    const closed = todoSplitReducer(base, { type: 'close', index: 2 });
+    const later = attachment('doc', 9, 12, 'later');
+    const synced = todoSplitReducer(closed, { type: 'sync', groups: [own(plan, pr, findings, later)], overview: 's-12' });
+    expect(labels(synced)).toEqual(['plan', 'Overview', 'findings', 'later']);
+  });
+
+  it('starts with the remembered closed tabs left out', () => {
+    const state = initialSplit(groups, false, 's-12', [`attachment:${plan.id}`, 'overview:s-12']);
+    expect(labels(state)).toEqual(['pr', 'findings']);
+    expect(labels(state)[state.active]).toBe('pr');
+  });
+
+  it('closing every tab hides the split', () => {
+    let state = base;
+    while (state.items.length > 0) state = todoSplitReducer(state, { type: 'close', index: state.active });
+    expect(state.hidden).toBe(true);
+    expect(state.closed).toHaveLength(4);
+    expect(splitHasTabs(state)).toBe(true);
+    expect(everyTabClosed(state)).toBe(true);
+  });
+
+  it('opens hidden when every tab was closed', () => {
+    const state = initialSplit([own(plan)], false, null, [`attachment:${plan.id}`]);
+    expect(state.items).toEqual([]);
+    expect(state.hidden).toBe(true);
+  });
+
+  it('showing the split with every tab closed reopens the default tab and forgets only its mark', () => {
+    let state = base;
+    while (state.items.length > 0) state = todoSplitReducer(state, { type: 'close', index: state.active });
+    const shown = todoSplitReducer(state, { type: 'set-hidden', hidden: false });
+    expect(labels(shown)).toEqual(['plan']);
+    expect(shown.hidden).toBe(false);
+    expect(shown.closed).not.toContain(`attachment:${plan.id}`);
+    expect(shown.closed).toHaveLength(3);
+    const toggled = todoSplitReducer(state, { type: 'toggle-hidden' });
+    expect(labels(toggled)).toEqual(['plan']);
+    expect(toggled.hidden).toBe(false);
+  });
+
+  it('opening a closed attachment reopens its tab in its place and forgets its mark', () => {
+    const closed = todoSplitReducer(todoSplitReducer(base, { type: 'close', index: 2 }), { type: 'set-hidden', hidden: true });
+    const opened = todoSplitReducer(closed, { type: 'open', item: { kind: 'attachment', attachment: pr } });
+    expect(labels(opened)).toEqual(['plan', 'Overview', 'pr', 'findings']);
+    expect(labels(opened)[opened.active]).toBe('pr');
+    expect(opened.closed).toEqual([]);
+    expect(opened.hidden).toBe(false);
+  });
+
+  it('opening the closed Overview reopens it', () => {
+    const closed = todoSplitReducer(base, { type: 'close', index: 1 });
+    const opened = todoSplitReducer(closed, { type: 'open', item: { kind: 'overview', sessionId: 's-12' } });
+    expect(labels(opened)[opened.active]).toBe('Overview');
+    expect(opened.closed).toEqual([]);
+  });
+
+  it('+ Attach’s reveal reopens a closed tab with that target', () => {
+    const closed = todoSplitReducer(base, { type: 'close', index: 3 });
+    const revealed = todoSplitReducer(closed, { type: 'reveal', target: findings.target });
+    expect(labels(revealed)[revealed.active]).toBe('findings');
+    expect(revealed.closed).toEqual([]);
+  });
+
+  it('a sub-to-do’s file opens as an extra tab, kept across syncs, and ✕ drops it without remembering it', () => {
+    const opened = todoSplitReducer(base, { type: 'open', item: { kind: 'attachment', attachment: subDoc, from: 14 } });
+    expect(labels(opened).at(-1)).toBe('sub doc');
+    const synced = todoSplitReducer(opened, { type: 'sync', groups, overview: 's-12' });
+    expect(labels(synced)[synced.active]).toBe('sub doc');
+    const closed = todoSplitReducer(synced, { type: 'close', index: synced.active });
+    expect(labels(closed)).toEqual(['plan', 'Overview', 'pr', 'findings']);
+    expect(closed.closed).toEqual([]);
+    const detached = todoSplitReducer(opened, { type: 'sync', groups: [own(plan, pr, findings)], overview: 's-12' });
+    expect(labels(detached)).toEqual(['plan', 'Overview', 'pr', 'findings']);
+  });
+
+  it('file tabs count every file, closed or not, and never the Overview', () => {
+    const closed = todoSplitReducer(base, { type: 'close', index: 0 });
+    expect(splitFileItems(closed).map(splitItemKey)).toEqual([plan, pr, findings].map((a) => `attachment:${a.id}`));
   });
 });

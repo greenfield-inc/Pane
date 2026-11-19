@@ -137,7 +137,7 @@ function SplitTab({ item, label, active, onPick, onClose }: { item: TodoSplitIte
       onClick={onPick}
       onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onPick(); } }}
       className={cn(
-        'flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-[12.5px] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus',
+        'group flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-b-2 pl-2.5 pr-1 text-[12.5px] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus',
         active ? 'border-interactive bg-bg-primary font-semibold text-text-primary' : 'border-transparent text-text-secondary hover:text-text-primary',
       )}
       title={item.kind === 'attachment' ? item.attachment.target : item.kind === 'overview' ? 'The Session’s Overview' : item.src}
@@ -147,19 +147,21 @@ function SplitTab({ item, label, active, onPick, onClose }: { item: TodoSplitIte
       <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       <span className="max-w-[180px] truncate">{label}</span>
       {item.kind === 'attachment' && item.from !== undefined && <span className="text-[10.5px] font-medium text-text-tertiary">from T-{item.from}</span>}
-      {item.kind === 'image' && (
-        <button
-          type="button"
-          tabIndex={-1}
-          onClick={(event) => { event.stopPropagation(); onClose(); }}
-          aria-label={`Close ${label}`}
-          title="Close"
-          className="inline-flex h-5 w-5 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary"
-          data-testid="todo-split-tab-close"
-        >
-          <X className="h-3 w-3" aria-hidden="true" />
-        </button>
-      )}
+      {/* Every tab closes (T-25): ✕ shows on hover and on the shown tab, in a fixed box so tabs never shift. */}
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={(event) => { event.stopPropagation(); onClose(); }}
+        aria-label={`Close ${label}`}
+        title="Close tab"
+        className={cn(
+          'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:opacity-100',
+          active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+        )}
+        data-testid="todo-split-tab-close"
+      >
+        <X className="h-3 w-3" aria-hidden="true" />
+      </button>
     </div>
   );
 }

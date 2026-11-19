@@ -10,12 +10,6 @@ export function isWebTarget(target: string): boolean {
   return /^https?:\/\//iu.test(target.trim());
 }
 
-/** Each attachment kind's word ("Plan", "Mock-up"). */
-export const ATTACHMENT_KIND_LABEL = {
-  plan: 'Plan', mockup: 'Mock-up', design: 'Design', pr: 'PR', findings: 'Findings', decision: 'Decision',
-  doc: 'Doc', image: 'Image', link: 'Link', status: 'Status', checklist: 'Checklist',
-} as const satisfies Record<TodoAttachmentKind, string>;
-
 /** Each attachment kind's icon, on its split tab, its file bar and its sidebar row. */
 export const ATTACHMENT_KIND_ICON = {
   plan: FileText, mockup: Image, design: Palette, pr: GitPullRequest, findings: SquareCheckBig, decision: Scale,

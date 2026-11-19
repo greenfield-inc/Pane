@@ -1,26 +1,22 @@
-import { useState, type KeyboardEvent, type ReactNode } from 'react';
-import { ExternalLink, X } from 'lucide-react';
-import type { TodoAttachment, TodoAttachmentSource, TodoDetail } from '../../../../../shared/types/todos';
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { ExternalLink, MoreHorizontal, Search, X } from 'lucide-react';
+import type { TodoAttachment, TodoDetail } from '../../../../../shared/types/todos';
+import { LOCAL_MACHINE_ID } from '../../../../../shared/types/machineConnections';
 import { useTodosStore } from '../../../stores/todosStore';
+import { useAllMachinesStore } from '../../../stores/allMachinesStore';
+import { Dropdown, type DropdownItem } from '../../ui/Dropdown';
 import { useNow } from '../../notify/useNow';
 import { relativeAge } from '../../notify/notifyFormat';
 import { cn } from '../../../utils/cn';
 import { TodoStatusPill } from '../TodoStatusIcon';
 import { focusTodoTab, openTodoSession } from './todoNavigation';
 import { AgentAvatar, SectionAction, SectionLabel, SubTodoRows, agoText } from './TodoPageParts';
-import { ATTACHMENT_KIND_ICON, ATTACHMENT_KIND_LABEL, AttachField } from './TodoAttach';
+import { ATTACHMENT_KIND_ICON, AttachField, attachmentIsHere, openAttachmentOutside } from './TodoAttach';
+import { fileOrigin, groupTodoFiles, todoFileRows, type TodoFileRow } from './todoFiles';
 import { useAttachDrop } from './thread/useThreadSend';
 
-/** How an attachment came, when Pane attached it on its own. */
-const SOURCE_WORDS = {
-  attached: undefined,
-  pr: 'from an assigned PR',
-  approval: 'from an approval',
-  opened: 'opened beside you',
-} as const satisfies Record<TodoAttachmentSource, string | undefined>;
-
-export type TodoDetailsTab = 'details' | 'attachments';
-const TABS: readonly TodoDetailsTab[] = ['details', 'attachments'];
+export type TodoDetailsTab = 'details' | 'files';
+const TABS: readonly TodoDetailsTab[] = ['details', 'files'];
 
 export interface TodoDetailsSidebarProps {
   detail: TodoDetail;
@@ -28,6 +24,8 @@ export interface TodoDetailsSidebarProps {
   onTab: (tab: TodoDetailsTab) => void;
   /** The attachment shown in the split, ringed here. */
   openAttachmentId?: number;
+  /** The split's closed tabs (T-25), marked "closed" in Files. */
+  closedTabs: readonly string[];
   onOpenAttachment: (attachment: TodoAttachment) => void;
   onOpenTodo: (number: number) => void;
   /** + Attach landed this target: the split shows it. */
@@ -38,10 +36,12 @@ export interface TodoDetailsSidebarProps {
 /**
  * The details sidebar on the page's right edge (round 7, D-418): closed by default on every to-do,
  * toggled from the header as a Session's is. Details: who and where, machine load, keep moving and
- * the sub-to-dos. Attachments: every attachment, who added it and when, + Attach and Detach.
+ * the sub-to-dos. Files (T-26): a file browser of every file the to-do has, its sub-to-dos' and its
+ * parent's, grouped by kind with a search; a click opens one in the split.
  */
-export function TodoDetailsSidebar({ detail, tab, onTab, openAttachmentId, onOpenAttachment, onOpenTodo, onAttached, onClose }: TodoDetailsSidebarProps) {
-  const total = detail.attachments.reduce((sum, group) => sum + group.attachments.length, 0);
+export function TodoDetailsSidebar({ detail, tab, onTab, openAttachmentId, closedTabs, onOpenAttachment, onOpenTodo, onAttached, onClose }: TodoDetailsSidebarProps) {
+  const total = useMemo(() => todoFileRows(detail.attachments).length, [detail.attachments]);
+  const closed = useMemo(() => new Set(closedTabs), [closedTabs]);
   const onTabKey = (event: KeyboardEvent<HTMLButtonElement>, current: TodoDetailsTab) => {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
     event.preventDefault();
@@ -68,7 +68,7 @@ export function TodoDetailsSidebar({ detail, tab, onTab, openAttachmentId, onOpe
             )}
             data-testid={`todo-details-tab-${name}`}
           >
-            {name === 'details' ? 'Details' : `Attachments · ${total}`}
+            {name === 'details' ? 'Details' : `Files · ${total}`}
           </button>
         ))}
         <span className="flex-1" />
@@ -79,7 +79,7 @@ export function TodoDetailsSidebar({ detail, tab, onTab, openAttachmentId, onOpe
       <div role="tabpanel" aria-labelledby={`todo-details-tab-${tab}`} className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
         {tab === 'details'
           ? <DetailsTab detail={detail} onOpenTodo={onOpenTodo} />
-          : <AttachmentsTab detail={detail} openAttachmentId={openAttachmentId} onOpen={onOpenAttachment} onAttached={onAttached} />}
+          : <FilesTab detail={detail} closedTabs={closed} openAttachmentId={openAttachmentId} onOpen={onOpenAttachment} onAttached={onAttached} />}
       </div>
     </div>
   );
@@ -158,71 +158,97 @@ function DetailsTab({ detail, onOpenTodo }: { detail: TodoDetail; onOpenTodo: (n
   );
 }
 
-function AttachmentsTab({ detail, openAttachmentId, onOpen, onAttached }: {
-  detail: TodoDetail; openAttachmentId?: number; onOpen: (attachment: TodoAttachment) => void; onAttached: (target: string) => void;
+function FilesTab({ detail, closedTabs, openAttachmentId, onOpen, onAttached }: {
+  detail: TodoDetail; closedTabs: ReadonlySet<string>; openAttachmentId?: number; onOpen: (attachment: TodoAttachment) => void; onAttached: (target: string) => void;
 }) {
   const now = useNow();
   const [attaching, setAttaching] = useState(false);
-  const own = detail.attachments.find((group) => !group.from);
-  const inherited = detail.attachments.filter((group) => group.from && group.attachments.length > 0);
-  const total = detail.attachments.reduce((sum, group) => sum + group.attachments.length, 0);
+  const [query, setQuery] = useState('');
+  const activeMachineId = useAllMachinesStore((state) => state.entries.find((entry) => entry.active)?.id ?? LOCAL_MACHINE_ID);
+  // The same detail the page watches, so a file attached anywhere shows here at once (T-26).
+  const rows = useMemo(() => todoFileRows(detail.attachments), [detail.attachments]);
+  const groups = useMemo(() => groupTodoFiles(rows, query), [rows, query]);
   // A file dropped here is attached to the to-do straight away (round 8, T-5).
   const drop = useAttachDrop(detail.todo.number, onAttached);
   return (
     <div onDragOver={drop.onDragOver} onDragLeave={drop.onDragLeave} onDrop={drop.onDrop}
       className={cn('-m-1.5 min-h-[120px] rounded-lg border-2 border-dashed p-1', drop.dragging ? 'border-border-interactive bg-interactive-surface' : 'border-transparent')}
-      data-testid="todo-attachments" data-dragging={drop.dragging || undefined}>
-      <SectionLabel className="mt-0" action={attaching
-        ? <AttachField number={detail.todo.number} onAttached={onAttached} onClose={() => setAttaching(false)} className="ml-2" />
-        : <SectionAction label="Attach" onClick={() => setAttaching(true)} testId="todo-attach" />}>
-        Attachments · {total}
-      </SectionLabel>
-      {(own?.attachments.length ?? 0) === 0 && <p className="mb-1.5 text-[12.5px] text-text-tertiary">Nothing attached here yet.</p>}
-      {own?.attachments.map((attachment) => <AttachmentRow key={attachment.id} detail={detail} attachment={attachment} now={now} open={attachment.id === openAttachmentId} onOpen={onOpen} canDetach />)}
-      {inherited.map((group) => group.from && (
-        <div key={`${group.from.relation}:${group.from.number}`} data-testid="todo-attachment-group" data-from={group.from.number}>
-          <div className="mb-1 mt-2 text-[11.5px] text-text-tertiary">From T-{group.from.number}{group.from.relation === 'parent' ? ' (parent)' : ''}</div>
-          {group.attachments.map((attachment) => <AttachmentRow key={attachment.id} detail={detail} attachment={attachment} now={now} open={attachment.id === openAttachmentId} onOpen={onOpen} canDetach={false} />)}
-        </div>
+      data-testid="todo-files" data-dragging={drop.dragging || undefined}>
+      <div className="mb-2 flex items-center gap-1.5">
+        <label className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border-primary bg-surface-primary px-2 focus-within:border-border-interactive">
+          <Search className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden="true" />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              // Esc clears the search first, before it reaches the page.
+              if (event.key === 'Escape' && query) { event.preventDefault(); event.stopPropagation(); setQuery(''); }
+            }}
+            placeholder="Search files"
+            aria-label="Search files"
+            className="min-w-0 flex-1 bg-transparent text-[12.5px] text-text-primary outline-none placeholder:text-text-tertiary"
+            data-testid="todo-files-search"
+          />
+        </label>
+        {attaching
+          ? <AttachField number={detail.todo.number} onAttached={onAttached} onClose={() => setAttaching(false)} className="h-7 w-[150px]" />
+          : <SectionAction label="Attach" onClick={() => setAttaching(true)} testId="todo-attach" />}
+      </div>
+      {rows.length === 0 && <p className="mb-1.5 px-1 text-[12.5px] text-text-tertiary">Nothing attached yet.</p>}
+      {rows.length > 0 && groups.length === 0 && <p className="mb-1.5 px-1 text-[12.5px] text-text-tertiary" data-testid="todo-files-none">No files match “{query.trim()}”.</p>}
+      {groups.map((group) => (
+        <section key={group.kind} aria-label={group.label} data-testid="todo-files-group" data-kind={group.kind}>
+          <SectionLabel className="mb-1 mt-2.5">{group.label} · {group.rows.length}</SectionLabel>
+          {group.rows.map((row) => (
+            <FileRow key={row.attachment.id} detail={detail} row={row} now={now} here={attachmentIsHere(detail, row.attachment, activeMachineId)}
+              open={row.attachment.id === openAttachmentId} closed={closedTabs.has(`attachment:${row.attachment.id}`)} onOpen={onOpen} />
+          ))}
+        </section>
       ))}
     </div>
   );
 }
 
-function AttachmentRow({ detail, attachment, now, open, onOpen, canDetach }: {
-  detail: TodoDetail; attachment: TodoAttachment; now: number; open: boolean; onOpen: (attachment: TodoAttachment) => void; canDetach: boolean;
+/** One file: its kind's icon and label; then where it came from, its machine when not here, and when. ⋯ has Open outside and Detach. */
+function FileRow({ detail, row, now, here, open, closed, onOpen }: {
+  detail: TodoDetail; row: TodoFileRow; now: number; here: boolean; open: boolean; closed: boolean; onOpen: (attachment: TodoAttachment) => void;
 }) {
   const act = useTodosStore((state) => state.act);
+  const { attachment } = row;
   const Icon = ATTACHMENT_KIND_ICON[attachment.kind];
-  const meta = [ATTACHMENT_KIND_LABEL[attachment.kind], attachment.note, SOURCE_WORDS[attachment.source], attachment.addedBy, relativeAge(attachment.addedAt, now)].filter(Boolean).join(' · ');
+  const meta = [fileOrigin(row), here ? null : `on ${attachment.machine ?? detail.machine}`, relativeAge(attachment.addedAt, now)].filter(Boolean).join(' · ');
+  const menu: DropdownItem[] = [
+    { id: 'open-outside', label: 'Open outside', disabled: !here, description: here ? undefined : `On ${attachment.machine ?? detail.machine}`, onClick: () => openAttachmentOutside(attachment) },
+  ];
+  if (!row.from) menu.push({ id: 'detach', label: 'Detach', variant: 'danger', onClick: () => void act({ kind: 'detach', number: detail.todo.number, attachmentId: attachment.id }) });
   return (
-    <div className={cn('group mb-0.5 flex items-center rounded-md hover:bg-surface-hover', open && 'bg-surface-hover')}>
+    <div className={cn('group mb-0.5 flex items-center rounded-md hover:bg-surface-hover', open && 'bg-surface-hover')} data-testid="todo-file-row">
       <button
         type="button"
         onClick={() => onOpen(attachment)}
-        className="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-1.5 text-left"
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
         title={attachment.target}
         aria-current={open || undefined}
-        data-testid="todo-attachment"
+        data-testid="todo-file"
         data-attachment={attachment.id}
+        data-closed={closed || undefined}
       >
         <Icon className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[12.5px] font-medium text-text-primary">{attachment.label}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[12.5px] font-medium text-text-primary">{attachment.label}</span>
+            {closed && <span className="shrink-0 rounded border border-border-secondary px-1 text-[10.5px] leading-[15px] text-text-tertiary" title="Its tab is closed: opening it reopens the tab" data-testid="todo-file-closed">closed</span>}
+          </span>
           <span className="block truncate text-[11.5px] text-text-tertiary">{meta}</span>
         </span>
       </button>
-      {canDetach && (
-        <button
-          type="button"
-          onClick={() => void act({ kind: 'detach', number: detail.todo.number, attachmentId: attachment.id })}
-          className="mr-1 shrink-0 rounded px-1.5 py-0.5 text-[11.5px] text-text-tertiary opacity-0 hover:bg-surface-tertiary hover:text-text-primary focus-visible:opacity-100 group-hover:opacity-100"
-          aria-label={`Detach ${attachment.label}`}
-          data-testid="todo-attachment-detach"
-        >
-          Detach
-        </button>
-      )}
+      <Dropdown
+        trigger={<button type="button" aria-label={`${attachment.label} actions`} className="mr-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-text-tertiary opacity-0 hover:bg-surface-tertiary hover:text-text-primary focus-visible:opacity-100 group-hover:opacity-100 aria-expanded:opacity-100" data-testid="todo-file-more"><MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" /></button>}
+        items={menu}
+        position="bottom-right"
+        menuLabel={`${attachment.label} actions`}
+      />
     </div>
   );
 }

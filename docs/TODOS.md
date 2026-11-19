@@ -197,6 +197,18 @@ with its **plan beside it** in a split at half the width.
   bar under the tabs names the file, who attached it and when, with Open ↗ and
   ⋯ (Reveal, Detach). Drag the split's edge to resize it; the width is
   remembered for every to-do.
+- **Every tab closes**, as in a Session's split: ✕ shows on the tab under the
+  pointer and on the one shown, and the close-tab key (⌘W, Ctrl+W on Linux
+  and Windows; the same binding as a Session's Close active tab) closes the
+  shown tab, or the approval over the split. Closing never detaches: Detach
+  stays in the file bar's ⋯. Closed tabs are remembered per to-do on this
+  computer; a file attached later still gets its tab. Opening a file again
+  (a chip, a thread card, the details' Files, + Attach) reopens its tab where
+  it was. Closing the last tab hides the split; the split button or ⌘\ shows
+  it again with the plan (else the first tab) reopened. "Plan · N files"
+  counts every file, closed or not, and with every tab closed it opens the
+  details' Files instead. In a Session's To-dos tab the key stays the
+  Session's.
 - **Hide the split** with the split button at the top right or ⌘\ (Ctrl+\ on
   Linux and Windows). It is the same key as a Session's Split Right, so
   rebinding Split Right in Settings rebinds this too. Hidden is remembered per
@@ -214,8 +226,17 @@ with its **plan beside it** in a split at half the width.
 - **The details sidebar** (the panel button at the top right, as in a
   Session) starts closed on every to-do. Its Details tab has the status,
   Session, requester, who manages and works it, repo, machine, machine load
-  with Never pause, keep moving, created and the sub-to-dos; its Attachments
-  tab lists every attachment with who added it and when. Its width is
+  with Never pause, keep moving, created and the sub-to-dos. Its **Files** tab
+  is a file browser of the to-do's own files, its sub-to-dos' ("from T-14")
+  and its parent's, with what Pane attached itself (its PR, an approval's
+  files, a page opened beside you). A search box filters by label, path and
+  note; the files are grouped by kind in the split's tab order (Plan,
+  Mock-ups, Designs, PRs, Findings, Decisions, Docs, Images, Links), each with
+  a count. A row reads where the file came from, its machine when it isn't
+  this one, and how long ago; one whose tab is closed is marked "closed".
+  Clicking a row (or Enter) shows it in the split, and ⋯ has Open outside and,
+  for the to-do's own files, Detach. It updates as files are attached, and on
+  another machine's to-do it opens files through that machine. Its width is
   remembered; opening it narrows the split. When there isn't room for the
   split, the thread and the details at once, the split steps aside until you
   show it again, which closes the details.

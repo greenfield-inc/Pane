@@ -3,6 +3,9 @@ import { recallTodoView, rememberTodoView, restoreActiveTab } from './todoPageVi
 import type { TodoSplitState } from './splitTabs';
 
 const split: TodoSplitState = {
+  all: [{ kind: 'overview', sessionId: 's-1' }],
+  extras: [{ kind: 'image', src: 'a.png', label: 'a.png' }],
+  closed: [],
   items: [{ kind: 'image', src: 'a.png', label: 'a.png' }, { kind: 'overview', sessionId: 's-1' }],
   active: 0,
   hidden: false,

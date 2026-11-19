@@ -184,8 +184,8 @@ test('R2: details toggle, narrows the split, closed again after a sub-to-do, wid
   expect(split.width).toBeLessThan(before.width);
   expect(split.x + split.width).toBeLessThanOrEqual(aside.x + 1);
   // Attachments tab.
-  await page.getByTestId('todo-details-tab-attachments').click();
-  await expect(details.getByTestId('todo-attachment')).toHaveCount(5);
+  await page.getByTestId('todo-details-tab-files').click();
+  await expect(details.getByTestId('todo-file')).toHaveCount(5);
   // Drag the details width.
   const separator = details.getByRole('separator');
   const box = (await separator.boundingBox())!;
@@ -294,8 +294,8 @@ test('R7: hide and show by button and chord, remembered, attachment shows it aga
   await expect(page.getByTestId('todo-page-split')).toHaveCount(0);
   // Clicking an attachment shows it again.
   await page.getByTestId('todo-details-toggle').click();
-  await page.getByTestId('todo-details-tab-attachments').click();
-  await page.locator('[data-testid="todo-attachment"]', { hasText: 'Decisions' }).click();
+  await page.getByTestId('todo-details-tab-files').click();
+  await page.locator('[data-testid="todo-file"]', { hasText: 'Decisions' }).click();
   await expect(page.getByTestId('todo-page-split')).toBeVisible();
   await expect(page.locator('[data-testid="todo-split-tab"][aria-selected="true"]')).toContainText('Decisions');
   // An approval shows it too.
