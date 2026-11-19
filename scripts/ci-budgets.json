@@ -1,4 +1,5 @@
 {
+  "enforce": false,
   "targets": {
     "waiting": 10,
     "setup": 30,

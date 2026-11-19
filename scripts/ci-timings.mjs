@@ -21,7 +21,8 @@
 // --summary appends a table to that file (the job summary).
 //
 // --budgets checks each successful Code Quality job against the budget file:
-// a value over its ceiling fails; a value over its target, or one that could
+// a value over its ceiling fails, unless the file sets "enforce": false, which
+// reports it as a warning instead; a value over its target, or one that could
 // not be measured (no jobs API answer, a step or phase with no time, a job
 // with no budget), only warns. Times come from the jobs API in whole seconds.
 
@@ -289,8 +290,9 @@ function namePattern(name) {
 
 /**
  * Checks one run attempt's jobs (from the jobs API) against the budget file.
- * Only `problems` (a measured value over its ceiling) fail CI result;
- * `warnings` are targets missed and `unmeasured` values with no time. Jobs
+ * Only `problems` (a measured value over its ceiling) fail CI result, and
+ * only while the budget file does not set `"enforce": false`; `warnings` are
+ * targets missed and `unmeasured` values with no time. Jobs
  * that did not succeed are left to the gate's own verdict, and the gate job
  * is still running. Renames are caught by scripts/ci-timings.test.mjs.
  */
@@ -299,9 +301,10 @@ export function checkBudgets({ jobs, budgets, workflowText, gateJob = 'ci-result
   const problems = [];
   const warnings = [];
   const unmeasured = [];
+  const enforced = budgets.enforce !== false;
   const compare = (label, value, { target, ceiling }) => {
     if (ceiling !== undefined && value > ceiling) {
-      problems.push(`${label}: ${value} s is over its ${ceiling} s ceiling (target ${target} s). If the run was only slow, re-run all jobs: re-running CI result alone reads the same timings.`);
+      problems.push(`${label}: ${value} s is over its ${ceiling} s ceiling (target ${target} s).${enforced ? ' If the run was only slow, re-run all jobs: re-running CI result alone reads the same timings.' : ''}`);
     } else if (target !== undefined && value > target) {
       warnings.push(`${label}: ${value} s is over its ${target} s target (${ceiling === undefined ? 'no ceiling' : `ceiling ${ceiling} s`}).`);
     }
@@ -333,13 +336,16 @@ export function checkBudgets({ jobs, budgets, workflowText, gateJob = 'ci-result
       }
     }
   }
-  return { ok: problems.length === 0, problems, warnings, unmeasured };
+  return { ok: !enforced || problems.length === 0, problems, warnings, unmeasured };
 }
 
-function budgetMarkdown({ ok, problems, warnings, unmeasured }) {
-  const lines = [`### Budgets: ${ok ? 'pass' : 'fail'}`, ''];
+function budgetMarkdown({ ok, problems, warnings, unmeasured }, enforced) {
+  const lines = [`### Budgets: ${ok ? 'pass' : 'fail'}${enforced ? '' : ' (ceilings not enforced)'}`, ''];
   if (problems.length + warnings.length + unmeasured.length === 0) lines.push('Every job is within its targets.');
-  if (problems.length > 0) lines.push('Over a ceiling (fails CI result):', '', ...problems.map((line) => `- ${line}`), '');
+  if (problems.length > 0) {
+    const heading = enforced ? 'Over a ceiling (fails CI result):' : 'Over a ceiling (reported only: ceilings are not enforced, so this does not fail CI result):';
+    lines.push(heading, '', ...problems.map((line) => `- ${line}`), '');
+  }
   if (unmeasured.length > 0) lines.push('Not measured (reported only):', '', ...unmeasured.map((line) => `- ${line}`), '');
   if (warnings.length > 0) lines.push('Over a target (reported only):', '', ...warnings.map((line) => `- ${line}`));
   return `${lines.join('\n')}\n`;
@@ -382,12 +388,15 @@ async function recordRun(args) {
 
   const workflowText = await readFile(new URL('../.github/workflows/quality.yml', import.meta.url), 'utf8');
   const verdict = checkBudgets({ jobs, budgets, workflowText });
-  const markdown = budgetMarkdown(verdict);
+  const enforced = budgets.enforce !== false;
+  const markdown = budgetMarkdown(verdict, enforced);
   process.stdout.write(markdown);
   if (args.summary) await appendFile(args.summary, markdown);
   for (const line of verdict.unmeasured) console.log(`::warning title=Budgets not measured::${line}`);
   if (verdict.warnings.length > 0) console.log(`::warning title=Over target::${verdict.warnings.length} values are over their targets; the job summary lists them.`);
-  for (const problem of verdict.problems) console.log(`::error title=Over budget::${problem}`);
+  for (const problem of verdict.problems) {
+    console.log(enforced ? `::error title=Over budget::${problem}` : `::warning title=Over budget (not enforced)::${problem}`);
+  }
   if (!verdict.ok) process.exitCode = 1;
 }
 
