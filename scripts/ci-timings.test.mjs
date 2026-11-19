@@ -82,6 +82,12 @@ test('a step over its target but under its ceiling only warns', () => {
   assert.deepEqual(verdict.warnings, ['Lint (1/2) step "Lint": 6 s is over its 5 s target (ceiling 10 s).']);
 });
 
+test('with enforce false, a value over its ceiling is still reported but passes', () => {
+  const verdict = check([apiJob({ steps: { Lint: 11 } })], { ...BUDGETS, enforce: false });
+  assert.equal(verdict.ok, true);
+  assert.match(verdict.problems[0], /^Lint \(1\/2\) step "Lint": 11 s is over its 10 s ceiling/);
+});
+
 // Missing data warns: a run fails only on a measured value over its ceiling.
 test('a renamed setup step is reported as not measured', () => {
   const verdict = check([apiJob({ steps: { 'Install dependencies': undefined, 'Get packages': 20 } })]);
