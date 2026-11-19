@@ -772,7 +772,7 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     if (parsed.command.startsWith('browser ') && (BROWSER_VALUE_FLAGS.has(arg) || BROWSER_BOOLEAN_FLAGS.has(arg))) {
       // Each browser command takes only the flags its usage line names.
       const usage = RUNPANE_CONTRACT.commands.find((command) => command.name === parsed.command)?.usage.join(' ') ?? '';
-      if (!new RegExp(`${arg}(?![a-z-])`).test(usage)) throw new Error(`runpane ${parsed.command} does not take ${arg}. Run runpane help ${parsed.command} for its options.`);
+      if (!usage.split(/[^a-z-]+/).includes(arg)) throw new Error(`runpane ${parsed.command} does not take ${arg}. Run runpane help ${parsed.command} for its options.`);
       const request = (parsed.browserRequest ??= {});
       const field = BROWSER_BOOLEAN_FLAGS.get(arg);
       if (field) {
