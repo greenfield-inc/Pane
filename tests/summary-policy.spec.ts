@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { DEFAULT_NOTIFY_SETTINGS, NOTIFY_SUMMARY_CSP, type NotifyItem } from '../shared/types/notify';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import { summaryPage } from '../main/src/services/notify/summaryPage';
 import { SUMMARY_FRAME_SANDBOX } from '../shared/utils/summaryPolicy';
 
@@ -112,7 +112,7 @@ test('the approval column\'s Summary frame keeps a hostile page off the network 
     return route.fulfill({ status: 200, body: '' });
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: `Expand project ${project.name}`, exact: true }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await page.getByTestId('approvals-nav').click();

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 
 type MockBridge = {
   emitPanelCreated(panel: JsonObject): void;
@@ -31,7 +31,7 @@ const sshTabs = (page: Page) => page.getByTestId('ssh-view').getByRole('tab');
 test.describe('SSH view', () => {
   test('keeps a tab opened while the saved tab list is still loading', async ({ page }) => {
     await installElectronApiMock(page, { sshHosts: ['mini', 'web-1'], holdSshPanelReads: true });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     await page.getByTestId('ssh-host-row').filter({ hasText: 'mini' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Opening SSH' })).toBeVisible();
@@ -52,7 +52,7 @@ test.describe('SSH view', () => {
 
   test('offers a retry when the SSH Session cannot load', async ({ page }) => {
     await installElectronApiMock(page, { sshHosts: ['mini'], sshSessionReadFailures: 1 });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     await page.getByTestId('ssh-host-row').filter({ hasText: 'mini' }).click();
     const alert = page.getByTestId('ssh-view').getByRole('alert');
@@ -66,7 +66,7 @@ test.describe('SSH view', () => {
 
   test('reaches the new-terminal button of a host row from the keyboard', async ({ page }) => {
     await installElectronApiMock(page, { sshHosts: ['mini'] });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     await page.getByTestId('ssh-host-row').filter({ hasText: 'mini' }).focus();
     await page.keyboard.press('Tab');
@@ -81,7 +81,7 @@ test.describe('SSH view', () => {
   test.describe('an open answered after a machine switch', () => {
     test('opens the SSH view when no switch happened', async ({ page }) => {
       await installElectronApiMock(page, { sshHosts: ['mini'], holdSshOpens: true });
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await gotoApp(page);
 
       await page.getByTestId('ssh-host-row').filter({ hasText: 'mini' }).click();
       await mock(page, 'releaseSshOpens');
@@ -92,7 +92,7 @@ test.describe('SSH view', () => {
     for (const outcome of ['success', 'failure'] as const) {
       test(`leaves the view alone when a ${outcome} arrives after switching away and back`, async ({ page }) => {
         await installElectronApiMock(page, { sshHosts: ['mini'], holdSshOpens: true });
-        await page.goto('/', { waitUntil: 'domcontentloaded' });
+        await gotoApp(page);
         await expect(page.getByTestId('ssh-host-row')).toHaveCount(1);
 
         await page.getByTestId('ssh-host-row').filter({ hasText: 'mini' }).click();

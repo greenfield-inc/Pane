@@ -45,65 +45,48 @@ export function saveImage(dataUrl: string, name: string): void {
   link.click();
 }
 
-/** A recording in progress: when it started, and the seconds since, ticking each second. */
-export function useRecording(client: DeviceTabClient, panelId: string) {
-  const [startedAt, setStartedAt] = useState<number>();
+/**
+ * The tab's recording as its state carries it (so every client shows the same one): whether one
+ * runs and the seconds since it started, ticking each second; Start and Stop.
+ */
+export function useRecording(client: DeviceTabClient, panelId: string, startedAt: number | undefined) {
   const [elapsed, setElapsed] = useState(0);
+  // The host's clock started it, and another computer's clock can be seconds apart: a tab that
+  // pressed Record counts from its own click; one that opens mid-recording counts from the host's start.
+  // A host from before the tab's state carried recordings never sets `startedAt`: this tab's own
+  // Start and Stop then say whether it records.
+  const [clicked, setClicked] = useState<number>();
+  const recording = startedAt !== undefined || clicked !== undefined;
+  const from = clicked ?? startedAt;
   useEffect(() => {
-    if (startedAt === undefined) return;
-    const tick = () => setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    if (from === undefined) return;
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - from) / 1000)));
     tick();
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
-  }, [startedAt]);
-  const recording = startedAt !== undefined;
-  // The recording lives in main: a tab shown again picks up its clock.
-  useEffect(() => {
-    let cancelled = false;
-    void client.recording(panelId).then((started) => { if (!cancelled && started !== null) setStartedAt(started); }, () => undefined);
-    return () => { cancelled = true; };
-  }, [client, panelId]);
-  // Main stops a recording at its 10-minute limit: while one runs, check it is still going.
-  const [capped, setCapped] = useState(false);
-  useEffect(() => {
-    if (!recording) return;
-    let cancelled = false;
-    let timer: number | undefined;
-    const check = async () => {
-      const started = await client.recording(panelId).catch(() => undefined);
-      if (cancelled) return;
-      if (started === null) {
-        setStartedAt(undefined);
-        setCapped(true);
-        return;
-      }
-      timer = window.setTimeout(() => { void check(); }, RECORDING_CHECK_MS);
-    };
-    timer = window.setTimeout(() => { void check(); }, RECORDING_CHECK_MS);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [client, panelId, recording]);
+  }, [from]);
+  // A recording that ended on the host (its limit, an agent, the device) ends here too.
+  const [previousStart, setPreviousStart] = useState(startedAt);
+  if (startedAt !== previousStart) {
+    setPreviousStart(startedAt);
+    if (startedAt === undefined) setClicked(undefined);
+  }
   const start = useCallback(async () => {
+    const at = Date.now();
     await client.record(panelId, 'start');
-    setCapped(false);
-    setStartedAt(Date.now());
+    setClicked(at);
   }, [client, panelId]);
   const stop = useCallback(async (): Promise<DeviceRecording> => {
     try {
-      const recording = await client.record(panelId, 'stop');
-      if (!recording) throw new Error('The recording did not save.');
-      return recording;
+      const saved = await client.record(panelId, 'stop');
+      if (!saved) throw new Error('The recording did not save.');
+      return saved;
     } finally {
-      setStartedAt(undefined);
+      setClicked(undefined);
     }
   }, [client, panelId]);
-  return { recording, elapsed, start, stop, capped };
+  return { recording, elapsed: recording ? elapsed : 0, start, stop };
 }
-
-/** How often a running recording checks it has not stopped at its limit. */
-const RECORDING_CHECK_MS = 5_000;
 
 export function clock(seconds: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;

@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 
 const rootDir = path.join(__dirname, '..');
 const npmDist = path.join(rootDir, 'packages', 'runpane', 'dist');
