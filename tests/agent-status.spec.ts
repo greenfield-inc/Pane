@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { AgentState, PanelAgentStatusEvent } from '../shared/types/agentStatus';
 
 declare global {
@@ -78,12 +78,13 @@ test('sidebar and tabs reconcile status without announcing snapshot completions'
       notifications,
     };
   });
-  await page.goto('/');
+  await gotoApp(page);
   const sidebarPane = page.getByRole('button', { name: 'Agent pane', exact: true });
   await expect(sidebarPane).toBeVisible();
   await expect(sidebarPane.locator('..').locator('[aria-label="Agent working"]')).toBeVisible();
   await sidebarPane.click();
-  const tab = page.getByRole('tab', { name: 'Codex', exact: true }).locator('..');
+  // The tab's draggable box holds its status; the tab button itself sits inside a right-click menu wrapper.
+  const tab = page.locator('[draggable]').filter({ has: page.getByRole('tab', { name: 'Codex', exact: true }) });
   await expect(tab.locator('[aria-label="Agent working"]')).toBeVisible();
 
   // The compact project's aggregate has its own subscription; it must stay

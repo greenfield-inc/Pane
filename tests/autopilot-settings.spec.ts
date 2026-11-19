@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 
 // D-196: Settings › Autopilot › Your instructions.
@@ -16,7 +16,7 @@ const saves = (page: Page) => page.evaluate(() => {
 async function openAutopilotSettings(page: Page, state: 'stopped' | 'running', colorScheme: 'light' | 'dark' = 'light') {
   await page.emulateMedia({ colorScheme });
   await installElectronApiMock(page, { autopilotSnapshot: autopilotSnapshot(state), initialConfig: { appearanceMode: 'system' } });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Settings' }).first().click();
   await expect(page.getByTestId('settings-page')).toBeVisible();
   await page.getByRole('button', { name: 'Autopilot', exact: true }).click();
@@ -49,7 +49,7 @@ for (const scheme of ['light', 'dark'] as const) test(`while Autopilot runs a sa
 
 test('Settings › Autopilot is not listed while Autopilot is off', async ({ page }) => {
   await installElectronApiMock(page, { autopilotSnapshot: { ...autopilotSnapshot('stopped'), enabled: false } });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Settings' }).first().click();
   await expect(page.getByTestId('settings-page')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approvals', exact: true })).toBeVisible();

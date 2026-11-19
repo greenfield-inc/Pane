@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import { boundary, decodeBoundary } from '../shared/validation/boundaryDecoder';
 
 test.use({ timezoneId: 'America/Los_Angeles' });
@@ -244,7 +244,7 @@ test('opens Usage & Limits from Settings with the sidebar expanded and compact',
     activeProjectId: project.id,
   });
   await page.setViewportSize({ width: 1_600, height: 900 });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
 
   await openUsageAndLimits(page);
   await expect(page.getByText('6.1M', { exact: true }).first()).toBeVisible();
@@ -283,7 +283,7 @@ test('shows sortable per-pane costs, model breakdowns, and unattributed usage', 
     activeProjectId: project.id,
   });
   await page.setViewportSize({ width: 1_600, height: 900 });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
   await openUsageAndLimits(page);
 
   const section = page.getByTestId('usage-by-pane');
@@ -308,7 +308,7 @@ test('shows sortable per-pane costs, model breakdowns, and unattributed usage', 
 
 test('per-pane averages exclude unattributed usage and explain small trimmed samples', async ({ page }, testInfo) => {
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: report, activeProjectId: project.id });
-  await page.goto('/');
+  await gotoApp(page);
   await openUsageAndLimits(page);
   const summary = page.getByTestId('pane-usage-summary');
   await expect(summary.getByText('740.0K', { exact: true })).toBeVisible();
@@ -333,7 +333,7 @@ test('trims each metric independently, ignores empty panes, and preserves missin
   await installElectronApiMock(page, {
     initialProjects: [project], initialUsageReport: { ...report, byPane: { ...report.byPane, panes } }, activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await openUsageAndLimits(page);
   const summary = page.getByTestId('pane-usage-summary');
   await expect(summary).toContainText('10 panes with recorded usage');
@@ -360,7 +360,7 @@ test('trims each metric independently, ignores empty panes, and preserves missin
 test('custom inclusive local dates reach the API, preserve provider filters, and cancel safely', async ({ page }, testInfo) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: report, activeProjectId: project.id });
-  await page.goto('/');
+  await gotoApp(page);
   await openUsageAndLimits(page);
   await expect(page.getByTestId('pane-usage-summary')).toBeVisible();
   await page.evaluate(() => {
@@ -416,7 +416,7 @@ test('custom inclusive local dates reach the API, preserve provider filters, and
 
 test('empty pane history shows unavailable averages', async ({ page }) => {
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: { ...report, byPane: { ...report.byPane, panes: [] } }, activeProjectId: project.id });
-  await page.goto('/');
+  await gotoApp(page);
   await openUsageAndLimits(page);
   const summary = page.getByTestId('pane-usage-summary');
   await expect(summary.getByText('—', { exact: true })).toHaveCount(3);
@@ -425,7 +425,7 @@ test('empty pane history shows unavailable averages', async ({ page }) => {
 
 test('rescan completion keeps the latest filter and late requests cannot replace it', async ({ page }) => {
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: report, activeProjectId: project.id });
-  await page.goto('/');
+  await gotoApp(page);
   await openUsageAndLimits(page);
   await expect(page.getByTestId('pane-usage-summary')).toBeVisible();
   await page.evaluate(() => {
@@ -459,7 +459,7 @@ test('rescan completion keeps the latest filter and late requests cannot replace
 
 test('Refresh reads usage up to the moment it is clicked', async ({ page }) => {
   await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: report, activeProjectId: project.id });
-  await page.goto('/');
+  await gotoApp(page);
   await openUsageAndLimits(page);
   await expect(page.getByTestId('pane-usage-summary')).toBeVisible();
   const lastRangeEnd = async () => decodeBoundary(await page.evaluate(() => {

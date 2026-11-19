@@ -20,7 +20,7 @@ each computer its `runpane.net` address for QR pairing.
 | Android build check | `Native Android Build` (`native-android.yml`) | pull requests and pushes to `main` whose Expo Android fingerprint changed, or that change the workflow; weekly; manual | Builds the Android dev client APK with the Firebase config. Pull requests build `arm64-v8a` only; pushes to `main`, the weekly run and manual runs build all four ABIs, one job per ABI |
 | Relays | `Deploy Pane relays` (`relay-deploy.yml`) | manual only | Builds `relay/`, pushes the image to Google Artifact Registry, and creates or updates the three relay VMs; see [relay/deploy/RUNBOOK.md](relay/deploy/RUNBOOK.md) |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
-| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux and Windows, the runpane wrapper matrix, and the Playwright smoke suite |
+| PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux and Windows (plus the native, glasses and mobile apps), the runpane wrapper matrix, the Playwright browser and Electron suites, and a check that every test file runs in one of them |
 | React review | `React Doctor` (`react-doctor.yml`) | pull requests that touch `frontend/` | Comments on new React findings; advisory, never blocks |
 | Traffic snapshot | `GitHub traffic → PostHog` (`traffic-snapshot.yml`) | daily 06:00 UTC | Copies GitHub traffic and release download counts into PostHog |
 
@@ -233,6 +233,14 @@ by `node --test scripts/ci-gate.test.mjs` locally) checks they match the
 workflow. It is the only check a merge waits for; how
 to merge a pull request or a stack is in
 [CONTRIBUTING.md](CONTRIBUTING.md#merging).
+
+Every test file runs in a CI lane or is listed with its reason.
+`node scripts/ci-test-inventory.mjs check` (run by Type Check and Lint) reads
+each lane's files from the runner itself (`vitest list`,
+`playwright test --list`) or from the job's steps, and fails when a tracked
+test file runs in no lane and is not in its `NOT_IN_CI` list, or when a lane
+in its `LANES` list no longer matches the workflow. `node
+scripts/ci-test-inventory.mjs list` prints every test file with its lanes.
 
 `node scripts/ci-timings.mjs --since <date> --until <time>` writes
 `ci-timings.json`: the wall time (first job start to last job end, attempt 1)

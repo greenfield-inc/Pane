@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
 
 for (const olderPage of [false,true]) test(`restores actual reading position after asynchronous reload; olderPage=${olderPage}`,async({page},testInfo)=>{
@@ -60,6 +60,17 @@ test('keeps resource and future content visible after transcript replay', async 
   expect(errors).toEqual([]);
 });
 
+/**
+ * Commits a focused native select's option by type-ahead. On macOS the arrow
+ * key before it opened the platform picker, and Enter commits and closes it.
+ * On Linux and Windows the select stays closed, type-ahead commits at once, and
+ * Enter would open the picker, which then takes the Tab that follows.
+ */
+async function pickWithTypeAhead(page: Page, key: string) {
+  await page.keyboard.press(key);
+  if (process.platform === 'darwin') await page.keyboard.press('Enter');
+}
+
 test('combines configuration on narrow screens and preserves host option values', async ({ page }, testInfo) => {
   const fixture = path.resolve('tests/fixtures/agent-chat-lifecycle.tsx');
   await page.route('**/agent-chat-configuration.html*', route => route.fulfill({ contentType: 'text/html', body: `<html><head><meta charset="UTF-8"></head><body><div id="root"></div><script type="module">import RefreshRuntime from "/@react-refresh"; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => type => type; window.__vite_plugin_react_preamble_installed__ = true;</script><script type="module" src="/@vite/client"></script><script type="module" src="/@fs/${fixture}"></script></body></html>` }));
@@ -82,10 +93,7 @@ test('combines configuration on narrow screens and preserves host option values'
   await expect(model).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(model).toBeFocused();
-  // Native select type-ahead commits in headless macOS Chromium; arrow keys
-  // alone open its platform picker without committing a value.
-  await page.keyboard.press('o');
-  await page.keyboard.press('Enter');
+  await pickWithTypeAhead(page, 'o');
   await expect(model).toHaveValue('opus');
   await expect(trigger).toContainText('Opus 5.5 · High');
   await expect.poll(() => page.evaluate(() => window.qaConfigurationCalls)).toEqual([{ id: 'model', value: 'opus' }]);
@@ -97,8 +105,7 @@ test('combines configuration on narrow screens and preserves host option values'
   await expect(effort).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(effort).toBeFocused();
-  await page.keyboard.press('l');
-  await page.keyboard.press('Enter');
+  await pickWithTypeAhead(page, 'l');
   await expect(effort).toHaveValue('low');
   await expect(trigger).toContainText('Opus 5.5 · Low');
   await expect.poll(() => page.evaluate(() => window.qaConfigurationCalls)).toEqual([{ id: 'model', value: 'opus' }, { id: 'effort', value: 'low' }]);
