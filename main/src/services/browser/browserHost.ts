@@ -67,6 +67,7 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
       await panelManager.updatePanel(tab.id, { state: { ...current.state, customState: state } });
     },
     page: (panelId) => newestPage(panelId),
+    tunnels: (panelId) => new Map(newestContext(panelId)?.ports ?? []),
     hasWindow: () => getMainWindow() !== null,
     shotsDirectory: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-screenshots'),
     showCursor: (panelId, x, y) => getMainWindow()?.webContents.send(BROWSER_AGENT_CURSOR_EVENT, { panelId, x, y }),
@@ -91,13 +92,20 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
   };
 }
 
+/** The newest live page's registration for a tab. */
+function newestContext(panelId: string) {
+  const page = newestPage(panelId);
+  return page ? getPaneWebviewContextMap().get(page.id) : undefined;
+}
+
 /** A remounted tab registers a new page id and the old ones stay mapped, so the newest live one wins. */
 function newestPage(panelId: string): Electron.WebContents | undefined {
   let newest: Electron.WebContents | undefined;
   for (const [id, context] of getPaneWebviewContextMap()) {
     if (context.panelId !== panelId) continue;
     const contents = webContents.fromId(id);
-    if (!contents || contents.isDestroyed()) continue;
+    // Only a browser tab's own page: never another kind of WebContents that reused a mapped id.
+    if (!contents || contents.isDestroyed() || contents.getType() !== 'webview') continue;
     if (!newest || contents.id > newest.id) newest = contents;
   }
   return newest;

@@ -24,6 +24,12 @@ export const REMOTE_READ_CHANNELS = new Set([
   'resource-monitor:machine-relief',
   'resource-monitor:machine-cleanup-history',
   'resource-monitor:machine-apps',
+  // A device tab's screen, controls, log and frame rate: a remote tab reads them twice a second;
+  // a frame is too large to keep as a write's answer, and nothing on the host changes.
+  'devices:frame',
+  'devices:controls',
+  'devices:logs',
+  'devices:frame-rate',
   'config:get',
   'config:get-session-preferences',
   'ui-state:get-expanded',

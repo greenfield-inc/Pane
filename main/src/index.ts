@@ -3,6 +3,7 @@ import './versionQuery';
 // Load ReadableStream polyfill before any other imports
 import './polyfills/readablestream';
 import { getChatTabManager } from './services/chatTabs';
+import { agentInputInFlight } from './services/browser/pageDriver';
 import { disposeDevices, setDeviceMachines } from './ipc/devices';
 import { setBrowserMachines } from './services/browser/browserHost';
 import { acknowledgeUpdateQuiescence } from './services/updateShutdown';
@@ -699,6 +700,8 @@ async function createWindow() {
     const keySequence = createWebviewSequenceState();
     wvContents.on('before-input-event', (event, input) => {
       if (input.type !== 'keyDown') return;
+      // An agent's keys belong to the page: Meta+W from browser_press never closes a Pane tab.
+      if (agentInputInFlight(wvContents.id)) return;
       const isBrowserTab = webviewContextMap.has(wvContents.id);
       const forwarded = webviewKeysToForward(input, {
         config: configManager.getConfig(),
@@ -1784,10 +1787,6 @@ if (launchRemoteSetup) {
     // named locks; resumed agents still hold them after the restart.
     paneDaemonHost?.services.namedLockService?.suspendAutoRelease();
 
-    // Device helpers and device_run jobs stop with Pane; booted simulators keep running and
-    // the next launch's lifecycle shuts Pane's own down.
-    await disposeDevices().catch(error => console.error('[Main] Device helpers could not all stop; continuing shutdown:', error));
-
     // Chat tabs keep their saved state, so each comes back on the next launch.
     await getChatTabManager().stopAll().catch(error => console.error('[Main] Chat tabs could not all stop; continuing shutdown:', error));
 
@@ -1843,6 +1842,11 @@ if (launchRemoteSetup) {
     }
 
     console.log(`[Main] Graceful shutdown: marked ${interruptedPanels.size} session${interruptedPanels.size !== 1 ? 's' : ''} as interrupted`);
+
+    // After terminal states are saved, so slow devices never cost agents their resume: device_run
+    // jobs stop, the devices Pane booted shut down (here and on linked Macs), then the device helpers
+    // stop; devices the person booted keep running.
+    await disposeDevices().catch(error => console.error('[Main] Device helpers could not all stop; continuing shutdown:', error));
 
     // Kill all terminal panel PTY processes so Claude doesn't survive as an orphan
     logToFile('Destroying all terminal panel processes');

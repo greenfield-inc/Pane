@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { requestOpenSettings } from '../../../utils/openSettings';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { BrowserDataSetting } from './BrowserDataSetting';
 import { SettingRow, SettingsPage } from '../SettingRow';
@@ -88,6 +89,10 @@ export function PrivacySettings({ persistence }: { persistence: SettingsPersiste
       </SettingsSection>
       <SettingsSection title="Browser">
         <BrowserDataSetting />
+        <p className="text-sm text-text-secondary">
+          What agents may do in browser tabs is in{' '}
+          <button type="button" className="text-interactive hover:text-interactive-hover underline-offset-2 hover:underline" onClick={() => requestOpenSettings({ category: 'browser', setting: 'browser-agent-tools' })}>Settings › Browser</button>.
+        </p>
       </SettingsSection>
     </SettingsPage>
   );

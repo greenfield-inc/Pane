@@ -76,6 +76,13 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   }, [remoteMode, ports]);
   const toHostUrl = useCallback((localUrl: string) => remapLoopbackPort(localUrl, localToHost), [localToHost]);
   const toHostUrlRef = useRef(toHostUrl);
+  const localToHostRef = useRef(localToHost);
+  useEffect(() => { localToHostRef.current = localToHost; }, [localToHost]);
+  // Main maps an agent's localhost URLs through this desktop's tunnels (docs/BROWSER_AGENTS.md).
+  useEffect(() => {
+    const wcId = pageWcIdRef.current;
+    if (wcId) void window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHost]);
+  }, [localToHost, panel.id, panel.sessionId]);
   // Navigation reads the current mapping without depending on it: a ports or
   // remote-mode update recomputes where a URL loads but never navigates the tab.
   const targetOfRef = useRef(targetOf);
@@ -99,7 +106,13 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const driver = (panel.state.customState as BrowserPanelState | undefined)?.driver;
 
-  const webviewRef = useRef<Electron.WebviewTag>(null);
+  const webviewRef = useRef<Electron.WebviewTag | null>(null);
+  // The mounted <webview>, so its listeners attach whenever a new one mounts (a tunnelled page mounts late).
+  const [webviewElement, setWebviewElement] = useState<Electron.WebviewTag | null>(null);
+  const attachWebview = useCallback((element: Electron.WebviewTag | null) => {
+    webviewRef.current = element;
+    setWebviewElement(element);
+  }, []);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
   const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const panelIdRef = useRef(panel.id);
@@ -449,14 +462,14 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // Depends on `url` because the <webview> is only rendered when url is non-empty,
   // so the ref is null until the first URL is set.
   useEffect(() => {
-    const webview = webviewRef.current;
+    const webview = webviewElement;
     if (!webview) return;
 
     // Registered on attach as well as dom-ready, so agents reach a page that fails to load.
     const register = () => {
       const wcId = webview.getWebContentsId();
       pageWcIdRef.current = wcId;
-      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId);
+      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHostRef.current]);
     };
     const onDomReady = () => {
       register();
@@ -528,7 +541,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       webview.removeEventListener('did-stop-loading', onDidStopLoading);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run when url becomes non-empty (webview mounts); persistState reads from refs
-  }, [panel.id, url, fileSession, target.kind]);
+  }, [panel.id, url, fileSession, target.kind, webviewElement]);
 
   // Listen for popup-requested events from the main process.
   // Uses stopImmediatePropagation so only the originating browser panel handles the event,
@@ -862,7 +875,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           )}
           {nextWebviewSrc && ((!isFileUrl && !isHostFileUrl) || fileSession?.panelId === panel.id) && <webview
             key={fileSession?.partition ?? 'local'}
-            ref={webviewRef}
+            ref={attachWebview}
             src={nextWebviewSrc.src}
             partition={webviewPartition(fileSession)}
             {...WEBVIEW_ALLOW_POPUPS}

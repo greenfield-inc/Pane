@@ -26,7 +26,7 @@ opened one tab, or when the Pane has one; with several, the call fails with
 | `browser_open` | `runpane browser open --url <url>` | Opens a tab beside the agent, in a split, owned by it; reuses the agent's tab on the same origin |
 | `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog, files the agent downloaded |
 | `browser_close` | `runpane browser close` | Closes a tab the agent opened |
-| `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title |
+| `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title. On a long page, text is left out before controls |
 | `browser_screenshot` | `runpane browser screenshot [--full-page]` | A PNG in the Pane's scratch folder; MCP clients get the image itself |
 | `browser_click` | `runpane browser click --ref e12` | Clicks an element (or `--x --y`) as real mouse input, once it is visible and enabled |
 | `browser_type` | `runpane browser type --ref e7 --text "hi" [--clear] [--submit]` | Types into a field |
@@ -73,12 +73,13 @@ tab's `downloads`.
 Every browser tab in every Pane shares one sign-in store, so a tab an agent opens is signed in
 wherever you are. An agent that a page steers with hidden instructions (prompt injection) can
 act as you on any site you are signed in to, by opening that site in its Pane. It cannot reach
-other Panes' tabs, Pane's own window, cookie values, `file:` or `chrome:` pages, or files
+other Panes' tabs, Pane's own window, the cookie store (a page's script can still read its own
+non-HttpOnly cookies through `browser_evaluate`), `file:` or `chrome:` pages, or files
 outside its worktree. The Settings switch is the off button.
 
 ## Watching and taking over
 
-While an agent's call runs, the tab is outlined, its address bar reads "Claude Code is driving ·
+While an agent's call runs, the tab is outlined, a chip over the top of the page reads "Claude is driving ·
 Take over" (with the agent's name), and a pointer marks each click. The chip stays 2 seconds
 after the agent's last call, so a run of calls reads as one. While you drive, it reads "You're
 driving · Hand to" and the agent's name.
@@ -102,7 +103,10 @@ Pane window. A call goes to the copy you watch:
   **Settings › Your computers**, the call runs on that computer's copy: snapshots, clicks and
   screenshots come from the page in front of you, the chip shows there, and touching the page or
   pressing **Take over** there makes the agent wait. That copy uses that computer's sign-ins. An
-  upload sends the file from the agent's worktree; the screenshot is saved on the agent's computer.
+  upload sends the file from the agent's worktree (up to 10 MB per call) and stays on that
+  computer until the tab closes; the screenshot is saved on the agent's computer. A `localhost`
+  URL loads through that computer's tunnel for the port, and fails with `ERR_BROWSER_URL_REFUSED`
+  when the port has none.
 - **On the agent's computer.** Otherwise the call uses the tab here, bringing it forward in its
   Pane and waiting up to 5 seconds for its page.
 

@@ -23,6 +23,7 @@ const GATE_JOB = 'ci-result';
 export const EXPECTED_JOBS = [
   'changes',
   'quality-checks',
+  'main-tests',
   'typecheck-lint',
   'markdown-links',
   'functional-smoke-browser',
@@ -30,6 +31,7 @@ export const EXPECTED_JOBS = [
   'functional-smoke-electron',
   'runpane-wrapper-tests',
   'cross-os-main-tests',
+  'relay-rust',
   'relay-tests',
 ];
 
@@ -39,6 +41,7 @@ export const EXPECTED_JOBS = [
 export const SKIP_WHEN_UNCHANGED = {
   'runpane-wrapper-tests': 'runpane',
   'cross-os-main-tests': 'main',
+  'relay-rust': 'relay',
   'relay-tests': 'relay',
 };
 

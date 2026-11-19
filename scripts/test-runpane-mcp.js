@@ -7,7 +7,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 
 const rootDir = path.resolve(__dirname, '..');
 const runpaneDir = path.join(rootDir, 'packages', 'runpane');
