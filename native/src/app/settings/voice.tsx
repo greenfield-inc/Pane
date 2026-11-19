@@ -4,9 +4,10 @@ import { StyleSheet, View } from 'react-native';
 import { useDaemon } from '@/daemon';
 import { saveErrorMessage, useAffordances, useSaveHostSettings } from '@/features/hosts/hostSettings';
 import { VoiceKeyField } from '@/features/voice/VoiceKeyField';
+import { VoiceKeysSkeleton } from '@/features/voice/VoiceKeysSkeleton';
 import { hostNeedsUpdate, maskSecrets, voiceKeysFor, type VoiceKey } from '@/features/voice/voiceKeys';
 import { useTheme } from '@/theme';
-import { Button, ErrorState, Screen, Skeleton, SkeletonSwap, Text } from '@/ui';
+import { Button, ErrorState, Screen, SkeletonSwap, Text } from '@/ui';
 
 /** Settings › Voice: which voice keys the host has, and replacing them. Saved there, never shown again. */
 export default function VoiceSettingsScreen() {
@@ -95,28 +96,9 @@ export default function VoiceSettingsScreen() {
 }
 
 /** The three voice key fields as a skeleton: a label over a one-row card each. */
-function VoiceKeysSkeleton() {
-  const theme = useTheme();
-  return (
-    <View testID="voice-settings-skeleton" accessible accessibilityLabel="Loading voice keys" style={styles.form}>
-      {[0.45, 0.4, 0.6].map(width => (
-        <View key={width} style={styles.field}>
-          <View style={styles.inset}><Skeleton width={`${width * 100}%`} height={13} style={styles.labelBone} /></View>
-          <View style={[styles.keyBox, { borderRadius: theme.radius.card, backgroundColor: theme.colors.card, borderColor: theme.colors.cardBorder }]}>
-            <Skeleton width={64} height={16} />
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
 
 const styles = StyleSheet.create({
   bold: { fontWeight: '600' },
   form: { gap: 20 },
   inset: { paddingHorizontal: 4 },
-  // VoiceKeyField's label and one-row card.
-  field: { gap: 6 },
-  labelBone: { marginVertical: 2.5 },
-  keyBox: { minHeight: 58, justifyContent: 'center', paddingHorizontal: 16, borderWidth: StyleSheet.hairlineWidth },
 });

@@ -1,6 +1,7 @@
 import { createContext, use, useEffect, useState, type ReactNode } from 'react';
 import { type DimensionValue, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
+  cancelAnimation,
   Easing,
   FadeIn,
   makeMutable,
@@ -18,14 +19,21 @@ import { SKELETON_REVEAL_MS, skeletonStart, skeletonState } from './skeletonTimi
 /**
  * One breathe for every bone in the app, so all skeletons on screen step together: opacity
  * 1 → 0.5 → 1 over 2 s in five steps each way, about five repaints a second, on the UI thread.
+ * It runs only while a bone is mounted.
  */
 const breathe = makeMutable(1);
-let breathing = false;
+let breathingBones = 0;
 function startBreathing() {
-  if (breathing) return;
-  breathing = true;
+  breathingBones += 1;
+  if (breathingBones > 1) return;
   const step = { duration: 1_000, easing: Easing.steps(5) };
   breathe.value = withRepeat(withSequence(withTiming(0.5, step), withTiming(1, step)), -1);
+}
+function stopBreathing() {
+  breathingBones -= 1;
+  if (breathingBones > 0) return;
+  cancelAnimation(breathe);
+  breathe.value = 1;
 }
 
 /** False for the first 150 ms of a load: the skeleton keeps the screen's shape, blank. */
@@ -44,7 +52,9 @@ export function Skeleton({ width = '100%', height = 16, radius, style }: Skeleto
   const reduceMotion = useReducedMotion();
   const shown = use(BonesShown);
   useEffect(() => {
-    if (!reduceMotion) startBreathing();
+    if (reduceMotion) return undefined;
+    startBreathing();
+    return stopBreathing;
   }, [reduceMotion]);
   const pulse = useAnimatedStyle(() => ({ opacity: shown ? (reduceMotion ? 1 : breathe.value) : 0 }));
 
@@ -97,16 +107,18 @@ function useSkeletonHold(loading: boolean) {
  * only while there is nothing to show: content the screen already has never gets a skeleton.
  * `style` lays out the content's wrapper (`{ flex: 1 }` for a screen body).
  */
-export function SkeletonSwap({ loading, skeleton, children, style }: {
+export function SkeletonSwap({ loading, skeleton, children, style, fade = true }: {
   loading: boolean;
   skeleton: ReactNode;
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
+  /** False when the skeleton already draws part of the content (a screen's top bar), which must not fade again. */
+  fade?: boolean;
 }) {
   const hold = useSkeletonHold(loading);
   if (hold.skeleton) return <BonesShown value={hold.bones}>{skeleton}</BonesShown>;
   return (
-    <Animated.View style={style} entering={hold.reveal ? FadeIn.duration(SKELETON_REVEAL_MS) : undefined}>
+    <Animated.View style={style} entering={fade && hold.reveal ? FadeIn.duration(SKELETON_REVEAL_MS) : undefined}>
       {children}
     </Animated.View>
   );

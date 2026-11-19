@@ -366,7 +366,8 @@ export function HomeScreen() {
     </View>
   );
   const list = (
-    <SkeletonSwap loading={loading} skeleton={skeleton} style={styles.fill}>
+    // The skeleton draws the tiles too, so the board doesn't fade them in again.
+    <SkeletonSwap loading={loading} skeleton={skeleton} style={styles.fill} fade={false}>
       <LegendList
         testID="panes-list"
         data={rows}

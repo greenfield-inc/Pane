@@ -20,8 +20,10 @@ export function SessionScreen() {
   useJourneyMark('session', 'data', view.data !== undefined);
 
   return (
+    // The skeleton draws the top bar and tab strip, so the Session doesn't fade them in again.
     <SkeletonSwap
       loading={view.data === undefined && !view.isError}
+      fade={false}
       skeleton={(
         <View testID="session-skeleton" style={[styles.fill, { backgroundColor: theme.colors.surface }]}>
           <TerminalTopBar paneName="" />
