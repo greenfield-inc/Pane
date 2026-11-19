@@ -23,8 +23,10 @@ have pnpm 10, `corepack enable` provides the version pinned in `package.json`.
    isn't built yet) and lists ignored build scripts. Both are harmless.
    The pre-push hook lints the files a push changes and, when they touch code
    or config, runs `pnpm typecheck`, in a few seconds. It keeps a pre-push
-   hook you already have and prints the line to add to it.
-   `git push --no-verify` skips it.
+   hook you already have and prints the line to add to it, and it never
+   writes to a `core.hooksPath` folder outside the clone. A worktree without
+   `node_modules` pushes unchecked, with a note. `git push --no-verify` skips
+   it.
 3. Create a branch:
    ```bash
    git checkout -b feature/your-feature-name
@@ -268,8 +270,8 @@ builds ignore the variable.
 - Two-space indentation. `camelCase` for variables and functions, `PascalCase`
   for React components and types, `kebab-case` for other filenames.
 - There is no formatter; follow the surrounding code. The pre-push hook
-  (`scripts/pre-push.mjs`) runs Oxlint, the agent-facts check and the type
-  check on what you push.
+  (`scripts/pre-push.mjs`) runs Oxlint, the agent-facts and boundary-decoder
+  conformance checks and the type check on what you push.
 
 ## How Pane reports errors
 
