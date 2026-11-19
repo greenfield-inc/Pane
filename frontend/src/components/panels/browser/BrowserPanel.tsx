@@ -98,8 +98,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const driver = (panel.state.customState as BrowserPanelState | undefined)?.driver;
+  // Only the computer that runs the page gives its view a screen's size; another desktop's copy fills its tab.
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
-  const pageSize = (panel.state.customState as BrowserPanelState | undefined)?.pageSize;
+  const pageSize = onHost ? (panel.state.customState as BrowserPanelState | undefined)?.pageSize : undefined;
 
   const webviewRef = useRef<Electron.WebviewTag>(null);
   // The mounted <webview>, as state so its listeners attach whenever it mounts:
