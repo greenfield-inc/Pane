@@ -85,6 +85,21 @@ test('a push onto a branch the remote has checks only the new commits', () => {
   assert.deepEqual(names(checks), ['oxlint (1 file)', 'agent facts', 'typecheck']);
 });
 
+test('a merge of origin/main checks only the files the branch changes', () => {
+  write('main/src/mine.ts');
+  const remote = commit('mine');
+  git('checkout', '-q', 'main');
+  write('frontend/src/theirs.ts');
+  git('update-ref', 'refs/remotes/origin/main', commit('theirs'));
+  git('checkout', '-q', 'topic');
+  write('main/src/mine.ts', 'export const value = 2;\n');
+  commit('edit');
+  git('merge', '-q', '--no-edit', 'origin/main');
+
+  const { checks } = plan(remote);
+  assert.equal(lintedFiles(checks), 'main/src/mine.ts');
+});
+
 test('a rewritten branch is checked from where it left origin/main', () => {
   write('frontend/src/first.ts');
   const replaced = commit('first');

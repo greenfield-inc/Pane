@@ -9,6 +9,7 @@
 // A ref whose remote sha is an ancestor of the pushed commit is checked on
 // that range. A new branch, a rewritten branch or an unknown remote commit is
 // checked from where it left origin/main; without origin/main, everything is.
+// Files that only origin/main changed (a merge of main) are left to CI.
 //
 // --dry-run prints the plan without running it.
 // `git push --no-verify` skips the hook.
@@ -68,14 +69,12 @@ for (const ref of pushed) {
     console.log(`pre-push: skipped ${ref.localRef}: it is not checked out, so the files on disk are not its files. CI checks it.`);
     continue;
   }
-  let from;
-  if (!ZERO.test(ref.remoteSha) && isAncestor(ref.remoteSha, ref.localSha)) {
-    from = ref.remoteSha;
-  } else {
-    from = git(['merge-base', ref.localSha, 'origin/main'])?.trim();
-  }
+  const mainBase = git(['merge-base', ref.localSha, 'origin/main'])?.trim();
+  const remoteKnown = !ZERO.test(ref.remoteSha) && isAncestor(ref.remoteSha, ref.localSha);
+  const from = remoteKnown ? ref.remoteSha : mainBase;
   if (from) {
-    changed.push(...changes(from, ref.localSha));
+    const onBranch = mainBase && from !== mainBase ? new Set(changes(mainBase, ref.localSha).map((file) => file.path)) : null;
+    changed.push(...changes(from, ref.localSha).filter((file) => !onBranch || onBranch.has(file.path)));
     console.log(`pre-push: ${ref.remoteRef} from ${from.slice(0, 12)}`);
   } else {
     everything = true;
