@@ -980,6 +980,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (cursor) view.agentCursor = cursor;
     if (driver?.pendingDialog) view.dialog = driver.pendingDialog;
     if (driver?.pendingChooser) view.fileChooser = driver.pendingChooser;
+    if (live) view.page = live.id;
     if (!live) view.stopped = holds.isAsleep(tabId) ? 'asleep' : 'gone';
     return view;
   }
