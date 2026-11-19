@@ -217,8 +217,17 @@ with its **plan beside it** in a split at half the width.
   rebinding Split Right in Settings rebinds this too. Hidden is remembered per
   to-do on this computer; the page then takes the full width and a
   "Plan · N files" chip shows the split again, as does clicking any
-  attachment or approval. When the to-do area is under 1,000 px wide, every
-  to-do opens with the split hidden and showing it lasts for that visit.
+  attachment or approval.
+- **Narrow places get tabs, not a split.** When the to-do area itself is under
+  1,000 px wide (a Session's To-dos tab beside the chat, a narrow window, an
+  iPad), the page and its files share one column: one tab strip reads
+  "To-do · Plan · Overview · cover-sheet.html …", with an open approval as the
+  last tab. The To-do tab is always first and never closes; the others close
+  as the split's tabs do (✕ and ⌘W, remembered per to-do). Opening a file or
+  approval from the page selects its tab. The width is measured on the area,
+  wherever it is mounted, and changing it moves between tabs and the split
+  keeping the open tabs and the one shown. A to-do opened narrow keeps its
+  remembered split choice untouched.
 - **The Session's Overview** is a tab in the split, after the plan, when the
   to-do (or its parent) has a Session on this machine: the same goal, next
   step, decisions, Panes and activity as the Session's own Overview tab.
