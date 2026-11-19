@@ -11,6 +11,7 @@ import { openPaneTarget } from '../components/terminal/openPaneLink';
 import { restoreHostNavigation, withHostNavigationWritesPaused } from '../utils/hostNavigationMemory';
 import { API } from '../utils/api';
 import { rememberPaneLayout } from '../utils/paneLayoutMemory';
+import { switchTodosHost } from '../stores/todosStore';
 import { sessionOverviewTabId } from '../utils/panelLayout';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { restoreRemoteTerminals, restoreRemoteWorkspace } from '../utils/remoteRestoration';
@@ -70,6 +71,8 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
   }
   await useConfigStore.getState().fetchConfig(ownsRuntime);
   if (!ownsRuntime()) return;
+  // The to-dos are the host's too, and the incoming one may not say it changed (T-37): read them now.
+  if (hostChanged) void switchTodosHost();
 
   const sessionsResponse = await API.sessions.getAll();
   if (!ownsRuntime()) return;

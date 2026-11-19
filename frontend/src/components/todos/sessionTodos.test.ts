@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import type { TodoListRow, TodoRecord } from '../../../../shared/types/todos';
-import { inTodoScope, sessionTodos, todoApprovalScope, todoRefOf } from './sessionTodos';
+import { approvalsByTodo, inTodoScope, sessionTodos, todoApprovalScope, todoRefOf } from './sessionTodos';
 
 function row(number: number, opts: { own?: string; requestedBy?: string; parent?: number; state?: TodoRecord['state'] } = {}): TodoListRow {
   const todo: TodoRecord = {
@@ -60,5 +60,16 @@ describe('a Session\'s to-dos (T-22, T-23)', () => {
     expect(todoRefOf(item('perm', { session: 'hidden-3' }), rows, 'uiux')).toBe('T-3');
     expect(todoRefOf(item('own', { session: 'uiux' }), rows, 'uiux')).toBeUndefined();
     expect(todoRefOf(item('in-own-hidden', { session: 'hidden-13' }), rows, 'hidden-13')).toBeUndefined();
+  });
+
+  it('counts each approval on its top-level to-do (T-37): linked, through a sub-to-do, or asked or connected in its hidden Session', () => {
+    const counts = approvalsByTodo([
+      item('review', { todo: 10 }),
+      item('sub', { todo: 11 }),
+      item('perm', { session: 'hidden-3' }),
+      item('conn', { connected: 'hidden-10' }),
+      item('stray', { session: 'nobody' }),
+    ], rows);
+    expect(Object.fromEntries(counts)).toEqual({ 3: 1, 10: 3 });
   });
 });

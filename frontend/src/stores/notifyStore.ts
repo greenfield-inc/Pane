@@ -216,8 +216,13 @@ export function sessionWaitingCount(snapshot: NotifySnapshot | null, sessionId: 
  * (T-23). The Session's own questions are left out; its sidebar row counts both (`sessionWaitingCount`).
  */
 export function todosWaitingCount(snapshot: NotifySnapshot | null, todos: TodoApprovalScope, machineId?: string): number {
-  return snapshot?.items.filter((item) => countsAsWaiting(item) && isOpenForSession(item) && inTodoScope(item, todos)
-    && (machineId === undefined || (item.machineId ?? 'local') === machineId)).length ?? 0;
+  return snapshot ? sessionTodoApprovals(snapshot.items, todos, machineId).length : 0;
+}
+
+/** A Session's to-dos' approvals waiting on you (open: not dismissed or sent), from machine `machineId` when given. */
+export function sessionTodoApprovals(items: readonly NotifyItem[], todos: TodoApprovalScope, machineId?: string): NotifyItem[] {
+  return items.filter((item) => countsAsWaiting(item) && isOpenForSession(item) && inTodoScope(item, todos)
+    && (machineId === undefined || (item.machineId ?? 'local') === machineId));
 }
 
 /** Waiting items from machines other than the one the app is on (`local` for this computer). */

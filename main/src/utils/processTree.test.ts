@@ -75,12 +75,25 @@ async function waitForDescendants(pid: number, expected: readonly number[]): Pro
 }
 
 afterEach(async () => {
-  // One call, so teardown costs one process-table read rather than one each.
-  const roots = spawned.flatMap(child => child.pid && child.exitCode === null && child.signalCode === null ? [child.pid] : []);
-  // Keep reported children even after their parent exits and a tree walk loses them.
+  // Teardown knows every process a test started: the roots and the children
+  // they reported. It kills them by pid instead of walking the tree, because a
+  // walk costs two PowerShell processes on Windows, and on a loaded runner
+  // those alone outlast the 10 s hook timeout.
+  const exited = spawned.map(child => child.exitCode !== null || child.signalCode !== null
+    ? Promise.resolve()
+    : new Promise(resolve => child.once('exit', resolve)));
+  const roots = spawned.flatMap(child => child.pid ? [child.pid] : []);
   const pids = [...new Set([...roots, ...reportedChildren])].filter(isProcessAlive);
-  if (pids.length > 0) expect(await terminateProcessTrees(pids, { timeoutMs: 15_000 })).toEqual([]);
-  expect(pids.filter(isProcessAlive)).toEqual([]);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Exited since the check.
+    }
+  }
+  expect(await waitForProcessesToExit(pids, 5000)).toEqual([]);
+  // On Windows, a root's 'exit' fires once it has closed its handles, its cwd among them.
+  await Promise.all(exited);
   spawned.length = 0;
   reportedChildren.clear();
   for (const directory of directories.splice(0)) {
