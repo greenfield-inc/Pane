@@ -117,6 +117,8 @@ printf %s "$VALUE" | runpane secrets set --project stripe --name STRIPE_SECRET_K
 runpane secrets delete --project stripe --name STRIPE_SECRET_KEY --yes --json
 runpane secrets exec --project stripe --only STRIPE_SECRET_KEY -- pnpm test:webhooks
 runpane secrets request --project stripe --name STRIPE_SECRET_KEY --title "Stripe test secret key" --reason "Run the webhook tests against Stripe test mode." --json
+runpane secrets lease --project stripe STRIPE_SECRET_KEY --reason "Run the webhook tests against Stripe test mode." --json
+runpane secrets lease end --id 3f9a2c1b7d4e8f06 --yes --json
 runpane panes list --repo active --json
 runpane panes cost --pane <pane-id> --json
 runpane panes create --repo active --name issue-252 --agent <agent> --prompt "Kick off the discussion skill for issue 252" --source agent --no-focus --wait-ready --yes --json
@@ -212,7 +214,7 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane repos rename` trims and sets a saved repository's display name, the same rename as the repository settings in the app, and returns the updated repository record.
 
-`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines only. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.
+`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines, 1Password references and live leases, never a value. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. A secret can instead be a 1Password reference, which the person sets in Settings; it has a value only during a lease. `lease` asks the person to start one and returns the lease's id, end time and machines; `lease end` ends one now. `exec` fails with `SECRET_LEASE_ENDED` when a reference has no live lease. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.
 
 `runpane panes list` lists Pane sessions, optionally scoped to one saved repository.
 
@@ -345,11 +347,13 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
 - `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, system prompt, and environment variables.
 - `repos rename`: Rename a repository saved in the running Pane app.
-- `secrets list`: List the Pane secrets on this machine: project, name, and when and where each was set. Never shows a value.
+- `secrets list`: List the Pane secrets on this machine: typed secrets, 1Password references and live leases, with when and where each was set. Never shows a value.
 - `secrets set`: Save a Pane secret, adding or replacing it. Reads the value from stdin.
 - `secrets delete`: Delete a Pane secret from this machine and, through sync, from your other machines.
 - `secrets exec`: Run a command with Pane secrets in its environment. Nothing prints a value.
 - `secrets request`: Ask the person for a secret on a masked card. Pane saves what they type as a Pane secret and never returns it.
+- `secrets lease`: Ask the person to lease 1Password-backed Pane secrets to this machine for a while. Returns the lease's id, end time and machines, never a value.
+- `secrets lease end`: End a Pane secret lease now: this machine deletes the leased values.
 - `devices list`: List the phone simulators and emulators this Pane can open: platform, name, OS, machine, state, and which Pane holds each.
 - `devices open`: Boot a phone simulator or emulator for this Pane and show its live screen in a device tab beside the agent.
 - `devices screenshot`: Capture the screen of this Pane's open device as an image.
@@ -509,6 +513,8 @@ runpane secrets set --project <project> --name <name> --yes [--json] [--pane-dir
 runpane secrets delete --project <project> --name <name> --yes [--json] [--pane-dir <path>]
 runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... [--pane-dir <path>] -- <command>...
 runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json] [--pane-dir <path>]
+runpane secrets lease <name>... --project <project> [--reason <text>] [--json] [--pane-dir <path>]
+runpane secrets lease end --id <lease-id> --yes [--json] [--pane-dir <path>]
 runpane devices list [--json] [--pane-dir <path>]
 runpane devices open --platform <ios|android> [--device <name-or-id>] [--json] [--pane-dir <path>]
 runpane devices screenshot [--platform <ios|android>] [--json] [--pane-dir <path>]
@@ -688,9 +694,10 @@ Brief tools:
 - `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
 - `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, system prompt, and environment variables.
 - `repos rename`: Rename a repository saved in the running Pane app.
-- `secrets list`: List Pane secrets: project, name, time and machine. Never a value.
+- `secrets list`: List Pane secrets: project, name, time and machine, plus 1Password references and live leases. Never a value.
 - `secrets exec`: Run a command with Pane secrets in its environment.
 - `secrets request`: Ask the person for a secret on a masked card; returns saved or declined, never the value.
+- `secrets lease`: Ask the person to lease 1Password-backed secrets; returns the lease id and end time, never a value.
 - `panes list`: List Pane sessions, optionally scoped to a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `panes create`: Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.
@@ -723,7 +730,7 @@ This repository is used with [Pane](https://runpane.com). Drive it with the CLI 
 
 Pane: one per feature (one worktree, one branch). Before creating one, find the feature's Pane (`runpane panes list --json`, match the branch) and create one only when none exists. Tab: reviews, review reruns, QA, fixes and follow-ups for a feature go in new tabs in its Pane (`runpane panels create --pane <id>`), never a new Pane or a plain `git worktree`. With the MCP tools, open a tab with `panels_create`, or `agents_start` with `pane`.
 
-When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question "<question>"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.
+When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. Claude's own card (AskUserQuestion) is only for a quick question in the chat the person is typing in, about their latest message, that steers only this turn; everything else is an approval card, and Codex and other agents always use one. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question "<question>"`. Its orchestrator relays that card with `runpane notify --relays <item> ...`, the answer goes straight to the worker's tab, and the orchestrator records it with `runpane inbox ack <item> --decision <D-n>`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets. For a secret from 1Password, call `secrets_lease` (or `runpane secrets lease`) and wait; on `SECRET_LEASE_ENDED`, run the next step it names.
 
 To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).
 
@@ -838,6 +845,7 @@ These flags are consumed by local daemon-control commands:
 --project <project>
 --only <name,...>
 --reason <text>
+--id <lease-id>
 --epoch <epoch>
 --ui <options|approve|ask|info>
 --context <text>

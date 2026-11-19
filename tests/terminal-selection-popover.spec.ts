@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 
 declare global {
   interface Window {
@@ -142,7 +142,7 @@ test('selection popover works in restored bottom and tab terminals', async ({ pa
     ])),
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
@@ -189,7 +189,7 @@ test('copies a mouse selection at once, without the popover, when Copy on select
     ])),
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
@@ -222,7 +222,7 @@ test('with Copy on select on, right-click leaves the clipboard alone and the men
     ])),
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
@@ -255,7 +255,7 @@ test('keeps keyboard copy available when Pane shortcuts are disabled', async ({ 
     ])),
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
@@ -280,7 +280,7 @@ test('copies OSC 52 writes from live output but not from restored scrollback', a
     ])),
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tabpanel').locator('.xterm-screen')).toBeVisible();
@@ -315,7 +315,7 @@ test('remote mode copies a mouse selection without the selection popover', async
     ])),
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
@@ -349,7 +349,7 @@ test('right-click shows the selection actions in a native menu and runs the chos
     ])),
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
@@ -388,7 +388,7 @@ test('right-click offers the browser actions for a selected URL', async ({ page 
     initialTerminalStates: Object.fromEntries(panels.map((panel) => [panel.id, { scrollbackBuffer: 'http://e.io\r\n' }])),
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal selection fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 

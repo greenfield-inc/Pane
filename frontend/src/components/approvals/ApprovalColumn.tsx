@@ -293,8 +293,8 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
     return () => { shown.current = false; };
   }, []);
   const waiting = item.state === 'waiting';
-  // What the column has no form of its own for: a secret, a prompt the terminal now holds, an update, a machine health card.
-  const plain = item.ui === 'secret' || item.ui === 'info' || item.agentPrompt?.inTerminal || item.relay || item.machineHealth;
+  // What the column has no form of its own for: a secret, a lease, a prompt the terminal now holds, an update, a machine health card.
+  const plain = item.ui === 'secret' || item.lease || item.ui === 'info' || item.agentPrompt?.inTerminal || item.relay || item.machineHealth;
   // Answered or closed: its receipt, Reopen and Override are the card's own.
   const ended = item.state === 'answered' || item.state === 'expired';
   const [closing, setClosing] = useState(false);

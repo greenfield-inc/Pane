@@ -15,7 +15,7 @@ import { runLinksCreate } from './links';
 import { runNotify } from './notify';
 import { runTodos } from './todos';
 import { runLink } from './pairingLink';
-import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
+import { runSecretsDelete, runSecretsExec, runSecretsLease, runSecretsLeaseEnd, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
 import { runDevicesAct, runDevicesClose, runDevicesFree, runDevicesList, runDevicesOpen, runDevicesRun, runDevicesScreenshot, runDevicesUsage } from './devices';
 import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runMachineCleanup, runMachineHealth } from './machine';
@@ -173,7 +173,7 @@ const THIS_MACHINE_ONLY = new Set<string>([
   // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
   'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
   // These read or change this machine's own secret store; another machine runs its own.
-  'secrets list', 'secrets set', 'secrets delete', 'secrets exec', 'secrets request',
+  'secrets list', 'secrets set', 'secrets delete', 'secrets exec', 'secrets request', 'secrets lease', 'secrets lease end',
   // Device tools act for the calling tab's Pane; a machine without Xcode reaches its Mac itself.
   'devices list', 'devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close', 'devices usage', 'devices free',
 ]);
@@ -273,6 +273,8 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'secrets delete': async (parsed) => runSecretsDelete(parsed),
   'secrets exec': async (parsed) => runSecretsExec(parsed),
   'secrets request': async (parsed) => runSecretsRequest(parsed),
+  'secrets lease': async (parsed) => runSecretsLease(parsed),
+  'secrets lease end': async (parsed) => runSecretsLeaseEnd(parsed),
   'devices list': async (parsed) => runDevicesList(parsed),
   'devices open': async (parsed) => runDevicesOpen(parsed),
   'devices screenshot': async (parsed) => runDevicesScreenshot(parsed),

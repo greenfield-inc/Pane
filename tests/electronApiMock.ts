@@ -20,7 +20,7 @@ import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
-import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
+import type { PaneSecretsOverview, SecretLeaseStartRequest } from '../shared/types/paneSecrets';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
 import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
@@ -191,8 +191,8 @@ export type ElectronApiMockOptions = {
   chatMessages?: Record<string, Array<{ id: string; role: 'user' | 'assistant'; text: string }>>;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
   notifySnapshot?: NotifySnapshot;
-  /** window.electronAPI.paneSecrets: the saved secrets and this host's store. Absent: none saved, in the keychain. */
-  paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage };
+  /** window.electronAPI.paneSecrets: what Settings → Secrets lists. Absent parts: nothing saved, in the keychain, no leases, this computer alone, no vault. */
+  paneSecrets?: Partial<PaneSecretsOverview>;
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
   /** machines:latency answers by machine, in ms, over the route its machine state names; `pending` never answers. Absent: null (no answer). */
@@ -222,6 +222,23 @@ export type ElectronApiMockOptions = {
   /** What dialog.openFile picks; absent: nothing (null). */
   openFilePath?: string;
 };
+
+/**
+ * Opens the desktop app and waits until it reports ready. `page.goto` returns before the app's code
+ * has loaded; on a cold Vite server the app can start seconds later. The app reports ready after its
+ * first loaded frame, when its event listeners are subscribed and its first data is on screen, so a
+ * test's own waits count from a running app. The mock drops events emitted before that.
+ */
+export async function gotoApp(page: Page, path = '/'): Promise<void> {
+  await page.goto(path, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.waitForFunction(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const mock = (window as typeof window & {
+      __paneTestElectronMock?: { isRendererReady: () => boolean };
+    }).__paneTestElectronMock;
+    return mock?.isRendererReady() ?? false;
+  }, undefined, { timeout: 30_000 });
+}
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
   type SerializedOptions = ElectronApiMockOptions & {
@@ -550,6 +567,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       : mockOptions.activeProjectId;
     let lastProjectUpdate: { projectId: string; updates: JsonObject } | null = null;
     let configGetCount = 0;
+    // The app reports ready after its first loaded frame, when its event listeners are subscribed.
+    let rendererReady = false;
     let nextConfigUpdateError: string | null = null;
     let nextPreferenceSetError: string | null = null;
     let nextBackgroundColorWriteError: string | null = null;
@@ -1046,24 +1065,105 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return () => { machineListeners.delete(callback); };
       },
     };
-    const paneSecrets = clone(mockOptions.paneSecrets ?? { secrets: [], storage: { kind: 'keychain' as const, encrypted: true } });
-    const paneSecretCalls: Array<{ action: 'set' | 'delete'; project: string; name: string }> = [];
+    const paneSecrets: PaneSecretsOverview = clone({
+      secrets: [],
+      references: [],
+      storage: { kind: 'keychain' as const, encrypted: true },
+      leases: [],
+      machines: [{ id: 'local', name: 'This computer', online: true, refusal: null, memoryOnly: false }],
+      leaseLengths: {},
+      moveVault: null,
+      ...mockOptions.paneSecrets,
+    });
+    /** What Settings asked of paneSecrets; values are never recorded. */
+    type PaneSecretCall =
+      | { action: 'set' | 'delete' | 'moveToOnePassword'; project: string; name: string }
+      | { action: 'setReference'; project: string; name: string; reference: string }
+      | { action: 'startLease'; request: SecretLeaseStartRequest }
+      | { action: 'endLease'; leaseId: string }
+      | { action: 'endAllLeases' | 'listVaults' }
+      | { action: 'setLeaseLength'; project: string; lengthMs: number }
+      | { action: 'setMoveVault'; vault: string };
+    const paneSecretCalls: PaneSecretCall[] = [];
+    const sameSecret = (project: string, name: string) => (secret: { project: string; name: string }) => secret.project === project && secret.name === name;
+    const addReference = (project: string, name: string, reference: string) => {
+      paneSecrets.secrets = paneSecrets.secrets.filter((secret) => !sameSecret(project, name)(secret));
+      paneSecrets.references = [
+        ...paneSecrets.references.filter((secret) => !sameSecret(project, name)(secret)),
+        { project, name, reference, updatedAt: new Date().toISOString(), machine: 'this-mac' },
+      ];
+    };
+    let leaseCount = 0;
     const paneSecretsApi = {
       list: () => Promise.resolve({ success: true, data: clone(paneSecrets) }),
       set: (project: string, name: string, _value: string) => {
         paneSecretCalls.push({ action: 'set', project, name });
-        const replaced = paneSecrets.secrets.some((secret) => secret.project === project && secret.name === name);
+        const replaced = paneSecrets.secrets.some(sameSecret(project, name));
         paneSecrets.secrets = [
-          ...paneSecrets.secrets.filter((secret) => !(secret.project === project && secret.name === name)),
+          ...paneSecrets.secrets.filter((secret) => !sameSecret(project, name)(secret)),
           { project, name, updatedAt: new Date().toISOString(), machine: 'this-mac' },
         ];
         return Promise.resolve({ success: true, data: replaced });
       },
       delete: (project: string, name: string) => {
         paneSecretCalls.push({ action: 'delete', project, name });
-        paneSecrets.secrets = paneSecrets.secrets.filter((secret) => !(secret.project === project && secret.name === name));
+        paneSecrets.secrets = paneSecrets.secrets.filter((secret) => !sameSecret(project, name)(secret));
+        paneSecrets.references = paneSecrets.references.filter((secret) => !sameSecret(project, name)(secret));
         return Promise.resolve({ success: true, data: true });
       },
+      setReference: (project: string, name: string, reference: string) => {
+        paneSecretCalls.push({ action: 'setReference', project, name, reference });
+        const replaced = paneSecrets.secrets.some(sameSecret(project, name));
+        addReference(project, name, reference);
+        return Promise.resolve({ success: true, data: replaced });
+      },
+      startLease: (request: SecretLeaseStartRequest) => {
+        paneSecretCalls.push({ action: 'startLease', request: clone(request) });
+        leaseCount += 1;
+        const id = `lease-${leaseCount}`;
+        const grantedAt = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + (paneSecrets.leaseLengths[request.project] ?? 24 * 60 * 60 * 1000)).toISOString();
+        const holders = paneSecrets.machines.filter((machine) => request.machines.includes(machine.id));
+        for (const machine of holders) {
+          paneSecrets.leases.push({
+            id, project: request.project, names: [...request.names], grantedAt, expiresAt, requestedBy: 'you',
+            grantedOn: 'this-mac', memoryOnly: machine.memoryOnly, machineId: machine.id, machine: machine.name,
+          });
+        }
+        return Promise.resolve({ success: true, data: { leaseId: id, expiresAt, machines: holders.map((machine) => machine.name), refused: [] } });
+      },
+      endLease: (leaseId: string) => {
+        paneSecretCalls.push({ action: 'endLease', leaseId });
+        paneSecrets.leases = paneSecrets.leases.filter((lease) => lease.id !== leaseId);
+        return Promise.resolve({ success: true, data: true });
+      },
+      endAllLeases: () => {
+        paneSecretCalls.push({ action: 'endAllLeases' });
+        const ended = new Set(paneSecrets.leases.map((lease) => lease.id)).size;
+        paneSecrets.leases = [];
+        return Promise.resolve({ success: true, data: ended });
+      },
+      setLeaseLength: (project: string, lengthMs: number) => {
+        paneSecretCalls.push({ action: 'setLeaseLength', project, lengthMs });
+        paneSecrets.leaseLengths[project] = lengthMs;
+        return Promise.resolve({ success: true, data: true });
+      },
+      setMoveVault: (vault: string) => {
+        paneSecretCalls.push({ action: 'setMoveVault', vault });
+        paneSecrets.moveVault = vault;
+        return Promise.resolve({ success: true, data: true });
+      },
+      listVaults: () => {
+        paneSecretCalls.push({ action: 'listVaults' });
+        return Promise.resolve({ success: true, data: ['Private', 'Dev'] });
+      },
+      moveToOnePassword: (project: string, name: string) => {
+        paneSecretCalls.push({ action: 'moveToOnePassword', project, name });
+        const reference = `op://${paneSecrets.moveVault ?? 'Private'}/${project}-${name}/credential`;
+        addReference(project, name, reference);
+        return Promise.resolve({ success: true, data: { reference } });
+      },
+      onChanged: (callback: () => void) => subscribe('pane-secrets:changed', callback),
     };
     // window.electronAPI.todos (D-409): the fixture's to-dos. attach and detach change them, kept in sessionStorage so a
     // reload keeps them; every act is recorded and todos:changed follows it, as main announces a change.
@@ -1255,7 +1355,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         titleBarOverlayWrites.push(clone(colors));
         return success();
       },
-      notifyRendererReady: () => {},
+      notifyRendererReady: () => {
+        rendererReady = true;
+      },
       setBackgroundColor: (payload: { theme: string; color: string }) => {
         backgroundColorWrites.push(clone(payload));
         if (nextBackgroundColorWriteError) {
@@ -2326,6 +2428,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getConfigReadCount() {
           return configGetCount;
+        },
+        isRendererReady() {
+          return rendererReady;
         },
         setSessions(sessions: JsonObject[]) {
           mockSessions = clone(sessions);

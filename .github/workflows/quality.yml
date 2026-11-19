@@ -146,9 +146,10 @@ jobs:
       run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # Type checking and lint get their own runner: beside the unit tests they
-  # competed for its CPUs and slowed the tests by about 30s. Oxlint runs
-  # first, alone, then the type check, the lint checks and Knip run in parallel; the Finish steps print
-  # each output and fail on errors.
+  # competed for its CPUs and slowed the tests by about 30s. Oxlint, then the
+  # type check (bun check over every tsconfig), each run alone on the 4 CPUs;
+  # then the lint checks and Knip run in parallel. The Finish steps print each
+  # output and fail on errors.
   typecheck-lint:
     name: Type Check and Lint
     runs-on: ubuntu-latest
@@ -160,17 +161,20 @@ jobs:
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
 
+    # bun's install script puts its binary in place (0.1s; `pnpm rebuild bun`
+    # took 6s). It is the one install script this job needs.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts && node node_modules/bun/install.js
 
     # Oxlint runs alone first: beside the type check it shared the 4 CPUs and
-    # took 21-23s. The other lint:code checks run with the type check.
+    # took 21-23s.
     - name: Lint
       run: scripts/ci-background.sh start lint node scripts/oxlint.mjs && scripts/ci-background.sh wait lint
 
-    - name: Start type checking
+    # Alone too: beside Knip and the lint checks it took 6s.
+    - name: Type check
       if: ${{ !cancelled() }}
-      run: scripts/ci-background.sh start typecheck pnpm typecheck
+      run: scripts/ci-background.sh start typecheck pnpm typecheck && scripts/ci-background.sh wait typecheck
 
     - name: Start lint checks
       if: ${{ !cancelled() }}
@@ -179,10 +183,6 @@ jobs:
     - name: Start dead-code check
       if: ${{ !cancelled() }}
       run: scripts/ci-background.sh start deadcode pnpm deadcode
-
-    - name: Finish type checking
-      if: ${{ !cancelled() }}
-      run: scripts/ci-background.sh wait typecheck
 
     - name: Finish dead-code check
       if: ${{ !cancelled() }}
@@ -195,9 +195,9 @@ jobs:
     # CI result's gate and its contract with this file (expected jobs, needs,
     # skip manifest). Here rather than in CI result, which runs it every time
     # at the end of the critical path.
-    - name: Test the CI result gate
+    - name: Test the CI result gate and the pre-push hook
       if: ${{ !cancelled() }}
-      run: node --test scripts/ci-gate.test.mjs
+      run: node --test scripts/ci-gate.test.mjs scripts/pre-push.test.mjs
 
   # Offline check of relative links and #anchors in every tracked markdown file.
   # External URLs are not fetched, so the check never flakes on the network.
@@ -261,8 +261,11 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    - name: Install Playwright browser dependencies
-      run: pnpm exec playwright install --with-deps chromium
+    - name: Install Playwright browsers
+      uses: ./.github/actions/playwright-browsers
+      with:
+        # This shard saves the browsers for every job on main pushes.
+        save: ${{ matrix.shard == 1 }}
 
     - name: Run maintained functional smoke tests
       run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/${{ strategy.job-total }}
@@ -287,23 +290,13 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    # pnpm test:renderer-selection in two parts: the tests' type check runs
-    # once, in shard 1, behind the browser install.
-    - name: Start renderer test type check
-      if: ${{ matrix.shard == 1 }}
-      run: scripts/ci-background.sh start renderer-types pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json
-
-    - name: Install Playwright browser dependencies
-      run: pnpm exec playwright install --with-deps chromium
+    - name: Install Playwright browsers
+      uses: ./.github/actions/playwright-browsers
 
     - name: Verify renderer selection races
       run: pnpm exec playwright test --config=tests/renderer/playwright.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       env:
         PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
-
-    - name: Check renderer test types
-      if: ${{ !cancelled() && matrix.shard == 1 }}
-      run: scripts/ci-background.sh wait renderer-types
 
   functional-smoke-electron:
     name: Functional Smoke (Electron)
@@ -319,9 +312,13 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    # The browser download and apt packages overlap the build steps below.
-    # apt upgrades libraries Electron loads, so the wait step comes before
-    # Electron first starts.
+    - name: Restore Playwright browsers
+      uses: ./.github/actions/playwright-browsers
+      with:
+        install: 'false'
+
+    # The apt packages overlap the build steps below. apt upgrades libraries
+    # Electron loads, so the wait step comes before Electron first starts.
     - name: Start Playwright browser dependencies install
       run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
 
@@ -331,7 +328,29 @@ jobs:
     - name: Fetch Electron
       uses: ./.github/actions/fetch-electron
 
+    # SQLite built for Electron depends only on the runner image, arch,
+    # Electron version, the module's installed folder and the rebuild tool, so
+    # it is cached on those and rebuilt only on a miss: no Electron 43 prebuilt
+    # exists to download. Pushes to main save it once the tests below pass.
+    - name: Key the Electron SQLite build
+      id: sqlite
+      run: |
+        electron="$(node -p "require('./node_modules/electron/package.json').version")"
+        # The .pnpm folder name carries the version, patch hash and peer suffix.
+        module="$(cd node_modules/.pnpm && printf '%s\n' better-sqlite3-multiple-ciphers@* | sort | paste -sd+ -)"
+        rebuild="$(cd node_modules/.pnpm && printf '%s\n' @electron+rebuild@* | sort | paste -sd+ -)"
+        # The runner image fixes the compiler and system headers the build used.
+        echo "key=electron-sqlite-${ImageOS}-${ImageVersion}-${{ runner.arch }}-electron${electron}-${module}-${rebuild}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the Electron SQLite build
+      id: sqlite-cache
+      uses: actions/cache/restore@v5
+      with:
+        path: node_modules/.pnpm/better-sqlite3-multiple-ciphers@*/node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node
+        key: ${{ steps.sqlite.outputs.key }}
+
     - name: Start native module rebuild for Electron
+      if: steps.sqlite-cache.outputs.cache-hit != 'true'
       run: scripts/ci-background.sh start electron-rebuild pnpm run electron:rebuild
 
     - name: Configure Electron sandbox
@@ -348,6 +367,7 @@ jobs:
       run: scripts/ci-background.sh wait playwright
 
     - name: Finish native module rebuild for Electron
+      if: steps.sqlite-cache.outputs.cache-hit != 'true'
       run: scripts/ci-background.sh wait electron-rebuild
 
     - name: Verify sandboxed Electron preload
@@ -359,6 +379,14 @@ jobs:
       run: xvfb-run -a pnpm test:chat-tabs
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+
+    # Last, so only a build that Electron loaded and passed the tests with is saved.
+    - name: Save the Electron SQLite build
+      if: steps.sqlite-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v5
+      with:
+        path: node_modules/.pnpm/better-sqlite3-multiple-ciphers@*/node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node
+        key: ${{ steps.sqlite.outputs.key }}
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Linux is tested at the
@@ -646,13 +674,33 @@ jobs:
     - name: Run runpane relay against the relay
       run: pnpm run test:runpane-relay
 
+  # The Remote PWA preview deploy's install and build, exactly as
+  # deploy-remote-pwa-preview.yml runs them on main. Its frontend-only install
+  # catches a build that needs another package's dependencies.
+  pwa-build:
+    name: Remote PWA Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile --filter 'frontend...' --ignore-scripts
+
+    - name: Build remote PWA assets
+      run: pnpm run build:frontend
+
   # The one check branch protection requires. It runs even when the run is
   # cancelled, and fails unless every job in scripts/ci-gate.mjs EXPECTED_JOBS
   # succeeded or skipped with a reason from Detect changed areas' manifest.
   # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests]
+    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests, pwa-build]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

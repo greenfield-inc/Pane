@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 
 // The keyboard shortcut sheet (⌘/, Ctrl+K Ctrl+/ elsewhere): journeys 1–4 of the
 // keyboard-approvals plan, against the Vite renderer with the Electron mock.
@@ -9,7 +9,7 @@ const MAC = process.platform === 'darwin';
 
 async function open(page: Page, initialConfig: JsonObject = {}) {
   await installElectronApiMock(page, { initialConfig: { keyboardShortcutOverrides: { 'cycle-tab-next-d': 'mod+alt+]', 'cycle-tab-prev-a': 'mod+alt+[' }, ...initialConfig } });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
 }
 

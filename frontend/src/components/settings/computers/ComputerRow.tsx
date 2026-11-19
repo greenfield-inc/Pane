@@ -228,6 +228,7 @@ function ComputerDetail({ id, computer, routes, onAddRoute, onReorder, onUnlink,
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-secondary">
               {unlinkable ? `${computer.label} stops reaching your other computers, and they stop reaching it.` : `Pane forgets ${computer.label} on this computer.`}
+              {' '}Secret leases pushed to it end now if it is online; otherwise they last until they expire there.
             </span>
             <Button type="button" variant="danger" size="sm" onClick={() => { setConfirming(false); onUnlink(); }}>{unlinkable ? 'Unlink' : 'Forget'}</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>

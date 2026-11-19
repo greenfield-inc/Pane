@@ -85,6 +85,10 @@ export interface ParsedArgs {
   deviceIdle?: boolean;
   only?: string[];
   secretFiles?: string[];
+  /** `secrets lease`: the secret names, given as words. */
+  secretNames?: string[];
+  /** `secrets lease end --id`: the lease to end. */
+  leaseId?: string;
   reason?: string;
   /** `runpane theme set`: --theme, --colors (JSON text) and --css. --base arrives as baseBranch. */
   themeId?: string;
@@ -341,7 +345,8 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--approve', ['autopilot answer']],
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
-  ['--reason', ['secrets request', 'autopilot close', 'todos drop']],
+  ['--reason', ['secrets request', 'secrets lease', 'autopilot close', 'todos drop']],
+  ['--id', ['secrets lease end']],
   ['--platform', ['devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close']],
   ['--device', ['devices open']],
   ['--wait-ms', ['devices run']],
@@ -604,8 +609,8 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
   return args.splice(1, 1)[0];
 }
 
-/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; Autopilot's answer, close and rewrite take one; link takes the link; profiles show and launch take the profile's name. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'todoArgs' | 'profileName'> {
+/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; secrets lease takes secret names; Autopilot's answer, close and rewrite take one; link takes the link; profiles show and launch take the profile's name. */
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'todoArgs' | 'profileName' | 'secretNames'> {
   if (command.startsWith('todos ')) return { todoArgs: takeTodoWords(args) };
   if (PROFILE_NAME_COMMANDS.has(command)) {
     return args[0] !== undefined && !args[0].startsWith('-') ? { profileName: args.shift() ?? '' } : {};
@@ -618,6 +623,15 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
     const ids: string[] = [];
     while (args[0] !== undefined && !args[0].startsWith('-')) ids.push(args.shift() ?? '');
     return ids.length ? { inboxIds: ids } : {};
+  }
+  // secrets lease takes the names as words before, between or after its options.
+  if (command === 'secrets lease') {
+    const names: string[] = [];
+    for (let index = 0; index < args.length;) {
+      if (args[index].startsWith('-')) index += LOCAL_VALUE_FLAGS.has(args[index]) ? 2 : 1;
+      else names.push(...args.splice(index, 1));
+    }
+    return names.length ? { secretNames: names } : {};
   }
   if (command === 'handoff') {
     const words: string[] = [];
@@ -1375,6 +1389,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--reason') {
     parsed.reason = value;
+    return;
+  }
+  if (flag === '--id') {
+    parsed.leaseId = value;
     return;
   }
   if (flag === '--theme') {

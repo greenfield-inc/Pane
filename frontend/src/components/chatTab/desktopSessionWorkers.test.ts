@@ -1,14 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.hoisted(() => {
-  const values = new Map<string, string>();
-  vi.stubGlobal('localStorage', {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => void values.set(key, value),
-    removeItem: (key: string) => void values.delete(key),
-  });
-});
-
 import { panelApi } from '../../services/panelApi';
 import { useErrorStore } from '../../stores/errorStore';
 import { usePanelStore } from '../../stores/panelStore';

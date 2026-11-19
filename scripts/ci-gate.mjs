@@ -33,6 +33,7 @@ export const EXPECTED_JOBS = [
   'cross-os-main-tests',
   'relay-rust',
   'relay-tests',
+  'pwa-build',
 ];
 
 // Jobs a pull request may skip when none of their files changed, keyed by job
