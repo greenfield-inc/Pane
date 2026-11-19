@@ -1794,6 +1794,14 @@ split beside it, or between tabs on a strip to place it there. Dragging the
 last tab out of a group closes that group. In tiled Sessions a tab moves only
 within its own Session.
 
+A Session or Pane shows **at most two splits** (D-448, the same rule as the
+[To-dos page](TODOS.md)). With two shown, Split Right and Split Down are
+disabled and say "At most 2 splits", an edge drop joins that group as a tab
+instead of splitting (unless the tab is its group's only one, which just moves
+it), and a page an agent opens beside the chat joins the side group. A layout
+saved with more splits opens as two: the first keeps its tabs and the others'
+tabs join the second, so no tab is lost.
+
 ## Tiling Sessions side by side
 
 ![Two Sessions tiled side by side, both streaming](screenshots/session-tiling.png)

@@ -20,7 +20,7 @@ import type {
   SessionPanelLayout,
   ToolPanel,
 } from '../../../../shared/types/panels';
-import { containsGroup } from '../../utils/panelLayout';
+import { containsGroup, edgeDropSplits } from '../../utils/panelLayout';
 import type { DropZone } from '../../utils/panelLayout';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
 import { useAllotmentSizeSync } from '../../hooks/useAllotmentSizeSync';
@@ -160,6 +160,9 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
   // Focus chrome only exists once a real split does (pixel-identical rule)
   const multiGroup = layout.root.type === 'split';
 
+  // At two splits (D-448), an edge drop that would open a third joins the group instead.
+  const edgesJoin = isTabDragging && draggedPanelId !== null && !edgeDropSplits(layout.root, draggedPanelId);
+
   // Allotment's defaultSizes is mount-only, so an n-ary tab drop that adds or
   // removes a sibling needs the model synced from what was actually drawn.
   const recordLiveSizes = useAllotmentSizeSync<PanelGroupNode>(layout.root, onSizesChange);
@@ -186,6 +189,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
           activeDropZone={dropZones?.get(node.id) ?? null}
           onDropZoneChange={onDropZoneChange}
           onDropTab={onDropTab}
+          edgesJoin={edgesJoin}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onStripDrop={onStripDrop ? (panelId, idx) => onStripDrop(node.id, panelId, idx) : undefined}
@@ -244,7 +248,7 @@ export const SplitLayout: React.FC<SplitLayoutProps> = React.memo(({
     resolvePanels, primaryGroupId, focusedGroupId, multiGroup, isMainRepo,
     onPanelSelect, onPanelClose, onFocusGroup, onSizesChange, recordLiveSizes,
     isTabDragging, draggedPanelId, dropZones, onDropZoneChange,
-    onDropTab, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
+    onDropTab, edgesJoin, onDragStart, onDragEnd, onStripDrop, getPanelTabPresentation, zoomedGroupId, emptyState,
     showAddTool, alwaysShowClose, keepPermanentTabsInGroups, renderAddTool,
     onToggleMaximize, hidden, renderPanelContent,
   ]);

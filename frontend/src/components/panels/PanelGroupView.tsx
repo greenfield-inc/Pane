@@ -60,6 +60,8 @@ export interface PanelGroupViewProps {
   activeDropZone?: DropZone | null;
   onDropZoneChange?: (groupId: string, zone: DropZone | null) => void;
   onDropTab?: (groupId: string, zone: DropZone) => void;
+  /** At two splits (D-448) this group's edges take the dragged tab instead of splitting. */
+  edgesJoin?: boolean;
   onDragStart?: (panelId: string) => void;
   onDragEnd?: () => void;
   onStripDrop?: (panelId: string, insertIndex: number) => void;
@@ -95,6 +97,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
   activeDropZone = null,
   onDropZoneChange,
   onDropTab,
+  edgesJoin = false,
   onDragStart,
   onDragEnd,
   onStripDrop,
@@ -273,6 +276,7 @@ export const PanelGroupView: React.FC<PanelGroupViewProps> = React.memo(({
             onZoneChange={handleZoneChange}
             onDrop={handleDrop}
             activeZone={activeDropZone}
+            edgesJoin={edgesJoin}
           />
         )}
 

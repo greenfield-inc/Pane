@@ -20,6 +20,8 @@ export interface ProjectViewActions {
   closeActiveTab: () => void;
   /** Split the focused group's active tab out to the right (row) or below (column). */
   canSplit?: () => boolean;
+  /** Why the focused tab cannot split out now (the two-split rule, D-448), or null. */
+  splitBlockedReason?: () => string | null;
   split?: (direction: 'row' | 'column') => void;
   toggleTerminal?: () => void;
 }

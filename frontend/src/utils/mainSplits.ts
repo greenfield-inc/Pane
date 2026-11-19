@@ -5,9 +5,13 @@ import { createContext, useContext } from 'react';
  * nothing ever opens a third column. A surface that wants another split asks `canOpenSplit`; when
  * it is refused, what it would have opened lands as a tab in the split it already has.
  *
- * Today the to-do page obeys it (T-38). Session panel splits are to adopt it next.
+ * The to-do page obeys it (T-38), and so does a Pane's or Session's own panel layout (T-40, through
+ * `canSplitLayout` in panelLayout).
  */
 export const MAX_MAIN_SPLITS = 2;
+
+/** Why Split Right / Split Down are unavailable once the main area shows its two splits. */
+export const SPLIT_LIMIT_REASON = `At most ${MAX_MAIN_SPLITS} splits`;
 
 /** The splits a surface may use: at most `max`, of which `shown` are already taken around it. */
 export interface SplitArea {

@@ -39,6 +39,8 @@ import {
   showPanelInSplit,
   placeLeadingSideTab,
   placeTabAfter,
+  canSplitLayout,
+  edgeDropSplits,
 } from './panelLayout';
 
 // ---------------------------------------------------------------------------
@@ -231,6 +233,36 @@ describe('normalize', () => {
 // splitGroup
 // ---------------------------------------------------------------------------
 
+describe('the two-split rule for a Session’s panels (D-448)', () => {
+  const two = split('s1', 'row', [group('g1', ['agent', 'notes']), group('g2', ['plan'])]);
+
+  it('allows a split until the layout shows two', () => {
+    expect(canSplitLayout(group('g1', ['agent', 'notes']))).toBe(true);
+    expect(canSplitLayout(two)).toBe(false);
+  });
+
+  it('edge drops split only while a split is free, or when the dragged tab leaves its split empty', () => {
+    expect(edgeDropSplits(group('g1', ['agent', 'notes']), 'notes')).toBe(true);
+    expect(edgeDropSplits(two, 'notes')).toBe(false);
+    expect(edgeDropSplits(two, 'plan')).toBe(true);
+    expect(edgeDropSplits(two, 'from-elsewhere')).toBe(false);
+  });
+});
+
+describe('agent and runpane split requests at two splits (D-448)', () => {
+  const twoDown = split('s1', 'column', [group('g1', ['agent', 'notes'], 'agent'), group('g2', ['plan'])]);
+
+  it('a tab created with openPlacement split joins the second split as a tab', () => {
+    const root = placeCreatedPanel(twoDown, 'g1', { id: 'page', metadata: { openPlacement: 'split' } });
+    expect(allGroups(root).map(g => g.panelIds)).toEqual([['agent', 'notes'], ['plan', 'page']]);
+  });
+
+  it('an activation request with placement split moves the tab into the second split, never a third', () => {
+    const root = showPanelInSplit(twoDown, 'notes');
+    expect(allGroups(root).map(g => [g.panelIds, g.activePanelId])).toEqual([[['agent'], 'agent'], [['plan', 'notes'], 'notes']]);
+  });
+});
+
 describe('splitGroup', () => {
   it('wraps a root group into a 50/50 split', () => {
     const root = group('g1', ['a', 'b'], 'a');
@@ -249,25 +281,22 @@ describe('splitGroup', () => {
     expect(right.activePanelId).toBe('a');
   });
 
-  it('inserts an n-ary sibling in a same-direction split, halving the source size', () => {
-    const root = split('s1', 'row', [group('g1', ['a', 'b']), group('g2', ['c'])], [0.6, 0.4]);
-    const result = requireSplit(splitGroup(root, 'g1', 'a', 'row'));
-    expect(result.id).toBe('s1');
-    expect(result.children).toHaveLength(3);
-    expect(result.children.map(c => c.id)).toEqual(['g1', result.children[1].id, 'g2']);
-    expect(result.sizes.map(s => Math.round(s * 100) / 100)).toEqual([0.3, 0.3, 0.4]);
+  it('splits down into a column split', () => {
+    const result = requireSplit(splitGroup(group('g1', ['a', 'b'], 'a'), 'g1', 'a', 'column'));
+    expect(result.direction).toBe('column');
+    expect(allGroups(result).map(g => g.panelIds)).toEqual([['b'], ['a']]);
   });
 
-  it('nests a new split when the direction differs', () => {
-    const root = split('s1', 'row', [group('g1', ['a', 'b']), group('g2', ['c'])]);
-    const result = requireSplit(splitGroup(root, 'g1', 'a', 'column'));
-    expect(result.id).toBe('s1');
-    const firstChild = result.children[0];
-    if (!firstChild) throw new Error('Expected nested split');
-    const nested = requireSplit(firstChild);
-    expect(nested.type).toBe('split');
-    expect(nested.direction).toBe('column');
-    expect(allPanelIds(nested)).toEqual(['b', 'a']);
+  it('at two splits, refuses a third and keeps the tab in its split (D-448)', () => {
+    const root = split('s1', 'row', [group('g1', ['a', 'b']), group('g2', ['c'])], [0.6, 0.4]);
+    expect(splitGroup(root, 'g1', 'a', 'row')).toBe(root);
+    expect(splitGroup(root, 'g1', 'a', 'column')).toBe(root);
+  });
+
+  it('at two splits, a tab not yet in the layout lands as a tab in the split it was aimed at', () => {
+    const root = split('s1', 'row', [group('g1', ['a']), group('g2', ['c'])]);
+    const result = splitGroup(root, 'g2', 'new', 'row');
+    expect(allGroups(result).map(g => [g.id, g.panelIds, g.activePanelId])).toEqual([['g1', ['a'], 'a'], ['g2', ['c', 'new'], 'new']]);
   });
 
   it('splitting out a sole panel collapses the emptied source group', () => {
@@ -333,28 +362,23 @@ describe('movePanel center drops', () => {
 
 describe('movePanel edge drops', () => {
   it('splits against the target group in the edge direction', () => {
-    const root = split('s1', 'row', [group('g1', ['a', 'b'], 'a'), group('g2', ['c'])]);
-    const result = requireSplit(movePanel(root, 'a', { groupId: 'g2', edge: 'bottom' }));
-    expect(result.id).toBe('s1');
-    const secondChild = result.children[1];
-    if (!secondChild) throw new Error('Expected nested split');
-    const nested = requireSplit(secondChild);
-    expect(nested.type).toBe('split');
-    expect(nested.direction).toBe('column');
-    const firstNestedChild = nested.children[0];
-    const secondNestedChild = nested.children[1];
-    if (!firstNestedChild || !secondNestedChild) throw new Error('Expected both nested groups');
-    expect(requireGroup(firstNestedChild).panelIds).toEqual(['c']);
-    expect(requireGroup(secondNestedChild).panelIds).toEqual(['a']);
+    const result = requireSplit(movePanel(group('g1', ['a', 'c'], 'a'), 'a', { groupId: 'g1', edge: 'bottom' }));
+    expect(result.direction).toBe('column');
+    expect(allGroups(result).map(g => g.panelIds)).toEqual([['c'], ['a']]);
   });
 
-  it('inserts an n-ary sibling when the edge matches the parent direction', () => {
+  it('at two splits, a sole tab may still move to another edge: the split count stays two', () => {
+    const root = split('s1', 'row', [group('g1', ['a']), group('g2', ['c'])]);
+    const result = requireSplit(movePanel(root, 'a', { groupId: 'g2', edge: 'bottom' }));
+    expect(result.direction).toBe('column');
+    expect(allGroups(result).map(g => g.panelIds)).toEqual([['c'], ['a']]);
+  });
+
+  it('at two splits, an edge drop that would open a third joins the target split as a tab (D-448)', () => {
     const root = split('s1', 'row', [group('g1', ['a', 'b']), group('g2', ['c'])], [0.5, 0.5]);
     const result = requireSplit(movePanel(root, 'a', { groupId: 'g2', edge: 'right' }));
-    expect(result.id).toBe('s1');
-    expect(result.children).toHaveLength(3);
-    expect(allPanelIds(result)).toEqual(['b', 'c', 'a']);
-    expect(result.sizes.map(s => Math.round(s * 100) / 100)).toEqual([0.5, 0.25, 0.25]);
+    expect(allGroups(result).map(g => [g.id, g.panelIds, g.activePanelId])).toEqual([['g1', ['b'], 'b'], ['g2', ['c', 'a'], 'a']]);
+    expect(result.sizes).toEqual([0.5, 0.5]);
   });
 
   it('never loses a panel when a sole tab is edge-dropped onto its own group', () => {
@@ -438,15 +462,14 @@ describe('placeLeadingSideTab', () => {
     expect(findGroup(root, 'g3')?.panelIds).toEqual(['notes']);
   });
 
-  it('opens a right split beside the conversation when the layout is only split top and bottom', () => {
+  it('at two splits top and bottom, goes first in the lower split instead of opening a third (D-448)', () => {
     const root = placeLeadingSideTab(split('s1', 'column', [group('g1', ['agent']), group('g2', ['plan'])]), 'overview');
-    expect(findGroupContainingPanel(root, 'overview')?.panelIds).toEqual(['overview']);
-    expect(findGroup(root, 'g2')?.panelIds).toEqual(['plan']);
+    expect(allGroups(root).map(g => [g.panelIds, g.activePanelId])).toEqual([[['agent'], 'agent'], [['overview', 'plan'], 'plan']]);
   });
 
-  it('opens a split right of the conversation when the person moved it to the right', () => {
+  it('at two splits with the conversation moved right, goes first in the other split (D-448)', () => {
     const root = placeLeadingSideTab(split('s1', 'row', [group('g1', ['plan']), group('g2', ['agent'])]), 'overview', 'agent');
-    expect(allGroups(root).map(g => [g.panelIds, g.activePanelId])).toEqual([[['plan'], 'plan'], [['agent'], 'agent'], [['overview'], 'overview']]);
+    expect(allGroups(root).map(g => [g.panelIds, g.activePanelId])).toEqual([[['overview', 'plan'], 'plan'], [['agent'], 'agent']]);
   });
 
   it('leaves the tab where the person put it', () => {
@@ -587,6 +610,39 @@ describe('reconcile', () => {
     expect(changed).toBe(true);
     expect(result.root.type).toBe('group');
     expect(allPanelIds(result.root)).toEqual(['a', 'b']);
+  });
+
+  it('opens a saved three-split layout as two, keeping every tab (D-448)', () => {
+    const saved = layoutOf(split('s1', 'row', [group('g1', ['agent']), group('g2', ['plan', 'notes'], 'notes'), group('g3', ['report', 'logs'], 'logs')]));
+    const { layout: result, changed } = reconcile(saved, ['agent', 'plan', 'notes', 'report', 'logs']);
+    expect(changed).toBe(true);
+    expect(allGroups(result.root).map(g => [g.id, g.panelIds, g.activePanelId])).toEqual([
+      ['g1', ['agent'], 'agent'],
+      ['g2', ['plan', 'notes', 'report', 'logs'], 'notes'],
+    ]);
+    expect(requireSplit(result.root).sizes).toEqual([0.5, 0.5]);
+  });
+
+  it('folds nested extra splits into the second, and moves focus and the shown tab with a folded split', () => {
+    const saved = layoutOf(split('s1', 'row', [
+      group('g1', ['agent']),
+      split('s2', 'column', [group('g2', ['plan']), split('s3', 'row', [group('g3', ['report']), group('g4', ['logs', 'web'], 'web')])]),
+    ]), { focusedGroupId: 'g4', zoomedGroupId: 'g3' });
+    const live = ['agent', 'plan', 'report', 'logs', 'web'];
+    const { layout: result } = reconcile(saved, live);
+    expect(allGroups(result.root).map(g => [g.id, g.panelIds, g.activePanelId])).toEqual([
+      ['g1', ['agent'], 'agent'],
+      ['g2', ['plan', 'report', 'logs', 'web'], 'web'],
+    ]);
+    expect(result.focusedGroupId).toBe('g2');
+    expect(result.zoomedGroupId).toBeNull();
+    expect(allPanelIds(result.root).sort()).toEqual([...live].sort());
+  });
+
+  it('places agent pages and orphans after folding, still in two splits', () => {
+    const saved = layoutOf(split('s1', 'row', [group('g1', ['agent']), group('g2', ['plan']), group('g3', ['report'])]));
+    const { layout: result } = reconcile(saved, ['agent', 'plan', 'report', 'page', 'orphan'], new Set(['page']));
+    expect(allGroups(result.root).map(g => g.panelIds)).toEqual([['agent', 'orphan'], ['plan', 'report', 'page']]);
   });
 
   it('fixes a group activePanelId that no longer exists', () => {

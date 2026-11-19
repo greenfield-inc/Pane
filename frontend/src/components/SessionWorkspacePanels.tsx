@@ -50,10 +50,12 @@ import {
   removePanelFromLayout,
   showPanelInSplit,
   splitGroup,
+  canSplitLayout,
   subsetInsertIndex,
   updateSizes,
   type DropZone,
 } from '../utils/panelLayout';
+import { SPLIT_LIMIT_REASON } from '../utils/mainSplits';
 
 const EMPTY_PANELS: ToolPanel[] = [];
 const SESSION_INSPECTOR_TABS = ['files', 'changes', 'todos'] as const;
@@ -615,9 +617,13 @@ export function SessionWorkspacePanels({
       },
       canCloseActiveTab: () => Boolean(activePanel()) && activePanel()?.id !== agentPanelId && activePanel()?.metadata.permanent !== true,
       closeActiveTab: () => { const panel = activePanel(); if (panel) handleClose(panel); },
+      splitBlockedReason: () => {
+        const current = usePanelStore.getState().layouts[sessionId];
+        return current && !canSplitLayout(current.root) ? SPLIT_LIMIT_REASON : null;
+      },
       canSplit: () => {
         const focused = focusedGroup();
-        return Boolean(focused && focused.group.panelIds.length >= 2 && focused.group.activePanelId);
+        return Boolean(focused && canSplitLayout(focused.current.root) && focused.group.panelIds.length >= 2 && focused.group.activePanelId);
       },
       split: (direction) => {
         const focused = focusedGroup();

@@ -31,6 +31,7 @@ import {
   updateSplitSizes,
 } from './layoutTree';
 import type { LayoutRect } from './layoutTree';
+import { MAIN_AREA, MAX_MAIN_SPLITS, canOpenSplit } from './mainSplits';
 
 export { dropZoneFor } from './layoutTree';
 export type { DropZone } from './layoutTree';
@@ -112,6 +113,63 @@ export function activatePanelInLayout(
     zoomedGroupId: layout.zoomedGroupId && layout.zoomedGroupId !== groupId
       ? null
       : layout.zoomedGroupId,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The two-split rule (D-448)
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the layout may open one more split. Every operation here that would add a group asks
+ * through `withinSplitLimit`, so Split Right/Down, edge drops and agent placement obey one rule.
+ */
+export function canSplitLayout(root: PanelLayoutNode): boolean {
+  return canOpenSplit(MAIN_AREA, allGroups(root).length);
+}
+
+/**
+ * Whether dropping `panelId` on a group's edge opens a split there. At the limit it still does
+ * when the tab is its split's only one (moving it keeps the count); otherwise the edge joins the
+ * group like its centre.
+ */
+export function edgeDropSplits(root: PanelLayoutNode, panelId: string): boolean {
+  return canSplitLayout(root) || findGroupContainingPanel(root, panelId)?.panelIds.length === 1;
+}
+
+/** `next` when it adds no group past the limit; otherwise the refusal, which lands the tab as a tab. */
+function withinSplitLimit(root: PanelLayoutNode, next: PanelLayoutNode, refused: () => PanelLayoutNode): PanelLayoutNode {
+  const before = allGroups(root).length;
+  return allGroups(next).length > before && !canSplitLayout(root) ? refused() : next;
+}
+
+/**
+ * Fold a layout saved with more than two splits (before D-448) into two: the first split keeps its
+ * tabs, and every later split's tabs join the second, in reading order. No tab is lost. When the
+ * focused split is folded, focus and its shown tab move to the second split.
+ */
+function capSplits(layout: SessionPanelLayout): SessionPanelLayout {
+  const groups = allGroups(layout.root);
+  if (groups.length <= MAX_MAIN_SPLITS) return layout;
+  const keep = groups[MAX_MAIN_SPLITS - 1];
+  const folded = groups.slice(MAX_MAIN_SPLITS);
+  const foldedIds = new Set(folded.map(group => group.id));
+  const focusedFolded = folded.find(group => group.id === layout.focusedGroupId);
+  const fold = (node: PanelLayoutNode): PanelLayoutNode => {
+    if (node.type !== 'group') return { ...node, children: node.children.map(fold) };
+    if (foldedIds.has(node.id)) return { ...node, panelIds: [], activePanelId: null };
+    if (node.id !== keep.id) return node;
+    return {
+      ...node,
+      panelIds: [...node.panelIds, ...folded.flatMap(group => group.panelIds)],
+      activePanelId: focusedFolded?.activePanelId ?? node.activePanelId,
+    };
+  };
+  return {
+    ...layout,
+    root: normalize(fold(layout.root)),
+    focusedGroupId: focusedFolded ? keep.id : layout.focusedGroupId,
+    zoomedGroupId: layout.zoomedGroupId && foldedIds.has(layout.zoomedGroupId) ? null : layout.zoomedGroupId,
   };
 }
 
@@ -241,12 +299,15 @@ export function sessionOverviewTabId(sessionId: string): string {
 export function placeLeadingSideTab(root: PanelLayoutNode, panelId: string, besideId?: string): PanelLayoutNode {
   if (allPanelIds(root).includes(panelId)) return root;
   const right = root.type === 'split' && root.direction === 'row' ? root.children.at(-1) : undefined;
-  const side = right ? allGroups(right)[0] : undefined;
-  if (!side) return splitGroup(root, primaryGroup(root).id, panelId, 'row', true);
-  if (besideId && side.panelIds.includes(besideId)) return splitGroup(root, side.id, panelId, 'row', true);
+  let side = right ? allGroups(right)[0] : undefined;
+  const opensSplit = !side || (besideId !== undefined && side.panelIds.includes(besideId));
+  if (opensSplit && canSplitLayout(root)) return splitGroup(root, side?.id ?? primaryGroup(root).id, panelId, 'row', true);
+  // At two splits (D-448) the tab goes first in the split that is not the conversation's.
+  if (opensSplit) side = allGroups(root).filter(group => !besideId || !group.panelIds.includes(besideId)).pop() ?? primaryGroup(root);
+  const host = side ?? primaryGroup(root);
   const insert = (node: PanelLayoutNode): PanelLayoutNode => {
     if (node.type !== 'group') return { ...node, children: node.children.map(insert) };
-    if (node.id !== side.id) return node;
+    if (node.id !== host.id) return node;
     return { ...node, panelIds: [panelId, ...node.panelIds], activePanelId: node.activePanelId ?? panelId };
   };
   return insert(root);
@@ -358,8 +419,8 @@ export function splitGroup(
   const afterRemove = removePanel(root);
   // 2. Insert the new group next to the source
   const afterInsert = insertLeafBeside<PanelGroupNode>(afterRemove, sourceGroupId, newGroup, direction, after);
-  // 3. Normalize
-  return normalize(afterInsert);
+  // 3. Normalize; at two splits the tab stays (or lands) as a tab in the source split instead.
+  return withinSplitLimit(root, normalize(afterInsert), () => addPanelToGroup(root, sourceGroupId, panelId));
 }
 
 // ---------------------------------------------------------------------------
@@ -451,7 +512,12 @@ export function movePanel(
     activePanelId: panelId,
   };
 
-  return normalize(insertLeafBeside<PanelGroupNode>(normalized, edgeTarget.groupId, newGroup, direction, after));
+  const split = normalize(insertLeafBeside<PanelGroupNode>(normalized, edgeTarget.groupId, newGroup, direction, after));
+  // At two splits the edge joins the target split as a tab (D-448).
+  return withinSplitLimit(root, split, () => movePanel(root, panelId, {
+    groupId: edgeTarget.groupId,
+    index: findGroup(root, edgeTarget.groupId)?.panelIds.length ?? 0,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -498,7 +564,7 @@ export function removePanelFromLayout(
  * - Guarantee at least one group.
  */
 export function reconcile(
-  layout: SessionPanelLayout,
+  saved: SessionPanelLayout,
   livePanelIds: string[],
   splitPanelIds: ReadonlySet<string> = new Set(),
 ): ReconciledPanelLayout {
@@ -522,7 +588,11 @@ export function reconcile(
     return { ...node, children: node.children.map(cleanNode) };
   }
 
-  let root = normalize(cleanNode(layout.root));
+  const cleaned = normalize(cleanNode(saved.root));
+  // A layout saved with more than two splits opens as two (D-448).
+  const layout = capSplits({ ...saved, root: cleaned });
+  if (layout.root !== cleaned) changed = true;
+  let root = layout.root;
 
   // If the tree collapsed, recreate with a single group
   if (root.type === 'group' && root.panelIds.length === 0 && livePanelIds.length > 0) {

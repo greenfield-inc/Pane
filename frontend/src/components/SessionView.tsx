@@ -48,6 +48,7 @@ import {
   createSingleGroupLayout,
   reconcile as reconcileLayout,
   splitGroup,
+  canSplitLayout,
   movePanel as movePanelInLayout,
   removePanelFromLayout,
   addPanelToGroup,
@@ -65,6 +66,7 @@ import {
   mergeAllGroups,
   type DropZone,
 } from '../utils/panelLayout';
+import { SPLIT_LIMIT_REASON } from '../utils/mainSplits';
 import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, Sprout, Boxes } from 'lucide-react';
 import { AgentFarmProfileDialog } from './chatTab/AgentFarmProfileDialog';
 import { agentIcon, getCliBrandIcon } from './ui/brandIconRegistry';
@@ -942,17 +944,27 @@ export const SessionView = memo(() => {
   });
 
   // --- Split tab group hotkeys ---
+  // The two-split rule (D-448): once the layout shows two splits, Split Right/Down are disabled
+  // and say why; splitGroup refuses a third anyway.
+  const splitBlockedReason = useCallback((): string | null => {
+    const bridged = projectActions();
+    if (bridged) return bridged.splitBlockedReason?.() ?? null;
+    const layout = activeSession ? usePanelStore.getState().layouts[activeSession.id] : undefined;
+    return layout && !canSplitLayout(layout.root) ? SPLIT_LIMIT_REASON : null;
+  }, [activeSession, projectActions]);
+  const canSplitFocused = useCallback((): boolean => {
+    const bridged = projectActions();
+    if (bridged) return bridged.canSplit?.() ?? false;
+    if (!activeSession || !focusedGroup || splitBlockedReason()) return false;
+    return focusedGroup.panelIds.length >= 2 && !!focusedGroup.activePanelId;
+  }, [activeSession, focusedGroup, projectActions, splitBlockedReason]);
   // Mod+\: split right (move active tab to a new group to the right)
   useHotkey({
     id: 'split-right',
     label: 'Split Right',
     category: 'tabs',
-    enabled: () => {
-      const bridged = projectActions();
-      if (bridged) return bridged.canSplit?.() ?? false;
-      if (!activeSession || !focusedGroup) return false;
-      return focusedGroup.panelIds.length >= 2 && !!focusedGroup.activePanelId;
-    },
+    enabled: canSplitFocused,
+    disabledReason: splitBlockedReason,
     action: () => {
       const bridged = projectActions();
       if (bridged) { bridged.split?.('row'); return; }
@@ -984,12 +996,8 @@ export const SessionView = memo(() => {
     id: 'split-down',
     label: 'Split Down',
     category: 'tabs',
-    enabled: () => {
-      const bridged = projectActions();
-      if (bridged) return bridged.canSplit?.() ?? false;
-      if (!activeSession || !focusedGroup) return false;
-      return focusedGroup.panelIds.length >= 2 && !!focusedGroup.activePanelId;
-    },
+    enabled: canSplitFocused,
+    disabledReason: splitBlockedReason,
     action: () => {
       const bridged = projectActions();
       if (bridged) { bridged.split?.('column'); return; }

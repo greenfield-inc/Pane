@@ -27,6 +27,11 @@ export interface DropOverlayProps {
   activeZone: DropZone | null;
   /** Zones this target refuses; hovering one reads as no zone at all. */
   disabledZones?: readonly DropZone[];
+  /**
+   * The edges cannot open a split here (the two-split rule, D-448), so hovering one offers the
+   * centre instead: the drop joins this target.
+   */
+  edgesJoin?: boolean;
 }
 
 export const DropOverlay: React.FC<DropOverlayProps> = React.memo(({
@@ -34,14 +39,15 @@ export const DropOverlay: React.FC<DropOverlayProps> = React.memo(({
   onDrop,
   activeZone,
   disabledZones,
+  edgesJoin = false,
 }) => {
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     const rect = e.currentTarget.getBoundingClientRect();
-    const zone = dropZoneFor(e.clientX, e.clientY, rect);
+    const zone = edgesJoin ? 'center' : dropZoneFor(e.clientX, e.clientY, rect);
     onZoneChange(disabledZones?.includes(zone) ? null : zone);
-  }, [onZoneChange, disabledZones]);
+  }, [onZoneChange, disabledZones, edgesJoin]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
