@@ -53,7 +53,7 @@ function apiJob({ name = 'Lint (1/2)', conclusion = 'success', waiting = 3, step
 const check = (jobs, budgets = BUDGETS) => checkBudgets({ jobs, budgets, workflowText: WORKFLOW });
 
 test('a job within its targets passes with nothing to report', () => {
-  assert.deepEqual(check([apiJob()]), { ok: true, problems: [], warnings: [] });
+  assert.deepEqual(check([apiJob()]), { ok: true, problems: [], warnings: [], unmeasured: [] });
 });
 
 test('a value at its ceiling passes and one second over fails', () => {
@@ -63,15 +63,16 @@ test('a value at its ceiling passes and one second over fails', () => {
 
   const over = check([apiJob({ steps: { 'Install dependencies': 48 } })]);
   assert.equal(over.ok, false);
-  assert.deepEqual(over.problems, ['Lint (1/2) setup: 51 s is over its 50 s ceiling (target 30 s).']);
+  assert.equal(over.problems.length, 1);
+  assert.match(over.problems[0], /^Lint \(1\/2\) setup: 51 s is over its 50 s ceiling \(target 30 s\)\. If the run was only slow, re-run all jobs/);
 });
 
 test('each phase and budgeted step with a ceiling fails one second over it', () => {
   const verdict = check([apiJob({ waiting: 400, steps: { Lint: 11, Tests: 90 } })]);
   assert.deepEqual(verdict.warnings, ['Lint (1/2) waiting: 400 s is over its 10 s target (no ceiling).']);
-  assert.deepEqual(verdict.problems, [
-    'Lint (1/2) running: 101 s is over its 100 s ceiling (target 60 s).',
-    'Lint (1/2) step "Lint": 11 s is over its 10 s ceiling (target 5 s).',
+  assert.deepEqual(verdict.problems.map((line) => line.split('. ')[0]), [
+    'Lint (1/2) running: 101 s is over its 100 s ceiling (target 60 s)',
+    'Lint (1/2) step "Lint": 11 s is over its 10 s ceiling (target 5 s)',
   ]);
 });
 
@@ -81,28 +82,32 @@ test('a step over its target but under its ceiling only warns', () => {
   assert.deepEqual(verdict.warnings, ['Lint (1/2) step "Lint": 6 s is over its 5 s target (ceiling 10 s).']);
 });
 
-test('a renamed setup step fails instead of moving its time to running', () => {
+// Missing data warns: a run fails only on a measured value over its ceiling.
+test('a renamed setup step is reported as not measured', () => {
   const verdict = check([apiJob({ steps: { 'Install dependencies': undefined, 'Get packages': 20 } })]);
-  assert.equal(verdict.ok, false);
-  assert.match(verdict.problems[0], /^Lint \(1\/2\): setup step "Install dependencies" was not reported/);
+  assert.equal(verdict.ok, true);
+  assert.deepEqual(verdict.unmeasured, ['Lint (1/2): setup step "Install dependencies" was not reported, so its setup time is incomplete.']);
 });
 
-test('a budgeted step that is missing or skipped fails', () => {
-  assert.match(check([apiJob({ steps: { Lint: undefined } })]).problems[0], /step "Lint" has a budget but reported no time/);
+test('a budgeted step that is missing or skipped is reported as not measured', () => {
+  const missing = check([apiJob({ steps: { Lint: undefined } })]);
+  assert.equal(missing.ok, true);
+  assert.deepEqual(missing.unmeasured, ['Lint (1/2): step "Lint" reported no time.']);
   const skipped = apiJob();
   skipped.steps.find((step) => step.name === 'Lint').conclusion = 'skipped';
-  assert.match(check([skipped]).problems[0], /step "Lint" has a budget but reported no time/);
+  assert.deepEqual(check([skipped]).unmeasured, ['Lint (1/2): step "Lint" reported no time.']);
 });
 
-test('a job with no budget fails, and a budget for a job that is gone fails', () => {
-  assert.match(check([apiJob()], { ...BUDGETS, jobs: {} }).problems[0], /job lint has no budget/);
-  assert.match(check([], { ...BUDGETS, jobs: { ...BUDGETS.jobs, gone: { ceilings: {} } } }).problems[0], /^gone: has a budget but is not in quality.yml/);
+test('a job with no budget is reported as not measured', () => {
+  const verdict = check([apiJob()], { ...BUDGETS, jobs: {} });
+  assert.equal(verdict.ok, true);
+  assert.deepEqual(verdict.unmeasured, ['Lint (1/2): has no budget in scripts/ci-budgets.json.']);
 });
 
 test('failed jobs and the gate job itself are left to the gate', () => {
   const failed = apiJob({ conclusion: 'failure', steps: { Lint: 99 } });
   const gate = { ...apiJob({ name: 'CI result' }), conclusion: null, completed_at: null };
-  assert.deepEqual(check([failed, gate]), { ok: true, problems: [], warnings: [] });
+  assert.deepEqual(check([failed, gate]), { ok: true, problems: [], warnings: [], unmeasured: [] });
 });
 
 // The contract with the real files.

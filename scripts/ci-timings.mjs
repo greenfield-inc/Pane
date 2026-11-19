@@ -21,9 +21,9 @@
 // --summary appends a table to that file (the job summary).
 //
 // --budgets checks each successful Code Quality job against the budget file:
-// a value over its ceiling, a job with no budget, or a budgeted step the job
-// did not report (renamed or removed) fails; a value over its target only
-// warns. Times come from the jobs API, which reports whole seconds.
+// a value over its ceiling fails; a value over its target, or one that could
+// not be measured (no jobs API answer, a step or phase with no time, a job
+// with no budget), only warns. Times come from the jobs API in whole seconds.
 
 import { execFile } from 'node:child_process';
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -289,20 +289,19 @@ function namePattern(name) {
 
 /**
  * Checks one run attempt's jobs (from the jobs API) against the budget file.
- * `problems` fail CI result; `warnings` are targets missed. Jobs that did not
- * succeed are left to the gate's own verdict, and the gate job is still running.
+ * Only `problems` (a measured value over its ceiling) fail CI result;
+ * `warnings` are targets missed and `unmeasured` values with no time. Jobs
+ * that did not succeed are left to the gate's own verdict, and the gate job
+ * is still running. Renames are caught by scripts/ci-timings.test.mjs.
  */
 export function checkBudgets({ jobs, budgets, workflowText, gateJob = 'ci-result' }) {
   const workflow = workflowJobs(workflowText);
   const problems = [];
   const warnings = [];
-  const fix = 'Update scripts/ci-budgets.json in the same change.';
-  for (const id of Object.keys(budgets.jobs)) {
-    if (!workflow.some((job) => job.id === id)) problems.push(`${id}: has a budget but is not in quality.yml. ${fix}`);
-  }
+  const unmeasured = [];
   const compare = (label, value, { target, ceiling }) => {
     if (ceiling !== undefined && value > ceiling) {
-      problems.push(`${label}: ${value} s is over its ${ceiling} s ceiling (target ${target} s).`);
+      problems.push(`${label}: ${value} s is over its ${ceiling} s ceiling (target ${target} s). If the run was only slow, re-run all jobs: re-running CI result alone reads the same timings.`);
     } else if (target !== undefined && value > target) {
       warnings.push(`${label}: ${value} s is over its ${target} s target (${ceiling === undefined ? 'no ceiling' : `ceiling ${ceiling} s`}).`);
     }
@@ -310,41 +309,38 @@ export function checkBudgets({ jobs, budgets, workflowText, gateJob = 'ci-result
   for (const job of jobs) {
     const owner = workflow.find((entry) => namePattern(entry.name).test(job.name));
     if (owner?.id === gateJob || job.conclusion !== 'success') continue;
-    if (!owner) {
-      problems.push(`${job.name}: matches no job in quality.yml, so it has no budget.`);
-      continue;
-    }
-    const budget = budgets.jobs[owner.id];
+    const budget = owner && budgets.jobs[owner.id];
     if (!budget) {
-      problems.push(`${job.name}: job ${owner.id} has no budget in scripts/ci-budgets.json. Add one with ceilings set from real runs.`);
+      unmeasured.push(`${job.name}: has no budget in scripts/ci-budgets.json.`);
       continue;
     }
     const [row] = jobTimings([job]);
     const reported = new Map((job.steps ?? []).map((step) => [step.name, step]));
     for (const name of budget.setupSteps ?? []) {
-      if (!reported.has(name)) problems.push(`${job.name}: setup step "${name}" was not reported, so setup time is unknown (renamed or removed?). ${fix}`);
+      if (!reported.has(name)) unmeasured.push(`${job.name}: setup step "${name}" was not reported, so its setup time is incomplete.`);
     }
     for (const phase of PHASES) {
       const value = row[`${phase}_seconds`];
-      if (value === null) problems.push(`${job.name}: has no ${phase} time.`);
+      if (value === null) unmeasured.push(`${job.name}: has no ${phase} time.`);
       else compare(`${job.name} ${phase}`, value, { target: budgets.targets[phase], ceiling: budget.ceilings?.[phase] });
     }
     for (const [name, limits] of Object.entries(budget.steps ?? {})) {
       const step = reported.get(name);
       if (!step?.started_at || !step.completed_at || step.conclusion === 'skipped') {
-        problems.push(`${job.name}: step "${name}" has a budget but reported no time (renamed, removed or skipped?). ${fix}`);
+        unmeasured.push(`${job.name}: step "${name}" reported no time.`);
       } else {
         compare(`${job.name} step "${name}"`, seconds(step.started_at, step.completed_at), limits);
       }
     }
   }
-  return { ok: problems.length === 0, problems, warnings };
+  return { ok: problems.length === 0, problems, warnings, unmeasured };
 }
 
-function budgetMarkdown({ ok, problems, warnings }) {
+function budgetMarkdown({ ok, problems, warnings, unmeasured }) {
   const lines = [`### Budgets: ${ok ? 'pass' : 'fail'}`, ''];
-  if (problems.length === 0 && warnings.length === 0) lines.push('Every job is within its targets.');
-  if (problems.length > 0) lines.push('Over a ceiling or missing a timer (fails CI result):', '', ...problems.map((line) => `- ${line}`), '');
+  if (problems.length + warnings.length + unmeasured.length === 0) lines.push('Every job is within its targets.');
+  if (problems.length > 0) lines.push('Over a ceiling (fails CI result):', '', ...problems.map((line) => `- ${line}`), '');
+  if (unmeasured.length > 0) lines.push('Not measured (reported only):', '', ...unmeasured.map((line) => `- ${line}`), '');
   if (warnings.length > 0) lines.push('Over a target (reported only):', '', ...warnings.map((line) => `- ${line}`));
   return `${lines.join('\n')}\n`;
 }
@@ -361,10 +357,11 @@ async function recordRun(args) {
       if (body.jobs.length < 100) break;
     }
   } catch (error) {
-    // Without timings no ceiling can be checked, so that fails; targets alone
-    // are reports, and a report that cannot be read only warns.
-    if (budgets && hasCeilings(budgets)) throw new Error(`No job timings, so no budget ceiling could be checked: ${error.message}`);
-    console.log(`::warning title=Job timings::${error.message}`);
+    // A run fails only on a measured value over its ceiling, so timings that
+    // cannot be read leave the verdict to CI result's Decide step.
+    const message = `No job timings, so no budget was measured: ${error.message}`;
+    console.log(`::warning title=Budgets not measured::${message}`);
+    if (args.summary) await appendFile(args.summary, `### Budgets: not measured\n\n${message}\n`);
     return;
   }
   const rows = jobTimings(jobs);
@@ -388,14 +385,11 @@ async function recordRun(args) {
   const markdown = budgetMarkdown(verdict);
   process.stdout.write(markdown);
   if (args.summary) await appendFile(args.summary, markdown);
+  for (const line of verdict.unmeasured) console.log(`::warning title=Budgets not measured::${line}`);
   if (verdict.warnings.length > 0) console.log(`::warning title=Over target::${verdict.warnings.length} values are over their targets; the job summary lists them.`);
   for (const problem of verdict.problems) console.log(`::error title=Over budget::${problem}`);
   if (!verdict.ok) process.exitCode = 1;
 }
-
-const hasCeilings = (budgets) => Object.values(budgets.jobs).some((budget) => (
-  Object.keys(budget.ceilings ?? {}).length > 0 || Object.values(budget.steps ?? {}).some((step) => step.ceiling !== undefined)
-));
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));

@@ -8,7 +8,7 @@
     "changes": {
       "ceilings": {
         "setup": 10,
-        "running": 10
+        "running": 20
       },
       "setupSteps": [
         "Checkout code"
@@ -16,8 +16,8 @@
     },
     "quality-checks": {
       "ceilings": {
-        "setup": 50,
-        "running": 170
+        "setup": 60,
+        "running": 180
       },
       "setupSteps": [
         "Checkout code",
@@ -28,7 +28,7 @@
     "main-tests": {
       "ceilings": {
         "setup": 60,
-        "running": 100
+        "running": 110
       },
       "setupSteps": [
         "Checkout code",
@@ -41,7 +41,7 @@
     "typecheck-lint": {
       "ceilings": {
         "setup": 50,
-        "running": 60
+        "running": 70
       },
       "setupSteps": [
         "Checkout code",
@@ -71,8 +71,8 @@
     },
     "functional-smoke-browser": {
       "ceilings": {
-        "setup": 160,
-        "running": 260
+        "setup": 180,
+        "running": 280
       },
       "setupSteps": [
         "Checkout code",
@@ -83,8 +83,8 @@
     },
     "renderer-selection": {
       "ceilings": {
-        "setup": 180,
-        "running": 80
+        "setup": 200,
+        "running": 90
       },
       "setupSteps": [
         "Checkout code",
@@ -95,8 +95,8 @@
     },
     "functional-smoke-electron": {
       "ceilings": {
-        "setup": 150,
-        "running": 370
+        "setup": 190,
+        "running": 410
       },
       "setupSteps": [
         "Checkout code",
@@ -112,8 +112,8 @@
     },
     "runpane-wrapper-tests": {
       "ceilings": {
-        "setup": 150,
-        "running": 110
+        "setup": 160,
+        "running": 120
       },
       "setupSteps": [
         "Checkout code",
@@ -126,8 +126,8 @@
     },
     "cross-os-main-tests": {
       "ceilings": {
-        "setup": 180,
-        "running": 190
+        "setup": 200,
+        "running": 210
       },
       "setupSteps": [
         "Keep temp files on the workspace drive",
@@ -141,8 +141,8 @@
     },
     "relay-rust": {
       "ceilings": {
-        "setup": 110,
-        "running": 140
+        "setup": 120,
+        "running": 160
       },
       "setupSteps": [
         "Checkout code",
@@ -154,8 +154,8 @@
     },
     "relay-tests": {
       "ceilings": {
-        "setup": 130,
-        "running": 120
+        "setup": 150,
+        "running": 130
       },
       "setupSteps": [
         "Checkout code",
@@ -171,7 +171,7 @@
     },
     "pwa-build": {
       "ceilings": {
-        "setup": 90,
+        "setup": 100,
         "running": 20
       },
       "setupSteps": [

@@ -736,8 +736,8 @@ jobs:
 
     # Each job's head SHA, runner and waiting/setup/running seconds, in the
     # job summary and the log, for measuring CI speed (scripts/ci-timings.mjs).
-    # A job over a ceiling in scripts/ci-budgets.json, or missing a budgeted
-    # timer, fails this step; a missed target is only reported.
+    # A job over a ceiling in scripts/ci-budgets.json fails this step; a
+    # missed target or a value that could not be measured is only reported.
     - name: Record job timings and check budgets
       if: ${{ always() }}
       env:
