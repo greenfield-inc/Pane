@@ -1,6 +1,3 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import Database from 'better-sqlite3-multiple-ciphers';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TodoService } from './todoService';
@@ -154,80 +151,6 @@ describe('TodoService', () => {
       expect(service.require(todo.number).state).toBe('in_progress');
       await service.flush();
       expect(host.typedInto('s1-orch').at(-1)).toContain('Changes asked for: add dark mode');
-    });
-  });
-
-  describe('a copy of each attached file (T-21)', () => {
-    let dir: string;
-    beforeEach(() => {
-      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'todo-files-'));
-      host.filesDir = path.join(dir, 'pane', 'todos', 'files');
-    });
-    afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
-
-    function workerFile(name: string, text: string): string {
-      const file = path.join(dir, 'worktrees', 'worker', name);
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, text);
-      return file;
-    }
-
-    it('still opens after the worker\'s worktree is gone; links are left alone', async () => {
-      const todo = await service.create({ title: 'Pane Selection' }, person);
-      const file = workerFile('t1-findings.md', 'root cause: stale index');
-      service.attach(todo.number, { target: file }, { kind: 'agent', panelId: 's1-orch' });
-      service.attach(todo.number, { target: 'https://github.com/acme/x/pull/1' }, { kind: 'agent', panelId: 's1-orch' });
-      expect(service.documentFile(file)).toBe(file);
-      fs.rmSync(path.join(dir, 'worktrees'), { recursive: true });
-      const kept = service.documentFile(file);
-      expect(kept).not.toBe(file);
-      expect(fs.readFileSync(kept, 'utf8')).toBe('root cause: stale index');
-      expect(service.documentFile('https://github.com/acme/x/pull/1')).toBe('https://github.com/acme/x/pull/1');
-    });
-
-    it('takes the latest version at review, so later edits survive too', async () => {
-      const todo = await service.create({ title: 'Ship' }, person);
-      const file = workerFile('findings.md', 'draft');
-      service.attach(todo.number, { target: file }, { kind: 'agent', panelId: 's1-orch' });
-      fs.writeFileSync(file, 'final findings');
-      fs.utimesSync(file, new Date(), new Date(Date.now() + 5_000));
-      await service.review(todo.number, {}, { kind: 'agent' });
-      fs.rmSync(file);
-      expect(fs.readFileSync(service.documentFile(file), 'utf8')).toBe('final findings');
-    });
-
-    it('says when a file is too large to keep, and still attaches it', async () => {
-      const todo = await service.create({ title: 'Ship' }, person);
-      const file = workerFile('huge.bin', '');
-      fs.truncateSync(file, 26 * 1024 * 1024);
-      service.attach(todo.number, { target: file }, person);
-      expect(service.detail(todo.number).attachments.flatMap(group => group.attachments).map(a => a.label)).toContain('huge.bin');
-      expect(service.detail(todo.number).activity.map(row => row.body)).toContainEqual(expect.stringContaining('over 25 MB'));
-    });
-
-    it('keeps copies of attachments made before this, where the file is still there', async () => {
-      const todo = await service.create({ title: 'Ship' }, person);
-      const file = workerFile('plan.md', 'the plan');
-      const missing = workerFile('gone.md', 'x');
-      const kept = host.filesDir;
-      host.filesDir = null;
-      service.attach(todo.number, { target: file }, person);
-      service.attach(todo.number, { target: missing }, person);
-      fs.rmSync(missing);
-      host.filesDir = kept;
-      expect(service.keepExistingCopies()).toBe(1);
-      fs.rmSync(file);
-      expect(fs.readFileSync(service.documentFile(file), 'utf8')).toBe('the plan');
-    });
-
-    it('forgets a pruned to-do\'s copies', async () => {
-      const todo = await service.create({ title: 'Ship' }, person);
-      const file = workerFile('a.md', 'a');
-      service.attach(todo.number, { target: file }, person);
-      service.drop(todo.number, {}, person);
-      now += 31 * 24 * 60 * 60 * 1000;
-      service.prune();
-      expect(fs.existsSync(path.join(host.filesDir ?? '', 'T-1'))).toBe(false);
     });
   });
 

@@ -438,16 +438,6 @@ export class TodoStore {
   }
 
   /** Every file currently attached to a to-do on this machine (URLs left out). */
-  /** Current attachments that point at this file path (T-21). */
-  attachmentsWithTarget(target: string): TodoAttachment[] {
-    return decodeBoundary(this.db.prepare('SELECT * FROM todo_attachments WHERE target = ? AND removed_at IS NULL AND machine IS NOT NULL ORDER BY id').all(target), boundary.array(attachmentRowSchema)).map(toAttachment);
-  }
-
-  /** Every current attachment that is a file (not a link), for the startup copy sweep (T-21). */
-  localAttachments(): TodoAttachment[] {
-    return decodeBoundary(this.db.prepare('SELECT * FROM todo_attachments WHERE removed_at IS NULL AND machine IS NOT NULL ORDER BY id').all(), boundary.array(attachmentRowSchema)).map(toAttachment);
-  }
-
   attachedFiles(): string[] {
     return decodeBoundary(this.db.prepare("SELECT DISTINCT target FROM todo_attachments WHERE removed_at IS NULL AND machine IS NOT NULL").all(), boundary.array(boundary.object({ target: boundary.string }))).map(row => row.target);
   }
@@ -556,8 +546,8 @@ export class TodoStore {
 
   // ── Retention ───────────────────────────────────────────────────────────
 
-  /** Deletes to-dos closed over 30 days ago, with their rows; returns their numbers (Pane's file copies go with them). */
-  pruneClosed(now: number): number[] {
+  /** Deletes to-dos closed more than 30 days ago, with their rows. Files they point at are never touched. */
+  pruneClosed(now: number): number {
     return this.transaction(() => {
       const cutoff = now - TODO_RETENTION_MS;
       const doomed = decodeBoundary(this.db.prepare('SELECT number FROM todos WHERE closed_at IS NOT NULL AND closed_at < ? AND state IN (\'done\', \'dropped\')').all(cutoff), boundary.array(boundary.object({ number: boundary.number }))).map(row => row.number);
@@ -567,7 +557,7 @@ export class TodoStore {
         this.db.prepare('UPDATE approvals SET todo_id = NULL WHERE todo_id = ?').run(number);
         this.db.prepare('DELETE FROM todos WHERE number = ?').run(number);
       }
-      return doomed;
+      return doomed.length;
     });
   }
 }

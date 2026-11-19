@@ -120,19 +120,9 @@ runpane todos detach T-12 <attachment-id> --json
 `image` or `link`; without it Pane picks one from the file (a PR link is a
 `pr`, an image an `image`, a web address a `link`, and a file named `plan…`
 such as `plan.md` the `plan`). A file stays a path on its machine and opens
-from there. On the page, **+ Attach** takes a dropped file or a pasted link,
+from there; Pane keeps no copy, so once the file is gone (its Pane archived, its
+scratch folder cleaned) the to-do says it isn't on that machine anymore. On the page, **+ Attach** takes a dropped file or a pasted link,
 and clicking an attachment opens it in the split beside the chat.
-
-**Pane keeps a copy of each attached file.** When a file on this machine is
-attached, Pane copies it into its data folder (`todos/files/T-n/` under
-`PANE_DIR`). The original stays the source while it exists: the copy is
-refreshed when the file is opened, when the to-do goes for review and when it
-is done. Once the original is gone (its worker's Pane archived, its scratch
-folder cleaned), the to-do opens the copy instead, on this machine, from
-another machine and in the web app. Links are never copied, nor are folders or
-files over 25 MB; for those the to-do's chat says it keeps no copy. Attachments
-made before copies were kept get one at startup, where the file is still
-there. Copies go when the to-do is deleted, 30 days after it closes.
 
 **Inheritance is read, not copied.** A sub-to-do shows its own attachments,
 then its parent's under "From T-12 (parent)". A parent shows its own, then
@@ -597,7 +587,7 @@ upgrade (`main/src/database/todosSchema.ts`):
 Approvals gain a `todo_id` column. All of it is additive (`reply_to` is added
 to databases from earlier to-do builds when they open), so an older Pane
 opening the same database still starts. The snooze columns are added the same way. Done and dropped to-dos, their
-attachments, activity and kept file copies are deleted 30 days after they close.
+attachments and activity are deleted 30 days after they close.
 
 ## From the CLI
 

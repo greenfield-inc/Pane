@@ -160,16 +160,6 @@ describe('autopilot:read-doc', () => {
     expect(readDocument(manager, file, { inline: true, links: () => [file] }).kind).toBe('html');
   });
 
-  it('reads a to-do\'s kept copy when the attached file is gone, under the attached path (T-21)', () => {
-    const gone = path.join(root, 'worktree', 't1-findings.md');
-    const copy = path.join(root, 'kept', 'T-1', '7-t1-findings.md');
-    fs.mkdirSync(path.dirname(copy), { recursive: true });
-    fs.writeFileSync(copy, '# Findings');
-    const resolve = (file: string) => (file === gone ? copy : file);
-    expect(readDocument(manager, gone, { links: () => [gone] })).toMatchObject({ kind: 'missing' });
-    expect(readDocument(manager, gone, { links: () => [gone], resolve })).toEqual({ kind: 'text', path: gone, text: '# Findings' });
-  });
-
   it('serves an SVG as an image data URL, which an <img> shows without running its scripts', () => {
     const file = path.join(root, 'linked', 'diagram.svg');
     fs.mkdirSync(path.dirname(file), { recursive: true });

@@ -22,7 +22,7 @@ describe('TodoStore', () => {
     const second = store.create({ title: 'Two', requester: person, createdBy: 'you', now: 2 });
     expect([first.ref, second.ref]).toEqual(['T-1', 'T-2']);
     store.update(second.number, { state: 'done', closedAt: 3 }, 3);
-    expect(store.pruneClosed(3 + TODO_RETENTION_MS + 1)).toHaveLength(1);
+    expect(store.pruneClosed(3 + TODO_RETENTION_MS + 1)).toBe(1);
     expect(store.create({ title: 'Three', requester: person, createdBy: 'you', now: 4 }).ref).toBe('T-3');
   });
 
