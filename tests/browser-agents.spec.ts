@@ -78,6 +78,21 @@ async function refs(pane: IsolatedPane, from: Caller): Promise<(label: string) =
   return label => refIn(reading.snapshot, label);
 }
 
+/**
+ * Copies the visible browser tab's driver chip text onto <body data-saw-driver-chip> each time it shows.
+ * The chip goes 2 s after an agent's last call, which a loaded machine can spend before a later check.
+ */
+async function recordDriverChip(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const record = () => {
+      const text = document.querySelector('[data-browser-page-visible="true"] [data-testid="browser-driver-chip"]')?.textContent;
+      if (text) document.body.dataset.sawDriverChip = text;
+    };
+    record();
+    new MutationObserver(record).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+}
+
 async function shot(page: Page, name: string): Promise<void> {
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
 }
@@ -144,12 +159,13 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     const read = await browser(pane, agent, 'snapshot');
     expect(read.snapshot).toMatch(/textbox "Email" \[ref=e\d+\]/);
     const form = (label: string) => refIn(read.snapshot, label);
+    await recordDriverChip(page);
     expect(await browser(pane, agent, 'type', ['--ref', form('textbox "Email"'), '--text', 'ada@example.com'])).toMatchObject({ ok: true });
     await browser(pane, agent, 'type', ['--ref', form('textbox "Password"'), '--text', 'hunter22']);
     await browser(pane, agent, 'select', ['--ref', form('combobox "Country"'), '--values', '["Canada"]']);
     await browser(pane, agent, 'click', ['--ref', form('button "Create account"')]);
-    // The tab shows who drives while the agent's calls run.
-    await expect(page.locator('[data-browser-page-visible="true"]').getByTestId('browser-driver-chip')).toContainText('is driving');
+    // The tab showed who drives while the agent's calls ran.
+    await expect(page.locator('body')).toHaveAttribute('data-saw-driver-chip', /Claude is driving/);
     await shot(page, 'j1-agent-driving');
     const after = await browser(pane, agent, 'snapshot');
     expect(after.snapshot).toContain('Welcome, ada@example.com (ca)');
