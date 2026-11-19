@@ -113,6 +113,7 @@ interface MachineReadAnswers {
   'orchestration-sessions:activity-list': IPCResponse<SessionActivity[]>;
   'permission:getPending': IPCResponse<PanePermissionRequest[]>;
   'notify:remote-snapshot': NotifySharedState | null;
+  'usage:get-report': IPCResponse<UsageReport>;
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- Generic type parameter default for flexible API responses

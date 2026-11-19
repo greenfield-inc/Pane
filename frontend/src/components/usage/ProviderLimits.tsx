@@ -1,9 +1,13 @@
 import type { UsageProvider, UsageRateLimitSample } from '../../../../shared/types/usage';
+import type { MachineState } from '../../../../shared/types/machineConnections';
+import type { AccountUsage } from './allMachinesUsage';
+import type { MachineUsageState } from './useMachinesUsage';
+import { formatTokens } from '../ui/charts/chartScales';
 
 const PROVIDER_META = {
-  claude: { label: 'Anthropic' },
-  codex: { label: 'OpenAI' },
-} satisfies Record<UsageProvider, { label: string }>;
+  claude: { label: 'Anthropic', noLimits: 'Claude Code does not record plan limits locally.' },
+  codex: { label: 'OpenAI', noLimits: 'No limits reported yet. Codex records them as it runs.' },
+} satisfies Record<UsageProvider, { label: string; noLimits: string }>;
 
 function formatWindow(minutes: number): string {
   if (minutes % (60 * 24) === 0) return `${minutes / (60 * 24)}d window`;
@@ -36,7 +40,7 @@ function limitBarColor(usedPercent: number): string {
   return 'var(--color-status-success, #37b877)';
 }
 
-export function LimitStatusBanners({ limits }: { limits: UsageRateLimitSample[] }) {
+function LimitStatusBanners({ limits }: { limits: UsageRateLimitSample[] }) {
   const blocked = limits.find(l => l.rateLimitReachedType !== null);
   const spendControl = limits.find(l => l.spendControlReached === true);
 
@@ -61,7 +65,7 @@ export function LimitStatusBanners({ limits }: { limits: UsageRateLimitSample[] 
   );
 }
 
-export function CreditsLine({ limits }: { limits: UsageRateLimitSample[] }) {
+function CreditsLine({ limits }: { limits: UsageRateLimitSample[] }) {
   const withCredits = limits.find(l => l.creditsHas !== null);
   if (!withCredits) return null;
 
@@ -80,7 +84,7 @@ export function CreditsLine({ limits }: { limits: UsageRateLimitSample[] }) {
   return null;
 }
 
-export function LimitBar({ limit }: { limit: UsageRateLimitSample }) {
+function LimitBar({ limit }: { limit: UsageRateLimitSample }) {
   const remaining = Math.max(0, Math.round(100 - limit.usedPercent));
   return (
     <div>
@@ -120,6 +124,74 @@ export function LimitBar({ limit }: { limit: UsageRateLimitSample }) {
             : ` · resets ${formatReset(limit.resetsAtMs)}`
           : ''}
       </p>
+    </div>
+  );
+}
+
+/**
+ * Each account once, with the machines signed in to it, its tokens in the range and its limits.
+ * `several` names the machines, which only All machines with more than one machine needs.
+ */
+export function AccountsSection({ accounts, several }: { accounts: AccountUsage[]; several: boolean }) {
+  const limits = accounts.flatMap(account => account.limits);
+  return (
+    <section className="rounded border border-border-primary bg-surface-secondary p-3" data-testid="usage-accounts">
+      <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+        Accounts and limits
+      </h2>
+
+      <LimitStatusBanners limits={limits} />
+
+      {accounts.length === 0 ? (
+        <p className="mt-2 text-[11px] text-text-muted">
+          No Claude Code or Codex sign-in found.
+        </p>
+      ) : (
+        <ul className="mt-2 space-y-3">
+          {accounts.map(account => (
+            <li key={`${account.provider}-${account.key}`} className="space-y-1.5">
+              <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                <span className="min-w-0 truncate text-text-primary" title={account.label}>
+                  {PROVIDER_META[account.provider].label}
+                  <span className="ml-1 text-text-secondary">· {account.label}</span>
+                  {account.plan && <span className="ml-1 text-text-muted">· {account.plan}</span>}
+                </span>
+                <span className="flex-shrink-0 tabular-nums text-text-secondary">{formatTokens(account.tokens)} tokens</span>
+              </div>
+              {several && (
+                <p className="text-[10px] text-text-tertiary">
+                  {account.machines.length > 1 ? 'Shared by ' : 'Used on '}{account.machines.join(', ')}
+                </p>
+              )}
+              {account.limits.map(limit => (
+                <LimitBar key={`${limit.limitId}-${limit.scope}`} limit={limit} />
+              ))}
+              <CreditsLine limits={account.limits} />
+              {account.limits.length === 0 && (
+                <p className="text-[10px] text-text-muted">{PROVIDER_META[account.provider].noLimits}</p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Names each machine whose numbers are not live: offline or not answering, with when they were read. */
+export function MachinesNotice({ machines, states }: { machines: MachineState[]; states: Record<string, MachineUsageState> }) {
+  const notes = machines.flatMap(machine => {
+    const state = states[machine.id];
+    if (state?.kind !== 'stale') return [];
+    const why = state.reason === 'offline' ? 'is offline' : 'did not answer';
+    return [state.readAt === null
+      ? `${machine.label} ${why} and has not been read since Pane opened, so its usage is not included.`
+      : `${machine.label} ${why}: showing its numbers from ${formatAge(state.readAt)}.`];
+  });
+  if (notes.length === 0) return null;
+  return (
+    <div className="rounded border border-status-warning/30 bg-status-warning/10 px-3 py-1.5 text-[11px] text-text-primary" data-testid="usage-machines-notice">
+      {notes.map(note => <p key={note}>{note}</p>)}
     </div>
   );
 }
