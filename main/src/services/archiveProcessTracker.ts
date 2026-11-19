@@ -92,6 +92,19 @@ export async function readArchiveProcesses(): Promise<ArchiveProcessObservation[
   return records;
 }
 
+type Lifetime = Pick<ArchiveProcessIdentity, 'started' | 'kernelStart'>;
+
+/**
+ * Whether two observations of one pid are the same process rather than a reused pid.
+ * When both carry a kernel start it decides, since lstart text can shift under a
+ * clock step; otherwise (macOS, Windows, /proc unreadable, an identity saved before
+ * kernel starts were read, or one machine health passed) the start text must match.
+ */
+function sameLifetime(a: Lifetime, b: Lifetime): boolean {
+  if (a.kernelStart !== undefined && b.kernelStart !== undefined) return a.kernelStart === b.kernelStart;
+  return a.started === b.started;
+}
+
 /** Escalate only freshly matched lifetimes; never taskkill /T or signal a group
  * whose membership may now belong to a different process. */
 async function terminateArchiveProcesses(identities: readonly ArchiveProcessIdentity[]): Promise<void> {
@@ -114,7 +127,7 @@ async function terminateArchiveProcesses(identities: readonly ArchiveProcessIden
   // signal, and never signal a changed/missing identity or an entire PID group.
   for (const identity of identities) {
     const current = (await readArchiveProcesses()).find(item => item.pid === identity.pid);
-    if (!current || current.exited || current.started !== identity.started) continue;
+    if (!current || current.exited || !sameLifetime(current, identity)) continue;
     try { process.kill(identity.pid, 'SIGKILL'); } catch { /* verification retains survivors */ }
   }
 }
@@ -131,11 +144,11 @@ export interface StopProcessDeps {
  * waits, then force-stops what is left. Every signal goes only to a pid whose start
  * time still matches, so a reused pid is never hit. Resolves with those still running.
  */
-export async function stopProcessIdentities(identities: readonly { pid: number; started: string }[], deps: StopProcessDeps = {}): Promise<{ pid: number; started: string }[]> {
+export async function stopProcessIdentities<Identity extends { pid: number } & Lifetime>(identities: readonly Identity[], deps: StopProcessDeps = {}): Promise<Identity[]> {
   const read = deps.read ?? readArchiveProcesses;
   const matching = async () => {
     const table = await read();
-    return identities.filter(identity => table.some(row => row.pid === identity.pid && row.started === identity.started && !row.exited));
+    return identities.filter(identity => table.some(row => row.pid === identity.pid && sameLifetime(row, identity) && !row.exited));
   };
   if (process.platform !== 'win32') {
     const signal = deps.signal ?? ((pid: number) => process.kill(pid, 'SIGTERM'));
@@ -215,7 +228,7 @@ export class ArchiveProcessTracker {
       }
     }
     for (const record of table.filter(item => selected.has(item.pid) && !item.exited)) {
-      if (!this.identities.some(item => item.pid === record.pid && item.started === record.started)) {
+      if (!this.identities.some(item => item.pid === record.pid && sameLifetime(item, record))) {
         this.identities.push(record);
       }
     }
@@ -227,7 +240,7 @@ export class ArchiveProcessTracker {
     if (this.identities.length === 0) return;
     const table = await this.read();
     const matching = this.identities.filter(identity => table.some(item =>
-      item.pid === identity.pid && item.started === identity.started && !item.exited));
+      item.pid === identity.pid && sameLifetime(item, identity) && !item.exited));
     this.captureTable(table, new Set(matching.map(identity => identity.pid)));
   }
 
@@ -235,11 +248,11 @@ export class ArchiveProcessTracker {
     if (this.identities.length === 0) return;
     const table = await this.read();
     const matching = this.identities.filter(identity => table.some(item =>
-      item.pid === identity.pid && item.started === identity.started && !item.exited));
+      item.pid === identity.pid && sameLifetime(item, identity) && !item.exited));
     // Include children born since capture while a known parent still exists.
     this.captureTable(table, new Set(matching.map(identity => identity.pid)));
     const survivors = this.identities.filter(identity => table.some(item =>
-      item.pid === identity.pid && item.started === identity.started && !item.exited));
+      item.pid === identity.pid && sameLifetime(item, identity) && !item.exited));
     await this.terminate([...survivors].reverse());
   }
 
@@ -252,7 +265,7 @@ export class ArchiveProcessTracker {
         const current = table.find(record => record.pid === identity.pid);
         if (current?.exited) return false;
         if (!current && isProcessAlive(identity.pid)) return true;
-        return current?.started === identity.started;
+        return current !== undefined && sameLifetime(current, identity);
       });
       if (this.identities.length === 0 || Date.now() >= deadline) break;
       await new Promise(resolve => setTimeout(resolve, 50));

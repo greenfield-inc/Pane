@@ -216,3 +216,75 @@ describe('attachKernelStarts', () => {
     expect(self?.kernelStart).toMatch(/^[0-9a-f-]+:\d+$/u);
   });
 });
+
+describe('identity across a clock step', () => {
+  const boot = '6a1f0c7e-3b44-4f0e-9a51-2a0c1d9e7b10';
+  // A clock step moves boot time, so ps prints a live process's lstart a few seconds later.
+  const before = 'Mon Nov 16 09:00:00 2026';
+  const after = 'Mon Nov 16 09:00:04 2026';
+  const observed = (pid: number, parent: number, started: string, kernelStart: string): ArchiveProcessObservation =>
+    ({ pid, parent, started, kernelStart, exited: false });
+
+  it('still kills a captured worker whose lstart shifted', async () => {
+    let table = [observed(1000001, 1, before, `${boot}:500`), observed(1000002, 1000001, before, `${boot}:600`)];
+    let saved: ArchiveProcessIdentity[] = [];
+    const terminate = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => { table = []; });
+    const tracker = new ArchiveProcessTracker([], items => { saved = items; }, async () => table, terminate);
+    await tracker.capture([1000001]);
+    table = table.map(row => ({ ...row, started: after }));
+
+    await tracker.refresh();
+    expect(saved.map(item => item.pid)).toEqual([1000001, 1000002]);
+    await tracker.terminateSurvivors();
+    expect(terminate.mock.calls[0][0].map(item => item.pid)).toEqual([1000002, 1000001]);
+    await tracker.verifyExited(0);
+    expect(saved).toEqual([]);
+  });
+
+  it('keeps waiting on a survivor whose lstart shifted instead of forgetting it', async () => {
+    const tracker = new ArchiveProcessTracker([{ pid: 1000001, parent: 1, started: before, kernelStart: `${boot}:500` }], () => {},
+      async () => [observed(1000001, 1, after, `${boot}:500`)]);
+    await expect(tracker.verifyExited(0)).rejects.toThrow('PIDs 1000001');
+  });
+
+  it('never kills a reused pid, even one whose lstart text happens to match', async () => {
+    const terminate = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => {});
+    let saved: ArchiveProcessIdentity[] = [];
+    const tracker = new ArchiveProcessTracker([{ pid: 1000001, parent: 1, started: before, kernelStart: `${boot}:500` }], items => { saved = items; },
+      async () => [observed(1000001, 1, before, `${boot}:90000`), observed(1000002, 1000001, before, `${boot}:90100`)], terminate);
+    await tracker.terminateSurvivors();
+    await tracker.verifyExited(0);
+    expect(terminate).toHaveBeenCalledWith([]);
+    expect(saved).toEqual([]);
+  });
+
+  it('never kills a pid reused after a reboot that landed on the same tick', async () => {
+    const terminate = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => {});
+    const tracker = new ArchiveProcessTracker([{ pid: 1000001, parent: 1, started: before, kernelStart: `${boot}:500` }], () => {},
+      async () => [observed(1000001, 1, after, 'c0ffee00-0000-4000-8000-000000000000:500')], terminate);
+    await tracker.terminateSurvivors();
+    expect(terminate).toHaveBeenCalledWith([]);
+  });
+
+  it('falls back to the lstart text when either side has no kernel start', async () => {
+    const terminate = vi.fn(async (_identities: readonly ArchiveProcessIdentity[]) => {});
+    // Saved before kernel starts were read (or on macOS): the text still has to match.
+    const tracker = new ArchiveProcessTracker([
+      { pid: 1000001, parent: 1, started: before },
+      { pid: 1000003, parent: 1, started: before },
+    ], () => {}, async () => [observed(1000001, 1, before, `${boot}:500`), observed(1000003, 1, after, `${boot}:700`)], terminate);
+    await tracker.terminateSurvivors();
+    expect(terminate.mock.calls[0][0].map(item => item.pid)).toEqual([1000001]);
+  });
+
+  it('stopProcessIdentities signals a pid whose lstart shifted, and not a reused one', async () => {
+    const signalled: number[] = [];
+    let table = [observed(30, 1, after, `${boot}:500`), observed(31, 1, before, `${boot}:90000`)];
+    const left = await stopProcessIdentities(
+      [{ pid: 30, started: before, kernelStart: `${boot}:500` }, { pid: 31, started: before, kernelStart: `${boot}:600` }],
+      { read: async () => table, signal: pid => { signalled.push(pid); table = table.filter(item => item.pid !== pid); }, terminate: async () => {}, graceMs: 0 },
+    );
+    expect(signalled).toEqual(process.platform === 'win32' ? [] : [30]);
+    expect(left).toEqual(process.platform === 'win32' ? [{ pid: 30, started: before, kernelStart: `${boot}:500` }] : []);
+  });
+});
