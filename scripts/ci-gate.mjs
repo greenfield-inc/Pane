@@ -37,6 +37,12 @@ export const EXPECTED_JOBS = [
   'pwa-build',
 ];
 
+// Code Quality jobs that run and report but that CI result does not wait for,
+// each with its reason. They stay out of CI result's needs.
+export const REPORTED_ONLY_JOBS = {
+  'functional-smoke-stabilizing': 'stabilizing: all-machines.spec.ts:489 failed 1 of 10 in CI (run 44473620612) and 1 of 160 on parsa-devbox, cause not yet known; returns to the required lane once it is fixed',
+};
+
 // Jobs a pull request may skip when none of their files changed, keyed by job
 // id, with the Detect changed areas output that says whether they did. Pushes
 // to main, merge groups and manual runs skip nothing.
@@ -108,8 +114,8 @@ export function evaluate({ needs, workflowJobs }) {
   }
 
   for (const job of workflowJobs) {
-    if (job !== GATE_JOB && !EXPECTED_JOBS.includes(job)) {
-      problems.push(`${job}: is in quality.yml but not in scripts/ci-gate.mjs EXPECTED_JOBS, so CI result would not check it. Add it there and to CI result's needs.`);
+    if (job !== GATE_JOB && !EXPECTED_JOBS.includes(job) && !REPORTED_ONLY_JOBS[job]) {
+      problems.push(`${job}: is in quality.yml but not in scripts/ci-gate.mjs EXPECTED_JOBS or REPORTED_ONLY_JOBS, so CI result would not check it. Add it to EXPECTED_JOBS and to CI result's needs.`);
     }
   }
   for (const job of Object.keys(needs)) {

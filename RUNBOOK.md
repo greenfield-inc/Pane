@@ -230,7 +230,8 @@ wrapper, main or relay files skips those jobs). A job that fails, is
 cancelled, is skipped without a reason, or is missing from the workflow or
 from `CI result`'s needs fails it, and so does a `Code Quality` job the list
 does not name. Add a new job to `EXPECTED_JOBS` and to `CI result`'s needs in
-the same change; `scripts/ci-gate.test.mjs` (run by Type Check and Lint, and
+the same change, or to `REPORTED_ONLY_JOBS` with its reason for a job that
+reports without gating (Functional Smoke (stabilizing)); `scripts/ci-gate.test.mjs` (run by Type Check and Lint, and
 by `node --test scripts/ci-gate.test.mjs` locally) checks they match the
 workflow. It is the only check a merge waits for; how
 to merge a pull request or a stack is in

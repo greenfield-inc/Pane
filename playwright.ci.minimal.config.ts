@@ -13,7 +13,6 @@ const BROWSER_SPECS = [
   'adaptive-panel-layout.spec.ts',
   'agent-status.spec.ts',
   'agent-usage.spec.ts',
-  'all-machines.spec.ts',
   'analytics-consent.spec.ts',
   'appearance-bootstrap.spec.ts',
   'approvals-system.spec.ts',

@@ -305,6 +305,29 @@ jobs:
     - name: Run maintained functional smoke tests
       run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
+  # Reported only: CI result does not wait for this job (REPORTED_ONLY_JOBS in
+  # scripts/ci-gate.mjs). It runs playwright.ci.stabilizing.config.ts, whose
+  # comment says why each spec there is not yet required.
+  functional-smoke-stabilizing:
+    name: Functional Smoke (stabilizing)
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
+
+    - name: Install Playwright browsers
+      uses: ./.github/actions/playwright-browsers
+
+    - name: Run stabilizing browser tests
+      run: pnpm exec playwright test --config=playwright.ci.stabilizing.config.ts
+
   # The WebGL renderer recovery spec, split off the browser shards: its 25 tests
   # take about 16 s each, and Playwright shards by test count in file order, so
   # in the browser lane they all landed in one shard and set the run's time.

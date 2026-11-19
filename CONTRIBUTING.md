@@ -172,6 +172,9 @@ To test approvals' timers without waiting, start a dev build with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the
   browser suite CI runs: every spec `playwright.ci.minimal.config.ts` lists,
   with the chat composer specs at a desktop and a phone size.
+- `playwright.ci.stabilizing.config.ts` lists specs that CI runs and reports
+  but `CI result` does not wait for, each with the reason in its comment. A
+  spec moves back to `playwright.ci.minimal.config.ts` once that is fixed.
 - `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey
   (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each

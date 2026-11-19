@@ -31,6 +31,9 @@ export const TEST_FILE_PATTERNS = [
 // list its files.
 const NATIVE_GLASSES_MOBILE = 'pnpm --filter native --filter glasses --filter mobile run test';
 
+// A lane with `stabilizing` runs and reports, but CI result does not wait for it.
+const STABILIZING = 'stabilizing: all-machines.spec.ts:489 failed 1 of 10 in CI (run 44473620612) and 1 of 160 on parsa-devbox, cause not yet known; returns to the required lane once it is fixed';
+
 export const LANES = [
   { workflow: 'quality.yml', job: 'quality-checks', run: 'pnpm --filter frontend exec vitest run', list: { vitest: 'frontend' } },
   { workflow: 'quality.yml', job: 'quality-checks', run: NATIVE_GLASSES_MOBILE, list: { vitest: 'native' } },
@@ -47,6 +50,7 @@ export const LANES = [
   { workflow: 'quality.yml', job: 'cross-os-main-tests', run: 'pnpm --filter main exec vitest run --shard', list: { vitest: 'main' } },
   { workflow: 'quality.yml', job: 'typecheck-lint', list: { named: ['scripts/ci-gate.test.mjs', 'scripts/ci-timings.test.mjs', 'scripts/pre-push.test.mjs', 'scripts/ci-test-inventory.test.mjs'] } },
   { workflow: 'quality.yml', job: 'functional-smoke-browser', run: 'playwright test --config=playwright.ci.minimal.config.ts', list: { playwright: 'playwright.ci.minimal.config.ts' } },
+  { workflow: 'quality.yml', job: 'functional-smoke-stabilizing', run: 'playwright test --config=playwright.ci.stabilizing.config.ts', list: { playwright: 'playwright.ci.stabilizing.config.ts' }, stabilizing: STABILIZING },
   { workflow: 'quality.yml', job: 'functional-smoke-webgl', run: 'playwright test --config=playwright.ci.webgl.config.ts', list: { playwright: 'playwright.ci.webgl.config.ts' } },
   { workflow: 'quality.yml', job: 'renderer-selection', run: 'playwright test --config=tests/renderer/playwright.config.ts', list: { playwright: 'tests/renderer/playwright.config.ts' } },
   { workflow: 'quality.yml', job: 'functional-smoke-electron', run: 'playwright test --config=playwright.chat-tabs.config.ts', list: { playwright: 'playwright.chat-tabs.config.ts' } },
@@ -139,7 +143,7 @@ export function evaluate({ testFiles, lanes, jobTexts, readFile, notInCi = NOT_I
         if (lane.list.named) problems.push(`${file}: is in LANES but is not a tracked test file.`);
         continue;
       }
-      lanesByFile.get(file).push(name);
+      lanesByFile.get(file).push(lane.stabilizing ? `${name} (stabilizing)` : name);
     }
   }
   for (const file of Object.keys(notInCi)) {
@@ -212,7 +216,8 @@ function main() {
   for (const fileLanes of verdict.lanesByFile.values()) for (const lane of new Set(fileLanes)) perLane.set(lane, (perLane.get(lane) ?? 0) + 1);
   const notInCi = Object.keys(NOT_IN_CI).filter((file) => verdict.lanesByFile.has(file)).length;
   // Code Quality is the workflow CI result gates; lanes elsewhere run outside it.
-  const gated = (lane) => lane.startsWith('quality.yml#');
+  // A stabilizing lane reports there but CI result does not wait for it.
+  const gated = (lane) => lane.startsWith('quality.yml#') && !lane.endsWith(' (stabilizing)');
   const ungated = [...verdict.lanesByFile].filter(([, fileLanes]) => fileLanes.length > 0 && !fileLanes.some(gated)).map(([file]) => file);
   const summary = [
     `### Test inventory: ${verdict.ok ? 'every test file has a lane' : 'fail'}`,
@@ -221,7 +226,8 @@ function main() {
     '',
     '| Lane | Files |',
     '| --- | --- |',
-    ...[...perLane].map(([lane, count]) => `| ${lane}${gated(lane) ? '' : ' (not part of CI result)'} | ${count} |`),
+    ...[...perLane].map(([lane, count]) => `| ${lane}${gated(lane) || lane.endsWith(' (stabilizing)') ? '' : ' (not part of CI result)'} | ${count} |`),
+    ...([...perLane.keys()].some((lane) => lane.endsWith(' (stabilizing)')) ? ['', `Lanes marked (stabilizing) report, but CI result does not wait for them. ${STABILIZING}.`] : []),
     ...(ungated.length > 0 ? ['', `Run only outside CI result: ${ungated.join(', ')}.`] : []),
     ...(verdict.problems.length > 0 ? ['', ...verdict.problems.map((problem) => `- ${problem}`)] : []),
     '',
