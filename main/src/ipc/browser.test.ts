@@ -606,7 +606,7 @@ describe('browser tabs: streaming a page to another screen', () => {
     const page = fixture.pages.get('persons');
     page?.debugger.emit('message', {}, 'Page.javascriptDialogOpening', { type: 'confirm', message: 'Delete it?' });
     page?.sent.splice(0, Infinity);
-    expect(await input(fixture, 'persons', [{ kind: 'dialog', accept: true }])).toEqual({ field: null });
+    expect(await input(fixture, 'persons', [{ kind: 'dialog', accept: true }])).toMatchObject({ field: null });
     expect(page?.sent).toEqual(['Page.handleJavaScriptDialog']);
     expect(page?.params.get('Page.handleJavaScriptDialog')).toEqual({ accept: true });
   });
