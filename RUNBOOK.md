@@ -280,6 +280,10 @@ come from repository variables: `GCP_PROJECT_ID`, `GCP_REGION`,
 `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOY_SERVICE_ACCOUNT`. The one-time
 GCP setup is `scripts/gcp/setup-remote-pwa-preview.sh`.
 
+On pull requests, `Code Quality`'s `Remote PWA Build` job runs the deploy's
+frontend-only install and build, so a change that breaks it fails `CI result`
+before it reaches `main`. Keep its two steps the same as the deploy's.
+
 The phone app's update server, Cloud Run service `pane-native-updates`, lives
 in the same project and uses the same registry, deploy identity and runtime
 service account. `native-updates.yml` names the service itself, and the
