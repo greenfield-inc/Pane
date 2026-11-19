@@ -27,6 +27,8 @@ const BILLING = 'billing';
 const DOCS = 'docs';
 const QUESTION = 'Three dunning reminders or two?';
 const DEVBOX = 'devbox';
+/** A saved computer the window can switch to (T-37's All machines case). */
+const DEVBOX_COMPUTER = { id: DEVBOX, label: 'devbox', routes: [{ id: 'public:https://devbox.example:8443', kind: 'public' as const, source: 'manual' as const, baseUrl: 'https://devbox.example:8443', token: 'paired' }] };
 
 function record(number: number, title: string, extra: Partial<TodoRecord> = {}): TodoRecord {
   return {
@@ -149,9 +151,9 @@ async function installSessions(page: Page, selected: string) {
   }, { records: [sessionRecord(BILLING, 'Billing rewrite'), sessionRecord(DOCS, 'Docs refresh')], first: selected });
 }
 
-interface OpenOptions { dark?: boolean; width?: number; session?: string; createdNumber?: number; notify?: NotifySnapshot }
+interface OpenOptions { dark?: boolean; width?: number; session?: string; createdNumber?: number; notify?: NotifySnapshot; devbox?: boolean }
 
-async function open(page: Page, { dark = false, width = 1440, session = BILLING, createdNumber, notify = approvals() }: OpenOptions = {}) {
+async function open(page: Page, { dark = false, width = 1440, session = BILLING, createdNumber, notify = approvals(), devbox = false }: OpenOptions = {}) {
   await page.setViewportSize({ width, height: 900 });
   await installElectronApiMock(page, {
     initialProjects: [{ id: 1, name: 'billing', path: '/tmp/billing', active: true, created_at: '2026-10-01T00:00:00.000Z', updated_at: '2026-10-01T00:00:00.000Z' }],
@@ -159,8 +161,7 @@ async function open(page: Page, { dark = false, width = 1440, session = BILLING,
     initialConfig: { theme: dark ? 'dark' : 'light-rounded', appearanceMode: 'fixed' },
     notifySnapshot: notify,
     todos: { ...todos(), createdNumber },
-    // A saved computer the window can switch to (T-37's All machines case).
-    computers: [{ id: DEVBOX, label: 'devbox', routes: [{ id: 'public:https://devbox.example:8443', kind: 'public', source: 'manual', baseUrl: 'https://devbox.example:8443', token: 'paired' }] }],
+    computers: devbox ? [DEVBOX_COMPUTER] : [],
   });
   await installSessions(page, session);
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -435,7 +436,7 @@ function bothMachines(q31: Partial<NotifyItem> = {}): NotifySnapshot {
 }
 
 test('switching this window to another computer shows that computer\'s to-dos in the sidebar, with no change event', async ({ page }) => {
-  await open(page);
+  await open(page, { devbox: true });
   await showSidebarTodos(page);
   await expect(sidebarRow(page, 14)).toContainText('Ship receipt PDFs');
   await page.evaluate((remote) => window.__paneTestElectronMock.switchTodosHost('devbox', remote), devboxTodos());
@@ -449,7 +450,7 @@ test('switching this window to another computer shows that computer\'s to-dos in
 });
 
 test('another computer\'s approval on its own T-14 counts neither in the badges nor in the pager here', async ({ page }) => {
-  await open(page, { notify: bothMachines() });
+  await open(page, { notify: bothMachines(), devbox: true });
   await expect(todosTab(page)).toHaveAccessibleName('To-dos, 1 waiting on you');
   await showSidebarTodos(page);
   await expect(sidebarTodosTab(page)).toHaveAccessibleName('To-dos, 1 waiting on you');
