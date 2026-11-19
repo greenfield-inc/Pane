@@ -165,7 +165,7 @@ const VIEW_WAIT_MS = 10_000;
 /** Files a person sends one page's picker in one batch, at most (base64 grows it by a third). */
 const PERSON_UPLOAD_BYTES = 10 * 1_048_576;
 /** Electron's cursor names that differ from CSS's. */
-const CSS_CURSOR = new Map([['nodrop', 'no-drop'], ['custom', 'default'], ['hand', 'pointer'], ['column-resize', 'col-resize']]);
+const CSS_CURSOR = new Map([['pointer', 'default'], ['hand', 'pointer'], ['nodrop', 'no-drop'], ['custom', 'default'], ['column-resize', 'col-resize']]);
 /** The smallest and largest page a viewer may ask for, in CSS pixels. */
 const PAGE_MIN = 100;
 const PAGE_MAX = { width: 3840, height: 2160 };
@@ -881,7 +881,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const driver = driverFor(id, page);
     // A pointer only passing over the stream (hover) is not the person acting: it takes nothing over.
     const acts = batch.length === 0 || batch.some(input => !(input.kind === 'mouse' && input.action === 'move'));
-    if (acts) {
+    // An open dialog blocks the page: only its answer goes through, and nothing resizes the page meanwhile.
+    if (acts && !driver.pendingDialog) {
       driver.notePersonInput();
       await personTouched(id, page.id);
       if (viewerId) await takeControl(id, viewerId);
