@@ -30,8 +30,9 @@ export interface TodoSplitState {
   /** + Attach is waiting for this target to arrive: its tab is selected and the split shown then. */
   reveal: string | null;
   /**
-   * The narrow layout (T-38) shows one thing at a time: the to-do page under its To-do tab, or the
-   * tab at `active`. True while the To-do tab is the one selected. The wide layout ignores it.
+   * Where no split is available (T-38, D-448) the page and its tabs share one column, one thing at a
+   * time: the to-do page under its To-do tab, or the tab at `active`. True while the To-do tab is
+   * the one selected. Beside a split it is ignored.
    */
   todoShown: boolean;
 }
@@ -42,9 +43,9 @@ export type TodoSplitAction =
   /** Shows an item's tab (reopening a closed one, adding an image's), and shows the split. */
   | { type: 'open'; item: TodoSplitItem }
   | { type: 'activate'; index: number }
-  /** ← and → on the tab strip, wrapping round; `withTodo` counts the narrow layout's To-do tab first. */
+  /** ← and → on the tab strip, wrapping round; `withTodo` counts the one-column layout's To-do tab first. */
   | { type: 'step'; delta: 1 | -1; withTodo?: boolean }
-  /** The narrow layout's To-do tab. */
+  /** The one-column layout's To-do tab. */
   | { type: 'show-todo' }
   /** ✕ or the close-tab key (T-25): any tab closes; closing the last one hides the split. */
   | { type: 'close'; index: number }
@@ -62,19 +63,8 @@ const KIND_RANK = {
   plan: 0, mockup: 1, design: 1, pr: 2, findings: 3, decision: 4, doc: 5, image: 6, link: 7, status: 8, checklist: 9,
 } as const satisfies Record<TodoAttachmentKind, number>;
 
-/**
- * The one width rule for a to-do (D-420, T-38): under this width of to-do area the page and its files
- * share one column as tabs (a Session's split, a narrow window, an iPad), and every to-do opens with
- * its wide split hidden; from it up the files sit in a split beside the page.
- */
+/** Under this width of to-do area, every to-do opens with its split hidden (D-420). */
 export const NARROW_TODO_AREA_PX = 1000;
-
-export type TodoLayout = 'tabs' | 'split';
-
-/** Which layout a to-do area this wide gets, measured on the area itself, wherever it is mounted. */
-export function todoLayoutFor(areaPx: number): TodoLayout {
-  return areaPx < NARROW_TODO_AREA_PX ? 'tabs' : 'split';
-}
 
 /** One key per tab, so opening it again shows its tab instead of adding another. */
 export function splitItemKey(item: TodoSplitItem): string {
@@ -144,7 +134,7 @@ export function initialSplit(groups: readonly TodoAttachmentGroup[], hidden: boo
 
 /** A narrow to-do area opens hidden; a wide one keeps the to-do's remembered choice. */
 export function startsHidden(rememberedHidden: boolean, areaPx: number): boolean {
-  return todoLayoutFor(areaPx) === 'tabs' || rememberedHidden;
+  return areaPx < NARROW_TODO_AREA_PX || rememberedHidden;
 }
 
 export function todoSplitReducer(state: TodoSplitState, action: TodoSplitAction): TodoSplitState {
@@ -160,7 +150,7 @@ export function todoSplitReducer(state: TodoSplitState, action: TodoSplitAction)
     }
     case 'activate':
       if (action.index < 0 || action.index >= state.items.length) return state;
-      // Picked under the narrow layout's tabs, the file is in the split too once the area widens.
+      // Picked under the one-column tabs, the file is the split's shown tab too where a split is allowed.
       return action.index === state.active && !state.todoShown && !state.hidden ? state : { ...state, active: action.index, todoShown: false, hidden: false };
     case 'step':
       return action.withTodo ? stepWithTodo(state, action.delta) : stepTabs(state, action.delta);
@@ -190,7 +180,7 @@ function stepTabs(state: TodoSplitState, delta: 1 | -1): TodoSplitState {
   return { ...state, active: (state.active + delta + count) % count };
 }
 
-/** The narrow strip: To-do at position 0, then each tab. */
+/** The one-column strip: To-do at position 0, then each tab. */
 function stepWithTodo(state: TodoSplitState, delta: 1 | -1): TodoSplitState {
   const count = state.items.length + 1;
   if (count < 2) return state;

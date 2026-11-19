@@ -9,6 +9,7 @@ import { cn } from '../../utils/cn';
 import { Dropdown } from '../ui/Dropdown';
 import { useNow } from '../notify/useNow';
 import { TodoPage } from './page/TodoPage';
+import { MAIN_AREA, SplitAreaContext } from '../../utils/mainSplits';
 import { NewTodoDialog } from './NewTodoDialog';
 import { TodoConfirm, type TodoConfirmRequest } from './TodoConfirm';
 import { TodoRow } from './TodoRow';
@@ -129,7 +130,12 @@ export function TodosView() {
   const [lastOpened, setLastOpened] = useState<number | null>(null);
   useEffect(() => { if (selected !== null) setLastOpened(selected); }, [selected]);
   if (selected !== null) {
-    return <TodoPage key={selected} number={selected} onBack={() => selectTodo(null)} onOpenTodo={number => selectTodo(number)} />;
+    // The whole main area: the to-do page and one file may be its two splits (D-448).
+    return (
+      <SplitAreaContext.Provider value={MAIN_AREA}>
+        <TodoPage key={selected} number={selected} onBack={() => selectTodo(null)} onOpenTodo={number => selectTodo(number)} />
+      </SplitAreaContext.Provider>
+    );
   }
   return <TodosList onOpen={number => selectTodo(number)} lastOpened={lastOpened} />;
 }

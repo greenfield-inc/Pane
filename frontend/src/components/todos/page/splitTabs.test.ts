@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { TodoAttachment, TodoAttachmentGroup, TodoAttachmentKind } from '../../../../../shared/types/todos';
 import {
   NARROW_TODO_AREA_PX,
-  todoLayoutFor,
   attachmentTabs,
   initialSplit,
   everyTabClosed,
@@ -364,16 +363,7 @@ describe('closing and reopening tabs (T-25)', () => {
   });
 });
 
-describe('todoLayoutFor (T-38: one rule for tabs or a split)', () => {
-  it('shows tabs in one column under the threshold, and the split beside the to-do from it up', () => {
-    expect(todoLayoutFor(NARROW_TODO_AREA_PX - 1)).toBe('tabs');
-    expect(todoLayoutFor(480)).toBe('tabs');
-    expect(todoLayoutFor(NARROW_TODO_AREA_PX)).toBe('split');
-    expect(todoLayoutFor(1600)).toBe('split');
-  });
-});
-
-describe('the To-do tab of the narrow layout (T-38)', () => {
+describe('the To-do tab where no split is available (T-38, D-448)', () => {
   const plan = attachment('plan', 1, 12, 'cover-sheet.html');
   const doc = attachment('doc', 2, 12, 'p5-p8.html');
   const base = initialSplit([own(plan, doc)], true);
@@ -391,7 +381,7 @@ describe('the To-do tab of the narrow layout (T-38)', () => {
     expect([back.todoShown, labels(back)[back.active]]).toEqual([true, 'p5-p8.html']);
   });
 
-  it('activating the tab already selected under the To-do tab still shows it, and in the split once wide', () => {
+  it('activating the tab already selected under the To-do tab shows it, and un-hides the split', () => {
     const picked = todoSplitReducer(base, { type: 'activate', index: base.active });
     expect([picked.todoShown, picked.hidden]).toEqual([false, false]);
   });
@@ -415,7 +405,7 @@ describe('the To-do tab of the narrow layout (T-38)', () => {
     expect(none.todoShown).toBe(true);
   });
 
-  it('hiding the split (in the wide layout) leaves the To-do tab selected for a narrow one', () => {
+  it('hiding the split leaves the To-do tab selected for the one-column layout', () => {
     const shown = todoSplitReducer(base, { type: 'activate', index: 1 });
     expect(todoSplitReducer(shown, { type: 'set-hidden', hidden: true }).todoShown).toBe(true);
     expect(todoSplitReducer(shown, { type: 'toggle-hidden' }).todoShown).toBe(true);

@@ -314,95 +314,32 @@ test('R7: rebinding Split Right rebinds the toggle', async ({ page }) => {
   await expect(page.getByTestId('todo-split-toggle')).toHaveAttribute('title', /Show split \(.*Y\)/);
 });
 
-const narrowTabs = (page: Page) => page.getByTestId('todo-tabs').getByRole('tab');
-const narrowSelected = (page: Page) => page.getByTestId('todo-tabs').locator('[role="tab"][aria-selected="true"]');
-
-async function noHorizontalScroll(page: Page) {
+test('R8: under 1,000 px opens hidden, showing lasts this visit, no horizontal scroll at 900', async ({ page }) => {
+  await open(page, { width: 900 });
+  await openTodo(page, 12);
+  await expect(page.getByTestId('todo-page-split')).toHaveCount(0);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/R8-narrow-light.png` });
+  await page.getByTestId('todo-split-toggle').click();
+  await expect(page.getByTestId('todo-page-split')).toBeVisible();
+  await page.getByTestId('todo-details-toggle').click();
+  // No room for the split, the thread and the details at once: the thread keeps its width and the split
+  // steps aside for this visit; the files chip brings it back by closing the details (round 7 QA).
+  await expect(page.getByTestId('todo-page-split')).toHaveCount(0);
+  expect((await page.getByTestId('todo-page-main').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(300);
+  await page.getByTestId('todo-chip-plan').click();
+  await expect(page.getByTestId('todo-page-split')).toBeVisible();
+  await expect(page.getByTestId('todo-details-toggle')).toHaveAttribute('aria-expanded', 'false');
+  await page.getByTestId('todo-details-toggle').click();
   const overflow = await page.evaluate(() => {
     const el = document.querySelector('[data-testid="todo-page"]');
     return { doc: document.documentElement.scrollWidth - document.documentElement.clientWidth, page: el ? el.scrollWidth - el.clientWidth : 0 };
   });
   expect(overflow.doc).toBeLessThanOrEqual(0);
   expect(overflow.page).toBeLessThanOrEqual(0);
-}
-
-for (const dark of [false, true]) {
-  const theme = dark ? 'dark' : 'light';
-
-  test(`T-38: under 1,000 px the page and its files are tabs in one column, To-do first and never closed (${theme})`, async ({ page }) => {
-    await open(page, { width: 900, dark });
-    await openTodo(page, 12);
-    await expect(page.getByTestId('todo-page-body')).toHaveAttribute('data-layout', 'tabs');
-    // No split beside the page, and no split toggle: the files are tabs.
-    await expect(page.getByTestId('todo-page-split')).toHaveCount(0);
-    await expect(page.getByTestId('todo-split-toggle')).toHaveCount(0);
-    await expect(narrowTabs(page)).toHaveText(['To-do', 'Plan', 'Receipt mock-up', 'PR #7', 'QA findings', 'Decisions'].map((label) => new RegExp(`^${label}`)));
-    await expect(narrowSelected(page)).toHaveText('To-do');
-    await expect(page.getByTestId('todo-tab-page').getByTestId('todo-split-tab-close')).toHaveCount(0);
-    await expect(page.getByTestId('todo-breadcrumb')).toContainText('T-12');
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/T38-narrow-todo-${theme}.png` });
-    // A file's tab takes the page's place.
-    await page.getByTestId('todo-tabs').getByRole('tab', { name: /^Plan/ }).click();
-    await expect(page.getByTestId('todo-page-main')).toBeHidden();
-    await expect(page.getByTestId('todo-page-split')).toBeVisible();
-    await expect(page.getByTestId('todo-split-filebar')).toContainText('plan.md');
-    await noHorizontalScroll(page);
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/T38-narrow-file-${theme}.png` });
-    // Arrows walk the strip, To-do included.
-    await page.keyboard.press('ArrowLeft');
-    await expect(narrowSelected(page)).toHaveText('To-do');
-    await expect(page.getByTestId('todo-page-main')).toBeVisible();
-    // The files chip opens the plan's tab; ✕ and the close-tab key close file tabs, back to To-do at the last.
-    await page.getByTestId('todo-chip-plan').click();
-    await expect(narrowSelected(page)).toHaveText(/^Plan/);
-    await page.keyboard.press('ControlOrMeta+KeyW');
-    await expect(narrowTabs(page)).toHaveCount(5);
-    await expect(narrowSelected(page)).toHaveText(/^Receipt mock-up/);
-  });
-}
-
-test('T-38: an approval opened from the page is a tab of its own; closing it returns to the tab it covered', async ({ page }) => {
-  await open(page, { width: 900 });
-  await openTodo(page, 12);
-  await page.getByTestId('todo-chip-status').click();
-  await expect(page.getByTestId('todo-tab-approval')).toHaveText(/Q-11/);
-  await expect(page.getByTestId('todo-tab-approval')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('todo-approval-over-split')).toBeVisible();
-  await expect(page.getByTestId('todo-tabs')).toBeVisible();
-  await page.getByTestId('todo-tab-approval').getByTestId('todo-split-tab-close').click();
-  await expect(page.getByTestId('todo-tab-approval')).toHaveCount(0);
-  await expect(narrowSelected(page)).toHaveText('To-do');
-  await expect(page.getByTestId('todo-page-main')).toBeVisible();
-  // Picking another tab leaves the approval.
-  await page.getByTestId('todo-chip-status').click();
-  await page.getByTestId('todo-tabs').getByRole('tab', { name: /QA findings/ }).click();
-  await expect(page.getByTestId('todo-approval-over-split')).toHaveCount(0);
-  await expect(narrowSelected(page)).toHaveText(/^QA findings/);
-});
-
-test('T-38: widening and narrowing live keeps the open tabs and the one shown; leaving and coming back too', async ({ page }) => {
-  await open(page, { width: 900 });
-  await openTodo(page, 12);
-  await page.getByTestId('todo-tabs').getByRole('tab', { name: /PR #7/ }).getByTestId('todo-split-tab-close').click();
-  await page.getByTestId('todo-tabs').getByRole('tab', { name: /QA findings/ }).click();
-  await page.setViewportSize({ width: 1500, height: 900 });
-  await expect(page.getByTestId('todo-page-body')).toHaveAttribute('data-layout', 'split');
-  await expect(page.getByTestId('todo-tabs')).toHaveCount(0);
-  await expect(page.getByTestId('todo-page-main')).toBeVisible();
-  await expect(tabs(page)).toHaveText(['Plan', 'Receipt mock-up', 'QA findings', 'Decisions'].map((label) => new RegExp(`^${label}`)));
-  await expect(page.locator('[data-testid="todo-split-tab"][aria-selected="true"]')).toContainText('QA findings');
-  await page.setViewportSize({ width: 900, height: 900 });
-  await expect(page.getByTestId('todo-page-body')).toHaveAttribute('data-layout', 'tabs');
-  await expect(narrowSelected(page)).toHaveText(/^QA findings/);
-  await expect(narrowTabs(page)).toHaveCount(5);
-  // Back to the list and in again: the tab it was left on.
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/R8-narrow-shown-light.png` });
   await page.getByTestId('todo-page-back').click();
   await openTodo(page, 12);
-  await expect(narrowSelected(page)).toHaveText(/^QA findings/);
-  // The details still open beside it, with no horizontal scroll.
-  await page.getByTestId('todo-details-toggle').click();
-  await expect(page.getByTestId('todo-page-details')).toBeVisible();
-  await noHorizontalScroll(page);
+  await expect(page.getByTestId('todo-page-split')).toHaveCount(0);
 });
 
 test('R20: the frame controls are reachable by Tab and show focus', async ({ page }) => {

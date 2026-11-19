@@ -30,7 +30,7 @@ describe('to-do page view memory', () => {
     expect(restoreActiveTab(split, null)).toBe(split);
   });
 
-  it('narrow (T-38): comes back on the file it was left on, or the To-do tab when that file is gone', () => {
+  it('one column (T-38): comes back on the file it was left on, or the To-do tab when that file is gone', () => {
     const back = restoreActiveTab(split, 'overview:s-1', false);
     expect([back.active, back.todoShown]).toEqual([1, false]);
     expect(restoreActiveTab(split, 'attachment:9', false).todoShown).toBe(true);

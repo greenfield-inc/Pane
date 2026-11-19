@@ -10,6 +10,7 @@ import { useOrchestrationSessionStore } from '../../../stores/orchestrationSessi
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../../stores/configStore';
 import { chordForEvent, rendererKeyPlatform } from '../../../stores/hotkeyStore';
 import { useOuterPanelResize } from '../../../hooks/useOuterPanelResize';
+import { canOpenSplit, useSplitArea } from '../../../utils/mainSplits';
 import { OUTER_PANEL_CONFIGS } from '../../../utils/outerPanelSizing';
 import { formatKeyDisplay } from '../../../utils/hotkeyUtils';
 import { openOnMachine } from '../../../utils/machineRowActions';
@@ -26,7 +27,7 @@ import { TodoDetailsSidebar, type TodoDetailsTab } from './TodoDetailsSidebar';
 import { TodoNarrowTabs, TodoSplit, splitTabLabel, useSplitOverviewSession, type TodoApprovalOpen } from './TodoSplit';
 import { openTodoSession } from './todoNavigation';
 import {
-  everyTabClosed, initialSplit, splitFileItems, splitHasTabs, splitItemKey, startsHidden, todoLayoutFor, todoSplitReducer, type TodoSplitItem,
+  everyTabClosed, initialSplit, splitFileItems, splitHasTabs, splitItemKey, startsHidden, todoSplitReducer, NARROW_TODO_AREA_PX, type TodoSplitItem,
 } from './splitTabs';
 
 /** The thread's narrowest usable width beside the split and the details (round 7 QA, R8). */
@@ -116,7 +117,7 @@ function useAnsweredNow(detail: TodoDetail | null): TodoDetail | null {
 function useSplitMemory(detail: TodoDetail, areaPx: number) {
   const key = todoSplitKey(detail.machineId ?? LOCAL_MACHINE_ID, detail.todo.number);
   // A visit that opened under 1,000 px starts hidden, and showing the split lasts for that visit only.
-  const [narrowVisit] = useState(() => todoLayoutFor(areaPx) === 'tabs');
+  const [narrowVisit] = useState(() => areaPx < NARROW_TODO_AREA_PX);
   const [hiddenAtOpen] = useState(() => startsHidden(safeRead(key), areaPx));
   // Closed tabs are remembered whatever the width (T-25).
   const [closedAtOpen] = useState(() => safeReadClosed(key));
@@ -257,9 +258,10 @@ function TodoPageLoaded({ detail, areaPx, onBack, onOpenTodo, embedded, onShown 
     rememberClosed(split.closed);
   }, [split.closed, rememberClosed]);
 
-  // One width rule (T-38): a narrow area shows the page and its files as tabs in one column, a wide
-  // one the files in a split beside the page. Both read the same tabs, so a change of width keeps them.
-  const tabs = todoLayoutFor(areaPx) === 'tabs';
+  // The main area's split rule (D-448): the page is one split, and its files may be the second only
+  // where the area has room for it. Otherwise they are tabs beside the page's own To-do tab, in one
+  // column. Both layouts read the same tabs, so a change of area keeps them and the one shown.
+  const tabs = !canOpenSplit(useSplitArea(), 1);
   const tabsRef = useRef(tabs);
   tabsRef.current = tabs;
   // With every tab closed the split can still be shown: its default tab comes back (T-25).
@@ -656,7 +658,7 @@ function PageHeader({ number, detail, onBack, onOpenTodo, onNotice, snooze, spli
         />
       )}
       {/* In a Session's To-dos tab the chips show the split and the details; the bar keeps the tab's own controls. */}
-      {/* Under the narrow layout's tabs there is no split to toggle: the files are tabs (T-38). */}
+      {/* With no split available there is no split to toggle: the files are tabs (T-38). */}
       {details && !embedded && (
         <>
           <span className="mx-0.5 h-[18px] w-px shrink-0 bg-border-primary" aria-hidden="true" />

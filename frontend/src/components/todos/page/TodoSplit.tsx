@@ -41,7 +41,7 @@ export interface TodoSplitProps {
   onCloseApproval: () => void;
   /** + Attach landed this target: its tab shows once it arrives. */
   onAttached: (target: string) => void;
-  /** False under the narrow layout's tabs (T-38): the strip above the page holds this split's tabs. */
+  /** False where no split is available (T-38): the strip above the page holds this split's tabs. */
   showStrip?: boolean;
 }
 
@@ -123,9 +123,9 @@ export interface TodoNarrowTabsProps {
 }
 
 /**
- * The narrow layout's one tab strip (T-38): "To-do · cover-sheet.html · p5-p8.html", and an open
- * approval's tab after them. The To-do tab is always first and never closes; the others close as
- * the split's tabs do (T-25), and are the same tabs, so a change of width keeps them and the one shown.
+ * The one tab strip where no split is available (T-38, D-448): "To-do · cover-sheet.html · p5-p8.html",
+ * and an open approval's tab after them. The To-do tab is always first and never closes; the others
+ * close as the split's tabs do (T-25), and are the same tabs, so either layout keeps them and the one shown.
  */
 export function TodoNarrowTabs({ detail, split, dispatch, approval, onCloseApproval, onAttached }: TodoNarrowTabsProps) {
   const approvalTitle = useNotifyStore((state) => (approval ? notifyItem(state.snapshot, approval.id)?.title : undefined));
@@ -221,7 +221,7 @@ interface StripTabProps {
   title: string;
   active: boolean;
   onPick: () => void;
-  /** Unset: the tab never closes (the narrow layout's To-do tab). */
+  /** Unset: the tab never closes (the one-column layout's To-do tab). */
   onClose?: () => void;
   testId: string;
   dataKey?: string;

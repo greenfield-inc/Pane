@@ -8,7 +8,7 @@ import { splitItemKey, type TodoSplitState } from './splitTabs';
 export interface TodoPageView {
   /** `splitItemKey` of the tab shown, or null with no tabs. */
   tab: string | null;
-  /** The narrow layout's To-do tab was the one shown (T-38). */
+  /** The one-column layout's To-do tab was the one shown (T-38). */
   todoShown: boolean;
   pageScroll: number;
   splitScroll: number;
@@ -31,8 +31,8 @@ export function recallTodoView(key: string): TodoPageView | null {
 }
 
 /**
- * The split with the remembered tab shown, when it is still one of the tabs; and, under the narrow
- * layout's tabs, that tab rather than the To-do tab when it was the one left showing.
+ * The split with the remembered tab shown, when it is still one of the tabs; and, under the
+ * one-column tabs, that tab rather than the To-do tab when it was the one left showing.
  */
 export function restoreActiveTab(split: TodoSplitState, tab: string | null, todoShown = true): TodoSplitState {
   if (tab === null) return split;
