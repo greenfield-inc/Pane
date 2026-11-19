@@ -208,11 +208,17 @@ test('the outline gives way within 10 s when the app cannot read its Panes', asy
   test.setTimeout(45_000);
   await installElectronApiMock(page, fixture);
   await page.addInitScript(() => {
-    window.electronAPI.sessions.getAll = () => Promise.reject(new Error('host offline'));
+    window.electronAPI.sessions.getAll = () => {
+      document.documentElement.dataset.askedForPanes = 'true';
+      return Promise.reject(new Error('host offline'));
+    };
   });
   await page.goto('/');
   await expect(launchBox(page)).toBeVisible();
-  await expect(page.locator('#pane-launch-outline')).toHaveCount(0, { timeout: 15_000 });
+  // The 10 s run from the app's start, which a cold dev server can hold back for seconds after the page loads.
+  // The app asks for its Panes after it starts its clock, so the clock runs from no later than that.
+  await expect(page.locator('html')).toHaveAttribute('data-asked-for-panes', 'true', { timeout: 30_000 });
+  await expect(page.locator('#pane-launch-outline')).toHaveCount(0, { timeout: 12_000 });
 });
 
 test('a reload draws no message box: the person is already in the app', async ({ page }) => {

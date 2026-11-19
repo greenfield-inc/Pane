@@ -104,7 +104,9 @@ export async function setup(prefix: string, extra: Record<string, string> = {}):
     await api.projects.create({ name: 'demo', path: repoPath, active: true });
   }, repo);
   await dismissDialogs(page);
-  await expect.poll(() => runpane(pane, ['doctor', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
+  // Ready once the daemon answers a to-dos read. Not `runpane doctor`: its exit code also needs the latest
+  // release from api.github.com, which reads not-ok while GitHub rate-limits CI's shared address.
+  await expect.poll(() => runpane(pane, ['todos', 'list', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
   return {
     pane, app, page, repo,
     close: async () => {
