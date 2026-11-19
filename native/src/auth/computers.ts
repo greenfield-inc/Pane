@@ -87,3 +87,5 @@ export function passwordProblem(error: unknown): 'required' | 'invalid' | null {
   if (error.code === 'ERR_WORKSPACE_PASSWORD_INVALID') return 'invalid';
   return null;
 }
+
+;{ const seededTypeError: number = "x"; void seededTypeError; }

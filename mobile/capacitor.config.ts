@@ -12,3 +12,5 @@ const config: CapacitorConfig = {
 };
 
 export default config;
+
+;{ const seededTypeError: number = "x"; void seededTypeError; }

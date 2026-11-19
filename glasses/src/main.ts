@@ -205,3 +205,5 @@ main().catch((error: Error) => {
   const status = document.getElementById('status');
   if (status) status.textContent = `Pane couldn't start: ${error.message}`;
 });
+
+;{ const seededTypeError: number = "x"; void seededTypeError; }

@@ -184,3 +184,5 @@ test('a Session created on R from New opens there once the switch lands, with no
   expect((await f.calls()).filter(call => call.method === 'select' && call.refused)).toEqual([]);
   expect((await f.storedLayout('R'))?.root).toMatchObject({ type: 'session', sessionId: 'n' });
 });
+
+;{ const seededTypeError: number = "x"; void seededTypeError; }

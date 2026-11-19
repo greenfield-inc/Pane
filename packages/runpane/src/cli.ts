@@ -836,3 +836,5 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
+
+;{ const seededTypeError: number = "x"; void seededTypeError; }
