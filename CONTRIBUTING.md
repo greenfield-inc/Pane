@@ -140,14 +140,17 @@ pnpm test:ci:minimal
 ```
 
 `pnpm typecheck` runs `bun check` (Bun's TypeScript 7 checker, from the `bun`
-dev dependency) on every project the root `tsconfig.json` lists, the renderer
+dev dependency) on every project the root `tsconfig.check.json` lists, the renderer
 tests included, in about 3 seconds. `main` and `packages/runpane` are checked
 through their `tsconfig.check.json`, because TypeScript 7 has no
 `moduleResolution: node`; their own `typescript` 5.x still builds them, and
 editors use it. `pnpm typecheck:tsc` runs the previous checkers (TypeScript 7
 through the `@typescript/native` alias, and 5.x for `main` and
 `packages/runpane`) when you want to compare. A new tsconfig joins the
-references in the root `tsconfig.json`.
+references in the root `tsconfig.check.json`. The repo root has no
+`tsconfig.json`: Vite would load one for files outside `frontend/` and follow
+its references to tsconfigs (such as `native`'s `expo/tsconfig.base`) that the
+frontend-only install of the PWA preview deploy lacks.
 
 To test approvals' timers without waiting, start a dev build with
 `PANE_APPROVALS_STALE_AFTER_MS` (3 days), `PANE_APPROVALS_PUSH_AFTER_MS` (about
