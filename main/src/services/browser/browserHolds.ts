@@ -102,10 +102,15 @@ export class BrowserHolds {
     this.asleep.delete(tabId);
     const existing = this.watches.get(tabId);
     const watch = existing ?? { viewers: new Map<string, Viewer>(), lastWatched: now, lastOnScreen: now };
+    const joined = !watch.viewers.has(viewerId);
     watch.viewers.set(viewerId, { ...report, id: viewerId, lastSeen: now });
     watch.lastWatched = now;
     if (report.onScreen) watch.lastOnScreen = now;
-    if (existing) return;
+    // A screen joining a watched tab can change which pages keep painting for other devices.
+    if (existing) {
+      if (joined) this.changed();
+      return;
+    }
     this.watches.set(tabId, watch);
     this.overWatchLimit(tabId);
     this.changed();
@@ -116,6 +121,7 @@ export class BrowserHolds {
     const watch = this.watches.get(tabId);
     if (!watch?.viewers.delete(viewerId)) return;
     watch.lastWatched = this.now();
+    this.changed();
   }
 
   /** Puts the agent's longest-idle hold to sleep while it holds more than `limit`; returns the last one. */
@@ -175,6 +181,7 @@ export class BrowserHolds {
         if (now - viewer.lastSeen < this.options.watch.silentMs) continue;
         watch.viewers.delete(id);
         watch.lastWatched = Math.max(watch.lastWatched, viewer.lastSeen);
+        changed = true;
       }
       if (watch.viewers.size > 0 || now - watch.lastWatched < this.options.watch.graceMs || busy(tabId)) continue;
       this.dropWatch(tabId);
