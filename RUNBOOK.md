@@ -267,16 +267,19 @@ queue can hold every merge to `main` until the full suite passes on the exact
 merge commit. In a merge group, Detect changed areas diffs no paths and its
 manifest skips nothing, so every job runs; caches are only read. No release or
 deploy workflow runs: their push triggers name `main`, `nightly`, `release` or
-tags, never the queue's `gh-readonly-queue/main/*` branches. Only `Code
-Quality` needs the trigger, because `CI result` is the only required check.
+tags, never the queue's `gh-readonly-queue/main/*` branches. `CI result` is a
+`Code Quality` job and the only required check, so no other workflow needs the
+trigger.
 
 The queue is off until a repository admin turns it on for `main` (Settings ›
 Rules › Rulesets, or the branch protection rule):
 
 1. Turn on **Require merge queue**.
-2. Choose its merge method. The queue merges every pull request one way, so a
-   stack ([CONTRIBUTING.md](CONTRIBUTING.md#merging)) needs **Merge commit**,
-   while single pull requests are squash-merged today.
+2. Choose its merge method. The queue merges every pull request the same way.
+   A stack ([CONTRIBUTING.md](CONTRIBUTING.md#merging)) needs **Merge commit**,
+   so with that choice single pull requests stop being squash-merged. Choosing
+   **Squash** keeps single pull requests as they are but breaks the stack
+   steps.
 3. Keep `CI result` as the only required check. Set the status check timeout
    above a full run (`main` runs take about 11 minutes at p95), for example 30
    minutes.
