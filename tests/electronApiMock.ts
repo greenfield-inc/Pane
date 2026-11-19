@@ -490,6 +490,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       : mockOptions.activeProjectId;
     let lastProjectUpdate: { projectId: string; updates: JsonObject } | null = null;
     let configGetCount = 0;
+    // The app's first render with data; main sends it events only after this (main/src/index.ts).
+    let rendererReady = false;
     let nextConfigUpdateError: string | null = null;
     let nextPreferenceSetError: string | null = null;
     let nextBackgroundColorWriteError: string | null = null;
@@ -1085,7 +1087,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         titleBarOverlayWrites.push(clone(colors));
         return success();
       },
-      notifyRendererReady: () => {},
+      notifyRendererReady: () => {
+        rendererReady = true;
+      },
       setBackgroundColor: (payload: { theme: string; color: string }) => {
         backgroundColorWrites.push(clone(payload));
         if (nextBackgroundColorWriteError) {
@@ -2149,6 +2153,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getConfigReadCount() {
           return configGetCount;
+        },
+        isRendererReady() {
+          return rendererReady;
         },
         setSessions(sessions: JsonObject[]) {
           mockSessions = clone(sessions);

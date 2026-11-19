@@ -42,6 +42,17 @@ async function dismissStartupDialogs(page: Page) {
   }
 }
 
+/** Main sends the renderer events only once it reports ready, so a test standing in for main waits for that too. */
+async function waitForRendererReady(page: Page) {
+  await expect.poll(() => page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const mock = (window as typeof window & {
+      __paneTestElectronMock?: { isRendererReady: () => boolean };
+    }).__paneTestElectronMock;
+    return mock?.isRendererReady() ?? false;
+  }), { timeout: 30_000 }).toBe(true);
+}
+
 async function clickDomNode(locator: ReturnType<Page['locator']>) {
   await locator.evaluate((node: HTMLElement) => {
     node.click();
@@ -264,6 +275,7 @@ test.describe('Smoke Tests', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     await dismissStartupDialogs(page);
+    await waitForRendererReady(page);
 
     await page.evaluate(() => {
       // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -294,8 +306,7 @@ test.describe('Smoke Tests', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     await dismissStartupDialogs(page);
-
-    await page.waitForTimeout(250);
+    await waitForRendererReady(page);
 
     const beforeCount = await page.evaluate(() => {
       // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -325,6 +336,7 @@ test.describe('Smoke Tests', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
     await dismissStartupDialogs(page);
+    await waitForRendererReady(page);
 
     const staleSessionName = 'Remote stale pane';
 
