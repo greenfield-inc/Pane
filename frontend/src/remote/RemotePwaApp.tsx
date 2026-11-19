@@ -51,6 +51,11 @@ import { PortalContainerProvider } from '../contexts/PortalContainerContext';
 import { DevicePanel } from '../components/panels/device/DevicePanel';
 import { DeviceClientContext } from '../components/panels/device/deviceClient';
 import { remoteDeviceClient } from './components/remoteDeviceClient';
+import { RemoteTodos } from './components/RemoteTodos';
+import { startRemoteTodos } from './runtime/remoteTodosHost';
+import { isOverlayRoute, parseRouteView, routeParent, routeView, stepTodosStack, type PhoneTodosRoute } from '../components/todos/phone/phoneRoute';
+import { useSessionTodosWaiting, useTodosStore } from '../stores/todosStore';
+import type { PhoneTodosSession } from '../components/todos/phone/PhoneSessionTodos';
 import { LoadingStatus } from '../components/ui/Skeleton';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
@@ -161,6 +166,14 @@ export function RemotePwaApp() {
   const navigationRequestRef = useRef(0);
   const archivedLoadRequestRef = useRef(0);
   const pushRoutePanelRef = useRef<{ sessionId: string; panelId: string } | null>(null);
+  /** To-dos on screen (P7): its screen, or null while a Pane or Session shows. */
+  const [todosRoute, setTodosRoute] = useState<PhoneTodosRoute | null>(null);
+  /** The history views under each To-dos screen opened forward, so back can step out through the history. */
+  const todosStackRef = useRef<string[]>([]);
+  const todosAvailable = useTodosStore(state => state.snapshot !== null);
+  /** To-dos opened from a Session's header (T-23): that Session's list, until To-dos closes. */
+  const [todosSession, setTodosSession] = useState<PhoneTodosSession | null>(null);
+  useEffect(() => { if (!todosRoute) setTodosSession(null); }, [todosRoute]);
 
   useEffect(() => {
     void loadRemoteProfiles()
@@ -232,12 +245,18 @@ export function RemotePwaApp() {
   const setOrchestrationFailure = useRemoteSessionStore(state => state.setOrchestrationFailure);
   const setArchivedProjects = useRemoteSessionStore(state => state.setArchivedProjects);
 
+  /** Android back while To-dos is open steps out of it; set once the handler exists below. */
+  const todosBackRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     let listener: { remove(): Promise<void> } | null = null;
     let cancelled = false;
     void addNativeAppListener('backButton', () => {
       if (sidebarOpen) {
         setSidebarOpen(false);
+        return;
+      }
+      if (todosBackRef.current) {
+        todosBackRef.current();
         return;
       }
       if (selectedPanelId) {
@@ -419,18 +438,31 @@ export function RemotePwaApp() {
     }
   }, [adapter, openSession, setLastError]);
 
-  const historyView: RemoteHistoryView = openOrchestrationSession
+  const workspaceView: RemoteHistoryView = openOrchestrationSession
     ? `session:${openOrchestrationSession.session.id}`
     : selectedSessionId ? `pane:${selectedSessionId}` : null;
+  const historyView: RemoteHistoryView = todosRoute ? routeView(todosRoute) : workspaceView;
+  const historyEnabled = adapter !== null && !isNativeMobile();
   const { requestView, cancelRequest } = useRemoteBrowserHistory({
-    enabled: adapter !== null && !isNativeMobile(),
+    enabled: historyEnabled,
     host: activeProfile?.id ?? '',
     view: historyView,
-    overlayOpen: sidebarOpen || createSessionProject !== null || createOrchestrationOpen,
+    overlayOpen: sidebarOpen || createSessionProject !== null || createOrchestrationOpen || (todosRoute !== null && isOverlayRoute(todosRoute)),
     onNavigate: (view) => {
       // Back and Forward retire a Session still opening, even when they land on the view on screen.
       navigationRequestRef.current += 1;
-      if (view === historyView) return;
+      // A To-dos screen: back or forward through approval → to-do → list.
+      const todos = parseRouteView(view);
+      if (todos) {
+        todosStackRef.current = stepTodosStack(todosStackRef.current, view ?? '', historyView);
+        setTodosRoute(todos);
+        return;
+      }
+      if (todosRoute) {
+        todosStackRef.current = [];
+        setTodosRoute(null);
+      }
+      if (view === workspaceView) return;
       const state = useRemoteSessionStore.getState();
       if (view?.startsWith('session:')) {
         const sessionId = view.slice('session:'.length);
@@ -447,8 +479,67 @@ export function RemotePwaApp() {
       setSidebarOpen(false);
       setCreateSessionProject(null);
       setCreateOrchestrationOpen(false);
+      setTodosRoute(route => (route && isOverlayRoute(route) ? routeParent(route) : route));
     },
   });
+
+  /** Leaves To-dos for a Pane or Session the person picked. */
+  const closeTodos = useCallback(() => {
+    todosStackRef.current = [];
+    setTodosRoute(null);
+  }, []);
+
+  /** Opens a To-dos screen as its own history entry; a form opens over the screen under it. */
+  const navigateTodos = useCallback((next: PhoneTodosRoute) => {
+    if (!isOverlayRoute(next)) {
+      todosStackRef.current.push(historyView ?? '');
+      requestView(routeView(next));
+    }
+    setTodosRoute(next);
+  }, [historyView, requestView]);
+
+  const openTodos = useCallback(() => {
+    setSidebarOpen(false);
+    setTodosSession(null);
+    if (todosRoute) {
+      // The entry again, from a to-do: back to the list in place.
+      setTodosRoute({ screen: 'list' });
+      return;
+    }
+    navigateTodos({ screen: 'list' });
+  }, [navigateTodos, todosRoute]);
+
+  /**
+   * Back one screen: approval or files → to-do → list → where To-dos was opened from. Through the
+   * browser's history when that is where it leads, so browser back and this stay in step.
+   */
+  const backTodos = useCallback(() => {
+    const route = todosRoute;
+    if (!route) return;
+    if (isOverlayRoute(route)) {
+      // The history closes the form's entry itself.
+      setTodosRoute(routeParent(route));
+      return;
+    }
+    const parentNumber = route.screen === 'todo' ? useTodosStore.getState().details.get(route.number)?.todo.parentNumber ?? null : null;
+    const parent = routeParent(route, parentNumber);
+    const stack = todosStackRef.current;
+    const under = stack[stack.length - 1];
+    const throughHistory = under !== undefined && (parent ? under === routeView(parent) : parseRouteView(under) === null);
+    if (historyEnabled && throughHistory) {
+      window.history.back();
+      return;
+    }
+    if (parent) setTodosRoute(parent);
+    else closeTodos();
+  }, [closeTodos, historyEnabled, todosRoute]);
+  useEffect(() => {
+    todosBackRef.current = todosRoute ? backTodos : null;
+  }, [backTodos, todosRoute]);
+
+  // The host's to-dos and approvals while connected to it; a new host starts with none.
+  useEffect(() => (adapter ? startRemoteTodos(adapter) : undefined), [adapter]);
+
 
   const refreshOrchestrationSessions = useCallback(async (runtime: RemoteRuntimeAdapter | null = adapter, required = false) => {
     if (!runtime) return;
@@ -510,6 +601,8 @@ export function RemotePwaApp() {
     setMountedTerminalPanelIds([]);
     setSelectedPaneScope(null);
     setArchivedSessionToast(null);
+    todosStackRef.current = [];
+    setTodosRoute(null);
   }, [resetRemoteHost]);
 
   const connectProfile = useCallback(async (profile: RemotePaneConnectionProfile) => {
@@ -582,6 +675,7 @@ export function RemotePwaApp() {
           return;
         }
         pushRoutePanelRef.current = route.panelId ? { sessionId: route.paneId, panelId: route.panelId } : null;
+        closeTodos();
         requestView(`pane:${route.paneId}`);
         selectSession(route.paneId);
         // Selecting the same pane does not rerun the panel-loading effect.
@@ -593,7 +687,7 @@ export function RemotePwaApp() {
       return;
     }
     void connectProfile(profile).then(applyRoute).catch(() => {});
-  }, [activeProfile?.id, adapter, connectProfile, loadPanels, pendingPushRoute, profilesLoading, requestView, savedProfiles, selectSession, setLastError]);
+  }, [activeProfile?.id, adapter, closeTodos, connectProfile, loadPanels, pendingPushRoute, profilesLoading, requestView, savedProfiles, selectSession, setLastError]);
 
   const pairFromLink = useCallback(async (secret: string) => {
     setLastError(null);
@@ -797,10 +891,11 @@ export function RemotePwaApp() {
     navigationRequestRef.current += 1;
     personOpenedPaneRef.current = sessionId;
     setSelectedPaneScope({ paneId: sessionId, scope });
+    closeTodos();
     requestView(`pane:${sessionId}`);
     selectSession(sessionId);
     setSidebarOpen(false);
-  }, [requestView, selectSession]);
+  }, [closeTodos, requestView, selectSession]);
 
   /** A worker line's Open in the Session orchestrator's chat: that worker's Pane, as its row under the Session. */
   const openWorkerPane = useCallback((paneId: string, orchestrationSessionId: string) => {
@@ -825,10 +920,11 @@ export function RemotePwaApp() {
     // The create request can finish after a switch to another host.
     if (adapter !== activeRuntimeRef.current) return;
     navigationRequestRef.current += 1;
+    closeTodos();
     requestView(`session:${view.session.id}`);
     openSession(view, { showChat: true });
     void refreshOrchestrationSessions(adapter);
-  }, [adapter, openSession, refreshOrchestrationSessions, requestView]);
+  }, [adapter, closeTodos, openSession, refreshOrchestrationSessions, requestView]);
 
   const sidebarActions = useMemo<RemoteSidebarActions>(() => ({
     selectPane: selectRemoteSession,
@@ -856,6 +952,7 @@ export function RemotePwaApp() {
     }),
     createPane: openCreateSession,
     openSession: (sessionId) => {
+      closeTodos();
       requestView(`session:${sessionId}`);
       setSidebarOpen(false);
       void openRemoteOrchestrationSession(sessionId).then(opened => { if (!opened) cancelRequest(); });
@@ -882,7 +979,7 @@ export function RemotePwaApp() {
     reloadSessions: () => void refreshOrchestrationSessions(adapter),
     loadArchived: () => void loadArchived(adapter),
     refresh: () => void resyncHost(adapter),
-  }), [adapter, cancelRequest, loadArchived, loadArchivedIfShown, openCreateOrchestrationSession, openCreateSession, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, requestView, resyncHost, runSidebarAction, selectRemoteSession]);
+  }), [adapter, cancelRequest, closeTodos, loadArchived, loadArchivedIfShown, openCreateOrchestrationSession, openCreateSession, openRemoteOrchestrationSession, refreshOrchestrationSessions, refreshProjects, requestView, resyncHost, runSidebarAction, selectRemoteSession]);
 
   const dismissArchivedSessionToast = useCallback(() => setArchivedSessionToast(null), []);
   const archivedSessionToastElement = archivedSessionToast && (
@@ -901,6 +998,7 @@ export function RemotePwaApp() {
       const nextProjects = await refreshProjects(adapter);
       const createdSessionId = nextProjects ? findSessionIdByName(nextProjects, projectId, sessionName) : null;
       if (createdSessionId) {
+        closeTodos();
         requestView(`pane:${createdSessionId}`);
         selectSession(createdSessionId);
         setSidebarOpen(false);
@@ -910,7 +1008,7 @@ export function RemotePwaApp() {
     }
 
     setSidebarOpen(false);
-  }, [adapter, refreshProjects, requestView, selectSession]);
+  }, [adapter, closeTodos, refreshProjects, requestView, selectSession]);
 
   // With the host's resume-on-open setting, a paused tab the person opens resumes: the tab shown
   // when they pick a Pane or Session, or a tab they pick. Tabs kept loaded out of sight never count.
@@ -1052,6 +1150,28 @@ export function RemotePwaApp() {
     void loadPanels(selectedSessionId, adapter);
   }, [adapter, loadPanels, selectedSessionId]);
 
+  const sidebarTodos = todosAvailable ? { open: todosRoute !== null, onOpen: openTodos } : undefined;
+  const openSessionId = openOrchestrationSession?.session.id ?? '';
+  const sessionTodosWaiting = useSessionTodosWaiting(openSessionId);
+  const openName = openOrchestrationSession
+    // The list carries renames (such as a first-message name); the open snapshot does not.
+    ? (orchestrationSessions.find(session => session.id === openOrchestrationSession.session.id)?.name ?? openOrchestrationSession.session.name) || 'Untitled'
+    : selectedSession ? selectedSession.name || 'Untitled' : null;
+  // The open Session's to-dos (T-23): the same list as the desktop's To-dos tab, full screen, with back.
+  const sessionTodos = todosAvailable && openOrchestrationSession && openName ? {
+    waiting: sessionTodosWaiting,
+    onOpen: () => {
+      setTodosSession({ id: openSessionId, name: openName });
+      navigateTodos({ screen: 'list' });
+    },
+  } : undefined;
+  /** A to-do's "Open its Session": the Session itself, here. */
+  const openTodoSession = (sessionId: string) => {
+    closeTodos();
+    requestView(`session:${sessionId}`);
+    void openRemoteOrchestrationSession(sessionId).then(opened => { if (!opened) cancelRequest(); });
+  };
+
   const connectionBar = (
     <RelayConnectionBar profile={activeProfile ?? reconnectingProfile ?? savedProfiles[0]} status={connectionStatus} lastError={lastError} />
   );
@@ -1131,6 +1251,7 @@ export function RemotePwaApp() {
                 actionId={sidebarActionId}
                 actions={sidebarActions}
                 selectedPane={selectedPaneScope}
+                todos={sidebarTodos}
                 onClose={() => setSidebarOpen(false)}
                 className="flex h-full w-full shadow-2xl"
               />
@@ -1146,124 +1267,140 @@ export function RemotePwaApp() {
         actionId={sidebarActionId}
         actions={sidebarActions}
         selectedPane={selectedPaneScope}
+        todos={sidebarTodos}
         className="hidden w-80 shrink-0 md:flex"
       />
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <RemoteStatusBar
-          profile={activeProfile}
-          openName={openOrchestrationSession
-            // The list carries renames (such as a first-message name); the open snapshot does not.
-            ? (orchestrationSessions.find(session => session.id === openOrchestrationSession.session.id)?.name ?? openOrchestrationSession.session.name) || 'Untitled'
-            : selectedSession ? selectedSession.name || 'Untitled' : null}
-          status={connectionStatus}
-          lastError={lastError}
-          lastSeenAt={lastSeenAt}
-          updateIntent={updateIntent}
-          onRetry={() => adapter.retryNow()}
-          onDisconnect={disconnect}
-          onOpenSidebar={openSidebar}
-        />
-        {connectionBar}
-
-        {isNativeMobile() && (
-          <details className="border-b border-border-primary bg-surface-secondary px-3 py-2 text-sm">
-            <summary className="cursor-pointer font-medium text-text-secondary">Notifications {pushStatus?.registration === 'registered' ? 'enabled' : 'setup'}</summary>
-            <p className="mt-2 text-text-tertiary">{pushStatus?.message ?? 'Allow notifications to receive host attention alerts.'}</p>
-            <label className="mt-2 flex items-center gap-2 text-text-secondary">
-              <input type="checkbox" disabled={pushStatus?.registration !== 'registered'} checked={pushControls.needsInputEnabled} onChange={event => changePushControl('needsInputEnabled', event.target.checked)} />
-              Alert when a Pane needs input
-            </label>
-            <label className="mt-2 flex items-center gap-2 text-text-secondary">
-              <input type="checkbox" disabled={pushStatus?.registration !== 'registered'} checked={pushControls.completedEnabled} onChange={event => changePushControl('completedEnabled', event.target.checked)} />
-              Alert when a turn completes
-            </label>
-          </details>
+        {todosRoute && (
+          <RemoteTodos
+            route={todosRoute}
+            onNavigate={navigateTodos}
+            onReplace={setTodosRoute}
+            onBack={backTodos}
+            onOpenSidebar={openSidebar}
+            onOpenSession={openTodoSession}
+            hostLabel={activeProfile.label}
+            sessionAgents={affordances.sessionAgents}
+            status={connectionStatus}
+            session={todosSession ?? undefined}
+          />
         )}
+        {/* Kept mounted under To-dos, so its terminals and chats don't start over on the way back. */}
+        <div className={todosRoute ? 'hidden' : 'contents'}>
+          <RemoteStatusBar
+            profile={activeProfile}
+            openName={openName}
+            status={connectionStatus}
+            lastError={lastError}
+            lastSeenAt={lastSeenAt}
+            updateIntent={updateIntent}
+            onRetry={() => adapter.retryNow()}
+            onDisconnect={disconnect}
+            onOpenSidebar={openSidebar}
+            todos={sessionTodos}
+          />
+          {connectionBar}
 
-        {openOrchestrationSession && <SessionBlockers sessionId={openOrchestrationSession.session.id} fallback={openOrchestrationSession.session.blockers} />}
+          {isNativeMobile() && (
+            <details className="border-b border-border-primary bg-surface-secondary px-3 py-2 text-sm">
+              <summary className="cursor-pointer font-medium text-text-secondary">Notifications {pushStatus?.registration === 'registered' ? 'enabled' : 'setup'}</summary>
+              <p className="mt-2 text-text-tertiary">{pushStatus?.message ?? 'Allow notifications to receive host attention alerts.'}</p>
+              <label className="mt-2 flex items-center gap-2 text-text-secondary">
+                <input type="checkbox" disabled={pushStatus?.registration !== 'registered'} checked={pushControls.needsInputEnabled} onChange={event => changePushControl('needsInputEnabled', event.target.checked)} />
+                Alert when a Pane needs input
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-text-secondary">
+                <input type="checkbox" disabled={pushStatus?.registration !== 'registered'} checked={pushControls.completedEnabled} onChange={event => changePushControl('completedEnabled', event.target.checked)} />
+                Alert when a turn completes
+              </label>
+            </details>
+          )}
 
-        <RemotePanelTabs
-          panels={selectedPanels}
-          selectedPanelId={selectedPanel?.id ?? null}
-          creating={creatingTerminal}
-          customCommands={affordances.customCommands}
-          onSelectPanel={selectPanel}
-          onCreateTerminal={createTerminal}
-          onCreateBrowser={createBrowser}
-          onCreateChat={affordances.chatTabsEnabled && adapter ? agent => void createChat({ agent }) : undefined}
-          chatAgents={chatAgents}
-          onCreateProfileChat={affordances.chatTabsEnabled && adapter ? () => setProfileDialogOpen(true) : undefined}
-        />
+          {openOrchestrationSession && <SessionBlockers sessionId={openOrchestrationSession.session.id} fallback={openOrchestrationSession.session.blockers} />}
 
-        {profileDialogOpen && (
-          <AgentFarmProfileDialog onClose={() => setProfileDialogOpen(false)} onCreate={launch => createChat({ launch })} />
-        )}
+          <RemotePanelTabs
+            panels={selectedPanels}
+            selectedPanelId={selectedPanel?.id ?? null}
+            creating={creatingTerminal}
+            customCommands={affordances.customCommands}
+            onSelectPanel={selectPanel}
+            onCreateTerminal={createTerminal}
+            onCreateBrowser={createBrowser}
+            onCreateChat={affordances.chatTabsEnabled && adapter ? agent => void createChat({ agent }) : undefined}
+            chatAgents={chatAgents}
+            onCreateProfileChat={affordances.chatTabsEnabled && adapter ? () => setProfileDialogOpen(true) : undefined}
+          />
 
-        <RemoteSessionList
-          session={selectedSession}
-          panels={selectedPanels}
-          onCreateTerminal={createTerminal}
-        />
+          {profileDialogOpen && (
+            <AgentFarmProfileDialog onClose={() => setProfileDialogOpen(false)} onCreate={launch => createChat({ launch })} />
+          )}
 
-        {selectedSession && terminalPanels
-          .filter(panel => panel.id === selectedPanel?.id || mountedTerminalPanelIds.includes(panel.id))
-          .map(panel => {
-            const selected = panel.id === selectedPanel?.id;
-            return (
-              <div
-                key={panel.id}
-                id={getRemotePanelTabPanelId(panel.id)}
-                role="tabpanel"
-                aria-labelledby={getRemotePanelTabId(panel.id)}
-                hidden={!selected}
-                tabIndex={0}
-                className={selected ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : undefined}
-              >
-                <RemoteTerminalPanel
-                  adapter={adapter}
-                  panel={panel}
-                  sessionId={selectedSession.id}
-                  connectionStatus={connectionStatus}
-                  shortcuts={affordances.terminalShortcuts}
-                  shortcutsLoading={affordancesLoading}
-                  voiceTranscription={affordances.voiceTranscription}
-                  onRefreshShortcuts={() => { void loadAffordances(adapter); }}
-                />
-              </div>
-            );
-          })}
+          <RemoteSessionList
+            session={selectedSession}
+            panels={selectedPanels}
+            onCreateTerminal={createTerminal}
+          />
 
-        {selectedSession && selectedPanel && selectedPanel.type !== 'terminal' && (
-          <div
-            id={getRemotePanelTabPanelId(selectedPanel.id)}
-            role="tabpanel"
-            aria-labelledby={getRemotePanelTabId(selectedPanel.id)}
-            tabIndex={0}
-            className="flex min-h-0 flex-1 flex-col overflow-hidden"
-          >
-            {selectedPanel.type === 'browser' && (
-              <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} onRelayAddress={isRelayComputer ? relayAddress : undefined} />
-            )}
-            {selectedPanel.type === 'explorer' && adapter && (
-              <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} panelId={selectedPanel.id} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />
-            )}
-            {selectedPanel.type === 'chat' && adapter && (
-              <Suspense fallback={null}>
-                <RemoteChatTab key={selectedPanel.id} adapter={adapter} panel={selectedPanel} panels={selectedPanels} connected={connectionStatus === 'connected'}
-                  onOpenWorker={openWorkerPane} onSelectPanel={selectPanel} />
-              </Suspense>
-            )}
-            {selectedPanel.type === 'device' && deviceClient && (
-              <DeviceClientContext.Provider value={deviceClient}>
-                <DevicePanel key={selectedPanel.id} panel={selectedPanel} isActive />
-              </DeviceClientContext.Provider>
-            )}
-            {selectedPanel.type === 'diff' && adapter && (
-              <RemoteDiffPanel key={selectedPanel.id} adapter={adapter} sessionId={selectedPanel.sessionId} />
-            )}
-            {!phoneShows(selectedPanel) && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
-          </div>
-        )}
+          {selectedSession && terminalPanels
+            .filter(panel => panel.id === selectedPanel?.id || mountedTerminalPanelIds.includes(panel.id))
+            .map(panel => {
+              const selected = panel.id === selectedPanel?.id;
+              return (
+                <div
+                  key={panel.id}
+                  id={getRemotePanelTabPanelId(panel.id)}
+                  role="tabpanel"
+                  aria-labelledby={getRemotePanelTabId(panel.id)}
+                  hidden={!selected}
+                  tabIndex={0}
+                  className={selected ? 'flex min-h-0 flex-1 flex-col overflow-hidden' : undefined}
+                >
+                  <RemoteTerminalPanel
+                    adapter={adapter}
+                    panel={panel}
+                    sessionId={selectedSession.id}
+                    connectionStatus={connectionStatus}
+                    shortcuts={affordances.terminalShortcuts}
+                    shortcutsLoading={affordancesLoading}
+                    voiceTranscription={affordances.voiceTranscription}
+                    onRefreshShortcuts={() => { void loadAffordances(adapter); }}
+                  />
+                </div>
+              );
+            })}
+
+          {selectedSession && selectedPanel && selectedPanel.type !== 'terminal' && (
+            <div
+              id={getRemotePanelTabPanelId(selectedPanel.id)}
+              role="tabpanel"
+              aria-labelledby={getRemotePanelTabId(selectedPanel.id)}
+              tabIndex={0}
+              className="flex min-h-0 flex-1 flex-col overflow-hidden"
+            >
+              {selectedPanel.type === 'browser' && (
+                <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} onRelayAddress={isRelayComputer ? relayAddress : undefined} />
+              )}
+              {selectedPanel.type === 'explorer' && adapter && (
+                <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} panelId={selectedPanel.id} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />
+              )}
+              {selectedPanel.type === 'chat' && adapter && (
+                <Suspense fallback={null}>
+                  <RemoteChatTab key={selectedPanel.id} adapter={adapter} panel={selectedPanel} panels={selectedPanels} connected={connectionStatus === 'connected'}
+                    onOpenWorker={openWorkerPane} onSelectPanel={selectPanel} />
+                </Suspense>
+              )}
+              {selectedPanel.type === 'device' && deviceClient && (
+                <DeviceClientContext.Provider value={deviceClient}>
+                  <DevicePanel key={selectedPanel.id} panel={selectedPanel} isActive />
+                </DeviceClientContext.Provider>
+              )}
+              {selectedPanel.type === 'diff' && adapter && (
+                <RemoteDiffPanel key={selectedPanel.id} adapter={adapter} sessionId={selectedPanel.sessionId} />
+              )}
+              {!phoneShows(selectedPanel) && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
+            </div>
+          )}
+        </div>
       </section>
 
       {createSessionProject && (

@@ -74,7 +74,7 @@ const eventChannels = new Set<string>(MACHINE_EVENT_CHANNELS);
 const isMachineEventChannel = (channel: string): channel is MachineEventChannel => eventChannels.has(channel);
 const itemSchema = boundary.object({ kind: boundary.enumeration('pane', 'session'), id: boundary.nonEmptyString });
 const commandTypeSchema = boundary.object({
-  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session', 'preview-switch-to-chat', 'switch-to-chat', 'submit-to-agent', 'machine-health', 'move-session'),
+  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session', 'preview-switch-to-chat', 'switch-to-chat', 'submit-to-agent', 'machine-health', 'todo-act', 'todo-create', 'move-session'),
 });
 const commandSchemas = {
   notify: boundary.object({ command: boundary.jsonObject }),
@@ -90,6 +90,8 @@ const commandSchemas = {
   'switch-to-chat': boundary.object({ sessionId: boundary.nonEmptyString, panelIds: boundary.array(boundary.nonEmptyString) }),
   'machine-health': boundary.object({ action: boundary.enumeration(...MACHINE_HEALTH_ACTIONS), request: boundary.jsonObject }),
   'submit-to-agent': boundary.object({ panelId: boundary.nonEmptyString, input: boundary.nonEmptyString }),
+  'todo-act': boundary.object({ action: boundary.jsonObject }),
+  'todo-create': boundary.object({ input: boundary.jsonObject }),
   'move-session': boundary.object({ channel: boundary.enumeration(...Object.values(SESSION_MOVE_CHANNELS)), request: boundary.jsonObject }),
 };
 
@@ -422,6 +424,11 @@ function toInvocation(command: PaneCommandValue): Invocation {
         const { panelId, input } = decodeBoundary(command, commandSchemas['submit-to-agent']);
         return { channel: 'runpane:panels:submit', args: [{ panelId, input, source: 'user' }] };
       }
+      // To-dos (D-409): the host decodes the action and applies its own rules, as the person.
+      case 'todo-act':
+        return { channel: 'todos:act', args: [decodeBoundary(command, commandSchemas['todo-act']).action] };
+      case 'todo-create':
+        return { channel: 'todos:create', args: [decodeBoundary(command, commandSchemas['todo-create']).input] };
     }
   } catch (error) {
     throw new PaneError('ERR_MACHINE_COMMAND_INVALID',

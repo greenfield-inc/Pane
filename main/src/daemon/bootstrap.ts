@@ -99,6 +99,10 @@ import { REMOTE_MEMBER_KINDS } from '../services/remoteMemberEvents';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { LoopManager } from '../services/loops/loopManager';
+import { TodoService } from '../services/todos/todoService';
+import { TodoStore } from '../services/todos/todoStore';
+import { createTodoHost } from '../services/todos/todoHost';
+import type { GitStatus } from '../types/session';
 import { AutoPauser } from '../services/autoPause';
 import { pausePanes } from '../services/panePause';
 import { updateHoldIsLive } from '../services/updateRestoration';
@@ -575,6 +579,66 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   };
 
   const commandRegistry = registerIpcHandlers(services);
+
+  // To-dos (D-409): the service answers reads everywhere; only the instance that does housekeeping
+  // runs the supervisor, the load gate and launch resume, so one data folder has one supervisor.
+  // Test-only (D-409 validation): PANE_TODOS_TIME_SCALE=60 runs the supervisor's and gate's minutes as seconds. Ignored when packaged.
+  const todoTimeScale = options.app?.isPackaged !== false ? 1 : Math.max(1, Number(process.env.PANE_TODOS_TIME_SCALE) || 1);
+  const todoClockStart = Date.now();
+  const todoClock = todoTimeScale === 1 ? Date.now : () => todoClockStart + (Date.now() - todoClockStart) * todoTimeScale;
+  const todoService = new TodoService(new TodoStore(databaseService.getDb()), createTodoHost(services, commandRegistry), todoClock);
+  services.todoService = todoService;
+  // T-7: to-do Sessions made before Sessions carried their to-do's number get it now, so no list shows them.
+  void services.orchestrationSessionManager?.markTodoSessions(todoService.sessionLinks()).catch((error: Error) => {
+    console.warn('[todos] Could not mark older to-do Sessions; the Sessions list hides them once the to-dos load:', error);
+  });
+  daemonServices.todoService = todoService;
+  let todosChangedTimer: ReturnType<typeof setTimeout> | undefined;
+  todoService.on('changed', () => {
+    if (todosChangedTimer) return;
+    todosChangedTimer = setTimeout(() => {
+      todosChangedTimer = undefined;
+      getPaneEventSink().send('todos:changed');
+    }, 150);
+  });
+  services.notifyService?.queue.on('change', () => {
+    const queue = services.notifyService?.queue;
+    if (queue) todoService.onApprovalsChanged(queue.snapshot().items);
+  });
+  const lastCommits = new Map<string, number>();
+  gitStatusManager.on('git-status-updated', (paneId: string, status: GitStatus) => {
+    if (status.prNumber && status.prUrl) todoService.onPr(paneId, { url: status.prUrl, number: status.prNumber, title: status.prTitle });
+    const commits = status.totalCommits ?? 0;
+    const before = lastCommits.get(paneId);
+    lastCommits.set(paneId, commits);
+    if (before !== undefined && commits > before) todoService.noteProgressForPane(paneId);
+  });
+  let todoTimer: ReturnType<typeof setInterval> | undefined;
+  let todoLaunchTimer: ReturnType<typeof setTimeout> | undefined;
+  if (duties.housekeeping) {
+    let ticking = false;
+    todoTimer = setInterval(() => {
+      if (ticking) return;
+      ticking = true;
+      // Round 9: the wake check reads the wall clock each tick (no timer per to-do), so a snooze that came due
+      // while Pane was closed or the Mac slept wakes on the first tick after; it waits for launch resume below.
+      // Each stage catches its own failure, so one can't stop wakes, the load gate or the supervisor (F-4).
+      const stage = (name: string, run: () => Promise<void>) => () => run().catch(error => logger.warn(`[Todos] ${name} failed`, error));
+      void stage('tick', () => todoService.fastTick())()
+        .then(stage('wake check', () => todoService.wakeTick()))
+        .then(stage('load check', () => todoService.loadTick()))
+        .then(stage('supervisor pass', () => todoService.supervisorPass()))
+        .finally(() => { ticking = false; });
+    }, 2_000);
+    todoService.prune();
+    // Launch resume, once the window and tabs have settled.
+    todoLaunchTimer = setTimeout(() => {
+      void todoService.resumeOnLaunch('launch').catch(error => logger.warn('[Todos] launch resume failed', error));
+    }, 10_000);
+    powerMonitor.on('resume', () => {
+      setTimeout(() => { void todoService.resumeOnLaunch('wake').catch(error => logger.warn('[Todos] wake resume failed', error)); }, 10_000);
+    });
+  }
   const autoPauser = new AutoPauser({
     now: () => Date.now(),
     settings: () => ({ enabled: configManager.getConfig().autoPauseEnabled, hours: configManager.getConfig().autoPauseAfterHours, chatMinutes: configManager.getConfig().chatIdleReleaseMinutes }),
@@ -998,6 +1062,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       prepareNotifyForQuit();
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
+      clearInterval(todoTimer);
+      clearTimeout(todoLaunchTimer);
       machineHealth.stop();
       finishedPanes.stop();
       autoPauser.stop();

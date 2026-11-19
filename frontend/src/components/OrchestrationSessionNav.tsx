@@ -7,10 +7,11 @@ import { openApprovalsFromCount } from './approvals/useSessionApprovals';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useLoopsStore } from '../stores/loopsStore';
+import { useTodoSessionIds } from '../stores/todosStore';
+import { visibleOrchestrationSessions } from './orchestrationSessionVisibility';
 import { sessionWaitingCount, useNotifyStore } from '../stores/notifyStore';
 import { LoopLabel, LoopMark } from './loops/LoopMark';
 import {
-  isArchivedOrchestrationSession,
   useOrchestrationSessionStore,
   type OrchestrationSessionAvailability,
 } from '../stores/orchestrationSessionStore';
@@ -124,11 +125,15 @@ export function OrchestrationSessionNav({
   const loopsBySessionTarget = useLoopsStore(state => state.loopsBySessionTarget);
   const notifySnapshot = useNotifyStore(state => state.snapshot);
   const openSessionId = useNavigationStore(state => state.activeView === 'pane-chat') ? selectedSessionIdForList : undefined;
-  // A loop's Session lives under Loops; it joins the list only while a card from it waits on you, or while it is open.
+  const todoSessionIds = useTodoSessionIds();
+  // A loop's Session lives under Loops and joins the list only while a card from it waits on you, or while
+  // it is open. A to-do's own Session lives under To-dos (D-409) and never joins it (T-7).
   const activeSessions = useMemo(
-    () => sessions.filter(session => !isArchivedOrchestrationSession(session)
-      && (!loopsBySessionTarget.has(session.id) || session.id === openSessionId || sessionWaitingCount(notifySnapshot, session.id) > 0)),
-    [sessions, loopsBySessionTarget, notifySnapshot, openSessionId],
+    () => visibleOrchestrationSessions(sessions, {
+      todoSessionIds, openSessionId, loopSessionIds: loopsBySessionTarget,
+      waitingCount: sessionId => sessionWaitingCount(notifySnapshot, sessionId),
+    }),
+    [sessions, loopsBySessionTarget, todoSessionIds, notifySnapshot, openSessionId],
   );
   const pinnedSessions = useMemo(
     () => activeSessions.filter(session => session.isPinned === true && !loopsBySessionTarget.has(session.id)),

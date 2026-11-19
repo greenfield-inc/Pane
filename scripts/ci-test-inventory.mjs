@@ -73,6 +73,7 @@ export const LANES = [
     'scripts/test-runpane-dispatch.js',
     'scripts/test-runpane-python-parity.js',
     'scripts/test-runpane-setup-pty.py',
+    'scripts/test-runpane-todo-times.js',
     'scripts/test-runpane-watch-defaults.js',
   ] } },
   { workflow: 'quality.yml', job: 'relay-rust', run: 'cargo test --locked', list: { glob: /^(relay|direct)\/tests\/[^/]+\.rs$/ } },

@@ -11,6 +11,8 @@ import { runPauseAction } from '../utils/pause';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import type { Session } from '../types/session';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
+import { useTodoSessionIds } from '../stores/todosStore';
+import { isTodoSession } from './orchestrationSessionVisibility';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
 
 export interface CompactSessionMenuState {
@@ -34,12 +36,16 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
   const showError = useErrorStore(state => state.showError);
   const orchestrationSessions = useOrchestrationSessionStore(state => state.sessions);
   const refreshOrchestrationSessions = useOrchestrationSessionStore(state => state.refresh);
+  const todoSessionIds = useTodoSessionIds();
   const paneId = menu?.session.id;
   const memberOf: OrchestrationSessionRecord[] = [];
   const addableTo: OrchestrationSessionRecord[] = [];
   for (const session of orchestrationSessions) {
     if (isArchivedOrchestrationSession(session)) continue;
-    (session.associations.some(association => association.paneId === paneId) ? memberOf : addableTo).push(session);
+    const member = session.associations.some(association => association.paneId === paneId);
+    // A to-do's own Session is not offered to join: the to-do runs it (D-409, T-7).
+    if (member) memberOf.push(session);
+    else if (!isTodoSession(session, todoSessionIds)) addableTo.push(session);
   }
   // "Add to Session" swaps the menu to a Session list in place, so the menu stays short however many Sessions exist.
   const [picking, setPicking] = useState(false);

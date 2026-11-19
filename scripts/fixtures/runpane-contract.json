@@ -669,13 +669,6 @@
       "/tmp/pane"
     ],
     [
-      "report",
-      "--outcome",
-      " plan ready ",
-      "--summary-file",
-      "status.json"
-    ],
-    [
       "panels",
       "resume",
       "--all-stopped",
@@ -1205,47 +1198,6 @@
       "--help"
     ],
     [
-      "profiles",
-      "list",
-      "--json"
-    ],
-    [
-      "profiles",
-      "show",
-      "greenfield",
-      "--yaml"
-    ],
-    [
-      "profiles",
-      "launch",
-      "greenfield",
-      "--prompt",
-      "Add dark mode",
-      "--repo",
-      "active",
-      "--session",
-      "Nightly",
-      "--harness",
-      "claude/opus",
-      "--agent-harness",
-      "planner=codex",
-      "--agent-harness={\"reviewer\":\"claude\"}",
-      "--command",
-      "aider=aider --yes-always",
-      "--yes",
-      "--json"
-    ],
-    [
-      "profiles",
-      "runs",
-      "--pane-dir",
-      "/tmp/pane"
-    ],
-    [
-      "profiles",
-      "--help"
-    ],
-    [
       "notify",
       "--ui",
       "options",
@@ -1621,6 +1573,291 @@
       "update-snapshot",
       "--yes",
       "--json"
+    ],
+    [
+      "todos",
+      "create",
+      "Keyboard sheet",
+      "--summary",
+      "Every shortcut",
+      "--done-when",
+      "Sheet opens",
+      "--done-when",
+      "Approvals work",
+      "--parent",
+      "T-11",
+      "--repo",
+      "pane",
+      "--agent",
+      "claude",
+      "--attach",
+      "plan.html",
+      "--attach",
+      "https://example.com/x",
+      "--no-start",
+      "--json"
+    ],
+    [
+      "todos",
+      "create",
+      "--repo",
+      "pane",
+      "Fix",
+      "the",
+      "focus",
+      "ring"
+    ],
+    [
+      "todos",
+      "create",
+      "--done-when=[\"one\",\"two\"]",
+      "--attach=[\"a.html\",\"b.png\"]",
+      "Two lines"
+    ],
+    [
+      "todos",
+      "create",
+      "--",
+      "-x flag title"
+    ],
+    [
+      "todos",
+      "comment",
+      "T-12",
+      "- did the sheet\n- next: approvals",
+      "--json"
+    ],
+    [
+      "todos",
+      "update",
+      "T-12",
+      "--title",
+      "New title",
+      "--summary",
+      "New",
+      "--done-when",
+      "One",
+      "--check",
+      "1,3",
+      "--check",
+      "2",
+      "--uncheck",
+      "4",
+      "--json"
+    ],
+    [
+      "todos",
+      "attach",
+      "T-12",
+      "docs/plan.html",
+      "--kind",
+      "plan",
+      "--label",
+      "Plan",
+      "--note",
+      "Read section 2",
+      "--json"
+    ],
+    [
+      "todos",
+      "detach",
+      "12",
+      "3",
+      "--json"
+    ],
+    [
+      "todos",
+      "show",
+      "T-12",
+      "--json"
+    ],
+    [
+      "todos",
+      "list",
+      "--all",
+      "--json"
+    ],
+    [
+      "todos",
+      "assign",
+      "T-12",
+      "--panel",
+      "panel-1",
+      "--json"
+    ],
+    [
+      "todos",
+      "ask",
+      "T-12",
+      "Should it list chat shortcuts?",
+      "--json"
+    ],
+    [
+      "todos",
+      "comment",
+      "T-12",
+      "Sheet done.",
+      "--escalate",
+      "--json"
+    ],
+    [
+      "todos",
+      "review",
+      "T-12",
+      "--summary",
+      "Ready",
+      "--no-attachments",
+      "A config change only",
+      "--json"
+    ],
+    [
+      "todos",
+      "done",
+      "T-12",
+      "--person-said",
+      "ship it",
+      "--json"
+    ],
+    [
+      "todos",
+      "drop",
+      "T-12",
+      "--reason",
+      "Covered by T-11",
+      "--json"
+    ],
+    [
+      "todos",
+      "archive",
+      "T-12",
+      "--json"
+    ],
+    [
+      "todos",
+      "start",
+      "T-12",
+      "--json"
+    ],
+    [
+      "todos",
+      "stop",
+      "T-12",
+      "--pane-dir",
+      "/tmp/pane",
+      "--json"
+    ],
+    [
+      "todos",
+      "snooze",
+      "T-12",
+      "--until",
+      "tomorrow 14:30",
+      "--note",
+      "Check Sentry",
+      "--remind-me",
+      "--json"
+    ],
+    [
+      "todos",
+      "snooze",
+      "12",
+      "--until=in 2h",
+      "--json"
+    ],
+    [
+      "todos",
+      "wake",
+      "T-12",
+      "--json"
+    ],
+    [
+      "todos",
+      "list",
+      "--status",
+      "snoozed",
+      "--json"
+    ],
+    [
+      "notify",
+      "--ui",
+      "ask",
+      "--title",
+      "Which?",
+      "--todo",
+      "T-12",
+      "--json"
+    ],
+    [
+      "report",
+      "--state",
+      "ready",
+      "--summary",
+      "Done",
+      "--todo",
+      "T-12",
+      "--json"
+    ],
+    [
+      "agents",
+      "start",
+      "--pane",
+      "pane-1",
+      "--agent",
+      "codex",
+      "--prompt",
+      "Review it",
+      "--todo",
+      "T-12",
+      "--yes",
+      "--json"
+    ],
+    [
+      "report",
+      "--outcome",
+      " plan ready ",
+      "--summary-file",
+      "status.json"
+    ],
+    [
+      "profiles",
+      "list",
+      "--json"
+    ],
+    [
+      "profiles",
+      "show",
+      "greenfield",
+      "--yaml"
+    ],
+    [
+      "profiles",
+      "launch",
+      "greenfield",
+      "--prompt",
+      "Add dark mode",
+      "--repo",
+      "active",
+      "--session",
+      "Nightly",
+      "--harness",
+      "claude/opus",
+      "--agent-harness",
+      "planner=codex",
+      "--agent-harness={\"reviewer\":\"claude\"}",
+      "--command",
+      "aider=aider --yes-always",
+      "--yes",
+      "--json"
+    ],
+    [
+      "profiles",
+      "runs",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "profiles",
+      "--help"
     ]
   ],
   "help": {

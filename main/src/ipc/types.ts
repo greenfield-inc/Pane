@@ -20,6 +20,7 @@ import type { FinishedPaneMonitor } from '../services/machineHealth/finishedPane
 import type { MemoryRelief } from '../services/machineHealth/memoryRelief';
 import type { OtherApps } from '../services/machineHealth/otherApps';
 import type { ApprovalStore } from '../services/approvals/approvalStore';
+import type { TodoService } from '../services/todos/todoService';
 import type { JsonStoreImportOutcome } from '../database/jsonStoreImport';
 
 export interface DaemonHostServices extends CoreServices {
@@ -52,6 +53,8 @@ export interface DaemonHostServices extends CoreServices {
   /** Early pause under memory pressure and leftover processes. */
   memoryRelief?: MemoryRelief;
   otherApps?: OtherApps;
+  /** To-dos (D-409): this machine's to-dos, their supervisor and load gate. */
+  todoService?: TodoService;
 }
 
 export interface AppServices extends DaemonHostServices {

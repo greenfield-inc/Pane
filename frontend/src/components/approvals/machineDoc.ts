@@ -1,11 +1,14 @@
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { notifyApi, notifyReadsFilesHere, type NotifyMachineRead } from '../../stores/notifyStore';
 
 /** A document linked from an item, read from the machine that holds it. */
 export type MachineDoc =
   | { kind: 'text'; text: string }
   | { kind: 'html'; html: string }
+  /** An image file (a to-do's screenshot, say), as a `data:image/…` URL. */
+  | { kind: 'image'; dataUrl: string }
   | { kind: 'missing' }
   /** Over the holding machine's 2 MiB limit for sending a file: it's there, just not sent. */
   | { kind: 'too-large' }
@@ -20,7 +23,6 @@ const READ_TIMEOUT_MS = 10_000;
  * means nothing here.
  */
 const READ_DOC_CHANNEL = 'autopilot:read-doc';
-type MachineRead = (machineId: string, channel: string, args: unknown[]) => Promise<{ data: unknown }>;
 
 /** The item's file links. */
 export function machineFileLinks(item: NotifyItem): Array<{ path: string; label: string }> {
@@ -29,23 +31,28 @@ export function machineFileLinks(item: NotifyItem): Array<{ path: string; label:
 
 const textSchema = boundary.object({ kind: boundary.literal('text'), text: boundary.string });
 const htmlSchema = boundary.object({ kind: boundary.literal('html'), html: boundary.string });
+const imageSchema = boundary.object({ kind: boundary.literal('image'), dataUrl: boundary.string });
 const missingSchema = boundary.object({ kind: boundary.literal('missing'), message: boundary.optional(boundary.string) });
 
-function decodeDoc(answer: Awaited<ReturnType<MachineRead>>['data']): MachineDoc {
+function decodeDoc(answer: Awaited<ReturnType<NotifyMachineRead>>['data']): MachineDoc {
   const text = decodeOptionalBoundary(answer, textSchema);
   if (text) return { kind: 'text', text: text.text };
   const page = decodeOptionalBoundary(answer, htmlSchema);
   if (page) return { kind: 'html', html: page.html };
+  const image = decodeOptionalBoundary(answer, imageSchema);
+  // Only an image's own data URL: it is shown through <img>, never navigated to.
+  if (image) return /^data:image\/[a-z0-9.+-]+;base64,/iu.test(image.dataUrl) ? { kind: 'image', dataUrl: image.dataUrl } : { kind: 'unreachable' };
   const missing = decodeOptionalBoundary(answer, missingSchema);
   if (!missing) return { kind: 'unreachable' };
   // `readDocument` refuses a file over its limit with this wording; the file itself is still there.
   return /larger than 2 MiB/u.test(missing.message ?? '') ? { kind: 'too-large' } : { kind: 'missing' };
 }
 
-/** Reads a linked file from the item's machine. Never rejects: a failed read is a state. */
-export async function readMachineDoc(item: NotifyItem, path: string): Promise<MachineDoc> {
-  // SAFETY: main refuses a channel it doesn't serve, and that refusal is a failed read below.
-  const read = window.electronAPI.machines.read as MachineRead;
+/** Reads a linked file from the item's machine (a to-do's attachment passes its to-do's). Never rejects: a failed read is a state. */
+export async function readMachineDoc(item: Pick<NotifyItem, 'machineId'>, path: string): Promise<MachineDoc> {
+  // The desktop reads through its machine connections; the web app straight from its host.
+  const read = notifyApi()?.read;
+  if (!read) return { kind: 'unreachable' };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<{ kind: 'unreachable' }>((resolve) => {
     timer = setTimeout(() => resolve({ kind: 'unreachable' }), READ_TIMEOUT_MS);
@@ -74,5 +81,6 @@ export function machineDocFailure(doc: MachineDoc, label: string, machine: strin
  * That machine serves only files its own approvals link, read-only and under the same size limit.
  */
 export function linkedFileReadsHere(item: Pick<NotifyItem, 'machineId'>, activeMachineId: string): boolean {
+  if (!notifyReadsFilesHere()) return false;
   return (item.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID && activeMachineId === LOCAL_MACHINE_ID;
 }

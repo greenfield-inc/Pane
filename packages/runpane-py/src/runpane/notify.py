@@ -402,6 +402,8 @@ def describe_notify_outcome(result: Dict[str, Any]) -> str:
 def run_notify(parsed: Any, env: Optional[Mapping[str, str]] = None) -> int:
     """Shows the question and waits, with no time limit, for the answer; unavailable when Pane is not running."""
     request = build_notify_request(parsed, os.environ if env is None else env, os.getcwd())
+    if parsed.todo is not None:
+        request["todo"] = parsed.todo
     try:
         result = invoke_daemon("runpane:notify", [request], pane_dir=parsed.pane_dir, timeout_ms=math.inf)
     except PaneDaemonClientError as error:

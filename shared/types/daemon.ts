@@ -107,6 +107,7 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'folders:',
   'logs:',
   'loops:',
+  'todos:',
   'profiles:',
   'mobile:',
   'notes:',

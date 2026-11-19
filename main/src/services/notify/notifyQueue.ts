@@ -155,6 +155,8 @@ export interface WorkerQuestion {
   /** Its own Summary page, and its status file (read for where it stands). */
   summaryPage?: string;
   statusFile?: string;
+  /** To-dos (D-408): the to-do the worker's question is about. */
+  todo?: NotifyItem['todo'];
 }
 
 export interface NotifyQueueEnvironment {
@@ -555,6 +557,7 @@ export class NotifyQueue extends EventEmitter {
     if (question.asSent) item.asSent = question.asSent;
     if (question.summaryPage) item.summaryPage = question.summaryPage;
     if (question.statusFile) item.statusFile = question.statusFile;
+    if (question.todo) item.todo = question.todo;
     if (question.questions?.length) item.questions = question.questions;
     else if (question.choices?.length) item.choices = question.choices;
     item.connected = question.connected ?? connectedOf(item, this.machine());

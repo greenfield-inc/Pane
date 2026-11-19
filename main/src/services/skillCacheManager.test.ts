@@ -5,6 +5,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SkillCacheManager } from './skillCacheManager';
 import { buildPaneHomeSkill } from './paneHomeSkill';
+import { prepareSessionWorkspace } from './sessionWorkspace';
 
 function normalizePathSeparators(value: string): string {
   return value.replace(/\\/g, '/');
@@ -520,6 +521,47 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       expect(variant).not.toContain('#654');
       expect(variant).not.toMatch(/archiv[^.]*approv|approv[^.]*archiv/i);
     }
+  });
+
+  it('puts the to-do attach rule, word for word, in every Pane instruction text (J38)', async () => {
+    const rule = "Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists. Read a to-do's attachments before you start on it.";
+    const manager = new SkillCacheManager();
+    await manager.ensurePaneChatGuide();
+    const bundle = path.join(__dirname, 'paneChatBundle', 'skills');
+    const texts = {
+      'Session folder AGENTS.md': await fs.readFile(path.join(prepareSessionWorkspace('todo-rule'), 'AGENTS.md'), 'utf8'),
+      'pane-orchestrator (Pane Chat)': await fs.readFile(manager.paneChatOrchestratorSkillPath, 'utf8'),
+      'pane-orchestrator (Codex)': await fs.readFile(manager.codexPaneOrchestratorSkillPath, 'utf8'),
+      'pane-orchestrator (Claude)': await fs.readFile(manager.claudePaneOrchestratorSkillPath, 'utf8'),
+      'pane-orchestrator (Cursor)': await fs.readFile(manager.cursorPaneOrchestratorRulePath, 'utf8'),
+      'bundled pane-orchestration': await fs.readFile(path.join(bundle, 'pane-orchestration', 'SKILL.md'), 'utf8'),
+      'bundled runpane': await fs.readFile(path.join(bundle, 'runpane', 'SKILL.md'), 'utf8'),
+      'pane home skill': buildPaneHomeSkill(),
+    };
+    for (const [name, text] of Object.entries(texts)) {
+      expect(text.replace(/\s+/g, ' '), name).toContain(rule);
+    }
+  });
+
+  it('teaches orchestrators the to-do workflow and the lines Pane types', async () => {
+    const manager = new SkillCacheManager();
+    await manager.ensurePaneChatGuide();
+    const texts = [
+      await fs.readFile(manager.paneChatOrchestratorSkillPath, 'utf8'),
+      await fs.readFile(path.join(prepareSessionWorkspace('todo-flow'), 'AGENTS.md'), 'utf8'),
+      await fs.readFile(path.join(__dirname, 'paneChatBundle', 'skills', 'pane-orchestration', 'SKILL.md'), 'utf8'),
+    ];
+    for (const raw of texts) {
+      const text = raw.replace(/\s+/g, ' ');
+      for (const expected of [
+        '--parent T-', 'runpane todos assign T-n --panel <tab-id>', 'runpane todos ask T-n', '--todo T-n',
+        'runpane report --state blocked --question "<question>" --todo T-n', 'runpane todos comment T-n', '2,000 characters',
+        'runpane todos review T-n', '--no-attachments "<why>"', 'runpane todos archive T-n', 'runpane todos done T-n',
+        '--person-said "<their words>"', 'machine_busy', 'Capacity is back', '[From Pane, To-dos]', '[From the person, via To-dos T-n]',
+      ]) expect(text).toContain(expected);
+    }
+    const liveness = (await fs.readFile(manager.paneChatOrchestratorSkillPath, 'utf8')).replace(/\s+/g, ' ');
+    expect(liveness).toContain("To-dos: this watch still keeps the workers on a to-do's sub-to-dos moving.");
   });
 
   it('installs the wrap-up skill only where Session orchestrators look, not in the home skill workers get', async () => {

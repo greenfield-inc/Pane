@@ -5,7 +5,7 @@ import path from 'path';
 import { getAppDirectory } from '../utils/appDirectory';
 import { DEFAULT_SESSION_PROFILE, PANE_CAPABILITY_CONTEXT } from '../../../shared/types/sessionProfile';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import { keepSessionTidySection } from './sessionTidyRules';
+import { keepSessionTidySection, todosSection } from './sessionTidyRules';
 import { APPROVALS_RULES } from './approvalsRules';
 import { paneAndTabRules } from '../../../packages/runpane/src/paneIntro';
 import { LeftAlone, writeOwnedBlock, type BlockMarkers } from './instructionsBlock';
@@ -168,6 +168,7 @@ function sessionInstructions(
     ...(record?.nameIsDefault ? [sessionNameRule(sessionId)] : []),
     PANE_CAPABILITY_CONTEXT,
     delegationRules(sessionId, record),
+    todosSection(),
     sessionTidyRules(sessionId, record),
     '## Session behavior',
     profile,

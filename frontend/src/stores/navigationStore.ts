@@ -93,12 +93,37 @@ interface NavigationState {
   approvalsReturn: ApprovalsReturn | null;
   /** Leaves Approvals for the view it was opened from, and says which Pane was active there. */
   leaveApprovals: () => ApprovalsReturn;
+  /**
+   * Opens To-dos (D-409): the list, or the page of to-do `number` when given. The first entry
+   * remembers the view and Pane you left (`returnPaneId`), which `leaveTodos` hands back.
+   */
+  navigateToTodos: (options?: TodosNavigationOptions) => void;
+  /** The to-do whose page To-dos shows; null shows the list. */
+  selectedTodoNumber: number | null;
+  selectTodo: (number: number | null) => void;
+  todosReturn: ApprovalsReturn | null;
+  /** Leaves To-dos for the view it was opened from, and says which Pane was active there. */
+  leaveTodos: () => ApprovalsReturn;
+  /** The to-do a Session was last opened from (round 8, T-4): that Session's breadcrumb returns to it. */
+  todoSessionOrigin: TodoSessionOrigin | null;
+  setTodoSessionOrigin: (origin: TodoSessionOrigin | null) => void;
+}
+
+export interface TodosNavigationOptions {
+  /** Opens this to-do's page; null opens the list; absent keeps what was showing. */
+  number?: number | null;
+  returnPaneId?: string | null;
 }
 
 export interface ApprovalsReturn {
   view: ActiveView;
   projectId: number | null;
   paneId: string | null;
+}
+
+export interface TodoSessionOrigin {
+  sessionId: string;
+  number: number;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -269,4 +294,28 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     set({ activeView: back.view === 'notify' ? 'sessions' : back.view, activeProjectId: back.projectId, approvalsReturn: null });
     return back;
   },
+
+  // To-dos lists every to-do on every machine, so it clears the project scope.
+  navigateToTodos: (options) => {
+    const state = get();
+    const todosReturn = state.activeView === 'todos'
+      ? state.todosReturn
+      : { view: state.activeView, projectId: state.activeProjectId, paneId: options?.returnPaneId ?? null };
+    set({
+      activeView: 'todos',
+      activeProjectId: null,
+      todosReturn,
+      selectedTodoNumber: options?.number === undefined ? state.selectedTodoNumber : options.number,
+    });
+  },
+  selectedTodoNumber: null,
+  selectTodo: (number) => set({ selectedTodoNumber: number }),
+  todosReturn: null,
+  leaveTodos: () => {
+    const back = get().todosReturn ?? { view: 'sessions', projectId: null, paneId: null };
+    set({ activeView: back.view === 'todos' ? 'sessions' : back.view, activeProjectId: back.projectId, todosReturn: null });
+    return back;
+  },
+  todoSessionOrigin: null,
+  setTodoSessionOrigin: (origin) => set({ todoSessionOrigin: origin }),
 }));

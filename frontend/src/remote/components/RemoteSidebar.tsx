@@ -15,6 +15,9 @@ import { useRemoteSessionStore } from '../stores/remoteSessionStore';
 import { useRemoteSidebarSectionsStore, type RemoteSidebarSection } from '../stores/remoteSidebarSectionsStore';
 import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from '../../components/ui/Skeleton';
 import { useRemoteExpandedSessionsStore } from '../stores/remoteExpandedSessionsStore';
+import { RemoteTodosEntry } from './RemoteTodos';
+import { useTodoSessionIds } from '../../stores/todosStore';
+import { isTodoSession } from '../../components/orchestrationSessionVisibility';
 
 /** Sidebar actions. Panes are the PWA's "sessions"; Sessions are orchestration Sessions. */
 export interface RemoteSidebarActions {
@@ -36,8 +39,16 @@ export interface RemoteSidebarActions {
   refresh: () => void;
 }
 
+/** The drawer's To-dos entry: whether To-dos is on screen, and how to open it. */
+interface RemoteSidebarTodos {
+  open: boolean;
+  onOpen: () => void;
+}
+
 interface RemoteSidebarProps {
   loading: boolean;
+  /** Hosts with To-dos show its entry first. */
+  todos?: RemoteSidebarTodos;
   /** A Pane or Session id whose pin, archive or restore is in flight. */
   actionId?: string | null;
   actions: RemoteSidebarActions;
@@ -57,6 +68,7 @@ export function RemoteSidebar({
   actions,
   selectedPane = null,
   onClose,
+  todos,
   className = 'flex w-80 shrink-0',
 }: RemoteSidebarProps) {
   const projects = useRemoteSessionStore(state => state.projects);
@@ -82,11 +94,14 @@ export function RemoteSidebar({
     () => getPinnedSessions([...paneById.values()], createProjectById(projects)),
     [paneById, projects],
   );
-  const activeSessions = useMemo(() => sessions.filter(session => session.archived !== true), [sessions]);
+  // A to-do's own Session lives under To-dos (D-409): no list here shows it (T-7).
+  const todoSessionIds = useTodoSessionIds();
+  const listedSessions = useMemo(() => sessions.filter(session => !isTodoSession(session, todoSessionIds)), [sessions, todoSessionIds]);
+  const activeSessions = useMemo(() => listedSessions.filter(session => session.archived !== true), [listedSessions]);
   const pinnedSessions = useMemo(() => activeSessions.filter(session => session.isPinned === true), [activeSessions]);
   const archivedSessions = useMemo(
-    () => sessions.filter(session => session.archived === true).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [sessions],
+    () => listedSessions.filter(session => session.archived === true).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    [listedSessions],
   );
 
   // Each host has its own opened Sessions on this device.
@@ -277,6 +292,7 @@ export function RemoteSidebar({
       </div>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+        {todos && <RemoteTodosEntry open={todos.open} onOpen={todos.onOpen} />}
         {hasPinned && (
           <SidebarSection section="pinned" label="Pinned" expanded={expanded.pinned} onToggle={toggleSection}>
             {pinnedSessions.map(session => sessionRow(session, 'pinned'))}

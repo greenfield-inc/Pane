@@ -160,11 +160,15 @@ export function useSkeletonHold(loading: boolean, chain?: string): SkeletonHold 
     if (loading) setState(current => (current.since !== null ? current : { since: visibleAt(key, named, performance.now()), reveal: false, seen: false }));
   }, [loading, key, named]);
 
+  // What the last render decided. Content it already committed is never held again: on a slow frame
+  // this effect can run after `since` although the render before it was earlier, and holding then
+  // would unmount the content and mount it again (losing its state).
+  const committedContent = useRef(false);
   useLayoutEffect(() => {
     if (loading || state.since === null) return;
     const since = state.since;
     const now = performance.now();
-    if (now < since) { setState({ since: null, reveal: false, seen: false }); return; }
+    if (now < since || committedContent.current) { setState({ since: null, reveal: false, seen: false }); return; }
     const release = () => setState({ since: null, reveal: true, seen: true });
     const remaining = since + SKELETON_MIN_VISIBLE_MS - now;
     if (remaining <= 0) { release(); return; }
@@ -181,7 +185,9 @@ export function useSkeletonHold(loading: boolean, chain?: string): SkeletonHold 
 
   // Decided while rendering, so content that is about to be held never commits.
   const shown = state.since !== null && performance.now() >= state.since;
-  return { holding: loading || shown, reveal: state.reveal, seen: state.seen };
+  const holding = loading || shown;
+  committedContent.current = !holding;
+  return { holding, reveal: state.reveal, seen: state.seen };
 }
 
 /**

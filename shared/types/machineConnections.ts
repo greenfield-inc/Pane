@@ -1,4 +1,5 @@
 import type { JsonObject } from '../validation/boundaryDecoder';
+import type { TodoAction, TodoCreateInput } from './todos';
 import type { NotifyRemoteCommand } from './notify';
 import type { OrchestrationSessionCreateInput } from './orchestrationSession';
 import type { PanePermissionResponse } from './permissions';
@@ -44,6 +45,9 @@ export const MACHINE_READ_CHANNELS = [
   'orchestration-sessions:runtimes',
   'permission:getPending',
   'notify:remote-snapshot',
+  // To-dos (D-409): another machine's to-dos, for the To-dos list.
+  'todos:snapshot',
+  'todos:detail',
   'autopilot:read-doc',
   'notify:summary-page',
   'panels:agent-statuses',
@@ -115,7 +119,10 @@ export type MachineCommand =
   /** The Move dialog's calls on the machine the Session lives on (`SESSION_MOVE_CHANNELS`). */
   | { type: 'move-session'; channel: string; request: JsonObject }
   /** Machine health on that machine, through its own engine and protections. */
-  | { type: 'machine-health'; action: MachineHealthAction; request: object };
+  | { type: 'machine-health'; action: MachineHealthAction; request: object }
+  /** To-dos (D-409): the person's action on that machine's to-do (Stop, Resume, Start anyway…), or a new to-do there. */
+  | { type: 'todo-act'; action: TodoAction }
+  | { type: 'todo-create'; input: TodoCreateInput };
 
 /** What Resources and its cards can ask another machine to do, each through that machine's own checks. */
 export const MACHINE_HEALTH_ACTIONS = ['cleanup', 'pause-idle', 'archive-finished', 'stop-processes', 'restart-process', 'ignore-leak', 'stop-app'] as const;

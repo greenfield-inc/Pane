@@ -54,16 +54,16 @@ export class ApprovalStore {
     ensureApprovalsSchema(db);
     this.saveItemStatement = db.prepare(`
       INSERT INTO approvals (id, machine, connected_kind, connected_id, connected_name, origin_kind, session_id, pane_id, panel_id, addressee, qn, state, item_json,
-        answered_by, closed_by, closed_reason, stale_since, rewritten_from, rewritten_as, delivered_via, delivered_at, decision, created_at, ended_at)
+        answered_by, closed_by, closed_reason, stale_since, rewritten_from, rewritten_as, delivered_via, delivered_at, decision, created_at, ended_at, todo_id)
       VALUES (@id, @machine, @connected_kind, @connected_id, @connected_name, @origin_kind, @session_id, @pane_id, @panel_id, 'person', @qn, @state, @item_json,
-        @answered_by, @closed_by, @closed_reason, @stale_since, @rewritten_from, @rewritten_as, @delivered_via, @delivered_at, @decision, @created_at, @ended_at)
+        @answered_by, @closed_by, @closed_reason, @stale_since, @rewritten_from, @rewritten_as, @delivered_via, @delivered_at, @decision, @created_at, @ended_at, @todo_id)
       ON CONFLICT(id) DO UPDATE SET
         machine = excluded.machine, connected_kind = excluded.connected_kind, connected_id = excluded.connected_id, connected_name = excluded.connected_name,
         origin_kind = excluded.origin_kind, session_id = excluded.session_id, pane_id = excluded.pane_id, panel_id = excluded.panel_id,
         addressee = 'person', qn = excluded.qn, state = excluded.state, item_json = excluded.item_json,
         answered_by = excluded.answered_by, closed_by = excluded.closed_by, closed_reason = excluded.closed_reason, stale_since = excluded.stale_since,
         rewritten_from = excluded.rewritten_from, rewritten_as = excluded.rewritten_as, delivered_via = excluded.delivered_via, delivered_at = excluded.delivered_at,
-        decision = excluded.decision, ended_at = excluded.ended_at`);
+        decision = excluded.decision, ended_at = excluded.ended_at, todo_id = COALESCE(excluded.todo_id, approvals.todo_id)`);
     this.claimStatement = db.prepare(`UPDATE approvals SET state = @state, item_json = @item_json, answered_by = @answered_by, closed_by = @closed_by, closed_reason = @closed_reason,
       delivered_via = @delivered_via, delivered_at = @delivered_at, rewritten_as = @rewritten_as, ended_at = @ended_at WHERE id = @id AND state = '${CLAIMABLE}'`);
     this.saveReportStatement = db.prepare(`
@@ -207,6 +207,7 @@ export class ApprovalStore {
       decision: item.decision ?? null,
       created_at: item.createdAt,
       ended_at: ended,
+      todo_id: item.todo?.number ?? null,
     };
   }
 }

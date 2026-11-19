@@ -49,6 +49,7 @@ const reportSchema = boundary.object({
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
   ...agentReportOptionFields,
+  todo: boundary.optional(boundary.string),
   reportedAt: boundary.string,
 });
 const itemSchema = boundary.object({

@@ -38,6 +38,7 @@ import {
   placePanelInSplit,
   showPanelInSplit,
   placeLeadingSideTab,
+  placeTabAfter,
 } from './panelLayout';
 
 // ---------------------------------------------------------------------------
@@ -451,6 +452,25 @@ describe('placeLeadingSideTab', () => {
   it('leaves the tab where the person put it', () => {
     const root = group('g1', ['agent', 'overview']);
     expect(placeLeadingSideTab(root, 'overview')).toBe(root);
+  });
+});
+
+describe('placeTabAfter', () => {
+  it('goes right after the tab it follows, keeping the tab already selected there (T-23)', () => {
+    const root = placeTabAfter(split('s1', 'row', [group('g1', ['agent']), group('g2', ['overview', 'plan'], 'plan')]), 'todos', 'overview');
+    expect(findGroup(root, 'g2')).toMatchObject({ panelIds: ['overview', 'todos', 'plan'], activePanelId: 'plan' });
+  });
+
+  it('follows the tab into whichever group the person moved it to', () => {
+    const root = placeTabAfter(group('g1', ['agent', 'overview']), 'todos', 'overview');
+    expect(root).toMatchObject({ panelIds: ['agent', 'overview', 'todos'], activePanelId: 'agent' });
+  });
+
+  it('leaves the tab where the person put it, and does nothing without the tab it follows', () => {
+    const placed = group('g1', ['todos', 'agent', 'overview']);
+    expect(placeTabAfter(placed, 'todos', 'overview')).toBe(placed);
+    const alone = group('g1', ['agent']);
+    expect(placeTabAfter(alone, 'todos', 'overview')).toBe(alone);
   });
 });
 

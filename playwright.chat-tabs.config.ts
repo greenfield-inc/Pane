@@ -10,7 +10,7 @@ const port = getPlaywrightPort();
 // browser-auth-persistence and remote-browser-files run only with PANE_ELECTRON_E2E=1, which CI sets.
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['chat-tabs.spec.ts', 'loop-sessions.spec.ts', 'session-activity-real.spec.ts', 'browser-auth-persistence.spec.ts', 'remote-browser-files.spec.ts'],
+  testMatch: ['chat-tabs.spec.ts', 'loop-sessions.spec.ts', 'session-activity-real.spec.ts', 'browser-auth-persistence.spec.ts', 'remote-browser-files.spec.ts', 'todos.spec.ts', 'todos-page.spec.ts', 'todos-real.spec.ts', 'todos-snooze.spec.ts'],
   timeout: 120 * 1000,
   forbidOnly: true,
   retries: 0,

@@ -520,6 +520,45 @@ describe('OrchestrationSessionManager', () => {
       .rejects.toThrow('Session resume must be a native session id');
   });
 
+  it('marks a to-do\'s Session in its first write, so the first changed event already reads as the to-do\'s (T-7)', async () => {
+    const fixture = createFixture();
+    await fixture.manager.initialize();
+    const writes: OrchestrationSessionStoreData[] = [];
+    const write = fixture.store.write.bind(fixture.store);
+    vi.spyOn(fixture.store, 'write').mockImplementation(next => { writes.push(next); write(next); });
+    const atChange: Array<number | undefined> = [];
+    fixture.manager.on('changed', (event: { sessionId: string }) => {
+      atChange.push(fixture.store.read().sessions.find(session => session.id === event.sessionId)?.todoNumber);
+    });
+    const created = await fixture.manager.create({ name: 'T-26 · Invoice PDFs', todoNumber: 26 });
+    expect(writes[0]?.sessions.find(session => session.id === created.session.id)?.todoNumber).toBe(26);
+    expect(created.session.todoNumber).toBe(26);
+    expect(atChange[0]).toBe(26);
+    // It survives a restart (a fresh store reads the file), and a Session made without one has none.
+    const storePath = path.join(temporaryDirectories[temporaryDirectories.length - 1], 'orchestration-sessions.json');
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, new OrchestrationSessionStore(storePath));
+    expect((await restarted.list()).sessions.find(session => session.id === created.session.id)?.todoNumber).toBe(26);
+    expect((await fixture.manager.create({ name: 'Plain' })).session.todoNumber).toBeUndefined();
+    await expect(fixture.manager.create({ name: 'Bad number', todoNumber: 0 })).rejects.toThrow('to-do number');
+  });
+
+  it('marks a to-do\'s Session made before Sessions carried the number, once, at startup (T-7)', async () => {
+    const fixture = createFixture();
+    const older = await fixture.manager.create({ name: 'T-26 · Add animation for moving' });
+    const plain = await fixture.manager.create({ name: 'Plain' });
+    const changed: string[] = [];
+    fixture.manager.on('changed', (event: { sessionId: string }) => { changed.push(event.sessionId); });
+    await fixture.manager.markTodoSessions([{ sessionId: older.session.id, todoNumber: 26 }, { sessionId: 'gone', todoNumber: 3 }]);
+    const sessions = (await fixture.manager.list()).sessions;
+    expect(sessions.find(session => session.id === older.session.id)?.todoNumber).toBe(26);
+    expect(sessions.find(session => session.id === plain.session.id)?.todoNumber).toBeUndefined();
+    expect(changed).toEqual([older.session.id]);
+    // Already marked: nothing is written or announced again.
+    await fixture.manager.markTodoSessions([{ sessionId: older.session.id, todoNumber: 26 }]);
+    expect(changed).toEqual([older.session.id]);
+  });
+
   it('saves the resumed conversation with the Session, so a tab created after an interrupted create still resumes it', async () => {
     const fixture = createFixture();
     const id = '0e5c1b2a-7d3f-4a69-9b84-3c2d1e0f9a87';

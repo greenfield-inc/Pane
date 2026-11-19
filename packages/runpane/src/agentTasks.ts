@@ -4,6 +4,7 @@ import { invokeDaemon } from './daemonClient';
 import { RunpaneError } from './errors';
 import { buildPaneLink } from './links';
 import { describeReport } from './watchLines';
+import { assignTodoToPanel } from './todos';
 import {
   type AgentReport,
   buildPaneCreateRequest,
@@ -67,6 +68,7 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
   await confirmMutation(parsed);
   if (paneId) return startAgentInPane(parsed, paneId);
   const request = await buildPaneCreateRequest({ ...parsed, source: 'agent', noFocus: true, focus: false, waitReady: true, yes: true });
+  if (parsed.todo !== undefined) request.todo = parsed.todo;
   const created = await invokeDaemon('runpane:panes:create', [request], paneCreateResultSchema, {
     paneDir: parsed.paneDir,
     timeoutMs: (parsed.timeoutMs ?? 120_000) + (parsed.readyTimeoutMs ?? 30_000) + 10_000,
@@ -82,6 +84,9 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
       setupQueue: item.setupQueue,
       next: `Check on it after setup with \`runpane agents status --pane ${item.sessionId}\`.`,
     };
+    if (parsed.todo !== undefined) {
+      console.error(`Warning: ${parsed.todo} was not assigned yet: the agent's tab opens after setup. Assign it then with \`runpane todos assign ${parsed.todo} --panel <panel-id>\`.`);
+    }
     print(parsed, queued, `Created ${queued.name ?? queued.paneId}: ${queued.link}\n${item.setupQueue.message}\n${queued.next}`);
     return 0;
   }
@@ -92,6 +97,7 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
   }
   const newPaneId = item.sessionId;
   const ready = item.readiness?.ok ?? false;
+  await assignTodoToPanel(parsed, item.panelId);
   const promptDelivered = isPromptDelivered(item.initialInput);
   const result = {
     ok: ready && promptDelivered,
@@ -113,6 +119,7 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
 /** `agents start --pane`: a new agent tab in an existing Pane; it shares the Pane's worktree and branch. */
 async function startAgentInPane(parsed: ParsedArgs, paneId: string): Promise<number> {
   const request = await buildPanelCreateRequest({ ...parsed, source: 'agent', noFocus: true, focus: false, waitReady: true, yes: true });
+  if (parsed.todo !== undefined) request.todo = parsed.todo;
   let created: ReturnType<typeof panelCreateResultSchema.decode>;
   try {
     created = await invokeDaemon('runpane:panels:create', [request], panelCreateResultSchema, {
@@ -124,6 +131,7 @@ async function startAgentInPane(parsed: ParsedArgs, paneId: string): Promise<num
     throw new Error(`Could not open the agent as a tab in Pane ${paneId}: ${reason} Nothing else was changed. Check the Pane id with \`runpane panes list --json\`; if the work's branch has no Pane yet, start it with --repo and --name instead.`);
   }
   const ready = created.readiness?.ok ?? false;
+  await assignTodoToPanel(parsed, created.panelId);
   const promptDelivered = isPromptDelivered(created.initialInput);
   const result = {
     ok: ready && promptDelivered,

@@ -62,6 +62,8 @@ export interface TerminalAgentReport {
   choices?: NotifyChoice[];
   /** A blocked report's several questions (`--questions`), each with its own buttons. */
   questions?: NotifySubQuestion[];
+  /** To-dos (D-408): `--todo T-14`, the to-do the report (and its question) is about. */
+  todo?: string;
   reportedAt: string;
 }
 

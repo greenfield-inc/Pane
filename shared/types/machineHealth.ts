@@ -101,6 +101,11 @@ export interface MachineHealthSettings {
   /** Under memory pressure, pause Panes idle this many hours (default 2). */
   pauseIdleHours?: number;
   autoPauseUnderPressure?: boolean;
+  /**
+   * To-dos (D-408): "Hold to-do agents when this machine is busy". On unless set to false: the load
+   * gate queues to-do starts and pauses to-dos under heavy sustained load.
+   */
+  holdTodoAgents?: boolean;
 }
 
 /** The value of every machine health setting nobody has overridden. */

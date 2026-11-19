@@ -1,5 +1,5 @@
 import * as Linking from 'expo-linking';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { DataDetectorTypes } from 'react-native-webview/lib/WebViewTypes';
 
@@ -64,6 +64,7 @@ export function FileDoc({ path }: { path: string }) {
   if (doc.isError) return <ErrorState title={`Couldn’t open ${name}`} error={doc.error} onRetry={() => void doc.refetch()} testID="autopilot-doc-error" />;
   const read = doc.data;
   if (read.kind === 'missing') return <StateScreen testID="autopilot-doc-missing" icon={{ ios: 'doc.questionmark', android: 'draft' }} title={`Can’t open ${name}`} message={read.message} />;
+  if (read.kind === 'image') return <Image testID="autopilot-doc-image" source={{ uri: read.dataUrl }} resizeMode="contain" style={styles.fill} accessibilityLabel={name} />;
   if (read.kind === 'html') {
     // A computer from before the phone could read pages inline sends only its file URL.
     if (read.html === undefined) return <StateScreen testID="autopilot-doc-update" icon={{ ios: 'arrow.down.circle', android: 'system_update' }} title="Update Pane on the computer" message={`${profile.label}’s Pane is too old to send this page to the phone. Update it, or open the page in Pane there.`} />;

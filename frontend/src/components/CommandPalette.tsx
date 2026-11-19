@@ -40,9 +40,11 @@ import { confirmMachineArchive } from './archiveConfirm';
 import type { MachineRef } from '../utils/allMachinesTree';
 import {
   buildMachineSearchItems, buildSearchItems, matchedRanges, searchItems, SEARCH_FILTERS,
-  type SearchFilter, type SearchItem, type SearchSection,
+  type SearchFilter, type SearchItem, type SearchSection, type TodoSearchRef,
 } from '../utils/spotlightSearch';
 import type { Project } from '../types/project';
+import { useTodosStore } from '../stores/todosStore';
+import { openTodo } from './todos/todosNavigation';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -203,8 +205,15 @@ function actionsFor(item: SearchItem, context: ActionContext): LauncherAction[] 
       ];
     }
     case 'session': {
-      const { session } = item;
+      const { session, todoNumber } = item;
       const fail = (title: string) => (cause: unknown) => showActionError(title, cause);
+      // A to-do's own Session opens its to-do's page (D-409); its Session is one click on from there.
+      if (todoNumber !== undefined) {
+        return [
+          { id: 'open', label: 'Open To-do', icon: SquareArrowOutUpRight, run: () => afterLeavingSettings(() => openTodo(todoNumber)) },
+          { id: 'open-session', label: 'Open Session', icon: MessageSquare, run: () => afterLeavingSettings(() => openSession(session.id)) },
+        ];
+      }
       return [
         { id: 'open', label: 'Open Session', icon: SquareArrowOutUpRight, run: () => afterLeavingSettings(() => openSession(session.id)) },
         {
@@ -361,6 +370,15 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   const allMachines = useAllMachinesStore(isAllMachinesOn);
   const { views: machineViews } = useAllMachinesTree();
 
+  const todoSnapshot = useTodosStore(s => s.snapshot);
+  const todoSessions = useMemo(() => {
+    const bySession = new Map<string, TodoSearchRef>();
+    for (const { todo } of todoSnapshot?.rows ?? []) {
+      if (todo.sessionId && todo.parentNumber === null) bySession.set(todo.sessionId, { number: todo.number, title: todo.title });
+    }
+    return bySession;
+  }, [todoSnapshot]);
+
   // Rebuilt when the launcher opens or its sources change, never per keystroke.
   const localItems = useMemo(() => isOpen
     ? buildSearchItems({
@@ -370,10 +388,11 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
       commands: useHotkeyStore.getState().getAll({ paletteOnly: true }),
       activePaneId,
       selectedSessionId,
+      todoSessions,
     })
     : [],
   // eslint-disable-next-line react-hooks/exhaustive-deps -- getAll reads the hotkeys registry
-  [isOpen, panes, sessions, projects, hotkeys, activePaneId, selectedSessionId]);
+  [isOpen, panes, sessions, projects, hotkeys, activePaneId, selectedSessionId, todoSessions]);
   const items = useMemo(() => isOpen && allMachines
     ? [...buildMachineSearchItems(machineViews), ...localItems.filter(item => item.kind === 'command')]
     : localItems,

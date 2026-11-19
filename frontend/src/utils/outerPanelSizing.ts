@@ -7,7 +7,9 @@ export type OuterPanelSurface =
   | 'rightTerminal'
   | 'bottomDetail'
   | 'approvalsList'
-  | 'autopilotChat';
+  | 'autopilotChat'
+  | 'todoDetails'
+  | 'todoSplit';
 
 export interface OuterPanelBounds {
   floor: number;
@@ -133,6 +135,28 @@ export const OUTER_PANEL_CONFIGS = {
     legacyDefault: 560,
     defaultPx: (width) => clamp(Math.round(width * 0.44), 380, 720),
     bounds: splitBounds(380, 300, 1600),
+  },
+  // A to-do's details sidebar, on the right edge; closed by default, its width remembered.
+  todoDetails: {
+    axis: 'width',
+    storageKey: 'pane-todo-details-width:v2',
+    legacyKey: 'pane-todo-details-width',
+    legacyMin: 240,
+    legacyMax: 560,
+    legacyDefault: 300,
+    defaultPx: () => 300,
+    bounds: widthBounds(560, 240),
+  },
+  // A to-do's split (its plan and attachments) beside the thread: half the width until dragged.
+  todoSplit: {
+    axis: 'width',
+    storageKey: 'pane-todo-split-width:v2',
+    legacyKey: 'pane-todo-split-width',
+    legacyMin: 320,
+    legacyMax: 2400,
+    legacyDefault: 0,
+    defaultPx: (width) => Math.round(width / 2),
+    bounds: splitBounds(320, 400, 2400),
   },
 } satisfies Record<OuterPanelSurface, OuterPanelConfig>;
 

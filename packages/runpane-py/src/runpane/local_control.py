@@ -1677,6 +1677,7 @@ def run_report(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
         **optional_value("question", parsed.question),
         **optional_value("outcome", parsed.report_outcome),
         **(options or {}),
+        **optional_value("todo", parsed.todo),
     }
     result = invoke_daemon("runpane:report", [request], pane_dir=parsed.pane_dir)
     if parsed.json:

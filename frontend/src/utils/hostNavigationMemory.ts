@@ -322,6 +322,13 @@ export async function restoreHostNavigation(
     return;
   }
 
+  if (memory.view === 'todos') {
+    await setActiveSession(null);
+    if (!ownsRuntime()) return;
+    navigation.navigateToTodos({ number: memory.todoNumber ?? null });
+    return;
+  }
+
   if (memory.view === 'ssh') {
     await setActiveSession(null);
     if (!ownsRuntime()) return;

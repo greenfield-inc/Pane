@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MermaidRenderer } from './MermaidRenderer';
 
@@ -9,13 +9,26 @@ interface CodeComponentProps extends React.HTMLAttributes<HTMLElement> {
   children?: React.ReactNode;
 }
 
+/** What a custom image renderer receives. */
+export interface MarkdownImageProps {
+  src?: string;
+  alt?: string;
+}
+
 interface MarkdownPreviewProps {
   content: string;
   className?: string;
   id?: string;
+  /**
+   * Renders each image itself, given its source as written (a local path or a data URL too, which
+   * the default renderer drops). Links keep the default safe URL filter.
+   */
+  image?: (props: MarkdownImageProps) => React.ReactNode;
 }
 
-export const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({ content, className = '' }) => {
+const keepImageSources = (url: string, key: string): string => (key === 'src' ? url : defaultUrlTransform(url));
+
+export const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({ content, className = '', image }) => {
   const [mermaidKey, setMermaidKey] = useState(0);
 
   // Force re-render of mermaid diagrams when content changes
@@ -27,7 +40,9 @@ export const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({ content, class
     <div className={`markdown-preview ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={image ? keepImageSources : defaultUrlTransform}
         components={{
+          img: ({ node: _node, src, alt, ...props }) => (image ? image({ src: src === undefined ? undefined : String(src), alt }) : <img src={src} alt={alt} {...props} />),
           code({ node: _node, className, children, ...props }: CodeComponentProps) {
             const match = /language-(\w+)/.exec(className || '');
             const language = match ? match[1] : '';

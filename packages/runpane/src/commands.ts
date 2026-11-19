@@ -224,6 +224,33 @@ export interface ParsedArgs {
   notifyUpdate?: string;
   notifyAsked?: string;
   notifyWhatChanged?: string;
+  /** `runpane todos <verb>`: the words after the verb (the to-do, then a title, target, id or text). */
+  todoArgs?: string[];
+  /** todos create|update `--done-when`, repeatable; a JSON array of lines also works (the MCP tool's input). */
+  doneWhen?: string[];
+  /** todos create `--parent <T-n>`. */
+  todoParent?: string;
+  /** todos update `--check` / `--uncheck`: 1-based done-when lines. */
+  todoCheck?: number[];
+  todoUncheck?: number[];
+  /** todos attach `--label`. */
+  label?: string;
+  /** todos create `--no-start`. */
+  noStart?: boolean;
+  /** todos comment `--escalate`. */
+  escalate?: boolean;
+  /** todos review `--no-attachments <why>`. */
+  noAttachments?: string;
+  /** todos done `--person-said <words>`. */
+  personSaid?: string;
+  /** todos snooze `--until <time>`, as typed; the CLI reads it in its own zone. */
+  snoozeUntil?: string;
+  /** todos snooze `--remind-me`: a reminder card for the person instead of waking the agents. */
+  remindMe?: boolean;
+  /** todos list `--status <status>`. */
+  todoStatus?: string;
+  /** notify, report and agents start `--todo <T-n>`: the to-do it belongs to. */
+  todo?: string;
   /** `runpane profiles show|launch <name>`: the profile's name. */
   profileName?: string;
   /** profiles launch `--harness`: one CLI (`cli` or `cli/model`) for every agent. */
@@ -293,7 +320,7 @@ const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactForm
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
 const AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/u;
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'profiles', 'secrets', 'autopilot', 'devices', 'browser']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'machine', 'loops', 'todos', 'profiles', 'secrets', 'autopilot', 'devices', 'browser']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -312,7 +339,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--outcome', ['report']],
   ['--took', ['notify']],
   ['--took-as', ['notify']],
-  ['--status', ['notify', 'update']],
+  ['--status', ['notify', 'update', 'todos list']],
   ['--update', ['notify']],
   ['--asked', ['notify']],
   ['--what-changed', ['notify']],
@@ -321,7 +348,7 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--approve', ['autopilot answer']],
   ['--deny', ['autopilot answer']],
   ['--because', ['autopilot answer']],
-  ['--reason', ['secrets request', 'secrets lease', 'autopilot close']],
+  ['--reason', ['secrets request', 'secrets lease', 'autopilot close', 'todos drop']],
   ['--id', ['secrets lease end']],
   ['--platform', ['devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close']],
   ['--device', ['devices open']],
@@ -331,7 +358,19 @@ const FLAG_OWNERS = new Map<string, readonly string[]>([
   ['--theme', ['theme set']],
   ['--colors', ['theme set']],
   ['--css', ['theme set']],
-  ['--kind', ['machine cleanup']],
+  ['--kind', ['machine cleanup', 'todos attach']],
+  ['--done-when', ['todos create', 'todos update']],
+  ['--parent', ['todos create']],
+  ['--check', ['todos update']],
+  ['--uncheck', ['todos update']],
+  ['--label', ['todos attach']],
+  ['--no-start', ['todos create']],
+  ['--escalate', ['todos comment']],
+  ['--no-attachments', ['todos review']],
+  ['--person-said', ['todos done']],
+  ['--until', ['todos snooze']],
+  ['--remind-me', ['todos snooze']],
+  ['--todo', ['notify', 'report', 'agents start']],
   ['--conversation', ['panels conversation']],
   ['--hook', ['panels conversation']],
   ['--harness', ['profiles launch']],
@@ -575,7 +614,8 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
 }
 
 /** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; relay takes all of it; read and write take one path; inbox ack takes item ids; secrets lease takes secret names; Autopilot's answer, close and rewrite take one; link takes the link; profiles show and launch take the profile's name. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'profileName' | 'secretNames'> {
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds' | 'item' | 'pairingLink' | 'todoArgs' | 'profileName' | 'secretNames'> {
+  if (command.startsWith('todos ')) return { todoArgs: takeTodoWords(args) };
   if (PROFILE_NAME_COMMANDS.has(command)) {
     return args[0] !== undefined && !args[0].startsWith('-') ? { profileName: args.shift() ?? '' } : {};
   }
@@ -622,6 +662,33 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
     return { workspacePath: args.shift() };
   }
   return {};
+}
+
+/**
+ * `runpane todos <verb>` words: every word that is not an option or an option's value, wherever it
+ * stands, and everything after `--` (for a title that starts with "-"). They leave `args`.
+ */
+const OPTION_TOKEN_PATTERN = /^--?[a-zA-Z][a-zA-Z0-9-]*(?:=[\s\S]*)?$/;
+
+function takeTodoWords(args: string[]): string[] {
+  const words: string[] = [];
+  const rest: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === '--') {
+      words.push(...args.slice(index + 1));
+      break;
+    }
+    // Only `-x`, `--flag` or `--flag=value` is an option: text such as "- fix the tests" (an MCP tool's positional input) is a word.
+    if (!OPTION_TOKEN_PATTERN.test(arg)) {
+      words.push(arg);
+      continue;
+    }
+    rest.push(arg);
+    if (LOCAL_VALUE_FLAGS.has(arg) && index + 1 < args.length) rest.push(args[++index]);
+  }
+  args.splice(0, args.length, ...rest);
+  return words;
 }
 
 /** Whether runpane itself was asked for JSON: a `--json` inside an exec command belongs to that command. */
@@ -1073,6 +1140,18 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.paused = true;
     return;
   }
+  if (flag === '--no-start') {
+    parsed.noStart = true;
+    return;
+  }
+  if (flag === '--escalate') {
+    parsed.escalate = true;
+    return;
+  }
+  if (flag === '--remind-me') {
+    parsed.remindMe = true;
+    return;
+  }
   if (flag === '--next') {
     if (parsed.command !== 'autopilot stack push') throw new Error('--next is only valid with runpane autopilot stack push.');
     parsed.stackNext = true;
@@ -1116,7 +1195,45 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     return;
   }
   if (flag === '--attach') {
-    (parsed.attachments ??= []).push(value);
+    (parsed.attachments ??= []).push(...(parsed.command === 'todos create' ? jsonLines(value) : [value]));
+    return;
+  }
+  if (flag === '--done-when') {
+    (parsed.doneWhen ??= []).push(...jsonLines(value));
+    return;
+  }
+  if (flag === '--parent') {
+    parsed.todoParent = value;
+    return;
+  }
+  if (flag === '--check' || flag === '--uncheck') {
+    const lines = parseDoneWhenLines(flag, value);
+    if (flag === '--check') (parsed.todoCheck ??= []).push(...lines);
+    else (parsed.todoUncheck ??= []).push(...lines);
+    return;
+  }
+  if (flag === '--label') {
+    parsed.label = value;
+    return;
+  }
+  if (flag === '--no-attachments') {
+    parsed.noAttachments = value;
+    return;
+  }
+  if (flag === '--person-said') {
+    parsed.personSaid = value;
+    return;
+  }
+  if (flag === '--until') {
+    parsed.snoozeUntil = value;
+    return;
+  }
+  if (flag === '--status' && parsed.command === 'todos list') {
+    parsed.todoStatus = value;
+    return;
+  }
+  if (flag === '--todo') {
+    parsed.todo = value;
     return;
   }
   if (flag === '--panel') {
@@ -1687,6 +1804,25 @@ function setNotifyTookAs(parsed: ParsedArgs, value: string): void {
   parsed.notifyTookAs = value;
 }
 
+/** A JSON array of strings (what an MCP tool sends for a repeatable flag) as its items; any other text as itself. */
+function jsonLines(value: string): string[] {
+  if (!value.trimStart().startsWith('[')) return [value];
+  try {
+    return decodeBoundary(JSON.parse(value), boundary.array(boundary.string));
+  } catch {
+    return [value];
+  }
+}
+
+/** `--check 1,3`: 1-based done-when line numbers. */
+function parseDoneWhenLines(flag: string, value: string): number[] {
+  const items = splitList(value);
+  if (items.length === 0 || items.some((item) => !/^[0-9]+$/.test(item) || Number(item) < 1)) {
+    throw new Error(`${flag} takes done-when line numbers from 1, such as 2 or 1,3.`);
+  }
+  return items.map(Number);
+}
+
 function splitList(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
@@ -1781,7 +1917,7 @@ function readValue(args: string[], index: number, flag: string, literalValues: S
   const clearable = REPO_SETTING_FLAGS.includes(flag);
   if (clearable && value === '') return value;
   const freeText = (clearable && !/^--[a-z][a-z-]*$/.test(value ?? ''))
-    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--because', '--reason', '--choice', '--asked', '--what-changed'].includes(flag);
+    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--because', '--reason', '--choice', '--asked', '--what-changed', '--done-when', '--no-attachments', '--person-said'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

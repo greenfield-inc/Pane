@@ -27,6 +27,7 @@ import {
   type NotifySnapshot,
   type NotifySource,
   type NotifyWindowSize,
+  type NotifyTodoLink,
 } from '../../../../shared/types/notify';
 import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed } from './notifyQueue';
 import { PaneError, paneErrorText } from '../../../../shared/paneError';
@@ -91,6 +92,11 @@ export interface NotifyServiceDependencies {
   sessionRecord?: (sessionId: string) => { name: string; paneId: string; archived: boolean } | undefined;
   /** The saved machine a Session member's Pane runs on, when it isn't this computer. */
   memberMachine?: (paneId: string) => string | undefined;
+  /**
+   * To-dos (D-408): the to-do a question is about: `--todo T-n` when given (an unknown one throws),
+   * else the one open to-do the asking tab is assigned to, if exactly one.
+   */
+  todoOf?: (panelId: string | undefined, explicit: string | undefined) => NotifyTodoLink | undefined;
   /** Hears Session changes, which can end their items. */
   onSessionsChanged?: (listener: () => void) => () => void;
   /** Every Session's unacknowledged worker reports; a blocked one's question is a card. */
@@ -254,6 +260,15 @@ export class NotifyService {
   }
 
   /** Each worker's blocked question is a card from the start (J7). */
+  /** A worker's question's to-do; a `--todo` that no longer resolves leaves the card unlinked rather than lost. */
+  private workerTodo(panelId: string, explicit: string | undefined): NotifyTodoLink | undefined {
+    try {
+      return this.deps.todoOf?.(panelId, explicit);
+    } catch {
+      return undefined;
+    }
+  }
+
   private addWorkerQuestions(): void {
     const inbox = this.deps.inbox;
     if (!inbox) return;
@@ -297,6 +312,7 @@ export class NotifyService {
         choices: card.choices,
         questions: card.questions,
         asSent: card.asSent,
+        todo: this.workerTodo(entry.panelId, entry.report?.todo),
         ...summaryFiles(entry.report?.summaryPath, card.summaryPage),
       });
     }
@@ -355,8 +371,12 @@ export class NotifyService {
 
   /** The `runpane:notify` daemon command. */
   ask(request: NotifyRequest, signal?: AbortSignal): Promise<NotifyResult> {
-    const { resume, relays, aboutSession, returnAfterMs, caller, took, tookAs, status, update, asked, whatChanged, ...question } = request;
+    const { resume, relays, aboutSession, returnAfterMs, caller, took, tookAs, status, update, asked, whatChanged, todoRef, ...question } = request;
     const source = this.describeSource(caller);
+    if (!resume && took === undefined && update === undefined) {
+      const todo = this.deps.todoOf?.(source.panelId, todoRef);
+      if (todo) question.todo = todo;
+    }
     // A reader saying how it took a reply, or updating the approval: not a new ask, so a worker may too.
     const reader = { paneId: source.paneId, panelId: source.panelId };
     if (took !== undefined) return Promise.resolve(this.queue.took(reader, took, tookAs ?? 'answer', status));

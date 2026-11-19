@@ -24,6 +24,7 @@ export const agentReportFields = {
   summaryPath: boundary.optional(boundary.string),
   question: boundary.optional(boundary.string),
   ...agentReportOptionFields,
+  todo: boundary.optional(boundary.string),
   reportedAt: boundary.nonEmptyString,
 };
 const agentReportSchema = boundary.object(agentReportFields);

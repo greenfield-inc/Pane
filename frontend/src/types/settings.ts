@@ -33,6 +33,7 @@ export type SettingsSettingId =
   | 'machine-health-auto-paused-scratch'
   | 'machine-health-auto-archived-folders'
   | 'machine-health-auto-pause'
+  | 'machine-health-hold-todo-agents'
   | 'machine-health-run-now'
   | 'automatic-updates'
   | 'check-updates-now'

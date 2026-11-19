@@ -20,6 +20,7 @@ const DAEMON_EVENT_PREFIXES = [
   'archive:',
   'folder:',
   'loops:',
+  'todos:',
   'panel:',
   'ports:',
   'project:',

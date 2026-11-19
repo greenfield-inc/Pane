@@ -87,6 +87,14 @@ export interface NotifyAction {
  */
 export type NotifyLink = { label: string; path: string } | { label: string; url: string } | { label: string; approval: string };
 
+/** The to-do a card is about: its number on the asking machine, and its title for the label. */
+export interface NotifyTodoLink {
+  number: number;
+  title: string;
+  /** Pane's own card about the to-do: its review, the supervisor's stuck card, or a snooze's reminder (round 9). */
+  kind?: 'review' | 'stuck' | 'question' | 'reminder';
+}
+
 /** Up to this many links per card; a label takes up to NOTIFY_LINK_LABEL_MAX characters. */
 export const NOTIFY_LINKS_MAX = 6;
 export const NOTIFY_LINK_LABEL_MAX = 80;
@@ -146,6 +154,12 @@ export interface NotifyQuestion {
    * can't answer it and nobody could read it as a reply, so it has no reply box.
    */
   optionsOnly?: boolean;
+  /**
+   * To-dos (D-408): the to-do this question is about, from `--todo T-n` or set by Pane for a review,
+   * a stuck card or a requester question. Approvals labels the card with it, and the to-do reads
+   * Waiting on you while it waits.
+   */
+  todo?: NotifyTodoLink;
 }
 
 /** A prompt an agent shows in its terminal, asked here too; the first answer from either place wins. */
@@ -185,6 +199,8 @@ export interface NotifyRequest extends Partial<NotifyQuestion> {
   aboutSession?: string;
   /** Return `waiting` after this long, for clients whose tool calls time out (Cursor's CLI). */
   returnAfterMs?: number;
+  /** To-dos (D-408): `--todo T-n`, as typed; Pane resolves it to `todo` on the question. */
+  todoRef?: string;
   caller: NotifyCaller;
 }
 

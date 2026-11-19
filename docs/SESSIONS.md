@@ -372,7 +372,10 @@ the right, the **Overview** tab first, before any page, file or browser tab
 opened beside the chat. A Session with no split yet gets one; an existing
 right split gains Overview as its leftmost tab and keeps the tab that was
 selected there. Overview can be dragged like any tab and stays where you put
-it on this computer, but it has no close button. A `pane://open?session=` link
+it on this computer, but it has no close button. **To-dos** comes right after
+it, the same kind of permanent tab: the to-dos this Session asked for, with an
+amber count while one of their approvals waits on you (see
+[In a Session](TODOS.md#in-a-session)). A `pane://open?session=` link
 opens the Session with Overview selected. When the Session
 folder holds a status page at `session/index.html` (an orchestrator renders it
 there from a status JSON with the `orchestrate-sessions` skill's bundled
@@ -780,13 +783,48 @@ Every skipped Pane has a `skipped.code` and a message with the next step.
 `--remove-worktree` also removes adopted worktrees; local branches are always
 kept. Run it with `--dry-run` first.
 
+### To-dos in a Session
+
+Every top-level [to-do](TODOS.md) you start gets its own Session, named
+"T-41 · Title" and kept out of the sidebar, with its own orchestrator. Its
+sub-to-dos stay in that Session. The generated instructions (the Session
+folder's `AGENTS.md` and the `pane-orchestrator` skill, from `todosSection()`
+in `main/src/services/sessionTidyRules.ts`; the bundled `pane-orchestration`
+skill says the same in its own words) make the to-do list the orchestrator's
+work list:
+
+- It creates to-dos and sub-to-dos as soon as work exists (`runpane todos
+  create`, `--parent T-n`), assigns each sub-to-do to the worker tab doing it
+  (`runpane todos assign T-n --panel <tab-id>`), and keeps an agent working on
+  every in-progress to-do until it is ready for review.
+- It follows the attach rule, which a test checks word for word in each of
+  those instructions and in the `runpane` and `pane` skills: "Attach every
+  plan, mock-up, design, PR, findings file and decision page you produce or
+  rely on, as soon as it exists. Read a to-do's attachments before you start
+  on it."
+- It asks the to-do's requester first (`runpane todos ask`), then the person
+  with `--todo T-n`; its workers ask it with `runpane report --state blocked
+  --todo T-n`. It replies in the to-do's chat with short summaries
+  (`runpane todos comment`, at most 2,000 characters).
+- When every done-when check is met it runs `runpane todos review`; after the
+  person's Accept it does the wrap-up (merging only if asked, cleanup,
+  `runpane todos archive`) and runs `runpane todos done`.
+- An agent start refused with `machine_busy` means wait: Pane types
+  "Capacity is back" into its tab.
+
+The orchestrator's watch keeps its workers moving as before. Pane's
+[supervisor](TODOS.md#the-supervisor) keeps the orchestrator moving, and on
+launch restarts the orchestrators and assigned tabs of in-progress to-dos.
+
 ### Keeping a Session tidy
 
 The generated Session instructions have their own "Keep the Session tidy"
 section (`main/src/services/sessionTidyRules.ts`, used by the Session folder's
 `AGENTS.md` and the generated `pane-orchestrator` skill; the bundled
 `pane-orchestration` skill carries the same rules). The orchestrator cleans up
-as it goes without asking, and says in one line what it closed or archived:
+as it goes without asking, and says in one line what it closed or archived.
+In a to-do's own Session, `runpane todos archive T-n` after the person's
+Accept archives its Panes with the same checks:
 
 - It keeps one status document at `session/index.html` in the Session folder,
   updated in place, which the Session's Overview tab shows (it never opens it

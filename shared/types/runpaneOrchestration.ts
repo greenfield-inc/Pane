@@ -1442,6 +1442,8 @@ export interface RunpaneReportRequest {
   choices?: NotifyChoice[];
   /** `--state blocked` only, instead of choices: 2 to 4 questions, each with its own buttons. */
   questions?: NotifySubQuestion[];
+  /** To-dos (D-408): "T-14"; links a blocked question to that to-do. */
+  todo?: string;
   /** `--outcome`: ends a profile step with one of its declared outcomes; the state is then done. */
   outcome?: string;
 }

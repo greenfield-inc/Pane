@@ -24,6 +24,7 @@ import {
   SIDEBAR_SECTION_TOGGLE,
   SessionRowContent,
 } from '../ProjectSessionList';
+import { TodosNavRow } from '../todos/TodosNavRow';
 import { paneIconColor } from '../../utils/paneIconColor';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { useAllMachinesTree } from '../../hooks/useAllMachinesTree';
@@ -409,12 +410,13 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   return (
     <div className="flex flex-col pb-2" data-testid="all-machines-sidebar">
       <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
-      {/* Same order as the single-machine sidebar: Loops, Autopilot, Approvals (D-117, D-198). */}
+      {/* Same order as the single-machine sidebar: Loops, Autopilot, Approvals, To-dos (D-117, D-198, D-409). */}
       {/* Profiles sits above Loops: Loops, Autopilot and Approvals stay together (D-117). */}
       <ProfilesNavRow active={activeView === 'profiles'} />
       <LoopsNavRow active={activeView === 'loops'} />
       <AutopilotNavRow />
       <ApprovalsNavRow />
+      <TodosNavRow />
 
       {offline.map(({ machine }) => (
         <MachineOfflineBanner

@@ -11,6 +11,7 @@ import { linuxToUNCPath } from '../utils/wslUtils';
 import { APPROVALS_RULES } from './approvalsRules';
 import { agentsIntroForInstructions, scratchRule } from '../../../packages/runpane/src/paneIntro';
 import { isPanePluginEnabled } from './claudePanePlugin';
+import { TODO_ATTACH_RULE } from './sessionTidyRules';
 
 /**
  * A user-level skill that teaches any agent in a Pane terminal how to reach
@@ -481,6 +482,31 @@ the project, not Pane.
   \`runpane docs read --doc <path>\`.
 - Another machine in the person's workspace: \`runpane workspace list\`, then
   \`runpane workspace <machine> exec -- <command>\`.
+
+## To-dos
+
+A to-do (T-n) is one piece of the person's agent work in Pane. When Pane
+assigns you one, it types \`[From Pane, To-dos] You are assigned T-n …\` into
+your tab, with its done-when checks and attachments; \`runpane todos show T-n\`
+shows it again, attachments first.
+
+- ${TODO_ATTACH_RULE}
+  Attach with \`runpane todos attach T-n <file|url> --kind plan|mockup|design|pr|findings|decision|doc\`.
+- Reply in the to-do's chat with short summaries:
+  \`runpane todos comment T-n "<text>"\` (at most 2,000 characters; the person
+  reads the full turn in your chat).
+- Ask your orchestrator, never the person directly:
+  \`runpane report --state blocked --question "<question>" --todo T-n\`.
+  An orchestrator asks the to-do's requester first (\`runpane todos ask T-n\`),
+  then the person with \`--todo T-n\` on \`runpane notify\`.
+- Mark a sub-to-do done when its done-when checks are met:
+  \`runpane todos done T-n\`. A top-level to-do goes to the person first with
+  \`runpane todos review T-n\`, and is marked done only after their Accept (or
+  with \`--person-said "<their words>"\` when they told you to close it).
+- An agent start refused with \`machine_busy\` means the machine is busy:
+  wait. Pane types "Capacity is back" into your tab when load comes down.
+- \`[From Pane, To-dos]\` lines come from Pane; \`[From the person, via To-dos T-n]\`
+  lines carry the person's own words from the to-do's page.
 
 ## Orchestrating workers
 

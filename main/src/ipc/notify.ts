@@ -313,7 +313,7 @@ const windowSizeSchema = boundary.object({ width: boundary.number, height: bound
 const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary.string) });
 
 /** What Notify reads from the app's services: the config, Panes by id, and the main window. */
-type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
+type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & Partial<Pick<AppServices, 'todoService'>> & {
   sessionManager: Pick<AppServices['sessionManager'], 'getSession'> & Partial<Pick<AppServices['sessionManager'], 'on' | 'off'>>;
   databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'> & Partial<Pick<AppServices['databaseService'], 'getSession' | 'getPanel'>>;
   /** Files each Approvals item under its Session. */
@@ -370,34 +370,40 @@ function askerPaneGone(database: NotifyServices['databaseService'], item: Notify
   return undefined;
 }
 
+/**
+ * Types text into this computer's tab, only at a live agent's prompt: an owed answer, or a to-do's
+ * message (D-408). `busy` means try again later.
+ */
+export async function typeIntoLocalTab(commandRegistry: PaneCommandRegistry, panelId: string, text: string): Promise<TabTypeOutcome> {
+  const panel = panelManager.getPanel(panelId);
+  if (!panel) return 'gone';
+  if (panel.type === 'chat') {
+    if (getChatTabManager().agentState(panelId) !== 'idle') return 'busy';
+  } else {
+    // The status is free to read; the process group costs a `ps`, so only an idle tab pays for it.
+    const status = terminalPanelManager.getAgentStatus(panelId);
+    if (status !== 'idle') return 'busy';
+    const agentInForeground = await terminalPanelManager.readForegroundAgent(panelId);
+    // Where Pane can't see what runs in the tab (Windows, WSL, the PTY host), it never types (F-7).
+    if (agentInForeground === undefined) return 'unsupported';
+    if (!tabTakesText(status, agentInForeground)) return 'busy';
+  }
+  try {
+    const submit = () => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);
+    const result = decodeOptionalBoundary(await (panel.type === 'chat' ? submit() : submitOnlyToAgent(panelId, submit)), boundary.object({ ok: boundary.optional(boundary.boolean) }));
+    return result?.ok === false ? 'busy' : 'delivered';
+  } catch (error) {
+    // Not started yet, say: the next time it's at its prompt, or the next sweep, tries again.
+    console.warn(`[Notify] Couldn't type into tab ${panelId} yet:`, error);
+    return 'busy';
+  }
+}
+
 export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
   /** Every machine's state, once the machine connections start; "Show cards on" reads it from the first snapshot. */
   let machineList: (() => MachineState[]) | null = null;
   /** Types an owed answer into this computer's tab, only at a live agent's prompt. */
-  const typeHere = async (panelId: string, text: string): Promise<TabTypeOutcome> => {
-      const panel = panelManager.getPanel(panelId);
-      if (!panel) return 'gone';
-      if (panel.type === 'chat') {
-        if (getChatTabManager().agentState(panelId) !== 'idle') return 'busy';
-      } else {
-        // The status is free to read; the process group costs a `ps`, so only an idle tab pays for it.
-        const status = terminalPanelManager.getAgentStatus(panelId);
-        if (status !== 'idle') return 'busy';
-        const agentInForeground = await terminalPanelManager.readForegroundAgent(panelId);
-        // Where Pane can't see what runs in the tab (Windows, WSL, the PTY host), it never types (F-7).
-        if (agentInForeground === undefined) return 'unsupported';
-        if (!tabTakesText(status, agentInForeground)) return 'busy';
-      }
-      try {
-        const submit = () => commandRegistry.invoke('runpane:panels:submit', [{ panelId, input: text, expectReport: false }]);
-        const result = decodeOptionalBoundary(await (panel.type === 'chat' ? submit() : submitOnlyToAgent(panelId, submit)), boundary.object({ ok: boundary.optional(boundary.boolean) }));
-        return result?.ok === false ? 'busy' : 'delivered';
-      } catch (error) {
-        // Not started yet, say: the next time it's at its prompt, or the next sweep, tries again.
-        console.warn(`[Notify] Couldn't type into tab ${panelId} yet:`, error);
-        return 'busy';
-      }
-    };
+  const typeHere = (panelId: string, text: string): Promise<TabTypeOutcome> => typeIntoLocalTab(commandRegistry, panelId, text);
 
   // Another computer whose Session holds one of this computer's Panes types its answers through here.
   commandRegistry.register(NOTIFY_TYPE_INTO_TAB, (request: PaneCommandValue) => {
@@ -507,6 +513,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     sessionsById: () => services.orchestrationSessionManager?.approvalSessionsById() ?? new Map(),
     sessionRecord: services.orchestrationSessionManager ? (sessionId) => services.orchestrationSessionManager?.approvalSessionRecord(sessionId) : undefined,
     memberMachine: (paneId) => services.orchestrationSessionManager?.remoteMember?.(paneId)?.machine.label,
+    todoOf: (panelId, explicit) => services.todoService?.todoLinkFor(panelId, explicit),
     onSessionsChanged: (listener) => {
       const sessions = services.orchestrationSessionManager;
       sessions?.on('changed', listener);
@@ -568,6 +575,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
 
   commandRegistry.register('runpane:notify', async (request: PaneCommandValue): Promise<NotifyResult> => {
     const parsed = parseNotifyRequest(request);
+    const todoRef = decodeOptionalBoundary(request, boundary.object({ todo: boundary.optional(boundary.string) }))?.todo?.trim();
+    if (todoRef) parsed.todoRef = todoRef;
     const teammate = teammatePaneCaller();
     // A secret card writes the owner's secret store, so a teammate cannot post one.
     if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');

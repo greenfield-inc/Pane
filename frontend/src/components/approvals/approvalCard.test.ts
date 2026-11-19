@@ -124,6 +124,15 @@ describe('the approval card', () => {
     expect(firstToOpen([older])?.id).toBe('older');
   });
 
+  it('T-22: a Session\'s column also lists the approvals of the to-dos it requested, from their hidden Sessions too, once each', () => {
+    const fromHidden = { ...q20, id: 'perm', source: { ...q20.source, session: { id: 'todo-3', name: 'T-3 · Pane Selection', paneId: 'h' } } };
+    const linked = { ...q20, id: 'review', source: { ...q20.source, session: { id: 'todo-3', name: 'T-3 · Pane Selection', paneId: 'h' } }, todo: { number: 3, title: 'Pane Selection' } };
+    const unrelated = { ...q20, id: 'other', source: { ...q20.source, session: { id: 'todo-9', name: 'T-9', paneId: 'n' } } };
+    const scope = { sessionIds: new Set(['todo-3']), todoNumbers: new Set([3]) };
+    expect(sessionApprovals([q20, fromHidden, linked, unrelated], 's1', scope).map(item => item.id).sort()).toEqual(['perm', 'q20', 'review'].sort());
+    expect(sessionApprovals([fromHidden, linked], 's1').map(item => item.id)).toEqual([]);
+  });
+
   it('a Session whose approvals were dismissed has none open, so no count or badge', () => {
     const dismissed = [{ ...q20, dismissedAt: 2_000 }, { ...q20, id: 'q21', dismissedAt: 2_500 }];
     expect(sessionApprovals(dismissed, 's1')).toEqual([]);

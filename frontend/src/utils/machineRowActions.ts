@@ -17,11 +17,12 @@ export async function commandOnMachine(machineId: string, command: MachineComman
   if (refused) throw new Error(refused.error ?? 'The machine refused it and did not say why.');
 }
 
-/** What opening a row asks for: a Pane, a Session, or a project's main workspace. */
+/** What opening a row asks for: a Pane, a Session, a project's main workspace, or a to-do's page. */
 export type MachineTarget =
   | { kind: 'pane'; id: string; name: string }
   | { kind: 'session'; id: string; name: string }
-  | { kind: 'project'; id: number; name: string };
+  | { kind: 'project'; id: number; name: string }
+  | { kind: 'todo'; id: number; name: string };
 
 /** Runs one row action on the row's machine, in place, and reports a failure. */
 export async function runOnMachine(machineId: string, command: MachineCommand, failure: string): Promise<void> {
@@ -43,6 +44,8 @@ function openHere(target: MachineTarget): void {
     navigation.navigateToPaneChat();
     // The store owns selection errors and shows them in the Session view.
     useOrchestrationSessionStore.getState().select({ sessionId: target.id }).catch(() => undefined);
+  } else if (target.kind === 'todo') {
+    navigation.navigateToTodos({ number: target.id });
   } else {
     navigation.navigateToProject(target.id);
   }
@@ -51,6 +54,7 @@ function openHere(target: MachineTarget): void {
 function memoryFor(target: MachineTarget): HostNavigationMemory {
   if (target.kind === 'pane') return { view: 'sessions', projectId: null, paneId: target.id };
   if (target.kind === 'session') return { view: 'pane-chat', projectId: null, paneId: null, orchestrationSessionId: target.id };
+  if (target.kind === 'todo') return { view: 'todos', projectId: null, paneId: null, todoNumber: target.id };
   return { view: 'project', projectId: target.id, paneId: null };
 }
 

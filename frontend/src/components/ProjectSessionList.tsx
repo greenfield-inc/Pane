@@ -40,6 +40,7 @@ import { useIsLoopRun, useListedPanes } from '../hooks/useListedPanes';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useApprovalsNav } from './approvals/useApprovalsNav';
 import { toggleApprovals } from './approvals/approvalsNavigation';
+import { TodosNavRow } from './todos/TodosNavRow';
 import { SSH_HOSTS_SESSION_ID } from '../../../shared/types/sshHosts';
 import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../hooks/useRowReorder';
 import { useErrorStore } from '../stores/errorStore';
@@ -50,6 +51,8 @@ import {
 } from '../stores/orchestrationSessionStore';
 import type { SidebarNavigationScope } from '../stores/navigationStore';
 import { restoreArchivedPanes } from './orchestrationSessionActions';
+import { useTodoSessionIds } from '../stores/todosStore';
+import { isTodoSession } from './orchestrationSessionVisibility';
 import {
   createProjectById,
   flattenSessionsByProjects,
@@ -465,6 +468,7 @@ export function ProjectSessionList({
         {/* Approvals sits right under Autopilot, which answers them for you (D-117). */}
         <AutopilotNavRow />
         <ApprovalsNavRow />
+        <TodosNavRow />
 
         {missionControlEnabled && (
           <button
@@ -1289,15 +1293,17 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
   const activeSessionId = useSessionStore(s => s.activeSessionId);
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
   const orchestrationSessions = useOrchestrationSessionStore(s => s.sessions);
+  const todoSessionIds = useTodoSessionIds();
   const orchestrationAvailability = useOrchestrationSessionStore(s => s.availability);
   const refreshOrchestrationSessions = useOrchestrationSessionStore(s => s.refresh);
   const updateOrchestrationSession = useOrchestrationSessionStore(s => s.update);
   const archivedOrchestrationSessions = useMemo(
     () => orchestrationSessions
-      .filter(session => isArchivedOrchestrationSession(session))
+      // A to-do's own Session archives with its to-do and stays under To-dos (D-409, T-7).
+      .filter(session => isArchivedOrchestrationSession(session) && !isTodoSession(session, todoSessionIds))
       .slice()
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-    [orchestrationSessions],
+    [orchestrationSessions, todoSessionIds],
   );
   const archivedPaneCount = useMemo(
     () => archivedProjects.reduce((sum, project) => sum + project.sessions.length, 0),

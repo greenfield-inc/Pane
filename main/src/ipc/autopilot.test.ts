@@ -159,4 +159,13 @@ describe('autopilot:read-doc', () => {
     expect(readDocument(manager, file, { inline: true })).toMatchObject({ kind: 'missing', message: "This file is not on Autopilot's stack." });
     expect(readDocument(manager, file, { inline: true, links: () => [file] }).kind).toBe('html');
   });
+
+  it('serves an SVG as an image data URL, which an <img> shows without running its scripts', () => {
+    const file = path.join(root, 'linked', 'diagram.svg');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4"/></svg>';
+    fs.writeFileSync(file, svg);
+    const doc = readDocument(manager, file, { inline: true, links: () => [file] });
+    expect(doc).toEqual({ kind: 'image', path: file, dataUrl: `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}` });
+  });
 });

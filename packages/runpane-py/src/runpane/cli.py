@@ -96,6 +96,7 @@ from .local_control import (
 from .machine import run_machine_cleanup, run_machine_health
 from .notify import RunpaneError, run_notify
 from .pairing_link import run_link
+from .todos import run_todos
 from .profiles import run_profiles_launch, run_profiles_list, run_profiles_runs, run_profiles_show
 from .secrets import (
     run_secrets_delete,
@@ -132,6 +133,7 @@ COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
 COMMAND_GROUP_HELP_TOPICS.add("machine")
 COMMAND_GROUP_HELP_TOPICS.add("loops")
+COMMAND_GROUP_HELP_TOPICS.add("todos")
 COMMAND_GROUP_HELP_TOPICS.add("profiles")
 COMMAND_GROUP_HELP_TOPICS.add("secrets")
 COMMAND_GROUP_HELP_TOPICS.add("autopilot")
@@ -188,7 +190,7 @@ FLAG_OWNERS = {
     "--outcome": ("report",),
     "--took": ("notify",),
     "--took-as": ("notify",),
-    "--status": ("notify", "update"),
+    "--status": ("notify", "update", "todos list"),
     "--update": ("notify",),
     "--asked": ("notify",),
     "--what-changed": ("notify",),
@@ -197,9 +199,21 @@ FLAG_OWNERS = {
     "--approve": ("autopilot answer",),
     "--deny": ("autopilot answer",),
     "--because": ("autopilot answer",),
-    "--reason": ("secrets request", "secrets lease", "autopilot close"),
+    "--reason": ("secrets request", "secrets lease", "autopilot close", "todos drop"),
     "--id": ("secrets lease end",),
-    "--kind": ("machine cleanup",),
+    "--kind": ("machine cleanup", "todos attach"),
+    "--done-when": ("todos create", "todos update"),
+    "--parent": ("todos create",),
+    "--check": ("todos update",),
+    "--uncheck": ("todos update",),
+    "--label": ("todos attach",),
+    "--no-start": ("todos create",),
+    "--escalate": ("todos comment",),
+    "--no-attachments": ("todos review",),
+    "--person-said": ("todos done",),
+    "--until": ("todos snooze",),
+    "--remind-me": ("todos snooze",),
+    "--todo": ("notify", "report", "agents start"),
     "--conversation": ("panels conversation",),
     "--hook": ("panels conversation",),
     "--harness": ("profiles launch",),
@@ -390,6 +404,27 @@ class ParsedArgs:
     notify_update: Optional[str] = None
     notify_asked: Optional[str] = None
     notify_what_changed: Optional[str] = None
+    # `runpane todos <verb>`: the words after the verb (the to-do, then a title, target, id or text).
+    todo_args: List[str] = field(default_factory=list)
+    # todos create|update --done-when, repeatable; a JSON array of lines also works (the MCP tool's input).
+    done_when: Optional[List[str]] = None
+    todo_parent: Optional[str] = None
+    # todos update --check / --uncheck: 1-based done-when lines.
+    todo_check: Optional[List[int]] = None
+    todo_uncheck: Optional[List[int]] = None
+    label: Optional[str] = None
+    no_start: bool = False
+    escalate: bool = False
+    no_attachments: Optional[str] = None
+    person_said: Optional[str] = None
+    # todos snooze --until <time>, as typed; the CLI reads it in its own zone.
+    snooze_until: Optional[str] = None
+    # todos snooze --remind-me: a reminder card for the person instead of waking the agents.
+    remind_me: bool = False
+    # todos list --status <status>.
+    todo_status: Optional[str] = None
+    # notify, report and agents start --todo <T-n>: the to-do it belongs to.
+    todo: Optional[str] = None
     loop_id: Optional[str] = None
     cron: Optional[str] = None
     paused: bool = False
@@ -676,6 +711,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         del args[:]
     if parsed.command == "link" and args and not args[0].startswith("-"):
         parsed.pairing_link = args.pop(0)
+    if parsed.command.startswith("todos "):
+        parsed.todo_args = take_todo_words(args)
     if parsed.command == "inbox ack":
         while args and not args[0].startswith("-"):
             parsed.inbox_ids.append(args.pop(0))
@@ -736,6 +773,33 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     if parsed.command == "autopilot stack push":
         validate_stack_push_args(parsed)
     return parsed
+
+
+OPTION_TOKEN_PATTERN = re.compile(r"--?[a-zA-Z][a-zA-Z0-9-]*(?:=.*)?", re.DOTALL)
+
+
+def take_todo_words(args: List[str]) -> List[str]:
+    """`runpane todos <verb>` words: every word that is not an option or an option's value, wherever it
+    stands, and everything after `--` (for a title that starts with "-"). They leave `args`."""
+    words: List[str] = []
+    rest: List[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            words.extend(args[index + 1:])
+            break
+        # Only `-x`, `--flag` or `--flag=value` is an option: text such as "- fix the tests" (an MCP tool's positional input) is a word.
+        if not OPTION_TOKEN_PATTERN.fullmatch(arg):
+            words.append(arg)
+        else:
+            rest.append(arg)
+            if arg in LOCAL_VALUE_FLAGS and index + 1 < len(args):
+                index += 1
+                rest.append(args[index])
+        index += 1
+    args[:] = rest
+    return words
 
 
 def take_secret_names(args: List[str]) -> Optional[List[str]]:
@@ -1188,6 +1252,15 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--paused":
         parsed.paused = True
         return
+    if flag == "--no-start":
+        parsed.no_start = True
+        return
+    if flag == "--escalate":
+        parsed.escalate = True
+        return
+    if flag == "--remind-me":
+        parsed.remind_me = True
+        return
     if flag == "--next":
         if parsed.command != "autopilot stack push":
             raise ValueError("--next is only valid with runpane autopilot stack push.")
@@ -1219,7 +1292,38 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         parsed.session_id = value
         return
     if flag == "--attach":
-        parsed.attachments.append(value)
+        parsed.attachments.extend(json_lines(value) if parsed.command == "todos create" else [value])
+        return
+    if flag == "--done-when":
+        parsed.done_when = [*(parsed.done_when or []), *json_lines(value)]
+        return
+    if flag == "--parent":
+        parsed.todo_parent = value
+        return
+    if flag in {"--check", "--uncheck"}:
+        lines = parse_done_when_lines(flag, value)
+        if flag == "--check":
+            parsed.todo_check = [*(parsed.todo_check or []), *lines]
+        else:
+            parsed.todo_uncheck = [*(parsed.todo_uncheck or []), *lines]
+        return
+    if flag == "--label":
+        parsed.label = value
+        return
+    if flag == "--no-attachments":
+        parsed.no_attachments = value
+        return
+    if flag == "--person-said":
+        parsed.person_said = value
+        return
+    if flag == "--until":
+        parsed.snooze_until = value
+        return
+    if flag == "--status" and parsed.command == "todos list":
+        parsed.todo_status = value
+        return
+    if flag == "--todo":
+        parsed.todo = value
         return
     if flag == "--exclude-pane":
         parsed.watch_exclude_pane_ids.append(value)
@@ -1580,6 +1684,27 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
 
 
 
+def json_lines(value: str) -> List[str]:
+    """A JSON array of strings (what an MCP tool sends for a repeatable flag) as its items; any other text as itself."""
+    if not value.lstrip().startswith("["):
+        return [value]
+    try:
+        items = json.loads(value)
+    except ValueError:
+        return [value]
+    if isinstance(items, list) and all(isinstance(item, str) for item in items):
+        return items
+    return [value]
+
+
+def parse_done_when_lines(flag: str, value: str) -> List[int]:
+    """`--check 1,3`: 1-based done-when line numbers."""
+    items = split_list(value)
+    if not items or any(not re.fullmatch(r"[0-9]+", item) or int(item) < 1 for item in items):
+        raise ValueError(f"{flag} takes done-when line numbers from 1, such as 2 or 1,3.")
+    return [int(item) for item in items]
+
+
 def parse_assignments(flag: str, value: str, current: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """`--agent-harness <agent>=<cli>` and `--command <cli>=<command>`: one key=value pair, or a JSON
     object of them (what the MCP tool sends), merged over the pairs given before."""
@@ -1645,7 +1770,7 @@ def read_value(args: List[str], index: int, flag: str, literal_values: Set[int])
     if clearable and index < len(args) and args[index] == "":
         return ""
     bare_flag = index < len(args) and re.fullmatch(r"--[a-z][a-z-]*", args[index]) is not None
-    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--because", "--reason", "--choice", "--asked", "--what-changed"}
+    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--because", "--reason", "--choice", "--asked", "--what-changed", "--done-when", "--no-attachments", "--person-said"}
     if index >= len(args) or not args[index] or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
@@ -1906,6 +2031,23 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "loops pause": lambda parsed, context: run_loops_set_enabled(parsed, False),
     "loops resume": lambda parsed, context: run_loops_set_enabled(parsed, True),
     "loops delete": lambda parsed, context: run_loops_delete(parsed),
+    "todos create": lambda parsed, context: run_todos(parsed),
+    "todos update": lambda parsed, context: run_todos(parsed),
+    "todos attach": lambda parsed, context: run_todos(parsed),
+    "todos detach": lambda parsed, context: run_todos(parsed),
+    "todos show": lambda parsed, context: run_todos(parsed),
+    "todos list": lambda parsed, context: run_todos(parsed),
+    "todos assign": lambda parsed, context: run_todos(parsed),
+    "todos ask": lambda parsed, context: run_todos(parsed),
+    "todos comment": lambda parsed, context: run_todos(parsed),
+    "todos review": lambda parsed, context: run_todos(parsed),
+    "todos done": lambda parsed, context: run_todos(parsed),
+    "todos drop": lambda parsed, context: run_todos(parsed),
+    "todos archive": lambda parsed, context: run_todos(parsed),
+    "todos start": lambda parsed, context: run_todos(parsed),
+    "todos stop": lambda parsed, context: run_todos(parsed),
+    "todos snooze": lambda parsed, context: run_todos(parsed),
+    "todos wake": lambda parsed, context: run_todos(parsed),
     "profiles list": lambda parsed, context: run_profiles_list(parsed),
     "profiles show": lambda parsed, context: run_profiles_show(parsed),
     "profiles launch": lambda parsed, context: run_profiles_launch(parsed),

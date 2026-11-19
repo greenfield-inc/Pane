@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
 import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
+import { FittedImage } from '../autopilot/AutopilotDocument';
+import { ATTACHMENT_FRAME_SANDBOX } from '../todos/page/attachmentPage';
 import { machineDocFailure, machineFileLinks, readMachineDoc, type MachineDoc } from './machineDoc';
 
 /**
- * What a linked document from another machine shows: opening, its page or text, or one line saying
+ * What a linked document from another machine shows: opening, its page, image or text, or one line saying
  * why not, with Retry when the machine didn't answer.
  */
 export function MachineDocView({ doc, label, machine, onRetry }: { doc: MachineDoc | null; label: string; machine: string; onRetry?: () => void }) {
@@ -35,8 +37,10 @@ export function MachineDocView({ doc, label, machine, onRetry }: { doc: MachineD
     <SkeletonSwap loading={!doc} skeleton={skeleton}>
       {doc?.kind === 'html'
         // Another machine's page, sent as text: no scripts (Pane's own content policy would block them anyway), no forms, no navigation.
-        ? <iframe title={label} srcDoc={doc.html} sandbox="" className="min-h-0 w-full flex-1 border-0" data-testid="approvals-machine-page" />
-        : doc && <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="approvals-machine-text">
+        ? <iframe title={label} srcDoc={doc.html} sandbox={ATTACHMENT_FRAME_SANDBOX} className="min-h-0 w-full flex-1 border-0" data-testid="approvals-machine-page" />
+        : doc?.kind === 'image'
+          ? <FittedImage src={doc.dataUrl} label={label} />
+          : doc && <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="approvals-machine-text">
           {doc.kind === 'text' ? doc.text : ''}
         </pre>}
     </SkeletonSwap>
@@ -44,7 +48,7 @@ export function MachineDocView({ doc, label, machine, onRetry }: { doc: MachineD
 }
 
 /** One linked document, read from the item's machine. A failure is one line, and nothing keeps spinning. */
-export function MachineDocument({ item, path, label, machine }: { item: NotifyItem; path: string; label: string; machine: string }) {
+export function MachineDocument({ item, path, label, machine }: { item: Pick<NotifyItem, 'machineId'>; path: string; label: string; machine: string }) {
   const [doc, setDoc] = useState<MachineDoc | null>(null);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {

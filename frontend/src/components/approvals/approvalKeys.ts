@@ -1,4 +1,5 @@
 import type { KeyboardShortcutId } from '../../../../shared/constants/keyboardShortcuts';
+import { sessionTodoScope } from '../../stores/todosStore';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
 import { chordForEvent, effectiveCatalogChord } from '../../stores/hotkeyStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
@@ -80,7 +81,7 @@ export function toggleSessionApproval(): void {
     return;
   }
   if (!useApprovalColumnStore.getState().open[`session:${sessionId}`]) {
-    const first = firstToOpen(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId));
+    const first = firstToOpen(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId, sessionTodoScope(sessionId)));
     if (!first) {
       showKeyHint('Nothing in this Session is waiting on you.');
       return;
@@ -104,7 +105,7 @@ export function stepApproval(direction: 1 | -1): void {
     return;
   }
   const sessionId = currentSessionId();
-  if (sessionId && firstToOpen(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId))) {
+  if (sessionId && firstToOpen(sessionApprovals(selectNotifyItems(useNotifyStore.getState()), sessionId, sessionTodoScope(sessionId)))) {
     toggleSessionApproval();
     return;
   }

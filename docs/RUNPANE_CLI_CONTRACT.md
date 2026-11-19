@@ -147,6 +147,11 @@ runpane machine cleanup --kind update-snapshot --yes --json
 runpane loops create --repo active --name nightly-bug-sweep --cron "0 3 * * *" --agent claude --prompt "Fix one bug from yesterday's issues" --yes --json
 runpane loops list --json
 runpane loops run --loop <loop-id> --yes --json
+runpane todos create "Keyboard sheet" --done-when "Sheet opens with ?" --repo pane --json
+runpane todos attach T-12 tmp/plan/cover-sheet.html --kind plan --json
+runpane todos ask T-12 "Should the sheet list chat shortcuts too?" --json
+runpane todos review T-12 --summary "Ready; see the PR." --json
+runpane todos snooze T-12 --until tomorrow --note "Check Sentry after the deploy" --json
 runpane profiles list --json
 runpane profiles launch greenfield --prompt "Add dark mode to settings" --yes --json
 runpane agents start --repo active --name fix-login --agent claude --prompt "Fix the login redirect" --yes --json
@@ -274,6 +279,8 @@ The desktop app treats one consumer name specially: while a `runpane watch --as 
 `runpane machine health` shows this machine's disk and memory levels, the Panes using the most memory, leak warnings, and the disk space Pane can free by tier. `runpane machine cleanup --kind <kind>` lists one kind of tier 1 or 2 item (a dry run) and deletes them with `--yes`; tier 3 items are not Pane's, so it refuses them and says how to free them. Agents free disk only through this command, never with rm.
 
 `runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).
+
+`runpane todos create|update|attach|detach|show|list|assign|ask|comment|review|done|drop|archive|start|stop` manage to-dos, the person's list of agent work: each started to-do gets its own Session and orchestrator, and Pane keeps it moving until it is done. Each call records the caller's tab ($PANE_PANEL_ID). Attach plans, mock-ups, designs, PRs, findings and decisions as soon as they exist; ask the requester first with `todos ask`; replies are summaries of at most 2,000 characters; `todos review` needs attachments or `--no-attachments`; an agent marks a top-level to-do done only after the person's Accept or with `--person-said`. `--todo <T-n>` on `notify`, `report` and `agents start` links that card, report or agent to a to-do.
 
 `runpane profiles list|show|launch|runs` work with Pane profiles: a profile is one YAML file that defines a team of agents and a fixed workflow, and Pane runs a launched profile's workflow itself (see [PROFILES.md](PROFILES.md)). `list` prints each profile in the library with its version, origin (`bundled` or `yours`), whether it is on, and whether it can launch (`launchable`, `no flow` for a profile with no workflow, or `invalid` with its first error); `--json` adds the bundled Agent Farm's state and the person's own Agent Farm profiles. `show <name>` prints its agents, steps and outcomes, and errors (`--yaml` prints the file text only; `--json` carries both as `profile` and `yaml`). `launch <name> --prompt <text> --yes` starts a run and prints it (`run`: id, Session, step, Pane): it runs in `--repo`, else the repo of the Pane the caller's terminal is in (`PANE_SESSION_ID`), else the active repo; in `--session`, else the caller's orchestrated Session (`PANE_ORCHESTRATION_SESSION_ID`), else a new Session. `--harness <cli[/model]>` picks one CLI for every agent, `--agent-harness <agent>=<cli[/model]>` one agent's CLI, and `--command <cli>=<command>` the command that starts a CLI Pane does not know (each repeatable, or one JSON object). A launch without `--prompt` fails with `ERR_PROFILES_PROMPT_REQUIRED`; Pane refuses a profile it cannot launch with `PROFILE_NOT_FOUND`, `PROFILE_NOT_LAUNCHABLE` or `PROFILE_TEAM_ONLY` and a next step. Profiles is off until Settings › Advanced › Profiles turns it on; until then `list`, `show` and `launch` fail with `PROFILES_OFF`, while runs already started keep going and `runs` still lists them. `runs` lists runs with their state (`running`, `asking`, `paused`, `ended`, `failed`) and current step. The MCP tools are `profiles_list`, `profiles_show`, `profiles_launch` and `profiles_runs`, in the `core`, `profiles` and `plugin` toolsets.
 
@@ -470,6 +477,23 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `loops pause`: Pause a loop: it starts no scheduled runs until resumed.
 - `loops resume`: Resume a paused loop from its next scheduled time.
 - `loops delete`: Delete a loop. It starts no more runs.
+- `todos create`: Create a to-do: one piece of work with a title, a summary and what done means. By default Pane starts it at once in its own Session, through the load gate.
+- `todos update`: Change a to-do's title, summary or done-when lines, or check lines off.
+- `todos attach`: Attach a file or URL to a to-do: a plan, mock-up, design, PR, findings, decision or other page.
+- `todos detach`: Remove an attachment from a to-do.
+- `todos show`: Show one to-do: its attachments first, then the to-do, its sub-to-dos and recent activity.
+- `todos list`: List open to-dos on this machine with the status the person sees.
+- `todos assign`: Hand a to-do to the tab doing its work, or back to its Session's orchestrator.
+- `todos ask`: Ask a question about a to-do: it goes to the to-do's requester first, and to the person only when needed.
+- `todos comment`: Post a short message on a to-do's chat: a progress note, or the requester's answer.
+- `todos review`: Send a to-do to the person for review: Pane shows a review card with its attachments.
+- `todos done`: Mark a to-do done.
+- `todos drop`: Drop a to-do: the work won't be done.
+- `todos archive`: Archive a closed to-do's Panes and Session, keeping any Pane with unsaved work.
+- `todos start`: Start a to-do that is not running: its Session and orchestrator, through the load gate.
+- `todos stop`: Stop a to-do: Pane stops keeping it moving until it is started again.
+- `todos snooze`: Snooze a to-do until a time: its agents stop after their current step, and Pane wakes them then with your note.
+- `todos wake`: Wake a snoozed to-do now, as its time arriving would.
 - `profiles list`: List the profiles in Pane's library: name, version, origin, on or off, and whether each can launch.
 - `profiles show`: Show one profile: its agents, its workflow's steps and outcomes, its errors, and its file.
 - `profiles launch`: Launch a profile: Pane runs its workflow step by step, the first step in a new Pane of a Session.
@@ -599,11 +623,11 @@ runpane links create --session <session-id> [--json]
 runpane links open --url <pane-url> --yes [--json] [--pane-dir <path>]
 runpane docs search --query <text> [--limit <count>] [--json]
 runpane docs read --doc <path> [--json]
-runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--json] [--pane-dir <path>]
+runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base-branch <branch>]) (--agent <codex|claude|cursor|opencode|pi>|--tool-command <command>) --prompt <task> --yes [--todo <T-n>] [--json] [--pane-dir <path>]
 runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]
 runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> [--as-file-pointer] [--no-expect-report] --yes [--json] [--pane-dir <path>]
-runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]
-runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--json] [--pane-dir <path>]
+runpane report (--state <ready|blocked|failed|done> | --outcome <name>) [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text> [--choices <json>|--questions <json>]] [--pane <pane-id> --panel <panel-id>] [--todo <T-n>] [--json] [--pane-dir <path>]
+runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--questions <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--links <json>] [--relays <item>] [--about-session <id|name>] [--todo <T-n>] [--json] [--pane-dir <path>]
 runpane notify --took <id|Q-n> <answer|question> [--status <text>] [--json] [--pane-dir <path>]
 runpane notify --update <id|Q-n> [--asked <text>] --what-changed <text> [--title <text>] [--context <text>] [--choices <json>] [--questions <json>] [--links <json>] [--json] [--pane-dir <path>]
 runpane notify --resume <id> [--json] [--pane-dir <path>]
@@ -644,6 +668,23 @@ runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops pause --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops resume --loop <id> --yes [--json] [--pane-dir <path>]
 runpane loops delete --loop <id> --yes [--json] [--pane-dir <path>]
+runpane todos create <title> [--summary <markdown>] [--done-when <text>]... [--parent <T-n>] [--repo <selector>] [--agent <agent>] [--attach <file|url>]... [--no-start] [--json] [--pane-dir <path>]
+runpane todos update <todo> [--title <title>] [--summary <markdown>] [--done-when <text>]... [--check <n,...>] [--uncheck <n,...>] [--json] [--pane-dir <path>]
+runpane todos attach <todo> <target> [--kind <plan|mockup|design|pr|findings|decision|doc|image|link>] [--label <label>] [--note <text>] [--json] [--pane-dir <path>]
+runpane todos detach <todo> <attachment> [--json] [--pane-dir <path>]
+runpane todos show <todo> [--json] [--pane-dir <path>]
+runpane todos list [--all] [--status <status>] [--json] [--pane-dir <path>]
+runpane todos assign <todo> [--panel <tab-id>] [--json] [--pane-dir <path>]
+runpane todos ask <todo> <question> [--json] [--pane-dir <path>]
+runpane todos comment <todo> <text> [--escalate] [--json] [--pane-dir <path>]
+runpane todos review <todo> [--summary <text>] [--no-attachments <why>] [--json] [--pane-dir <path>]
+runpane todos done <todo> [--person-said <words>] [--json] [--pane-dir <path>]
+runpane todos drop <todo> [--reason <text>] [--json] [--pane-dir <path>]
+runpane todos archive <todo> [--json] [--pane-dir <path>]
+runpane todos start <todo> [--json] [--pane-dir <path>]
+runpane todos stop <todo> [--json] [--pane-dir <path>]
+runpane todos snooze <todo> --until <time> [--note <text>] [--remind-me] [--json] [--pane-dir <path>]
+runpane todos wake <todo> [--json] [--pane-dir <path>]
 runpane profiles list [--json] [--pane-dir <path>]
 runpane profiles show <name> [--yaml] [--json] [--pane-dir <path>]
 runpane profiles launch <name> --prompt <text> [--repo <selector>] [--session <id|name>] [--harness <cli[/model]>] [--agent-harness <agent>=<cli[/model]>]... [--command <cli>=<command>]... --yes [--json] [--pane-dir <path>]
@@ -714,6 +755,7 @@ Managed AGENTS.md block body:
 ```md
 ## Pane
 
+To-dos: `runpane todos` (or the `todos_*` MCP tools) is a work list Pane keeps moving. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists, with `runpane todos attach <T-n> <file|url>`; ask questions about a to-do with `--todo <T-n>`; to check back later (after a deploy, or for a reply), snooze it with `runpane todos snooze <T-n> --until <time> --note <text>` instead of waiting in a turn; `runpane docs read --doc docs/TODOS.md` has the rest.
 This repository is used with [Pane](https://runpane.com). Drive it with the CLI or the `pane` MCP server.
 
 Pane: one per feature (one worktree, one branch). Before creating one, find the feature's Pane (`runpane panes list --json`, match the branch) and create one only when none exists. Tab: reviews, review reruns, QA, fixes and follow-ups for a feature go in new tabs in its Pane (`runpane panels create --pane <id>`), never a new Pane or a plain `git worktree`. With the MCP tools, open a tab with `panels_create`, or `agents_start` with `pane`.
@@ -817,7 +859,6 @@ These flags are consumed by local daemon-control commands:
 --summary <text>
 --summary-file <path|->
 --question <text>
---outcome <name>
 --conversation <id>
 --cwd <path>
 --note-file <path|->
@@ -850,9 +891,6 @@ These flags are consumed by local daemon-control commands:
 --agent-farm <profile>
 --arg <key=value>
 --item <id>
---harness <cli[/model]>
---agent-harness <agent>=<cli[/model]>
---command <cli>=<command>
 --relays <item>
 --about-session <id|name>
 --questions <json>
@@ -873,6 +911,19 @@ These flags are consumed by local daemon-control commands:
 --device <name-or-id>
 --wait-ms <milliseconds>
 --kind <kind>
+--done-when <text>
+--parent <T-n>
+--check <n,...>
+--uncheck <n,...>
+--label <label>
+--no-attachments <why>
+--person-said <words>
+--until <time>
+--todo <T-n>
+--outcome <name>
+--harness <cli[/model]>
+--agent-harness <agent>=<cli[/model]>
+--command <cli>=<command>
 --json
 --wait-ready
 --no-focus
@@ -914,6 +965,9 @@ These flags are consumed by local daemon-control commands:
 --hook
 --background
 --idle
+--no-start
+--escalate
+--remind-me
 --yaml
 ```
 

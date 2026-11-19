@@ -1,4 +1,4 @@
-import { LogOut, Menu } from 'lucide-react';
+import { ListTodo, LogOut, Menu } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '../../../../shared/types/remoteDaemon';
 
@@ -13,6 +13,8 @@ interface RemoteStatusBarProps {
   onDisconnect: () => void;
   onRetry: () => void;
   onOpenSidebar: () => void;
+  /** The open Session's to-dos (T-23): a To-dos button, with the amber count of its approvals waiting on you. */
+  todos?: { waiting: number; onOpen: () => void };
 }
 
 export function RemoteStatusBar({
@@ -25,6 +27,7 @@ export function RemoteStatusBar({
   onDisconnect,
   onRetry,
   onOpenSidebar,
+  todos,
 }: RemoteStatusBarProps) {
   const connected = status === 'connected';
   // Through Pane's servers, the connection bar under this header says what is wrong in plain words;
@@ -90,6 +93,19 @@ export function RemoteStatusBar({
           </p>
         </div>
       </div>
+      {todos && (
+        <button
+          type="button"
+          onClick={todos.onOpen}
+          aria-label={todos.waiting > 0 ? `To-dos, ${todos.waiting} waiting on you` : 'To-dos'}
+          className="ml-auto inline-flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-border-primary px-2.5 text-sm font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary sm:h-8"
+          data-testid="remote-session-todos"
+        >
+          <ListTodo className="h-4 w-4" aria-hidden="true" />
+          <span>To-dos</span>
+          {todos.waiting > 0 && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-status-warning px-1.5 text-[11.5px] font-semibold tabular-nums text-text-on-status-warning">{todos.waiting}</span>}
+        </button>
+      )}
       {canRetry && <button type="button" onClick={onRetry} className="shrink-0 rounded-md border border-border-primary px-3 py-2 text-sm text-text-primary">Retry now</button>}
       <button
         type="button"

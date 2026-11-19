@@ -1,3 +1,4 @@
+import type React from 'react';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { ProjectEnvironment, ToolPanel, ToolPanelType } from '../../../shared/types/panels';
 
@@ -14,6 +15,10 @@ interface PanelTabPresentation {
   title?: string;
   disabled?: boolean;
   disabledReason?: string;
+  /** In place of the panel type's icon (a tab with no panel record, such as a Session's To-dos). */
+  icon?: React.ReactNode;
+  /** An amber count after the title while something waits on you, with the words it reads as. */
+  badge?: { count: number; label: string };
 }
 
 export type PanelTabPresentationResolver = (panel: ToolPanel) => PanelTabPresentation | undefined;

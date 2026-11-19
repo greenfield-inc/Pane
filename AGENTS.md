@@ -98,6 +98,8 @@ To free disk or memory, run `runpane machine health` and delete only with `runpa
 
 Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.
 
+To-dos: `runpane todos` (or the `todos_*` MCP tools) is a work list Pane keeps moving. Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists, with `runpane todos attach <T-n> <file|url>`; ask questions about a to-do with `--todo <T-n>`; to check back later (after a deploy, or for a reply), snooze it with `runpane todos snooze <T-n> --until <time> --note <text>` instead of waiting in a turn; `runpane docs read --doc docs/TODOS.md` has the rest.
+
 Profiles: a profile is a team of agents and a fixed workflow in one file. Once Profiles is on (Settings › Advanced › Profiles), `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `"$PANE_RUNPANE_BIN" report --outcome "<outcome>"`, using one of the outcomes its first message lists.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.

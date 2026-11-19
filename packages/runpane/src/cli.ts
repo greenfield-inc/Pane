@@ -13,6 +13,7 @@ import { runHandoff } from './handoff';
 import { runAsk, runModels } from './ask';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
+import { runTodos } from './todos';
 import { runLink } from './pairingLink';
 import { runSecretsDelete, runSecretsExec, runSecretsLease, runSecretsLeaseEnd, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
 import { BROWSER_VERBS, runBrowser } from './browser';
@@ -355,6 +356,23 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'loops pause': async (parsed) => runLoopsSetEnabled(parsed, false),
   'loops resume': async (parsed) => runLoopsSetEnabled(parsed, true),
   'loops delete': async (parsed) => runLoopsDelete(parsed),
+  'todos create': async (parsed) => runTodos(parsed),
+  'todos update': async (parsed) => runTodos(parsed),
+  'todos attach': async (parsed) => runTodos(parsed),
+  'todos detach': async (parsed) => runTodos(parsed),
+  'todos show': async (parsed) => runTodos(parsed),
+  'todos list': async (parsed) => runTodos(parsed),
+  'todos assign': async (parsed) => runTodos(parsed),
+  'todos ask': async (parsed) => runTodos(parsed),
+  'todos comment': async (parsed) => runTodos(parsed),
+  'todos review': async (parsed) => runTodos(parsed),
+  'todos done': async (parsed) => runTodos(parsed),
+  'todos drop': async (parsed) => runTodos(parsed),
+  'todos archive': async (parsed) => runTodos(parsed),
+  'todos start': async (parsed) => runTodos(parsed),
+  'todos stop': async (parsed) => runTodos(parsed),
+  'todos snooze': async (parsed) => runTodos(parsed),
+  'todos wake': async (parsed) => runTodos(parsed),
   'profiles list': async (parsed) => runProfilesList(parsed),
   'profiles show': async (parsed) => runProfilesShow(parsed),
   'profiles launch': async (parsed) => runProfilesLaunch(parsed),

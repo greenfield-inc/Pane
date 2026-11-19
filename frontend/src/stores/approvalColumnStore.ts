@@ -2,11 +2,12 @@ import { create } from 'zustand';
 import type { NotifyItem } from '../../../shared/types/notify';
 
 /**
- * Which approval the column shows on each surface (P4): a Session (keyed `session:<id>`),
- * Autopilot, or the Approvals screen. One column per surface; ✕ closes it and shows what was
+ * Which approval the column shows on each surface (P4): a Session (keyed `session:<id>`), a
+ * to-do's split (keyed `todo:<number>`, D-407), a Session's To-dos tab (keyed `session-todos:<id>`,
+ * T-23), Autopilot, or the Approvals screen. One column per surface; ✕ closes it and shows what was
  * underneath again.
  */
-export type ApprovalSurface = `session:${string}` | 'autopilot' | 'approvals';
+export type ApprovalSurface = `session:${string}` | `todo:${number}` | `session-todos:${string}` | 'autopilot' | 'approvals';
 
 interface OpenApproval {
   itemId: string;
@@ -76,6 +77,11 @@ export const useApprovalColumnStore = create<ApprovalColumnState>((set, get) => 
 /** Opens an approval in a Session's column (from its count, an inline card, or a link). */
 export function openSessionApproval(sessionId: string, itemId: string): void {
   useApprovalColumnStore.getState().openApproval(`session:${sessionId}`, itemId);
+}
+
+/** A to-do page's split column: the approval it shows, opened on its Q&A tab. */
+export function todoApprovalSurface(todoNumber: number): `todo:${number}` {
+  return `todo:${todoNumber}`;
 }
 
 /** The key an approval's unsent reply is kept under: one draft per version, shared by every surface. */

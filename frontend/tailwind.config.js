@@ -162,6 +162,11 @@ const config = {
           'error-on-tint': 'var(--color-status-error-on-tint)',
           'info-on-tint': 'var(--color-status-info-on-tint)',
           'neutral': 'var(--color-status-neutral)',
+          // Snoozed to-dos (round 9): violet, derived per theme.
+          'snoozed': 'var(--color-status-snoozed)',
+          'snoozed-subtle': 'var(--color-status-snoozed-subtle)',
+          'snoozed-border': 'var(--color-status-snoozed-border)',
+          'snoozed-on-tint': 'var(--color-status-snoozed-on-tint)',
         },
         // Autopilot's accent (violet)
         'autopilot': {
@@ -307,8 +312,13 @@ const config = {
         'modal-enter': 'modal-enter var(--duration-modal) var(--ease-out-strong)',
         'title-pill-enter': 'title-pill-enter var(--duration-150) var(--ease-out-strong)',
         'modal-overlay-enter': 'fade-in var(--duration-modal) var(--ease-out-strong)',
+        // A just-created to-do's row lights up once and fades to its own background.
+        'todo-flash': 'todo-flash 1.6s ease-out',
       },
       keyframes: {
+        'todo-flash': {
+          '0%': { backgroundColor: 'color-mix(in srgb, var(--color-interactive-primary) 22%, transparent)' },
+        },
         // Vertical "loading" light that sweeps up and down the working status bar.
         'status-working-sweep': {
           '0%': { transform: 'translateY(-120%)' },

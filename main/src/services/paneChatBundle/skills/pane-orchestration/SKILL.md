@@ -602,6 +602,55 @@ runpane lock list --json
   this or another machine: the agent fills in `runpane handoff --template`,
   then runs `runpane handoff "<destination>" --note-file <note> [--push]`.
 
+## To-dos
+
+In Pane, an orchestrator's work list is the to-do list (T-n). Every top-level
+to-do has its own Session and orchestrator; its sub-to-dos stay in that
+Session. Pane's first message names the to-do, its requester, its done-when
+checks and its attachments; `runpane todos show T-n` shows them again,
+attachments first. `runpane docs read --doc docs/TODOS.md` has the whole model.
+
+- **Create and assign as soon as work exists.** Split the to-do into
+  sub-to-dos with `runpane todos create "<title>" --parent T-n --done-when "<check>"`,
+  and assign each one to the worker tab doing it:
+  `runpane todos assign T-n --panel <tab-id>`, or `--todo T-n` on
+  `runpane agents start`. A `todos create` without `--parent` starts a new
+  Session with its own orchestrator, and you become its requester. Edit
+  to-dos as the work moves (`todos update`) and drop what won't be done
+  (`todos drop T-n --reason "<why>"`).
+- **Keep it moving.** Keep an agent working on every in-progress to-do until
+  it is ready for review, unless it waits on the person, is queued for machine
+  load, or the person stopped it. Your watch keeps workers moving; Pane's
+  supervisor keeps you moving (a reminder at 10 and 20 quiet minutes, a
+  restart in the same conversation at 30, a card to the person at 40).
+- **Attach.** Attach every plan, mock-up, design, PR, findings file and decision page you produce or rely on, as soon as it exists. Read a to-do's attachments before you start on it.
+  `runpane todos attach T-n <file|url> --kind plan|mockup|design|pr|findings|decision|doc`.
+- **Ask the requester first** with `runpane todos ask T-n "<question>"`, then
+  the person with `--todo T-n` on `runpane notify`. Workers ask you with
+  `runpane report --state blocked --question "<question>" --todo T-n`. As a
+  requester, answer with `runpane todos comment T-n "<answer>"`, adding
+  `--escalate` when you can't settle it.
+- **Reply with short summaries** in the to-do's chat:
+  `runpane todos comment T-n "<text>"`, at most 2,000 characters. The person
+  reads the full turn in the Session chat.
+- **Done.** When every done-when check is met, run
+  `runpane todos review T-n --summary "<what to look at>"` (it needs
+  attachments, or `--no-attachments "<why>"`). After the person's Accept, do
+  the wrap-up: merge only if they asked for that, clean up, and archive the
+  to-do's Panes with `runpane todos archive T-n`. Then run
+  `runpane todos done T-n`. Never mark a top-level to-do done before the
+  person's Accept unless they said so: pass `--person-said "<their words>"`.
+- **machine_busy.** An agent start refused with `machine_busy` means wait;
+  don't retry in a loop. Pane types "Capacity is back on <machine>; you can
+  start agents again." into your tab.
+- **What Pane types.** `[From Pane, To-dos] …` is Pane's own (a starting
+  message, a reminder, a restart, a pause for load, capacity back).
+  `[From the person, via To-dos T-n] …` is the person's own words from the
+  to-do's page (a comment, Accept, Ask for changes, Stop, Resume).
+  `[From <name>, via To-dos T-n] …` is a reply from the requester or a worker,
+  and `[From To-dos T-n, asked by its orchestrator] …` is a question for you as
+  its requester.
+
 ## Keep the Session tidy
 
 Clean up as you go, without asking. In your next message, say in one line what
@@ -651,7 +700,9 @@ its Pane right after the merge, in the same turn. Run
 busy agent or unsent input, keep the Pane and say why. Never pass `--force`. For several at
 once: `runpane panes archive --session <S> --merged --closed --dry-run --json`,
 then the same with `--yes`. The local branch stays, and `runpane panes restore`
-brings the worktree back.
+brings the worktree back. For a to-do's own Session, `runpane todos archive T-n` after the
+person's Accept runs the same checks on its Panes, keeps any that aren't clean
+and says why, and archives the Session once all its Panes are archived.
 
 When: as each item closes, and when you start, resume or wake. Never touch
 Panes or tabs of another Session.
