@@ -203,7 +203,7 @@ test('Settings shows Codex limits from transcripts under Usage & Limits', async 
   await expect(usageTab).toHaveAttribute('aria-current', 'page');
   const content = page.getByTestId('settings-content');
   await expect(content.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
-  await expect(content.getByRole('heading', { name: 'Provider limits' })).toBeVisible();
+  await expect(content.getByRole('heading', { name: 'Accounts and limits' })).toBeVisible();
   await expect(content.getByText('· pro_lite', { exact: true })).toBeVisible();
   await expect(content.getByText('58% left', { exact: true })).toBeVisible();
   await capture(page, testInfo, 'codex-usage-settings.png');
@@ -230,8 +230,8 @@ test('Settings keeps Usage & Limits reachable and explains missing Codex limits'
   await navigation.getByRole('button', { name: 'Usage & Limits', exact: true }).click();
 
   const content = page.getByTestId('settings-content');
-  await expect(content.getByRole('heading', { name: 'Provider limits' })).toBeVisible();
-  await expect(content.getByText(/^No provider-reported limits available\./)).toBeVisible();
+  await expect(content.getByRole('heading', { name: 'Accounts and limits' })).toBeVisible();
+  await expect(content.getByText('No Claude Code or Codex sign-in found.', { exact: true })).toBeVisible();
   await expect(content.getByText(/% left$/)).toHaveCount(0);
 
   await page.setViewportSize({ width: 640, height: 760 });
