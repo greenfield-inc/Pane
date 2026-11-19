@@ -59,6 +59,8 @@ export const MACHINE_READ_CHANNELS = [
   'resource-monitor:machine-relief',
   'resource-monitor:machine-cleanup-history',
   'resource-monitor:machine-apps',
+  // Usage & Limits: one machine's usage report, accounts and provider limits.
+  'usage:get-report',
 ] as const;
 export type MachineReadChannel = typeof MACHINE_READ_CHANNELS[number];
 

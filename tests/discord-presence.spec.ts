@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const inviteUrl = 'https://discord.gg/BdMyubeAZn';
 
@@ -16,7 +16,7 @@ test('sidebar Discord action opens the community invite', async ({ page }) => {
   await installElectronApiMock(page, {
     initialPreferences: { hide_discord: 'true', hide_welcome: 'true' },
   });
-  await page.goto('/');
+  await gotoApp(page);
 
   const feedback = page.getByRole('button', { name: 'Feedback', exact: true });
   const discord = page.getByRole('button', { name: 'Discord', exact: true });
@@ -33,7 +33,7 @@ test('sidebar footer keeps utility controls reachable at minimum width', async (
   await installElectronApiMock(page, {
     initialPreferences: { hide_discord: 'true', hide_welcome: 'true' },
   });
-  await page.goto('/');
+  await gotoApp(page);
 
   const sidebarBounds = await page.getByTestId('sidebar').boundingBox();
   if (!sidebarBounds) throw new Error('Sidebar has no visible bounds');
@@ -55,7 +55,7 @@ test('home Discord banner persists dismissal', async ({ page }) => {
       welcome_shown: 'true',
     },
   });
-  await page.goto('/');
+  await gotoApp(page);
 
   const banner = page.getByRole('region', { name: 'Pane Discord community' });
   await expect(banner).toBeVisible();
@@ -80,7 +80,7 @@ test('home Discord join opens the invite and dismisses the banner', async ({ pag
       welcome_shown: 'true',
     },
   });
-  await page.goto('/');
+  await gotoApp(page);
 
   const banner = page.getByRole('region', { name: 'Pane Discord community' });
   await banner.getByRole('button', { name: 'Join', exact: true }).click();
@@ -98,7 +98,7 @@ test('home Discord banner remains available when the invite cannot open', async 
     },
     openExternalOutcome: 'failure',
   });
-  await page.goto('/');
+  await gotoApp(page);
 
   const banner = page.getByRole('region', { name: 'Pane Discord community' });
   await banner.getByRole('button', { name: 'Join', exact: true }).click();

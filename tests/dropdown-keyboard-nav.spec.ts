@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 test.beforeEach(async ({ page }) => {
   await installElectronApiMock(page, {
@@ -26,7 +26,7 @@ async function dismissStartupDialogs(page: Page) {
 
 test.describe('Dropdown keyboard navigation', () => {
   test('footer-only dropdown focuses and activates its footer action', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
     await dismissStartupDialogs(page);
 
     const trigger = page
@@ -44,7 +44,7 @@ test.describe('Dropdown keyboard navigation', () => {
   });
 
   test('theme dropdown is navigable with arrow keys and Enter', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
     await dismissStartupDialogs(page);
 
     const trigger = page
@@ -88,7 +88,7 @@ test.describe('Dropdown keyboard navigation', () => {
   });
 
   test('Escape closes the dropdown without changing the theme', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
     await dismissStartupDialogs(page);
 
     const trigger = page

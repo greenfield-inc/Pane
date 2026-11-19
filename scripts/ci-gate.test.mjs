@@ -86,13 +86,21 @@ test('an unreadable manifest allows no skip', () => {
   assert.match(verdict.problems[0], /skip manifest is not JSON/);
 });
 
-test('pushes and manual runs skip nothing; pull requests skip only unchanged areas', () => {
+test('pushes, merge groups and manual runs skip nothing; pull requests skip only unchanged areas', () => {
   assert.deepEqual(skipManifest({ event: 'push', changed: {} }), {});
+  assert.deepEqual(skipManifest({ event: 'merge_group', changed: {} }), {});
   assert.deepEqual(skipManifest({ event: 'workflow_dispatch', changed: {} }), {});
   assert.deepEqual(Object.keys(PR_SKIP).sort(), ['relay-rust', 'relay-tests', 'runpane-wrapper-tests']);
 });
 
 // The contract with the real workflow file.
+// A required check that never reports on a merge group holds the queue until
+// it times out, so CI result must run on merge groups.
+test('Code Quality runs on merge groups', () => {
+  const on = WORKFLOW.replace(/\r\n/g, '\n').split(/^on:\n/m)[1].split(/^\S/m)[0];
+  assert.match(on, /^ {2}merge_group:\n {4}types: \[ checks_requested \]$/m);
+});
+
 test('quality.yml has exactly the expected jobs plus CI result', () => {
   assert.deepEqual(workflowJobIds(WORKFLOW).sort(), [...ALL_JOBS].sort());
 });

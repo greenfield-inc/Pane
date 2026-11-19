@@ -106,12 +106,13 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const driver = (panel.state.customState as BrowserPanelState | undefined)?.driver;
 
-  const webviewRef = useRef<Electron.WebviewTag | null>(null);
-  // The mounted <webview>, so its listeners attach whenever a new one mounts (a tunnelled page mounts late).
-  const [webviewElement, setWebviewElement] = useState<Electron.WebviewTag | null>(null);
+  const webviewRef = useRef<Electron.WebviewTag>(null);
+  // The mounted <webview>, as state so its listeners attach whenever it mounts:
+  // SkeletonSwap can mount it from its own timer, without a render of this panel.
+  const [webview, setWebview] = useState<Electron.WebviewTag | null>(null);
   const attachWebview = useCallback((element: Electron.WebviewTag | null) => {
     webviewRef.current = element;
-    setWebviewElement(element);
+    setWebview(element);
   }, []);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
   const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -458,11 +459,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     navigateTo(inputUrl);
   };
 
-  // Wire webview events when the webview element is mounted.
-  // Depends on `url` because the <webview> is only rendered when url is non-empty,
-  // so the ref is null until the first URL is set.
+  // Wire webview events to each <webview> element that mounts.
   useEffect(() => {
-    const webview = webviewElement;
     if (!webview) return;
 
     // Registered on attach as well as dom-ready, so agents reach a page that fails to load.
@@ -540,8 +538,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       webview.removeEventListener('did-fail-load', onDidFailLoad);
       webview.removeEventListener('did-stop-loading', onDidStopLoading);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run when url becomes non-empty (webview mounts); persistState reads from refs
-  }, [panel.id, url, fileSession, target.kind, webviewElement]);
+  }, [webview, panel.id, panel.sessionId, findAdapter, persistState, rerunOpenFind, syncFindActive]);
 
   // Listen for popup-requested events from the main process.
   // Uses stopImmediatePropagation so only the originating browser panel handles the event,
