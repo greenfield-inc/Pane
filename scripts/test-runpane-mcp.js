@@ -1554,7 +1554,8 @@ const TODOS_DISABLED = {
 const pythonSource = path.join(rootDir, 'packages', 'runpane-py', 'src');
 
 function runBoth(args, paneDir) {
-  const env = { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1', PANE_DIR: paneDir, PYTHONPATH: pythonSource };
+  // UTF-8 like the contract suite's Python runs: Windows' default console encoding can't print the contract's arrows.
+  const env = { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1', PANE_DIR: paneDir, PYTHONPATH: pythonSource, PYTHONIOENCODING: 'utf-8' };
   const run = (command, prefix) => require('node:child_process').spawnSync(command, [...prefix, ...args], { encoding: 'utf8', env });
   return { npm: run(process.execPath, [dist('cli.js')]), python: run(process.env.PYTHON ?? 'python3', ['-m', 'runpane']) };
 }
@@ -1594,7 +1595,7 @@ test('with To-dos off, runpane todos refuses before reaching Pane, and its help 
   for (const args of [['todos', 'list', '--json'], ['todos', 'show', 'T-1', '--json'], ['agent-context', '--command', 'todos list', '--json'], ['help', 'todos']]) {
     for (const [runtime, result] of Object.entries(runBoth(args, off))) {
       assert.equal(result.status, 1, `${runtime} ${args.join(' ')} should refuse: ${result.stdout}${result.stderr}`);
-      assert.match(result.stderr, /^To-dos is turned off in this Pane, so nothing was read or changed\. Saved to-dos are kept\.\nNext: Turn it on in Settings > Advanced > Experimental > To-dos, then run this again\.\n$/);
+      assert.match(result.stderr, /^To-dos is turned off in this Pane, so nothing was read or changed\. Saved to-dos are kept\.\r?\nNext: Turn it on in Settings > Advanced > Experimental > To-dos, then run this again\.\r?\n$/);
       if (args.includes('--json') && !args.includes('agent-context')) assert.deepEqual(JSON.parse(result.stdout), { ok: false, error: TODOS_DISABLED });
     }
   }
