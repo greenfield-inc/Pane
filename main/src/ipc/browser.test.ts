@@ -487,6 +487,19 @@ describe('browser tabs: the screens that watch them', () => {
     expect((await listed(fixture))[0].size).toBeUndefined();
   });
 
+  it('keeps the page at the size of the screen in control as that screen changes size', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
+    const page = fixture.pages.get('mine');
+    await fromAfar(fixture, 'mine', 'phone-1', phone);
+    await fixture.registry.invokeRemote('browser:driver', ['mine', 'person', 'phone-1'], { caller: undefined });
+    await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 844 }));
+    // Another screen resizing changes nothing; the one in control resizing moves the page with it.
+    await fromAfar(fixture, 'mine', 'desktop-1', { kind: 'desktop', onScreen: true, width: 1000, height: 700 });
+    await fromAfar(fixture, 'mine', 'phone-1', { ...phone, height: 600 });
+    await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 600 }));
+    expect((await listed(fixture))[0].size).toEqual({ width: 390, height: 600, mobile: true });
+  });
+
   it('runs a page only another device shows unthrottled and silent here, with sound back while this window shows it', async () => {
     const painting: string[] = [];
     const fixture = setup([browserTab('persons', 'pane-a')], { painting, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
