@@ -155,15 +155,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/vitest-linux-${{ matrix.shard }}.json
-
-    # TEMPORARY (P07 skip-site evidence): reverted before the PR is ready.
-    - name: Upload per-case results
-      if: ${{ always() }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: vitest-linux-${{ matrix.shard }}
-        path: ${{ runner.temp }}/vitest-linux-${{ matrix.shard }}.json
+      run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # Type checking and lint get their own runner: beside the unit tests they
   # competed for its CPUs and slowed the tests by about 30s. Oxlint, then the
@@ -546,15 +538,7 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=default --reporter=json --outputFile.json=${{ runner.temp }}/vitest-windows-${{ matrix.shard }}.json
-
-    # TEMPORARY (P07 skip-site evidence): reverted before the PR is ready.
-    - name: Upload per-case results
-      if: ${{ always() }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: vitest-windows-${{ matrix.shard }}
-        path: ${{ runner.temp }}/vitest-windows-${{ matrix.shard }}.json
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # The relay and direct-path helper (Rust): format, lints and cargo tests,
   # including the relay's ACME test against Pebble. It also builds both
