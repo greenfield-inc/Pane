@@ -149,7 +149,7 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     await browser(pane, agent, 'select', ['--ref', form('combobox "Country"'), '--values', '["Canada"]']);
     await browser(pane, agent, 'click', ['--ref', form('button "Create account"')]);
     // The tab shows who drives while the agent's calls run.
-    await expect(page.getByTestId('browser-driver-chip')).toContainText('is driving');
+    await expect(page.locator('[data-browser-page-visible="true"]').getByTestId('browser-driver-chip')).toContainText('is driving');
     await shot(page, 'j1-agent-driving');
     const after = await browser(pane, agent, 'snapshot');
     expect(after.snapshot).toContain('Welcome, ada@example.com (ca)');
@@ -215,14 +215,35 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     // and a moment after. Take over may land before or during that call: either way it, and the
     // click after it, wait for Hand to.
     const working = browser(pane, agent, 'evaluate', ['--expression', '(() => { const end = Date.now() + 5000; while (Date.now() < end) { /* busy */ } return true; })()']);
-    await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();
+    await page.locator('[data-browser-page-visible="true"]').getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();
     email = (await refs(pane, agent))('textbox "Email"');
     const waiting = browser(pane, agent, 'click', ['--ref', email]);
-    await expect(page.getByTestId('browser-driver-chip')).toContainText("You're driving · Claude is waiting");
+    await expect(page.locator('[data-browser-page-visible="true"]').getByTestId('browser-driver-chip')).toContainText("You're driving · Claude is waiting");
     await shot(page, 'j2-person-driving');
-    await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Hand to Claude' }).click();
+    await page.locator('[data-browser-page-visible="true"]').getByTestId('browser-driver-chip').getByRole('button', { name: 'Hand to Claude' }).click();
     expect(await working).toMatchObject({ ok: true });
     expect(await waiting).toMatchObject({ ok: true });
+
+    // J13: background tabs. A second tab comes forward; the first keeps its half-filled form while
+    // hidden, across a Pane switch, and no page is drawn over Settings.
+    const first = opened.tab ?? '';
+    await browser(pane, agent, 'navigate', ['--tab', first, '--url', `${origin}/`]);
+    const firstForm = (await browser(pane, agent, 'snapshot', ['--tab', first])).snapshot;
+    await browser(pane, agent, 'type', ['--tab', first, '--ref', refIn(firstForm, 'textbox "Email"'), '--text', 'half@filled.test']);
+    const second = await browser(pane, agent, 'open', ['--url', `${origin.replace('127.0.0.1', 'localhost')}/`]);
+    expect(second).toMatchObject({ ok: true, reused: false });
+    const emailValue = async () => (await browser(pane, agent, 'evaluate', ['--tab', first, '--expression', "document.getElementById('email').value"])).value;
+    expect(await emailValue()).toBe('half@filled.test');
+    await page.locator(`[data-sidebar-key="pane-${other.paneId}"]`).click();
+    await expect(page.locator('[data-browser-page-visible="true"]')).toHaveCount(0);
+    await page.locator(`[data-sidebar-key="pane-${agent.paneId}"]`).click();
+    await expect(page.locator('[data-browser-page-visible="true"]')).toHaveCount(1);
+    expect(await emailValue()).toBe('half@filled.test');
+    await page.evaluate(() => window.dispatchEvent(new CustomEvent('pane:open-settings', { detail: { category: 'browser' } })));
+    await expect(page.locator('[data-browser-page-visible="true"]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Back', exact: true }).first().click();
+    await expect(page.locator('[data-browser-page-visible="true"]')).toHaveCount(1);
+    expect(await browser(pane, agent, 'close', ['--tab', second.tab ?? ''])).toMatchObject({ ok: true });
 
     // J15: tab rules.
     expect((await browser(pane, other, 'snapshot')).code).toBe('ERR_BROWSER_NO_TAB');

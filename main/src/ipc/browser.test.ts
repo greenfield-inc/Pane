@@ -2,13 +2,13 @@ import { EventEmitter } from 'events';
 import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { PaneError } from '../../../shared/paneError';
 import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { BrowserPageContents } from '../services/browser/pageDriver';
-import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost, type BrowserServices, type LinkedComputers } from './browser';
+import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHoldSettings, type BrowserHost, type BrowserServices, type LinkedComputers, type TabDownload } from './browser';
 import { readFileSync } from 'fs';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
@@ -64,6 +64,12 @@ interface Fixture {
   pages: Map<string, ReturnType<typeof fakePage>>;
   setTools(on: boolean): void;
   worktree: string;
+  /** A page in `tabId` starts downloading `filename`; resolves with where it saved, once the file is written and done. */
+  download(tabId: string, filename: string, content: string): Promise<string>;
+  /** The tabs that said "Downloaded …", with the file. */
+  shownDownloads: Array<[string, string]>;
+  /** Archives a Pane, as Pane does: it is marked archived, then the host hears it went. */
+  archive(paneId: string): void;
 }
 
 function browserTab(id: string, paneId: string, openedByPanel?: string, url = 'http://localhost:4173/'): ToolPanel {
@@ -78,12 +84,16 @@ function agentTab(id: string, paneId: string, agent: string): ToolPanel {
 }
 
 /** `pagesHere: false` leaves this computer without pages, as when only a linked computer shows the tabs. */
-function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; pagesHere?: boolean; cursors?: string[]; loading?: boolean } = {}): Fixture {
+function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; pagesHere?: boolean; cursors?: string[]; held?: string[]; holds?: BrowserHoldSettings; loading?: boolean } = {}): Fixture {
+  const archived = new Set<string>();
+  const goneListeners: Array<() => void> = [];
   const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-browser-tools-'));
   let tools = true;
   const tabs = [agentTab('claude-a', 'pane-a', 'claude'), agentTab('codex-a', 'pane-a', 'codex'), ...initial];
   const pages = new Map<string, ReturnType<typeof fakePage>>();
   let nextPage = 1;
+  let downloadListener: ((download: TabDownload) => void) | undefined;
+  const shownDownloads: Array<[string, string]> = [];
   if (options.pagesHere !== false) {
     for (const tab of initial) {
       // SAFETY: browserTab builds every initial tab's customState as a BrowserPanelState.
@@ -102,7 +112,6 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
       pages.set(tab.id, page);
       return tab;
     },
-    show: async () => undefined,
     close: async (tab) => { tabs.splice(tabs.indexOf(tab), 1); },
     update: async (tab, state) => { tab.state = { ...tab.state, customState: state }; },
     page: (id) => pages.get(id),
@@ -110,15 +119,45 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     hasWindow: () => true,
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
+    // As the window does: a tab whose hold ends loses its page; a newly held tab gets one.
+    setHeld: (tabIds) => {
+      for (const id of options.held ?? []) if (!tabIds.includes(id)) pages.delete(id);
+      for (const id of tabIds) {
+        const tab = tabs.find(candidate => candidate.id === id);
+        if (!tab || pages.has(id) || options.pagesHere === false) continue;
+        // SAFETY: browserTab builds every tab's customState as a BrowserPanelState.
+        const state = tab.state.customState as BrowserPanelState | undefined;
+        pages.set(id, fakePage(nextPage++, state?.currentUrl ?? 'http://localhost:4173/'));
+      }
+      options.held?.splice(0, Infinity, ...tabIds);
+    },
+    onGone: (listener) => { goneListeners.push(listener); },
+    setBusy: () => undefined,
     linked: () => options.linked,
+    onDownload: (listener) => { downloadListener = listener; },
+    personDownloads: () => path.join(worktree, 'Downloads'),
+    agentDownloads: async () => path.join(worktree, '.scratch', 'browser-downloads'),
+    showDownload: (panelId, file) => { shownDownloads.push([panelId, file]); },
+  };
+  mkdirSync(path.join(worktree, 'Downloads'));
+  const download = async (tabId: string, filename: string, content: string): Promise<string> => {
+    let saveAt = '';
+    let finish: (done: boolean) => void = () => undefined;
+    const finished = new Promise<boolean>(resolve => { finish = resolve; });
+    downloadListener?.({ pageId: pages.get(tabId)?.id ?? 0, tabId, filename, saveAs: (file) => { saveAt = file; }, finished });
+    // Electron writes the file, then reports it done.
+    writeFileSync(saveAt, content);
+    finish(true);
+    return saveAt;
   };
   const services: BrowserServices = {
-    sessionManager: { getSession: (id: string) => (id === 'pane-a' || id === 'pane-b' ? { name: id, worktreePath: worktree } : undefined) },
+    sessionManager: { getSession: (id: string) => (id === 'pane-a' || id === 'pane-b' ? { name: id, worktreePath: worktree, archived: archived.has(id) } : undefined) },
     configManager: { getConfig: () => ({ browser: { agentTools: tools } }) },
   };
   const registry = new PaneCommandRegistry();
-  registerBrowserHandlers(services, registry, host);
-  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree };
+  onTestFinished(registerBrowserHandlers(services, registry, host, options.holds));
+  const archive = (paneId: string) => { archived.add(paneId); for (const listener of goneListeners) listener(); };
+  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree, download, shownDownloads, archive };
 }
 
 const signal = new AbortController().signal;
@@ -259,9 +298,31 @@ describe('browser tools: the person takes over', () => {
   });
 });
 
+describe('browser tabs: downloads', () => {
+  it('saves the person\'s download in their Downloads folder, without asking, and the tab says so', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')]);
+    const first = await fixture.download('persons', 'report.pdf', 'one');
+    const second = await fixture.download('persons', 'report.pdf', 'two');
+    expect([first, second]).toEqual([path.join(fixture.worktree, 'Downloads', 'report.pdf'), path.join(fixture.worktree, 'Downloads', 'report (2).pdf')]);
+    await vi.waitFor(() => expect(fixture.shownDownloads).toEqual([['persons', first], ['persons', second]]));
+    expect(JSON.stringify(await call(fixture, 'tabs', {}))).not.toContain('downloads');
+  });
+
+  it('saves a download the agent\'s click caused in the Pane\'s scratch folder, and browser_tabs lists it', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    await fixture.download('mine', 'report.pdf', 'pdf bytes');
+    const saved = path.join(fixture.worktree, '.scratch', 'browser-downloads', 'report.pdf');
+    await vi.waitFor(() => expect(fixture.shownDownloads).toEqual([['mine', saved]]));
+    expect(readFileSync(saved, 'utf8')).toBe('pdf bytes');
+    expect(await call(fixture, 'tabs', {})).toMatchObject({ tabs: [{ id: 'mine', downloads: [saved] }] });
+  });
+});
+
 describe('browser tools: a tab a linked computer shows (P2)', () => {
   /** The agent's computer, whose tab only the linked desktop shows, wired to that desktop's real channel. */
-  function linkedPair(duringRun?: () => Promise<void>) {
+  function linkedPair(duringRun?: () => Promise<void>, held?: string[]) {
     const viewerCursors: string[] = [];
     const viewer = setup([], { cursors: viewerCursors });
     viewer.pages.set('shown-there', fakePage(9, 'http://localhost:4173/'));
@@ -273,9 +334,16 @@ describe('browser tools: a tab a linked computer shows (P2)', () => {
         return viewer.registry.invokeRemote('runpane:machine:browser', [request], { caller: { paneId: 'remote' } });
       },
     };
-    const agentSide = setup([browserTab('shown-there', 'pane-a', 'claude-a')], { linked, pagesHere: false });
+    const agentSide = setup([browserTab('shown-there', 'pane-a', 'claude-a')], { linked, pagesHere: false, held });
     return { agentSide, viewer, viewerCursors };
   }
+
+  it('holds nothing on the agent\'s computer for a call that runs on the linked computer', async () => {
+    const held: string[] = [];
+    const { agentSide } = linkedPair(undefined, held);
+    expect(await call(agentSide, 'snapshot', {})).toMatchObject({ ok: true });
+    expect(held).toEqual([]);
+  });
 
   it('runs the call on the linked computer\'s copy and brings a screenshot home', async () => {
     const { agentSide, viewer, viewerCursors } = linkedPair();
@@ -408,4 +476,74 @@ describe('browser tools: opening a slow page', () => {
     const fixture = setup([], { loading: true });
     expect(await call(fixture, 'open', { url: 'http://localhost:4173/slow' })).toMatchObject({ ok: true, url: 'http://localhost:4173/slow' });
   }, 20_000);
+});
+
+describe('browser tools: tabs an agent holds (P4)', () => {
+  it('holds up to four tabs per agent, putting the longest idle to sleep for a fifth', async () => {
+    const held: string[] = [];
+    const fixture = setup([], { held });
+    const opened: string[] = [];
+    for (let site = 1; site <= 4; site += 1) opened.push(JSON.parse(JSON.stringify(await call(fixture, 'open', { url: `http://site-${site}.test/` }))).tab);
+    // The first tab opened is used again, a moment later, so the second is now the one idle longest.
+    await new Promise(resolve => setTimeout(resolve, 10));
+    await call(fixture, 'snapshot', { tab: opened[0] });
+    const fifth = await call(fixture, 'open', { url: 'http://site-5.test/' });
+    expect(fifth).toMatchObject({ note: expect.stringContaining(`tab ${opened[1]} went to sleep`) });
+    expect(held).not.toContain(opened[1]);
+    expect(held).toHaveLength(4);
+    const listed = JSON.parse(JSON.stringify(await call(fixture, 'tabs', {}))).tabs;
+    expect(listed.find((tab: { id: string }) => tab.id === opened[1])).toMatchObject({ held: false, asleep: true });
+  });
+
+  it('puts the held tabs to sleep at once when the agent\'s Pane is archived', async () => {
+    const held: string[] = [];
+    const agentTerminal: ToolPanel = { id: 'claude-a', sessionId: 'pane-a', type: 'terminal', title: 'Claude Code', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a'), agentTerminal], { held });
+    await call(fixture, 'snapshot', { tab: 'mine' });
+    expect(held).toEqual(['mine']);
+    fixture.archive('pane-a');
+    expect(held).toEqual([]);
+  });
+
+  it('puts a tab to sleep after the idle time with no agent action, and says so when the agent wakes it', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held, holds: { limit: 4, idleMs: 600, sweepMs: 40 } });
+    await call(fixture, 'snapshot', {});
+    expect(held).toEqual(['mine']);
+    // Several sweeps later, still inside the idle time: still held.
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(held).toEqual(['mine']);
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 3_000 });
+    expect(await call(fixture, 'snapshot', {})).toMatchObject({ note: expect.stringContaining('was asleep') });
+    expect(held).toEqual(['mine']);
+  });
+
+  it('forgets the hold of a tab the person closed, so it counts toward no limit', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held, holds: { limit: 4, idleMs: 60_000, sweepMs: 40 } });
+    await call(fixture, 'snapshot', {});
+    expect(held).toEqual(['mine']);
+    fixture.tabs.splice(fixture.tabs.findIndex(tab => tab.id === 'mine'), 1);
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+  });
+
+  it('keeps an agent at four held tabs when its calls to five tabs run at once', async () => {
+    const held: string[] = [];
+    const tabs = [1, 2, 3, 4, 5].map(n => browserTab(`t${n}`, 'pane-a', 'claude-a', `http://site-${n}.test/`));
+    const fixture = setup(tabs, { held });
+    await Promise.all(tabs.map(tab => call(fixture, 'snapshot', { tab: tab.id })));
+    expect(held).toHaveLength(4);
+  });
+
+  it('says a tab was asleep only when its page really went away', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held, holds: { limit: 4, idleMs: 100, sweepMs: 40 } });
+    await call(fixture, 'snapshot', {});
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+    // The person selected the tab meanwhile, so its page is back.
+    fixture.pages.set('mine', fakePage(50, 'http://localhost:4173/'));
+    const listed = JSON.parse(JSON.stringify(await call(fixture, 'tabs', {}))).tabs;
+    expect(listed[0]).toMatchObject({ asleep: false });
+    expect(JSON.parse(JSON.stringify(await call(fixture, 'snapshot', {}))).note ?? '').not.toContain('was asleep');
+  });
 });

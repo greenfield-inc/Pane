@@ -1,5 +1,5 @@
-import { realpathSync, statSync } from 'fs';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises';
+import { existsSync, mkdirSync, realpathSync, statSync } from 'fs';
+import { copyFile, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'fs/promises';
 import os from 'os';
 import { randomUUID } from 'crypto';
 import path from 'path';
@@ -15,6 +15,7 @@ import { PageDriver, WAIT_DEFAULT_MS, WAIT_MAX_MS, type BrowserPageContents, typ
 import { READ_VERBS, runVerb, type VerbOutcome, type VerbRequest } from '../services/browser/pageVerbs';
 import { BROWSER_MACHINE_CHANNEL, IMAGE_CHUNK_BYTES, linkedBrowserRequestSchema, linkedChunkAnswerSchema, linkedProbeAnswerSchema, linkedRunAnswerSchema } from '../services/browser/linkedBrowser';
 import { answerWithin, awaitTask } from './macDevices';
+import { BrowserHolds } from '../services/browser/browserHolds';
 import { loopbackPortOf, remapLoopbackPort } from '../../../shared/utils/browserUrl';
 
 /**
@@ -27,8 +28,6 @@ export interface BrowserHost {
   tab(panelId: string): ToolPanel | undefined;
   /** Opens a browser tab in a split beside the caller, owned by it; never raises the window. */
   open(paneId: string, url: string, callerPanelId: string | undefined): Promise<ToolPanel>;
-  /** Brings the tab forward on clients showing its Pane, so its page loads. */
-  show(tab: ToolPanel): Promise<void>;
   close(tab: ToolPanel): Promise<void>;
   /** Writes the tab's state (the driver chip and its URL). */
   update(tab: ToolPanel, state: BrowserPanelState): Promise<void>;
@@ -42,8 +41,37 @@ export interface BrowserHost {
   shotsDirectory(paneId: string): Promise<string>;
   /** Shows the agent's cursor where it clicked, in the tab. */
   showCursor(panelId: string, x: number, y: number): void;
+  /** The tabs agents hold: their pages stay alive while hidden (P4). */
+  setHeld(tabIds: readonly string[]): void;
+  /** Hears a tab closing for good or a Pane archived: agents whose tab is gone stop holding pages. */
+  onGone(listener: () => void): void;
+  /** A call runs on the tab: a hidden page paints while it does, so screenshots are current. */
+  setBusy(panelId: string, busy: boolean): void;
   /** Your other computers this one is linked to, when it keeps connections to them (P2). */
   linked(): LinkedComputers | undefined;
+  /** Calls `listener` for each download a page in a browser tab starts, before anything is saved. */
+  onDownload(listener: (download: TabDownload) => void): void;
+  /** Where the person's own downloads go: their Downloads folder. */
+  personDownloads(): string;
+  /** Where downloads an agent's call caused go: the Pane's scratch folder, deleted with the Pane. */
+  agentDownloads(paneId: string): Promise<string>;
+  /** Tells the tab a file finished downloading: "Downloaded <name> · Show in folder". */
+  /** Shows the download's notice in the tab; `agent` names the agent whose call caused it. */
+  showDownload(panelId: string, file: string, agent?: string): void;
+}
+
+/** A download a page started (Electron's will-download on the browser tabs' store). */
+export interface TabDownload {
+  /** The page that started it. */
+  pageId: number;
+  /** The tab that page shows in; undefined for a sign-in popup's own window. */
+  tabId: string | undefined;
+  /** The name the site suggests. */
+  filename: string;
+  /** Saves the file at `file`, with no dialog. Only during the onDownload listener call. */
+  saveAs(file: string): void;
+  /** True once the file is complete; false when it failed or was cancelled. */
+  finished: Promise<boolean>;
 }
 
 /** The linked computers an agent's call can reach, and how this computer names itself to them. */
@@ -55,14 +83,14 @@ export interface LinkedComputers {
 }
 
 /** One tab as browser_tabs lists it (the contract's browserTab). */
-interface TabSummary { id: string; url: string; title: string; openedBy: string; yours: boolean; driving?: string; showing: boolean; dialog?: PendingDialog }
+interface TabSummary { id: string; url: string; title: string; openedBy: string; yours: boolean; driving?: string; showing: boolean; held: boolean; asleep: boolean; dialog?: PendingDialog; downloads?: string[] }
 /** What an action on a tab returns (the contract's browserActionResult). */
 /** What a browser tool returns (the contract's browser*Result schemas). */
 interface ToolResult { ok: true; tab: string; url?: string; title?: string; dialog?: PendingDialog; fileChooser?: FileChooser; note?: string; snapshot?: string; truncated?: boolean; value?: JsonValue; path?: string; mimeType?: 'image/png'; width?: number; height?: number; reused?: boolean; next?: string }
 
 /** What the browser tools read from the app: the caller's Pane and Settings > Browser. */
 export interface BrowserServices {
-  sessionManager: { getSession(paneId: string): { name: string; worktreePath?: string } | undefined };
+  sessionManager: { getSession(paneId: string): { name: string; worktreePath?: string; archived?: boolean } | undefined };
   configManager: { getConfig(): { browser?: Partial<BrowserSettings> } };
 }
 
@@ -167,13 +195,32 @@ function checkedUploadPath(worktree: string | undefined, raw: string): string {
   return file;
 }
 
+/** Holds (P4): how many tabs one agent keeps alive while hidden, and for how long without an action (D-126). */
+export interface BrowserHoldSettings { limit: number; idleMs: number; sweepMs: number }
+const DEFAULT_HOLDS: BrowserHoldSettings = { limit: 4, idleMs: 15 * 60_000, sweepMs: 30_000 };
+
 /**
  * The browser tools (docs/BROWSER_AGENTS.md): agents read and act on the browser tabs of their own
  * Pane through `runpane:browser:*`. Writes run through the driver gate keyed by tab, so the person
- * sees who drives and can take over; calls on different tabs never wait on each other.
+ * sees who drives and can take over; calls on different tabs never wait on each other. Returns what
+ * stops the holds' sweep.
  */
-export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost): void {
+
+export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost, holdSettings: BrowserHoldSettings = DEFAULT_HOLDS): () => void {
   const pages = new Map<number, PageDriver>();
+  const holds = new BrowserHolds({ limit: holdSettings.limit, idleMs: holdSettings.idleMs, onChange: held => host.setHeld(held) });
+  const sweep = () => holds.sweep(
+    // An agent is gone once its tab closed or its Pane was archived.
+    agent => { const tab = host.tab(agent); return tab !== undefined && services.sessionManager.getSession(tab.sessionId)?.archived !== true; },
+    // A dialog waiting for an answer counts as action.
+    tabId => { const page = host.page(tabId); return page !== undefined && pages.get(page.id)?.pendingDialog !== undefined; },
+    // The person closed the tab: it holds nothing and counts toward no limit.
+    tabId => host.tab(tabId) !== undefined,
+  );
+  const sweeper = setInterval(sweep, holdSettings.sweepMs);
+  sweeper.unref?.();
+  // Closing the agent's tab or archiving its Pane puts its held tabs to sleep at once.
+  host.onGone(sweep);
   /** Linked computers found showing each tab, or found not showing it (machine undefined) until `until`. */
   const viewers = new Map<string, { machine: { id: string; name: string } | undefined; until: number }>();
   /** Tabs the person holds by touching the page; they go back to the agent TOUCH_HOLD_MS after the last touch. */
@@ -193,6 +240,45 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   });
 
   const settings = (): BrowserSettings => ({ ...DEFAULT_BROWSER_SETTINGS, ...services.configManager.getConfig().browser });
+
+  /** Files agents' calls downloaded, by tab, which browser_tabs lists. */
+  const downloads = new Map<string, string[]>();
+
+  /**
+   * A download an agent's call caused (during its call, or while the chip still shows it driving)
+   * saves into the Pane's scratch folder and browser_tabs lists it. Any other download is the
+   * person's: it saves to their Downloads folder. Neither asks where to save.
+   */
+  host.onDownload(download => {
+    const tab = download.tabId ? host.tab(download.tabId) : undefined;
+    const byAgent = tab !== undefined && (pages.get(download.pageId)?.isAgentInput() === true || tabState(tab).driver?.by === 'agent');
+    const name = path.basename(download.filename.replace(/\\/g, '/')) || 'download';
+    if (!tab || !byAgent) {
+      const file = unusedPath(host.personDownloads(), name);
+      download.saveAs(file);
+      void download.finished.then(done => { if (done && download.tabId) host.showDownload(download.tabId, file); });
+      return;
+    }
+    // The scratch folder is found (and made) only after Electron needs the path, so the file saves
+    // beside the system's temporary files first and moves when it is complete.
+    const staging = path.join(os.tmpdir(), `pane-browser-download-${randomUUID()}`);
+    mkdirSync(staging, { recursive: true });
+    download.saveAs(path.join(staging, name));
+    void download.finished.then(async done => {
+      try {
+        if (!done) return;
+        const directory = await host.agentDownloads(tab.sessionId);
+        await mkdir(directory, { recursive: true });
+        const file = unusedPath(directory, name);
+        await moveFile(path.join(staging, name), file);
+        downloads.set(tab.id, [...(downloads.get(tab.id) ?? []), file]);
+        const driver = tabState(tab).driver;
+        host.showDownload(tab.id, file, driver?.by === 'agent' ? driver.agent : 'The agent');
+      } finally {
+        await rm(staging, { recursive: true, force: true });
+      }
+    }).catch(error => console.error('[browser] Could not keep an agent\'s download:', error));
+  });
 
   function callerOf(): BrowserCaller {
     if (isRemotePaneCommand()) {
@@ -243,10 +329,15 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       openedBy: openerOf(tab, caller),
       yours: mayAct(tab, caller),
       showing: page !== undefined || viewers.get(tab.id)?.machine !== undefined,
+      held: holds.isHeld(tab.id),
+      // Asleep only while its page is really gone: a tab in view, or one the person reselected, has its page.
+      asleep: holds.isAsleep(tab.id) && host.page(tab.id) === undefined,
     };
     if (state.driver) item.driving = state.driver.by === 'person' ? 'person' : state.driver.agent;
     const dialog = page ? pages.get(page.id)?.pendingDialog : undefined;
     if (dialog) item.dialog = dialog;
+    const saved = downloads.get(tab.id);
+    if (saved) item.downloads = saved;
     return item;
   }
 
@@ -277,8 +368,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   /** The tab's live page, brought forward (and waited for) when it is not showing. */
   async function livePage(tab: ToolPanel): Promise<BrowserPageContents> {
     let page = host.page(tab.id);
-    if (!page && host.hasWindow()) {
-      await host.show(tab);
+    // The tab is held (runLocal holds it before this runs), so this computer mounts its page, hidden
+    // when it is not the tab in view; it never comes forward.
+    if (!page) {
       const deadline = Date.now() + PAGE_WAIT_MS;
       while (!page && Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -288,9 +380,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (!page) {
       const paneName = services.sessionManager.getSession(tab.sessionId)?.name ?? 'this Pane';
       if (!host.hasWindow()) {
-        throw new PaneError('ERR_BROWSER_NOT_LINKED', `Tab ${tab.id} is not showing anywhere this computer can reach: Pane runs here without a window, and no linked computer shows ${paneName}. Nothing ran.`, `Open ${paneName} in Pane's desktop app on a computer linked in Settings › Your computers (a computer that only views this one over Tailscale or SSH cannot run browser tools), then try again.`);
+        throw new PaneError('ERR_BROWSER_NOT_LINKED', `Tab ${tab.id} in ${paneName} did not load its page in a hidden window within ${PAGE_WAIT_MS / 1000} seconds: Pane runs here without a window, and no linked computer shows ${paneName}. Nothing ran.`, `Try again. To drive the copy you watch instead, open ${paneName} in Pane's desktop app on a computer linked in Settings › Your computers (a computer that only views this one over Tailscale or SSH cannot run browser tools).`);
       }
-      throw new PaneError('ERR_BROWSER_NOT_SHOWING', `Tab ${tab.id} did not load its page within ${PAGE_WAIT_MS / 1000} seconds. A browser tab's page loads only while its Pane is open in a Pane window, and ${paneName} is not open here or on a linked computer. Nothing ran.`, `Ask the person to open ${paneName} in Pane, then try again. To use a tab you watch from another computer, link that computer in Settings › Your computers.`);
+      throw new PaneError('ERR_BROWSER_NOT_SHOWING', `Tab ${tab.id} in ${paneName} did not load its page in Pane's window within ${PAGE_WAIT_MS / 1000} seconds. Nothing ran.`, `Try again. If it fails again, ask the person to open ${paneName} in Pane. To use a tab you watch from another computer, link that computer in Settings › Your computers.`);
     }
     return page;
   }
@@ -436,14 +528,43 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     return Buffer.concat(parts);
   }
 
-  /** Runs a verb on this computer's page for the tab. */
-  async function runLocal(tab: ToolPanel, request: VerbRequest, write: boolean): Promise<VerbOutcome> {
+  /**
+   * Runs a verb on this computer's page for the tab. The agent holds the tab here only: a call that
+   * runs on a linked computer's copy leaves this computer's copy asleep.
+   */
+  async function runLocal(tab: ToolPanel, request: VerbRequest, write: boolean, holder: string): Promise<VerbOutcome> {
+    // A page that is still here never went away, whatever the hold says.
+    const hadPage = host.page(tab.id) !== undefined;
+    const { evicted, wasAsleep } = holds.begin(holder, tab.id);
+    try {
+      const outcome = await runLocalHeld(tab, request, write);
+      const notes = [
+        wasAsleep && !hadPage ? `The tab was asleep (${holdSettings.idleMs / 60_000} minutes with no action, another tab took its place, or its agent went), so its page reloaded from its URL; anything typed there before is gone.` : undefined,
+        evicted ? `You hold at most ${holdSettings.limit} tabs, so tab ${evicted} went to sleep; its page reloads when you next use it.` : undefined,
+        outcome.note,
+      ].filter(note => note !== undefined);
+      if (notes.length) outcome.note = notes.join(' ');
+      return outcome;
+    } finally {
+      holds.end(tab.id);
+    }
+  }
+
+  async function runLocalHeld(tab: ToolPanel, request: VerbRequest, write: boolean): Promise<VerbOutcome> {
     const contents = await livePage(tab);
     if (write && devToolsOpen(contents)) {
       throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', `DevTools is open on tab ${tab.id}, and agents don't act on a page while the person inspects it. Nothing ran.`, 'Ask the person to close DevTools on that tab, then try again.');
     }
     if (!loadsUrl(request)) refuseNonWebPage(contents, 'shows');
-    const outcome = await runVerb(driverFor(tab.id, contents), contents, request);
+    host.setBusy(tab.id, true);
+    let outcome: VerbOutcome;
+    try {
+      // A hidden page starts painting again for the call; give it a frame before capturing it.
+      if (request.verb === 'screenshot') await new Promise(resolve => setTimeout(resolve, 150));
+      outcome = await runVerb(driverFor(tab.id, contents), contents, request);
+    } finally {
+      host.setBusy(tab.id, false);
+    }
     refuseNonWebPage(contents, 'is now on');
     if (outcome.cursor) host.showCursor(tab.id, outcome.cursor.x, outcome.cursor.y);
     return outcome;
@@ -476,7 +597,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
           }
         }
       }
-      return runLocal(tab, request, write);
+      return runLocal(tab, request, write, caller.panelId ?? caller.paneId);
     };
     return write ? gate.run(tab.id, agent, paneCommandSignal(), run) : run();
   }
@@ -561,6 +682,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     }
     await gate.run(tab.id, agentName(caller.panelId), paneCommandSignal(), () => host.close(tab));
     viewers.delete(tab.id);
+    holds.forget(tab.id);
     opened.delete(tab.id);
     return { ok: true, tab: tab.id };
   });
@@ -732,6 +854,26 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     await setDriverFromChip(id, who);
     return { success: true };
   });
+
+  return () => clearInterval(sweeper);
+}
+
+/** `name` in `directory`, or "name (2).ext" and on when a file has it, as browsers name downloads. */
+function unusedPath(directory: string, name: string): string {
+  const { name: stem, ext } = path.parse(name);
+  let file = path.join(directory, name);
+  for (let copy = 2; existsSync(file); copy += 1) file = path.join(directory, `${stem} (${copy})${ext}`);
+  return file;
+}
+
+/** Moves a file, copying it when the folders are on different disks. */
+async function moveFile(from: string, to: string): Promise<void> {
+  try {
+    await rename(from, to);
+  } catch (cause) {
+    if (!(cause instanceof Error) || !('code' in cause) || cause.code !== 'EXDEV') throw cause;
+    await copyFile(from, to);
+  }
 }
 
 /** Agents read and act only on http(s) pages (and a blank one): never a file: or chrome: page in a tab. */

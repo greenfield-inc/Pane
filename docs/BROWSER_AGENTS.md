@@ -24,7 +24,7 @@ opened one tab, or when the Pane has one; with several, the call fails with
 | Tool | Command | What it does |
 | --- | --- | --- |
 | `browser_open` | `runpane browser open --url <url>` | Opens a tab beside the agent, in a split, owned by it; reuses the agent's tab on the same origin |
-| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog |
+| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog, files the agent downloaded, and whether an agent holds it or it is asleep |
 | `browser_close` | `runpane browser close` | Closes a tab the agent opened |
 | `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title. On a long page, text is left out before controls |
 | `browser_screenshot` | `runpane browser screenshot [--full-page]` | A PNG in the Pane's scratch folder; MCP clients get the image itself |
@@ -52,6 +52,12 @@ Snapshots show password fields as dots. A dialog the page opens stays open until
 `browser_dialog` answers it or you answer it in the tab; until then every other action fails
 with `ERR_BROWSER_DIALOG_PENDING`. A file picker a click opens never shows on your screen
 during an agent's call; the result tells the agent to fill it with `browser_upload`.
+
+A file a page downloads while an agent drives the tab (during its call, or in the 2 seconds
+after, while the tab's chip still names the agent; see
+[Watching and taking over](#watching-and-taking-over)) saves into the Pane's scratch folder,
+`$PANE_SCRATCH_DIR`, under `browser-downloads/`, and `browser_tabs` lists its path under the
+tab's `downloads`.
 
 ## Who may act on a tab
 
@@ -88,10 +94,9 @@ Any input of yours on the page revokes the agent's refs from before: a call that
 and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open on a tab, an agent's actions on it fail with
 `ERR_BROWSER_DEVTOOLS_OPEN`.
 
-## Where a tab must be
+## Where a tab's page runs
 
-Each desktop draws its own copy of a tab, and a tab's page exists only while the tab shows in a
-Pane window. A call goes to the copy you watch:
+Each desktop draws its own copy of a tab. A call goes to the copy you watch:
 
 - **On a linked computer.** When you watch this Pane from another of your computers, linked in
   **Settings › Your computers**, the call runs on that computer's copy: snapshots, clicks and
@@ -101,14 +106,71 @@ Pane window. A call goes to the copy you watch:
   computer until the tab closes; the screenshot is saved on the agent's computer. A `localhost`
   URL loads through that computer's tunnel for the port, and fails with `ERR_BROWSER_URL_REFUSED`
   when the port has none.
-- **On the agent's computer.** Otherwise the call uses the tab here, bringing it forward in its
-  Pane and waiting up to 5 seconds for its page.
+- **On the agent's computer.** Otherwise the call uses the tab here. When the tab is not in view,
+  its page loads in the background and the tab never comes forward. With no Pane window (a
+  headless host), Pane loads the page in a hidden window, where it can't open popups or hand
+  links to other apps, since nobody is there to approve them.
 
-When no copy shows the tab, the call fails: with `ERR_BROWSER_NOT_SHOWING` when the window here
-shows another Pane, and with `ERR_BROWSER_NOT_LINKED` when Pane runs here without a window. A
+When the page doesn't load within 5 seconds, the call fails with `ERR_BROWSER_NOT_SHOWING`, or
+`ERR_BROWSER_NOT_LINKED` on a host with no window. A
 computer that views this one over Tailscale, SSH or a manual URL without being linked can't run
 browser tools; link it. A call from an agent on another computer through `runpane workspace`
 fails with `ERR_BROWSER_LOCAL_ONLY`.
+
+## Background tabs
+
+An agent holds each tab it calls, so the tab's page stays alive while you look at another tab or
+Pane: a half-filled form, the scroll position and the page's own state stay as they were. One
+agent can drive its held tabs at the same time.
+
+- **Up to 4 per agent.** Holding a fifth puts the one idle longest to sleep, and the result's note
+  names it.
+- **Sleep after 15 minutes.** A held tab with no agent action for 15 minutes goes to sleep: its
+  page unloads and `browser_tabs` shows it `asleep`. The next agent call reloads it from its URL
+  and its note says so; selecting the tab yourself reloads it too.
+- **When the agent goes.** Closing the agent's tab, or archiving its Pane, puts its held tabs to
+  sleep at once.
+- **Tabs nobody holds** unload when hidden, as before.
+
+A held page costs memory but next to no energy while it waits. Measured on a Mac with four held,
+hidden pages (three small test pages and a GitHub pull request page): about 70 MB each for the
+small pages and 100 MB for the GitHub page, 320 MB in all, with no CPU use and an energy impact of
+0.0 while idle.
+
+## Links
+
+- **Links from your work open in a Pane browser tab beside where you clicked.** A link in
+  terminal output, a chat message, a Notify card, the chat's pull request chip, the command
+  palette's **Open pull request**, or a page in the docs dialog opens in a browser tab of that
+  Pane, in the split beside the conversation. A tab already showing that page comes forward instead. Pane's own links
+  (release notes, downloads, Discord, feedback, Tailscale) open in your system browser.
+- **Command-line tools too, on macOS and Linux.** Pane's terminals and chat tabs set `BROWSER`
+  to its `pane-browser` command, so `gh pr view --web`, `gh auth login` and
+  `python3 -m webbrowser <url>` open a tab beside that terminal. A tool that runs macOS `open`
+  itself, or ignores `BROWSER`, still uses your system browser. On Windows, and in WSL
+  terminals, Pane leaves `BROWSER` alone, so these tools open your system browser: Windows tools
+  pass the URL to `BROWSER` unquoted, and a `.cmd` file would cut it at `&`.
+- **Settings › Links › Open links in** chooses **Pane's browser** (the default) or **System
+  browser**. With System browser, links from terminals, chats, cards, the command palette, the
+  docs dialog and command-line tools all open in your system browser, at once, in terminals
+  already open too.
+- **Leave any page.** Each tab's **Open in your browser** button sends its page to your
+  system browser, and right-clicking a link, in a tab or in a chat, offers **Open in System
+  Browser**.
+
+## Apps, sign-ins and downloads
+
+These apply to every browser tab, whoever drives it.
+
+- **Apps.** When a page opens an app link, such as a Zoom meeting (`zoommtg:`), the tab asks
+  first: "This page wants to open zoom.us. Open · Cancel". Only **Open** hands it to the app.
+  Links that reach local files or programs (`file:`, `search-ms:`, `ms-msdt:`) never open.
+- **Sign-ins that refuse embedded browsers.** Google sign-in (`accounts.google.com`) refuses
+  to run inside an app's browser, so Pane opens it in your system browser and the tab says so.
+  When a site's passkey prompt doesn't appear in a tab, use **Open in your browser**.
+- **Downloads.** A file you download in a tab saves to your Downloads folder with no save
+  dialog, and the tab shows "Downloaded report.pdf · Show in folder". A download an agent's call
+  caused goes to the Pane's scratch folder instead (see above), and the notice names the agent.
 
 ## How it works
 

@@ -21,6 +21,31 @@ export function externalUrlOrNull(value: string): string | null {
   return EXTERNAL_URL_PROTOCOLS.has(parsed.protocol) ? parsed.href : null;
 }
 
+/**
+ * Schemes a page in a browser tab never hands to the OS, even once the person agrees: they reach
+ * local files or scripts, or are Windows handlers known to run programs from a link.
+ */
+const NEVER_APP_PROTOCOLS: ReadonlySet<string> = new Set([
+  'file:', 'javascript:', 'data:', 'blob:', 'about:', 'filesystem:', 'view-source:', 'chrome:', 'chrome-extension:', 'devtools:',
+  'pane:', 'smb:', 'ms-msdt:', 'search-ms:', 'search:', 'ms-officecmd:', 'ms-appinstaller:',
+]);
+
+/**
+ * The URL when `value` is a link to an app on this computer that a page may ask to open
+ * (zoommtg:, slack:, mailto:), with the person's OK; null for web links and refused schemes.
+ */
+export function appLinkOrNull(value: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  const { protocol } = parsed;
+  if (protocol === 'http:' || protocol === 'https:' || NEVER_APP_PROTOCOLS.has(protocol)) return null;
+  return parsed.href;
+}
+
 /** The normalized URL to open in the system browser or mail client; throws for any other value. */
 export function toExternalUrl(value: string): string {
   const url = externalUrlOrNull(value);

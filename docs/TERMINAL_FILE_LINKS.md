@@ -29,6 +29,11 @@ match and `$1` to `$9` insert capture groups, URL-encoded. Cmd-click (Ctrl-click
 on Windows and Linux) opens the link. File, URL and git links keep working
 alongside. Entries travel with Settings › Import & Export.
 
+Web links, custom or not, follow **Settings › Links › Open links in**: **Pane's
+browser** (the default) opens a Pane browser tab beside where you clicked, and
+**System browser** opens your system browser. The right-click menu offers both.
+See [Links](BROWSER_AGENTS.md#links).
+
 Patterns run in a web worker (`frontend/src/utils/customLinkMatcher.ts`), one
 terminal row at a time with trailing padding trimmed. A row that takes longer
 than `CUSTOM_LINK_MATCH_TIMEOUT_MS` stops the worker and gets no custom links,

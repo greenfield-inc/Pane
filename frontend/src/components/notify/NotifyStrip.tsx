@@ -42,7 +42,8 @@ export function NotifyStrip({ snapshot, narrow, menuPlacement, onFieldFocusReque
       menuPlacement={menuPlacement}
       onFieldFocusRequest={onFieldFocusRequest}
       className={className}
-      onOpenUrl={(url) => { void window.electronAPI.openExternal(url); }}
+      // The floating card's window has no Settings: main decides where the link opens (Settings > Links).
+      onOpenUrl={(url) => runNotify({ type: 'open-url', id: item.id, url })}
     />
   );
 }

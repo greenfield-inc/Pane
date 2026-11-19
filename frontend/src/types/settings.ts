@@ -65,6 +65,7 @@ export type SettingsSettingId =
   | 'terminal-reference-paste-mode'
   | 'terminal-reference-line-count'
   | 'terminal-shell'
+  | 'links-open-in'
   | 'custom-links'
   | 'default-pane-chat-agent'
   | 'chat-tab-keys'
