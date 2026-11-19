@@ -106,6 +106,12 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
   const openApproval = useCallback((id: string, key: string) => update(sessionId, { view: { kind: 'approval', id }, selected: key }), [sessionId, update]);
 
   const { view } = memory;
+  // An approval answered elsewhere (Approvals, the chat card, another machine) leaves the Decide view for the list (T-23 QA F4).
+  const notifyLoaded = useNotifyStore(state => state.snapshot !== null);
+  const shownApproval = view.kind === 'approval' ? view.id : null;
+  useEffect(() => {
+    if (shownApproval && notifyLoaded && !approvals.some(item => item.id === shownApproval)) showList();
+  }, [shownApproval, notifyLoaded, approvals, showList]);
   let body;
   if (entries === null) {
     body = null;
@@ -163,7 +169,8 @@ export function SessionTodosTab({ sessionId, machineId, inChat }: SessionTodosTa
   return (
     <div ref={rootRef} className="flex h-full min-h-0 min-w-0 flex-col bg-bg-primary text-[14px] text-text-primary" data-testid="session-todos-tab" data-view={view.kind} data-narrow={narrow || undefined}>
       {body}
-      {creating && <NewTodoDialog onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); select(`${created.machineId}:${created.number}`); }} />}
+      {/* A to-do made here is yours (the dialog says so), so the list may not hold it: it opens here all the same (T-23 QA F1). */}
+      {creating && <NewTodoDialog onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); openNumber(created.number); }} />}
     </div>
   );
 }
@@ -440,13 +447,18 @@ function TodoApproval({ sessionId, itemId, order, inChat, onSelect, onBack }: To
   const surface: ApprovalSurface = `session-todos:${sessionId}`;
   // The column's tab and nested approval are this visit's alone.
   useEffect(() => () => useApprovalColumnStore.getState().close(surface), [surface]);
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Escape' || event.defaultPrevented || isTypingTarget(event.target) || overlayOpen()) return;
-    event.preventDefault();
-    onBack();
-  };
+  // Esc goes back wherever focus is: right after Answer it is still on the page, not in this view (T-23 QA F2).
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || isTypingTarget(event.target) || overlayOpen()) return;
+      event.preventDefault();
+      onBack();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onBack]);
   return (
-    <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKeyDown} data-testid="session-todo-approval">
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="session-todo-approval">
       <div className="flex h-9 shrink-0 items-center border-b border-border-primary px-2">
         <button type="button" onClick={onBack} className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary" data-testid="session-todo-approval-back">
           <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />Back to To-dos

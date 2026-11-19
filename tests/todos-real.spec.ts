@@ -82,7 +82,7 @@ test('a real Claude Code orchestrator attaches the plan it writes, unprompted (J
     let attachments: string[] = [];
     await expect.poll(async () => {
       attachments = (await detail(run.page, todo.number)).attachments.flatMap(group => group.attachments).map(item => `${item.source} ${item.addedBy} ${item.target}`);
-      return attachments.some(line => /plan\.md$/.test(line));
+      return attachments.some(line => line.endsWith('plan.md'));
     }, { timeout: 600_000, intervals: [5_000] }).toBe(true);
     console.log(`[J38] attachments: ${JSON.stringify(attachments)}`);
     save('claude-orchestrator', await screen(run.pane, panelId));

@@ -2,7 +2,6 @@ import { expect, test } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { RunpaneTodo, RunpaneTodoShowResult } from '../shared/types/todos';
-import { runpane } from './isolatedPane';
 import { shot, json, failure, createSession, snapshot, detail, approvals, answer, transcript, statusOf, ownCaller, setup } from './todosHarness';
 
 // To-dos (D-409) in a real, isolated Pane (D-288). Every Session's chat runs the scripted ACP agent,

@@ -5443,7 +5443,7 @@ async function checkTodosParity() {
   // Only the daemon's own refusal reached it; every other mistake is refused before any call.
   assert.strictEqual(calls.length, argvs.length + 1);
   assert.strictEqual(errors[0], 'No to-do T-99. Nothing was changed.');
-  assert.ok(errors.slice(1).every((message) => /Nothing was changed\.$/.test(message)), errors.join('\n'));
+  assert.ok(errors.slice(1).every((message) => message.endsWith('Nothing was changed.')), errors.join('\n'));
 
   const showText = lines.slice(5, 21).join('\n');
   assert.strictEqual(lines[5], 'Attachments:');

@@ -146,14 +146,16 @@ async function installSessions(page: Page, selected: string) {
   }, { records: [sessionRecord(BILLING, 'Billing rewrite'), sessionRecord(DOCS, 'Docs refresh')], first: selected });
 }
 
-async function open(page: Page, { dark = false, width = 1440, session = BILLING } = {}) {
+interface OpenOptions { dark?: boolean; width?: number; session?: string; createdNumber?: number }
+
+async function open(page: Page, { dark = false, width = 1440, session = BILLING, createdNumber }: OpenOptions = {}) {
   await page.setViewportSize({ width, height: 900 });
   await installElectronApiMock(page, {
     initialProjects: [{ id: 1, name: 'billing', path: '/tmp/billing', active: true, created_at: '2026-10-01T00:00:00.000Z', updated_at: '2026-10-01T00:00:00.000Z' }],
     initialSessions: [],
     initialConfig: { theme: dark ? 'dark' : 'light-rounded', appearanceMode: 'fixed' },
     notifySnapshot: approvals(),
-    todos: todos(),
+    todos: { ...todos(), createdNumber },
   });
   await installSessions(page, session);
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -413,4 +415,34 @@ test.describe('the web app', () => {
     await page.getByRole('button', { name: /^To-dos, 1 waiting on you/ }).click();
     await expect(page.getByTestId('phone-todos-list')).toBeVisible();
   });
+});
+
+// Fixes from T-23's QA (round 1).
+test('QA F2: Esc right after Answer returns to the list', async ({ page }) => {
+  await open(page);
+  await showTodos(page);
+  await rowOf(page, 15).getByTestId('session-todo-answer').click();
+  await expect(page.getByTestId('session-todo-approval')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('session-todos-list')).toBeVisible();
+  await expect(selectedRow(page)).toHaveAttribute('data-todo', '15');
+});
+
+test('QA F4: an approval answered elsewhere takes the tab back to the list', async ({ page }) => {
+  await open(page);
+  await showTodos(page);
+  await rowOf(page, 15).getByTestId('session-todo-answer').click();
+  await expect(page.getByTestId('session-todo-approval')).toBeVisible();
+  await page.evaluate((notify) => window.__paneTestElectronMock.emitNotifySnapshot(notify), approvals(true));
+  await expect(page.getByTestId('session-todos-list')).toBeVisible();
+});
+
+test('QA F1: a to-do made with New in the tab opens there, though it is yours, not the Session\'s', async ({ page }) => {
+  await open(page, { session: DOCS, createdNumber: 18 });
+  await showTodos(page);
+  await page.getByTestId('session-todos-empty-new').click();
+  await page.getByTestId('new-todo-title').fill('Tidy the receipt template');
+  await page.getByRole('dialog', { name: /New to-do/ }).getByRole('button', { name: /^Create/ }).click();
+  await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '18');
+  await expect(page.getByTestId('todo-breadcrumb')).toHaveText(/\/\s*T-18/);
 });

@@ -39,6 +39,8 @@ type AnalyticsMainEvent = {
 export interface TodosMockOptions {
   snapshot: TodosSnapshot;
   details: Record<number, TodoDetail>;
+  /** todos:create answers with this fixture to-do (its `details` entry), as if it had just been made. Absent: create is refused. */
+  createdNumber?: number;
   /** autopilot.readDoc answers by path; any other path reads as the text `Contents of <path>`. */
   docs?: Record<string, AutopilotDocument>;
   /** readDoc answers an image path (png, jpg, gif, webp, svg) not in `docs` as this image (round 8, T-5). */
@@ -1137,6 +1139,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       detail: (number: number) => success(clone(todosState.details[number] ?? null)),
       create: (input: TodoCreateInput) => {
         trackCall('todos:create', [clone(input)]);
+        const createdNumber = mockOptions.todos?.createdNumber;
+        const made = createdNumber === undefined ? undefined : todosState.details[createdNumber];
+        if (made) return Promise.resolve({ success: true, data: clone(made.todo) });
         return Promise.resolve({ success: false, error: 'This mock does not create to-dos.' });
       },
       act: (action: TodoAction) => {

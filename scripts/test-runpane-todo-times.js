@@ -168,7 +168,7 @@ print(json.dumps({"reads": reads, "refusals": refusals, "formats": formats, "rel
 function checkTodoSnoozeTimes() {
   const times = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'todoTimes.js'));
   const node = nodeResults(times);
-  READS.forEach(([text, now, zone, expected], index) => {
+  READS.forEach(([text, , zone, expected], index) => {
     assert.strictEqual(node.reads[index], expected, `"${text}" in ${zone} reads ${new Date(node.reads[index]).toISOString()}, not ${new Date(expected).toISOString()}`);
   });
   REFUSALS.forEach(([text, , , code], index) => {

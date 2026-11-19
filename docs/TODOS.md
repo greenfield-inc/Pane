@@ -249,8 +249,9 @@ the chat's cards.
   to-do waiting on you shows its question with **Answer**. J/K or ↑/↓ move,
   ← folds, → opens a group, Enter opens. Under about 440 px the rows drop T-n
   and the worker.
-- **+ New** opens New to-do (requested by you: the dialog has no requester
-  choice), and **↗** opens the To-dos screen grouped by Requested by, where
+- **+ New** opens New to-do. The new to-do is requested by you (the dialog has
+  no requester choice), so it isn't one of the Session's own, but it opens in the
+  tab once made. **↗** opens the To-dos screen grouped by Requested by, where
   this Session's to-dos sit under its name; the screen has no filter.
 - **A to-do opens inside the tab**, under "‹ To-dos / T-14", with ↑ ↓ and ↗
   at the end of its bar. ↑/↓ (or J/K) step through the list; Esc or ‹ To-dos
@@ -259,7 +260,10 @@ the chat's cards.
   Session's Split Right.
 - **Answer** opens the approval in the tab, in the same Decide view as the
   Session's approval column, under "‹ Back to To-dos". Sending it returns to
-  the list; the count, the sidebar badge and the chat's card clear together.
+  the list; the count, the sidebar badge and the chat's card clear together. Esc
+  goes back too, and so does answering it anywhere else. A question that arrives
+  while the Session is shown still opens in the Session's approval column, over
+  the split, as every Session's approvals do.
 
 In the web app, an open Session's header has a **To-dos** button with the same
 count. It opens that list full screen; a to-do opens on the phone's to-do

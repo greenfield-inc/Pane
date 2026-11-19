@@ -25,7 +25,7 @@ function decide(minutesQuiet: number, over: Partial<SupervisorInputs> = {}, todo
 
 /** Runs the ladder minute by minute the way TodoService applies it, returning [minute, action] for every action. */
 function runLadder(minutes: number, over: Partial<SupervisorInputs> = {}): Array<[number, string]> {
-  let record = todo();
+  const record = todo();
   let lastRestartAt: number | null = null;
   const actions: Array<[number, string]> = [];
   for (let minute = 1; minute <= minutes; minute += 1) {
@@ -36,9 +36,9 @@ function runLadder(minutes: number, over: Partial<SupervisorInputs> = {}): Array
     });
     if (action.kind === 'none') continue;
     actions.push([minute, action.kind === 'remind' ? `remind ${action.rung}` : action.kind]);
-    if (action.kind === 'remind') record = { ...record, stuckSince: record.stuckSince ?? now, episodeReminders: record.episodeReminders + 1 };
-    if (action.kind === 'restart') { record = { ...record, episodeRestarts: record.episodeRestarts + 1 }; lastRestartAt = now; }
-    if (action.kind === 'card') { record = { ...record, stuckCardId: 'card' }; }
+    if (action.kind === 'remind') Object.assign(record, { stuckSince: record.stuckSince ?? now, episodeReminders: record.episodeReminders + 1 });
+    if (action.kind === 'restart') { record.episodeRestarts += 1; lastRestartAt = now; }
+    if (action.kind === 'card') record.stuckCardId = 'card';
   }
   return actions;
 }
