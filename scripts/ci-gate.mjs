@@ -40,7 +40,7 @@ export const EXPECTED_JOBS = [
 // Code Quality jobs that run and report but that CI result does not wait for,
 // each with its reason. They stay out of CI result's needs.
 export const REPORTED_ONLY_JOBS = {
-  'functional-smoke-stabilizing': 'stabilizing: all-machines.spec.ts:489 failed 1 of 10 in CI (run 44473620612) and 1 of 160 on parsa-devbox, cause not yet known; returns to the required lane once it is fixed',
+  'functional-smoke-stabilizing': 'stabilizing: tab-popover.spec.ts:85 failed once in CI (run 44485044464) and passed 200 of 200 on parsa-devbox, cause not yet known; returns to the required lane once it is found',
 };
 
 // Jobs a pull request may skip when none of their files changed, keyed by job

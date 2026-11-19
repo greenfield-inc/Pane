@@ -32,7 +32,7 @@ export const TEST_FILE_PATTERNS = [
 const NATIVE_GLASSES_MOBILE = 'pnpm --filter native --filter glasses --filter mobile run test';
 
 // A lane with `stabilizing` runs and reports, but CI result does not wait for it.
-const STABILIZING = 'stabilizing: all-machines.spec.ts:489 failed 1 of 10 in CI (run 44473620612) and 1 of 160 on parsa-devbox, cause not yet known; returns to the required lane once it is fixed';
+const STABILIZING = 'stabilizing: tab-popover.spec.ts:85 failed once in CI (run 44485044464) and passed 200 of 200 on parsa-devbox, cause not yet known; returns to the required lane once it is found';
 
 export const LANES = [
   { workflow: 'quality.yml', job: 'quality-checks', run: 'pnpm --filter frontend exec vitest run', list: { vitest: 'frontend' } },

@@ -608,10 +608,8 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               style={dropdownStyle}
               role="menu"
               onKeyDown={handleDropdownKeyDown}
-              // Focus follows the pointer, so the hovered item is the only one lit. A menu that changes
-              // under a resting pointer gets mouse moves with no movement; those leave focus where it is.
+              // Focus follows the pointer, so the hovered item is the only one lit.
               onMouseMove={event => {
-                if (event.movementX === 0 && event.movementY === 0) return;
                 const item = event.target instanceof Element ? event.target.closest('button') : null;
                 const index = item ? dropdownItemsRef.current.indexOf(item) : -1;
                 if (index >= 0 && index !== focusedDropdownIndex) setFocusedDropdownIndex(index);
