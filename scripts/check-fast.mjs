@@ -63,7 +63,7 @@ const started = Date.now();
 const results = [];
 console.log(`check:fast against ${base.slice(0, 12)}: ${changed.length} changed files; unit tests for ${workspaces.join(', ') || 'no workspace'}.\n`);
 
-// Type check and lint are the slowest; they run side by side, as in CI.
+// Type check and lint are the slowest; they run side by side.
 results.push(...(await Promise.all([
   run('pnpm typecheck', 'pnpm', ['typecheck'], { quiet: true }),
   run('pnpm lint', 'pnpm', ['lint'], { quiet: true }),
