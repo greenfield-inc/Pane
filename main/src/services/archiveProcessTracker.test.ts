@@ -217,7 +217,9 @@ describe('attachKernelStarts', () => {
   });
 });
 
-describe('identity across a clock step', () => {
+// POSIX only: these rows carry ps lstart text and a Linux kernel start, while Windows compares
+// CIM creation times as integers and has no /proc.
+describe.skipIf(process.platform === 'win32')('identity across a clock step', () => {
   const boot = '6a1f0c7e-3b44-4f0e-9a51-2a0c1d9e7b10';
   // A clock step moves boot time, so ps prints a live process's lstart a few seconds later.
   const before = 'Mon Nov 16 09:00:00 2026';
