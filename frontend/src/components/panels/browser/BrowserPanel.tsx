@@ -113,8 +113,10 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // While a screen on another device controls the page's size, the page's own view takes that size
   // (so frames streamed to it are exactly the page) and shows here scaled to fit, letterboxed.
   const [pageArea, setPageArea] = useState<{ width: number; height: number } | null>(null);
+  // The tab's page area, whose size never depends on the webview's (the webview's own parent shrinks with it).
+  const pageAreaRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const area = webview?.parentElement;
+    const area = pageAreaRef.current;
     if (!area || !pageSize) return;
     const measure = () => setPageArea({ width: area.clientWidth, height: area.clientHeight });
     measure();
@@ -868,7 +870,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           </div>
         </div>
       ) : (
-        <div className="relative flex-1 flex flex-row min-h-0">
+        <div ref={pageAreaRef} className="relative flex-1 flex flex-row min-h-0">
           {/* Pane find bar, top right of the page and clear of docked DevTools
               (a native view drawn above everything in its bounds). */}
           <div
