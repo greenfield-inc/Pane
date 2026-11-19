@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { JsonValue } from '../shared/validation/boundaryDecoder';
 
 type PaneOrderMock = {
@@ -28,7 +28,7 @@ async function openSidebar(page: Page, options: { paneOrderUnsupported?: boolean
     initialUiState: { expandedProjects: [project.id] },
     paneOrderUnsupported: options.paneOrderUnsupported,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await expect(paneRows(page)).toHaveCount(3);
 }
 

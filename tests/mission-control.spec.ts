@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const project = {
   id: 1,
@@ -51,7 +51,7 @@ async function boot(page: Page, initialConfig: JsonObject = {}) {
     initialMissionControlAgents: [agent],
     initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.getByTestId('sidebar').first()).toBeVisible({ timeout: 10_000 });
 }
 

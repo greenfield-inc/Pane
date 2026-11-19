@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { TerminalPanelState } from '../shared/types/panels';
 
 const now = new Date(0).toISOString();
@@ -40,7 +40,7 @@ for (const [label, customState] of [
       // Old persisted layouts omitted the agent when it was mistaken for the dock.
       initialLayout: emptyLayout,
     });
-    await page.goto('/');
+    await gotoApp(page);
     await openPane(page);
     await expect(page.getByRole('tab', { name: 'Codex', exact: true })).toBeVisible();
     await expect(page.locator('.pane-terminal-dock')).toHaveCount(0);
@@ -69,7 +69,7 @@ for (const split of [false, true]) {
         root: { type: 'group', id: 'agent-group', panelIds: [extraShell.id, agent.id], activePanelId: extraShell.id },
       },
     });
-    await page.goto('/');
+    await gotoApp(page);
     await openPane(page);
     await expect(page.getByRole('tab', { name: 'Extra shell', exact: true })).toBeVisible();
 

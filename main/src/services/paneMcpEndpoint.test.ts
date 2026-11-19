@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import http from 'http';
 import os from 'os';
 import path from 'path';
+import v8 from 'v8';
+import vm from 'vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { tokenizeShellCommand } from './agents/agentIdentity';
@@ -137,6 +139,13 @@ async function until(check: () => boolean, what: string): Promise<void> {
   }
 }
 
+/** Runs a full garbage collection, so whatever a collection would break breaks on every run. */
+function collectGarbage(): void {
+  v8.setFlagsFromString('--expose-gc');
+  // SAFETY: with --expose-gc set, a new context's global `gc` is V8's collector.
+  (vm.runInNewContext('gc') as () => void)();
+}
+
 function alive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
@@ -222,6 +231,7 @@ describe('PaneMcpEndpoint', () => {
 
     await until(() => existsSync(pidFile) && readFileSync(pidFile, 'utf8') !== '', 'the tool call to start');
     const pid = Number(readFileSync(pidFile, 'utf8'));
+    collectGarbage();
     abort.abort();
     await call;
     await until(() => !alive(pid), 'the runpane process to end');
