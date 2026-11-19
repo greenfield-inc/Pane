@@ -38,9 +38,18 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     expect((await page.evaluate(() => window.electronAPI.invoke('preview-test:requests'))).persisted).toEqual([]);
     await page.evaluate(() => window.electronAPI.invoke('preview-test:release-preparation'));
     await expect(page.locator('webview')).toBeVisible();
-    const guest = async <T>(script: string): Promise<T> => page.locator('webview').evaluate(
+    // A webview the host just replaced is in the DOM before its dom-ready event, and
+    // executeJavaScript throws until then. Report that as a value so polls keep waiting.
+    const guest = async <T>(script: string): Promise<T | 'webview not ready'> => page.locator('webview').evaluate(
       // SAFETY: This locator selects Electron's webview tag in the Electron client fixture.
-      (element, code) => (element as Electron.WebviewTag).executeJavaScript(code, true), script,
+      async (element, code) => {
+        try {
+          return await (element as Electron.WebviewTag).executeJavaScript(code, true);
+        } catch (error) {
+          if (String(error).includes('dom-ready event emitted')) return 'webview not ready';
+          throw error;
+        }
+      }, script,
     );
     await expect.poll(() => guest('location.href')).toBe(externalUrl);
     await page.locator('input').fill(initialEntryUrl);
