@@ -244,6 +244,21 @@ instead: each job's head SHA, runner, and waiting, setup, running and teardown
 seconds. `CI result` writes that record to its job summary and log on every
 `Code Quality` run.
 
+`Code Quality` pushes to `main` write three Actions caches that pull requests
+only read: Linux `node_modules` (`node-modules-*`, keyed on the lockfile,
+`pnpm-workspace.yaml`, `.npmrc`, `patches/` and the pnpm version; saved by
+Quality Checks), Playwright's Chromium (`playwright-*`, keyed on the image's
+OS family and the `playwright-core` version; saved by browser shard 1) and
+SQLite built for Electron (`electron-sqlite-*`, keyed on the runner image,
+Electron version and module folder; saved by Functional Smoke (Electron)). A
+pull request that changes one of those inputs misses once and installs or
+builds as before; the next push to `main` writes the new key. A cache hit
+still runs `pnpm install --frozen-lockfile --offline`, so a lockfile that
+disagrees with a `package.json` fails as it does without the cache. Windows
+installs every time: restoring `node_modules` there breaks pnpm's junctions.
+To drop a bad entry, delete it with `gh cache delete <key>`; the next push to
+`main` writes it again.
+
 ## Recovery and rollback
 
 - **Never retag a version.** To undo a bad release, fix `main` and cut a new
