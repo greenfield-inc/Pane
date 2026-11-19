@@ -35,3 +35,16 @@ export function inTodoScope(item: NotifyItem, scope: TodoApprovalScope): boolean
   if (item.source.session && scope.sessionIds.has(item.source.session.id)) return true;
   return item.connected?.kind === 'session' && scope.sessionIds.has(item.connected.id);
 }
+
+/**
+ * Which to-do an approval shown in a Session belongs to, as "T-n" (T-24): the one it is linked to, or the one whose own
+ * hidden Session asked it. None for the Session's own approvals, nor inside a to-do's own Session (its page says which).
+ */
+export function todoRefOf(item: NotifyItem, rows: readonly TodoListRow[], sessionId: string): string | undefined {
+  if (rows.some(({ todo }) => todo.sessionId === sessionId)) return undefined;
+  if (item.todo) return `T-${item.todo.number}`;
+  const asking = item.source.session?.id;
+  if (!asking || asking === sessionId) return undefined;
+  const owner = rows.find(({ todo }) => todo.sessionId === asking && todo.parentNumber === null);
+  return owner ? owner.todo.ref : undefined;
+}

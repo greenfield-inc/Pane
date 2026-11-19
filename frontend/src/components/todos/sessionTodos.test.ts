@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import type { TodoListRow, TodoRecord } from '../../../../shared/types/todos';
-import { inTodoScope, sessionTodos, todoApprovalScope } from './sessionTodos';
+import { inTodoScope, sessionTodos, todoApprovalScope, todoRefOf } from './sessionTodos';
 
 function row(number: number, opts: { own?: string; requestedBy?: string; parent?: number; state?: TodoRecord['state'] } = {}): TodoListRow {
   const todo: TodoRecord = {
@@ -53,5 +53,12 @@ describe('a Session\'s to-dos (T-22, T-23)', () => {
   it('a closed to-do no longer brings its approvals', () => {
     const scope = todoApprovalScope([row(5, { own: 'hidden-5', requestedBy: 'uiux', state: 'done' })], 'uiux');
     expect(inTodoScope(item('late', { session: 'hidden-5' }), scope)).toBe(false);
+  });
+
+  it('names the to-do an approval belongs to (T-24): linked, or asked in its hidden Session; none for the Session\'s own', () => {
+    expect(todoRefOf(item('review', { todo: 10 }), rows, 'uiux')).toBe('T-10');
+    expect(todoRefOf(item('perm', { session: 'hidden-3' }), rows, 'uiux')).toBe('T-3');
+    expect(todoRefOf(item('own', { session: 'uiux' }), rows, 'uiux')).toBeUndefined();
+    expect(todoRefOf(item('in-own-hidden', { session: 'hidden-13' }), rows, 'hidden-13')).toBeUndefined();
   });
 });

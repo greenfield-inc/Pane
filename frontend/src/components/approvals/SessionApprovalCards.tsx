@@ -14,6 +14,8 @@ import { ApprovalKeyTip } from './ApprovalColumn';
 import { whenShown } from './approvalKeys';
 import { focusChatSoon } from '../../services/regionFocus';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
+import { useTodosStore } from '../../stores/todosStore';
+import { todoRefOf } from '../todos/sessionTodos';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 
 /**
@@ -25,6 +27,8 @@ import { formatKeyDisplay } from '../../utils/hotkeyUtils';
  */
 export function SessionApprovalCards({ sessionId, chatPanelId }: { sessionId: string; chatPanelId?: string }) {
   const waiting = useSessionApprovals(sessionId);
+  // Its to-dos' approvals dock here too (T-22); each names its to-do (T-24).
+  const todoRows = useTodosStore((state) => state.snapshot?.rows);
   const chat = chatPanelId ?? `session:${sessionId}`;
   const dismissed = useApprovalColumnStore((state) => state.docked[chat]);
   const pager = useMemo(() => dockApprovals(waiting, chatPanelId, dismissed), [waiting, chatPanelId, dismissed]);
@@ -47,7 +51,7 @@ export function SessionApprovalCards({ sessionId, chatPanelId }: { sessionId: st
   return (
     <div ref={cardsRef} className="mx-auto flex w-full max-w-[var(--thread-max-width)] flex-col gap-2 px-6 pb-2" data-testid="session-approval-cards">
       {status}
-      <CompactCard item={item} index={index} total={pager.length} open={item.id === openId} onStep={step}
+      <CompactCard item={item} todoRef={todoRefOf(item, todoRows ?? [], sessionId)} index={index} total={pager.length} open={item.id === openId} onStep={step}
         onOpen={(tab) => useApprovalColumnStore.getState().openApproval(`session:${sessionId}`, item.id, tab)}
         onDismiss={() => {
           // Same as Dismiss elsewhere: no answer, it leaves the strip and keeps waiting in Approvals.
@@ -71,13 +75,14 @@ export function SessionApprovalCards({ sessionId, chatPanelId }: { sessionId: st
   );
 }
 
-function CompactCard({ item, index, total, open, onStep, onOpen, onDismiss }: {
-  item: NotifyItem; index: number; total: number; open: boolean; onStep: (direction: 1 | -1) => void; onOpen: (tab?: string) => void; onDismiss: () => void;
+function CompactCard({ item, todoRef, index, total, open, onStep, onOpen, onDismiss }: {
+  item: NotifyItem; todoRef?: string; index: number; total: number; open: boolean; onStep: (direction: 1 | -1) => void; onOpen: (tab?: string) => void; onDismiss: () => void;
 }) {
   const now = useNow();
   const count = questionsOf(item).length;
   const qn = approvalQn(item);
-  const who = item.source.autopilot ? 'Autopilot' : item.source.session?.orchestrator ? `${item.source.session.name} orchestrator` : item.source.name;
+  // A to-do's card names the to-do; its hidden Session's orchestrator is then just "orchestrator" (T-24).
+  const who = item.source.autopilot ? 'Autopilot' : item.source.session?.orchestrator ? (todoRef ? 'orchestrator' : `${item.source.session.name} orchestrator`) : item.source.name;
   const references = referenceCount(item);
   const openKeys = useHotkeyStore((state) => state.hotkeys.get('open-session-approval')?.keys ?? '');
   const stepButton = 'inline-flex h-6 w-6 items-center justify-center rounded-md border border-border-secondary text-text-secondary hover:bg-surface-hover disabled:opacity-40';
@@ -93,7 +98,7 @@ function CompactCard({ item, index, total, open, onStep, onOpen, onDismiss }: {
           {item.source.autopilot ? <Navigation className="h-3.5 w-3.5 text-autopilot" /> : <CircleAlert className="h-3.5 w-3.5 text-status-warning" />}
         </span>
         {qn && <span className="shrink-0 font-semibold text-status-warning-on-tint">{qn}</span>}
-        <span className="min-w-0 truncate">{[qn ? '' : 'Approval', who, count > 1 ? `${count} questions` : count === 1 ? '1 question' : '', relativeAge(item.createdAt, now)].filter(Boolean).join(' · ')}</span>
+        <span className="min-w-0 truncate" data-testid="session-approval-card-meta">{[qn ? '' : 'Approval', todoRef, who === todoRef ? '' : who, count > 1 ? `${count} questions` : count === 1 ? '1 question' : '', relativeAge(item.createdAt, now)].filter(Boolean).join(' · ')}</span>
         {open && <span className="ml-auto shrink-0 rounded-md bg-surface-secondary px-1.5 py-px text-[11px] font-semibold text-text-secondary" data-testid="session-approval-card-open-label">Open</span>}
         <Tooltip content="Dismiss: it stays in Approvals" side="top">
           <button type="button" onClick={onDismiss} aria-label="Dismiss"
