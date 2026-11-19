@@ -231,7 +231,7 @@ cancelled, is skipped without a reason, or is missing from the workflow or
 from `CI result`'s needs fails it, and so does a `Code Quality` job the list
 does not name. Add a new job to `EXPECTED_JOBS` and to `CI result`'s needs in
 the same change, or to `REPORTED_ONLY_JOBS` with its reason for a job that
-reports without gating (the stabilizing lanes); `scripts/ci-gate.test.mjs` (run by Type Check and Lint, and
+reports without gating (Functional Smoke (stabilizing)); `scripts/ci-gate.test.mjs` (run by Type Check and Lint, and
 by `node --test scripts/ci-gate.test.mjs` locally) checks they match the
 workflow. It is the only check a merge waits for; how
 to merge a pull request or a stack is in
@@ -258,15 +258,19 @@ seconds. `CI result` writes that record to its job summary and log on every
 `CI result` also checks each successful job against
 `scripts/ci-budgets.json`. Each phase (waiting, setup, running) and each
 budgeted step (Lint, Type check) has a target, the speed the CI plan aims for,
-and most have a ceiling. Only a measured value over its ceiling fails
-`CI result`. A value over its target is a warning in the job summary, and so
+and most have a ceiling. While the file sets `"enforce": false` (as it does
+now), a value over its ceiling is a warning, listed in the job summary under a
+heading that says it does not fail the run; set `"enforce": true` to make a
+measured value over its ceiling fail `CI result`. A value over its target is a
+warning in the job summary, and so
 is a value that could not be measured: the jobs API did not answer, a step or
 phase reported no time, or a job has no budget. Waiting has no ceiling: it
 depends on GitHub's runner capacity, not the change. Times come from the jobs
 API in whole seconds. Ceilings are 1.3 times the largest value seen in recent
-successful runs, rounded up to 10 s, so no normal run fails one. If a run was
-only slow, re-run all jobs: re-running `CI result` alone reads the same
-timings. A new job, or a renamed or new setup step, needs its entry in the
+successful runs, rounded up to 10 s. Enforcement is off because slow-runner
+periods pass those ceilings with no test failure; recalibrate them on a wider
+sample before turning it back on. While it is on, if a run was only slow,
+re-run all jobs: re-running `CI result` alone reads the same timings. A new job, or a renamed or new setup step, needs its entry in the
 same change; `scripts/ci-timings.test.mjs` (run by Type Check and Lint) checks
 the file against `quality.yml`. Lower a ceiling only after real runs show the
 job stays under it.

@@ -274,10 +274,6 @@ jobs:
   # from Vite with a mocked Electron API; the two renderer selection race shards
   # also run from Vite alone. The two Electron shards launch real Electron and
   # split the specs playwright.chat-tabs.config.ts lists.
-  # Specs #1554 wired in that are not yet proven stable run in Functional Smoke
-  # (stabilizing), the WebGL shards and a stabilizing Electron step: they report
-  # on every run, but CI result does not wait for them (REPORTED_ONLY_JOBS in
-  # scripts/ci-gate.mjs).
   # scripts/ci-test-inventory.mjs (in Type Check and Lint) fails when a test file
   # runs in no lane.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
@@ -288,7 +284,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
     steps:
     - name: Checkout code
@@ -309,16 +305,12 @@ jobs:
     - name: Run maintained functional smoke tests
       run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
-  # Stabilizing: wired in by #1554 on 2026-11-18, flaky under CI load; returns to
-  # the required lanes as each is proven stable. Reported only: CI result does
-  # not wait for this job.
+  # Reported only: CI result does not wait for this job (REPORTED_ONLY_JOBS in
+  # scripts/ci-gate.mjs). It runs playwright.ci.stabilizing.config.ts, whose
+  # comment says why each spec there is not yet required.
   functional-smoke-stabilizing:
-    name: Functional Smoke (stabilizing ${{ matrix.shard }}/${{ strategy.job-total }})
+    name: Functional Smoke (stabilizing)
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
 
     steps:
     - name: Checkout code
@@ -334,14 +326,13 @@ jobs:
       uses: ./.github/actions/playwright-browsers
 
     - name: Run stabilizing browser tests
-      run: pnpm exec playwright test --config=playwright.ci.stabilizing.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      run: pnpm exec playwright test --config=playwright.ci.stabilizing.config.ts
 
   # The WebGL renderer recovery spec, split off the browser shards: its 25 tests
   # take about 16 s each, and Playwright shards by test count in file order, so
   # in the browser lane they all landed in one shard and set the run's time.
-  # Stabilizing, like functional-smoke-stabilizing: reported only.
   functional-smoke-webgl:
-    name: Functional Smoke (stabilizing WebGL ${{ matrix.shard }}/${{ strategy.job-total }})
+    name: Functional Smoke (WebGL ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -359,7 +350,7 @@ jobs:
       run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Install Playwright browser dependencies
-      run: pnpm exec playwright install --with-deps chromium
+      run: scripts/playwright-chromium.sh
 
     - name: Run WebGL renderer recovery tests
       run: pnpm exec playwright test --config=playwright.ci.webgl.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
@@ -415,10 +406,10 @@ jobs:
       with:
         install: 'false'
 
-    # The apt packages overlap the build steps below. apt upgrades libraries
-    # Electron loads, so the wait step comes before Electron first starts.
+    # The browser install overlaps the build steps below; the wait step comes
+    # before the tests first start Chromium.
     - name: Start Playwright browser dependencies install
-      run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
+      run: scripts/ci-background.sh start playwright scripts/playwright-chromium.sh
 
     # The install skipped Electron's binary download, and Electron 42+ logs a
     # first-use fetch to stdout, so fetch it first to keep require('electron')
@@ -477,19 +468,20 @@ jobs:
       run: xvfb-run -a node scripts/test-worktree-trash-electron.cjs
 
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
+    # PANE_ELECTRON_E2E turns on the remote browser and browser auth specs.
     - name: Run chat tab journeys
       if: ${{ !cancelled() }}
       run: xvfb-run -a pnpm test:chat-tabs --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+        PANE_ELECTRON_E2E: '1'
 
-    # Stabilizing: wired in by #1554 on 2026-11-18, flaky under CI load. Reported
-    # only: a failure here marks the step and leaves the job green.
-    # PANE_ELECTRON_E2E turns on the remote browser and browser auth specs.
+    # Reported only: a failure here marks the step and leaves the job green. The
+    # config's comment says why each spec there is not yet required.
     - name: Run stabilizing Electron specs
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && matrix.shard == 1 }}
       continue-on-error: true
-      run: xvfb-run -a pnpm exec playwright test --config=playwright.ci.stabilizing-electron.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      run: xvfb-run -a pnpm exec playwright test --config=playwright.ci.stabilizing-electron.config.ts
       env:
         PANE_DIR: ${{ runner.temp }}/pane-stabilizing-electron
         PANE_ELECTRON_E2E: '1'
@@ -815,7 +807,7 @@ jobs:
   # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests, pwa-build]
+    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-webgl, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests, pwa-build]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

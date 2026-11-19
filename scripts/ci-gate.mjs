@@ -27,6 +27,7 @@ export const EXPECTED_JOBS = [
   'typecheck-lint',
   'markdown-links',
   'functional-smoke-browser',
+  'functional-smoke-webgl',
   'renderer-selection',
   'functional-smoke-electron',
   'runpane-wrapper-tests',
@@ -38,10 +39,8 @@ export const EXPECTED_JOBS = [
 
 // Code Quality jobs that run and report but that CI result does not wait for,
 // each with its reason. They stay out of CI result's needs.
-const STABILIZING = 'stabilizing: wired in by #1554 on 2026-11-18, flaky under CI load; returns to the required lanes as each is proven stable';
 export const REPORTED_ONLY_JOBS = {
-  'functional-smoke-stabilizing': STABILIZING,
-  'functional-smoke-webgl': STABILIZING,
+  'functional-smoke-stabilizing': 'stabilizing: tab-popover.spec.ts:85 failed once in CI (run 44485044464) and passed 200 of 200 on parsa-devbox, cause not yet known; returns to the required lane once it is found',
 };
 
 // Jobs a pull request may skip when none of their files changed, keyed by job

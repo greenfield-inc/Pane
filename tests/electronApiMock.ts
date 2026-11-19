@@ -137,7 +137,8 @@ export type ElectronApiMockOptions = {
   diffManifests?: Record<string, DiffManifest>;
   fileDiffs?: Record<string, FileDiffResult>;
   diffManifestDelayMs?: Record<string, number>;
-  fileDiffDelayMs?: Record<string, number>;
+  /** Hold these file diff reads (`<sessionId>:<path>` or `<path>`, as fileDiffs keys them) until releaseFileDiffs(). */
+  holdFileDiffs?: string[];
   diffManifestErrors?: Record<string, string>;
   fileDiffErrors?: Record<string, string>;
   testPerf?: boolean;
@@ -161,6 +162,8 @@ export type ElectronApiMockOptions = {
   detectedBranch?: string | null;
   detectedBranchByPath?: Record<string, string | null>;
   mainRepoSessionDelayByProjectId?: Record<number, number>;
+  /** Hold these projects' main-repository Session lookups until releaseMainRepoSessions(). */
+  holdMainRepoSessionProjectIds?: number[];
   mainRepoSessionErrorByProjectId?: Record<number, string>;
   activeProjectId?: number | null;
   paneChatAgentChangeDelayMs?: number;
@@ -465,6 +468,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockPanels = clone(mockOptions.initialPanels ?? []);
     let nextPanelId = mockPanels.length + 1;
     const heldSshPanelReads: Array<() => void> = [];
+    const heldMainRepoSessions: Array<() => void> = [];
+    const heldFileDiffs: Array<() => void> = [];
     const openSshHost = (alias: string, newTab: boolean) => {
       const sessionId = '__ssh_hosts_session__';
       const existing = newTab ? undefined : mockPanels.find(panel => sshHostOf(panel) === alias);
@@ -1896,6 +1901,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getOrCreateMainRepoSession: async (projectId: number) => {
           const delayMs = mockOptions.mainRepoSessionDelayByProjectId?.[projectId] ?? 0;
           if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+          if (mockOptions.holdMainRepoSessionProjectIds?.includes(projectId)) {
+            await new Promise<void>(resolve => { heldMainRepoSessions.push(resolve); });
+          }
           const error = mockOptions.mainRepoSessionErrorByProjectId?.[projectId];
           if (error) throw new Error(error);
           return success(clone(
@@ -1970,8 +1978,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getFileDiff: async (sessionId: string, scope: DiffScope, request: { path: string }) => {
           const key = `${scopeMockKey(scope)}:${request.path}`;
           fileDiffCalls.push({ sessionId, scope: clone(scope), path: request.path });
-          const delay = requestOption(mockOptions.fileDiffDelayMs, sessionId, key) ?? 0;
-          if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+          if (mockOptions.holdFileDiffs?.some(held => held === key || held === `${sessionId}:${key}`)) {
+            await new Promise<void>(resolve => { heldFileDiffs.push(resolve); });
+          }
           const failure = requestOption(mockOptions.fileDiffErrors, sessionId, key);
           if (failure) return { success: false as const, error: failure };
           const explicit = requestOption(mockOptions.fileDiffs, sessionId, key);
@@ -2110,6 +2119,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             remoteDaemonConfig.client.profiles.push(profile);
           }
           syncRemoteDaemonConfig();
+          // As main does: saving a connection updates the config, which it announces.
+          emit('config:updated', clone(configState));
           return success(clone(remoteDaemonConfig.client.profiles));
         },
         deleteConnectionProfile: (profileId: string) => {
@@ -2129,6 +2140,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             });
           }
           syncRemoteDaemonConfig();
+          emit('config:updated', clone(configState));
           return success(clone(remoteDaemonConfig.client));
         },
         updateClientState: (updates: { activeProfileId?: string | null; mode?: 'local' | 'remote' }) => {
@@ -2481,6 +2493,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         releaseSshPanelReads() {
           for (const release of heldSshPanelReads.splice(0)) release();
+        },
+        releaseMainRepoSessions() {
+          for (const release of heldMainRepoSessions.splice(0)) release();
+        },
+        releaseFileDiffs() {
+          for (const release of heldFileDiffs.splice(0)) release();
         },
         emitPanelCreated(panel: JsonObject) {
           if (!mockPanels.some(existing => existing.id === panel.id)) {

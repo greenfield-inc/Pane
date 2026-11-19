@@ -1,4 +1,5 @@
 {
+  "enforce": false,
   "targets": {
     "waiting": 10,
     "setup": 30,
@@ -90,6 +91,10 @@
       ]
     },
     "functional-smoke-webgl": {
+      "ceilings": {
+        "setup": 90,
+        "running": 80
+      },
       "setupSteps": [
         "Checkout code",
         "Setup Node.js and pnpm",

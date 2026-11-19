@@ -305,7 +305,7 @@ test('main-repository branch detection never renders the previous repository bra
       [project.path]: 'main-a',
       [secondProject.path]: null,
     },
-    mainRepoSessionDelayByProjectId: { [secondProject.id]: 500 },
+    holdMainRepoSessionProjectIds: [secondProject.id],
   });
   await gotoApp(page);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
@@ -331,10 +331,12 @@ test('main-repository branch detection never renders the previous repository bra
   const loadingSession = page.getByRole('status', { name: 'Loading main repository session' });
   await expect(loadingSession).toBeVisible();
   await expect(page.getByText('No session selected', { exact: true })).toHaveCount(0);
-  await page.waitForTimeout(250);
-  await expect(loadingSession).toBeVisible();
   await expect(detailPanel.getByText('main-a', { exact: true })).toHaveCount(0);
-  await page.waitForTimeout(400);
+  // The lookup is held, so the loading state stays until the test lets it answer.
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    (window as typeof window & { __paneTestElectronMock: { releaseMainRepoSessions(): void } }).__paneTestElectronMock.releaseMainRepoSessions();
+  });
   await expect(loadingSession).toHaveCount(0);
   await expect(detailPanel.getByText('main-b', { exact: true })).toBeVisible();
   await expect(detailPanel.getByText('main-a', { exact: true })).toHaveCount(0);
@@ -405,7 +407,7 @@ test('main-repository lookup failure clears the loading skeleton', async ({ page
     initialSessions: [mainRepoSessionWithBranch],
     initialPanels: mainRepoPanels,
     activeProjectId: project.id,
-    mainRepoSessionDelayByProjectId: { [project.id]: 100 },
+    holdMainRepoSessionProjectIds: [project.id],
     mainRepoSessionErrorByProjectId: { [project.id]: 'Main repository session lookup failed' },
   });
   await gotoApp(page);
@@ -414,7 +416,10 @@ test('main-repository lookup failure clears the loading skeleton', async ({ page
 
   const loadingSession = page.getByRole('status', { name: 'Loading main repository session' });
   await expect(loadingSession).toBeVisible();
-  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    (window as typeof window & { __paneTestElectronMock: { releaseMainRepoSessions(): void } }).__paneTestElectronMock.releaseMainRepoSessions();
+  });
   await expect(loadingSession).toHaveCount(0);
   await expect(page.getByText('No session selected', { exact: true })).toBeVisible();
 });

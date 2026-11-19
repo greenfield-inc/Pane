@@ -133,7 +133,7 @@ export const PopoverButton: React.FC<PopoverButtonProps> = ({
   variant = 'default',
   className,
   children,
-  onMouseEnter,
+  onMouseMove,
   ...props
 }) => {
   return (
@@ -145,11 +145,14 @@ export const PopoverButton: React.FC<PopoverButtonProps> = ({
         popoverButtonVariants[variant],
         className
       )}
-      // Once focus is in the menu, it follows the pointer, so a focused item never stays lit beside the
-      // hovered one. Focus elsewhere (the terminal under a link popover) stays put.
-      onMouseEnter={event => {
-        if (event.currentTarget.closest('[data-terminal-popover]')?.contains(document.activeElement)) event.currentTarget.focus();
-        onMouseEnter?.(event);
+      // Once focus is in the menu, it follows the pointer when the pointer moves, so a focused item never
+      // stays lit beside the hovered one. A menu that opens under a resting pointer gets mouse events with
+      // no movement; those leave keyboard focus where it is. Focus elsewhere (the terminal under a link
+      // popover) stays put.
+      onMouseMove={event => {
+        const moved = event.movementX !== 0 || event.movementY !== 0;
+        if (moved && event.currentTarget !== document.activeElement && event.currentTarget.closest('[data-terminal-popover]')?.contains(document.activeElement)) event.currentTarget.focus();
+        onMouseMove?.(event);
       }}
       {...props}
     >
