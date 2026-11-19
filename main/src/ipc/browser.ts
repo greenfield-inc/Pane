@@ -162,6 +162,8 @@ const FRAME_WAIT_MS = 1_000;
 const STREAM_IDLE_MS = 10_000;
 /** JPEG quality of streamed frames (T3 Code's default). */
 const FRAME_QUALITY = 70;
+/** This run of Pane: page ids start again at 1 when it restarts, so screens see `<run>-<id>`. */
+const HOST_RUN = randomUUID();
 /** How long a batch of a screen's input may take before the host answers that it didn't land. */
 const INPUT_MS = 15_000;
 /** How long a state read waits for a change before answering with the same state. */
@@ -1011,7 +1013,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (cursor) view.agentCursor = cursor;
     if (driver?.pendingDialog) view.dialog = driver.pendingDialog;
     if (driver?.pendingChooser) view.fileChooser = driver.pendingChooser;
-    if (live) view.page = live.id;
+    if (live) view.page = `${HOST_RUN}-${live.id}`;
     if (!live) view.stopped = holds.isAsleep(tabId) ? 'asleep' : 'gone';
     return view;
   }
