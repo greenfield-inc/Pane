@@ -595,7 +595,8 @@ describe('chat tab manager', () => {
     manager.send('p1', { operationId: 'op-1', text: 'turn 2' });
     await expect.poll(() => manager.view('p1').status).toBe('working');
     manager.send('p1', { operationId: 'op-2', text: 'urgent', now: true });
-    await expect.poll(() => manager.view('p1').notice).toContain('could not reach the agent');
+    // The notice waits on the agent's answer to the steer, a round trip to its process.
+    await expect.poll(() => manager.view('p1').notice, { timeout: 8000 }).toContain('could not reach the agent');
     expect(manager.view('p1').queue.map(item => item.operationId)).toEqual(['op-2']);
     await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 8000 }).toBe('completed');
     expect(turnEnds(manager.view('p1'))).toEqual(['end_turn', 'end_turn']);
