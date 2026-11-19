@@ -128,8 +128,14 @@ test('shows the same inventory from a Project view with a WSL project on a Windo
   await page.getByRole('button', { name: /^Expand project Shortcut settings fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tabpanel').locator('.xterm-screen').first()).toBeVisible({ timeout: 15_000 });
+  // The terminal takes focus once it activates. There, Ctrl+K starts the two-step key
+  // only while Ctrl stays held; releasing it clears the terminal instead (D-250).
+  await expect(page.locator('.xterm-helper-textarea:visible')).toBeFocused();
   // navigator.platform reads Win32 here, so mod is Control.
-  await pressOpenShortcutSettings(page, 'Control');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('K');
+  await page.keyboard.press('S');
+  await page.keyboard.up('Control');
   await expect(page.getByTestId('settings-page')).toBeVisible();
   const map = page.locator('[data-setting-id="keyboard-shortcut-map"]');
 
