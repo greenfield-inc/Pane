@@ -295,7 +295,10 @@ export class PageDriver {
   }
 
   /** A PNG of what the tab shows, or of the whole page. One capture per tab at a time. */
-  screenshot(fullPage: boolean): Promise<PageScreenshot> {
+  async screenshot(fullPage: boolean): Promise<PageScreenshot> {
+    // An open dialog blocks the page's renderer, so no capture would answer.
+    await this.attach();
+    this.refuseWhileDialog();
     const run = this.screenshots.then(() => this.withinCapture(this.screenshotNow(fullPage)));
     this.screenshots = run.then(() => undefined, () => undefined);
     return run;

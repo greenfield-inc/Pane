@@ -534,6 +534,15 @@ describe('browser tools: every call answers by a deadline', () => {
   });
 });
 
+describe('browser tools: a dialog open on the page', () => {
+  it('refuses a screenshot at once instead of waiting on the blocked page', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
+    await call(fixture, 'snapshot', {});
+    fixture.pages.get('mine')?.debugger.emit('message', {}, 'Page.javascriptDialogOpening', { type: 'alert', message: 'Saved' });
+    await expect(call(fixture, 'screenshot', {})).rejects.toMatchObject({ code: 'ERR_BROWSER_DIALOG_PENDING', message: expect.stringContaining('an alert dialog') });
+  });
+});
+
 describe('browser tools: Take over pressed during a call', () => {
   it('keeps the person driving after the call ends, shows it, and holds the agent\'s next call until Hand to', async () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
