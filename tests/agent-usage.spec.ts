@@ -407,7 +407,7 @@ test('main-repository lookup failure clears the loading skeleton', async ({ page
     initialSessions: [mainRepoSessionWithBranch],
     initialPanels: mainRepoPanels,
     activeProjectId: project.id,
-    mainRepoSessionDelayByProjectId: { [project.id]: 100 },
+    holdMainRepoSessionProjectIds: [project.id],
     mainRepoSessionErrorByProjectId: { [project.id]: 'Main repository session lookup failed' },
   });
   await gotoApp(page);
@@ -416,7 +416,10 @@ test('main-repository lookup failure clears the loading skeleton', async ({ page
 
   const loadingSession = page.getByRole('status', { name: 'Loading main repository session' });
   await expect(loadingSession).toBeVisible();
-  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    (window as typeof window & { __paneTestElectronMock: { releaseMainRepoSessions(): void } }).__paneTestElectronMock.releaseMainRepoSessions();
+  });
   await expect(loadingSession).toHaveCount(0);
   await expect(page.getByText('No session selected', { exact: true })).toBeVisible();
 });

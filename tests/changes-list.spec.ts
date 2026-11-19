@@ -84,7 +84,7 @@ interface OpenChangesOptions {
   manifests?: Record<string, DiffManifest>;
   manifestDelays?: Record<string, number>;
   fileDiffs?: Record<string, FileDiffResult>;
-  fileDelays?: Record<string, number>;
+  holdFileDiffs?: string[];
   sessions?: JsonObject[];
   panels?: JsonObject[];
   gitCommands?: JsonObject;
@@ -100,7 +100,7 @@ async function openChanges(page: Page, options: OpenChangesOptions = {}): Promis
     diffManifests: options.manifests ?? { session: manifest },
     diffManifestDelayMs: options.manifestDelays,
     fileDiffs: options.fileDiffs,
-    fileDiffDelayMs: options.fileDelays,
+    holdFileDiffs: options.holdFileDiffs,
     gitCommands: options.gitCommands,
     initialUiState: { expandedProjects: [project.id] },
     activeProjectId: project.id,
@@ -229,7 +229,7 @@ test('new file keys show loading and late file responses cannot replace the acti
       'session:race/a.ts': renameResult(1),
       'session:race/b.ts': renameResult(2),
     },
-    fileDelays: { 'session:race/a.ts': 160 },
+    holdFileDiffs: ['session:race/a.ts'],
   });
 
   await page.getByRole('option', { name: 'Open diff for race/seed.ts' }).click();
@@ -240,6 +240,11 @@ test('new file keys show loading and late file responses cannot replace the acti
   await expect(page.getByText('Renamed from race/seed-old.ts → race/seed.ts, no content changes', { exact: true })).toHaveCount(0);
   await page.getByRole('option', { name: 'Open diff for race/b.ts' }).click();
   await expect(page.getByText('Renamed from race/b-old.ts → race/b.ts, no content changes', { exact: true })).toBeVisible();
+  // a.ts answers only now, after b.ts is showing; give its late answer time to arrive.
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    (window as typeof window & { __paneTestElectronMock: { releaseFileDiffs(): void } }).__paneTestElectronMock.releaseFileDiffs();
+  });
   await page.waitForTimeout(190);
   await expect(page.getByText('Renamed from race/b-old.ts → race/b.ts, no content changes', { exact: true })).toBeVisible();
   await expect(page.getByText('Renamed from race/a-old.ts → race/a.ts, no content changes', { exact: true })).toHaveCount(0);
