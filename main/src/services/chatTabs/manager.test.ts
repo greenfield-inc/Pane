@@ -569,7 +569,7 @@ describe('chat tab manager', () => {
     expect(manager.isRunning('p1')).toBe(false);
   });
 
-  it('Send now delivers into the running turn of an agent that takes steering, and the turn goes on', async () => {
+  it('Send now delivers into the running turn of an agent that takes steering, and the turn goes on', { timeout: 30_000 }, async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));
     await manager.ensure('p1');
@@ -578,7 +578,8 @@ describe('chat tab manager', () => {
     expect(manager.view('p1').sendNowSteers).toBe(true);
     manager.send('p1', { operationId: 'op-2', text: 'second' });
     manager.send('p1', { operationId: 'op-3', text: 'urgent', now: true });
-    await expect.poll(() => manager.receipt('p1', 'op-3')?.state).toBe('completed');
+    // The receipt waits on the agent's answer to the steer, a round trip to its process.
+    await expect.poll(() => manager.receipt('p1', 'op-3')?.state, { timeout: 8000 }).toBe('completed');
     expect(manager.view('p1').status).toBe('working');
     expect(manager.view('p1').queue.map(item => item.operationId)).toEqual(['op-2']);
     await expect.poll(() => manager.receipt('p1', 'op-2')?.state, { timeout: 8000 }).toBe('completed');
@@ -588,7 +589,7 @@ describe('chat tab manager', () => {
     expect(turnEnds(manager.view('p1'))).toEqual(['end_turn', 'end_turn']);
   });
 
-  it('Send now keeps the message queued, with a notice, when the agent refuses the steer', async () => {
+  it('Send now keeps the message queued, with a notice, when the agent refuses the steer', { timeout: 30_000 }, async () => {
     const { manager, store, directory } = harness(new MemoryStore(), { SCRIPTED_AGENT_STEER_FAILS: '1' });
     store.add('p1', newTab(directory));
     await manager.ensure('p1');

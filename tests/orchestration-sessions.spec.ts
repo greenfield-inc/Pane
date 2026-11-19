@@ -1805,7 +1805,7 @@ test('the Overview is the first tab of every Session\'s right split, beside the 
   await expect(overviewPanel.getByText('Plan the next release.', { exact: true })).toBeVisible();
   // The right sidebar keeps Files and Changes only.
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
-  await expect(page.getByRole('tablist', { name: 'Session inspector' }).getByRole('tab')).toHaveText(['Files', 'Changes']);
+  await expect(page.getByRole('tablist', { name: 'Session inspector' }).getByRole('tab')).toHaveText(['Files', 'Changes', 'To-dos']);
   await expect(page.getByRole('complementary', { name: 'Session changes' })).toBeVisible();
   await page.getByRole('button', { name: 'Hide details', exact: true }).click();
 

@@ -46,7 +46,9 @@ async function start(prefix: string, baseURL: string | undefined) {
     return (created.data as { id: number }).id;
   }, repo);
   await dismissDialogs(page);
-  await expect.poll(() => runpane(pane, ['doctor', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
+  // Ready once the daemon answers a to-dos read. Not `runpane doctor`: its exit code also needs the latest
+  // release from api.github.com, which reads not-ok while GitHub rate-limits CI's shared address.
+  await expect.poll(() => runpane(pane, ['todos', 'list', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
   const create = (input: TodoCreateInput) => page.evaluate(async todo => {
     const response = await window.electronAPI.todos.create(todo);
     if (!response.success || !response.data) throw new Error(response.error ?? 'create failed');
