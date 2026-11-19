@@ -82,7 +82,7 @@ driving · Hand to" and the agent's name.
 - **Take over** in the chip makes you the driver until you press **Hand to** and the agent's
   name.
 
-Either way the agent's refs from before are revoked: a call that uses one fails at once with
+Any input of yours on the page revokes the agent's refs from before: a call that uses one fails at once with
 `ERR_BROWSER_STALE_REF`, and the agent snapshots again. Any other action waits while you drive,
 and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open on a tab, an agent's actions on it fail with
 `ERR_BROWSER_DEVTOOLS_OPEN`.

@@ -270,7 +270,10 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     // The person touching a page an agent drives takes it over until they stop (TOUCH_HOLD_MS).
     page.on('input-event', (_event, input) => {
       if (!['mouseDown', 'rawKeyDown', 'keyDown', 'mouseWheel', 'touchStart', 'gestureScrollBegin'].includes(input.type)) return;
-      if (pages.get(page.id)?.isAgentInput()) return;
+      const driver = pages.get(page.id);
+      if (!driver || driver.isAgentInput()) return;
+      // The person changed the page under the agent's refs, so they go stale either way.
+      driver.revokeRefs();
       void personTouched(tab.id, page.id);
     });
     return driver;
