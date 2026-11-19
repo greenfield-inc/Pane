@@ -479,6 +479,22 @@ export class PageDriver {
     return result;
   }
 
+  /**
+   * The person's pointer passing over the page from another screen (hover, for menus and the
+   * pointer's shape). It changes nothing a repeat would undo, so it needs no focus, takeover or answer.
+   */
+  async hover(x: number, y: number): Promise<void> {
+    if (this.dialog) return;
+    await this.attach();
+    this.forwarding += 1;
+    try {
+      await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none' });
+    } finally {
+      this.forwarding -= 1;
+      this.lastForwardEnd = Date.now();
+    }
+  }
+
   /** Applies one input; returns the copied text for a copy or cut chord. */
   private async personOne(input: BrowserInput): Promise<string | undefined> {
     switch (input.kind) {

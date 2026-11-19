@@ -712,6 +712,21 @@ describe('browser tabs: streaming a page to another screen', () => {
     await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 524, height: 748 }));
   });
 
+  it('moves the pointer over the page on the read channel, taking nothing over and waking no state read', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    const page = fixture.pages.get('mine');
+    page?.sent.splice(0, Infinity);
+    // SAFETY: browser:view answers a BrowserTabView.
+    const before = (await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined })) as { version: number };
+    expect(await fixture.registry.invokeRemote('browser:pointer', ['mine', 'phone-1', 12, 34], { caller: undefined })).toBeNull();
+    expect(page?.params.get('Input.dispatchMouseEvent')).toEqual({ type: 'mouseMoved', x: 12, y: 34, button: 'none' });
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).not.toContain('"by":"person"');
+    // SAFETY: browser:view answers a BrowserTabView.
+    expect(((await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined })) as { version: number }).version).toBe(before.version);
+  });
+
   it('lets a pointer pass over the stream without taking the page from the agent', async () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
     await fixture.registry.invokeRemote('browser:watch', ['mine', 'phone-1', phone], { caller: undefined });

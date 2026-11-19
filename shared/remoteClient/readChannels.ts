@@ -38,6 +38,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   // frame is too large to keep as a write's answer.
   'browser:frame',
   'browser:view',
+  // The person's pointer passing over a streamed page: a repeated move changes nothing.
+  'browser:pointer',
   'config:get',
   'config:get-session-preferences',
   'ui-state:get-expanded',

@@ -992,6 +992,22 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     return JSON.parse(JSON.stringify(result));
   });
 
+  /**
+   * The person's pointer passing over the page from another screen. A read channel, so the host
+   * keeps no answer per move (a write's answer is kept 10 minutes, and hover would use up a
+   * device's allowance); a repeated move changes nothing. It takes nothing over and wakes no state read.
+   */
+  commandRegistry.register('browser:pointer', async (panelId: PaneCommandValue, _viewer: PaneCommandValue, x: PaneCommandValue, y: PaneCommandValue): Promise<PaneCommandValue> => {
+    if (paneCommandCaller() || teammatePaneCaller()) throw new PaneError('ERR_BROWSER_SCREENS_ONLY', 'This channel belongs to the person\'s screens. Nothing ran.', 'Agents use runpane browser.');
+    const id = decodeOptionalBoundary(panelId, boundary.string);
+    const px = decodeOptionalBoundary(x, boundary.number);
+    const py = decodeOptionalBoundary(y, boundary.number);
+    const page = id ? host.page(id) : undefined;
+    if (!id || px === undefined || py === undefined || !page || page.isDestroyed()) return null;
+    await driverFor(id, page).hover(px, py).catch(() => undefined);
+    return null;
+  });
+
   /** Each tab's state version and the reads waiting for it to change. */
   const views = new Map<string, { version: number; waiters: Set<() => void>; pages: Set<number> }>();
   /** Where an agent last clicked in each tab, for the cursor other screens draw. */
