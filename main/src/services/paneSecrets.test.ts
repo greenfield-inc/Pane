@@ -226,4 +226,18 @@ describe('PaneSecretStore 1Password references', () => {
     });
     await expect(store.setReference('stripe', 'OTHER', 'sk_live_not_a_reference')).rejects.toMatchObject({ code: 'SECRET_INVALID' });
   });
+
+  it('ignores a reference in config.json that would not pass when set', async () => {
+    const config = memoryConfig();
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-secrets-'));
+    tempDirs.push(dir);
+    const store = new PaneSecretStore(config, fileSecretBackend(path.join(dir, 'secrets.json'), fakeEncryption(true)), () => 'studio');
+    await config.updateConfigWith(() => ({ paneSecretReferences: {
+      'stripe/EDITED': { reference: 'op://$VAULT/Bank/password', updatedAt: '2026-11-18T12:00:00.000Z', source: 'studio' },
+      'stripe/STRIPE_KEY': { reference: 'op://Dev/Stripe/credential', updatedAt: '2026-11-18T12:00:00.000Z', source: 'studio' },
+    } }));
+
+    expect(store.referenceOf('stripe', 'EDITED')).toBeNull();
+    expect(store.listReferences().map(reference => reference.name)).toEqual(['STRIPE_KEY']);
+  });
 });

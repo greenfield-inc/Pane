@@ -29,6 +29,8 @@ export interface SecretLeaseRecord {
   memoryOnly: boolean;
   /** On the desktop that granted it: the machines it was pushed to, by connection id. */
   pushedTo?: string[];
+  /** On the desktop: the end time last sent to each machine, so a reconnect can tell a renewal it missed from a lease ended there. */
+  pushedUntil?: Record<string, string>;
   /** On a host: the paired client (desktop) that pushed it, so removing that client ends it. */
   pushedBy?: string;
 }
@@ -56,6 +58,7 @@ const recordSchema = boundary.object({
   grantedOn: boundary.string,
   memoryOnly: boundary.boolean,
   pushedTo: boundary.optional(boundary.array(boundary.string)),
+  pushedUntil: boundary.optional(boundary.record(boundary.string)),
   pushedBy: boundary.optional(boundary.string),
 });
 const recordFileSchema = boundary.object({ leases: boundary.array(recordSchema) });
@@ -286,6 +289,8 @@ export class SecretLeaseStore {
         memoryOnly: !this.options.values.storage().encrypted,
       };
       if (grant.pushedTo) lease.pushedTo = [...grant.pushedTo];
+      // A renewal keeps what each machine was last sent, so a machine it can't reach now is caught up later.
+      if (previous?.pushedUntil) lease.pushedUntil = { ...previous.pushedUntil };
       if (grant.pushedBy) lease.pushedBy = grant.pushedBy;
       // The record first, so a crash between the two leaves values the next sweep can find and delete.
       this.records.set(lease.id, lease);
@@ -381,6 +386,17 @@ export class SecretLeaseStore {
       const lease = this.records.get(id);
       if (!lease) return;
       lease.pushedTo = [...machines];
+      if (!lease.memoryOnly) await this.save();
+    });
+  }
+
+  /** Records that lease `id` was sent to `machineId` with the end time it has now. */
+  async notePushed(id: string, machineId: string): Promise<void> {
+    await this.loaded;
+    return this.serial(async () => {
+      const lease = this.records.get(id);
+      if (!lease) return;
+      lease.pushedUntil = { ...lease.pushedUntil, [machineId]: lease.expiresAt };
       if (!lease.memoryOnly) await this.save();
     });
   }
