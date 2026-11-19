@@ -7,6 +7,8 @@ import { notifyApi, notifyReadsFilesHere, type NotifyMachineRead } from '../../s
 export type MachineDoc =
   | { kind: 'text'; text: string }
   | { kind: 'html'; html: string }
+  /** An image file (a to-do's screenshot, say), as a `data:image/…` URL. */
+  | { kind: 'image'; dataUrl: string }
   | { kind: 'missing' }
   /** Over the holding machine's 2 MiB limit for sending a file: it's there, just not sent. */
   | { kind: 'too-large' }
@@ -29,6 +31,7 @@ export function machineFileLinks(item: NotifyItem): Array<{ path: string; label:
 
 const textSchema = boundary.object({ kind: boundary.literal('text'), text: boundary.string });
 const htmlSchema = boundary.object({ kind: boundary.literal('html'), html: boundary.string });
+const imageSchema = boundary.object({ kind: boundary.literal('image'), dataUrl: boundary.string });
 const missingSchema = boundary.object({ kind: boundary.literal('missing'), message: boundary.optional(boundary.string) });
 
 function decodeDoc(answer: Awaited<ReturnType<NotifyMachineRead>>['data']): MachineDoc {
@@ -36,6 +39,9 @@ function decodeDoc(answer: Awaited<ReturnType<NotifyMachineRead>>['data']): Mach
   if (text) return { kind: 'text', text: text.text };
   const page = decodeOptionalBoundary(answer, htmlSchema);
   if (page) return { kind: 'html', html: page.html };
+  const image = decodeOptionalBoundary(answer, imageSchema);
+  // Only an image's own data URL: it is shown through <img>, never navigated to.
+  if (image) return /^data:image\/[a-z0-9.+-]+;base64,/iu.test(image.dataUrl) ? { kind: 'image', dataUrl: image.dataUrl } : { kind: 'unreachable' };
   const missing = decodeOptionalBoundary(answer, missingSchema);
   if (!missing) return { kind: 'unreachable' };
   // `readDocument` refuses a file over its limit with this wording; the file itself is still there.

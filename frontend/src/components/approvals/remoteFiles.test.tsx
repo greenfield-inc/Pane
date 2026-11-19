@@ -53,6 +53,13 @@ describe('an approval from another machine opens its files here', () => {
     expect(text(markup)).not.toContain(' on ');
   });
 
+  it('an image from another machine shows as the image, fitted', () => {
+    const markup = renderToStaticMarkup(<MachineDocView doc={{ kind: 'image', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }} label="shot.png" machine="tylers-mac-mini" />);
+    expect(markup).toContain('data-testid="autopilot-image-doc"');
+    expect(markup).toContain('src="data:image/png;base64,iVBORw0KGgo="');
+    expect(markup).not.toContain('approvals-machine-text');
+  });
+
   it('offline: a clear line with Retry', () => {
     const markup = renderToStaticMarkup(<MachineDocView doc={{ kind: 'unreachable' }} label="Plan draft" machine="tylers-mac-mini" onRetry={() => undefined} />);
     expect(text(markup)).toContain("Couldn't reach tylers-mac-mini Retry");

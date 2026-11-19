@@ -33,6 +33,17 @@ describe('reading a linked document from its machine', () => {
     expect(await readMachineDoc(item, '/a/plan.html')).toEqual({ kind: 'unreachable' });
   });
 
+  it('reads an image the machine sends as its data URL', async () => {
+    const dataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+    stubRead(async () => ({ machineId: 'mini', data: { kind: 'image', path: '/a/shot.png', dataUrl } }));
+    expect(await readMachineDoc(item, '/a/shot.png')).toEqual({ kind: 'image', dataUrl });
+    // Anything but an image's data URL isn't shown.
+    stubRead(async () => ({ machineId: 'mini', data: { kind: 'image', path: '/a/shot.png', dataUrl: 'javascript:alert(1)' } }));
+    expect(await readMachineDoc(item, '/a/shot.png')).toEqual({ kind: 'unreachable' });
+    stubRead(async () => ({ machineId: 'mini', data: { kind: 'image', path: '/a/shot.png' } }));
+    expect(await readMachineDoc(item, '/a/shot.png')).toEqual({ kind: 'unreachable' });
+  });
+
   it('tells a missing document from a machine it could not reach', async () => {
     stubRead(async () => ({ machineId: 'mini', data: { kind: 'missing', path: '/a', message: 'gone' } }));
     expect(await readMachineDoc(item, '/a/plan.html')).toEqual({ kind: 'missing' });

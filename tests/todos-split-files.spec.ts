@@ -123,7 +123,7 @@ async function installSessions(page: Page) {
   }, seed);
 }
 
-async function open(page: Page, dark = false) {
+async function open(page: Page, dark = false, extra: Partial<Parameters<typeof installElectronApiMock>[1]> = {}) {
   await page.setViewportSize({ width: 1500, height: 900 });
   const initialConfig: JsonObject = { theme: dark ? 'dark' : 'light-rounded', appearanceMode: 'fixed' };
   await installElectronApiMock(page, {
@@ -132,6 +132,7 @@ async function open(page: Page, dark = false) {
     initialConfig,
     notifySnapshot: approvals(),
     todos: todos(),
+    ...extra,
   });
   await installSessions(page);
   await page.goto('/', { waitUntil: 'domcontentloaded' });
@@ -344,6 +345,34 @@ for (const dark of [false, true]) {
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/remote-files-${theme}.png` });
   });
 }
+
+// A 1×1 PNG, as devbox's readDocument sends an image (F-8).
+const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+test('another machine’s screenshot shows in the split as the image, read through that machine (F-8)', async ({ page }) => {
+  const options = todos();
+  const shot = attachment(30, 'image', 'Rotation screenshot', '/home/dev/keys/rotation.png', 1, { machine: 'devbox' });
+  const remote = options.details[30];
+  if (!remote) throw new Error('T-30 has no detail in the fixture');
+  remote.attachments = [{ attachments: [remotePlan, shot] }];
+  await open(page, false, {
+    todos: options,
+    machineConnections: {
+      machines: [
+        { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+        { id: 'devbox', label: 'devbox', kind: 'remote', status: 'online', offlineSince: null },
+      ],
+      reads: { devbox: { 'autopilot:read-doc': { kind: 'image', path: '/home/dev/keys/rotation.png', dataUrl: PIXEL } } },
+    },
+  });
+  await openTodo(page, 30);
+  await openFiles(page);
+  await fileRow(page, 'Rotation screenshot').click();
+  await expect(page.getByTestId('todo-split-filebar')).toContainText('on devbox');
+  const image = page.getByTestId('todo-split-attachment').getByTestId('autopilot-image-doc').locator('img');
+  await expect(image).toHaveAttribute('src', PIXEL);
+  await expect(page.getByTestId('approvals-doc-failed')).toHaveCount(0);
+});
 
 test('a file that is gone says it isn\'t on its machine anymore, with nothing to open (D-442)', async ({ page }) => {
   await open(page);
