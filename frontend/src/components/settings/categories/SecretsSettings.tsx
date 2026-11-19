@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, ExternalLink, KeyRound, Plus } from 'lucide-react';
+import { cn } from '../../../utils/cn';
 import { Button } from '../../ui/Button';
 import { Input } from '../../ui/Input';
 import { SecretValueInput } from '../../ui/SecretValueInput';
@@ -271,12 +272,21 @@ function LeaseLengthSelect({ project, lengthMs, onChange }: { project: string; l
   );
 }
 
-function Check({ label, checked, disabled, onChange, note }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void; note?: string | null }) {
+function Check({ label, checked, disabled, onChange, note, address }: {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+  note?: string | null;
+  /** The 1Password item this name reads from, so the person sees what they lease. */
+  address?: string;
+}) {
   return (
     <label className="flex items-start gap-2 text-sm text-text-primary">
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-border-primary accent-interactive" />
-      <span className={disabled ? 'text-text-muted' : undefined}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-border-primary accent-interactive" />
+      <span className={cn('min-w-0', disabled && 'text-text-muted')}>
         {label}
+        {address && <span className="block truncate font-mono text-xs text-text-tertiary" title={address}>{address}</span>}
         {note && <span className="block text-xs text-text-tertiary">{note}</span>}
       </span>
     </label>
@@ -326,7 +336,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
       <fieldset className="space-y-1.5">
         <legend className="mb-1 text-xs font-medium text-text-secondary">Secrets</legend>
         {references.map((reference) => (
-          <Check key={reference.name} label={reference.name} checked={names.has(reference.name)} onChange={(on) => setNames(toggled(names, reference.name, on))} />
+          <Check key={reference.name} label={reference.name} address={reference.reference} checked={names.has(reference.name)} onChange={(on) => setNames(toggled(names, reference.name, on))} />
         ))}
       </fieldset>
       <fieldset className="space-y-1.5">

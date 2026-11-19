@@ -252,6 +252,14 @@ export function systemSecretBackend(appDirectory: string, platform: string = pro
   return fileSecretBackend(path.join(appDirectory, 'secrets.json'), electronSecretEncryption());
 }
 
+/**
+ * A reference read back from config.json passes the same check as one the person set: an edited
+ * file can't point a name at text op would expand (a `$`, braces) or that isn't a reference at all.
+ */
+function usableReference(reference: string | undefined): reference is string {
+  return reference !== undefined && paneSecretReferenceProblem(reference) === null;
+}
+
 export function secretNotFound(project: string, name: string): PaneError {
   return new PaneError(
     'SECRET_NOT_FOUND',
@@ -312,14 +320,14 @@ export class PaneSecretStore {
   /** The 1Password reference behind `project/name`, or null when it is a typed secret or none. */
   referenceOf(project: string, name: string): string | null {
     const meta = this.referenceIndex()[paneSecretKey(project, name)];
-    return meta && !meta.deleted && meta.reference ? meta.reference : null;
+    return meta && !meta.deleted && usableReference(meta.reference) ? meta.reference : null;
   }
 
   /** Secrets whose values live in 1Password, sorted by project then name. */
   listReferences(project?: string): PaneSecretReferenceSummary[] {
     return Object.entries(this.referenceIndex()).flatMap(([key, meta]) => {
       const address = parsePaneSecretKey(key);
-      if (!address || meta.deleted || !meta.reference || (project !== undefined && address.project !== project)) return [];
+      if (!address || meta.deleted || !usableReference(meta.reference) || (project !== undefined && address.project !== project)) return [];
       return [{ ...address, reference: meta.reference, updatedAt: meta.updatedAt, machine: meta.source }];
     }).sort((a, b) => a.project.localeCompare(b.project) || a.name.localeCompare(b.name));
   }

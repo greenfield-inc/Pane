@@ -232,6 +232,7 @@ export class SecretLeaseService {
           grantedOn: lease.grantedOn,
         }]);
         pushed.push(link);
+        await this.deps.store.notePushed(id, link.id);
       } catch (error) {
         refused.push({ machine: link.name, reason: pushFailure(link.name, error instanceof Error ? error : new Error(String(error))) });
       }
@@ -299,8 +300,9 @@ export class SecretLeaseService {
 
   /**
    * A machine reconnected: push it each of this desktop's leases it missed. A memory-only machine
-   * that restarted lost them; any machine may have slept through a renewal. A lease an agent ended
-   * there on purpose (gone from a machine that keeps leases at rest) stays ended.
+   * that restarted lost them; any machine may have slept through a renewal, still holding the old
+   * end or having already swept it at that end. A lease an agent ended there on purpose (gone before
+   * the end it was last sent) stays ended.
    */
   async repushTo(machineId: string): Promise<void> {
     try {
@@ -311,8 +313,12 @@ export class SecretLeaseService {
       const list = decodeBoundary(await link.invoke('secrets:lease:list', []), hostLeaseListSchema);
       const held = new Map(list.leases.map(lease => [lease.id, Date.parse(lease.expiresAt)]));
       for (const lease of due) {
+        const ends = Date.parse(lease.expiresAt);
         const there = held.get(lease.id);
-        const missedRenewal = there !== undefined && there < Date.parse(lease.expiresAt) - 60_000;
+        const lastSent = this.deps.store.get(lease.id)?.pushedUntil?.[machineId];
+        // Gone from a machine that keeps leases at rest: it swept the old end if that end has passed.
+        const sweptOldEnd = lastSent !== undefined && Date.parse(lastSent) <= this.now() && Date.parse(lastSent) < ends - 60_000;
+        const missedRenewal = there !== undefined ? there < ends - 60_000 : sweptOldEnd;
         if (!missedRenewal && (there !== undefined || !list.memoryOnly)) continue;
         const { refused } = await this.pushTo([machineId], lease.id);
         if (refused.length > 0) console.warn(`[SecretLeases] Could not push lease ${lease.id} again to ${link.name}: ${refused[0].reason}`);
