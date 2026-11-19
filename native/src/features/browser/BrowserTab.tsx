@@ -224,6 +224,9 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
     seenDownload.current = download.at;
     setNotice(`Downloaded ${download.name} on ${host}`);
   }, [view, download, host]);
+  useEffect(() => {
+    if (stream.reloadedAt !== undefined) setNotice(`The page reloaded on ${host}.`);
+  }, [stream.reloadedAt, host]);
 
   if (stop === 'older') {
     return (

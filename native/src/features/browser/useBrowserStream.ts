@@ -15,11 +15,26 @@ const RETRY_MIN_MS = 500;
 const RETRY_MAX_MS = 5_000;
 /** How often a screen repeats that it still shows a tab; the host forgets one silent for 15 s. */
 const WATCH_EVERY_MS = 5_000;
+/**
+ * A frame read the host leaves unanswered this long means it can't be reached: the host answers
+ * within about a second even with nothing new, while a reconnecting link holds reads.
+ */
+const FRAME_DEADLINE_MS = 5_000;
+
+/** Rejects when `work` takes longer than `ms`; the late answer is dropped. */
+function within<Value>(work: Promise<Value>, ms: number): Promise<Value> {
+  work.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('The host did not answer in time.')), ms); });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
 
 export interface BrowserStream {
   frame?: BrowserFrame;
   view?: BrowserTabView;
   stop?: StreamStop;
+  /** When the page was found reloaded on the host (it slept, or Pane there restarted). */
+  reloadedAt?: number;
 }
 
 /** The host's browser channels, called as this phone. */
@@ -62,6 +77,7 @@ export function useBrowserStream(panelId: string, on: boolean, space: { width: n
     let cancelled = false;
     let seq = 0;
     let version = 0;
+    let page: number | undefined;
     let frameRetry = RETRY_MIN_MS;
     let viewRetry = RETRY_MIN_MS;
     const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -72,7 +88,7 @@ export function useBrowserStream(panelId: string, on: boolean, space: { width: n
     const frames = async () => {
       while (!cancelled) {
         try {
-          const answer = decodeBoundary(await invokeChannel(client, 'browser:frame', [panelId, VIEWER_ID, seq]), browserFrameAnswerSchema);
+          const answer = decodeBoundary(await within(invokeChannel(client, 'browser:frame', [panelId, VIEWER_ID, seq]), FRAME_DEADLINE_MS), browserFrameAnswerSchema);
           if (cancelled) return;
           frameRetry = RETRY_MIN_MS;
           if ('frame' in answer) {
@@ -101,7 +117,10 @@ export function useBrowserStream(panelId: string, on: boolean, space: { width: n
           if (cancelled) return;
           viewRetry = RETRY_MIN_MS;
           version = view.version;
-          setStream(current => ({ ...current, view }));
+          // A different page than before means the host loaded it again from its URL.
+          const reloaded = page !== undefined && view.page !== undefined && view.page !== page;
+          if (view.page !== undefined) page = view.page;
+          setStream(current => (reloaded ? { ...current, view, reloadedAt: Date.now() } : { ...current, view }));
         } catch (cause) {
           if (cancelled) return;
           if (isOlderHost(cause)) { setStream(current => ({ ...current, stop: 'older' })); return; }
