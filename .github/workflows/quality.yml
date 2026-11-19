@@ -471,7 +471,7 @@ jobs:
     # PANE_ELECTRON_E2E turns on the remote browser and browser auth specs.
     - name: Run chat tab journeys
       if: ${{ !cancelled() }}
-      run: xvfb-run -a pnpm test:chat-tabs --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      run: xvfb-run -a pnpm test:chat-tabs browser-agents.spec.ts --repeat-each=6 --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
         PANE_ELECTRON_E2E: '1'

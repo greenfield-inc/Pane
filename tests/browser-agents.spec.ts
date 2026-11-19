@@ -87,6 +87,9 @@ async function recordDriverChip(page: Page): Promise<void> {
     const record = () => {
       const text = document.querySelector('[data-browser-page-visible="true"] [data-testid="browser-driver-chip"]')?.textContent;
       if (text) document.body.dataset.sawDriverChip = text;
+      const w = window as unknown as { __probe?: string[]; __last?: string };
+      const state = [...document.querySelectorAll<HTMLElement>('[data-browser-page]')].map(p => `${p.dataset.browserPage?.slice(0, 8)} vis=${p.dataset.browserPageVisible} drv=${p.querySelector<HTMLElement>('[data-testid="browser-agent-overlay"]')?.dataset.driving} chip=${p.querySelector('[data-testid="browser-driver-chip"]')?.textContent} slots=${document.querySelectorAll('[data-browser-slot]').length}`).join(' | ') + ` dialog=${[...document.querySelectorAll('[role="dialog"]')].map(d => d.getAttribute('aria-label') ?? d.textContent?.slice(0, 30)).join(',')}`;
+      if (state !== w.__last) { w.__last = state; (w.__probe ??= []).push(`${Math.round(performance.now())} ${state}`); }
     };
     record();
     new MutationObserver(record).observe(document.body, { subtree: true, childList: true, characterData: true });
@@ -134,6 +137,7 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
   const leaveDialogs = (attached: Page) => { attached.on('dialog', () => undefined); };
   app.context().pages().forEach(leaveDialogs);
   app.context().on('page', leaveDialogs);
+  page.on('console', message => { if (/onboard|Onboard|browser|Browser|driver|error/i.test(message.text())) console.log(`RENDERER ${message.type()} ${message.text().slice(0, 300)}`); });
   try {
     await dismissDialogs(page);
     // A loaded test machine can raise Pane's own machine health cards (memory, disk) over the window at any time.
@@ -165,7 +169,11 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     await browser(pane, agent, 'select', ['--ref', form('combobox "Country"'), '--values', '["Canada"]']);
     await browser(pane, agent, 'click', ['--ref', form('button "Create account"')]);
     // The tab showed who drives while the agent's calls ran.
-    await expect(page.locator('body')).toHaveAttribute('data-saw-driver-chip', /Claude is driving/);
+    await expect(page.locator('body')).toHaveAttribute('data-saw-driver-chip', /Claude is driving/).catch(async (error: unknown) => {
+      console.log(`PROBE now=${await page.evaluate(() => Math.round(performance.now()))}\n` + (await page.evaluate(() => (window as unknown as { __probe?: string[] }).__probe ?? [])).join('\n'));
+      throw error;
+    });
+    console.log('PROBE PASS ' + (await page.evaluate(() => (window as unknown as { __probe?: string[] }).__probe ?? [])).slice(0, 6).join('\n'));
     await shot(page, 'j1-agent-driving');
     const after = await browser(pane, agent, 'snapshot');
     expect(after.snapshot).toContain('Welcome, ada@example.com (ca)');
