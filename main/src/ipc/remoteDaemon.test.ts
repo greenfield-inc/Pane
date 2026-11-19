@@ -293,6 +293,9 @@ describe('remote daemon IPC', () => {
       enabled: true,
       listenPort: 42138,
     };
+    // A health refresh looks up where Pane is installed: `where` twice on Windows, which on a busy runner
+    // outlasted the 5 s test timeout. This test is about the state the handler returns, not that lookup.
+    vi.spyOn(remoteHostRuntimeStateStore, 'refreshExecutableHealth').mockImplementation(async () => remoteHostRuntimeStateStore.getState());
     remoteHostRuntimeStateStore.setLive(hostConfig, {
       host: '127.0.0.1',
       port: 42138,
