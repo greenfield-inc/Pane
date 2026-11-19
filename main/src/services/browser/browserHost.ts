@@ -70,6 +70,8 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
         return;
       }
       const paint = new Set(painting);
+      // While another device streams a tab, the window keeps painting even when minimized or covered.
+      window.webContents.setBackgroundThrottling(paint.size === 0);
       window.webContents.send(BROWSER_HELD_EVENT, { tabs: tabIds.map(panelId => ({ panelId, sessionId: panelManager.getPanel(panelId)?.sessionId, painting: paint.has(panelId) })) });
       // The window is back: its tabs hold the pages now, so the hidden windows go.
       holdHeadless([]);

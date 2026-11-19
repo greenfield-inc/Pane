@@ -643,3 +643,66 @@ describe('browser tabs: streaming a page to another screen', () => {
     expect(await frame(fixture, 'mine', 0)).toEqual({ stopped: 'asleep' });
   });
 });
+
+describe('browser tools: every call answers by a deadline', () => {
+  it('fails a screenshot of a page that gives no picture (a minimized window) quickly, saying why', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds: { screenshotMs: 200 } });
+    const page = fixture.pages.get('mine');
+    const paints = page?.capturePage;
+    Object.assign(page ?? {}, { capturePage: () => new Promise(() => undefined) });
+    const started = Date.now();
+    await expect(call(fixture, 'screenshot', {})).rejects.toMatchObject({ code: 'ERR_BROWSER_SCREENSHOT_TIMEOUT', message: expect.stringContaining('minimized or covered') });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // Other calls go on, and once the window is back the next screenshot isn't stuck behind the lost one.
+    expect(await call(fixture, 'snapshot', {})).toMatchObject({ ok: true });
+    Object.assign(page ?? {}, { capturePage: paints });
+    expect(await call(fixture, 'screenshot', {})).toMatchObject({ ok: true, mimeType: 'image/png' });
+  });
+
+  it('fails any other call that stops answering, saying it may still finish', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds: { callMs: 200 } });
+    Object.assign(fixture.pages.get('mine') ?? {}, { executeJavaScriptInIsolatedWorld: () => new Promise(() => undefined) });
+    await expect(call(fixture, 'snapshot', {})).rejects.toMatchObject({ code: 'ERR_BROWSER_CALL_TIMEOUT' });
+  });
+});
+
+describe('browser tools: a dialog open on the page', () => {
+  it('refuses a screenshot at once instead of waiting on the blocked page', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
+    await call(fixture, 'snapshot', {});
+    fixture.pages.get('mine')?.debugger.emit('message', {}, 'Page.javascriptDialogOpening', { type: 'alert', message: 'Saved' });
+    await expect(call(fixture, 'screenshot', {})).rejects.toMatchObject({ code: 'ERR_BROWSER_DIALOG_PENDING', message: expect.stringContaining('an alert dialog') });
+  });
+});
+
+describe('browser tools: Take over pressed during a call', () => {
+  it('keeps the person driving after the call ends, shows it, and holds the agent\'s next call until Hand to', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
+    const page = fixture.pages.get('mine');
+    await call(fixture, 'snapshot', {});
+    // A slow click: the person presses Take over while it runs.
+    let finish = () => {};
+    const sendCommand = page?.debugger.sendCommand;
+    if (!page || !sendCommand) throw new Error('no page');
+    page.debugger.sendCommand = async (method, params) => {
+      if (method === 'Input.dispatchMouseEvent') await new Promise<void>(resolve => { finish = resolve; });
+      return sendCommand(method, params);
+    };
+    const clicking = call(fixture, 'click', { x: 5, y: 5 });
+    await vi.waitFor(() => expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"agent"'));
+    expect(await fixture.registry.invokeRemote('browser:driver', ['mine', 'person', 'phone-1'], { caller: undefined })).toEqual({ success: true });
+    page.debugger.sendCommand = sendCommand;
+    finish();
+    await clicking;
+    // The chip still says the person drives, after the agent's chip would have lingered out.
+    await new Promise(resolve => setTimeout(resolve, 2_300));
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"person"');
+    let settled = false;
+    const next = call(fixture, 'click', { x: 5, y: 5 }).finally(() => { settled = true; });
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(settled).toBe(false);
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"agentWaiting"');
+    await fixture.registry.invokeRemote('browser:driver', ['mine', 'agent', 'phone-1'], { caller: undefined });
+    expect(await next).toMatchObject({ ok: true });
+  });
+});
