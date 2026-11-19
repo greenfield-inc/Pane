@@ -210,8 +210,12 @@ function AddReferenceForm({ typed, onAdd, onCancel }: {
   const address = paneSecretKey(project.trim(), name.trim());
   const add = async () => {
     setBusy(true);
-    const added = await onAdd(project.trim(), name.trim(), reference.trim());
-    setBusy(false);
+    let added = false;
+    try {
+      added = await onAdd(project.trim(), name.trim(), reference.trim());
+    } finally {
+      setBusy(false);
+    }
     if (added) onCancel();
   };
   const submit = (event: FormEvent) => {
@@ -285,9 +289,14 @@ function Check({ label, checked, disabled, onChange, note }: { label: string; ch
   );
 }
 
-function toggled(list: string[], value: string, on: boolean): string[] {
-  return on ? [...list.filter((item) => item !== value), value] : list.filter((item) => item !== value);
+function toggled(set: ReadonlySet<string>, value: string, on: boolean): Set<string> {
+  const next = new Set(set);
+  if (on) next.add(value);
+  else next.delete(value);
+  return next;
 }
+
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
 
 /** Start lease: the project's references and the machines to hold them, defaulting to all names on this desktop. */
 function StartLeaseForm({ project, references, machines, lengthMs, now, onStart, onCancel }: {
@@ -299,19 +308,23 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
   onStart: (request: SecretLeaseStartRequest) => Promise<boolean>;
   onCancel: () => void;
 }) {
-  const [names, setNames] = useState(() => references.map((reference) => reference.name));
-  const [picked, setPicked] = useState<string[]>(() => machines.some((machine) => machine.id === 'local' && !machine.refusal) ? ['local'] : []);
+  const [names, setNames] = useState(() => new Set(references.map((reference) => reference.name)));
+  const [picked, setPicked] = useState(() => new Set(machines.some((machine) => machine.id === 'local' && !machine.refusal) ? ['local'] : []));
   const [busy, setBusy] = useState(false);
   const start = async (event: FormEvent) => {
     event.preventDefault();
     setBusy(true);
-    // Sent in the order shown, whatever order they were ticked in.
-    const ok = await onStart({
-      project,
-      names: references.map((reference) => reference.name).filter((name) => names.includes(name)),
-      machines: machines.map((machine) => machine.id).filter((id) => picked.includes(id)),
-    });
-    setBusy(false);
+    let ok = false;
+    try {
+      // Sent in the order shown, whatever order they were ticked in.
+      ok = await onStart({
+        project,
+        names: references.flatMap((reference) => (names.has(reference.name) ? [reference.name] : [])),
+        machines: machines.flatMap((machine) => (picked.has(machine.id) ? [machine.id] : [])),
+      });
+    } finally {
+      setBusy(false);
+    }
     if (ok) onCancel();
   };
   return (
@@ -319,7 +332,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
       <fieldset className="space-y-1.5">
         <legend className="mb-1 text-xs font-medium text-text-secondary">Secrets</legend>
         {references.map((reference) => (
-          <Check key={reference.name} label={reference.name} checked={names.includes(reference.name)} onChange={(on) => setNames(toggled(names, reference.name, on))} />
+          <Check key={reference.name} label={reference.name} checked={names.has(reference.name)} onChange={(on) => setNames(toggled(names, reference.name, on))} />
         ))}
       </fieldset>
       <fieldset className="space-y-1.5">
@@ -328,7 +341,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
           <Check
             key={machine.id}
             label={machine.name}
-            checked={picked.includes(machine.id)}
+            checked={picked.has(machine.id)}
             disabled={Boolean(machine.refusal)}
             note={machine.refusal ?? (machine.memoryOnly ? 'Held in memory: ends if Pane restarts there.' : null)}
             onChange={(on) => setPicked(toggled(picked, machine.id, on))}
@@ -340,7 +353,7 @@ function StartLeaseForm({ project, references, machines, lengthMs, now, onStart,
       </p>
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" size="sm" className="min-w-[7.5rem]" loading={busy} disabled={busy || names.length === 0 || picked.length === 0}>Start lease</Button>
+        <Button type="submit" size="sm" className="min-w-[7.5rem]" loading={busy} disabled={busy || names.size === 0 || picked.size === 0}>Start lease</Button>
       </div>
     </form>
   );
@@ -352,9 +365,12 @@ function MoveVaultPicker({ moveVault, run }: { moveVault: string | null; run: Ru
   const [loading, setLoading] = useState(false);
   const load = async () => {
     setLoading(true);
-    const outcome = await run(() => window.electronAPI.paneSecrets.listVaults(), 'Pane could not list your 1Password vaults.');
-    setLoading(false);
-    if (outcome.ok) setVaults(outcome.data ?? []);
+    try {
+      const outcome = await run(() => window.electronAPI.paneSecrets.listVaults(), 'Pane could not list your 1Password vaults.');
+      if (outcome.ok) setVaults(outcome.data ?? []);
+    } finally {
+      setLoading(false);
+    }
   };
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="pane-secrets-move-vault">
@@ -470,16 +486,14 @@ function ProjectSection({ project, overview, now, run, set, remove }: {
 }) {
   const [leasing, setLeasing] = useState(false);
   const [result, setResult] = useState<SecretLeaseStartResult | null>(null);
-  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
   const secrets = overview.secrets.filter((secret) => secret.project === project).sort(byName);
   const references = overview.references.filter((reference) => reference.project === project).sort(byName);
   const lengthMs = overview.leaseLengths[project] ?? SECRET_LEASE_DEFAULT_MS;
-  const leasedUntil = (name: string): number | null => {
-    const ends = overview.leases
-      .filter((lease) => lease.machineId === 'local' && lease.project === project && lease.names.includes(name))
-      .map((lease) => Date.parse(lease.expiresAt));
-    return ends.length ? Math.max(...ends) : null;
-  };
+  const leasedUntil = (name: string): number | null => overview.leases.reduce<number | null>((latest, lease) => {
+    if (lease.machineId !== 'local' || lease.project !== project || !lease.names.includes(name)) return latest;
+    const ends = Date.parse(lease.expiresAt);
+    return latest === null || ends > latest ? ends : latest;
+  }, null);
   const start = async (request: SecretLeaseStartRequest) => {
     const outcome = await run(() => window.electronAPI.paneSecrets.startLease(request), `Pane could not start a lease for ${project}.`);
     if (outcome.ok) setResult(outcome.data ?? null);
