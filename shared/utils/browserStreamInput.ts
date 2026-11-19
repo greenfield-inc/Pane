@@ -65,3 +65,21 @@ export function browserInputQueue(send: (batch: BrowserInput[]) => Promise<Brows
     void pump();
   };
 }
+
+/** Presses closer together than this, in time and distance, count as a double or triple click. */
+const MULTI_CLICK_MS = 500;
+const MULTI_CLICK_PX = 5;
+
+/**
+ * Counts clicks the way the OS does, for pointer events (whose `detail` Chromium leaves at 0):
+ * each press at about the same place soon after the last adds one, up to a triple click.
+ */
+export function clickCounter(): (x: number, y: number, at: number) => number {
+  let last: { x: number; y: number; at: number; count: number } | undefined;
+  return (x, y, at) => {
+    const again = last !== undefined && at - last.at < MULTI_CLICK_MS && Math.hypot(x - last.x, y - last.y) <= MULTI_CLICK_PX;
+    const count = again && last ? (last.count % 3) + 1 : 1;
+    last = { x, y, at, count };
+    return count;
+  };
+}

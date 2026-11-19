@@ -3,7 +3,7 @@ import { MousePointer2 } from 'lucide-react';
 import type { BrowserInputResult } from '../../../../../../shared/types/browserStream';
 import { cn } from '../../../../utils/cn';
 import { DriverChip } from '../../device/DeviceToolViews';
-import { browserInputQueue, fitFrame, modifiersOf, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
+import { browserInputQueue, clickCounter, fitFrame, modifiersOf, pagePoint } from '../../../../../../shared/utils/browserStreamInput';
 import type { BrowserStream, StreamStop } from './useBrowserStream';
 import type { BrowserStreamClient } from './streamClient';
 
@@ -127,6 +127,10 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
   const agentNow = view?.driver?.by === 'agent';
   useEffect(() => { if (!mobileSize || agentNow) setInControl(false); }, [mobileSize, agentNow]);
 
+  // Double and triple clicks: pointer events carry no count, so the view counts presses itself.
+  const countClick = useMemo(() => clickCounter(), []);
+  const clicks = useRef(1);
+
   // Touch: a tap clicks, a drag scrolls, a long press is a right click.
   const touch = useRef<{ x: number; y: number; lastX: number; lastY: number; moved: boolean; timer: number | undefined; longPressed: boolean } | undefined>(undefined);
 
@@ -148,7 +152,8 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
       return;
     }
     event.currentTarget.setPointerCapture(event.pointerId);
-    send({ kind: 'mouse', action: 'down', ...point, button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clicks: Math.max(1, event.detail), modifiers: modifiersOf(event) });
+    clicks.current = countClick(event.clientX, event.clientY, event.timeStamp);
+    send({ kind: 'mouse', action: 'down', ...point, button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clicks: clicks.current, modifiers: modifiersOf(event) });
   };
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -192,7 +197,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
     }
     const point = toPage(event);
     if (!point) return;
-    send({ kind: 'mouse', action: 'up', ...point, button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clicks: Math.max(1, event.detail), modifiers: modifiersOf(event) });
+    send({ kind: 'mouse', action: 'up', ...point, button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clicks: clicks.current, modifiers: modifiersOf(event) });
   };
 
   // A wheel turn scrolls the page, never Pane: the listener must not be passive to keep it.
