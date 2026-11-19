@@ -41,6 +41,8 @@ import { paneSecretStore, secretLeaseStore } from '../services/paneSecrets';
 import { secretLeaseService } from '../services/secretLeaseRuntime';
 import type { SecretLeaseStart } from '../services/secretLeaseService';
 import { agentLabel } from '../../../shared/agents';
+import { openExternalUrl } from '../utils/openExternalUrl';
+import { DEFAULT_BROWSER_SETTINGS } from '../../../shared/types/browser';
 
 const MAX_CHOICES = 9;
 const MAX_TEXT = 4_000;
@@ -131,6 +133,7 @@ const notifyCommandSchema = boundary.union(
   idCommand('open-in-pane'),
   idCommand('ask-agent'),
   boundary.object({ type: boundary.literal('open-link'), id: boundary.nonEmptyString, index: boundary.number, paneId: boundary.optional(boundary.nonEmptyString) }),
+  boundary.object({ type: boundary.literal('open-url'), id: boundary.nonEmptyString, url: boundary.nonEmptyString }),
   boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h', 'pane') }),
   boundary.object({ type: boundary.literal('hover-info'), id: boundary.nonEmptyString, hovering: boundary.boolean }),
   boundary.object({ type: boundary.literal('pause'), minutes: boundary.number }),
@@ -420,6 +423,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       const target = 'path' in link ? { filePath: link.path } : link.url.startsWith('file:') ? { url: link.url, title: link.label } : { url: link.url };
       await commandRegistry.invoke('runpane:panels:open', [{ paneId, ...target, placement: 'tab', source: 'user' }]);
     },
+    linksOpenIn: () => services.configManager.getConfig().browser?.openLinksIn ?? DEFAULT_BROWSER_SETTINGS.openLinksIn,
+    openExternal: (url) => openExternalUrl(url),
     rendererArguments: () => buildWindowAppearanceOptions(normalizeAppearance(services.configManager.getConfig()).appearance, false, {}).additionalArguments,
     headless: hasHeadlessDaemonLaunchArg(),
     machine: thisMachineName(),

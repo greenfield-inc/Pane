@@ -1,4 +1,5 @@
 import type { DeviceSettings } from '../../../shared/types/devices';
+import type { BrowserSettings } from '../../../shared/types/browser';
 import type { MachineHealthSettings } from '../../../shared/types/machineHealth';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
@@ -97,6 +98,8 @@ export interface AppConfig {
   chatTabsEnabled?: boolean;
   /** Settings > Devices (docs/DEVICES.md). */
   devices?: Partial<DeviceSettings>;
+  /** Settings > Browser. */
+  browser?: Partial<BrowserSettings>;
   autopilotEnabled?: boolean;
   // Auto-check for updates
   autoCheckUpdates?: boolean;
@@ -240,6 +243,7 @@ export type PreferredShell = NonNullable<AppConfig['preferredShell']>;
 export type PreferredTerminalPowerMode = NonNullable<AppConfig['terminalPowerMode']>;
 
 export interface UpdateConfigRequest {
+  browser?: Partial<BrowserSettings>;
   verbose?: boolean;
   anthropicApiKey?: string;
   openaiApiKey?: string;

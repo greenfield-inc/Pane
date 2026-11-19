@@ -7,5 +7,5 @@ import electronConfig from './playwright.chat-tabs.config';
 // which that step sets.
 export default defineConfig({
   ...electronConfig,
-  testMatch: ['browser-auth-persistence.spec.ts', 'remote-browser-files.spec.ts'],
+  testMatch: ['browser-auth-persistence.spec.ts', 'remote-browser-files.spec.ts', 'browser-agents.spec.ts'],
 });

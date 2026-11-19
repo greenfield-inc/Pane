@@ -16,6 +16,8 @@ import { uploadFileToHost } from '../../utils/hostUpload';
 import type { ChatTurnActions } from './ChatTurns';
 import { SessionApprovalCards } from '../approvals/SessionApprovalCards';
 import ChatTabPanel from './ChatTabPanel';
+import type { ChatRendering } from './chatRendering';
+import { openLink } from '../../utils/openLink';
 
 /** A path the agent reported, relative to the tab's worktree when it is inside it. */
 function worktreeRelative(file: string, cwd: string | undefined): string {
@@ -58,7 +60,10 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
       open: panelId => { void openPaneTarget({ paneId: panel.sessionId, panelId }); },
     },
   }), [cwd, panel.id, panel.sessionId, deviceTabs]);
+  // Links in the chat open beside it, in this Pane (Settings > Links).
+  const rendering = useMemo<ChatRendering>(() => ({ openLink: url => void openLink(url, panel.sessionId) }), [panel.sessionId]);
   return <ChatTabPanel
+    rendering={rendering}
     saveFile={saveFile}
     workers={workers}
     panelId={panel.id}

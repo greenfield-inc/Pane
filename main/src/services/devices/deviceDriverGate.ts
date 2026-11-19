@@ -11,7 +11,14 @@ export interface DeviceDriverGateOptions {
   pollMs: number;
   /** The chip stays this long after an agent's last call, so a run of calls reads as one. */
   lingerMs: number;
+  /** What the tab shows, for the errors an agent gets (default device). */
+  kind?: 'device' | 'browser';
 }
+
+const KIND_TEXT = {
+  device: { code: 'DEVICE', thing: 'device', where: 'device in its tab', handBack: 'press Hand to agent in the device tab' },
+  browser: { code: 'BROWSER', thing: 'browser tab', where: 'browser tab', handBack: 'stop using the page, or press Hand to agent in the tab' },
+} as const;
 
 /**
  * Who drives each device tab: an agent while its device calls run, or the person after Take over.
@@ -46,13 +53,14 @@ export class DeviceDriverGate {
   async run<Result>(tabId: string, agent: string, signal: AbortSignal | undefined, work: () => Promise<Result>): Promise<Result> {
     const deadline = Date.now() + this.options.waitMs;
     for (let driver = await this.driver(tabId); driver?.by === 'person'; driver = this.options.read(tabId)) {
+      const text = KIND_TEXT[this.options.kind ?? 'device'];
       if (signal?.aborted) {
         await this.clearWaiting(tabId, agent);
-        throw new PaneError('ERR_DEVICE_CALL_CANCELLED', 'The agent\'s device call was cancelled while the person had the device. Nothing ran.', 'Call it again once the person hands the device back.');
+        throw new PaneError(`ERR_${text.code}_CALL_CANCELLED`, `The agent's ${text.thing} call was cancelled while the person had the ${text.thing}. Nothing ran.`, `Call it again once the person hands the ${text.thing} back.`);
       }
       if (Date.now() >= deadline) {
         await this.clearWaiting(tabId, agent);
-        throw new PaneError('ERR_DEVICE_PERSON_DRIVING', `The person took over this device in its tab and has not handed it back in ${Math.round(this.options.waitMs / 1000)} seconds. Nothing ran.`, 'Ask them to press Hand to agent in the device tab, then try again.');
+        throw new PaneError(`ERR_${text.code}_PERSON_DRIVING`, `The person took over this ${text.where} and has not handed it back in ${Math.round(this.options.waitMs / 1000)} seconds. Nothing ran.`, `Ask them to ${text.handBack}, then try again.`);
       }
       if (driver.agentWaiting !== agent) await this.options.write(tabId, { by: 'person', agentWaiting: agent });
       await sleep(this.options.pollMs, signal);

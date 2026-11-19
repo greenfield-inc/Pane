@@ -1,6 +1,7 @@
 import fs from 'fs';
 import { app, BrowserWindow, globalShortcut } from 'electron';
 import { AUTOPILOT_OWNER_PANE_PREFIX } from '../../../../shared/types/autopilot';
+import type { LinksOpenIn } from '../../../../shared/types/browser';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -50,6 +51,10 @@ export interface NotifyServiceDependencies {
   findPane: (caller: NotifyCaller) => { paneId: string; panelId?: string; name: string; agentType?: string } | undefined;
   /** Opens a related link as a tab of a Pane (`runpane panels open`); rejects when the Pane can't show it. */
   openLink?: (paneId: string, link: NotifyLink) => Promise<void>;
+  /** Settings > Links: where links from your work open. */
+  linksOpenIn?: () => LinksOpenIn;
+  /** Opens a link in the system browser. */
+  openExternal?: (url: string) => Promise<void>;
   /** Arguments the main window's renderer reads before its first paint (theme). */
   rendererArguments: () => string[];
   /** A headless host has no screen: no floating windows, tray or shortcut; connected screens show its questions. */
@@ -429,6 +434,7 @@ export class NotifyService {
       case 'open-in-pane': await this.openInPane(command.id); return;
       case 'ask-agent': this.askAgentInMainWindow(command.id); return;
       case 'open-link': await this.openLink(command.id, command.index, command.paneId); return;
+      case 'open-url': await this.openUrl(command.id, command.url); return;
       default: {
         const remote = 'id' in command && command.id ? this.queue.remoteTarget(command.id) : null;
         const sent = command.type === 'answer' ? await this.withLease(command, remote?.machineId ?? null) : command;
@@ -496,7 +502,7 @@ export class NotifyService {
    * A command for a saved machine's question: it goes to that machine only, under the id the
    * machine knows the question by. What stays on this screen runs here.
    */
-  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'ask-agent' }>): Promise<void> {
+  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'open-url' | 'ask-agent' }>): Promise<void> {
     const target = this.queue.remoteTarget(command.id);
     if (!target) return;
     if (command.type === 'close' || command.type === 'reopen' || command.type === 'override') {
@@ -617,6 +623,25 @@ export class NotifyService {
     if (!this.queue.snapshot().items.some(candidate => candidate.id === itemId)) return;
     this.windows.closeRound();
     this.navigate({ approval: itemId });
+  }
+
+  /**
+   * A link in a card's text. The floating card's window has no Settings, so main decides: a web link
+   * from a Pane opens beside that Pane in the main window, raised and showing it (the window opens
+   * the tab, as any link from your work); anything else, or System browser in Settings > Links,
+   * opens in the system browser.
+   */
+  private async openUrl(itemId: string, url: string): Promise<void> {
+    const item = this.queue.snapshot().items.find(candidate => candidate.id === itemId);
+    const paneId = item?.source.paneId;
+    const window = this.deps.getMainWindow();
+    const web = /^https?:\/\//i.test(url);
+    if (paneId && web && window && !window.isDestroyed() && this.deps.linksOpenIn?.() !== 'system') {
+      this.navigate({ link: url, paneId });
+      return;
+    }
+    if (!this.deps.openExternal) throw new PaneError('ERR_NOTIFY_LINK_OPEN', 'Pane has no way to open links here, so nothing was opened.', 'Copy the link and open it yourself.');
+    await this.deps.openExternal(url);
   }
 
   /**

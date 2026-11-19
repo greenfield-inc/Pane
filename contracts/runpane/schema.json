@@ -961,6 +961,22 @@
         "devices close",
         "devices usage",
         "devices free",
+        "browser",
+        "browser open",
+        "browser tabs",
+        "browser close",
+        "browser snapshot",
+        "browser screenshot",
+        "browser click",
+        "browser type",
+        "browser press",
+        "browser select",
+        "browser scroll",
+        "browser navigate",
+        "browser wait",
+        "browser dialog",
+        "browser evaluate",
+        "browser upload",
         "theme",
         "theme read",
         "theme set",
@@ -1169,6 +1185,54 @@
         "devices free": {
           "$ref": "#/$defs/helpLines"
         },
+        "browser": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser open": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser tabs": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser close": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser snapshot": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser screenshot": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser click": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser type": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser press": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser select": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser scroll": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser navigate": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser wait": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser dialog": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser evaluate": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "browser upload": {
+          "$ref": "#/$defs/helpLines"
+        },
         "theme": {
           "$ref": "#/$defs/helpLines"
         },
@@ -1296,9 +1360,6 @@
           "$ref": "#/$defs/helpLines"
         },
         "panels conversation": {
-          "$ref": "#/$defs/helpLines"
-        },
-        "panels close": {
           "$ref": "#/$defs/helpLines"
         },
         "agent-context": {
@@ -1548,17 +1609,26 @@
       "properties": {
         "intro": {
           "type": "object",
-          "required": ["humans", "agents"],
+          "required": [
+            "humans",
+            "agents"
+          ],
           "properties": {
-            "humans": { "$ref": "#/$defs/agentContextIntroPart" },
-            "agents": { "$ref": "#/$defs/agentContextIntroPart" }
+            "humans": {
+              "$ref": "#/$defs/agentContextIntroPart"
+            },
+            "agents": {
+              "$ref": "#/$defs/agentContextIntroPart"
+            }
           },
           "additionalProperties": false,
           "description": "What Pane is and how to work in it, people first, then agents. The surfaces agents and people read first render it."
         },
         "workspaceRules": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1,
           "description": "Where work goes in Pane: Session, Pane, tab and scratch."
         },
@@ -1587,27 +1657,53 @@
     "notifyGuidance": {
       "description": "The notify rules every agent needs before it asks: Pane's user-level instruction block reads them. How to write the card lives in the notify command's notes, which agents read when they call it.",
       "type": "object",
-      "required": ["rules"],
+      "required": [
+        "rules"
+      ],
       "properties": {
-        "rules": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
       },
       "additionalProperties": false
     },
     "agentContextIntroPart": {
       "type": "object",
-      "required": ["title", "sentences", "approvals"],
+      "required": [
+        "title",
+        "sentences",
+        "approvals"
+      ],
       "properties": {
-        "title": { "type": "string" },
+        "title": {
+          "type": "string"
+        },
         "sentences": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "minItems": 1,
           "description": "One entry is the literal \"{approvals}\", replaced by approvals.on or approvals.off from the live Approvals setting."
         },
         "approvals": {
           "type": "object",
-          "required": ["on", "off"],
-          "properties": { "on": { "type": "string" }, "off": { "type": "string" } },
+          "required": [
+            "on",
+            "off"
+          ],
+          "properties": {
+            "on": {
+              "type": "string"
+            },
+            "off": {
+              "type": "string"
+            }
+          },
           "additionalProperties": false
         }
       },

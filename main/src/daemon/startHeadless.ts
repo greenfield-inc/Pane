@@ -57,6 +57,9 @@ export function startHeadlessPaneProcess(): void {
   if (process.platform === 'darwin') {
     app.dock?.hide();
   }
+  // The only windows here are the hidden ones holding agents' browser tabs: the host keeps running
+  // when the last of them closes, as it does before the first opens.
+  app.on('window-all-closed', () => {});
 
   app.whenReady().then(async () => {
     daemonHost = await startHeadlessHost(

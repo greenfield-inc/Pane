@@ -17,6 +17,7 @@ import { NotifySettings } from './settings/categories/NotifySettings';
 import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings';
 import { IntegrationsSettings } from './settings/categories/IntegrationsSettings';
 import { DevicesSettings } from './settings/categories/DevicesSettings';
+import { BrowserSettings } from './settings/categories/BrowserSettings';
 import { SecretsSettings } from './settings/categories/SecretsSettings';
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
 import { PrivacySettings } from './settings/categories/PrivacySettings';
@@ -239,6 +240,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <SecretsSettings />;
       case 'devices':
         return <DevicesSettings />;
+      case 'browser':
+        return <BrowserSettings persistence={persistence} />;
       case 'shortcuts':
         return <ShortcutsSettings persistence={persistence} platform={platform} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':

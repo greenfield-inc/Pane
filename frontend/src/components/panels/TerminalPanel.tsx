@@ -66,6 +66,7 @@ import { markTerminalRevealed, wasTerminalRevealed } from '../../utils/revealedT
 import { TerminalSkeleton } from './TerminalSkeleton';
 import { noteTerminalCell } from '../../utils/terminalCellSize';
 import { REVEAL_MS, useSkeletonHold } from '../ui/Skeleton';
+import { openLink } from '../../utils/openLink';
 import { flushSync } from 'react-dom';
 import '@xterm/xterm/css/xterm.css';
 
@@ -1165,7 +1166,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
                 void openPaneLink(uri).catch(error => console.error('[TerminalPanel] Failed to open Pane link:', error));
                 return;
               }
-              void window.electronAPI.openExternal(uri).catch((error) => {
+              void openLink(uri, panel.sessionId).catch((error) => {
                 console.error('[TerminalPanel] Failed to open terminal link:', error);
               });
             },
@@ -1346,7 +1347,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
               const webLinksAddon = new WebLinksAddonImpl((event, uri) => {
                 // Only open link if Ctrl (Windows/Linux) or Cmd (Mac) is held
                 if (isMac ? event.metaKey : event.ctrlKey) {
-                  window.electronAPI.openExternal(uri);
+                  void openLink(uri, panel.sessionId);
                 }
               });
               terminal.loadAddon(webLinksAddon);

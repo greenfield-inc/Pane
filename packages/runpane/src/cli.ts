@@ -15,6 +15,7 @@ import { runLinksCreate } from './links';
 import { runNotify } from './notify';
 import { runLink } from './pairingLink';
 import { runSecretsDelete, runSecretsExec, runSecretsLease, runSecretsLeaseEnd, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
+import { BROWSER_VERBS, runBrowser } from './browser';
 import { runDevicesAct, runDevicesClose, runDevicesFree, runDevicesList, runDevicesOpen, runDevicesRun, runDevicesScreenshot, runDevicesUsage } from './devices';
 import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runMachineCleanup, runMachineHealth } from './machine';
@@ -175,6 +176,8 @@ const THIS_MACHINE_ONLY = new Set<string>([
   'secrets list', 'secrets set', 'secrets delete', 'secrets exec', 'secrets request', 'secrets lease', 'secrets lease end',
   // Device tools act for the calling tab's Pane; a machine without Xcode reaches its Mac itself.
   'devices list', 'devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close', 'devices usage', 'devices free',
+  // Browser tools act on the browser tabs of the calling tab's Pane.
+  ...BROWSER_VERBS.map((verb) => `browser ${verb}`),
 ]);
 
 /** `runpane workspace <machine> <command...>`: the same command, answered by that machine's Pane. */
@@ -282,6 +285,21 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'devices close': async (parsed) => runDevicesClose(parsed),
   'devices usage': async (parsed) => runDevicesUsage(parsed),
   'devices free': async (parsed) => runDevicesFree(parsed),
+  'browser open': async (parsed) => runBrowser(parsed),
+  'browser tabs': async (parsed) => runBrowser(parsed),
+  'browser close': async (parsed) => runBrowser(parsed),
+  'browser snapshot': async (parsed) => runBrowser(parsed),
+  'browser screenshot': async (parsed) => runBrowser(parsed),
+  'browser click': async (parsed) => runBrowser(parsed),
+  'browser type': async (parsed) => runBrowser(parsed),
+  'browser press': async (parsed) => runBrowser(parsed),
+  'browser select': async (parsed) => runBrowser(parsed),
+  'browser scroll': async (parsed) => runBrowser(parsed),
+  'browser navigate': async (parsed) => runBrowser(parsed),
+  'browser wait': async (parsed) => runBrowser(parsed),
+  'browser dialog': async (parsed) => runBrowser(parsed),
+  'browser evaluate': async (parsed) => runBrowser(parsed),
+  'browser upload': async (parsed) => runBrowser(parsed),
   'theme read': async (parsed) => runThemeRead(parsed),
   'theme set': async (parsed) => runThemeSet(parsed),
   'theme reset': async (parsed) => runThemeReset(parsed),

@@ -1,7 +1,7 @@
 import type { MenuItemConstructorOptions, PopupOptions, WebContents } from 'electron';
 import { Menu } from 'electron';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { showContextMenu } from './nativeMenus';
+import { attachEditContextMenu, showContextMenu } from './nativeMenus';
 
 /** The menu showContextMenu built and how it popped it up. */
 interface ShownMenu {
@@ -100,5 +100,30 @@ describe('showContextMenu', () => {
     await vi.runAllTimersAsync();
 
     await expect(choice).resolves.toBe('copy');
+  });
+});
+
+describe('attachEditContextMenu', () => {
+  /** Right-clicks a page that attachEditContextMenu watches, with Electron's context-menu params. */
+  function rightClick(params: Partial<Electron.ContextMenuParams>): void {
+    let listener: ((event: Electron.Event, params: Electron.ContextMenuParams) => void) | undefined;
+    // SAFETY: attachEditContextMenu only subscribes to context-menu here.
+    attachEditContextMenu({ on: (_name: string, next: typeof listener) => { listener = next; } } as WebContents);
+    // SAFETY: The menu reads only these params for a link.
+    const menuParams = { editFlags: {}, isEditable: false, misspelledWord: '', dictionarySuggestions: [], selectionText: '', linkURL: '', ...params } as Electron.ContextMenuParams;
+    // SAFETY: The menu never reads the event.
+    listener?.({} as Electron.Event, menuParams);
+  }
+
+  it('offers a link to the system browser', () => {
+    const shown = captureMenu();
+    rightClick({ linkURL: 'https://github.com/acme/app/pull/12' });
+    expect(shown.template.map(item => item.label)).toEqual(['Open in System Browser', 'Copy Link']);
+  });
+
+  it('shows no menu for a link to a local program or file', () => {
+    vi.mocked(Menu.buildFromTemplate).mockClear();
+    rightClick({ linkURL: 'file:///Applications/Calculator.app' });
+    expect(Menu.buildFromTemplate).not.toHaveBeenCalled();
   });
 });
