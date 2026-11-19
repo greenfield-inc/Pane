@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// pane-pre-push: the marker scripts/git-hooks/pre-push looks for before running this.
 // The pre-push hook (scripts/git-hooks/pre-push, installed by `pnpm run setup`).
 // It lints the files the pushed commits change and, when they touch code or
 // config, runs the type check CI runs (`pnpm typecheck`), side by side, in a few
@@ -89,10 +90,17 @@ const lintAll = everything || lintFiles.length > MAX_LINT_FILES;
 // Deleted files count: removing a module can break the files that import it.
 const typecheck = everything || changed.some((file) => TYPED.test(file.path));
 
+// Worktrees share the clone's hook, but each has its own node_modules.
+if (!dryRun && (lintAll || lintFiles.length > 0 || typecheck) && !fs.existsSync('node_modules/.bin')) {
+  console.log('pre-push: skipped: this worktree has no node_modules. Run pnpm install to check pushes here; CI checks this one.');
+  process.exit(0);
+}
+
 // The tools read the disk, so an uncommitted edit to a checked file would be
 // checked in place of the pushed one.
-const dirty = (git(['status', '--porcelain', '-z', '--untracked-files=no']) ?? '')
-  .split('\0').filter(Boolean).map((entry) => entry.slice(3));
+const status = git(['status', '--porcelain', '-z', '--no-renames', '--untracked-files=no']);
+if (status === null) refuse('could not list uncommitted changes (git status failed).');
+const dirty = status.split('\0').filter(Boolean).map((entry) => entry.slice(3));
 const checkedDirty = dirty.filter((file) => (lintAll ? LINTABLE.test(file) : lintFiles.includes(file))
   || (typecheck && TYPED.test(file)));
 if (checkedDirty.length > 0) {
@@ -112,6 +120,7 @@ if (lintAll) {
 }
 if (lintAll || lintFiles.length > 0) {
   checks.push({ name: 'agent facts', command: process.execPath, args: ['scripts/check-agent-names.mjs'] });
+  checks.push({ name: 'boundary decoder lint conformance', command: process.execPath, args: ['scripts/check-boundary-decoder-conformance.mjs'] });
 }
 // Format: oxfmt --check on the changed files goes here once the repo has a formatter.
 if (typecheck) {
