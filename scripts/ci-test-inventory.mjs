@@ -54,6 +54,7 @@ export const LANES = [
   { workflow: 'quality.yml', job: 'functional-smoke-webgl', run: 'playwright test --config=playwright.ci.webgl.config.ts', list: { playwright: 'playwright.ci.webgl.config.ts' } },
   { workflow: 'quality.yml', job: 'renderer-selection', run: 'playwright test --config=tests/renderer/playwright.config.ts', list: { playwright: 'tests/renderer/playwright.config.ts' } },
   { workflow: 'quality.yml', job: 'functional-smoke-electron', run: 'playwright test --config=playwright.chat-tabs.config.ts', list: { playwright: 'playwright.chat-tabs.config.ts' } },
+  { workflow: 'quality.yml', job: 'functional-smoke-electron', run: 'playwright test --config=playwright.ci.stabilizing-electron.config.ts', list: { playwright: 'playwright.ci.stabilizing-electron.config.ts' }, stabilizing: 'stabilizing: todos-upgrade.spec.ts (R21, added by #1481) hung past its 180 s timeout once on main (run 44596759187) after passing 10 of 10 in probe #1610, cause not yet known; returns to the required Electron specs once it is found' },
   { workflow: 'quality.yml', job: 'functional-smoke-electron', list: { named: ['scripts/test-worktree-trash-electron.cjs'] } },
   { workflow: 'quality.yml', job: 'runpane-wrapper-tests', list: { named: [
     'scripts/test-runpane-package-smoke.js',
