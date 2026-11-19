@@ -1810,7 +1810,7 @@ Both halves stay fully live. A tile that is not focused keeps its agent running
 and its output streaming; nothing is throttled or suspended, so a Session you
 are watching out of the corner of your eye is the same Session you were just
 typing in. Each tile keeps its own tab splits, its own Terminal dock, its own
-Files and Changes sidebar, and its own navigation.
+Files, Changes and To-dos sidebar, and its own navigation.
 
 The focused tile's Session is the selected one: its title row carries the focus
 ring, and clicking a Session in the sidebar focuses its tile when it already has

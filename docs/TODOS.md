@@ -279,6 +279,16 @@ the chat's cards.
   while the Session is shown still opens in the Session's approval column, over
   the split, as every Session's approvals do.
 
+The Session's right sidebar (the details button at the top right) has a
+**To-dos** tab after Files and Changes with the same to-dos, compact: each
+row's status, T-n and title, its sub-to-do progress (2/5) and an amber count
+of the approvals waiting on you. The tab's label carries the same count. A
+click opens the to-do in the split's To-dos tab, bringing that tab forward. With
+none open or closed this week it says so in one quiet line, as Changes does for
+a Session with no Panes. On All machines, a Session on another machine shows
+that machine's to-dos: switching rereads them, and only that machine's
+approvals count, so another computer's T-14 never adds to this one's.
+
 In the web app, an open Session's header has a **To-dos** button with the same
 count. It opens that list full screen; a to-do opens on the phone's to-do
 page, and back returns to the list, then the Session.
