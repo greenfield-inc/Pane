@@ -425,7 +425,7 @@ export class PageDriver {
       this.unfocusLater();
     }
     const field = this.dialog ? null : decodeOptionalBoundary(await this.page('focusedField').catch(() => null), fieldSchema) ?? null;
-    const result: BrowserInputResult = { success: true, field };
+    const result: BrowserInputResult = { field };
     if (copied !== undefined) result.copied = copied;
     return result;
   }

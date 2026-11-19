@@ -29,5 +29,5 @@ export function streamClient(invoke: Invoke): BrowserStreamClient {
 
 /** Whether a failed call means the host has no such channel: an older Pane, which streams nothing. */
 export function isOlderHost(error: Error): boolean {
-  return /ERR_UNKNOWN_CHANNEL|No Pane daemon command registered/i.test(error.message);
+  return /ERR_UNKNOWN_CHANNEL|No Pane daemon command registered|No handler registered/i.test(error.message);
 }

@@ -13,8 +13,6 @@ export const browserFrameAnswerSchema: BoundarySchema<BrowserFrameAnswer> = boun
 );
 
 export const browserInputResultSchema: BoundarySchema<BrowserInputResult> = boundary.object({
-  success: boundary.boolean,
-  error: boundary.optional(boundary.string),
   field: fieldSchema,
   copied: boundary.optional(boundary.string),
 });

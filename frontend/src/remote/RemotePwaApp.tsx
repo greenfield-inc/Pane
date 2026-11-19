@@ -20,6 +20,7 @@ import { RemoteSidebar, type RemoteSidebarActions } from './components/RemoteSid
 import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
 import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
+import { RemoteStreamedBrowser } from './components/RemoteStreamedBrowser';
 import type { RelayPreview } from '../../../shared/utils/phonePage';
 import { RELAY_CLIENT_COMMANDS } from '../../../shared/types/relay';
 import { RemoteExplorerPanel } from './components/RemoteExplorerPanel';
@@ -1377,8 +1378,11 @@ export function RemotePwaApp() {
               tabIndex={0}
               className="flex min-h-0 flex-1 flex-col overflow-hidden"
             >
-              {selectedPanel.type === 'browser' && (
-                <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} onRelayAddress={isRelayComputer ? relayAddress : undefined} />
+              {selectedPanel.type === 'browser' && adapter && (
+                // The page streams from the host; a host on an older Pane gets the page's own copy.
+                <RemoteStreamedBrowser key={selectedPanel.id} adapter={adapter} panel={selectedPanel} hostName={listeningPorts?.host ?? 'the computer'} ownCopy={() => (
+                  <RemoteBrowserPanel panel={selectedPanel} ports={listeningPorts} onRefreshPorts={refreshListeningPorts} onNavigate={url => navigateBrowser(selectedPanel, url)} onRequestAddress={requestPhoneAddress} onError={setLastError} onRelayAddress={isRelayComputer ? relayAddress : undefined} />
+                )} />
               )}
               {selectedPanel.type === 'explorer' && adapter && (
                 <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} panelId={selectedPanel.id} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />

@@ -46,8 +46,9 @@ export function browserInputQueue(send: (batch: BrowserInput[]) => Promise<Brows
       const batch = waiting;
       waiting = [];
       takeControl = false;
-      const result = await send(batch).catch((cause: unknown): BrowserInputResult => ({ success: false, error: cause instanceof Error ? cause.message : String(cause) }));
-      onResult?.(result);
+      // A refused batch is dropped; the next one still goes.
+      const result = await send(batch).catch(() => undefined);
+      if (result) onResult?.(result);
     }
     sending = false;
   };

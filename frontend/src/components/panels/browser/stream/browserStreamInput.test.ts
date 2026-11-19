@@ -23,7 +23,7 @@ describe('browserInputQueue', () => {
     const queue = browserInputQueue(async (batch) => {
       sent.push(batch);
       await new Promise<void>(resolve => { release = resolve; });
-      return { success: true };
+      return {};
     });
     const move = (x: number): BrowserInput => ({ kind: 'mouse', action: 'move', x, y: 0, button: 'none', clicks: 0, modifiers: 0 });
     queue({ kind: 'mouse', action: 'down', x: 1, y: 1, button: 'left', clicks: 1, modifiers: 0 });
@@ -42,7 +42,7 @@ describe('browserInputQueue', () => {
 
   it('sends an empty batch to take control without input', async () => {
     const sent: BrowserInput[][] = [];
-    const queue = browserInputQueue(async (batch) => { sent.push(batch); return { success: true }; });
+    const queue = browserInputQueue(async (batch) => { sent.push(batch); return {}; });
     queue(null);
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(sent).toEqual([[]]);

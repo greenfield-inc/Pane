@@ -551,7 +551,7 @@ describe('browser tabs: streaming a page to another screen', () => {
       { kind: 'touch', action: 'start', x: 10, y: 20 },
       { kind: 'touch', action: 'end', x: 10, y: 20 },
       { kind: 'wheel', x: 10, y: 20, dx: 0, dy: 300 },
-    ])).toMatchObject({ success: true });
+    ])).toEqual({ field: null });
     const inputs = (page?.sent ?? []).filter(method => method.startsWith('Input.'));
     expect(inputs).toEqual(['Input.dispatchTouchEvent', 'Input.dispatchTouchEvent', 'Input.dispatchMouseEvent']);
     expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"person"');

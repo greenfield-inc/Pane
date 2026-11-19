@@ -17,12 +17,17 @@ const TAP_SLOP_PX = 8;
 const PAGE_KEYS = new Set(['Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 /** Editing chords (with Cmd or Ctrl) the page gets; every other chord stays Pane's hotkey. */
 const EDIT_CHORDS = new Set(['a', 'c', 'x', 'z']);
+/**
+ * The text field always holds this zero-width character, so a phone keyboard's Backspace on an
+ * empty field still deletes something and shows up (Android sends no key for it).
+ */
+const SENTINEL = '\u200b';
 
 /** The line a stopped stream shows over its last frame, dimmed. */
-export function stopLine(stop: StreamStop, host: string): string {
+export function stopLine(stop: StreamStop, host: string, phone = false): string {
   switch (stop) {
     case 'unreachable': return `${host} can't be reached (asleep or offline). The page resumes when it's back.`;
-    case 'asleep': return 'This tab is asleep. Click to wake it.';
+    case 'asleep': return `This tab is asleep. ${phone ? 'Tap' : 'Click'} to wake it.`;
     case 'gone': return `This tab closed on ${host}.`;
     case 'older': return `${host} is on an older Pane. Showing your own copy.`;
   }
@@ -34,8 +39,10 @@ interface BrowserStreamViewProps {
   stream: BrowserStream & { wake(): void };
   /** The host's name until its state arrives. */
   hostName: string;
-  /** Hears the kind of field focused after each input, so a phone can open its keyboard. */
-  onField?: (field: 'text' | 'password' | null) => void;
+  /** A phone: the first tap only takes control (the page gets the phone's size), and a tap into a field opens the keyboard. */
+  phone?: boolean;
+  /** Set by the view: focuses its text field, opening a phone's keyboard (the keyboard button). */
+  keyboardRef?: { current: (() => void) | null };
 }
 
 /**
@@ -44,10 +51,15 @@ interface BrowserStreamViewProps {
  * and goes to the host in order. Shows who drives, the agent's cursor, the page's dialogs and file
  * pickers, downloads and why the stream stopped.
  */
-export function BrowserStreamView({ client, panelId, stream, hostName, onField }: BrowserStreamViewProps) {
+export function BrowserStreamView({ client, panelId, stream, hostName, phone = false, keyboardRef }: BrowserStreamViewProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const keysRef = useRef<HTMLTextAreaElement>(null);
+  const keysRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!keyboardRef) return;
+    keyboardRef.current = () => keysRef.current?.focus({ preventScroll: true });
+    return () => { keyboardRef.current = null; };
+  }, [keyboardRef]);
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [field, setField] = useState<'text' | 'password' | null>(null);
   const { frame, view, stop } = stream;
@@ -58,9 +70,11 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     if (result.copied) void navigator.clipboard.writeText(result.copied).catch(() => undefined);
     if (result.field !== undefined) {
       setField(result.field);
-      onField?.(result.field);
+      // A tap into a field opens the phone's keyboard; elsewhere it closes.
+      if (phone && result.field) keysRef.current?.focus({ preventScroll: true });
+      else if (phone) keysRef.current?.blur();
     }
-  }, [onField]);
+  }, [phone]);
   const send = useMemo(() => browserInputQueue(batch => client.input(panelId, batch), onResult), [client, panelId, onResult]);
 
   useLayoutEffect(() => {
@@ -106,6 +120,12 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     return pagePoint(event.clientX - rect.left, event.clientY - rect.top, box, page);
   };
 
+  // A phone controls the page once it took control: the page has the phone's size.
+  const [inControl, setInControl] = useState(false);
+  const mobileSize = view?.size?.mobile === true;
+  const agentNow = view?.driver?.by === 'agent';
+  useEffect(() => { if (!mobileSize || agentNow) setInControl(false); }, [mobileSize, agentNow]);
+
   // Touch: a tap clicks, a drag scrolls, a long press is a right click.
   const touch = useRef<{ x: number; y: number; lastX: number; lastY: number; moved: boolean; timer: number | undefined; longPressed: boolean } | undefined>(undefined);
 
@@ -114,7 +134,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     const point = toPage(event);
     if (!point) return;
     event.preventDefault();
-    keysRef.current?.focus({ preventScroll: true });
+    if (!phone) keysRef.current?.focus({ preventScroll: true });
     if (event.pointerType === 'touch') {
       const timer = window.setTimeout(() => {
         const current = touch.current;
@@ -157,6 +177,12 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       if (!current) return;
       window.clearTimeout(current.timer);
       const point = toPage({ clientX: current.x, clientY: current.y });
+      if (phone && !inControl && !current.moved && !current.longPressed) {
+        // The first tap only takes control: the page resizes to the phone and gets its phone layout.
+        setInControl(true);
+        send(null);
+        return;
+      }
       if (!current.moved && !current.longPressed && point) {
         send({ kind: 'touch', action: 'start', ...point });
         send({ kind: 'touch', action: 'end', ...point });
@@ -185,7 +211,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     return () => element.removeEventListener('wheel', onWheel);
   }, [page, send]);
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return;
     const chord = event.metaKey || event.ctrlKey;
     if (chord) {
@@ -204,8 +230,13 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
   const onInput = () => {
     const keys = keysRef.current;
     if (!keys || composing.current) return;
-    const text = keys.value;
-    keys.value = '';
+    const typed = keys.value;
+    keys.value = SENTINEL;
+    if (!typed.includes(SENTINEL)) {
+      // The keyboard deleted the sentinel: a Backspace, then whatever replaced it.
+      send({ kind: 'key', key: 'Backspace', modifiers: 0 });
+    }
+    const text = typed.replaceAll(SENTINEL, '');
     if (text) send({ kind: 'text', text });
   };
   const composing = useRef(false);
@@ -251,14 +282,19 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
         className={cn('absolute transition-opacity duration-200', stop ? 'opacity-40' : 'opacity-100')}
         style={{ left: drawn.left, top: drawn.top, width: drawn.width, height: drawn.height }}
       />
-      <textarea
+      <input
         ref={keysRef}
+        // A password field gets the keyboard's secure mode; nothing typed stays in this field.
+        type={field === 'password' ? 'password' : 'text'}
+        defaultValue={SENTINEL}
         aria-label="Type into the page"
         autoCapitalize="off"
-        autoComplete={field === 'password' ? 'current-password' : 'off'}
+        autoComplete="off"
         autoCorrect={field === 'password' ? 'off' : 'on'}
         spellCheck={false}
-        className="absolute left-0 top-0 h-px w-px resize-none border-0 bg-transparent p-0 text-[16px] opacity-0"
+        enterKeyHint="go"
+        // 16 px keeps iOS from zooming the page when the field takes focus.
+        className="absolute left-0 top-0 h-px w-px border-0 bg-transparent p-0 text-[16px] opacity-0"
         onKeyDown={onKeyDown}
         onInput={onInput}
         onCompositionStart={() => { composing.current = true; }}
@@ -285,7 +321,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       </div>
       {stop && stop !== 'older' && (
         <div role="status" className="absolute inset-x-0 bottom-0 flex justify-center p-3">
-          <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">{stopLine(stop, host)}</p>
+          <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">{stopLine(stop, host, phone)}</p>
         </div>
       )}
       {!frame && !stop && (
