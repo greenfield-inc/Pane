@@ -12,6 +12,7 @@ import { getPricingSource } from './modelPricing';
 import { OpenRouterPriceProvider } from './openRouterPriceProvider';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { agentLogsDirectory } from '../archiveRetention';
+import { readUsageAccounts } from './usageAccounts';
 import {
   DEFAULT_USAGE_RANGE_DAYS,
   USAGE_PARSER_VERSION,
@@ -171,6 +172,7 @@ export class UsageManager {
       byProject: this.aggregator.getByProject(fromMs, toMs, providers),
       byPane: this.aggregator.getByPane(fromMs, toMs, providers),
       rateLimits: this.safeRateLimits(nowMs, providers),
+      accounts: readUsageAccounts().filter(account => !providers?.length || providers.includes(account.provider)),
       index: this.getStatus(),
       pricingAsOf: getPricingSource(),
     };

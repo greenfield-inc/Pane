@@ -639,20 +639,28 @@ describe('NotifyQueue with its store', () => {
     expect(item(queue, 'in-1')?.state).toBe('waiting');
   });
 
-  it('stays inside the sweep budget with 5,000 waiting items', () => {
-    const insert = db.transaction(() => {
-      for (let index = 0; index < 5_000; index += 1) {
-        store.saveItem({ id: `row-${index}`, ui: 'ask', title: `t${index}`, state: 'waiting', createdAt: Date.now(), source: worker });
-      }
-    });
-    insert();
-    vi.useRealTimers();
-    const queue = queueWith();
-    expect(queue.snapshot().queue).toHaveLength(5_000);
-    const start = performance.now();
-    queue.sweep();
-    expect(performance.now() - start).toBeLessThan(20);
-    queue.dispose();
-    vi.useFakeTimers();
+  it('touches the store the same few times per sweep with 500 or 5,000 waiting items', () => {
+    const sweepStatements = (waiting: number) => {
+      const statements: string[] = [];
+      const counted = new Database(':memory:', { verbose: sql => statements.push(String(sql)) });
+      store = new ApprovalStore(counted, 'mini');
+      counted.transaction(() => {
+        for (let index = 0; index < waiting; index += 1) {
+          store.saveItem({ id: `row-${index}`, ui: 'ask', title: `t${index}`, state: 'waiting', createdAt: Date.now(), source: worker });
+        }
+      })();
+      const queue = queueWith();
+      expect(queue.snapshot().queue).toHaveLength(waiting);
+      statements.length = 0;
+      queue.sweep();
+      const swept = [...statements];
+      queue.dispose();
+      counted.close();
+      return swept;
+    };
+    // Items that need no change cost the sweep no reads or writes: its one statement is the retention prune.
+    const few = sweepStatements(500);
+    expect(few).toEqual([expect.stringMatching(/^DELETE FROM approvals WHERE ended_at/u)]);
+    expect(sweepStatements(5_000)).toEqual(few);
   });
 });

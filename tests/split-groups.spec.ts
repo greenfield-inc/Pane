@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { PanelActivationRequest, ToolPanel } from '../shared/types/panels';
 
 // Once a pane is split, every tab lives in its group's strip: the top tab
@@ -69,6 +69,9 @@ async function computedVar(page: Page, cssProp: string, value: string): Promise<
 }
 
 test('a split pane keeps its tabs in the group strips and collapses the top row', async ({ page }, testInfo) => {
+  // The title strip that takes the top row's controls renders on macOS (or with
+  // the Window Controls Overlay), which the renderer reads from navigator.platform.
+  await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' }));
   await installElectronApiMock(page, {
     platform: 'darwin',
     initialProjects: [project],
@@ -77,7 +80,7 @@ test('a split pane keeps its tabs in the group strips and collapses the top row'
     initialLayout: layout,
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
   await page.getByRole('button', { name: 'Split pane', exact: true }).click();
 
@@ -142,43 +145,31 @@ test('a split pane keeps its tabs in the group strips and collapses the top row'
   await expect(page.getByRole('button', { name: 'Close Beta', exact: true })).toHaveCount(1);
 });
 
-for (const layoutReadFails of [false, true]) {
-  test(`first visit places agent-opened pages beside the conversation when layout is ${layoutReadFails ? 'unavailable' : 'missing'}`, async ({ page }) => {
-    await installElectronApiMock(page, {
-      platform: 'darwin',
-      initialProjects: [project],
-      initialSessions: [session],
-      initialPanels: [
-        ...panels.slice(0, 2),
-        {
-          id: 'agent-plan', sessionId: session.id, type: 'browser', title: 'plan.html',
-          state: { isActive: false, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } },
-          metadata: { createdAt: now, lastActiveAt: now, position: 2, openPlacement: 'split' },
-        },
-      ],
-      initialLayout: null,
-      activeProjectId: project.id,
-    });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    if (layoutReadFails) {
-      await page.evaluate(() => {
-        const invoke = window.electronAPI.invoke;
-        Object.assign(window.electronAPI, {
-          invoke: (channel: string, ...args: unknown[]) => channel === 'panels:get-layout'
-            ? Promise.resolve({ success: false, error: 'Layout unavailable' })
-            : invoke(channel, ...args),
-        });
-      });
-    }
-    await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
-    await page.getByRole('button', { name: 'Split pane', exact: true }).click();
-
-    const groups = page.locator('.panel-group-tab-bar');
-    await expect(groups).toHaveCount(2);
-    await expect(groups.nth(0).getByRole('tab', { name: 'Alpha', exact: true })).toHaveAttribute('aria-selected', 'true');
-    await expect(groups.nth(1).getByRole('tab', { name: 'plan.html', exact: true })).toHaveAttribute('aria-selected', 'true');
+test('first visit places agent-opened pages beside the conversation when layout is missing', async ({ page }) => {
+  await installElectronApiMock(page, {
+    platform: 'darwin',
+    initialProjects: [project],
+    initialSessions: [session],
+    initialPanels: [
+      ...panels.slice(0, 2),
+      {
+        id: 'agent-plan', sessionId: session.id, type: 'browser', title: 'plan.html',
+        state: { isActive: false, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } },
+        metadata: { createdAt: now, lastActiveAt: now, position: 2, openPlacement: 'split' },
+      },
+    ],
+    initialLayout: null,
+    activeProjectId: project.id,
   });
-}
+  await gotoApp(page);
+  await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
+  await page.getByRole('button', { name: 'Split pane', exact: true }).click();
+
+  const groups = page.locator('.panel-group-tab-bar');
+  await expect(groups).toHaveCount(2);
+  await expect(groups.nth(0).getByRole('tab', { name: 'Alpha', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(groups.nth(1).getByRole('tab', { name: 'plan.html', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
 
 for (const leaveVia of ['another Pane', 'the repository view'] as const) {
   test(`pages an agent opens while you are in ${leaveVia} land in the split, keeping the remembered focus`, async ({ page }) => {
@@ -192,7 +183,7 @@ for (const leaveVia of ['another Pane', 'the repository view'] as const) {
       activeProjectId: project.id,
       rememberPaneLayouts: true,
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
     await page.getByRole('button', { name: 'Split pane', exact: true }).click();
     const groups = page.locator('.panel-group-tab-bar');

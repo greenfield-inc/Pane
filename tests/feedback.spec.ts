@@ -1,6 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 type FeedbackMock = {
   getFeedbackSubmissions: () => SubmitFeedbackRequest[];
@@ -9,7 +9,7 @@ type FeedbackMock = {
 
 async function bootApp(page: Page, options: Parameters<typeof installElectronApiMock>[1] = {}) {
   await installElectronApiMock(page, options);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
 }
 

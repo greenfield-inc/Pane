@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const project = {
   id: 381,
@@ -51,7 +51,7 @@ test('upload button sends picked files through the chunked upload', async ({ pag
     initialTerminalStates: Object.fromEntries(panels.map((panel) => [panel.id, { scrollbackBuffer: 'ready\r\n' }])),
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal upload fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 
