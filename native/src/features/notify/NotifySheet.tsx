@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { originLine } from '@shared/approvalReceipts';
-import type { NotifyAnswer, NotifyChoice, NotifyItem, NotifyRemoteCommand } from '@shared/types/notify';
+import type { NotifyAnswer, NotifyChoice, NotifyItem, NotifyLeaseTarget, NotifyRemoteCommand } from '@shared/types/notify';
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
@@ -14,7 +14,7 @@ import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Text, TextField } from '@/ui';
 
 import { useMachineNotifyCommand, useMachineNotifyShared, useNotifyCommand, useNotifyShared } from './hooks';
-import { type AnsweredHere, initialPicks, isReply, NOTIFY_KIND_LABEL, notifySheetState, optionsAnswer, replyStatus, revisionNote, type ReplyTone } from './notifyQuestions';
+import { type AnsweredHere, initialPicks, isReply, leaseLengthText, NOTIFY_KIND_LABEL, notifySheetState, optionsAnswer, replyStatus, revisionNote, type ReplyTone } from './notifyQuestions';
 
 /**
  * One Notify question, drawn like the desktop card (frontend/src/components/notify/NotifyCard.tsx) in the app's sheet chrome.
@@ -155,7 +155,10 @@ export function QuestionForm({ item, answer, busy, children }: {
   const block = { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised };
 
   let actions: QuestionAction[] = [];
-  if (item.ui === 'approve') {
+  if (item.ui === 'approve' && item.lease) {
+    // Only a desktop starts a lease (1Password asks there), so the phone can only decline.
+    actions = [{ testID: 'notify-deny', variant: 'danger', title: 'Decline', disabled: busy, onPress: () => answer(withNote({ approved: false })) }];
+  } else if (item.ui === 'approve') {
     actions = [
       { testID: 'notify-deny', variant: 'danger', title: 'Deny', disabled: busy, onPress: () => answer(withNote({ approved: false })) },
       { testID: 'notify-approve', variant: 'primary', title: 'Approve', disabled: busy, onPress: () => answer(withNote({ approved: true })) },
@@ -206,6 +209,8 @@ export function QuestionForm({ item, answer, busy, children }: {
           ))}
         </View>
       ) : null}
+
+      {item.ui === 'approve' && item.lease ? <LeaseLines lease={item.lease} error={item.leaseError} /> : null}
 
       {item.ui === 'approve' && item.detail ? (
         showDetail ? (
@@ -282,6 +287,27 @@ export function QuestionForm({ item, answer, busy, children }: {
     </>
   );
   return children({ fields, actions });
+}
+
+/** A lease card's secrets, where and how long they're held, and why the last try failed. */
+function LeaseLines({ lease, error }: { lease: NotifyLeaseTarget; error?: string }) {
+  const theme = useTheme();
+  const on = [lease.machine, lease.lengthMs ? leaseLengthText(lease.lengthMs) : undefined].filter(Boolean).join(' · ');
+  return (
+    <>
+      <View testID="notify-lease-names" style={[styles.block, styles.leaseRows, { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
+        {lease.names.map(name => (
+          <Text key={name} testID={`notify-lease-row-${name}`} selectable variant="footnote" numberOfLines={1} style={{ fontFamily: monoFontFamily }}>
+            {lease.references?.[name] ? `${name}  ${lease.references[name]}` : name}
+          </Text>
+        ))}
+      </View>
+      {on ? <Text testID="notify-lease-on" variant="footnote" tone="muted">{`On: ${on}`}</Text> : null}
+      {lease.memoryOnly ? <Text testID="notify-lease-memory-only" variant="footnote" tone="muted">{`Held in memory only on ${lease.machine ?? 'the asking machine'}`}</Text> : null}
+      {error ? <Text testID="notify-lease-error" variant="footnote" tone="danger" accessibilityLiveRegion="polite">{error}</Text> : null}
+      <Text testID="notify-lease-approve-elsewhere" variant="footnote" tone="secondary">Approve on your computer: 1Password asks there.</Text>
+    </>
+  );
 }
 
 /** One choice: tapped to answer (one question) or to pick (several). A reworded one says what it was. */
@@ -385,5 +411,6 @@ const styles = StyleSheet.create({
   sent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   replyStatus: { gap: 2 },
   revision: { gap: 4 },
+  leaseRows: { gap: 4 },
   check: { width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
 });

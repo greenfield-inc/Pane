@@ -137,6 +137,7 @@ import { worktreePoolManager } from './services/worktreePoolManager';
 import { removePaneFsmonitorConfig } from './services/gitPerformanceConfig';
 import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
+import { startSecretLeases } from './services/secretLeaseRuntime';
 import { MachineConnections, remoteMachineAccess } from './services/machineConnections';
 import { RemoteMemberEvents } from './services/remoteMemberEvents';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
@@ -1632,6 +1633,8 @@ if (launchRemoteSetup) {
     machineConnections.start();
     sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
     sharedCredentialSync.start();
+    // Secret leases: renewal reminders, and pushing a lease again to a machine that lost it.
+    startSecretLeases({ configManager, machines: machineConnections, notifyQueue: () => paneDaemonHost?.services.notifyService?.queue, packaged: app.isPackaged });
   }
 
   // Index agent CLI transcripts for the usage page. Read-only, and deferred so

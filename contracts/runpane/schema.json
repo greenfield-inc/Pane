@@ -950,6 +950,8 @@
         "secrets delete",
         "secrets exec",
         "secrets request",
+        "secrets lease",
+        "secrets lease end",
         "devices",
         "devices list",
         "devices open",
@@ -1148,6 +1150,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "secrets request": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "secrets lease": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "secrets lease end": {
           "$ref": "#/$defs/helpLines"
         },
         "devices": {

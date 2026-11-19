@@ -14,13 +14,19 @@ You need patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), and 
 have pnpm 10, `corepack enable` provides the version pinned in `package.json`.
 
 1. Fork the repository on GitHub and clone your fork.
-2. Install dependencies, rebuild native modules for Electron, and build the
-   main process:
+2. Install dependencies, install the pre-push hook, rebuild native modules
+   for Electron, and build the main process:
    ```bash
    pnpm run setup
    ```
    Setup warns that it can't link `node_modules/.bin/runpane` (the local CLI
    isn't built yet) and lists ignored build scripts. Both are harmless.
+   The pre-push hook lints the files a push changes and, when they touch code
+   or config, runs `pnpm typecheck`, in a few seconds. It keeps a pre-push
+   hook you already have and prints the line to add to it, and it never
+   writes to a `core.hooksPath` folder outside the clone. A worktree without
+   `node_modules` pushes unchecked, with a note. `git push --no-verify` skips
+   it.
 3. Create a branch:
    ```bash
    git checkout -b feature/your-feature-name
@@ -139,9 +145,18 @@ pnpm --filter main exec vitest run
 pnpm test:ci:minimal
 ```
 
-`pnpm typecheck` checks `frontend`, `mobile` and `native` with TypeScript 7
-(the `@typescript/native` alias), and `main` and `packages/runpane` with their
-own `typescript` 5.x, which also builds them. Editors use the 5.x package.
+`pnpm typecheck` runs `bun check` (Bun's TypeScript 7 checker, from the `bun`
+dev dependency) on every project the root `tsconfig.check.json` lists, the renderer
+tests included, in about 3 seconds. `main` and `packages/runpane` are checked
+through their `tsconfig.check.json`, because TypeScript 7 has no
+`moduleResolution: node`; their own `typescript` 5.x still builds them, and
+editors use it. `pnpm typecheck:tsc` runs the previous checkers (TypeScript 7
+through the `@typescript/native` alias, and 5.x for `main` and
+`packages/runpane`) when you want to compare. A new tsconfig joins the
+references in the root `tsconfig.check.json`. The repo root has no
+`tsconfig.json`: Vite would load one for files outside `frontend/` and follow
+its references to tsconfigs (such as `native`'s `expo/tsconfig.base`) that the
+frontend-only install of the PWA preview deploy lacks.
 
 To test approvals' timers without waiting, start a dev build with
 `PANE_APPROVALS_STALE_AFTER_MS` (3 days), `PANE_APPROVALS_PUSH_AFTER_MS` (about
@@ -257,7 +272,9 @@ builds ignore the variable.
   [docs/lint/anti-slop.md](docs/lint/anti-slop.md).
 - Two-space indentation. `camelCase` for variables and functions, `PascalCase`
   for React components and types, `kebab-case` for other filenames.
-- There is no formatter or commit hook; follow the surrounding code.
+- There is no formatter; follow the surrounding code. The pre-push hook
+  (`scripts/pre-push.mjs`) runs Oxlint, the agent-facts and boundary-decoder
+  conformance checks and the type check on what you push.
 
 ## How Pane reports errors
 
