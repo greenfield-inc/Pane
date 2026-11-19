@@ -4,15 +4,15 @@ import type { TodoAction, TodoActionResult, TodoCreateInput, TodoDetail, TodoLis
 import { isMac } from '../utils/platformUtils';
 import { LOCAL_MACHINE_ID, type MachineCommand, type MachineConnectionsEvent, type MachineEventChannel, type MachineState } from '../../../shared/types/machineConnections';
 import { otherMachines } from '../components/todos/todoList';
-import { todoApprovalScope, type TodoApprovalScope } from '../components/todos/sessionTodos';
+import { approvalsByTodo, todoApprovalScope, type TodoApprovalScope } from '../components/todos/sessionTodos';
 import { sessionTodoEntries } from '../components/todos/sessionTodosList';
 import type { TodoEntry } from '../components/todos/todoList';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { isTodosEnabled, useConfigStore } from './configStore';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { showActionError } from './errorStore';
-import { todosWaitingCount, useNotifyStore } from './notifyStore';
-import type { NotifySnapshot } from '../../../shared/types/notify';
+import { selectNotifyItems, sessionTodoApprovals, useNotifyStore } from './notifyStore';
+import type { NotifyItem, NotifySnapshot } from '../../../shared/types/notify';
 import type { AutopilotDocument } from '../../../shared/types/autopilot';
 
 /** What one to-do channel answers: the IPC envelope `todos:*` replies in. */
@@ -435,6 +435,18 @@ export function useTodosRefresh(): void {
   }, [refresh, enabled]);
 }
 
+/**
+ * The desktop switched this window to another computer (All machines, T-37): forgets the outgoing host's
+ * list and pages, so the to-do screens read as loading, then reads the incoming host. Pages still open
+ * stay watched, so the read brings back theirs. An older read that lands late is dropped.
+ */
+export async function switchTodosHost(): Promise<void> {
+  refreshGeneration += 1;
+  detailGenerations.clear();
+  useTodosStore.setState({ snapshot: null, details: new Map() });
+  await useTodosStore.getState().refresh();
+}
+
 /** Forgets every to-do read so far: the web app does this when it leaves a host. */
 export function resetTodos(): void {
   refreshGeneration += 1;
@@ -524,9 +536,32 @@ export function useSessionTodoEntries(sessionId: string, machineId?: string): To
   return useMemo(() => (rows ? sessionTodoEntries(rows, sessionId, machineId ?? LOCAL_MACHINE_ID) : null), [rows, sessionId, machineId]);
 }
 
+/** The approvals waiting on you for a Session's to-dos: oldest first, and how many each of its to-dos has. */
+export interface SessionTodoApprovals {
+  items: NotifyItem[];
+  /** By top-level to-do number; a sub-to-do's count is its parent's. */
+  byTodo: ReadonlyMap<number, number>;
+}
+
+/**
+ * The approvals of a Session's to-dos waiting on you (T-23, T-37), from the machine those to-dos are on.
+ * Desktop Notify lists every saved machine's cards together, and two machines each have a T-14, so a card
+ * counts only when its machine is that one: the given saved machine, else the host this window shows.
+ * The tabs' counts, the rows' counts and the approval pager all read this one set.
+ */
+export function useSessionTodoApprovals(sessionId: string, machineId?: string): SessionTodoApprovals {
+  const items = useNotifyStore(selectNotifyItems);
+  const rows = useTodosStore(state => machineRows(state, machineId));
+  const scope = useSessionTodoScope(sessionId, machineId);
+  const shownHost = useConfigStore(state => getActiveRemoteHostId(state.config?.remoteDaemon) ?? LOCAL_MACHINE_ID);
+  const notifyMachine = machineId === undefined || machineId === LOCAL_MACHINE_ID ? shownHost : machineId;
+  return useMemo(() => {
+    const waiting = sessionTodoApprovals(items, scope, notifyMachine).sort((a, b) => a.createdAt - b.createdAt);
+    return { items: waiting, byTodo: approvalsByTodo(waiting, rows ?? []) };
+  }, [items, rows, scope, notifyMachine]);
+}
+
 /** A Session's To-dos tab's amber count (T-23): its to-dos' approvals waiting on you, each once. */
 export function useSessionTodosWaiting(sessionId: string, machineId?: string): number {
-  const snapshot = useNotifyStore(state => state.snapshot);
-  const scope = useSessionTodoScope(sessionId, machineId);
-  return useMemo(() => todosWaitingCount(snapshot, scope, machineId), [snapshot, scope, machineId]);
+  return useSessionTodoApprovals(sessionId, machineId).items.length;
 }

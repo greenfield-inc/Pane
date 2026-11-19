@@ -29,6 +29,12 @@ export interface TodoSplitState {
   hidden: boolean;
   /** + Attach is waiting for this target to arrive: its tab is selected and the split shown then. */
   reveal: string | null;
+  /**
+   * Where no split is available (T-38, D-448) the page and its tabs share one column, one thing at a
+   * time: the to-do page under its To-do tab, or the tab at `active`. True while the To-do tab is
+   * the one selected. Beside a split it is ignored.
+   */
+  todoShown: boolean;
 }
 
 export type TodoSplitAction =
@@ -37,8 +43,10 @@ export type TodoSplitAction =
   /** Shows an item's tab (reopening a closed one, adding an image's), and shows the split. */
   | { type: 'open'; item: TodoSplitItem }
   | { type: 'activate'; index: number }
-  /** ← and → on the tab strip, wrapping round. */
+  /** ← and → on the split's tab strip, wrapping round: selects as a click does. */
   | { type: 'step'; delta: 1 | -1 }
+  /** The one-column layout's To-do tab. */
+  | { type: 'show-todo' }
   /** ✕ or the close-tab key (T-25): any tab closes; closing the last one hides the split. */
   | { type: 'close'; index: number }
   | { type: 'set-hidden'; hidden: boolean }
@@ -121,7 +129,7 @@ function defaultTab(items: readonly TodoSplitItem[]): number {
 export function initialSplit(groups: readonly TodoAttachmentGroup[], hidden: boolean, overview: string | null = null, closed: readonly string[] = []): TodoSplitState {
   const all = splitTabs(groups, overview);
   const items = shownItems(all, closed, []);
-  return { all, extras: [], closed, items, active: defaultTab(items), hidden: hidden || (items.length === 0 && all.length > 0), reveal: null };
+  return { all, extras: [], closed, items, active: defaultTab(items), hidden: hidden || (items.length === 0 && all.length > 0), reveal: null, todoShown: true };
 }
 
 /** A narrow to-do area opens hidden; a wide one keeps the to-do's remembered choice. */
@@ -136,32 +144,53 @@ export function todoSplitReducer(state: TodoSplitState, action: TodoSplitAction)
     case 'open': {
       const key = splitItemKey(action.item);
       const at = state.items.findIndex((item) => splitItemKey(item) === key);
-      if (at >= 0) return at === state.active && !state.hidden ? state : { ...state, active: at, hidden: false };
-      if (state.all.some((item) => splitItemKey(item) === key)) return { ...reopen(state, key), hidden: false };
-      return { ...rebuild(state, { extras: [...state.extras, action.item] }, key), hidden: false };
+      if (at >= 0) return at === state.active && !state.hidden && !state.todoShown ? state : { ...state, active: at, hidden: false, todoShown: false };
+      if (state.all.some((item) => splitItemKey(item) === key)) return { ...reopen(state, key), hidden: false, todoShown: false };
+      return { ...rebuild(state, { extras: [...state.extras, action.item] }, key), hidden: false, todoShown: false };
     }
     case 'activate':
-      return action.index >= 0 && action.index < state.items.length && action.index !== state.active ? { ...state, active: action.index } : state;
-    case 'step': {
-      const count = state.items.length;
-      if (count < 2) return state;
-      return { ...state, active: (state.active + action.delta + count) % count };
-    }
+      if (action.index < 0 || action.index >= state.items.length) return state;
+      // Picked under the one-column tabs, the file is the split's shown tab too where a split is allowed.
+      return action.index === state.active && !state.todoShown && !state.hidden ? state : { ...state, active: action.index, todoShown: false, hidden: false };
+    case 'step':
+      return stepTabs(state, action.delta);
+    case 'show-todo':
+      return state.todoShown ? state : { ...state, todoShown: true };
     case 'close':
       return close(state, action.index);
     case 'set-hidden':
       if (!action.hidden && everyTabClosed(state)) return showDefault(state);
-      return state.hidden === action.hidden ? state : { ...state, hidden: action.hidden };
+      if (action.hidden) return state.hidden && state.todoShown ? state : { ...state, hidden: true, todoShown: true };
+      return !state.hidden && !state.todoShown ? state : { ...state, hidden: false, todoShown: state.items.length === 0 };
     case 'toggle-hidden':
       if (state.hidden && everyTabClosed(state)) return showDefault(state);
-      return { ...state, hidden: !state.hidden };
+      return { ...state, hidden: !state.hidden, todoShown: !state.hidden || state.items.length === 0 };
     case 'reveal': {
       // The attach's refresh may already have brought it in; otherwise the next sync shows it.
       const found = state.all.find((item) => item.kind === 'attachment' && item.attachment.target === action.target);
-      if (found) return { ...reopen(state, splitItemKey(found)), hidden: false, reveal: null };
+      if (found) return { ...reopen(state, splitItemKey(found)), hidden: false, reveal: null, todoShown: false };
       return { ...state, reveal: action.target };
     }
   }
+}
+
+function stepTabs(state: TodoSplitState, delta: 1 | -1): TodoSplitState {
+  const count = state.items.length;
+  if (count < 2) return state;
+  // As a click: the one-column layout then shows this tab rather than the to-do.
+  return { ...state, active: (state.active + delta + count) % count, todoShown: false, hidden: false };
+}
+
+/**
+ * Where a key moves the one-column strip's selection (T-38): positions To-do 0, each file, then an
+ * open approval last. ← → wrap round, Home is To-do, End the last tab; any other key, null.
+ */
+export function stripMove(position: number, count: number, key: string): number | null {
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  if (key === 'ArrowRight') return (position + 1) % count;
+  if (key === 'ArrowLeft') return (position - 1 + count) % count;
+  return null;
 }
 
 /** The tabs shown: the offered ones not closed, then the extras. */
@@ -188,7 +217,7 @@ function reopen(state: TodoSplitState, key: string): TodoSplitState {
 /** Every tab was closed: the default one (the plan, else the first) comes back, and the split shows. */
 function showDefault(state: TodoSplitState): TodoSplitState {
   const tab = state.all[defaultTab(state.all)];
-  return { ...reopen(state, splitItemKey(tab)), hidden: false };
+  return { ...reopen(state, splitItemKey(tab)), hidden: false, todoShown: false };
 }
 
 /** An extra (an image, a sub-to-do's file) goes; any other tab is remembered as closed. The last one hides the split. */
@@ -202,7 +231,8 @@ function close(state: TodoSplitState, index: number): TodoSplitState {
   const closed = extra ? state.closed : [...state.closed, key];
   const items = shownItems(all, closed, extras);
   const active = Math.max(0, index < state.active ? state.active - 1 : Math.min(state.active, items.length - 1));
-  return { ...state, extras, closed, items, active, hidden: items.length === 0 ? true : state.hidden };
+  const none = items.length === 0;
+  return { ...state, extras, closed, items, active, hidden: none ? true : state.hidden, todoShown: none ? true : state.todoShown };
 }
 
 function sync(state: TodoSplitState, groups: readonly TodoAttachmentGroup[], overview: string | null | undefined): TodoSplitState {
@@ -214,7 +244,7 @@ function sync(state: TodoSplitState, groups: readonly TodoAttachmentGroup[], ove
   const revealed = state.reveal === null ? undefined : all.find((item) => item.kind === 'attachment' && item.attachment.target === state.reveal);
   if (revealed) {
     const key = splitItemKey(revealed);
-    return { ...rebuild(state, { all, extras, closed: state.closed.filter((closed) => closed !== key) }, key), hidden: false, reveal: null };
+    return { ...rebuild(state, { all, extras, closed: state.closed.filter((closed) => closed !== key) }, key), hidden: false, reveal: null, todoShown: false };
   }
   const shown = state.items[state.active];
   return rebuild(state, { all, extras }, shown ? splitItemKey(shown) : null);
