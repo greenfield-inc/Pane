@@ -84,7 +84,7 @@ export function leaseSummary(item: NotifyItem, now: number): string {
   const lengthMs = item.lease?.lengthMs;
   return [
     `On: ${['this computer', remote].filter(Boolean).join(', ')}`,
-    lengthMs ? `Ends ${leaseEndLabel(now + lengthMs, now)}` : null,
+    lengthMs ? `${item.lease?.renews ? 'Extends to' : 'Ends'} ${leaseEndLabel(now + lengthMs, now)}` : null,
     '1Password will ask once',
   ].filter(Boolean).join(' · ');
 }
