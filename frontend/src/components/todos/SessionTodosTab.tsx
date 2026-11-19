@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from 'react';
 import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListTodo, Plus } from 'lucide-react';
-import { create } from 'zustand';
 import { todoRef } from '../../../../shared/types/todos';
-import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { useSessionTodoEntries, useSessionTodoScope } from '../../stores/todosStore';
 import { countsAsWaiting, selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
@@ -18,7 +16,8 @@ import { TodoPage } from './page/TodoPage';
 import { TodoStatusIcon } from './TodoStatusIcon';
 import { firstLine, snoozeWhen, viewerZone, wakesIn, wakesInShort } from './snoozeTime';
 import { inTodoScope } from './sessionTodos';
-import { SESSION_DONE_GROUP, SESSION_SNOOZED_GROUP, sessionGroupFolded, sessionOpenCount, sessionTodoGroups, stepTodo, withSessionFold, type SessionFolds } from './sessionTodosList';
+import { SESSION_DONE_GROUP, SESSION_SNOOZED_GROUP, sessionGroupFolded, sessionOpenCount, sessionTodoGroups, stepTodo, withSessionFold } from './sessionTodosList';
+import { FRESH, useTabMemory, type TabMemory } from './sessionTodosTabMemory';
 import { headerKey, listStops, moveSelection, nextWake, resolveStop, type TodoEntry, type TodoGroup } from './todoList';
 import { isTypingTarget, openTodo, openTodosByRequester, overlayOpen } from './todosNavigation';
 import { TODOS_BUTTON } from './todoStyles';
@@ -28,35 +27,6 @@ import { TODOS_BUTTON } from './todoStyles';
  * and keys, beside its chat. A to-do opens inside the tab ("‹ To-dos / T-14"), and an approval opens
  * in the same Decide view as the Session's approval column, with "‹ Back to To-dos".
  */
-
-type TabView =
-  | { kind: 'list' }
-  | { kind: 'todo'; number: number }
-  | { kind: 'approval'; id: string };
-
-/** What the tab shows and where its selection is, per Session: the tab's content unmounts while another tab shows. */
-interface TabMemory {
-  view: TabView;
-  selected: string | null;
-  folds: SessionFolds;
-}
-
-const FRESH: TabMemory = { view: { kind: 'list' }, selected: null, folds: {} };
-
-interface TabMemoryState {
-  tabs: Readonly<Record<string, TabMemory>>;
-  update: (sessionId: string, patch: Partial<TabMemory>) => void;
-}
-
-const useTabMemory = create<TabMemoryState>((set) => ({
-  tabs: {},
-  update: (sessionId, patch) => set(state => ({ tabs: { ...state.tabs, [sessionId]: { ...(state.tabs[sessionId] ?? FRESH), ...patch } } })),
-}));
-
-/** Opens to-do `number` in a Session's To-dos tab, as a click on its row there would (T-37: the sidebar's To-dos). */
-export function showSessionTodo(sessionId: string, number: number, machineId: string = LOCAL_MACHINE_ID): void {
-  useTabMemory.getState().update(sessionId, { view: { kind: 'todo', number }, selected: `${machineId}:${number}` });
-}
 
 /** Under this width the rows drop T-n and the agent chip, keeping the title, the reason and the time. */
 const NARROW_TAB_PX = 440;
