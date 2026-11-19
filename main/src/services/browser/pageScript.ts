@@ -445,11 +445,6 @@ function pageScript(limit: number) {
     return null;
   }
 
-  /** The field a viewer's tap at a point lands in, so the phone opens its keyboard for it. */
-  function fieldAt(x: number, y: number): 'password' | 'text' | null {
-    return fieldKind(deepestAt(x, y));
-  }
-
   /**
    * The field that has the page's focus now, through shadow roots and same-origin frames. A field
    * in a frame Pane can't read (a payment or sign-in form) counts as a password field, so the
@@ -478,10 +473,10 @@ function pageScript(limit: number) {
     return (window.getSelection()?.toString() ?? '').slice(0, 100_000);
   }
 
-  return { snapshot, point, focus, select, mark, scrollBy, check, revoke, fieldAt, focusedField, selection };
+  return { snapshot, point, focus, select, mark, scrollBy, check, revoke, focusedField, selection };
 }
 
 /** One call on the page script, with JSON arguments; the first call in a document defines it. */
-export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check' | 'revoke' | 'fieldAt' | 'focusedField' | 'selection', ...args: PageArgument[]): string {
+export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check' | 'revoke' | 'focusedField' | 'selection', ...args: PageArgument[]): string {
   return `(globalThis.__paneBrowser ??= (${pageScript.toString()})(${SNAPSHOT_CHAR_LIMIT})).${method}(${args.map(arg => JSON.stringify(arg ?? null)).join(', ')})`;
 }
