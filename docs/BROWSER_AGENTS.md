@@ -109,6 +109,25 @@ from an agent on another computer through `runpane workspace` fails with `ERR_BR
 Another computer showing this Pane still draws its own copy of the tab, with its own sign-ins.
 Agent calls never run on that copy, so it doesn't show what an agent does.
 
+### Streaming to other screens
+
+The host serves each tab's page to other screens on its existing `/invoke` route (the device
+tab's route), with no new port:
+
+- **Frames** (`browser:frame`). While a screen reads frames, the host encodes the page with
+  Chromium's screencast as JPEG, sized for the largest watching screen. A read names the last
+  frame it has; the host answers at once when a newer one exists, and otherwise waits for the
+  next paint, or answers "unchanged" after about a second. So the frame rate follows the link,
+  and a still page sends nothing. A screen's first read gets a still capture. The screencast
+  pauses while an agent's `browser_screenshot` runs, and stops 10 seconds after the last read.
+- **Input** (`browser:input`). Mouse, wheel, touch, keys, text, navigation, dialog answers and
+  files for the page's file picker, applied in order. It counts as yours: it takes over from an
+  agent by the 750 ms rule and revokes its refs, and the page takes that screen's size. A click
+  that opens a file picker sends it to that screen's own picker, never a dialog on the host.
+- **State** (`browser:view`). The address, title, loading, back and forward, who drives, the
+  agent's last click, the pointer shape, an open dialog or file picker, downloads and whether the
+  tab is asleep. A read waits until something changes.
+
 ### Page size
 
 The page fills its tab on the computer that owns it. When you take over a tab from a screen on

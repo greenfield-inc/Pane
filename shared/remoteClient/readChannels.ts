@@ -34,6 +34,10 @@ export const REMOTE_READ_CHANNELS = new Set([
   'devices:frame-rate',
   // A screen saying it shows a browser tab, every 5 s: repeating a report changes nothing more.
   'browser:watch',
+  // A browser tab's newest frame and state for another screen: nothing on the host changes, and a
+  // frame is too large to keep as a write's answer.
+  'browser:frame',
+  'browser:view',
   'config:get',
   'config:get-session-preferences',
   'ui-state:get-expanded',

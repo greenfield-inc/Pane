@@ -11,7 +11,8 @@ import { agentLabel } from '../../../shared/agents';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { isRemotePaneCommand, paneCommandCaller, paneCommandSignal, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { DeviceDriverGate } from '../services/devices/deviceDriverGate';
-import { PageDriver, WAIT_DEFAULT_MS, WAIT_MAX_MS, type BrowserPageContents, type FileChooser, type PendingDialog } from '../services/browser/pageDriver';
+import { PageDriver, WAIT_DEFAULT_MS, WAIT_MAX_MS, type BrowserPageContents, type FileChooser, type PendingDialog, type ScreencastSettings } from '../services/browser/pageDriver';
+import type { BrowserFrame, BrowserFrameAnswer, BrowserInput, BrowserTabView } from '../../../shared/types/browserStream';
 import { READ_VERBS, runVerb, type VerbOutcome, type VerbRequest } from '../services/browser/pageVerbs';
 import { BrowserHolds, type ViewerKind, type WatchLimits } from '../services/browser/browserHolds';
 
@@ -36,6 +37,10 @@ export interface BrowserHost {
   shotsDirectory(paneId: string): Promise<string>;
   /** Shows the agent's cursor where it clicked, in the tab. */
   showCursor(panelId: string, x: number, y: number): void;
+  /** This computer's name, as other screens show it ("on studio-mac"). */
+  name(): string;
+  /** A folder for files a person on another screen gives a page, deleted when `page` closes. */
+  uploadsFor(page: BrowserPageContents): Promise<string>;
   /**
    * The tabs whose pages stay alive while hidden: agents hold them (P4) or screens watch them.
    * `painting` are the ones another device watches, so a hidden page there keeps drawing.
@@ -135,7 +140,32 @@ const watchReportSchema = boundary.optional(boundary.object({
   onScreen: boundary.boolean,
   width: boundary.number,
   height: boundary.number,
+  scale: boundary.optional(boundary.number),
 }));
+const inputSchema: BoundarySchema<BrowserInput[]> = boundary.array(boundary.union(
+  boundary.object({ kind: boundary.literal('mouse'), action: boundary.enumeration('move', 'down', 'up'), x: boundary.number, y: boundary.number, button: boundary.enumeration('none', 'left', 'middle', 'right'), clicks: boundary.number, modifiers: boundary.number }),
+  boundary.object({ kind: boundary.literal('wheel'), x: boundary.number, y: boundary.number, dx: boundary.number, dy: boundary.number }),
+  boundary.object({ kind: boundary.literal('touch'), action: boundary.enumeration('start', 'move', 'end'), x: boundary.number, y: boundary.number }),
+  boundary.object({ kind: boundary.literal('key'), key: boundary.string, modifiers: boundary.number }),
+  boundary.object({ kind: boundary.literal('text'), text: boundary.string }),
+  boundary.object({ kind: boundary.literal('navigate'), url: boundary.string }),
+  boundary.object({ kind: boundary.literal('history'), go: boundary.enumeration('back', 'forward', 'reload') }),
+  boundary.object({ kind: boundary.literal('dialog'), accept: boundary.boolean, text: boundary.optional(boundary.string) }),
+  boundary.object({ kind: boundary.literal('files'), files: boundary.array(boundary.object({ name: boundary.string, data: boundary.string })) }),
+  boundary.object({ kind: boundary.literal('files-cancel') }),
+));
+/** How long a frame read waits on the host for a newer frame before answering "unchanged". */
+const FRAME_WAIT_MS = 1_000;
+/** The screencast stops this long after the last frame read. */
+const STREAM_IDLE_MS = 10_000;
+/** JPEG quality of streamed frames (T3 Code's default). */
+const FRAME_QUALITY = 70;
+/** How long a state read waits for a change before answering with the same state. */
+const VIEW_WAIT_MS = 15_000;
+/** Files a person sends one page's picker in one batch, at most (base64 grows it by a third). */
+const PERSON_UPLOAD_BYTES = 10 * 1_048_576;
+/** Electron's cursor names that differ from CSS's. */
+const CSS_CURSOR = new Map([['nodrop', 'no-drop'], ['custom', 'default'], ['hand', 'pointer'], ['column-resize', 'col-resize']]);
 /** The smallest and largest page a viewer may ask for, in CSS pixels. */
 const PAGE_MIN = 100;
 const PAGE_MAX = { width: 3840, height: 2160 };
@@ -221,6 +251,12 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       host.setHeld(holds.held(), remotelyWatched());
     }
     for (const tabId of holds.held()) applyWatch(tabId);
+    // Nobody read a page's frames for a while (the phone went to the background): stop encoding it.
+    for (const [pageId, stream] of streams) {
+      if (Date.now() - stream.lastRead < STREAM_IDLE_MS) continue;
+      streams.delete(pageId);
+      void stream.driver.stopScreencast();
+    }
   };
   const sweeper = setInterval(sweep, holdSettings.sweepMs);
   sweeper.unref?.();
@@ -236,7 +272,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   const gate = new DeviceDriverGate({
     kind: 'browser',
     read: (tabId) => { const tab = host.tab(tabId); return tab ? tabState(tab).driver : undefined; },
-    write: async (tabId, driver) => { const tab = host.tab(tabId); if (tab) await host.update(tab, { ...tabState(tab), driver }); },
+    write: async (tabId, driver) => { const tab = host.tab(tabId); if (tab) await host.update(tab, { ...tabState(tab), driver }); changedView(tabId); },
     waitMs: 4 * 60_000,
     pollMs: 250,
     lingerMs: 2_000,
@@ -259,7 +295,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (!tab || !byAgent) {
       const file = unusedPath(host.personDownloads(), name);
       download.saveAs(file);
-      void download.finished.then(done => { if (done && download.tabId) host.showDownload(download.tabId, file); });
+      void download.finished.then(done => { if (done && download.tabId) showDownload(download.tabId, file); });
       return;
     }
     // The scratch folder is found (and made) only after Electron needs the path, so the file saves
@@ -276,7 +312,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
         await moveFile(path.join(staging, name), file);
         downloads.set(tab.id, [...(downloads.get(tab.id) ?? []), file]);
         const driver = tabState(tab).driver;
-        host.showDownload(tab.id, file, driver?.by === 'agent' ? driver.agent : 'The agent');
+        showDownload(tab.id, file, driver?.by === 'agent' ? driver.agent : 'The agent');
       } finally {
         await rm(staging, { recursive: true, force: true });
       }
@@ -400,7 +436,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     page.on('input-event', (_event, input) => {
       if (!['mouseDown', 'rawKeyDown', 'keyDown', 'mouseWheel', 'touchStart', 'gestureScrollBegin'].includes(input.type)) return;
       const driver = pages.get(page.id);
-      if (!driver || driver.isAgentInput()) return;
+      // Input from another screen took over through browser:input already.
+      if (!driver || driver.isAgentInput() || driver.isForwardedInput()) return;
       // The person changed the page under the agent's refs, so they go stale either way.
       driver.notePersonInput();
       void personTouched(tabId, page.id);
@@ -447,6 +484,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const next: BrowserPanelState = { ...state, pageSize: size };
     await host.update(tab, next);
     applyWatch(tabId);
+    changedView(tabId);
   }
 
   /**
@@ -530,7 +568,11 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       host.setBusy(tab.id, false);
     }
     refuseNonWebPage(contents, 'is now on');
-    if (outcome.cursor) host.showCursor(tab.id, outcome.cursor.x, outcome.cursor.y);
+    if (outcome.cursor) {
+      host.showCursor(tab.id, outcome.cursor.x, outcome.cursor.y);
+      agentCursors.set(tab.id, { ...outcome.cursor, at: Date.now() });
+      changedView(tab.id);
+    }
     return outcome;
   }
 
@@ -730,6 +772,224 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     }
     applyWatch(id);
     return { success: true };
+  });
+
+  // ── Streaming the page to other screens (S2) ──
+
+  /** Each live page viewers read frames of: its newest frame, the reads waiting for the next, and the last read. */
+  interface Stream { driver: PageDriver; frame?: BrowserFrame; waiters: Set<() => void>; lastRead: number }
+  const streams = new Map<number, Stream>();
+  let frameSeq = 0;
+
+  /** The frame size the screens watching from afar need: the largest of them, in device pixels. */
+  function settingsFor(tabId: string): ScreencastSettings {
+    const far = holds.viewers(tabId).filter(viewer => viewer.kind !== 'host');
+    const maxWidth = Math.round(Math.max(320, ...far.map(viewer => viewer.width * Math.min(viewer.scale ?? 1, 3))));
+    const maxHeight = Math.round(Math.max(320, ...far.map(viewer => viewer.height * Math.min(viewer.scale ?? 1, 3))));
+    return { maxWidth, maxHeight, quality: FRAME_QUALITY };
+  }
+
+  function streamOf(tabId: string, page: BrowserPageContents): Stream {
+    let stream = streams.get(page.id);
+    const driver = driverFor(tabId, page);
+    if (!stream) {
+      const created: Stream = { driver, waiters: new Set(), lastRead: Date.now() };
+      stream = created;
+      streams.set(page.id, created);
+      page.once('destroyed', () => { streams.delete(page.id); for (const wake of created.waiters) wake(); });
+    }
+    const current = stream;
+    void driver.startScreencast(settingsFor(tabId), frame => {
+      frameSeq += 1;
+      current.frame = { seq: frameSeq, data: `data:image/jpeg;base64,${frame.data}`, width: frame.width, height: frame.height };
+      for (const wake of current.waiters) wake();
+    }).catch(cause => console.warn(`[browser] Could not stream tab ${tabId}:`, cause));
+    return stream;
+  }
+
+  /** Waits until `ready()` holds or `ms` pass; `waiters` wakes it early. */
+  function waitFor(waiters: Set<() => void>, ms: number, ready: () => boolean): Promise<void> {
+    if (ready()) return Promise.resolve();
+    return new Promise(resolve => {
+      const wake = () => { if (!ready()) return; done(); };
+      const done = () => { clearTimeout(timer); waiters.delete(wake); resolve(); };
+      const timer = setTimeout(done, ms);
+      waiters.add(wake);
+    });
+  }
+
+  /**
+   * The tab's newest frame after `after`, for a screen on another device. A read with nothing newer
+   * waits on the host until there is a frame, or answers "unchanged" after about a second, so the
+   * frame rate follows the link and a still page costs nothing. A page's first read gets a still.
+   */
+  commandRegistry.register('browser:frame', async (panelId: PaneCommandValue, _viewer: PaneCommandValue, afterValue: PaneCommandValue): Promise<PaneCommandValue> => {
+    if (paneCommandCaller() || teammatePaneCaller()) throw new PaneError('ERR_BROWSER_SCREENS_ONLY', 'This channel belongs to the person\'s screens. Nothing ran.', 'Agents use runpane browser.');
+    const id = decodeOptionalBoundary(panelId, boundary.string);
+    const after = decodeOptionalBoundary(afterValue, boundary.number) ?? 0;
+    if (!id || !host.tab(id)) return answer({ stopped: 'gone' });
+    const page = host.page(id);
+    if (!page || page.isDestroyed()) {
+      if (holds.isAsleep(id)) return answer({ stopped: 'asleep' });
+      // Watched a moment ago: the page is still being mounted.
+      await new Promise(resolve => setTimeout(resolve, FRAME_WAIT_MS));
+      return answer({ unchanged: true, seq: after });
+    }
+    const stream = streamOf(id, page);
+    stream.lastRead = Date.now();
+    if (!stream.frame) {
+      const still = await stream.driver.still(FRAME_QUALITY).catch(() => undefined);
+      if (still && !stream.frame) {
+        frameSeq += 1;
+        stream.frame = { seq: frameSeq, data: `data:image/jpeg;base64,${still.data}`, width: still.width, height: still.height };
+      }
+    }
+    await waitFor(stream.waiters, FRAME_WAIT_MS, () => (stream.frame?.seq ?? 0) > after || page.isDestroyed());
+    const frame = stream.frame;
+    if (!frame || frame.seq <= after) return answer({ unchanged: true, seq: after });
+    // The screen took this frame: Chromium may paint the next.
+    stream.driver.ackFrame();
+    return answer({ frame });
+  });
+
+  function answer(value: BrowserFrameAnswer): PaneCommandValue {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  /**
+   * The person's input from another screen, in order. It counts as the person's: it takes over from
+   * an agent by the 750 ms rule and revokes the agent's refs, and the page takes that screen's size.
+   * An empty batch only takes control.
+   */
+  commandRegistry.register('browser:input', async (panelId: PaneCommandValue, viewer: PaneCommandValue, batchValue: PaneCommandValue): Promise<PaneCommandValue> => {
+    if (paneCommandCaller() || teammatePaneCaller()) return { success: false, error: 'This channel belongs to the person\'s screens.' };
+    const id = decodeOptionalBoundary(panelId, boundary.string);
+    const viewerId = decodeOptionalBoundary(viewer, boundary.string);
+    let batch: BrowserInput[];
+    try {
+      batch = decodeBoundary(batchValue, inputSchema);
+    } catch (cause) {
+      return { success: false, error: `The input is malformed: ${reasonOf(cause)}.` };
+    }
+    const page = id ? host.page(id) : undefined;
+    if (!id || !host.tab(id) || !page || page.isDestroyed()) return { success: false, error: 'That tab has no live page here.' };
+    const driver = driverFor(id, page);
+    driver.notePersonInput();
+    await personTouched(id, page.id);
+    if (viewerId) await takeControl(id, viewerId);
+    const files = batch.flatMap(input => (input.kind === 'files' ? input.files : []));
+    const bytes = files.reduce((sum, file) => sum + Math.floor(file.data.length * 3 / 4), 0);
+    if (bytes > PERSON_UPLOAD_BYTES) return { success: false, error: `Files from another screen go up to ${PERSON_UPLOAD_BYTES / 1_048_576} MB at once.` };
+    const result = await driver.personInput(batch);
+    if (files.length) {
+      const folder = await host.uploadsFor(page);
+      const paths: string[] = [];
+      for (const file of files) {
+        const target = unusedPath(folder, path.basename(file.name.replace(/\\/g, '/')) || 'file');
+        await writeFile(target, Buffer.from(file.data, 'base64'));
+        paths.push(target);
+      }
+      await driver.setChooserFiles(paths);
+    }
+    changedView(id);
+    return JSON.parse(JSON.stringify(result));
+  });
+
+  /** Each tab's state version and the reads waiting for it to change. */
+  const views = new Map<string, { version: number; waiters: Set<() => void>; pages: Set<number> }>();
+  /** Where an agent last clicked in each tab, for the cursor other screens draw. */
+  const agentCursors = new Map<string, { x: number; y: number; at: number }>();
+  /** The pointer each tab's page shows (a hand over a link). */
+  const pointers = new Map<string, string>();
+  /** Downloads that saved on this computer, by tab, for other screens' notices. */
+  const tabDownloads = new Map<string, Array<{ name: string; at: number; agent?: string }>>();
+
+  function viewOf(tabId: string) {
+    let view = views.get(tabId);
+    if (!view) {
+      view = { version: 1, waiters: new Set(), pages: new Set() };
+      views.set(tabId, view);
+    }
+    return view;
+  }
+
+  function changedView(tabId: string): void {
+    const view = views.get(tabId);
+    if (!view) return;
+    view.version += 1;
+    for (const wake of view.waiters) wake();
+  }
+
+  function showDownload(tabId: string, file: string, agent?: string): void {
+    host.showDownload(tabId, file, agent);
+    const saved: BrowserTabView['downloads'][number] = { name: path.basename(file), at: Date.now() };
+    if (agent) saved.agent = agent;
+    const shown = [...(tabDownloads.get(tabId) ?? []), saved].slice(-3);
+    tabDownloads.set(tabId, shown);
+    changedView(tabId);
+  }
+
+  /** Hears the page's own changes (navigation, title, loading, pointer, dialogs) once per page. */
+  function followPage(tabId: string, page: BrowserPageContents): void {
+    const view = viewOf(tabId);
+    if (view.pages.has(page.id)) return;
+    view.pages.add(page.id);
+    const changed = () => changedView(tabId);
+    for (const event of ['did-navigate', 'did-navigate-in-page', 'page-title-updated', 'did-start-loading', 'did-stop-loading'] as const) page.on(event, changed);
+    page.on('cursor-changed', (_event, type) => {
+      const css = CSS_CURSOR.get(type) ?? type;
+      if (pointers.get(tabId) === css) return;
+      pointers.set(tabId, css);
+      changed();
+    });
+    page.once('destroyed', () => { view.pages.delete(page.id); changed(); });
+    const driver = driverFor(tabId, page);
+    driver.onEvent(method => { if (method.startsWith('Page.javascriptDialog') || method === 'Page.fileChooserOpened') changed(); });
+    void driver.listen().catch(() => undefined);
+  }
+
+  function tabView(tabId: string, tab: ToolPanel): BrowserTabView {
+    const state = tabState(tab);
+    const page = host.page(tabId);
+    const live = page && !page.isDestroyed() ? page : undefined;
+    const driver = live ? pages.get(live.id) : undefined;
+    const view: BrowserTabView = {
+      version: viewOf(tabId).version,
+      url: live?.getURL() || state.currentUrl || '',
+      title: live?.getTitle() || tab.title,
+      loading: live?.isLoading() ?? false,
+      canGoBack: live?.navigationHistory.canGoBack() ?? false,
+      canGoForward: live?.navigationHistory.canGoForward() ?? false,
+      pointer: pointers.get(tabId) ?? 'default',
+      downloads: tabDownloads.get(tabId) ?? [],
+      host: host.name(),
+    };
+    if (state.driver) view.driver = state.driver;
+    if (state.pageSize) view.size = state.pageSize;
+    const cursor = agentCursors.get(tabId);
+    if (cursor) view.agentCursor = cursor;
+    if (driver?.pendingDialog) view.dialog = driver.pendingDialog;
+    if (driver?.pendingChooser) view.fileChooser = driver.pendingChooser;
+    if (!live) view.stopped = holds.isAsleep(tabId) ? 'asleep' : 'gone';
+    return view;
+  }
+
+  /**
+   * The tab as another screen draws it around the stream. A read naming the version it has waits
+   * until the state changes, or about 15 seconds.
+   */
+  commandRegistry.register('browser:view', async (panelId: PaneCommandValue, afterValue: PaneCommandValue): Promise<PaneCommandValue> => {
+    if (paneCommandCaller() || teammatePaneCaller()) throw new PaneError('ERR_BROWSER_SCREENS_ONLY', 'This channel belongs to the person\'s screens. Nothing ran.', 'Agents use runpane browser.');
+    const id = decodeOptionalBoundary(panelId, boundary.string);
+    const after = decodeOptionalBoundary(afterValue, boundary.number) ?? 0;
+    const tab = id ? host.tab(id) : undefined;
+    if (!id || !tab) return { version: 0, stopped: 'gone' };
+    const page = host.page(id);
+    if (page && !page.isDestroyed()) followPage(id, page);
+    const view = viewOf(id);
+    await waitFor(view.waiters, VIEW_WAIT_MS, () => view.version > after || host.tab(id) === undefined);
+    const now = host.tab(id);
+    return now ? JSON.parse(JSON.stringify(tabView(id, now))) : { version: 0, stopped: 'gone' };
   });
 
   return () => clearInterval(sweeper);

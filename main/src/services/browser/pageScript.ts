@@ -431,10 +431,47 @@ function pageScript(limit: number) {
     return true;
   }
 
-  return { snapshot, point, focus, select, mark, scrollBy, check, revoke };
+  /** What kind of field takes typing at `el`: a password field, another text field, or none. */
+  function fieldKind(el: Element | null): 'password' | 'text' | null {
+    for (let node = el; node; node = node.parentElement ?? (node.parentNode instanceof ShadowRoot ? node.parentNode.host : null)) {
+      if (node instanceof HTMLInputElement) {
+        if (node.disabled || node.readOnly) return null;
+        if (node.type === 'password' || masked(node)) return 'password';
+        return ['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit'].includes(node.type) ? null : 'text';
+      }
+      if (node instanceof HTMLTextAreaElement) return node.disabled || node.readOnly ? null : 'text';
+      if (editable(node)) return 'text';
+    }
+    return null;
+  }
+
+  /** The field a viewer's tap at a point lands in, so the phone opens its keyboard for it. */
+  function fieldAt(x: number, y: number): 'password' | 'text' | null {
+    return fieldKind(deepestAt(x, y));
+  }
+
+  /** The field that has the page's focus now, through shadow roots. */
+  function focusedField(): 'password' | 'text' | null {
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    return fieldKind(active);
+  }
+
+  /** The text the person selected, to put on their own clipboard; never a password field's. */
+  function selection(): string {
+    let active = document.activeElement;
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+      if (masked(active)) return '';
+      return active.value.slice(active.selectionStart ?? 0, active.selectionEnd ?? 0).slice(0, 100_000);
+    }
+    return (window.getSelection()?.toString() ?? '').slice(0, 100_000);
+  }
+
+  return { snapshot, point, focus, select, mark, scrollBy, check, revoke, fieldAt, focusedField, selection };
 }
 
 /** One call on the page script, with JSON arguments; the first call in a document defines it. */
-export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check' | 'revoke', ...args: PageArgument[]): string {
+export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check' | 'revoke' | 'fieldAt' | 'focusedField' | 'selection', ...args: PageArgument[]): string {
   return `(globalThis.__paneBrowser ??= (${pageScript.toString()})(${SNAPSHOT_CHAR_LIMIT})).${method}(${args.map(arg => JSON.stringify(arg ?? null)).join(', ')})`;
 }

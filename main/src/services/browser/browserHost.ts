@@ -10,6 +10,7 @@ import { getPaneWebviewContextMap } from '../../core/runtime';
 import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
 import type { BrowserHost } from '../../ipc/browser';
 import os from 'os';
+import { mkdtemp, rm } from 'fs/promises';
 import { paneScratchDirectory } from '../paneScratch';
 import { panelManager } from '../panelManager';
 
@@ -50,6 +51,13 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     hasWindow: () => getMainWindow() !== null,
     shotsDirectory: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-screenshots'),
     showCursor: (panelId, x, y) => getMainWindow()?.webContents.send(BROWSER_AGENT_CURSOR_EVENT, { panelId, x, y }),
+    name: () => os.hostname().replace(/\.local$/i, ''),
+    uploadsFor: async (page) => {
+      const folder = await mkdtemp(path.join(os.tmpdir(), 'pane-browser-upload-'));
+      // The page reads a chosen file when its form submits, so the copy stays until the page goes.
+      page.once('destroyed', () => { void rm(folder, { recursive: true, force: true }); });
+      return folder;
+    },
     setBusy: (panelId, busy) => getMainWindow()?.webContents.send(BROWSER_BUSY_EVENT, { panelId, busy }),
     onGone: (listener) => {
       panelManager.onPanelDeleted(() => listener());
