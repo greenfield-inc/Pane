@@ -31,7 +31,8 @@ test('a browser tab streams from the host: frames arrive, a click and typing lan
   await page.keyboard.press('Enter');
   const sent = () => JSON.stringify(host.browserStream?.calls.filter(call => call.channel === 'browser:input').map(call => call.args[2]));
   await expect.poll(sent).toContain('"kind":"mouse","action":"down"');
-  await expect.poll(sent).toContain('"kind":"text","text":"h');
+  // On a desktop-width screen each printable key goes as a key press, so the page sees keydown.
+  await expect.poll(sent).toContain('"kind":"key","key":"h"');
   await expect.poll(sent).toContain('"kind":"key","key":"Enter"');
   // The click landed at the middle of the page: 400 of its 800 CSS pixels across.
   expect(sent()).toMatch(/"action":"down","x":400(\.\d+)?,"y":300/);

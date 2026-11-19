@@ -132,7 +132,9 @@ export const BrowserLayer = memo(function BrowserLayer() {
         const rect = visible ? { left: measured.left, top: measured.top, width: measured.width, height: measured.height } : lastRects.get(id) ?? { left: 0, top: 0, width: 1280, height: 800 };
         lastRects.set(id, rect);
         // A desktop showing another computer's Pane reports from the stream itself (StreamedBrowserPanel).
-        if (visible && !remote) shown.set(id, { width: rect.width, height: rect.height });
+        // A tab this computer's own agents hold is this computer's page, even while it shows another computer.
+        const fromHost = remote && !held.some(tab => tab.panelId === id);
+        if (visible && !fromHost) shown.set(id, { width: rect.width, height: rect.height });
         // A hidden page is not drawn, and Chromium throttles it. While a call runs on it, or another
         // device streams it, it is drawn fully transparent under the tab in view, so its frames are current.
         const painting = visible || busy.has(id) || streamed.has(id);
@@ -149,7 +151,7 @@ export const BrowserLayer = memo(function BrowserLayer() {
           <div key={id} style={style} aria-hidden={!visible} inert={!visible ? true : undefined} data-browser-page={id} data-browser-page-visible={visible}>
             <PanelErrorBoundary panelId={panel.id}>
               <Suspense fallback={null}>
-                {remote
+                {fromHost
                   ? <StreamedBrowserPanel panel={panel} isActive={visible} ownCopy={() => <BrowserPanel panel={panel} isActive={visible} />} />
                   : <BrowserPanel panel={panel} isActive={visible} />}
               </Suspense>

@@ -552,6 +552,15 @@ describe('browser tabs: the screens that watch them', () => {
     await vi.waitFor(() => expect(held).toEqual(['streamed']));
   });
 
+  it('lets a watched tab go at once when its Pane is archived', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('persons', 'pane-a')], { held, holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000, graceMs: 60_000 } } });
+    await fromAfar(fixture, 'persons', 'phone-1', phone);
+    expect(held).toEqual(['persons']);
+    fixture.archive('pane-a');
+    expect(held).toEqual([]);
+  });
+
   it('takes reports only from Pane\'s own screens, never from an agent', async () => {
     const fixture = setup([browserTab('persons', 'pane-a')]);
     expect(await fixture.registry.invokeConnected('browser:watch', ['persons', 'v', phone], signal, claudeInA)).toMatchObject({ success: false });
@@ -703,6 +712,21 @@ describe('browser tabs: streaming a page to another screen', () => {
     // The viewer's sidebar closes: its box grows, and the page grows with it.
     await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', { ...desktop, width: 524 }], { caller: undefined });
     await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 524, height: 748 }));
+  });
+
+  it('moves the pointer over the page on the read channel, taking nothing over and waking no state read', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    const page = fixture.pages.get('mine');
+    page?.sent.splice(0, Infinity);
+    // SAFETY: browser:view answers a BrowserTabView.
+    const before = (await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined })) as { version: number };
+    expect(await fixture.registry.invokeRemote('browser:pointer', ['mine', 'phone-1', 12, 34], { caller: undefined })).toBeNull();
+    expect(page?.params.get('Input.dispatchMouseEvent')).toEqual({ type: 'mouseMoved', x: 12, y: 34, button: 'none' });
+    expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).not.toContain('"by":"person"');
+    // SAFETY: browser:view answers a BrowserTabView.
+    expect(((await fixture.registry.invokeRemote('browser:view', ['mine', 0], { caller: undefined })) as { version: number }).version).toBe(before.version);
   });
 
   it('lets a pointer pass over the stream without taking the page from the agent', async () => {

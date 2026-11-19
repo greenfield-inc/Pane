@@ -252,8 +252,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       agent => { const tab = host.tab(agent); return tab !== undefined && services.sessionManager.getSession(tab.sessionId)?.archived !== true; },
       // A dialog waiting for an answer counts as action.
       tabId => { const page = host.page(tabId); return page !== undefined && pages.get(page.id)?.pendingDialog !== undefined; },
-      // The person closed the tab: it holds nothing and counts toward no limit.
-      tabId => host.tab(tabId) !== undefined,
+      // The person closed the tab, or archived its Pane: it holds nothing and counts toward no limit.
+      tabId => { const tab = host.tab(tabId); return tab !== undefined && services.sessionManager.getSession(tab.sessionId)?.archived !== true; },
     );
     // The window closed or came back: the live pages move between it and hidden windows, so they
     // are handed over again (each reloads once from its URL).
@@ -345,7 +345,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
 
   function callerOf(): BrowserCaller {
     if (isRemotePaneCommand()) {
-      throw new PaneError('ERR_BROWSER_LOCAL_ONLY', 'Browser tools answer only agents running on this computer, and this call came from another one. Nothing ran.', 'Run the agent in a Pane on the computer that shows the tab.');
+      throw new PaneError('ERR_BROWSER_LOCAL_ONLY', 'Browser tools answer only agents running on this computer, and this call came from another one. Nothing ran.', 'Run the agent in a Pane on the computer that owns the tab\'s Pane.');
     }
     const caller = paneCommandCaller();
     const session = caller?.paneId ? services.sessionManager.getSession(caller.paneId) : undefined;
@@ -990,6 +990,22 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     }
     changedView(id);
     return JSON.parse(JSON.stringify(result));
+  });
+
+  /**
+   * The person's pointer passing over the page from another screen. A read channel, so the host
+   * keeps no answer per move (a write's answer is kept 10 minutes, and hover would use up a
+   * device's allowance); a repeated move changes nothing. It takes nothing over and wakes no state read.
+   */
+  commandRegistry.register('browser:pointer', async (panelId: PaneCommandValue, _viewer: PaneCommandValue, x: PaneCommandValue, y: PaneCommandValue): Promise<PaneCommandValue> => {
+    if (paneCommandCaller() || teammatePaneCaller()) throw new PaneError('ERR_BROWSER_SCREENS_ONLY', 'This channel belongs to the person\'s screens. Nothing ran.', 'Agents use runpane browser.');
+    const id = decodeOptionalBoundary(panelId, boundary.string);
+    const px = decodeOptionalBoundary(x, boundary.number);
+    const py = decodeOptionalBoundary(y, boundary.number);
+    const page = id ? host.page(id) : undefined;
+    if (!id || px === undefined || py === undefined || !page || page.isDestroyed()) return null;
+    await driverFor(id, page).hover(px, py).catch(() => undefined);
+    return null;
   });
 
   /** Each tab's state version and the reads waiting for it to change. */

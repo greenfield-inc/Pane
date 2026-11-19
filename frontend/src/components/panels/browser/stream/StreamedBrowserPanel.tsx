@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, Loader2, RotateCw } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { ArrowLeft, ArrowRight, Check, Copy, Loader2, RotateCw } from 'lucide-react';
 import type { ToolPanel } from '../../../../../../shared/types/panels';
 import type { JsonValue } from '../../../../../../shared/validation/boundaryDecoder';
 import { cn } from '../../../../utils/cn';
 import { normalizeUrl } from '../browserUrl';
+import { BROWSER_NAVIGATE_EVENT, navigateRequestAction, type BrowserNavigateRequest } from '../browserNavigation';
 import { BrowserStreamView, stopLine } from './BrowserStreamView';
 import { streamClient } from './streamClient';
 import { useBrowserStream } from './useBrowserStream';
@@ -27,6 +28,26 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
   const [typed, setTyped] = useState<string | null>(null);
   const [error, setError] = useState('');
   const host = view?.host ?? 'the host';
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1_500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  // An editor's preview or a project's run URL asks this tab to load a page: it loads on the host.
+  const shownUrl = useRef(view?.url);
+  useEffect(() => { shownUrl.current = view?.url; }, [view?.url]);
+  useEffect(() => {
+    const onNavigate = (event: Event) => {
+      // SAFETY: requestBrowserNavigation is the only sender of this event.
+      const request = (event as CustomEvent<BrowserNavigateRequest>).detail;
+      const action = navigateRequestAction(request, { panelId: panel.id, sessionId: panel.sessionId, shownUrl: shownUrl.current });
+      if (action === 'reload') void client.input(panel.id, [{ kind: 'history', go: 'reload' }]).catch(() => undefined);
+      else if (action === 'navigate') void client.input(panel.id, [{ kind: 'navigate', url: normalizeUrl(request.url) }]).catch(() => undefined);
+    };
+    window.addEventListener(BROWSER_NAVIGATE_EVENT, onNavigate);
+    return () => window.removeEventListener(BROWSER_NAVIGATE_EVENT, onNavigate);
+  }, [client, panel.id, panel.sessionId]);
 
   if (stream.stop === 'older') {
     return (
@@ -75,6 +96,9 @@ export function StreamedBrowserPanel({ panel, isActive, ownCopy }: { panel: Tool
             on {host}
           </span>
         </form>
+        <button type="button" className={button} disabled={!view?.url} onClick={() => { if (view?.url) void navigator.clipboard.writeText(view.url).then(() => setCopied(true), () => undefined); }} title="Copy URL">
+          {copied ? <Check className="h-3.5 w-3.5 text-status-success" /> : <Copy className="h-3.5 w-3.5" />}
+        </button>
       </div>
       {error && <div className="border-b border-border-primary bg-bg-primary px-2 py-1 text-xs text-status-error">{error}</div>}
       <BrowserStreamView client={client} panelId={panel.id} stream={stream} hostName={host} />
