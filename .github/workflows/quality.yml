@@ -49,6 +49,7 @@ jobs:
             - 'scripts/test-runpane-handoff.js'
             - 'scripts/test-runpane-ask.js'
             - 'scripts/test-runpane-managed-cli.js'
+            - 'scripts/test-runpane-submit.js'
             - 'scripts/runpane-test-shard.js'
             - 'scripts/fixtures/**'
             - '.github/workflows/quality.yml'
@@ -99,6 +100,17 @@ jobs:
 
     - name: Run frontend unit tests
       run: CI=1 pnpm --filter frontend exec vitest run
+
+    # The Expo app, the glasses app and the Capacitor shell, each its own Vitest run.
+    - name: Run native, glasses and mobile unit tests
+      if: ${{ !cancelled() }}
+      run: CI=1 pnpm --filter native --filter glasses --filter mobile run test
+
+    - name: Run release and network script tests
+      if: ${{ !cancelled() }}
+      run: |
+        node scripts/test-license-generation.js
+        node --test scripts/flapping-link-proxy.test.mjs scripts/patch-electron-builder-macos-keychain.test.js
 
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
@@ -197,7 +209,13 @@ jobs:
     # at the end of the critical path.
     - name: Test the CI result gate
       if: ${{ !cancelled() }}
-      run: node --test scripts/ci-gate.test.mjs
+      run: node --test scripts/ci-gate.test.mjs scripts/ci-test-inventory.test.mjs
+
+    # Every tracked test file runs in a lane of this workflow (or another
+    # workflow), or is listed with its reason in scripts/ci-test-inventory.mjs.
+    - name: Check every test file has a lane
+      if: ${{ !cancelled() }}
+      run: node scripts/ci-test-inventory.mjs check
 
   # Offline check of relative links and #anchors in every tracked markdown file.
   # External URLs are not fetched, so the check never flakes on the network.
@@ -236,11 +254,13 @@ jobs:
         --exclude-path node_modules --exclude-path dist-electron
         './**/*.md'
 
-  # The smoke suites run beside quality-checks in ten jobs. The seven browser
-  # shards split the minimal suite, which loads the renderer from Vite with a
-  # mocked Electron API; the two renderer selection race shards also run from
-  # Vite alone. The Electron job launches main/dist in real Electron and runs the
-  # specs playwright.chat-tabs.config.ts lists.
+  # The smoke suites run beside quality-checks. The browser shards split the
+  # browser suite (playwright.ci.minimal.config.ts), which loads the renderer
+  # from Vite with a mocked Electron API; the two renderer selection race shards
+  # also run from Vite alone. The two Electron shards launch real Electron and
+  # split the specs playwright.chat-tabs.config.ts lists.
+  # scripts/ci-test-inventory.mjs (in Type Check and Lint) fails when a test file
+  # runs in no lane.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke-browser:
@@ -249,7 +269,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
     steps:
     - name: Checkout code
@@ -306,8 +326,12 @@ jobs:
       run: scripts/ci-background.sh wait renderer-types
 
   functional-smoke-electron:
-    name: Functional Smoke (Electron)
+    name: Functional Smoke (Electron ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
     - name: Checkout code
@@ -351,14 +375,21 @@ jobs:
       run: scripts/ci-background.sh wait electron-rebuild
 
     - name: Verify sandboxed Electron preload
+      if: ${{ matrix.shard == 1 }}
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
+    - name: Verify worktree trash sweep under Electron's ASAR
+      if: ${{ !cancelled() && matrix.shard == 1 }}
+      run: xvfb-run -a node scripts/test-worktree-trash-electron.cjs
+
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
+    # PANE_ELECTRON_E2E turns on the remote browser and browser auth specs.
     - name: Run chat tab journeys
       if: ${{ !cancelled() }}
-      run: xvfb-run -a pnpm test:chat-tabs
+      run: xvfb-run -a pnpm test:chat-tabs --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+        PANE_ELECTRON_E2E: '1'
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Linux is tested at the
@@ -459,6 +490,7 @@ jobs:
         scripts/test-runpane-workspace.js
         scripts/test-runpane-managed-cli.js
         scripts/test-runpane-telemetry.js
+        scripts/test-runpane-submit.js
 
     - name: Finish wrapper contract tests
       if: ${{ !cancelled() && matrix.lane != 'package' }}

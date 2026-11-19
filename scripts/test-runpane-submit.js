@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 
 const root = path.resolve(__dirname, '..');
 for (const runtime of ['npm', 'pip']) {
