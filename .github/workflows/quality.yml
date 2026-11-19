@@ -25,63 +25,21 @@ jobs:
     name: Detect changed areas
     runs-on: ubuntu-latest
     outputs:
-      runpane: ${{ steps.filter.outputs.runpane }}
-      main: ${{ steps.filter.outputs.main }}
-      relay: ${{ steps.filter.outputs.relay }}
-      # The jobs this run may skip, each with its reason (scripts/ci-gate.mjs).
+      # The jobs this run may skip, each with its reason (scripts/ci-affected.mjs).
       # Skippable jobs read it in their `if:`, and CI result allows only these skips.
       skip: ${{ steps.manifest.outputs.skip }}
     steps:
+    # Two commits: a pull request's merge commit and the base it merges into.
     - name: Checkout code
       uses: actions/checkout@v7
-
-    - name: Filter changed paths
-      id: filter
-      uses: dorny/paths-filter@v3
       with:
-        filters: |
-          runpane:
-            - 'packages/runpane/**'
-            - 'packages/runpane-py/**'
-            - 'contracts/runpane/**'
-            - 'shared/types/runpaneOrchestration.ts'
-            - 'shared/types/generatedRunpaneContract.ts'
-            - 'scripts/generate-runpane-contract.js'
-            - 'scripts/sync-runpane-package-versions.js'
-            - 'scripts/test-runpane-contract.js'
-            - 'scripts/test-runpane-node-runtime.js'
-            - 'scripts/test-runpane-mcp.js'
-            - 'scripts/test-runpane-package-smoke.js'
-            - 'scripts/test-runpane-workspace.js'
-            - 'scripts/test-runpane-handoff.js'
-            - 'scripts/test-runpane-ask.js'
-            - 'scripts/test-runpane-managed-cli.js'
-            - 'scripts/test-runpane-submit.js'
-            - 'scripts/runpane-test-shard.js'
-            - 'scripts/fixtures/**'
-            - '.github/workflows/quality.yml'
-          relay:
-            - 'relay/**'
-            - 'packages/runpane/src/relay*.ts'
-            - 'scripts/test-runpane-relay.js'
-            - 'direct/**'
-            - 'main/src/daemon/relay/**'
-            - '.github/workflows/quality.yml'
-          main:
-            - 'main/**'
-            - 'shared/**'
-            - 'package.json'
-            - 'pnpm-lock.yaml'
-            - 'pnpm-workspace.yaml'
-            - '.github/workflows/quality.yml'
+        fetch-depth: 2
 
-    - name: Declare the jobs this run may skip
+    # Fails when the lane map is broken or a lane's tests read a path outside
+    # its inputs; on a pull request, skips only lanes no changed path reaches.
+    - name: Check the lane map and declare the jobs this run may skip
       id: manifest
-      env:
-        CHANGED_RUNPANE: ${{ steps.filter.outputs.runpane }}
-        CHANGED_MAIN: ${{ steps.filter.outputs.main }}
-        CHANGED_RELAY: ${{ steps.filter.outputs.relay }}
-      run: node scripts/ci-gate.mjs manifest >> "$GITHUB_OUTPUT"
+      run: node scripts/ci-affected.mjs manifest >> "$GITHUB_OUTPUT"
 
   quality-checks:
     name: Quality Checks
@@ -137,6 +95,8 @@ jobs:
   # matrix entry rebalances the suite instead of dropping part of it.
   main-tests:
     name: Main Process Tests (ubuntu-latest, ${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: changes
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['main-tests'] }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -215,9 +175,9 @@ jobs:
     # CI result's gate and budgets and their contract with this file (expected
     # jobs, needs, skip manifest, a budget per job). Here rather than in CI
     # result, which runs it every time at the end of the critical path.
-    - name: Test the CI result gate and the pre-push hook
+    - name: Test the CI result gate, budgets, lane selection and the pre-push hook
       if: ${{ !cancelled() }}
-      run: node --test scripts/ci-gate.test.mjs scripts/ci-timings.test.mjs scripts/pre-push.test.mjs scripts/ci-test-inventory.test.mjs
+      run: node --test scripts/ci-gate.test.mjs scripts/ci-timings.test.mjs scripts/ci-affected.test.mjs scripts/pre-push.test.mjs scripts/ci-test-inventory.test.mjs
 
     # Every tracked test file runs in a lane of this workflow (or another
     # workflow), or is listed with its reason in scripts/ci-test-inventory.mjs.
@@ -273,6 +233,8 @@ jobs:
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke-browser:
     name: Functional Smoke (browser ${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: changes
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['functional-smoke-browser'] }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -303,6 +265,8 @@ jobs:
   # in the browser lane they all landed in one shard and set the run's time.
   functional-smoke-webgl:
     name: Functional Smoke (WebGL ${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: changes
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['functional-smoke-webgl'] }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -329,6 +293,8 @@ jobs:
   # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
   renderer-selection:
     name: Renderer Selection Races (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: changes
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['renderer-selection'] }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -355,6 +321,8 @@ jobs:
 
   functional-smoke-electron:
     name: Functional Smoke (Electron ${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: changes
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['functional-smoke-electron'] }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -746,6 +714,8 @@ jobs:
   # catches a build that needs another package's dependencies.
   pwa-build:
     name: Remote PWA Build
+    needs: changes
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['pwa-build'] }}
     runs-on: ubuntu-latest
 
     steps:

@@ -20,7 +20,7 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 - `pnpm run setup` installs a pre-push hook (`scripts/pre-push.mjs`) that
   lints the pushed files and runs `pnpm typecheck` in a few seconds;
   `git push --no-verify` skips it.
-- Before a push: `pnpm check:fast` (type check, lint, offline links when
+- Before a push: `pnpm check:fast` (type check, lint, the CI lane map guard, offline links when
   lychee is installed, and the unit tests your changes reach), plus any other
   tests your change touches.
   Agent facts (ids, executables, modes, versions, env var names) live in

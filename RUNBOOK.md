@@ -223,8 +223,7 @@ namespace. Check the listing with
 `CI result` is the check branch protection requires. It runs even when the
 run is cancelled, and passes only when every `Code Quality` job named in
 `scripts/ci-gate.mjs` `EXPECTED_JOBS` succeeded, or skipped with a reason from
-the manifest that Detect changed areas writes (a pull request that changes no
-wrapper, main or relay files skips those jobs). A job that fails, is
+the manifest that Detect changed areas writes. A job that fails, is
 cancelled, is skipped without a reason, or is missing from the workflow or
 from `CI result`'s needs fails it, and so does a `Code Quality` job the list
 does not name. Add a new job to `EXPECTED_JOBS` and to `CI result`'s needs in
@@ -241,6 +240,32 @@ each lane's files from the runner itself (`vitest list`,
 test file runs in no lane and is not in its `NOT_IN_CI` list, or when a lane
 in its `LANES` list no longer matches the workflow. `node
 scripts/ci-test-inventory.mjs list` prints every test file with its lanes.
+
+
+Detect changed areas runs `node scripts/ci-affected.mjs manifest`. On a pull
+request it skips a lane (a set of jobs in `LANES`) only when every changed
+path, both sides of a rename or delete, is inside another lane's inputs or in
+`LANE_FREE`. A path no entry names (root config, the lockfile, patches,
+workflows, most of `scripts/`), an empty diff, an unreadable base and every
+event other than `pull_request` run every lane. Before it selects, it fails
+the run when the map is broken (an empty map, a job the gate does not know,
+an entry that names no file, a path a lane's job names in `quality.yml`
+outside that lane, a test file `scripts/ci-test-inventory.mjs` names for a
+lane's job outside that lane) or when a lane's code names a path in another lane or in
+`LANE_FREE`. It reads past comments and regex literals, and sees `../` and
+top-level literals; `join()`, `resolve()`, `new URL()`, templates
+(`` `${__dirname}/../x` ``) and concatenation (`__dirname + '/../x'`) built on
+the file's location; and names bound to it (`join(__dirname, '..')`,
+`dirname(dirname(__dirname))`, `fileURLToPath(new URL('..', import.meta.url))`).
+A climb followed by a computed part, any other use of such a name, and a
+template literal that never closes fail as unverifiable. Declare the path in
+the lane, or in `NOT_READ` with a reason when the code does not read it. The
+guard misses a path built entirely from variables, function results or
+environment values; a location passed through a function or an object before
+the path is built; and a file a spawned program opens by itself. A wrong
+`NOT_READ` entry also hides a read. Only a merge queue that runs every lane
+catches those, and none is enabled yet. `pnpm check:fast` and
+`node scripts/ci-affected.mjs guard` run the same guard locally.
 
 `node scripts/ci-timings.mjs --since <date> --until <time>` writes
 `ci-timings.json`: the wall time (first job start to last job end, attempt 1)
