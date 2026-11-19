@@ -523,7 +523,7 @@ describe('browser tools: tabs an agent holds (P4)', () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held, holds: { limit: 4, idleMs: 60_000, sweepMs: 40 } });
     await call(fixture, 'snapshot', {});
     expect(held).toEqual(['mine']);
-    fixture.tabs.splice(0, 1);
+    fixture.tabs.splice(fixture.tabs.findIndex(tab => tab.id === 'mine'), 1);
     await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
   });
 

@@ -324,6 +324,25 @@ function pageScript(limit: number) {
   }
 
   /** Scrolls the element into view and says where to click it, or why it can't be clicked yet. */
+  /** The element under a point, through shadow roots: document.elementFromPoint stops at the host. */
+  function deepestAt(x: number, y: number): Element | null {
+    let hit = document.elementFromPoint(x, y);
+    while (hit?.shadowRoot) {
+      const inner = hit.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === hit) break;
+      hit = inner;
+    }
+    return hit;
+  }
+
+  /** Whether `inner` sits inside `outer` as the page renders it: through slots and shadow hosts. */
+  function composedContains(outer: Element, inner: Element): boolean {
+    for (let node: Element | null = inner; node; node = node.assignedSlot ?? node.parentElement ?? (node.parentNode instanceof ShadowRoot ? node.parentNode.host : null)) {
+      if (node === outer) return true;
+    }
+    return false;
+  }
+
   function point(ref: string): { x: number; y: number } | { stale: string } | { wait: string } {
     const el = lookup(ref);
     if ('stale' in el) return el;
@@ -333,9 +352,9 @@ function pageScript(limit: number) {
     if (disabled(el)) return { wait: `${ref} is disabled.` };
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
-    const hit = document.elementFromPoint(x, y);
-    if (hit && hit !== el && !el.contains(hit) && !hit.contains(el) && !(el instanceof HTMLLabelElement)) {
-      const label = el instanceof HTMLInputElement && Array.from(el.labels ?? []).some(candidate => candidate.contains(hit));
+    const hit = deepestAt(x, y);
+    if (hit && hit !== el && !composedContains(el, hit) && !composedContains(hit, el) && !(el instanceof HTMLLabelElement)) {
+      const label = el instanceof HTMLInputElement && Array.from(el.labels ?? []).some(candidate => composedContains(candidate, hit));
       if (!label) return { wait: `${ref} is covered by another element (${hit.tagName.toLowerCase()}).` };
     }
     return { x, y };
