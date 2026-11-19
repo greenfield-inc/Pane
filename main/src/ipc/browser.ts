@@ -457,6 +457,14 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
 
     async function runLinkedLoop(): Promise<VerbOutcome> {
     for (;;) {
+      // Take over pressed while the call waited on the person's touches: it waits for Hand to agent.
+      if (chipHeld.has(tab.id)) {
+        if (Date.now() >= deadline) {
+          throw new PaneError('ERR_BROWSER_PERSON_DRIVING', `The person took over this tab on ${machine.name} and has not handed it back in ${PERSON_WAIT_MS / 60_000} minutes. Nothing ran.`, 'Ask them to hand the tab back, then try again.');
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+        continue;
+      }
       const message: JsonObject = { op: 'run', from: linked.self, panelId: tab.id, request };
       if (files) message.files = files;
       let answer = decodeBoundary(await linked.invoke(machine.id, message, LINKED_CALL_MS), linkedRunAnswerSchema);

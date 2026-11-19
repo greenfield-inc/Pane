@@ -82,7 +82,7 @@ function agentTab(id: string, paneId: string, agent: string): ToolPanel {
 }
 
 /** `pagesHere: false` leaves this computer without pages, as when only a linked computer shows the tabs. */
-function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; pagesHere?: boolean; cursors?: string[] } = {}): Fixture {
+function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; pagesHere?: boolean; cursors?: string[]; loading?: boolean } = {}): Fixture {
   const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-browser-tools-'));
   let tools = true;
   const tabs = [agentTab('claude-a', 'pane-a', 'claude'), agentTab('codex-a', 'pane-a', 'codex'), ...initial];
@@ -103,7 +103,9 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     open: async (paneId, url, callerPanelId) => {
       const tab = browserTab(`tab-${tabs.length}`, paneId, callerPanelId, url);
       tabs.push(tab);
-      pages.set(tab.id, fakePage(nextPage++, url));
+      const page = fakePage(nextPage++, url);
+      if (options.loading) Object.assign(page, { isLoading: () => true });
+      pages.set(tab.id, page);
       return tab;
     },
     show: async () => undefined,
@@ -413,4 +415,40 @@ describe('browser tools: a tab a linked computer shows (P2)', () => {
     offline = false;
     expect(await call(agentSide, 'snapshot', {})).toMatchObject({ ok: true });
   }, 15_000);
+
+  it('keeps the person driving after they touch the page and then press Take over during one call', async () => {
+    const { agentSide, viewer } = linkedPair();
+    await call(agentSide, 'snapshot', {});
+    await call(agentSide, 'click', { ref: 'e2' });
+    await new Promise(resolve => setTimeout(resolve, 400));
+    viewer.pages.get('shown-there')?.emit('input-event', {}, { type: 'mouseDown' });
+    let settled = false;
+    const clicking = code(call(agentSide, 'click', { ref: 'e2' })).finally(() => { settled = true; });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'person'], { caller: undefined });
+    // The touch ends; the Take over still holds the tab.
+    await new Promise(resolve => setTimeout(resolve, TOUCH_HOLD_MS + 500));
+    expect(settled).toBe(false);
+    expect(JSON.stringify(agentSide.tabs.find(tab => tab.id === 'shown-there')?.state.customState)).toContain('"by":"person"');
+    await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'agent'], { caller: undefined });
+    expect(await clicking).toBe('ERR_BROWSER_STALE_REF');
+  });
+
+  it('asks the linked computers again on calls right after open, so a tab that reaches them late runs there', async () => {
+    const { agentSide, viewer, viewerCursors } = linkedPair();
+    const opened = JSON.parse(JSON.stringify(await call(agentSide, 'open', { url: 'http://site.test/new' })));
+    expect(opened).toMatchObject({ ok: true });
+    // The new tab now reaches the linked computer's window.
+    viewer.pages.set(opened.tab, fakePage(99, 'http://site.test/new'));
+    await call(agentSide, 'snapshot', { tab: opened.tab });
+    await call(agentSide, 'click', { tab: opened.tab, ref: 'e2' });
+    expect(viewerCursors).toEqual([opened.tab]);
+  });
+});
+
+describe('browser tools: opening a slow page', () => {
+  it('returns once the page registered, even when it is still loading', async () => {
+    const fixture = setup([], { loading: true });
+    expect(await call(fixture, 'open', { url: 'http://localhost:4173/slow' })).toMatchObject({ ok: true, url: 'http://localhost:4173/slow' });
+  }, 20_000);
 });
