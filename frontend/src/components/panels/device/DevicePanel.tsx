@@ -5,7 +5,9 @@ import { Tooltip } from '../../ui/Tooltip';
 import type { ToolPanel } from '../../../../../shared/types/panels';
 import { Dropdown, type DropdownItem } from '../../ui/Dropdown';
 import { cn } from '../../../utils/cn';
-import { deviceCaption, devicePhaseCopy } from './deviceCopy';
+import { deviceCaption, devicePhaseCopy, recordingEndCopy } from './deviceCopy';
+import { deviceInputQueue } from './deviceInputQueue';
+import { frameDelta, framePoint, screenTurn, type ScreenTurn } from './deviceTurn';
 import { requestOpenSettings } from '../../../utils/openSettings';
 import { useAddDeviceStore } from '../../addDevice/addDeviceStore';
 import { useConfigStore } from '../../../stores/configStore';
@@ -35,6 +37,8 @@ export interface DevicePanelProps {
 
 /** Narrower than this, the rail lies under the phone as a bar (phones, a narrow split). */
 const NARROW_PX = 520;
+/** Narrower than this, the bar wraps onto rows, which read best without the group dividers. */
+const ONE_ROW_PX = 380;
 
 /**
  * A phone simulator or emulator's live screen: the phone at full height, a grouped
@@ -51,6 +55,12 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const live = state.phase === 'live';
   // A desktop switched to another computer reads frames from it; this one's own devices stream.
   const remote = useConfigStore(store => store.config?.remoteDaemon?.client.mode === 'remote');
+  // The host names its own machine "This Mac"; a desktop showing it from another computer names that computer.
+  const hostName = useConfigStore(store => {
+    const remoteClient = store.config?.remoteDaemon?.client;
+    return remoteClient?.mode === 'remote' ? remoteClient.computers.find(computer => computer.id === remoteClient.activeProfileId)?.label : undefined;
+  });
+  const captionState = hostName && !state.machineId ? { ...state, machine: hostName } : state;
   const provided = useContext(DeviceClientContext);
   const client = useMemo(() => provided ?? desktopDeviceClient(remote), [provided, remote]);
   const storePanels = usePanelStore(store => store.panels[panel.sessionId]);
@@ -65,7 +75,9 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
     setAspect(current => (Math.abs(current - next) / current < 0.01 ? current : next));
   }, [panel.id]);
   const root = useRef<HTMLDivElement>(null);
-  const narrow = useNarrow(root);
+  const width = useSize(root)?.width ?? Number.POSITIVE_INFINITY;
+  const narrow = width < NARROW_PX;
+  const wraps = width < ONE_ROW_PX;
 
   const run = useCallback(async (label: string, work: () => Promise<void>) => {
     setBusy(label);
@@ -88,25 +100,25 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const [painted, setPainted] = useState(false);
   const skeletonChain = `device:${panel.id}`;
   const screenHold = useSkeletonHold(state.phase === 'booting' || (shown && !painted), skeletonChain);
-  const send = useCallback((input: DeviceInput) => { void client.input(panel.id, input).catch(() => undefined); }, [client, panel.id]);
+  // A frame read right after each input lands, so a remote screen shows it without waiting for the next poll.
+  const readFrameNow = useRef<() => void>(() => undefined);
+  const send = useMemo(() => deviceInputQueue(input => client.input(panel.id, input), () => readFrameNow.current()), [client, panel.id]);
+  // Turns and folds go in line with touches, and the screen is read right after, like any input.
   const act = useCallback((input: DeviceInput) => run(input.kind, async () => {
-    await client.input(panel.id, input);
+    const failure = await send(input);
+    if (failure) throw failure;
     refreshControls();
-  }), [client, panel.id, refreshControls, run]);
+  }), [refreshControls, run, send]);
 
   const [notice, setNotice] = useState<CaptureNotice>();
   const closeNotice = useCallback(() => setNotice(undefined), []);
   const [markup, setMarkup] = useState<CaptureNotice>();
   const [logsOpen, setLogsOpen] = useState(false);
   const logs = useDeviceLogs(client, panel.id, logsOpen && shown);
-  const recorder = useRecording(client, panel.id);
-  const [recordingNote, setRecordingNote] = useState<string>();
-  useEffect(() => { if (recorder.capped) setRecordingNote('The recording stopped at its 10-minute limit and was saved with Pane\'s device files.'); }, [recorder.capped]);
-  useEffect(() => {
-    if (!recordingNote) return;
-    const timer = window.setTimeout(() => setRecordingNote(undefined), 10_000);
-    return () => window.clearTimeout(timer);
-  }, [recordingNote]);
+  const recorder = useRecording(client, panel.id, state.recording?.startedAt);
+  const recordingNote = useRecordingNote(state.recordingEnded);
+  /** The recording whose path this tab typed at the agent's prompt, and that agent. */
+  const [staged, setStaged] = useState<{ path: string; agent: string }>();
 
   useEffect(() => {
     if (!state.deviceId) return;
@@ -134,11 +146,11 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
       return;
     }
     const saved = await recorder.stop();
-    const where = saved.machine ? ` on ${saved.machine}` : '';
     // A terminal agent gets the video's path at its prompt, as a screenshot's.
-    const staged = agentTab?.kind === 'terminal' && !saved.machine;
-    if (staged) await client.stage(panel.id, agentTab.id, `${saved.path} `);
-    setRecordingNote(`Recording saved${where}${staged ? `, path typed at ${agentTab.agent}'s prompt` : ''}: ${saved.path}`);
+    if (agentTab?.kind === 'terminal' && !saved.machine) {
+      await client.stage(panel.id, agentTab.id, `${saved.path} `);
+      setStaged({ path: saved.path, agent: agentTab.agent });
+    }
   }), [agentTab, client, panel.id, recorder, run]);
 
   /** The screenshot on screen in the card, or a new one: Copy, Save and Mark up reuse one capture. */
@@ -182,24 +194,25 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   const agentDriving = state.driver?.by === 'agent';
 
   const rail = (
-    <div className={cn('flex flex-shrink-0 items-center gap-1 rounded-full border border-border-primary bg-surface-primary p-1 shadow-sm', narrow ? 'flex-row self-center' : 'flex-col self-center')} data-testid="device-rail">
+    // In a narrow tab the rail wraps onto rows under the phone, so every control stays inside the tab.
+    <div className={cn('flex flex-shrink-0 items-center gap-1 border border-border-primary bg-surface-primary p-1 shadow-sm', narrow ? 'max-w-full flex-row flex-wrap justify-center self-center rounded-2xl' : 'flex-col self-center rounded-full')} data-testid="device-rail">
       <RailButton label="Home" shortcut="⇧⌘H" disabled={!live} onClick={() => send({ kind: 'button', button: 'home' })}><Home className="h-4 w-4" /></RailButton>
       <RailButton label="Rotate" shortcut="⌘→" disabled={!live || !controls.orientation} onClick={() => { void act({ kind: 'rotate', orientation: nextOrientation(controls.orientation) }); }}><RotateCw className="h-4 w-4" /></RailButton>
       {controls.fold && (
         <>
-          <RailDivider vertical={narrow} />
+          {!wraps && <RailDivider vertical={narrow} />}
           {FOLDS.map(({ posture, label, Icon }) => (
             <RailButton key={posture} label={label} disabled={!live} selected={controls.fold?.posture === posture} onClick={() => { void act({ kind: 'fold', posture }); }}><Icon className="h-4 w-4" /></RailButton>
           ))}
         </>
       )}
-      <RailDivider vertical={narrow} />
+      {!wraps && <RailDivider vertical={narrow} />}
       <RailButton label={agentTab ? 'Screenshot to chat' : 'Screenshot'} shortcut="⌘S" accent disabled={!live || busy === 'screenshot'} onClick={() => { void screenshotToChat(); }}><Camera className="h-4 w-4" /></RailButton>
       <RailButton label={recorder.recording ? `Stop recording (${clock(recorder.elapsed)})` : 'Record'} shortcut="⌘R" disabled={!live || busy === 'record'} selected={recorder.recording} onClick={() => { void toggleRecording(); }}>
         {recorder.recording ? <Square className="h-3.5 w-3.5 fill-current text-status-error" /> : <CircleDot className="h-4 w-4" />}
       </RailButton>
       <RailButton label="Mark up" disabled={!live || busy === 'markup'} onClick={() => { void markUp(); }}><Pencil className="h-4 w-4" /></RailButton>
-      <RailDivider vertical={narrow} />
+      {!wraps && <RailDivider vertical={narrow} />}
       <RailButton label="Logs" disabled={!live} selected={logsOpen} onClick={() => setLogsOpen(open => !open)}><FileText className="h-4 w-4" /></RailButton>
       <Dropdown trigger={<RailButton label="More" disabled={false}><MoreHorizontal className="h-4 w-4" /></RailButton>} items={moreItems} position="bottom-right" width="sm" />
     </div>
@@ -218,7 +231,7 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
       <div className={cn('relative flex min-h-0 flex-1 items-center justify-center gap-3 p-4', narrow && 'flex-col')}>
         <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col items-center justify-center">
           <PhoneFrame aspect={aspect} highlighted={agentDriving} footer={(
-            <DeviceCaption state={state} frameRate={streaming ? frameRate : undefined} recording={recorder.recording ? recorder.elapsed : undefined} compact={narrow && state.driver !== undefined}>
+            <DeviceCaption state={captionState} frameRate={streaming ? frameRate : undefined} recording={recorder.recording ? recorder.elapsed : undefined} compact={narrow && state.driver !== undefined}>
               <DriverChip
                 driver={state.driver}
                 agentName={agentTab?.agent}
@@ -227,7 +240,7 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
               />
             </DeviceCaption>
           )}>
-            {live && isActive ? <LiveScreen client={client} panelId={panel.id} platform={state.platform} onScreenSize={onScreenSize} onPainted={setPainted} onInput={send} /> : (
+            {live && isActive ? <LiveScreen client={client} panelId={panel.id} platform={state.platform} orientation={controls.orientation} onScreenSize={onScreenSize} onPainted={setPainted} onInput={send} readFrameNow={readFrameNow} /> : (
               <div className="absolute inset-0 bg-device-screen">
                 {lastFrame && <img src={lastFrame} alt="" className="h-full w-full object-contain opacity-60" onLoad={(event) => onScreenSize(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />}
               </div>
@@ -238,7 +251,13 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
             <PhaseOverlay state={state} busy={busy} onBoot={() => run('boot', () => client.power(panel.id, 'boot'))} onTakeOver={() => run('take-over', () => client.takeOver(panel.id))} />
           </PhoneFrame>
           {error && <p className="mt-1 max-w-sm text-center text-xs text-status-error" role="alert">{error}</p>}
-          {recordingNote && !error && <p className="mt-1 max-w-sm truncate text-center text-xs text-text-secondary" title={recordingNote}>{recordingNote}</p>}
+          {recordingNote && !error && (
+            // Over the tab, not in its column, so the phone keeps its size while the note shows.
+            <p className="absolute left-1/2 top-2 z-10 w-max max-w-[min(28rem,calc(100%-2rem))] -translate-x-1/2 break-words rounded-md border border-border-primary bg-surface-primary px-3 py-1.5 text-center text-xs text-text-secondary shadow-sm" role="status" data-testid="device-recording-note">
+              {recordingNote.text}
+              {staged && staged.path === recordingNote.path && ` Its path is typed at ${staged.agent}'s prompt.`}
+            </p>
+          )}
         </div>
         {rail}
         {notice && !markup && (
@@ -286,23 +305,29 @@ export function DevicePanel({ panel, isActive, panels }: DevicePanelProps) {
   );
 }
 
+/** How long the note under the phone says how a recording ended. */
+const RECORDING_NOTE_MS = 15_000;
+
+/**
+ * How the tab's last recording ended, for the note under the phone: shown when it ends while the
+ * tab is open (not for one that ended before), for RECORDING_NOTE_MS.
+ */
+function useRecordingNote(ended: DevicePanelState['recordingEnded']): { text: string; path?: string } | undefined {
+  // Every panel update brings a new object, so the note follows the end's time, not the object.
+  const at = ended?.at;
+  const firstSeen = useRef(at);
+  const [shownAt, setShownAt] = useState<number>();
+  useEffect(() => {
+    if (at === undefined || at === firstSeen.current) return;
+    setShownAt(at);
+    const timer = window.setTimeout(() => setShownAt(undefined), RECORDING_NOTE_MS);
+    return () => window.clearTimeout(timer);
+  }, [at]);
+  return ended && shownAt === ended.at ? { text: recordingEndCopy(ended), path: ended.recording?.path } : undefined;
+}
+
 /** Keys with names that type into the device; other named keys (F1, Shift…) stay with Pane. */
 const TYPED_KEYS = new Set(['Enter', 'Backspace', 'Tab', 'Escape', 'Delete', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
-
-/** Whether `root` is narrower than NARROW_PX, so the rail becomes a bar under the phone. */
-function useNarrow(root: RefObject<HTMLDivElement | null>): boolean {
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    const element = root.current;
-    if (!element) return;
-    const measure = () => setNarrow(element.getBoundingClientRect().width < NARROW_PX);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [root]);
-  return narrow;
-}
 
 /**
  * Change, on the banner of a device that runs on a linked Mac: Automatic and each saved Mac with
@@ -529,13 +554,20 @@ const STREAM_RESIZE_SETTLE_MS = 400;
  * renderer; on another computer it is frames read over the connection, about twice a second.
  * Pointer events become normalized touches on the drawn image; moves are sent once a frame.
  */
-function LiveScreen({ client, panelId, platform, onScreenSize, onPainted, onInput }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; onScreenSize: (width: number, height: number) => void; onPainted: (painted: boolean) => void; onInput: (input: DeviceInput) => void }) {
+function LiveScreen({ client, panelId, platform, orientation, onScreenSize, onPainted, onInput, readFrameNow }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; orientation: DeviceOrientation | undefined; onScreenSize: (width: number, height: number) => void; onPainted: (painted: boolean) => void; onInput: (input: DeviceInput) => void; readFrameNow: RefObject<() => void> }) {
   const box = useRef<HTMLDivElement>(null);
   const streamPx = useStreamPx(box);
-  // Simulators stream MJPEG where the client can; an emulator's screen comes as frames.
+  // Simulators stream MJPEG where the client can; an emulator's screen comes as frames, sized to this box.
   const streams = platform === 'ios' && client.streamUrl !== undefined;
   const stream = streams && streamPx ? client.streamUrl?.(panelId, streamPx) : undefined;
-  const polled = useDeviceFrames(client, panelId, streams ? undefined : FRAME_POLL_MS);
+  // A client without a local stream reads frames over a connection: sized to this box so the host
+  // sends no pixels the tab throws away. This desktop's own Android frames come whole, over IPC.
+  const remoteFrames = client.streamUrl === undefined;
+  const [polled, readNow] = useDeviceFrames(client, panelId, streams || !streamPx ? undefined : FRAME_POLL_MS, remoteFrames ? streamPx : undefined);
+  useEffect(() => {
+    readFrameNow.current = readNow;
+    return () => { readFrameNow.current = () => undefined; };
+  }, [readFrameNow, readNow]);
   // A hidden window drops the stream, which closes its connection; the last polled frame stays.
   const pageVisible = usePageVisible();
   const src = stream ? (pageVisible ? stream : undefined) : polled;
@@ -548,7 +580,8 @@ function LiveScreen({ client, panelId, platform, onScreenSize, onPainted, onInpu
   }, [onPainted, onScreenSize]);
   return (
     <div ref={box} className="absolute inset-0 bg-device-screen">
-      {src && <TouchScreen client={client} panelId={panelId} platform={platform} src={src} onScreenSize={onFrameSize} onInput={onInput} />}
+      {/* A simulator streams its portrait framebuffer however the device turns, as Simulator shows it before turning the window. */}
+      {src && <TouchScreen platform={platform} orientation={platform === 'ios' ? orientation : undefined} box={box} src={src} onScreenSize={onFrameSize} onInput={onInput} />}
     </div>
   );
 }
@@ -596,10 +629,15 @@ function usePageVisible(): boolean {
 /** How often the stream's frame size is checked: an MJPEG image changes size without an event. */
 const SIZE_CHECK_MS = 250;
 
-/** Where a pointer falls on the image as drawn (letterboxed, never cropped), from 0 to 1 on each axis. */
-function pointOnImage(image: HTMLImageElement, clientX: number, clientY: number) {
+/**
+ * Where a pointer falls on the image as drawn (letterboxed, never cropped, turned `turn` degrees),
+ * from 0 to 1 on each axis of the upright screen.
+ */
+function pointOnImage(image: HTMLImageElement, clientX: number, clientY: number, turn: ScreenTurn = 0) {
+  // The bounding box of a turned image is the upright screen's box.
   const rect = image.getBoundingClientRect();
-  const natural = image.naturalWidth > 0 && image.naturalHeight > 0 ? image.naturalWidth / image.naturalHeight : rect.width / rect.height;
+  const sideways = turn === 90 || turn === 270;
+  const natural = image.naturalWidth > 0 && image.naturalHeight > 0 ? (sideways ? image.naturalHeight / image.naturalWidth : image.naturalWidth / image.naturalHeight) : rect.width / rect.height;
   const width = Math.min(rect.width, rect.height * natural);
   const height = width / natural;
   const left = rect.left + (rect.width - width) / 2;
@@ -607,19 +645,52 @@ function pointOnImage(image: HTMLImageElement, clientX: number, clientY: number)
   return { x: (clientX - left) / width, y: (clientY - top) / height };
 }
 
-function TouchScreen({ client, panelId, platform, src, onScreenSize, onInput }: { client: DeviceTabClient; panelId: string; platform: DevicePanelState['platform']; src: string; onScreenSize: (width: number, height: number) => void; onInput: (input: DeviceInput) => void }) {
+/** The size of `element` as it resizes; undefined until measured. */
+function useSize(element: RefObject<HTMLDivElement | null>): { width: number; height: number } | undefined {
+  const [size, setSize] = useState<{ width: number; height: number }>();
+  useEffect(() => {
+    const target = element.current;
+    if (!target) return;
+    const measure = () => { const { width, height } = target.getBoundingClientRect(); setSize(current => (current?.width === width && current.height === height ? current : { width, height })); };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [element]);
+  return size;
+}
+
+/**
+ * The device's screen as an image that takes touches. A simulator turned to landscape still
+ * streams a portrait frame, so the image is turned upright and touches are turned back onto the frame.
+ */
+function TouchScreen({ platform, orientation, box, src, onScreenSize, onInput }: { platform: DevicePanelState['platform']; orientation: DeviceOrientation | undefined; box: RefObject<HTMLDivElement | null>; src: string; onScreenSize: (width: number, height: number) => void; onInput: (input: DeviceInput) => void }) {
   const image = useRef<HTMLImageElement>(null);
   const down = useRef(false);
   // Wheel and trackpad scrolls, gathered into one scroll a frame, as fractions of the screen.
   const pendingScroll = useRef<{ x: number; y: number; dx: number; dy: number }>(undefined);
   const pendingMove = useRef<{ x: number; y: number }>(undefined);
+  const [natural, setNatural] = useState({ width: 0, height: 0 });
+  const turn = screenTurn(orientation, natural.width, natural.height);
+  const sideways = turn === 90 || turn === 270;
+  const boxSize = useSize(box) ?? { width: 0, height: 0 };
   useEffect(() => {
-    const timer = window.setInterval(() => { const element = image.current; if (element) onScreenSize(element.naturalWidth, element.naturalHeight); }, SIZE_CHECK_MS);
+    const measure = () => {
+      const element = image.current;
+      if (!element) return;
+      const { naturalWidth: width, naturalHeight: height } = element;
+      setNatural(current => (current.width === width && current.height === height ? current : { width, height }));
+      // The phone takes the shape the person sees: a turned frame's sides swap.
+      if (sideways) onScreenSize(height, width);
+      else onScreenSize(width, height);
+    };
+    measure();
+    const timer = window.setInterval(measure, SIZE_CHECK_MS);
     return () => window.clearInterval(timer);
-  }, [onScreenSize]);
-  const point = (event: ReactPointerEvent<HTMLImageElement>) => pointOnImage(event.currentTarget, event.clientX, event.clientY);
+  }, [onScreenSize, sideways]);
+  const point = (event: ReactPointerEvent<HTMLImageElement>) => framePoint(turn, pointOnImage(event.currentTarget, event.clientX, event.clientY, turn));
   const send = (phase: 'begin' | 'move' | 'end', at: { x: number; y: number }) => {
-    void client.input(panelId, { kind: 'touch', phase, x: Math.min(1, Math.max(0, at.x)), y: Math.min(1, Math.max(0, at.y)) }).catch(() => undefined);
+    onInput({ kind: 'touch', phase, x: Math.min(1, Math.max(0, at.x)), y: Math.min(1, Math.max(0, at.y)) });
   };
   const end = (event: ReactPointerEvent<HTMLImageElement>) => {
     if (!down.current) return;
@@ -634,8 +705,18 @@ function TouchScreen({ client, panelId, platform, src, onScreenSize, onInput }: 
       alt={`${platform === 'ios' ? 'iOS' : 'Android'} screen`}
       draggable={false}
       data-testid="device-screen"
-      className="absolute inset-0 h-full w-full touch-none select-none object-contain"
-      onLoad={(event) => onScreenSize(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+      className={cn('absolute touch-none select-none object-contain', turn === 0 && 'inset-0 h-full w-full')}
+      // A sideways image is laid out with the box's sides swapped, then turned to fill it.
+      style={turn === 0 ? undefined : sideways
+        ? { width: boxSize.height, height: boxSize.width, left: (boxSize.width - boxSize.height) / 2, top: (boxSize.height - boxSize.width) / 2, transform: `rotate(${turn}deg)` }
+        : { inset: 0, width: '100%', height: '100%', transform: `rotate(${turn}deg)` }}
+      // The first frame paints now, not at the next size check, so the skeleton lifts with it.
+      onLoad={(event) => {
+        const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
+        setNatural({ width, height });
+        if (sideways) onScreenSize(height, width);
+        else onScreenSize(width, height);
+      }}
       onPointerDown={(event) => { down.current = true; event.currentTarget.setPointerCapture(event.pointerId); send('begin', point(event)); }}
       onPointerMove={(event) => {
         if (!down.current) return;
@@ -647,10 +728,11 @@ function TouchScreen({ client, panelId, platform, src, onScreenSize, onInput }: 
       onPointerCancel={end}
       onWheel={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
-        const at = pointOnImage(event.currentTarget, event.clientX, event.clientY);
+        const at = framePoint(turn, pointOnImage(event.currentTarget, event.clientX, event.clientY, turn));
         const first = pendingScroll.current === undefined;
         const previous = pendingScroll.current ?? { ...at, dx: 0, dy: 0 };
-        pendingScroll.current = { ...previous, dx: previous.dx + event.deltaX / rect.width, dy: previous.dy + event.deltaY / rect.height };
+        const delta = frameDelta(turn, { dx: event.deltaX / rect.width, dy: event.deltaY / rect.height });
+        pendingScroll.current = { ...previous, dx: previous.dx + delta.dx, dy: previous.dy + delta.dy };
         if (first) requestAnimationFrame(() => { const scroll = pendingScroll.current; pendingScroll.current = undefined; if (scroll) onInput({ kind: 'scroll', ...scroll }); });
       }}
     />
