@@ -9,6 +9,7 @@ import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult }
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
+import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
   type WindowControlsOverlayColors,
@@ -317,6 +318,14 @@ try {
       window.dispatchEvent(new CustomEvent('browser-panel:file-refused', { detail: data }));
     } catch (e) {
       console.error('Failed to dispatch browser-panel:file-refused to window:', e);
+    }
+  });
+  // A line under a browser tab's address bar: an app link to confirm, a sign-in sent out, a download.
+  ipcRenderer.on(BROWSER_TAB_NOTICE_CHANNEL, (_event: Electron.IpcRendererEvent, data: { panelId: string; notice: BrowserTabNotice }) => {
+    try {
+      window.dispatchEvent(new CustomEvent(BROWSER_TAB_NOTICE_CHANNEL, { detail: data }));
+    } catch (e) {
+      console.error(`Failed to dispatch ${BROWSER_TAB_NOTICE_CHANNEL} to window:`, e);
     }
   });
   // A docs page's link that opens a new window.

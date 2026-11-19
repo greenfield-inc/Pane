@@ -11,3 +11,13 @@ export interface BrowserSettings {
 
 export const DEFAULT_BROWSER_SETTINGS: BrowserSettings = { agentTools: true, openLinksIn: 'pane' };
 
+/** What main tells a browser tab to show under its address bar (`BROWSER_TAB_NOTICE_CHANNEL`). */
+export type BrowserTabNotice =
+  /** "This page wants to open <app>. Open · Cancel": the page asked for an app link (zoommtg:). */
+  | { kind: 'app'; id: string; app: string | null; scheme: string }
+  /** A sign-in that fails in an embedded browser went to the system browser instead. */
+  | { kind: 'sent-out'; site: string }
+  /** "Downloaded <name> · Show in folder". */
+  | { kind: 'downloaded'; name: string; file: string };
+
+export const BROWSER_TAB_NOTICE_CHANNEL = 'browser-panel:notice';

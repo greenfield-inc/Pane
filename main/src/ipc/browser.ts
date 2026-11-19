@@ -1,5 +1,5 @@
-import { readFileSync, realpathSync, statSync } from 'fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'fs';
+import { copyFile, mkdir, mkdtemp, rename, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import { randomUUID } from 'crypto';
 import path from 'path';
@@ -41,6 +41,28 @@ export interface BrowserHost {
   showCursor(panelId: string, x: number, y: number): void;
   /** Your other computers this one is linked to, when it keeps connections to them (P2). */
   linked(): LinkedComputers | undefined;
+  /** Calls `listener` for each download a page in a browser tab starts, before anything is saved. */
+  onDownload(listener: (download: TabDownload) => void): void;
+  /** Where the person's own downloads go: their Downloads folder. */
+  personDownloads(): string;
+  /** Where downloads an agent's call caused go: the Pane's scratch folder, deleted with the Pane. */
+  agentDownloads(paneId: string): Promise<string>;
+  /** Tells the tab a file finished downloading: "Downloaded <name> · Show in folder". */
+  showDownload(panelId: string, file: string): void;
+}
+
+/** A download a page started (Electron's will-download on the browser tabs' store). */
+export interface TabDownload {
+  /** The page that started it. */
+  pageId: number;
+  /** The tab that page shows in; undefined for a sign-in popup's own window. */
+  tabId: string | undefined;
+  /** The name the site suggests. */
+  filename: string;
+  /** Saves the file at `file`, with no dialog. Only during the onDownload listener call. */
+  saveAs(file: string): void;
+  /** True once the file is complete; false when it failed or was cancelled. */
+  finished: Promise<boolean>;
 }
 
 /** The linked computers an agent's call can reach, and how this computer names itself to them. */
@@ -52,7 +74,7 @@ export interface LinkedComputers {
 }
 
 /** One tab as browser_tabs lists it (the contract's browserTab). */
-interface TabSummary { id: string; url: string; title: string; openedBy: string; yours: boolean; driving?: string; showing: boolean; dialog?: PendingDialog }
+interface TabSummary { id: string; url: string; title: string; openedBy: string; yours: boolean; driving?: string; showing: boolean; dialog?: PendingDialog; downloads?: string[] }
 /** What an action on a tab returns (the contract's browserActionResult). */
 /** What a browser tool returns (the contract's browser*Result schemas). */
 interface ToolResult { ok: true; tab: string; url: string; title: string; dialog?: PendingDialog; fileChooser?: FileChooser; note?: string; snapshot?: string; truncated?: boolean; value?: JsonValue; path?: string; mimeType?: 'image/png'; width?: number; height?: number; reused?: boolean; next?: string }
@@ -181,6 +203,44 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
 
   const settings = (): BrowserSettings => ({ ...DEFAULT_BROWSER_SETTINGS, ...services.configManager.getConfig().browser });
 
+  /** Files agents' calls downloaded, by tab, which browser_tabs lists. */
+  const downloads = new Map<string, string[]>();
+
+  /**
+   * A download an agent's call caused (during its call, or while the chip still shows it driving)
+   * saves into the Pane's scratch folder and browser_tabs lists it. Any other download is the
+   * person's: it saves to their Downloads folder. Neither asks where to save.
+   */
+  host.onDownload(download => {
+    const tab = download.tabId ? host.tab(download.tabId) : undefined;
+    const byAgent = tab !== undefined && (pages.get(download.pageId)?.isAgentInput() === true || tabState(tab).driver?.by === 'agent');
+    const name = path.basename(download.filename.replace(/\\/g, '/')) || 'download';
+    if (!tab || !byAgent) {
+      const file = unusedPath(host.personDownloads(), name);
+      download.saveAs(file);
+      void download.finished.then(done => { if (done && download.tabId) host.showDownload(download.tabId, file); });
+      return;
+    }
+    // The scratch folder is found (and made) only after Electron needs the path, so the file saves
+    // beside the system's temporary files first and moves when it is complete.
+    const staging = path.join(os.tmpdir(), `pane-browser-download-${randomUUID()}`);
+    mkdirSync(staging, { recursive: true });
+    download.saveAs(path.join(staging, name));
+    void download.finished.then(async done => {
+      try {
+        if (!done) return;
+        const directory = await host.agentDownloads(tab.sessionId);
+        await mkdir(directory, { recursive: true });
+        const file = unusedPath(directory, name);
+        await moveFile(path.join(staging, name), file);
+        downloads.set(tab.id, [...(downloads.get(tab.id) ?? []), file]);
+        host.showDownload(tab.id, file);
+      } finally {
+        await rm(staging, { recursive: true, force: true });
+      }
+    }).catch(error => console.error('[browser] Could not keep an agent\'s download:', error));
+  });
+
   function callerOf(): BrowserCaller {
     if (isRemotePaneCommand()) {
       throw new PaneError('ERR_BROWSER_LOCAL_ONLY', 'Browser tools answer only agents running on this computer, and this call came from another one. Nothing ran.', 'Run the agent in a Pane on the computer that shows the tab.');
@@ -234,6 +294,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (state.driver) item.driving = state.driver.by === 'person' ? 'person' : state.driver.agent;
     const dialog = page ? pages.get(page.id)?.pendingDialog : undefined;
     if (dialog) item.dialog = dialog;
+    const saved = downloads.get(tab.id);
+    if (saved) item.downloads = saved;
     return item;
   }
 
@@ -647,6 +709,24 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     await setDriverFromChip(id, who);
     return { success: true };
   });
+}
+
+/** `name` in `directory`, or "name (2).ext" and on when a file has it, as browsers name downloads. */
+function unusedPath(directory: string, name: string): string {
+  const { name: stem, ext } = path.parse(name);
+  let file = path.join(directory, name);
+  for (let copy = 2; existsSync(file); copy += 1) file = path.join(directory, `${stem} (${copy})${ext}`);
+  return file;
+}
+
+/** Moves a file, copying it when the folders are on different disks. */
+async function moveFile(from: string, to: string): Promise<void> {
+  try {
+    await rename(from, to);
+  } catch (cause) {
+    if (!(cause instanceof Error) || !('code' in cause) || cause.code !== 'EXDEV') throw cause;
+    await copyFile(from, to);
+  }
 }
 
 function devToolsOpen(contents: BrowserPageContents): boolean {

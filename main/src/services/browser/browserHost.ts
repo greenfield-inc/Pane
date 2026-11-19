@@ -1,4 +1,6 @@
-import { webContents, type BrowserWindow } from 'electron';
+import { app, session, webContents, type BrowserWindow } from 'electron';
+import { SHARED_BROWSER_PARTITION } from '../../../../shared/constants/browserPartitions';
+import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../../../shared/types/browser';
 import path from 'path';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { BrowserPanelState } from '../../../../shared/types/panels';
@@ -69,6 +71,23 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     shotsDirectory: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-screenshots'),
     showCursor: (panelId, x, y) => getMainWindow()?.webContents.send(BROWSER_AGENT_CURSOR_EVENT, { panelId, x, y }),
     linked: () => linkedComputers(configManager),
+    onDownload: (listener) => {
+      void app.whenReady().then(() => {
+        session.fromPartition(SHARED_BROWSER_PARTITION).on('will-download', (_event, item, contents) => listener({
+          pageId: contents.id,
+          tabId: getPaneWebviewContextMap().get(contents.id)?.panelId,
+          filename: item.getFilename(),
+          saveAs: (file) => item.setSavePath(file),
+          finished: new Promise(resolve => item.once('done', (_done, state) => resolve(state === 'completed'))),
+        }));
+      });
+    },
+    personDownloads: () => app.getPath('downloads'),
+    agentDownloads: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-downloads'),
+    showDownload: (panelId, file) => {
+      const notice: BrowserTabNotice = { kind: 'downloaded', name: path.basename(file), file };
+      getMainWindow()?.webContents.send(BROWSER_TAB_NOTICE_CHANNEL, { panelId, notice });
+    },
   };
 }
 

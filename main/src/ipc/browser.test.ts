@@ -8,7 +8,7 @@ import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { BrowserPageContents } from '../services/browser/pageDriver';
-import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost, type BrowserServices, type LinkedComputers } from './browser';
+import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost, type BrowserServices, type LinkedComputers, type TabDownload } from './browser';
 import { readFileSync } from 'fs';
 import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
 
@@ -60,6 +60,10 @@ interface Fixture {
   pages: Map<string, ReturnType<typeof fakePage>>;
   setTools(on: boolean): void;
   worktree: string;
+  /** A page in `tabId` starts downloading `filename`; resolves with where it saved, once the file is written and done. */
+  download(tabId: string, filename: string, content: string): Promise<string>;
+  /** The tabs that said "Downloaded …", with the file. */
+  shownDownloads: Array<[string, string]>;
 }
 
 function browserTab(id: string, paneId: string, openedByPanel?: string, url = 'http://localhost:4173/'): ToolPanel {
@@ -80,6 +84,8 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
   const tabs = [agentTab('claude-a', 'pane-a', 'claude'), agentTab('codex-a', 'pane-a', 'codex'), ...initial];
   const pages = new Map<string, ReturnType<typeof fakePage>>();
   let nextPage = 1;
+  let downloadListener: ((download: TabDownload) => void) | undefined;
+  const shownDownloads: Array<[string, string]> = [];
   if (options.pagesHere !== false) for (const tab of initial) pages.set(tab.id, fakePage(nextPage++, 'http://localhost:4173/'));
   const host: BrowserHost = {
     tabs: (paneId) => tabs.filter(tab => tab.sessionId === paneId && tab.type === 'browser'),
@@ -98,6 +104,21 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
     linked: () => options.linked,
+    onDownload: (listener) => { downloadListener = listener; },
+    personDownloads: () => path.join(worktree, 'Downloads'),
+    agentDownloads: async () => path.join(worktree, '.scratch', 'browser-downloads'),
+    showDownload: (panelId, file) => { shownDownloads.push([panelId, file]); },
+  };
+  mkdirSync(path.join(worktree, 'Downloads'));
+  const download = async (tabId: string, filename: string, content: string): Promise<string> => {
+    let saveAt = '';
+    let finish: (done: boolean) => void = () => undefined;
+    const finished = new Promise<boolean>(resolve => { finish = resolve; });
+    downloadListener?.({ pageId: pages.get(tabId)?.id ?? 0, tabId, filename, saveAs: (file) => { saveAt = file; }, finished });
+    // Electron writes the file, then reports it done.
+    writeFileSync(saveAt, content);
+    finish(true);
+    return saveAt;
   };
   const services: BrowserServices = {
     sessionManager: { getSession: (id: string) => (id === 'pane-a' || id === 'pane-b' ? { name: id, worktreePath: worktree } : undefined) },
@@ -105,7 +126,7 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
   };
   const registry = new PaneCommandRegistry();
   registerBrowserHandlers(services, registry, host);
-  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree };
+  return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree, download, shownDownloads };
 }
 
 const signal = new AbortController().signal;
@@ -235,6 +256,28 @@ describe('browser tools: the person takes over', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(TOUCH_HOLD_MS - 100);
     await call(fixture, 'snapshot', {});
     expect(await call(fixture, 'click', { ref: 'e2' })).toMatchObject({ ok: true });
+  });
+});
+
+describe('browser tabs: downloads', () => {
+  it('saves the person\'s download in their Downloads folder, without asking, and the tab says so', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')]);
+    const first = await fixture.download('persons', 'report.pdf', 'one');
+    const second = await fixture.download('persons', 'report.pdf', 'two');
+    expect([first, second]).toEqual([path.join(fixture.worktree, 'Downloads', 'report.pdf'), path.join(fixture.worktree, 'Downloads', 'report (2).pdf')]);
+    await vi.waitFor(() => expect(fixture.shownDownloads).toEqual([['persons', first], ['persons', second]]));
+    expect(JSON.stringify(await call(fixture, 'tabs', {}))).not.toContain('downloads');
+  });
+
+  it('saves a download the agent\'s click caused in the Pane\'s scratch folder, and browser_tabs lists it', async () => {
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
+    await call(fixture, 'snapshot', {});
+    await call(fixture, 'click', { ref: 'e2' });
+    await fixture.download('mine', 'report.pdf', 'pdf bytes');
+    const saved = path.join(fixture.worktree, '.scratch', 'browser-downloads', 'report.pdf');
+    await vi.waitFor(() => expect(fixture.shownDownloads).toEqual([['mine', saved]]));
+    expect(readFileSync(saved, 'utf8')).toBe('pdf bytes');
+    expect(await call(fixture, 'tabs', {})).toMatchObject({ tabs: [{ id: 'mine', downloads: [saved] }] });
   });
 });
 

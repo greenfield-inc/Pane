@@ -24,7 +24,7 @@ opened one tab, or when the Pane has one; with several, the call fails with
 | Tool | Command | What it does |
 | --- | --- | --- |
 | `browser_open` | `runpane browser open --url <url>` | Opens a tab beside the agent, in a split, owned by it; reuses the agent's tab on the same origin |
-| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog |
+| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog, files the agent downloaded |
 | `browser_close` | `runpane browser close` | Closes a tab the agent opened |
 | `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title |
 | `browser_screenshot` | `runpane browser screenshot [--full-page]` | A PNG in the Pane's scratch folder; MCP clients get the image itself |
@@ -52,6 +52,12 @@ Snapshots show password fields as dots. A dialog the page opens stays open until
 `browser_dialog` answers it or you answer it in the tab; until then every other action fails
 with `ERR_BROWSER_DIALOG_PENDING`. A file picker a click opens never shows on your screen
 during an agent's call; the result tells the agent to fill it with `browser_upload`.
+
+A file a page downloads while an agent drives the tab (during its call, or in the 2 seconds
+after, while the tab's chip still names the agent; see
+[Watching and taking over](#watching-and-taking-over)) saves into the Pane's scratch folder,
+`$PANE_SCRATCH_DIR`, under `browser-downloads/`, and `browser_tabs` lists its path under the
+tab's `downloads`.
 
 ## Who may act on a tab
 
@@ -125,6 +131,20 @@ fails with `ERR_BROWSER_LOCAL_ONLY`.
 - **Leave any page.** Each tab's **Open in your browser** button sends its page to your
   system browser, and right-clicking a link, in a tab or in a chat, offers **Open in System
   Browser**.
+
+## Apps, sign-ins and downloads
+
+These apply to every browser tab, whoever drives it.
+
+- **Apps.** When a page opens an app link, such as a Zoom meeting (`zoommtg:`), the tab asks
+  first: "This page wants to open zoom.us. Open · Cancel". Only **Open** hands it to the app.
+  Links that reach local files or programs (`file:`, `search-ms:`, `ms-msdt:`) never open.
+- **Sign-ins that refuse embedded browsers.** Google sign-in (`accounts.google.com`) refuses
+  to run inside an app's browser, so Pane opens it in your system browser and the tab says so.
+  When a site's passkey prompt doesn't appear in a tab, use **Open in your browser**.
+- **Downloads.** A file you download in a tab saves to your Downloads folder with no save
+  dialog, and the tab shows "Downloaded report.pdf · Show in folder". A download an agent's call
+  caused goes to the Pane's scratch folder instead (see above).
 
 ## How it works
 

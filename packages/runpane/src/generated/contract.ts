@@ -20925,6 +20925,13 @@ export const RUNPANE_CONTRACT = {
         },
         "dialog": {
           "$ref": "#/jsonSchemas/browserDialog"
+        },
+        "downloads": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Files your calls on this tab downloaded, saved in the Pane's scratch folder."
         }
       },
       "additionalProperties": false
