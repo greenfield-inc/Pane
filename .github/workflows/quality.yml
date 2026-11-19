@@ -195,9 +195,9 @@ jobs:
     # CI result's gate and its contract with this file (expected jobs, needs,
     # skip manifest). Here rather than in CI result, which runs it every time
     # at the end of the critical path.
-    - name: Test the CI result gate
+    - name: Test the CI result gate and the pre-push hook
       if: ${{ !cancelled() }}
-      run: node --test scripts/ci-gate.test.mjs
+      run: node --test scripts/ci-gate.test.mjs scripts/pre-push.test.mjs
 
   # Offline check of relative links and #anchors in every tracked markdown file.
   # External URLs are not fetched, so the check never flakes on the network.
