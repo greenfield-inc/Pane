@@ -15,6 +15,7 @@ import { PageDriver, WAIT_DEFAULT_MS, WAIT_MAX_MS, type BrowserPageContents, typ
 import { READ_VERBS, runVerb, type VerbOutcome, type VerbRequest } from '../services/browser/pageVerbs';
 import { BROWSER_MACHINE_CHANNEL, IMAGE_CHUNK_BYTES, linkedBrowserRequestSchema, linkedChunkAnswerSchema, linkedProbeAnswerSchema, linkedRunAnswerSchema } from '../services/browser/linkedBrowser';
 import { answerWithin, awaitTask } from './macDevices';
+import { BrowserHolds } from '../services/browser/browserHolds';
 import { remapLoopbackPort } from '../../../shared/utils/browserUrl';
 
 /**
@@ -27,8 +28,6 @@ export interface BrowserHost {
   tab(panelId: string): ToolPanel | undefined;
   /** Opens a browser tab in a split beside the caller, owned by it; never raises the window. */
   open(paneId: string, url: string, callerPanelId: string | undefined): Promise<ToolPanel>;
-  /** Brings the tab forward on clients showing its Pane, so its page loads. */
-  show(tab: ToolPanel): Promise<void>;
   close(tab: ToolPanel): Promise<void>;
   /** Writes the tab's state (the driver chip and its URL). */
   update(tab: ToolPanel, state: BrowserPanelState): Promise<void>;
@@ -42,6 +41,10 @@ export interface BrowserHost {
   shotsDirectory(paneId: string): Promise<string>;
   /** Shows the agent's cursor where it clicked, in the tab. */
   showCursor(panelId: string, x: number, y: number): void;
+  /** The tabs agents hold: their pages stay alive while hidden (P4). */
+  setHeld(tabIds: readonly string[]): void;
+  /** A call runs on the tab: a hidden page paints while it does, so screenshots are current. */
+  setBusy(panelId: string, busy: boolean): void;
   /** Your other computers this one is linked to, when it keeps connections to them (P2). */
   linked(): LinkedComputers | undefined;
 }
@@ -55,7 +58,7 @@ export interface LinkedComputers {
 }
 
 /** One tab as browser_tabs lists it (the contract's browserTab). */
-interface TabSummary { id: string; url: string; title: string; openedBy: string; yours: boolean; driving?: string; showing: boolean; dialog?: PendingDialog }
+interface TabSummary { id: string; url: string; title: string; openedBy: string; yours: boolean; driving?: string; showing: boolean; held: boolean; asleep: boolean; dialog?: PendingDialog }
 /** What an action on a tab returns (the contract's browserActionResult). */
 /** What a browser tool returns (the contract's browser*Result schemas). */
 interface ToolResult { ok: true; tab: string; url: string; title: string; dialog?: PendingDialog; fileChooser?: FileChooser; note?: string; snapshot?: string; truncated?: boolean; value?: JsonValue; path?: string; mimeType?: 'image/png'; width?: number; height?: number; reused?: boolean; next?: string }
@@ -168,8 +171,19 @@ function checkedUploadPath(worktree: string | undefined, raw: string): string {
  * Pane through `runpane:browser:*`. Writes run through the driver gate keyed by tab, so the person
  * sees who drives and can take over; calls on different tabs never wait on each other.
  */
-export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost): void {
+/** Holds (P4): how many tabs one agent keeps alive while hidden, and for how long without an action (D-126). */
+export interface BrowserHoldSettings { limit: number; idleMs: number; sweepMs: number }
+const DEFAULT_HOLDS: BrowserHoldSettings = { limit: 4, idleMs: 15 * 60_000, sweepMs: 30_000 };
+
+export function registerBrowserHandlers(services: BrowserServices, commandRegistry: PaneCommandRegistry, host: BrowserHost, holdSettings: BrowserHoldSettings = DEFAULT_HOLDS): void {
   const pages = new Map<number, PageDriver>();
+  const holds = new BrowserHolds({ limit: holdSettings.limit, idleMs: holdSettings.idleMs, onChange: held => host.setHeld(held) });
+  const sweeper = setInterval(() => holds.sweep(
+    agent => host.tab(agent) !== undefined,
+    // A dialog waiting for an answer counts as action.
+    tabId => { const page = host.page(tabId); return page !== undefined && pages.get(page.id)?.pendingDialog !== undefined; },
+  ), holdSettings.sweepMs);
+  sweeper.unref?.();
   /** Linked computers found showing each tab, or found not showing it (machine undefined) until `until`. */
   const viewers = new Map<string, { machine: { id: string; name: string } | undefined; until: number }>();
   /** Tabs the person holds by touching the page; they go back to the agent TOUCH_HOLD_MS after the last touch. */
@@ -235,6 +249,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       openedBy: openerOf(tab, caller),
       yours: mayAct(tab, caller),
       showing: page !== undefined || viewers.get(tab.id)?.machine !== undefined,
+      held: holds.isHeld(tab.id),
+      asleep: holds.isAsleep(tab.id),
     };
     if (state.driver) item.driving = state.driver.by === 'person' ? 'person' : state.driver.agent;
     const dialog = page ? pages.get(page.id)?.pendingDialog : undefined;
@@ -269,8 +285,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   /** The tab's live page, brought forward (and waited for) when it is not showing. */
   async function livePage(tab: ToolPanel): Promise<BrowserPageContents> {
     let page = host.page(tab.id);
-    if (!page && host.hasWindow()) {
-      await host.show(tab);
+    // The tab is held (onTab holds it before this runs), so this computer mounts its page, hidden
+    // when it is not the tab in view; it never comes forward.
+    if (!page) {
       const deadline = Date.now() + PAGE_WAIT_MS;
       while (!page && Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -402,7 +419,15 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (write && devToolsOpen(contents)) {
       throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', `DevTools is open on tab ${tab.id}, and agents don't act on a page while the person inspects it. Nothing ran.`, 'Ask the person to close DevTools on that tab, then try again.');
     }
-    const outcome = await runVerb(driverFor(tab.id, contents), contents, request);
+    host.setBusy(tab.id, true);
+    let outcome: VerbOutcome;
+    try {
+      // A hidden page starts painting again for the call; give it a frame before capturing it.
+      if (request.verb === 'screenshot') await new Promise(resolve => setTimeout(resolve, 150));
+      outcome = await runVerb(driverFor(tab.id, contents), contents, request);
+    } finally {
+      host.setBusy(tab.id, false);
+    }
     if (outcome.cursor) host.showCursor(tab.id, outcome.cursor.x, outcome.cursor.y);
     return outcome;
   }
@@ -430,7 +455,19 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       }
       return runLocal(tab, request, write);
     };
-    return write ? gate.run(tab.id, agent, paneCommandSignal(), run) : run();
+    const { evicted, wasAsleep } = holds.begin(caller.panelId ?? caller.paneId, tab.id);
+    try {
+      const outcome = await (write ? gate.run(tab.id, agent, paneCommandSignal(), run) : run());
+      const notes = [
+        wasAsleep ? 'The tab was asleep after 15 minutes without your actions, so its page reloaded from its URL.' : undefined,
+        evicted ? `You hold at most ${holdSettings.limit} tabs, so tab ${evicted} went to sleep; its page reloads when you next use it.` : undefined,
+        outcome.note,
+      ].filter(note => note !== undefined);
+      if (notes.length) outcome.note = notes.join(' ');
+      return outcome;
+    } finally {
+      holds.end(tab.id);
+    }
   }
 
   /** A verb's outcome as the tool returns it; a screenshot is saved on the agent's computer. */
@@ -505,6 +542,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     }
     await gate.run(tab.id, agentName(caller.panelId), paneCommandSignal(), () => host.close(tab));
     viewers.delete(tab.id);
+    holds.forget(tab.id);
     return { ok: true, tab: tab.id };
   });
 

@@ -20923,6 +20923,14 @@ export const RUNPANE_CONTRACT = {
           "type": "boolean",
           "description": "Whether its page is live now. A tab that is not showing comes forward on your next call."
         },
+        "held": {
+          "type": "boolean",
+          "description": "An agent holds it: its page stays alive while hidden, until 15 minutes pass with no agent action."
+        },
+        "asleep": {
+          "type": "boolean",
+          "description": "Its hold ended, so its page reloads from its URL on the next call."
+        },
         "dialog": {
           "$ref": "#/jsonSchemas/browserDialog"
         }

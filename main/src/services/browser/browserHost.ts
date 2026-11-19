@@ -1,6 +1,8 @@
-import { webContents, type BrowserWindow } from 'electron';
+import { BrowserWindow, webContents } from 'electron';
 import path from 'path';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { SHARED_BROWSER_PARTITION } from '../../../../shared/constants/browserPartitions';
+import { hardenWebviewPreferences } from '../webviewPreferences';
 import type { BrowserPanelState } from '../../../../shared/types/panels';
 import { getPaneWebviewContextMap } from '../../core/runtime';
 import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
@@ -14,6 +16,10 @@ import { panelManager } from '../panelManager';
 
 /** The renderer hears where an agent clicked, to draw its cursor on the tab. */
 const BROWSER_AGENT_CURSOR_EVENT = 'browser-panel:agent-cursor';
+/** The renderer hears which browser tabs agents hold, to keep their pages alive while hidden (P4). */
+const BROWSER_HELD_EVENT = 'browser-panel:held';
+/** A call runs on a tab, so its page paints while hidden. */
+const BROWSER_BUSY_EVENT = 'browser-panel:busy';
 
 /** Browser tabs as this desktop's main process has them: the panel store and the pages its window registered. */
 let machines: MachineConnections | undefined;
@@ -55,7 +61,6 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
         announceActivation: true,
       });
     },
-    show: (tab) => panelManager.setActivePanel(tab.sessionId, tab.id, 'split'),
     close: async (tab) => {
       const deleted = decodeBoundary(await commandRegistry.invoke('panels:delete', [tab.id]), boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) }));
       if (!deleted.success) throw new Error(deleted.error ?? 'Pane could not close the tab.');
@@ -70,6 +75,12 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     shotsDirectory: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-screenshots'),
     showCursor: (panelId, x, y) => getMainWindow()?.webContents.send(BROWSER_AGENT_CURSOR_EVENT, { panelId, x, y }),
     linked: () => linkedComputers(configManager),
+    setBusy: (panelId, busy) => getMainWindow()?.webContents.send(BROWSER_BUSY_EVENT, { panelId, busy }),
+    setHeld: (tabIds) => {
+      const window = getMainWindow();
+      if (window) window.webContents.send(BROWSER_HELD_EVENT, { tabs: tabIds.map(panelId => ({ panelId, sessionId: panelManager.getPanel(panelId)?.sessionId })) });
+      else holdHeadless(tabIds);
+    },
   };
 }
 
@@ -89,4 +100,29 @@ function newestPage(panelId: string): Electron.WebContents | undefined {
     if (!newest || contents.id > newest.id) newest = contents;
   }
   return newest;
+}
+
+/** A host with no window keeps each held tab's page in a hidden window, in the shared sign-in store. */
+const headlessPages = new Map<string, BrowserWindow>();
+
+function holdHeadless(tabIds: readonly string[]): void {
+  const wanted = new Set(tabIds);
+  for (const [panelId, window] of headlessPages) {
+    if (wanted.has(panelId)) continue;
+    headlessPages.delete(panelId);
+    if (!window.isDestroyed()) window.destroy();
+  }
+  for (const panelId of wanted) {
+    if (headlessPages.has(panelId)) continue;
+    const panel = panelManager.getPanel(panelId);
+    const url = decodeOptionalBoundary(panel?.state.customState, boundary.object({ currentUrl: boundary.optional(boundary.string) }))?.currentUrl;
+    if (!panel || !url) continue;
+    const webPreferences = { partition: SHARED_BROWSER_PARTITION };
+    hardenWebviewPreferences(webPreferences);
+    const window = new BrowserWindow({ show: false, width: 1280, height: 800, paintWhenInitiallyHidden: true, webPreferences });
+    headlessPages.set(panelId, window);
+    getPaneWebviewContextMap().set(window.webContents.id, { panelId, sessionId: panel.sessionId });
+    window.webContents.once('destroyed', () => { if (headlessPages.get(panelId) === window) headlessPages.delete(panelId); });
+    void window.loadURL(url).catch(() => undefined);
+  }
 }

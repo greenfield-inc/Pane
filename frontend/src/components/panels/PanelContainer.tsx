@@ -52,7 +52,7 @@ const ExplorerPanel = lazy(() => import('./editor/EditorPanel'));
 const LogsPanel = lazy(() => import('./logPanel/LogsPanel'));
 const DashboardPanel = lazy(() => import('./DashboardPanel'));
 const SetupTasksPanel = lazy(() => import('./SetupTasksPanel'));
-const BrowserPanel = lazy(() => import('./browser/BrowserPanel'));
+import { BrowserSlot } from './browser/BrowserLayer';
 
 const NotesPanel = lazy(() => import('./notes/NotesPanel'));
 
@@ -155,7 +155,8 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
       case 'setup-tasks':
         return <SetupTasksPanel panelId={panel.id} sessionId={panel.sessionId} isActive={isActive} />;
       case 'browser':
-        return <BrowserPanel panel={panel} isActive={isActive} />;
+        // The page itself renders in the app-level BrowserLayer, which keeps held tabs alive.
+        return <BrowserSlot panel={panel} isActive={isActive} />;
       case 'device':
         return <DevicePanel panel={panel} isActive={isActive} />;
       default:

@@ -1,4 +1,5 @@
 import { HealthCardDialog } from './components/machineHealth/HealthCardDialog';
+import { BrowserLayer } from './components/panels/browser/BrowserLayer';
 import { askAgentAbout, isHealthCard } from './components/machineHealth/healthCardActions';
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
 import { AddDeviceHost } from './components/addDevice/AddDeviceDialog';
@@ -1100,6 +1101,7 @@ function App() {
           isOpen={isSupportPaneOpen}
           onClose={() => setIsSupportPaneOpen(false)}
         />
+        <BrowserLayer />
         <Welcome isOpen={isWelcomeOpen} onClose={() => setIsWelcomeOpen(false)} />
         <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} onUpdate={handleUpdateRequest} />
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />

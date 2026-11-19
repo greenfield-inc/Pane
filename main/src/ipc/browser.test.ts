@@ -8,7 +8,7 @@ import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { BrowserPageContents } from '../services/browser/pageDriver';
-import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost, type BrowserServices, type LinkedComputers } from './browser';
+import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHoldSettings, type BrowserHost, type BrowserServices, type LinkedComputers } from './browser';
 import { readFileSync } from 'fs';
 import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
 
@@ -74,7 +74,7 @@ function agentTab(id: string, paneId: string, agent: string): ToolPanel {
 }
 
 /** `pagesHere: false` leaves this computer without pages, as when only a linked computer shows the tabs. */
-function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; pagesHere?: boolean; cursors?: string[] } = {}): Fixture {
+function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; pagesHere?: boolean; cursors?: string[]; held?: string[]; holds?: BrowserHoldSettings } = {}): Fixture {
   const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-browser-tools-'));
   let tools = true;
   const tabs = [agentTab('claude-a', 'pane-a', 'claude'), agentTab('codex-a', 'pane-a', 'codex'), ...initial];
@@ -90,7 +90,6 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
       pages.set(tab.id, fakePage(nextPage++, url));
       return tab;
     },
-    show: async () => undefined,
     close: async (tab) => { tabs.splice(tabs.indexOf(tab), 1); },
     update: async (tab, state) => { tab.state = { ...tab.state, customState: state }; },
     page: (id) => pages.get(id),
@@ -98,6 +97,8 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     hasWindow: () => true,
     shotsDirectory: async () => path.join(worktree, '.shots'),
     showCursor: (panelId) => { options.cursors?.push(panelId); },
+    setHeld: (tabIds) => { options.held?.splice(0, Infinity, ...tabIds); },
+    setBusy: () => undefined,
     linked: () => options.linked,
   };
   const services: BrowserServices = {
@@ -105,7 +106,7 @@ function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; p
     configManager: { getConfig: () => ({ browser: { agentTools: tools } }) },
   };
   const registry = new PaneCommandRegistry();
-  registerBrowserHandlers(services, registry, host);
+  registerBrowserHandlers(services, registry, host, options.holds);
   return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree };
 }
 
@@ -289,3 +290,29 @@ describe('browser tools: a tab a linked computer shows (P2)', () => {
   });
 });
 
+
+describe('browser tools: tabs an agent holds (P4)', () => {
+  it('holds up to four tabs per agent, putting the longest idle to sleep for a fifth', async () => {
+    const held: string[] = [];
+    const fixture = setup([], { held });
+    const opened: string[] = [];
+    for (let site = 1; site <= 5; site += 1) {
+      const result = await call(fixture, 'open', { url: `http://site-${site}.test/` });
+      opened.push(JSON.parse(JSON.stringify(result)).tab);
+      if (site === 5) expect(result).toMatchObject({ note: expect.stringContaining(`tab ${opened[0]} went to sleep`) });
+    }
+    expect(held.sort()).toEqual(opened.slice(1).sort());
+    const listed = JSON.parse(JSON.stringify(await call(fixture, 'tabs', {}))).tabs;
+    expect(listed.find((tab: { id: string }) => tab.id === opened[0])).toMatchObject({ held: false, asleep: true });
+  });
+
+  it('puts a tab to sleep after the idle time with no agent action, and says so when the agent wakes it', async () => {
+    const held: string[] = [];
+    const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { held, holds: { limit: 4, idleMs: 150, sweepMs: 40 } });
+    await call(fixture, 'snapshot', {});
+    expect(held).toEqual(['mine']);
+    await vi.waitFor(() => expect(held).toEqual([]), { timeout: 2_000 });
+    expect(await call(fixture, 'snapshot', {})).toMatchObject({ note: expect.stringContaining('was asleep') });
+    expect(held).toEqual(['mine']);
+  });
+});

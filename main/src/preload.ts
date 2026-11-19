@@ -288,6 +288,22 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  // A call runs on a browser tab: its hidden page paints while it does (P4).
+  ipcRenderer.on('browser-panel:busy', (_event: Electron.IpcRendererEvent, data: { panelId: string; busy: boolean }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:busy', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:busy to window:', e);
+    }
+  });
+  // The browser tabs agents hold: their pages stay alive while hidden (P4).
+  ipcRenderer.on('browser-panel:held', (_event: Electron.IpcRendererEvent, data: { tabs: Array<{ panelId: string; sessionId?: string }> }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:held', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:held to window:', e);
+    }
+  });
   // An agent clicked in a browser tab's page: draw its cursor there.
   ipcRenderer.on('browser-panel:agent-cursor', (_event: Electron.IpcRendererEvent, data: { panelId: string; x: number; y: number }) => {
     try {
