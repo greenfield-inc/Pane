@@ -130,6 +130,7 @@ export class PageDriver {
   private refsRevoked = false;
   private dispatching = 0;
   private lastDispatchEnd = 0;
+  private lastPersonInput = 0;
   private screenshots: Promise<void> = Promise.resolve();
   private readonly dialogWaiters = new Set<() => void>();
 
@@ -142,6 +143,20 @@ export class PageDriver {
   /** Whether input the page sees now came from the agent (so it never reads as the person's). */
   isAgentInput(now = Date.now()): boolean {
     return this.dispatching > 0 || now - this.lastDispatchEnd < SETTLE_MS * 2;
+  }
+
+  /**
+   * The person used the page: refs from before stop working, since the page may have changed.
+   * On a linked computer this is also how the agent's computer learns the person is driving.
+   */
+  notePersonInput(now = Date.now()): void {
+    this.lastPersonInput = now;
+    this.refsRevoked = true;
+  }
+
+  /** Whether the person used the page in the last `holdMs` (they drive until they stop). */
+  personDriving(holdMs: number, now = Date.now()): boolean {
+    return now - this.lastPersonInput < holdMs;
   }
 
   /** Refs from before now stop working until the next snapshot (the person took over). */

@@ -89,11 +89,22 @@ and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open 
 
 ## Where a tab must be
 
-Today a tab's page exists only while the tab shows in a Pane window on the agent's computer. A
-call on a tab that is not showing brings it forward in its Pane and waits up to 5 seconds for
-its page. When the window shows another Pane, or Pane runs without a window, the page never
-loads and the call fails with `ERR_BROWSER_NOT_SHOWING`. A call from an agent
-on another computer fails with `ERR_BROWSER_LOCAL_ONLY`.
+Each desktop draws its own copy of a tab, and a tab's page exists only while the tab shows in a
+Pane window. A call goes to the copy you watch:
+
+- **On a linked computer.** When you watch this Pane from another of your computers, linked in
+  **Settings › Your computers**, the call runs on that computer's copy: snapshots, clicks and
+  screenshots come from the page in front of you, the chip shows there, and touching the page or
+  pressing **Take over** there makes the agent wait. That copy uses that computer's sign-ins. An
+  upload sends the file from the agent's worktree; the screenshot is saved on the agent's computer.
+- **On the agent's computer.** Otherwise the call uses the tab here, bringing it forward in its
+  Pane and waiting up to 5 seconds for its page.
+
+When no copy shows the tab, the call fails: with `ERR_BROWSER_NOT_SHOWING` when the window here
+shows another Pane, and with `ERR_BROWSER_NOT_LINKED` when Pane runs here without a window. A
+computer that views this one over Tailscale, SSH or a manual URL without being linked can't run
+browser tools; link it. A call from an agent on another computer through `runpane workspace`
+fails with `ERR_BROWSER_LOCAL_ONLY`.
 
 ## How it works
 

@@ -8,7 +8,8 @@ import type { PaneDaemonCaller } from '../../../shared/types/daemon';
 import type { BrowserPanelState, ToolPanel } from '../../../shared/types/panels';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { BrowserPageContents } from '../services/browser/pageDriver';
-import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost, type BrowserServices } from './browser';
+import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost, type BrowserServices, type LinkedComputers } from './browser';
+import { readFileSync } from 'fs';
 import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
 
 /** A page that answers the page script and the debugger the way a simple form page would. */
@@ -35,6 +36,7 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
       const method = /\)\.(\w+)\([^()]*\)$/.exec(code)?.[1];
       if (method === 'snapshot') return { snapshot: '- textbox "Email" [ref=e1]\n- button "Sign up" [ref=e2]', truncated: false, url, title: 'Sign up' };
       if (method === 'point') return { x: 40, y: 80 };
+      if (method === 'check') return { met: true };
       return true;
     },
     debugger: Object.assign(new EventEmitter(), {
@@ -71,13 +73,14 @@ function agentTab(id: string, paneId: string, agent: string): ToolPanel {
   return { id, sessionId: paneId, type: 'terminal', title: agent, state: { isActive: false, customState: { agent } }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
 }
 
-function setup(initial: ToolPanel[] = []): Fixture {
+/** `pagesHere: false` leaves this computer without pages, as when only a linked computer shows the tabs. */
+function setup(initial: ToolPanel[] = [], options: { linked?: LinkedComputers; pagesHere?: boolean; cursors?: string[] } = {}): Fixture {
   const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-browser-tools-'));
   let tools = true;
   const tabs = [agentTab('claude-a', 'pane-a', 'claude'), agentTab('codex-a', 'pane-a', 'codex'), ...initial];
   const pages = new Map<string, ReturnType<typeof fakePage>>();
   let nextPage = 1;
-  for (const tab of initial) pages.set(tab.id, fakePage(nextPage++, 'http://localhost:4173/'));
+  if (options.pagesHere !== false) for (const tab of initial) pages.set(tab.id, fakePage(nextPage++, 'http://localhost:4173/'));
   const host: BrowserHost = {
     tabs: (paneId) => tabs.filter(tab => tab.sessionId === paneId && tab.type === 'browser'),
     tab: (id) => tabs.find(tab => tab.id === id),
@@ -93,14 +96,15 @@ function setup(initial: ToolPanel[] = []): Fixture {
     page: (id) => pages.get(id),
     hasWindow: () => true,
     shotsDirectory: async () => path.join(worktree, '.shots'),
-    showCursor: () => undefined,
+    showCursor: (panelId) => { options.cursors?.push(panelId); },
+    linked: () => options.linked,
   };
   const services: BrowserServices = {
     sessionManager: { getSession: (id: string) => (id === 'pane-a' || id === 'pane-b' ? { name: id, worktreePath: worktree } : undefined) },
     configManager: { getConfig: () => ({ browser: { agentTools: tools } }) },
   };
   const registry = new PaneCommandRegistry();
-  registerBrowserHandlers({ handle: vi.fn() }, services, registry, host);
+  registerBrowserHandlers(services, registry, host);
   return { registry, tabs, pages, setTools: (on) => { tools = on; }, worktree };
 }
 
@@ -233,3 +237,42 @@ describe('browser tools: the person takes over', () => {
     expect(await call(fixture, 'click', { ref: 'e2' })).toMatchObject({ ok: true });
   });
 });
+
+describe('browser tools: a tab a linked computer shows (P2)', () => {
+  /** The agent's computer, whose tab only the linked desktop shows, wired to that desktop's real channel. */
+  function linkedPair() {
+    const viewerCursors: string[] = [];
+    const viewer = setup([], { cursors: viewerCursors });
+    viewer.pages.set('shown-there', fakePage(9, 'http://localhost:4173/'));
+    const linked: LinkedComputers = {
+      self: { id: 'devbox', name: 'DEVBOX' },
+      online: () => [{ id: 'mac', name: 'Mac' }],
+      invoke: (_machine, request, _timeout) => viewer.registry.invokeRemote('runpane:machine:browser', [request], { caller: { paneId: 'remote' } }),
+    };
+    const agentSide = setup([browserTab('shown-there', 'pane-a', 'claude-a')], { linked, pagesHere: false });
+    return { agentSide, viewer, viewerCursors };
+  }
+
+  it('runs the call on the linked computer\'s copy and brings a screenshot home', async () => {
+    const { agentSide, viewer, viewerCursors } = linkedPair();
+    expect(await call(agentSide, 'snapshot', {})).toMatchObject({ ok: true, tab: 'shown-there', snapshot: expect.stringContaining('[ref=e2]') });
+    expect(await call(agentSide, 'click', { ref: 'e2' })).toMatchObject({ ok: true });
+    expect(viewerCursors).toEqual(['shown-there']);
+    const shot = await call(agentSide, 'screenshot', {});
+    expect(shot).toMatchObject({ ok: true, mimeType: 'image/png' });
+    expect(readFileSync(JSON.parse(JSON.stringify(shot)).path, 'utf8')).toBe('png');
+    expect(viewer.pages.get('shown-there')?.sent).toContain('Input.dispatchMouseEvent');
+  });
+
+  it('waits while the person uses the page on the linked computer', async () => {
+    const { agentSide, viewer } = linkedPair();
+    await call(agentSide, 'snapshot', {});
+    await call(agentSide, 'click', { ref: 'e2' });
+    await new Promise(resolve => setTimeout(resolve, 400));
+    viewer.pages.get('shown-there')?.emit('input-event', {}, { type: 'mouseDown' });
+    const started = Date.now();
+    expect(await code(call(agentSide, 'click', { ref: 'e2' }))).toBe('ERR_BROWSER_STALE_REF');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(TOUCH_HOLD_MS - 300);
+  });
+});
+

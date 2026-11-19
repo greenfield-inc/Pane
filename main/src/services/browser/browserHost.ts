@@ -4,7 +4,10 @@ import { boundary, decodeBoundary } from '../../../../shared/validation/boundary
 import type { BrowserPanelState } from '../../../../shared/types/panels';
 import { getPaneWebviewContextMap } from '../../core/runtime';
 import type { PaneCommandRegistry } from '../../daemon/commandRegistry';
-import type { BrowserHost } from '../../ipc/browser';
+import type { BrowserHost, LinkedComputers } from '../../ipc/browser';
+import type { MachineConnections } from '../machineConnections';
+import type { ConfigManager } from '../configManager';
+import { BROWSER_MACHINE_CHANNEL } from './linkedBrowser';
 import os from 'os';
 import { paneScratchDirectory } from '../paneScratch';
 import { panelManager } from '../panelManager';
@@ -13,7 +16,29 @@ import { panelManager } from '../panelManager';
 const BROWSER_AGENT_CURSOR_EVENT = 'browser-panel:agent-cursor';
 
 /** Browser tabs as this desktop's main process has them: the panel store and the pages its window registered. */
-export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, commandRegistry: PaneCommandRegistry): BrowserHost {
+let machines: MachineConnections | undefined;
+
+/** Main hands over the saved computers' connections once they exist; calls reach tabs a linked computer shows through them. */
+export function setBrowserMachines(connections: MachineConnections): void {
+  machines = connections;
+}
+
+/** The linked computers this desktop keeps connections to; none on a headless host. */
+function linkedComputers(configManager: Pick<ConfigManager, 'getConfig'>): LinkedComputers | undefined {
+  const connections = machines;
+  if (!connections) return undefined;
+  const config = configManager.getConfig();
+  const name = os.hostname().replace(/\.local$/i, '');
+  return {
+    self: { id: config.machineId ?? name, name },
+    online: () => (configManager.getConfig().remoteDaemon?.client.computers ?? [])
+      .filter(computer => connections.machineState(computer.id)?.status === 'online')
+      .map(computer => ({ id: computer.id, name: computer.label })),
+    invoke: (machineId, request, timeoutMs) => connections.invokeOn(machineId, BROWSER_MACHINE_CHANNEL, [request], timeoutMs),
+  };
+}
+
+export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, commandRegistry: PaneCommandRegistry, configManager: Pick<ConfigManager, 'getConfig'>): BrowserHost {
   return {
     tabs: (paneId) => panelManager.getPanelsBySessionAndType(paneId, 'browser'),
     tab: (panelId) => panelManager.getPanel(panelId),
@@ -43,6 +68,7 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
     hasWindow: () => getMainWindow() !== null,
     shotsDirectory: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-screenshots'),
     showCursor: (panelId, x, y) => getMainWindow()?.webContents.send(BROWSER_AGENT_CURSOR_EVENT, { panelId, x, y }),
+    linked: () => linkedComputers(configManager),
   };
 }
 

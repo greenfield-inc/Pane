@@ -4,6 +4,7 @@ import './versionQuery';
 import './polyfills/readablestream';
 import { getChatTabManager } from './services/chatTabs';
 import { disposeDevices, setDeviceMachines } from './ipc/devices';
+import { setBrowserMachines } from './services/browser/browserHost';
 import { acknowledgeUpdateQuiescence } from './services/updateShutdown';
 
 import { registerStartupNotice } from './ipc/startup-notice';
@@ -1248,6 +1249,7 @@ async function initializeServices() {
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
   setDeviceMachines(machineConnections);
+  setBrowserMachines(machineConnections);
   const machines = machineConnections;
   powerMonitor.on('suspend', () => machines.suspend());
   powerMonitor.on('resume', () => machines.resume());
