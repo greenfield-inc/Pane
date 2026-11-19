@@ -242,11 +242,13 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
   /** Series switched off in the legend — see `visibleAreaSeries`. */
   const [hiddenSeries, setHiddenSeries] = useState<string[]>([]);
 
-  const request = useMemo(() => ({
+  // A rolling range is computed when each read starts, so Refresh and the scan poll reach now.
+  const viewKey = JSON.stringify({ customRange, rangeDays, provider });
+  const buildRequest = useCallback(() => ({
     ...(customRange ? usageDateBounds(customRange) : rollingUsageRange(rangeDays)),
     providers: provider === 'all' ? undefined : [provider],
   }), [customRange, rangeDays, provider]);
-  const { machines, usages, states, reload, loading: firstRead, reading } = useMachinesUsage(request);
+  const { machines, usages, states, reload, loading: firstRead, reading } = useMachinesUsage(viewKey, buildRequest);
   const allView = machineId === ALL_MACHINES;
   const shown = useMemo(() => (allView ? usages : usages.filter(usage => usage.machineId === machineId)), [allView, usages, machineId]);
   const report: UsageReport | null = useMemo(() => mergeMachineReports(shown), [shown]);
@@ -267,20 +269,21 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
   // Usage comes from each machine, so read again when the active host reconnects.
   useEffect(() => window.electronAPI?.events?.onRemoteDaemonResyncRequested?.(() => { void reload(); }), [reload]);
 
-  // While an index is still building, keep refreshing so numbers fill in.
-  const scanning = report?.index.scanning ?? false;
+  // While a shown machine's index is still building, read that machine again so its numbers fill in.
+  const scanningKey = shown.filter(usage => !usage.stale && usage.report.index.scanning).map(usage => usage.machineId).join('\n');
   useEffect(() => {
-    if (!scanning) return;
-    const timer = window.setInterval(() => { void reload(allView ? undefined : machineId); }, SCAN_POLL_MS);
+    if (!scanningKey) return;
+    const ids = scanningKey.split('\n');
+    const timer = window.setInterval(() => { void reload(ids); }, SCAN_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [scanning, reload, allView, machineId]);
+  }, [scanningKey, reload]);
 
   const handleRescan = useCallback(async () => {
     setRescanning(true);
     try {
       // Only this computer's index can be rescanned from here; every machine is read again.
       if (allView || machineId === 'local') await API.usage.rescan().catch(() => undefined);
-      await reload(allView ? undefined : machineId);
+      await reload(allView ? undefined : [machineId]);
     } finally {
       setRescanning(false);
     }

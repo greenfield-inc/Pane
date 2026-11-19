@@ -12,10 +12,13 @@ export type MachineUsageState =
   /** Offline or not answering: its last report, if Pane read one, stays with its time. */
   | { kind: 'stale'; reason: 'offline' | 'error'; message: string | null; readAt: number | null };
 
-/** The last report read per machine and request, so an offline machine still shows its numbers. */
+/**
+ * The last report read per machine and view (range and provider, not its timestamps), so an
+ * offline machine still shows its numbers when the page opens again.
+ */
 const lastRead = new Map<string, { report: UsageReport; readAt: number }>();
 
-const readKey = (machineId: string, request: UsageReportRequest) => `${machineId}\n${JSON.stringify(request)}`;
+const readKey = (machineId: string, viewKey: string) => `${machineId}\n${viewKey}`;
 
 async function readReport(machineId: string, request: UsageReportRequest): Promise<UsageReport> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -37,8 +40,8 @@ export interface MachinesUsage {
   /** Each machine with a report to show: read now, or its last one. */
   usages: MachineUsage[];
   states: Record<string, MachineUsageState>;
-  /** Reads every machine (or `only`) again; resolves once each has answered or timed out. */
-  reload: (only?: string) => Promise<void>;
+  /** Reads every machine (or the `only` ones) again; resolves once each has answered or timed out. */
+  reload: (only?: readonly string[]) => Promise<void>;
   /** True until the first read of every machine settles. */
   loading: boolean;
   /** True while any read is in flight. */
@@ -50,15 +53,21 @@ export interface MachinesUsage {
  * Resources reads machine health. A machine that is offline or does not answer keeps its last
  * report, marked stale with the time it was read, and is never shown as zero.
  */
-export function useMachinesUsage(request: UsageReportRequest): MachinesUsage {
+export function useMachinesUsage(
+  /** Names what is shown (range and provider); reports are kept per machine and view. */
+  viewKey: string,
+  /** Builds the request when a read starts, so a rolling range ends at that moment. */
+  buildRequest: () => UsageReportRequest,
+): MachinesUsage {
   const [machines, setMachines] = useState<MachineState[]>([]);
   const [listed, setListed] = useState(false);
   const [states, setStates] = useState<Record<string, MachineUsageState>>({});
   const [loading, setLoading] = useState(true);
   const [inFlight, setInFlight] = useState(0);
-  const requestRef = useRef(request);
-  requestRef.current = request;
-  const requestKey = JSON.stringify(request);
+  const buildRef = useRef(buildRequest);
+  buildRef.current = buildRequest;
+  const viewRef = useRef(viewKey);
+  viewRef.current = viewKey;
   const machinesRef = useRef(machines);
   machinesRef.current = machines;
 
@@ -69,41 +78,49 @@ export function useMachinesUsage(request: UsageReportRequest): MachinesUsage {
     return () => { live = false; off(); };
   }, []);
 
-  const reload = useCallback(async (only?: string) => {
-    const current = requestRef.current;
-    const targets = machinesRef.current.filter(machine => !only || machine.id === only);
+  const reload = useCallback(async (only?: readonly string[]) => {
+    const view = viewRef.current;
+    const request = buildRef.current();
+    // A read that finishes after the view changed keeps its report but leaves the shown state alone.
+    const setState = (machineId: string, state: MachineUsageState) => {
+      if (viewRef.current === view) setStates(previous => ({ ...previous, [machineId]: state }));
+    };
+    const targets = machinesRef.current.filter(machine => !only || only.includes(machine.id));
     setInFlight(count => count + 1);
     await Promise.all(targets.map(async machine => {
-      const key = readKey(machine.id, current);
+      const key = readKey(machine.id, view);
       const stale = (reason: 'offline' | 'error', message: string | null): MachineUsageState =>
         ({ kind: 'stale', reason, message, readAt: lastRead.get(key)?.readAt ?? null });
       if (machine.status === 'offline') {
-        setStates(previous => ({ ...previous, [machine.id]: stale('offline', null) }));
+        setState(machine.id, stale('offline', null));
         return;
       }
       try {
-        const report = await readReport(machine.id, current);
+        const report = await readReport(machine.id, request);
         const readAt = Date.now();
         lastRead.set(key, { report, readAt });
-        setStates(previous => ({ ...previous, [machine.id]: { kind: 'live', readAt } }));
+        setState(machine.id, { kind: 'live', readAt });
       } catch (error) {
-        setStates(previous => ({ ...previous, [machine.id]: stale('error', error instanceof Error ? error.message : String(error)) }));
+        setState(machine.id, stale('error', error instanceof Error ? error.message : String(error)));
       }
     }));
     setInFlight(count => count - 1);
   }, []);
 
-  // A machine going offline or coming back changes what it can show; read again when the list or range changes.
+  // A new view reads every machine; otherwise only machines that appeared or changed status are read.
   const machineKey = machines.map(machine => `${machine.id}:${machine.status}`).join(',');
+  const readFor = useRef<{ view: string | null; statuses: Map<string, MachineState['status']> }>({ view: null, statuses: new Map() });
   useEffect(() => {
     if (!listed) return;
-    let live = true;
-    void reload().finally(() => { if (live) setLoading(false); });
-    return () => { live = false; };
-  }, [listed, machineKey, requestKey, reload]);
+    const last = readFor.current;
+    const changed = last.view === viewKey ? machinesRef.current.filter(machine => last.statuses.get(machine.id) !== machine.status).map(machine => machine.id) : undefined;
+    readFor.current = { view: viewKey, statuses: new Map(machinesRef.current.map(machine => [machine.id, machine.status])) };
+    if (changed?.length === 0) return;
+    void reload(changed).finally(() => setLoading(false));
+  }, [listed, machineKey, viewKey, reload]);
 
   const usages: MachineUsage[] = machines.flatMap(machine => {
-    const last = lastRead.get(readKey(machine.id, request));
+    const last = lastRead.get(readKey(machine.id, viewKey));
     if (!last) return [];
     return [{ machineId: machine.id, name: machine.label, stale: states[machine.id]?.kind !== 'live', report: last.report, readAt: last.readAt }];
   });

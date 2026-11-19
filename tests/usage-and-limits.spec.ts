@@ -1,5 +1,6 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
+import { boundary, decodeBoundary } from '../shared/validation/boundaryDecoder';
 
 test.use({ timezoneId: 'America/Los_Angeles' });
 
@@ -454,4 +455,22 @@ test('rescan completion keeps the latest filter and late requests cannot replace
   await page.waitForTimeout(300);
   await expect(summary.getByText('123', { exact: true })).toBeVisible();
   await expect(summary.getByText('999', { exact: true })).toHaveCount(0);
+});
+
+test('Refresh reads usage up to the moment it is clicked', async ({ page }) => {
+  await installElectronApiMock(page, { initialProjects: [project], initialUsageReport: report, activeProjectId: project.id });
+  await page.goto('/');
+  await openUsageAndLimits(page);
+  await expect(page.getByTestId('pane-usage-summary')).toBeVisible();
+  const lastRangeEnd = async () => decodeBoundary(await page.evaluate(() => {
+    const calls = window.__paneTestElectronMock.getInvokeCalls('usage:get-report');
+    return calls[calls.length - 1]?.args[0];
+  }), boundary.object({ toMs: boundary.number })).toMs;
+  const opened = await lastRangeEnd();
+  await page.waitForTimeout(50);
+  const clickedAt = await page.evaluate(() => Date.now());
+  await page.getByRole('button', { name: 'Rescan transcripts' }).click();
+  await expect(page.getByRole('button', { name: 'Rescan transcripts' })).toBeEnabled();
+  expect(opened).toBeLessThan(clickedAt);
+  expect(await lastRangeEnd()).toBeGreaterThanOrEqual(clickedAt);
 });
