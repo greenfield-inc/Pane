@@ -834,11 +834,14 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   interface Stream { driver: PageDriver; frame?: BrowserFrame; waiters: Set<() => void>; lastRead: number }
   const streams = new Map<number, Stream>();
   const streamPages = new Set<number>();
-  let frameSeq = 0;
+  // Frame numbers run on from the clock, so a host restart never numbers a frame below one a screen already has.
+  let frameSeq = Date.now();
 
   /** The frame size the screens watching from afar need: the largest of them, in device pixels. */
   function settingsFor(tabId: string): ScreencastSettings {
-    const far = holds.viewers(tabId).filter(viewer => viewer.kind !== 'host');
+    const remote = holds.viewers(tabId).filter(viewer => viewer.kind !== 'host');
+    const shown = remote.filter(viewer => viewer.onScreen);
+    const far = shown.length ? shown : remote;
     const maxWidth = Math.round(Math.max(320, ...far.map(viewer => viewer.width * Math.min(viewer.scale ?? 1, 3))));
     const maxHeight = Math.round(Math.max(320, ...far.map(viewer => viewer.height * Math.min(viewer.scale ?? 1, 3))));
     return { maxWidth, maxHeight, quality: FRAME_QUALITY };
@@ -878,7 +881,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (!page || !stream || Date.now() - stream.lastRead > STREAM_IDLE_MS) return;
     await new Promise(resolve => setTimeout(resolve, STILL_SETTLE_MS));
     if (page.isDestroyed() || streams.get(page.id) !== stream) return;
-    const still = await stream.driver.still(FRAME_QUALITY).catch(() => undefined);
+    const still = await stream.driver.still(FRAME_QUALITY, settingsFor(tabId)).catch(() => undefined);
     if (!still) return;
     frameSeq += 1;
     stream.frame = { seq: frameSeq, data: `data:image/jpeg;base64,${still.data}`, width: still.width, height: still.height };
@@ -916,15 +919,17 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const stream = streamOf(id, page);
     stream.lastRead = Date.now();
     if (!stream.frame) {
-      const still = await stream.driver.still(FRAME_QUALITY).catch(() => undefined);
+      const still = await stream.driver.still(FRAME_QUALITY, settingsFor(id)).catch(() => undefined);
       if (still && !stream.frame) {
         frameSeq += 1;
         stream.frame = { seq: frameSeq, data: `data:image/jpeg;base64,${still.data}`, width: still.width, height: still.height };
       }
     }
-    await waitFor(stream.waiters, FRAME_WAIT_MS, () => (stream.frame?.seq ?? 0) > after || page.isDestroyed());
+    // A screen asking past the newest frame read from an earlier run of this host: it gets the newest.
+    const stale = stream.frame !== undefined && after > stream.frame.seq;
+    if (!stale) await waitFor(stream.waiters, FRAME_WAIT_MS, () => (stream.frame?.seq ?? 0) > after || page.isDestroyed());
     const frame = stream.frame;
-    if (!frame || frame.seq <= after) return answer({ unchanged: true, seq: after });
+    if (!frame || (!stale && frame.seq <= after)) return answer({ unchanged: true, seq: after });
     // The screen took this frame: Chromium may paint the next.
     stream.driver.ackFrame();
     return answer({ frame });
@@ -955,10 +960,10 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     // A pointer only passing over the stream (hover) is not the person acting: it takes nothing over.
     const acts = batch.length === 0 || batch.some(input => !(input.kind === 'mouse' && input.action === 'move'));
     // An open dialog blocks the page: only its answer goes through, and nothing resizes the page meanwhile.
-    if (acts && !driver.pendingDialog) {
-      driver.notePersonInput();
+    const taking = acts && !driver.pendingDialog;
+    if (taking) {
+      driver.notePersonInput(Date.now(), true);
       await personTouched(id, page.id);
-      if (viewerId) await takeControl(id, viewerId);
     }
     const files = batch.flatMap(input => (input.kind === 'files' ? input.files : []));
     const bytes = files.reduce((sum, file) => sum + Math.floor(file.data.length * 3 / 4), 0);
@@ -971,7 +976,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const applying = driver.personInput(batch);
     applying.catch(() => undefined);
     const result = await Promise.race([applying, late]).finally(() => clearTimeout(timer));
-    if (files.length) {
+    // The page takes this screen's size after the batch, so a click lands on the layout the person saw.
+    if (taking && viewerId) await takeControl(id, viewerId);
+    if (files.length && driver.pendingChooser) {
       const folder = await host.uploadsFor(page);
       const paths: string[] = [];
       for (const file of files) {

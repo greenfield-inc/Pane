@@ -68,7 +68,7 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
         params.set(method, given);
         if (method === 'DOM.setFileInputFiles') files.push(...(given?.files ?? []));
         if (method === 'Page.captureScreenshot') return { data: pngOf(780, 1688).toString('base64') };
-        if (method === 'Runtime.evaluate' && JSON.stringify(given).includes('innerWidth')) return { result: { value: { width: 800, height: 600 } } };
+        if (method === 'Runtime.evaluate' && JSON.stringify(given).includes('innerWidth')) return { result: { value: { width: 800, height: 600, x: 0, y: 120, ratio: 2 } } };
         if (method === 'Page.getLayoutMetrics') return { cssContentSize: { width: 800, height: 600 }, cssLayoutViewport: { clientWidth: 800, clientHeight: 600 } };
         if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
         if (method === 'DOM.querySelector') return { nodeId: 7 };
@@ -586,6 +586,32 @@ describe('browser tabs: streaming a page to another screen', () => {
     expect(page?.sent).toContain('Page.screencastFrameAck');
   });
 
+  it('gives a screen that holds a frame number from before a host restart the newest frame at once', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    const first = await frame(fixture, 'persons', 0);
+    const started = Date.now();
+    const again = await frame(fixture, 'persons', (first.frame?.seq ?? 0) + 1_000_000_000);
+    expect(again.frame?.seq).toBe(first.frame?.seq);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('captures a new screen\'s still no larger than the frames, where the page is scrolled to', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    await frame(fixture, 'persons', 0);
+    // An 800x600 page at 2x is 1600 px wide; the phone needs 1170.
+    expect(fixture.pages.get('persons')?.params.get('Page.captureScreenshot')).toMatchObject({ format: 'jpeg', clip: { x: 0, y: 120, width: 800, height: 600, scale: 1170 / 1600 } });
+  });
+
+  it('refuses the screen channels to agents', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    for (const channel of ['browser:frame', 'browser:view']) {
+      expect(await code(fixture.registry.invokeConnected(channel, ['persons', 'v', 0], signal, claudeInA))).toBe('ERR_BROWSER_SCREENS_ONLY');
+    }
+    expect(await fixture.registry.invokeConnected('browser:input', ['persons', 'v', []], signal, claudeInA)).toMatchObject({ success: false });
+  });
+
   it('acks each frame a screen reads, so Chromium keeps painting between reads', async () => {
     const fixture = setup([browserTab('persons', 'pane-a')], { holds });
     await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
@@ -639,8 +665,12 @@ describe('browser tabs: streaming a page to another screen', () => {
       { kind: 'touch', action: 'end', x: 10, y: 20 },
       { kind: 'wheel', x: 10, y: 20, dx: 0, dy: 300 },
     ])).toMatchObject({ success: true });
-    const inputs = (page?.sent ?? []).filter(method => method.startsWith('Input.'));
+    const sent = page?.sent ?? [];
+    const inputs = sent.filter(method => method.startsWith('Input.'));
     expect(inputs).toEqual(['Input.dispatchTouchEvent', 'Input.dispatchTouchEvent', 'Input.dispatchMouseEvent']);
+    // The page keeps its focus (a typeahead list stays open), and takes the screen's size only after the input landed.
+    expect(page?.params.get('Emulation.setFocusEmulationEnabled')).toEqual({ enabled: true });
+    expect(sent.indexOf('Emulation.setDeviceMetricsOverride')).toBeGreaterThan(sent.lastIndexOf('Input.dispatchMouseEvent'));
     expect(JSON.stringify(fixture.tabs.find(tab => tab.id === 'mine')?.state.customState)).toContain('"by":"person"');
     // Taking control gave the page the phone's size.
     expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 390, height: 844, mobile: true });

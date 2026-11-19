@@ -1,4 +1,5 @@
 import { app, BrowserWindow, clipboard, Menu, shell, type MenuItemConstructorOptions, type WebContents } from 'electron';
+import { syntheticInputInFlight } from './browser/pageDriver';
 import { externalUrlOrNull } from '../utils/externalUrl';
 import { openExternalUrl } from '../utils/openExternalUrl';
 import type { ContextMenuEntry } from '../../../shared/types/contextMenu';
@@ -142,6 +143,8 @@ const CONTEXT_MENU_DISMISS_GRACE_MS = 100;
  */
 export function attachEditContextMenu(contents: WebContents): void {
   contents.on('context-menu', (_event, params) => {
+    // A right click an agent or another screen sent never opens a menu on this computer's screen.
+    if (syntheticInputInFlight(contents.id)) return;
     const { editFlags, isEditable, misspelledWord, dictionarySuggestions } = params;
     const selection = params.selectionText.trim();
     const link = externalUrlOrNull(params.linkURL);
