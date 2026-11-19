@@ -90,6 +90,7 @@ test('T-24: a Session\'s to-dos\' approvals dock above its chat with its own, ea
   await card(page).getByRole('button', { name: 'Dismiss' }).click();
   await expect(card(page).getByTestId('session-approval-card-pager')).toHaveText(/of 2$/);
   // Answered anywhere: it leaves the dock.
+  // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
   await page.evaluate((next) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(next), snapshot([{ ...review, state: 'answered' }, prompt, own]));
   await expect(card(page).getByTestId('session-approval-card-pager')).toHaveText('1 of 1');
   await expect(card(page).getByTestId('session-approval-card-title')).toHaveText('Allow pkill -f vite?');
