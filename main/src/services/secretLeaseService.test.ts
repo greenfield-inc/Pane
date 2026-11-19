@@ -200,6 +200,29 @@ describe('SecretLeaseService', () => {
     service.dispose();
   });
 
+  it('sends the renewal to a host that slept past the old end and swept the lease', async () => {
+    const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
+    const devbox = await fakeHost('devbox', clock);
+    const links = [devbox.link];
+    const { service, secrets } = await desktop(clock, links, ITEMS);
+    await secrets.setReference('stripe', 'STRIPE_KEY', 'op://Dev/Stripe/credential');
+    const { leaseId } = await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: ['devbox-id'], requestedBy: 'Settings' });
+
+    links[0] = { ...devbox.link, online: false };
+    clock.now += 23 * HOUR;
+    await service.start({ project: 'stripe', names: ['STRIPE_KEY'], machines: [], requestedBy: 'Settings', renews: leaseId });
+    // Still asleep at the old end: the devbox sweeps its copy when it wakes.
+    clock.now += 2 * HOUR;
+    await devbox.store.end(leaseId);
+    links[0] = devbox.link;
+
+    await service.repushTo('devbox-id');
+
+    expect(await devbox.store.read('stripe', 'STRIPE_KEY')).toBe('sk_live_canary_1');
+    expect(devbox.store.list()[0]?.expiresAt).toBe('2026-11-20T11:00:00.000Z');
+    service.dispose();
+  });
+
   it('ends the leases pushed to a machine being removed', async () => {
     const clock = { now: Date.parse('2026-11-18T12:00:00Z') };
     const devbox = await fakeHost('devbox', clock);

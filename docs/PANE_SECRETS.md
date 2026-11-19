@@ -171,7 +171,8 @@ only. The lease ends there if Pane restarts. The card and Settings → Secrets s
 a machine holds a lease in memory.
 
 When the desktop reconnects to a machine, it sends a lease again only if that
-machine held it in memory and lost it, or missed a renewal. A lease an agent ended
+machine held it in memory and lost it, or missed a renewal (including one it already
+deleted at the old end while it slept). A lease an agent ended
 on a machine stays ended.
 
 ### Lease log
