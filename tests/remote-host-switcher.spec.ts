@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 import type { RemoteComputer } from '../shared/types/remoteComputers';
 import type { MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
@@ -18,7 +18,7 @@ async function saveHost(page: Page, connect: boolean) {
 
 test('the header pill names the connected machine and switches back to this computer', async ({ page }, testInfo) => {
   await installElectronApiMock(page);
-  await page.goto('/');
+  await gotoApp(page);
   await expect(page.getByRole('button', { name: 'Collapse sidebar', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /Switch machine$/ })).toHaveCount(0);
 
@@ -36,7 +36,7 @@ test('the header pill names the connected machine and switches back to this comp
 
 test('the collapsed rail shows the active machine and opens the same menu', async ({ page }, testInfo) => {
   await installElectronApiMock(page);
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
 
   await saveHost(page, true);
@@ -79,7 +79,7 @@ test('the menu shows a computer once, with only the route it is on and its laten
     },
     machineLatency: { 'build-box': 4 },
   });
-  await page.goto('/');
+  await gotoApp(page);
   const switcher = page.getByRole('button', { name: 'Agents run on devbox. Switch machine' });
   await expect(switcher).toBeVisible();
   expect(await latencyCalls(page)).toEqual([]);
@@ -119,7 +119,7 @@ test('a machine shows "…" until its latency answers, and an offline machine is
     },
     machineLatency: { 'build-box': 'pending', far: 1510 },
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: /Switch machine$/ }).click();
   const row = page.getByRole('menuitemradio', { name: /Build Box/ });
   await expect(row.getByLabel('Pane relay, in use')).toBeVisible();
@@ -145,7 +145,7 @@ test('a machine that connects while the menu is open is measured then, on the ro
     },
     machineLatency: { 'build-box': 12 },
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: /Switch machine$/ }).click();
   const row = page.getByRole('menuitemradio', { name: /Build Box/ });
   await expect(row).toContainText('Windows · Last seen');
@@ -175,7 +175,7 @@ test('a saved computer agents do not run on shows its live state and the route i
       reads: {},
     },
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: /Switch machine$/ }).click();
   const row = page.getByRole('menuitemradio', { name: /Build Box/ });
   await expect(row.getByLabel('Pane relay, in use')).toBeVisible();
@@ -195,7 +195,7 @@ const tailnetMachines: TailnetMachineList = {
 
 test('the menu lists Tailscale machines never connected and connects one in one click', async ({ page }) => {
   await installElectronApiMock(page, { tailnetMachines });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
   await expect(page.getByRole('menuitemradio', { name: /office-pc/ })).toContainText('Windows · Online · Not linked');
   await expect(page.getByRole('menuitemradio', { name: /travel-laptop/ })).toBeDisabled();
@@ -211,7 +211,7 @@ test('the menu lists Tailscale machines never connected and connects one in one 
 
 test('a machine that needs a password opens its password field in Remote Access', async ({ page }) => {
   await installElectronApiMock(page, { tailnetMachines });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
   await page.getByRole('menuitemradio', { name: /build-box/ }).click();
 
@@ -227,7 +227,7 @@ test('a machine that needs a password opens its password field in Remote Access'
 
 test('the active machine asks for a new password from the menu', async ({ page }) => {
   await installElectronApiMock(page, { tailnetMachines, remoteConnectError: 'build-box refused the password.' });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
   await page.getByRole('menuitemradio', { name: /build-box/ }).click();
   await page.getByLabel('Password for build-box').fill('wrong horse');

@@ -1,43 +1,90 @@
 import { defineConfig, devices } from '@playwright/test';
+import { CHAT_PROJECTS } from './playwright.agent-chat.config';
 import { getPlaywrightBaseURL, getPlaywrightPort, getPlaywrightServerEnv } from './playwright.shared';
 
 const devServerPort = getPlaywrightPort();
 
 // The required browser specs: they run against the renderer from Vite with a mocked
-// Electron API, and CI result waits for them. The specs #1554 wired in run beside
-// them, not gating, in playwright.ci.stabilizing.config.ts until each is proven
-// stable. scripts/ci-test-inventory.mjs fails CI when a spec in tests/ runs in no
+// Electron API, and CI result waits for them. The chat composer specs run here too,
+// at the desktop and phone sizes playwright.agent-chat.config.ts gives them. Specs
+// not yet proven stable run beside them, not gating, in
+// playwright.ci.stabilizing.config.ts. scripts/ci-test-inventory.mjs fails CI when a spec in tests/ runs in no
 // lane, so a new spec must be added here, to another CI config, or to its
 // NOT_IN_CI list.
 const BROWSER_SPECS = [
   'accessibility.spec.ts',
+  'adaptive-panel-layout.spec.ts',
+  'agent-status.spec.ts',
   'analytics-consent.spec.ts',
   'approvals-system.spec.ts',
+  'archive-cleanup.spec.ts',
+  'autopilot-settings.spec.ts',
   'browser-ports.spec.ts',
+  'changes-list-perf.spec.ts',
+  'chat-enter-focus.spec.ts',
+  'chrome-evidence.spec.ts',
+  'codeless-remote.spec.ts',
+  'command-palette.spec.ts',
+  'commit-dialog.spec.ts',
+  'desktop-notifications.spec.ts',
   'device-tab.spec.ts',
+  'discord-presence.spec.ts',
+  'dropdown-keyboard-nav.spec.ts',
+  'feedback.spec.ts',
   'file-editor-lifecycle.spec.ts',
   'file-preview-lifecycle.spec.ts',
   'file-tree-selection.spec.ts',
+  'file-tree-shortcuts.spec.ts',
   'find-in-tab.spec.ts',
   'home-usage-card.spec.ts',
   'html-editable-source.spec.ts',
   'html-explorer-open.spec.ts',
   'launch-outline.spec.ts',
+  'launch-shortcuts.spec.ts',
+  'leaderboard.spec.ts',
   'loops.spec.ts',
   'machine-health-cards.spec.ts',
   'machine-health-resources.spec.ts',
+  'main-repo-push.spec.ts',
+  'mermaid-preview.spec.ts',
+  'mission-control.spec.ts',
+  'motion-remote.spec.ts',
+  'motion.spec.ts',
+  'native-mobile.spec.ts',
   'notify-cards.spec.ts',
+  'notify.spec.ts',
   'onboarding-open-project.spec.ts',
+  'pair-phone.spec.ts',
+  'pane-order.spec.ts',
+  'pause.spec.ts',
+  'project-dashboard-refresh.spec.ts',
+  'remote-network-rejection.spec.ts',
+  'remote-pwa-browser.spec.ts',
   'remote-pwa-explorer.spec.ts',
   'remote-pwa-sidebar.spec.ts',
   'remote-pwa-view-state.spec.ts',
+  'remote-runtime-state.spec.ts',
+  'resume-selection.spec.ts',
+  'review-availability.spec.ts',
+  'session-logs.spec.ts',
   'session-move-dialog.spec.ts',
   'settings.spec.ts',
   'shortcut-sheet.spec.ts',
+  'shortcuts-settings.spec.ts',
+  'sidebar-compact.spec.ts',
+  'sidebar-session-status.spec.ts',
   'smoke.spec.ts',
+  'split-groups.spec.ts',
   'ssh-hosts.spec.ts',
+  'startup-notice.spec.ts',
   'summary-policy.spec.ts',
+  'tab-popover.spec.ts',
+  'tailnet-https-banner.spec.ts',
+  'terminal-dock.spec.ts',
+  'terminal-keyboard-input.spec.ts',
   'terminal-selection-popover.spec.ts',
+  'terminal-upload-button.spec.ts',
+  'theme-screenshots.spec.ts',
   'window-title-bar.spec.ts',
 ];
 
@@ -94,6 +141,10 @@ export default defineConfig({
         },
       },
     },
+    ...CHAT_PROJECTS.map((project) => ({
+      ...project,
+      use: { ...devices['Desktop Chrome'], ...project.use, launchOptions: { args: ['--disable-gpu', '--disable-dev-shm-usage', '--disable-setuid-sandbox', '--no-sandbox'] } },
+    })),
   ],
 
   // The tests mock the Electron API (tests/electronApiMock.ts), so they need

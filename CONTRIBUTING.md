@@ -170,10 +170,10 @@ To test approvals' timers without waiting, start a dev build with
   `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the
-  required browser suite: every spec `playwright.ci.minimal.config.ts` lists.
-- The specs #1554 added to CI are stabilizing: CI runs them and reports, but
-  `CI result` does not wait for them. `playwright.ci.stabilizing.config.ts`
-  (with the chat composer specs at a desktop and a phone size),
+  required browser suite: every spec `playwright.ci.minimal.config.ts` lists,
+  with the chat composer specs at a desktop and a phone size.
+- Some specs #1554 added to CI are stabilizing: CI runs them and reports, but
+  `CI result` does not wait for them. `playwright.ci.stabilizing.config.ts`,
   `playwright.ci.webgl.config.ts` and `playwright.ci.stabilizing-electron.config.ts`
   list them. A spec moves back to a required config once it is proven stable.
 - `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey

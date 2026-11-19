@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import { readTerminalTheme } from './terminalXterm';
 import type { AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest } from '../shared/types/gitDiff';
@@ -78,7 +78,7 @@ test('System follows live changes and refreshes native window colors while Fixed
       appearanceMode: 'system', theme: 'walnut', systemLightTheme: 'folio', systemDarkTheme: 'forge',
     },
   });
-  await page.goto('/');
+  await gotoApp(page);
   await expect(page.locator('html')).toHaveClass(/folio/);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -107,7 +107,7 @@ test('fulfilled background-colour failures are logged without interrupting Syste
       appearanceMode: 'system', theme: 'walnut', systemLightTheme: 'folio', systemDarkTheme: 'forge',
     },
   });
-  await page.goto('/');
+  await gotoApp(page);
   await expect(page.locator('html')).toHaveClass(/folio/);
   await expect.poll(() => page.evaluate(() => {
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -139,7 +139,7 @@ test('Fixed appearance ignores live system preference changes', async ({ page })
       appearanceMode: 'fixed', theme: 'walnut', systemLightTheme: 'folio', systemDarkTheme: 'forge',
     },
   });
-  await page.goto('/');
+  await gotoApp(page);
   await expect(page.locator('html')).toHaveClass(/walnut/);
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('html')).toHaveClass(/walnut/);
@@ -182,7 +182,7 @@ test('terminal palette and rendered diff follow a System slot flip', async ({ pa
     fileDiffs: { 'session:example.ts': { file: changedFile, patch: diff, status: 'changed' } },
     initialTerminalStates: { 'appearance-terminal': { scrollbackBuffer: 'ready\r\n' } },
   });
-  await page.goto('/');
+  await gotoApp(page);
   const expandRepo = page.getByRole('button', { name: /^Expand project appearance-runtime$/ });
   await expect(expandRepo).toBeVisible();
   await expandRepo.click();
