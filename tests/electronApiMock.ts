@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import path from 'node:path';
 import type { ArchiveProgressSnapshot } from '../shared/types/archiveProgress';
 import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
@@ -109,6 +110,8 @@ export type ElectronApiMockOptions = {
   detectedBranch?: string | null;
   detectedBranchByPath?: Record<string, string | null>;
   mainRepoSessionDelayByProjectId?: Record<number, number>;
+  /** Hold these projects' main-repository Session lookups until releaseMainRepoSessions(). */
+  holdMainRepoSessionProjectIds?: number[];
   mainRepoSessionErrorByProjectId?: Record<number, string>;
   activeProjectId?: number | null;
   paneChatAgentChangeDelayMs?: number;
@@ -180,7 +183,14 @@ export async function gotoApp(page: Page, path = '/'): Promise<void> {
   }, undefined, { timeout: 30_000 });
 }
 
+// The editor loads Monaco from jsDelivr (frontend/vite.config.ts). Tests serve the installed
+// copy, so opening a file never waits on the network.
+const MONACO_MIN = path.resolve('frontend/node_modules/monaco-editor/min');
+
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
+  await page.route(/^https:\/\/cdn\.jsdelivr\.net\/npm\/monaco-editor@[^/]+\/min\//, (route) => (
+    route.fulfill({ path: path.join(MONACO_MIN, new URL(route.request().url()).pathname.replace(/^\/npm\/monaco-editor@[^/]+\/min\//, '')) })
+  ));
   type SerializedOptions = ElectronApiMockOptions & {
     appearance: { defaults: AppearanceConfig; seeded: AppearanceConfig };
   };
@@ -405,6 +415,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockPanels = clone(mockOptions.initialPanels ?? []);
     let nextPanelId = mockPanels.length + 1;
     const heldSshPanelReads: Array<() => void> = [];
+    const heldMainRepoSessions: Array<() => void> = [];
     const openSshHost = (alias: string, newTab: boolean) => {
       const sessionId = '__ssh_hosts_session__';
       const existing = newTab ? undefined : mockPanels.find(panel => sshHostOf(panel) === alias);
@@ -1723,6 +1734,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getOrCreateMainRepoSession: async (projectId: number) => {
           const delayMs = mockOptions.mainRepoSessionDelayByProjectId?.[projectId] ?? 0;
           if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+          if (mockOptions.holdMainRepoSessionProjectIds?.includes(projectId)) {
+            await new Promise<void>(resolve => { heldMainRepoSessions.push(resolve); });
+          }
           const error = mockOptions.mainRepoSessionErrorByProjectId?.[projectId];
           if (error) throw new Error(error);
           return success(clone(
@@ -2307,6 +2321,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         releaseSshPanelReads() {
           for (const release of heldSshPanelReads.splice(0)) release();
+        },
+        releaseMainRepoSessions() {
+          for (const release of heldMainRepoSessions.splice(0)) release();
         },
         emitPanelCreated(panel: JsonObject) {
           if (!mockPanels.some(existing => existing.id === panel.id)) {
