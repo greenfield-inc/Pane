@@ -3160,6 +3160,9 @@ test('a Session inspector opened later still minimizes and maximizes by key (F-3
   await installSessionsFixture(page, [sessionFixture('aside', 'Aside demo', '', '', '2026-09-16T12:00:00.000Z')]);
   await gotoApp(page);
   await page.getByTestId('orchestration-session-aside').click();
+  // Opening the Session ends with its terminal taking focus once its activation refresh lands;
+  // wait for that so it cannot pull focus out of the inspector below.
+  await expect(page.locator('[data-panel-group-id] .xterm-helper-textarea').first()).toBeFocused();
   await page.getByRole('button', { name: 'Show details', exact: true }).click();
   const aside = page.getByRole('complementary', { name: 'Session changes' });
   await expect(aside).toBeVisible();
