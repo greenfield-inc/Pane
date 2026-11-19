@@ -7,5 +7,6 @@ import electronConfig from './playwright.chat-tabs.config';
 // playwright.chat-tabs.config.ts once it is found. The step sets PANE_ELECTRON_E2E=1.
 export default defineConfig({
   ...electronConfig,
-  testMatch: ['browser-agents.spec.ts'],
+  testMatch: ['browser-agents-probe-old.spec.ts', 'browser-agents-probe-new.spec.ts', 'browser-agents.spec.ts'],
+  repeatEach: 3,
 });

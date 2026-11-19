@@ -8,4 +8,5 @@ import browserConfig from './playwright.ci.minimal.config';
 export default defineConfig({
   ...browserConfig,
   projects: [{ ...browserConfig.projects![0], testMatch: ['tab-popover.spec.ts'] }],
+  repeatEach: 30,
 });
