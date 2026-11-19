@@ -1,11 +1,12 @@
 name: Playwright browsers
 description: >-
   Restores Playwright's Chromium from the Actions cache that pushes to main
-  write, then installs it with its system packages. Run it after the install.
+  write, then installs it. Run it after the install.
 # Playwright's CDN took 35-103 s for one browser on some runs; the cache holds
 # the browser folder, keyed on the image's OS family, arch and playwright-core
-# version, so a key never serves another browser build. The system packages
-# still come from apt on every run.
+# version, so a key never serves another browser build. No apt: the Ubuntu
+# image already has every library Chromium loads, and --with-deps only added
+# fonts and a Mesa upgrade from a mirror that stalled for minutes.
 inputs:
   install:
     description: Run the browser install here; false restores only, for a job that installs in the background.
@@ -31,7 +32,7 @@ runs:
     - name: Install Playwright browser dependencies
       if: inputs.install == 'true'
       shell: bash
-      run: pnpm exec playwright install --with-deps chromium
+      run: scripts/playwright-chromium.sh
 
     - name: Save the Playwright browsers
       if: inputs.install == 'true' && inputs.save == 'true' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
