@@ -139,9 +139,15 @@ pnpm --filter main exec vitest run
 pnpm test:ci:minimal
 ```
 
-`pnpm typecheck` checks `frontend`, `mobile` and `native` with TypeScript 7
-(the `@typescript/native` alias), and `main` and `packages/runpane` with their
-own `typescript` 5.x, which also builds them. Editors use the 5.x package.
+`pnpm typecheck` runs `bun check` (Bun's TypeScript 7 checker, from the `bun`
+dev dependency) on every project the root `tsconfig.json` lists, the renderer
+tests included, in about 3 seconds. `main` and `packages/runpane` are checked
+through their `tsconfig.check.json`, because TypeScript 7 has no
+`moduleResolution: node`; their own `typescript` 5.x still builds them, and
+editors use it. `pnpm typecheck:tsc` runs the previous checkers (TypeScript 7
+through the `@typescript/native` alias, and 5.x for `main` and
+`packages/runpane`) when you want to compare. A new tsconfig joins the
+references in the root `tsconfig.json`.
 
 To test approvals' timers without waiting, start a dev build with
 `PANE_APPROVALS_STALE_AFTER_MS` (3 days), `PANE_APPROVALS_PUSH_AFTER_MS` (about
