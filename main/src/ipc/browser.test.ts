@@ -625,6 +625,18 @@ describe('browser tabs: streaming a page to another screen', () => {
     expect(page?.params.get('Page.handleJavaScriptDialog')).toEqual({ accept: true });
   });
 
+  it('sizes the page to the screen whose click takes control, and follows that screen as it resizes', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds: { ...holds, watch: { ...holds.watch, silentMs: 60_000 } } });
+    const page = fixture.pages.get('persons');
+    const desktop = { kind: 'desktop', onScreen: true, width: 344, height: 748, scale: 2 };
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', desktop], { caller: undefined });
+    await input(fixture, 'persons', [{ kind: 'mouse', action: 'down', x: 5, y: 5, button: 'left', clicks: 1, modifiers: 0 }, { kind: 'mouse', action: 'up', x: 5, y: 5, button: 'left', clicks: 1, modifiers: 0 }]);
+    expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 344, height: 748, mobile: false });
+    // The viewer's sidebar closes: its box grows, and the page grows with it.
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', { ...desktop, width: 524 }], { caller: undefined });
+    await vi.waitFor(() => expect(page?.params.get('Emulation.setDeviceMetricsOverride')).toMatchObject({ width: 524, height: 748 }));
+  });
+
   it('lets a pointer pass over the stream without taking the page from the agent', async () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
     await fixture.registry.invokeRemote('browser:watch', ['mine', 'phone-1', phone], { caller: undefined });
