@@ -192,8 +192,10 @@ export function BrowserStreamView({ client, panelId, stream, hostName, phone = f
         return;
       }
       if (!current.moved && !current.longPressed && point) {
-        send({ kind: 'touch', action: 'start', ...point });
-        send({ kind: 'touch', action: 'end', ...point });
+        // A tap goes as a mouse click: Chromium makes no click (or one in the wrong place) from a
+        // synthetic touch on a page shown at another size.
+        send({ kind: 'mouse', action: 'down', ...point, button: 'left', clicks: 1, modifiers: 0 });
+        send({ kind: 'mouse', action: 'up', ...point, button: 'left', clicks: 1, modifiers: 0 });
       }
       return;
     }

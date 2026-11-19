@@ -48,6 +48,10 @@ export function electronBrowserHost(getMainWindow: () => BrowserWindow | null, c
       await panelManager.updatePanel(tab.id, { state: { ...current.state, customState: state } });
     },
     page: (panelId) => newestPage(panelId),
+    sizeHidden: (panelId, size) => {
+      const window = headlessPages.get(panelId);
+      if (window && !window.isDestroyed()) window.setContentSize(size?.width ?? HIDDEN_PAGE.width, size?.height ?? HIDDEN_PAGE.height);
+    },
     hasWindow: () => getMainWindow() !== null,
     shotsDirectory: async (paneId) => path.join(await paneScratchDirectory(paneId) ?? os.tmpdir(), 'browser-screenshots'),
     showCursor: (panelId, x, y) => getMainWindow()?.webContents.send(BROWSER_AGENT_CURSOR_EVENT, { panelId, x, y }),
@@ -112,6 +116,9 @@ function newestPage(panelId: string): Electron.WebContents | undefined {
   return newest;
 }
 
+/** A hidden page's size while no screen on another device controls it. */
+const HIDDEN_PAGE = { width: 1280, height: 800 };
+
 /** A host with no window keeps each held tab's page in a hidden window, in the shared sign-in store. */
 const headlessPages = new Map<string, BrowserWindow>();
 
@@ -142,7 +149,8 @@ function holdHeadless(tabIds: readonly string[]): void {
     if (!panel || !url) continue;
     const webPreferences = { partition: SHARED_BROWSER_PARTITION };
     hardenWebviewPreferences(webPreferences);
-    const window = new BrowserWindow({ show: false, width: 1280, height: 800, paintWhenInitiallyHidden: true, webPreferences });
+    const size = decodeOptionalBoundary(panel.state.customState, boundary.object({ pageSize: boundary.optional(boundary.object({ width: boundary.number, height: boundary.number })) }))?.pageSize ?? HIDDEN_PAGE;
+    const window = new BrowserWindow({ show: false, useContentSize: true, width: size.width, height: size.height, paintWhenInitiallyHidden: true, webPreferences });
     guardHeadlessPage(window.webContents);
     headlessPages.set(panelId, window);
     getPaneWebviewContextMap().set(window.webContents.id, { panelId, sessionId: panel.sessionId });

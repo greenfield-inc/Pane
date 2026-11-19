@@ -68,6 +68,9 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
   const keysRef = useRef<TextInput>(null);
   const [field, setField] = useState<'text' | 'password' | null>(null);
   const [keyboardText, setKeyboardText] = useState(KEYBOARD_EMPTY);
+  // What the field holds after the last edit: changes can arrive faster than a render, so each one
+  // is compared with this, never with the last rendered text.
+  const keyboardTextRef = useRef(KEYBOARD_EMPTY);
   const [notice, setNotice] = useState<string>();
   const fieldRef = useRef<'text' | 'password' | null>(null);
   const [send] = useState(() => browserInputQueue(async batch => {
@@ -76,10 +79,11 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
     if (result.field !== undefined && result.field !== fieldRef.current) {
       fieldRef.current = result.field;
       setField(result.field);
+      keyboardTextRef.current = KEYBOARD_EMPTY;
       setKeyboardText(KEYBOARD_EMPTY);
     }
     // A tap on a text field opens the keyboard; scrolling or typing leaves it as it is.
-    if (result.field && batch.some(input => input.kind === 'touch')) keysRef.current?.focus();
+    if (result.field && batch.some(input => input.kind === 'mouse' && input.action === 'up' && input.button === 'left')) keysRef.current?.focus();
     return result;
   }));
   const [control] = useState(() => new PhoneControl());
@@ -106,8 +110,10 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
     if (stop === 'asleep') { stream.wake(); return; }
     const point = toPage(x, y);
     if (!point || takesControl()) return;
-    send({ kind: 'touch', action: 'start', ...point });
-    send({ kind: 'touch', action: 'end', ...point });
+    // A tap goes as a mouse click: Chromium makes no click (or one in the wrong place) from a
+    // synthetic touch on a page shown at another size.
+    send({ kind: 'mouse', action: 'down', ...point, button: 'left', clicks: 1, modifiers: 0 });
+    send({ kind: 'mouse', action: 'up', ...point, button: 'left', clicks: 1, modifiers: 0 });
   };
   const onLongPress = (x: number, y: number) => {
     const point = toPage(x, y);
@@ -149,7 +155,8 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
 
   // Typing: a hidden field carries the phone's keyboard into the page's focused field.
   const onType = (after: string) => {
-    const edit = keyboardEdit(keyboardText, after, fieldRef.current === 'password');
+    const edit = keyboardEdit(keyboardTextRef.current, after, fieldRef.current === 'password');
+    keyboardTextRef.current = edit.next;
     for (const input of edit.input) send(input);
     setKeyboardText(edit.next);
   };
@@ -331,7 +338,7 @@ function StreamedBrowserTab({ panel }: { panel: ToolPanel }) {
             accessibilityLabel="Type into the page"
             value={keyboardText}
             onChangeText={onType}
-            onSubmitEditing={() => { send({ kind: 'key', key: 'Enter', modifiers: 0 }); setKeyboardText(KEYBOARD_EMPTY); }}
+            onSubmitEditing={() => { send({ kind: 'key', key: 'Enter', modifiers: 0 }); keyboardTextRef.current = KEYBOARD_EMPTY; setKeyboardText(KEYBOARD_EMPTY); }}
             submitBehavior="submit"
             secureTextEntry={field === 'password'}
             autoCapitalize="none"
