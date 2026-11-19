@@ -265,7 +265,7 @@ pnpm's junctions on Windows. To drop a bad entry, delete it with
 `Code Quality` also runs on the merge queue's `merge_group` events, so the
 queue can hold every merge to `main` until the full suite passes on the exact
 merge commit. In a merge group, Detect changed areas diffs no paths and its
-manifest skips nothing, so every job runs; caches are only read. No release or
+manifest skips nothing, so every job runs. No release or
 deploy workflow runs: their push triggers name `main`, `nightly`, `release` or
 tags, never the queue's `gh-readonly-queue/main/*` branches. `CI result` is a
 `Code Quality` job and the only required check, so no other workflow needs the
