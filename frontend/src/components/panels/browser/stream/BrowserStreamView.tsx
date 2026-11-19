@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { MousePointer2 } from 'lucide-react';
-import type { BrowserInputResult } from '../../../../../../shared/types/browserStream';
+import type { BrowserInput, BrowserInputResult } from '../../../../../../shared/types/browserStream';
 import { cn } from '../../../../utils/cn';
 import { DriverChip } from '../../device/DeviceToolViews';
 import { browserInputQueue, clickCounter, fitFrame, modifiersOf, pagePoint } from './streamInput';
@@ -11,6 +11,8 @@ import type { BrowserStreamClient } from './streamClient';
 const CURSOR_SHOWN_MS = 1_200;
 /** How long "The page reloaded on <host>" stays. */
 const RELOADED_SHOWN_MS = 8_000;
+/** The pointer's position goes to the host at most this often while it hovers. */
+const HOVER_MS = 60;
 /** A touch held this long without moving is a right click. */
 const LONG_PRESS_MS = 550;
 /** A touch that moves this far is a scroll, not a tap. */
@@ -63,7 +65,34 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       onField?.(result.field);
     }
   }, [onField]);
-  const send = useMemo(() => browserInputQueue(batch => client.input(panelId, batch), onResult), [client, panelId, onResult]);
+  const queue = useMemo(() => browserInputQueue(batch => client.input(panelId, batch), onResult), [client, panelId, onResult]);
+  // Input made while the host can't be reached is dropped, never replayed late onto a page that may have changed.
+  const stopRef = useRef(stop);
+  useEffect(() => { stopRef.current = stop; }, [stop]);
+  const send = useCallback((input: BrowserInput | null) => {
+    if (stopRef.current && stopRef.current !== 'older') return;
+    queue(input);
+  }, [queue]);
+
+  // Hover goes on its own read channel, at most every HOVER_MS, one on its way at a time: the host
+  // keeps no answer for it, so pointing around never uses up this screen's write allowance.
+  const hover = useRef<{ next?: { x: number; y: number }; busy: boolean; last: number }>({ busy: false, last: 0 });
+  const sendHover = useCallback((point: { x: number; y: number }) => {
+    const state = hover.current;
+    state.next = point;
+    if (state.busy || stopRef.current) return;
+    const go = () => {
+      const next = state.next;
+      if (!next) { state.busy = false; return; }
+      state.next = undefined;
+      state.last = performance.now();
+      void client.pointer(panelId, next.x, next.y).catch(() => undefined).finally(() => {
+        window.setTimeout(go, Math.max(0, HOVER_MS - (performance.now() - state.last)));
+      });
+    };
+    state.busy = true;
+    go();
+  }, [client, panelId]);
 
   useLayoutEffect(() => {
     const element = boxRef.current;
@@ -108,6 +137,15 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     if (!rect || !page) return undefined;
     return pagePoint(event.clientX - rect.left, event.clientY - rect.top, box, page);
   };
+  // While a button is held, a point outside the page lands on its nearest edge, so a drag that ends outside still releases.
+  const toPageClamped = (event: { clientX: number; clientY: number }) => {
+    const rect = boxRef.current?.getBoundingClientRect();
+    if (!rect || !page || drawn.width === 0) return undefined;
+    const x = Math.min(Math.max(event.clientX - rect.left, drawn.left), drawn.left + drawn.width);
+    const y = Math.min(Math.max(event.clientY - rect.top, drawn.top), drawn.top + drawn.height);
+    return pagePoint(x, y, box, page);
+  };
+  const pressed = useRef<{ button: 'left' | 'middle' | 'right'; x: number; y: number } | null>(null);
 
   // Double and triple clicks: pointer events carry no count, so the view counts presses itself.
   const countClick = useMemo(() => clickCounter(), []);
@@ -135,7 +173,9 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     }
     event.currentTarget.setPointerCapture(event.pointerId);
     clicks.current = countClick(event.clientX, event.clientY, event.timeStamp);
-    send({ kind: 'mouse', action: 'down', ...point, button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clicks: clicks.current, modifiers: modifiersOf(event) });
+    const button = event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left';
+    pressed.current = { button, ...point };
+    send({ kind: 'mouse', action: 'down', ...point, button, clicks: clicks.current, modifiers: modifiersOf(event) });
   };
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -152,9 +192,14 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       return;
     }
     if (event.pointerType === 'touch') return;
-    const point = toPage(event);
-    if (!point) return;
     const button = event.buttons & 1 ? 'left' : event.buttons & 2 ? 'right' : event.buttons & 4 ? 'middle' : 'none';
+    if (button === 'none') {
+      const point = toPage(event);
+      if (point) sendHover(point);
+      return;
+    }
+    const point = toPageClamped(event);
+    if (!point) return;
     send({ kind: 'mouse', action: 'move', ...point, button, clicks: 0, modifiers: modifiersOf(event) });
   };
 
@@ -173,9 +218,17 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       }
       return;
     }
-    const point = toPage(event);
+    const point = toPageClamped(event);
     if (!point) return;
+    pressed.current = null;
     send({ kind: 'mouse', action: 'up', ...point, button: event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left', clicks: clicks.current, modifiers: modifiersOf(event) });
+  };
+
+  // Capture lost before the release (the window lost focus): release the button on the page too.
+  const onLostCapture = () => {
+    const held = pressed.current;
+    pressed.current = null;
+    if (held) send({ kind: 'mouse', action: 'up', x: held.x, y: held.y, button: held.button, clicks: clicks.current, modifiers: 0 });
   };
 
   // A wheel turn scrolls the page, never Pane: the listener must not be passive to keep it.
@@ -199,15 +252,24 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     if (event.nativeEvent.isComposing) return;
     const chord = event.metaKey || event.ctrlKey;
     if (chord) {
-      // Paste reads this screen's clipboard (the paste event); other chords are Pane's.
+      // Editing chords and chords on named keys (Cmd+Left, Cmd+Backspace, Cmd+Enter) go to the page;
+      // paste reads this screen's clipboard (the paste event); every other chord stays Pane's.
+      if (PAGE_KEYS.has(event.key)) {
+        event.preventDefault();
+        send({ kind: 'key', key: event.key, modifiers: modifiersOf(event) });
+        return;
+      }
       if (!EDIT_CHORDS.has(event.key.toLowerCase())) return;
       event.preventDefault();
       send({ kind: 'key', key: event.key.toLowerCase(), modifiers: modifiersOf(event) });
       return;
     }
-    if (!PAGE_KEYS.has(event.key)) return;
-    event.preventDefault();
-    send({ kind: 'key', key: event.key, modifiers: modifiersOf(event) });
+    // One printable character goes as a key press, so the page sees keydown (Space, site shortcuts);
+    // IME and dictation text still arrive through the input event.
+    if ([...event.key].length === 1 || PAGE_KEYS.has(event.key)) {
+      event.preventDefault();
+      send({ kind: 'key', key: event.key, modifiers: modifiersOf(event) });
+    }
   };
 
   // Typed, dictated and IME text, and phones' keyboards (whose keys arrive as "Unidentified").
@@ -237,16 +299,26 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
     return () => window.clearTimeout(timer);
   }, [stream.reloadedAt]);
   const cursor = view?.agentCursor;
+  // When this screen heard of the click and of the download: the host's clock may differ from this one.
+  const [cursorSeenAt, setCursorSeenAt] = useState(0);
+  useEffect(() => { if (cursor) setCursorSeenAt(Date.now()); }, [cursor?.at, cursor?.x, cursor?.y]);
   useEffect(() => {
-    if (!cursor) return;
+    if (!cursorSeenAt) return;
     const timer = window.setTimeout(() => rerender(count => count + 1), CURSOR_SHOWN_MS);
     return () => window.clearTimeout(timer);
-  }, [cursor]);
+  }, [cursorSeenAt]);
   const agentDriving = view?.driver?.by === 'agent';
-  const cursorShown = cursor !== undefined && agentDriving && Date.now() - cursor.at < CURSOR_SHOWN_MS && page !== undefined;
-  const lastAgent = useRef<string | undefined>(undefined);
-  if (view?.driver?.by === 'agent') lastAgent.current = view.driver.agent;
+  const cursorShown = cursor !== undefined && agentDriving && Date.now() - cursorSeenAt < CURSOR_SHOWN_MS && page !== undefined;
+  const [lastAgent, setLastAgent] = useState<string | undefined>(undefined);
+  useEffect(() => { if (view?.driver?.by === 'agent') setLastAgent(view.driver.agent); }, [view?.driver]);
   const download = view?.downloads.at(-1);
+  const [downloadSeenAt, setDownloadSeenAt] = useState(0);
+  const firstDownload = useRef<number | undefined | null>(null);
+  useEffect(() => {
+    // Downloads from before this screen opened the tab stay quiet.
+    if (firstDownload.current === null) { firstDownload.current = download?.at; return; }
+    if (download && download.at !== firstDownload.current) setDownloadSeenAt(Date.now());
+  }, [download?.at]);
 
   return (
     <div
@@ -256,7 +328,8 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={() => { window.clearTimeout(touch.current?.timer); touch.current = undefined; }}
+      onPointerCancel={() => { window.clearTimeout(touch.current?.timer); touch.current = undefined; onLostCapture(); }}
+      onLostPointerCapture={onLostCapture}
       onContextMenu={event => event.preventDefault()}
       data-testid="browser-stream"
       data-stream-stop={stop ?? 'none'}
@@ -287,7 +360,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
       <div className={cn('pointer-events-none absolute inset-0 border-2 transition-colors duration-200', agentDriving ? 'border-interactive' : 'border-transparent')} data-testid="browser-agent-overlay" data-driving={agentDriving ? 'agent' : view?.driver?.by ?? 'none'}>
         {view?.driver && (
           <div className="pointer-events-auto absolute left-1/2 top-2 max-w-[calc(100%-16px)] -translate-x-1/2 whitespace-nowrap rounded-full bg-surface-primary text-xs shadow-md" data-testid="browser-driver-chip" onPointerDown={event => event.stopPropagation()}>
-            <DriverChip driver={view.driver} agentName={lastAgent.current} onTakeOver={() => void client.driver(panelId, 'person')} onHandBack={() => void client.driver(panelId, 'agent')} />
+            <DriverChip driver={view.driver} agentName={lastAgent} onTakeOver={() => void client.driver(panelId, 'person')} onHandBack={() => void client.driver(panelId, 'agent')} />
           </div>
         )}
         {cursor && page && (
@@ -311,7 +384,7 @@ export function BrowserStreamView({ client, panelId, stream, hostName, onField }
           <p className="rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">The page reloaded on {host}.</p>
         </div>
       )}
-      {download && Date.now() - download.at < 60_000 && (
+      {download && downloadSeenAt > 0 && Date.now() - downloadSeenAt < 60_000 && (
         <div role="status" className="absolute bottom-3 right-3 rounded-md bg-surface-primary px-3 py-1.5 text-xs text-text-secondary shadow-md">
           Downloaded {download.name} on {host}
         </div>

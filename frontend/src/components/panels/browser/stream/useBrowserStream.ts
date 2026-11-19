@@ -87,6 +87,8 @@ export function useBrowserStream(client: BrowserStreamClient, panelId: string, o
           const reloaded = page !== undefined && view.page !== undefined && view.page !== page;
           if (view.page !== undefined) page = view.page;
           setStream(current => (reloaded ? { ...current, view, reloadedAt: Date.now() } : { ...current, view }));
+          // A closed tab answers at once: ask again in a while, not in a tight loop.
+          if (view.stopped === 'gone') await sleep(2_000);
         } catch (cause) {
           if (cancelled) return;
           if (older(cause instanceof Error ? cause : undefined)) { setStream(current => ({ ...current, stop: 'older' })); return; }

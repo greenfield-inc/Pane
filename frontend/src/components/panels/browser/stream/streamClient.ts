@@ -12,7 +12,22 @@ export interface BrowserStreamClient {
   frame(panelId: string, after: number): Promise<BrowserFrameAnswer>;
   view(panelId: string, after: number): Promise<BrowserTabView>;
   input(panelId: string, batch: BrowserInput[]): Promise<BrowserInputResult>;
+  /** The person's pointer passing over the page (hover): a read, so the host keeps no answer for it. */
+  pointer(panelId: string, x: number, y: number): Promise<void>;
   driver(panelId: string, who: 'person' | 'agent'): Promise<void>;
+}
+
+/** How long each call may take before the screen counts it as failed; the host answers sooner. */
+const VIEW_MS = 15_000;
+const INPUT_MS = 20_000;
+const SHORT_MS = 10_000;
+
+/** Rejects when `work` takes longer than `ms`; a late answer is dropped. */
+function within<Value>(work: Promise<Value>, ms: number): Promise<Value> {
+  work.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('The host did not answer in time.')), ms); });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
 /** A host channel call: rejects with the host's error, so an older host's unknown channel shows. */
@@ -21,9 +36,10 @@ type Invoke = (channel: string, ...args: Array<string | number | BrowserInput[]>
 export function streamClient(invoke: Invoke): BrowserStreamClient {
   return {
     frame: async (panelId, after) => decodeBoundary(await invoke('browser:frame', panelId, VIEWER_ID, after), browserFrameAnswerSchema),
-    view: async (panelId, after) => decodeBoundary(await invoke('browser:view', panelId, after), browserTabViewSchema),
-    input: async (panelId, batch) => decodeBoundary(await invoke('browser:input', panelId, VIEWER_ID, batch), browserInputResultSchema),
-    driver: async (panelId, who) => { await invoke('browser:driver', panelId, who, VIEWER_ID); },
+    view: async (panelId, after) => decodeBoundary(await within(invoke('browser:view', panelId, after), VIEW_MS), browserTabViewSchema),
+    input: async (panelId, batch) => decodeBoundary(await within(invoke('browser:input', panelId, VIEWER_ID, batch), INPUT_MS), browserInputResultSchema),
+    pointer: async (panelId, x, y) => { await within(invoke('browser:pointer', panelId, VIEWER_ID, x, y), SHORT_MS); },
+    driver: async (panelId, who) => { await within(invoke('browser:driver', panelId, who, VIEWER_ID), SHORT_MS); },
   };
 }
 
