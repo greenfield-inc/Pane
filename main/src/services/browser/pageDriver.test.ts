@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { agentInputInFlight, ALLOWED_CDP_METHODS, PageDriver, type BrowserPageContents } from './pageDriver';
 
 /** A page whose debugger records every method sent to it and opens a confirm() on a click. */
@@ -122,16 +122,39 @@ describe('page driver', () => {
     expect(agentInputInFlight(1)).toBe(false);
   });
 
-  it('keeps the page focused while the agent works, and gives focus back once it stops', async () => {
-    const { page, log } = recordingPage();
-    const driver = new PageDriver(page);
-    await driver.snapshot();
-    await driver.type('e1', 'ada', false, false);
-    await new Promise(resolve => setTimeout(resolve, 1_000));
-    await driver.click({ ref: 'e2' }, 'left', false);
-    // A typeahead menu stays open between typing and clicking a suggestion: no blur yet.
-    expect(log).not.toContain('emulation focus false');
-    await new Promise(resolve => setTimeout(resolve, 2_300));
-    expect(log.filter(line => line.startsWith('emulation focus')).at(-1)).toBe('emulation focus false');
+  it('keeps the page focused across an agent\'s turns, and gives focus back after a minute without calls', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      const { page, log } = recordingPage();
+      const driver = new PageDriver(page);
+      await driver.snapshot();
+      await driver.type('e1', 'ada', false, false);
+      // An agent's turn between typing and clicking a suggestion: the typeahead menu stays open.
+      await vi.advanceTimersByTimeAsync(30_000);
+      await driver.click({ ref: 'e2' }, 'left', false);
+      expect(log).not.toContain('emulation focus false');
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(log.filter(line => line.startsWith('emulation focus')).at(-1)).toBe('emulation focus false');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves a page that closed alone when its focus time runs out', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
+    try {
+      const { page, log } = recordingPage();
+      const driver = new PageDriver(page);
+      await driver.snapshot();
+      await driver.type('e1', 'ada', false, false);
+      page.emit('destroyed');
+      // From then on, Electron throws on any call into the page's debugger.
+      Object.assign(page, { isDestroyed: () => true });
+      Object.assign(page.debugger, { isAttached: () => { throw new Error('Object has been destroyed'); } });
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(log).not.toContain('emulation focus false');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
