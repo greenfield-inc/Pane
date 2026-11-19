@@ -13,6 +13,13 @@ concurrency:
   group: code-quality-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+# Installs here pass --os=current --cpu=current: these jobs test on the
+# runner's own platform, so they skip the other platforms' binaries that
+# pnpm-workspace.yaml's supportedArchitectures adds for package builds (about
+# 1.2 GB of the 3.2 GB store on Linux). Jobs that test only the desktop app
+# also leave out the mobile, native and glasses workspaces (about 500 of the
+# 2,165 locked packages); Type Check and Lint installs every workspace.
+
 jobs:
   changes:
     name: Detect changed areas
@@ -89,7 +96,7 @@ jobs:
     # The frontend tests load no native module and no Electron, so the
     # Electron-targeted postinstall rebuild is skipped.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
@@ -133,7 +140,7 @@ jobs:
     # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
     # builds the only native module these tests load.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     # The unit tests load the real electron package (main/src/utils/shellPath.ts).
     - name: Fetch Electron
@@ -164,7 +171,7 @@ jobs:
     # bun's install script puts its binary in place (0.1s; `pnpm rebuild bun`
     # took 6s). It is the one install script this job needs.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts && node node_modules/bun/install.js
+      run: pnpm install --ignore-scripts --os=current --cpu=current && node node_modules/bun/install.js
 
     # Oxlint runs alone first: beside the type check it shared the 4 CPUs and
     # took 21-23s.
@@ -259,7 +266,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Install Playwright browsers
       uses: ./.github/actions/playwright-browsers
@@ -288,7 +295,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Install Playwright browsers
       uses: ./.github/actions/playwright-browsers
@@ -310,7 +317,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Restore Playwright browsers
       uses: ./.github/actions/playwright-browsers
@@ -454,7 +461,7 @@ jobs:
         "$python" -c "import os, sys; print(os.path.dirname(sys.executable))" >> "$GITHUB_PATH"
 
     - name: Install wrapper dependencies
-      run: pnpm install --filter runpane --ignore-scripts
+      run: pnpm install --filter runpane --ignore-scripts --os=current --cpu=current
 
     - name: Check wrapper package versions
       if: matrix.lane == 'package'
@@ -533,7 +540,7 @@ jobs:
     # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
     # builds the only native module these tests load.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     # The unit tests load the real electron package (main/src/utils/shellPath.ts);
     # without this, each test worker downloads Electron and they collide on Windows.
@@ -660,7 +667,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Fetch Electron
       uses: ./.github/actions/fetch-electron
@@ -689,7 +696,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --frozen-lockfile --filter 'frontend...' --ignore-scripts
+      run: pnpm install --frozen-lockfile --filter 'frontend...' --ignore-scripts --os=current --cpu=current
 
     - name: Build remote PWA assets
       run: pnpm run build:frontend
