@@ -175,7 +175,11 @@ export class ChatTabViewer {
       }
       this.pending = [];
       if (gap) this.resyncNeeded = true;
+      // Closed before this read landed: it keeps what a close keeps, and counts toward the five.
+      const closed = this.listeners.size === 0;
+      if (closed && transcript) transcript = newest(transcript);
       this.publish({ view: { ...view, transcript: undefined }, transcript, hasNewer: false, error: gap ? this.state.error : this.state.pendingDelivery ? this.state.error : undefined });
+      if (closed && transcript) keepClosed(this);
     }).catch(error => {
       if (transport !== this.transport) return;
       this.resyncNeeded = false;

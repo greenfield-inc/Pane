@@ -245,6 +245,14 @@ describe('chat tab viewer reopen', () => {
     expect(viewers.map(viewer => ids(viewer).length)).toEqual([0, 3, 3, 3, 3, 3]);
   });
 
+  it('counts a chat closed before its first read lands toward the five', async () => {
+    const fake = host(3);
+    const viewers = ['a', 'b', 'c', 'd', 'e', 'f'].map(panel => new ChatTabViewer(fake.client, panel));
+    viewers.map(viewer => viewer.subscribe(() => undefined)).forEach(close => close());
+    await settle();
+    expect(viewers.map(viewer => ids(viewer).length)).toEqual([0, 3, 3, 3, 3, 3]);
+  });
+
   it('keeps the newest 200 messages of a long chat, and nothing of a chat closed while scrolled back', async () => {
     const fake = host(1000);
     const following = new ChatTabViewer(fake.client, 'p');
