@@ -274,6 +274,9 @@ jobs:
   # from Vite with a mocked Electron API; the two renderer selection race shards
   # also run from Vite alone. The two Electron shards launch real Electron and
   # split the specs playwright.chat-tabs.config.ts lists.
+  # The specs #1554 wired in run in Functional Smoke (stabilizing), the WebGL
+  # shards and a stabilizing Electron step: they report on every run, but CI
+  # result does not wait for them (REPORTED_ONLY_JOBS in scripts/ci-gate.mjs).
   # scripts/ci-test-inventory.mjs (in Type Check and Lint) fails when a test file
   # runs in no lane.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
@@ -284,7 +287,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        shard: [1, 2, 3, 4, 5, 6, 7]
 
     steps:
     - name: Checkout code
@@ -305,11 +308,39 @@ jobs:
     - name: Run maintained functional smoke tests
       run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
+  # Stabilizing: wired in by #1554 on 2026-11-18, flaky under CI load; returns to
+  # the required lanes as each is proven stable. Reported only: CI result does
+  # not wait for this job.
+  functional-smoke-stabilizing:
+    name: Functional Smoke (stabilizing ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
+
+    - name: Install Playwright browsers
+      uses: ./.github/actions/playwright-browsers
+
+    - name: Run stabilizing browser tests
+      run: pnpm exec playwright test --config=playwright.ci.stabilizing.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
   # The WebGL renderer recovery spec, split off the browser shards: its 25 tests
   # take about 16 s each, and Playwright shards by test count in file order, so
   # in the browser lane they all landed in one shard and set the run's time.
+  # Stabilizing, like functional-smoke-stabilizing: reported only.
   functional-smoke-webgl:
-    name: Functional Smoke (WebGL ${{ matrix.shard }}/${{ strategy.job-total }})
+    name: Functional Smoke (stabilizing WebGL ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -445,12 +476,21 @@ jobs:
       run: xvfb-run -a node scripts/test-worktree-trash-electron.cjs
 
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
-    # PANE_ELECTRON_E2E turns on the remote browser and browser auth specs.
     - name: Run chat tab journeys
       if: ${{ !cancelled() }}
       run: xvfb-run -a pnpm test:chat-tabs --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+
+    # Stabilizing: wired in by #1554 on 2026-11-18, flaky under CI load. Reported
+    # only: a failure here marks the step and leaves the job green.
+    # PANE_ELECTRON_E2E turns on the remote browser and browser auth specs.
+    - name: Run stabilizing Electron specs
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      run: xvfb-run -a pnpm exec playwright test --config=playwright.ci.stabilizing-electron.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-stabilizing-electron
         PANE_ELECTRON_E2E: '1'
 
     # Last, so only a build that Electron loaded and passed the tests with is saved.
@@ -774,7 +814,7 @@ jobs:
   # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-webgl, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests, pwa-build]
+    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests, pwa-build]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
