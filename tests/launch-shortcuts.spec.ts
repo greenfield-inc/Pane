@@ -48,7 +48,7 @@ const allPanels = [...terminalPanels(worktreeSession.id, 'wt'), ...terminalPanel
 
 /** A catalog key such as `mod+alt+3` as a Playwright press: `mod` is Command on macOS and Control elsewhere. */
 function pressFor(binding: string): string {
-  return binding.split('+').map((part) => part === 'mod' ? 'ControlOrMeta' : part === 'alt' ? 'Alt' : part.toUpperCase()).join('+');
+  return binding.split('+').map((part) => part === 'mod' ? 'ControlOrMeta' : part === 'alt' ? 'Alt' : part === 'shift' ? 'Shift' : part.toUpperCase()).join('+');
 }
 
 async function panelCreates(page: Page): Promise<JsonObject[]> {

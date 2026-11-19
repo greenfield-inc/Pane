@@ -14,6 +14,11 @@ const panel = {
   state: { isActive: true, hasBeenViewed: true, customState: { isInitialized: false } },
   metadata: { createdAt: now, lastActiveAt: now, position: 0, permanent: true },
 };
+// The host's chat agent catalog (chat-tab:agents): Claude is installed and its terminal tabs can switch.
+const claudeCatalog = [{
+  id: 'claude', label: 'Claude', icon: 'claude', source: 'config', installed: true, fullAccess: 'agent', switchFromTerminal: { ok: true },
+}];
+
 test('add-tool popover supports keyboard navigation and dismissal', async ({ page }, testInfo) => {
   await installElectronApiMock(page, {
     platform: 'darwin', initialProjects: [project], initialSessions: [session], initialPanels: [panel], activeProjectId: project.id,
@@ -200,11 +205,14 @@ for (const scheme of ['light', 'dark'] as const) {
       initialConfig: { chatTabsEnabled: true, appearanceMode: 'system' },
       initialPanels: [{ ...panel, title: 'Claude', metadata: { ...panel.metadata, permanent: false }, state: { ...panel.state, customState: { agentType: 'claude', agentSessionId: 'conv-1' } } }],
     });
-    await page.addInitScript(() => {
+    await page.addInitScript((catalog) => {
       const switched: string[] = [];
-      Object.assign(window.electronAPI, { chatTab: { switch: async (panelId: string) => { switched.push(panelId); return { panelId: 'chat-1', terminalKept: false }; } } });
+      Object.assign(window.electronAPI, { chatTab: {
+        agents: async () => catalog,
+        switch: async (panelId: string) => { switched.push(panelId); return { panelId: 'chat-1', terminalKept: false }; },
+      } });
       Object.assign(window, { __switchedToChat: switched });
-    });
+    }, claudeCatalog);
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
     await page.getByRole('button', { name: 'Tool menu', exact: true }).click();
@@ -230,6 +238,9 @@ test('a terminal agent tab shows Switch to chat with chat tabs off, disabled, an
     initialConfig: { chatTabsEnabled: false, appearanceMode: 'system' },
     initialPanels: [{ ...panel, title: 'Claude', metadata: { ...panel.metadata, permanent: false }, state: { ...panel.state, customState: { agentType: 'claude', agentSessionId: 'conv-1' } } }],
   });
+  await page.addInitScript((catalog) => {
+    Object.assign(window.electronAPI, { chatTab: { agents: async () => catalog } });
+  }, claudeCatalog);
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: /^Expand project Popover$/ }).click();
   await page.getByRole('button', { name: 'Tool menu', exact: true }).click();

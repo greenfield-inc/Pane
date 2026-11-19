@@ -761,7 +761,8 @@ test('Session creation agent picker supports native radio keyboard semantics', a
   await page.getByTestId('new-orchestration-session').click();
   const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
   const radios = dialog.getByRole('radio');
-  await expect(radios).toHaveCount(3);
+  // Claude, Codex, Cursor, OpenCode and Pi.
+  await expect(radios).toHaveCount(5);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
 
   await radios.first().focus();
@@ -788,7 +789,8 @@ test('Session creation hides unsupported Cursor on Windows', async ({ page }) =>
 
   await page.getByTestId('new-orchestration-session').click();
   const dialog = page.locator('form').filter({ has: page.getByRole('heading', { name: 'Create Session', exact: true }) });
-  await expect(dialog.getByRole('radio')).toHaveCount(2);
+  // Claude, Codex, OpenCode and Pi.
+  await expect(dialog.getByRole('radio')).toHaveCount(4);
   await expect(dialog.getByRole('radio', { name: 'Cursor', exact: true })).toHaveCount(0);
   await expect(dialog.getByRole('radio', { name: 'Claude', exact: true })).toBeChecked();
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
@@ -1112,6 +1114,10 @@ test('Sessions group live managed Panes while preserving the focused Pane rows',
 
 test('Sessions stay collapsed until you open one, and this computer remembers it per host', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
+  // The window title bar renders on macOS without the overlay flag.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' });
+  });
   const association = (paneId: string) => [{ paneId, panelIds: [], attachedAt: '2026-09-16T12:00:00.000Z' }];
   await installSessionsFixture(page, [
     sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z', association('pane-alpha'), false, true),
@@ -1594,6 +1600,9 @@ test('the Session actions menu works by keyboard, and its archive Undo survives 
   await page.getByTestId('orchestration-session-alpha').click();
   const alphaChat = page.getByRole('heading', { level: 1, name: 'Alpha', exact: true });
   await expect(alphaChat).toBeAttached({ timeout: 10_000 });
+  // Opening the Session ends with its terminal taking focus once the activation refresh lands;
+  // wait for that so it cannot pull focus out of the menu below.
+  await expect(page.locator('.xterm-helper-textarea:focus')).toHaveCount(1);
 
   const actions = page.getByRole('button', { name: 'Actions for Alpha', exact: true });
   await actions.focus();
@@ -2282,6 +2291,10 @@ test('Sessions can be renamed from their right-click menu', async ({ page }) => 
 });
 
 test('the Session "+" menu opens terminals and browsers as tabs, apart from the terminal dock', async ({ page }) => {
+  // The window title bar renders on macOS without the overlay flag.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' });
+  });
   await installSessionsFixture(page, [sessionFixture('addtool', 'Add tool demo', '', '', new Date(0).toISOString())]);
   await page.goto('/');
   await page.getByTestId('orchestration-session-addtool').click();
@@ -3568,7 +3581,8 @@ test('Move to machine… lists only machines that can take the Session, and Hand
 test('Move to machine… viewing a Tailscale host offers this computer and leaves out the host', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     initialConfig: { remoteDaemon: { host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
-      client: { mode: 'remote', activeProfileId: 'mini', profiles: [{ id: 'mini', label: 'tylers-mac-mini', baseUrl: 'https://tylers-mac-mini.tail1234.ts.net:8443', token: '', transport: 'http+sse', tailnetMachine: 'tylers-mac-mini', tailnetDomain: 'tail1234.ts.net' }] } } },
+      client: { mode: 'remote', activeProfileId: 'mini', profiles: [{ id: 'mini', label: 'tylers-mac-mini', baseUrl: 'https://tylers-mac-mini.tail1234.ts.net:8443', token: '', transport: 'http+sse', tailnetMachine: 'tylers-mac-mini', tailnetDomain: 'tail1234.ts.net' }],
+        computers: [{ id: 'mini', label: 'tylers-mac-mini', routes: [{ id: 'tailscale:https://tylers-mac-mini.tail1234.ts.net:8443', kind: 'tailscale', source: 'found', baseUrl: 'https://tylers-mac-mini.tail1234.ts.net:8443', token: '', tailnetMachine: 'tylers-mac-mini', tailnetDomain: 'tail1234.ts.net' }] }] } } },
     tailnetMachines: { ok: true, tailnet: 'example.github', domain: 'tail1234.ts.net', machines: [tailnetMachine('tylers-mac-mini')] },
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
@@ -3599,14 +3613,15 @@ test('Move to machine… with nothing reachable says why, names the fix, and sen
 test('Move to machine… is unavailable, with the reason, on a host paired with a code', async ({ page }) => {
   await installSessionsFixture(page, [sessionFixture('alpha', 'Alpha', 'Goal.', 'Context.', '2026-09-16T12:00:00.000Z')], [], {
     initialConfig: { remoteDaemon: { host: { config: { enabled: false, listenHost: '127.0.0.1', listenPort: 42137, pairingRequired: true, allowInsecureHttpOnLoopback: true }, clients: [] },
-      client: { mode: 'remote', activeProfileId: 'studio', profiles: [{ id: 'studio', label: 'Studio', baseUrl: 'https://studio.example:8443', token: 'paired', transport: 'http+sse' }] } } },
+      client: { mode: 'remote', activeProfileId: 'studio', profiles: [{ id: 'studio', label: 'Studio', baseUrl: 'https://studio.example:8443', token: 'paired', transport: 'http+sse' }],
+        computers: [{ id: 'studio', label: 'Studio', routes: [{ id: 'public:https://studio.example:8443', kind: 'public', source: 'manual', baseUrl: 'https://studio.example:8443', token: 'paired' }] }] } } },
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByTestId('orchestration-session-alpha').click({ button: 'right' });
   const item = page.getByRole('menuitem', { name: 'Move to machine…' });
   await expect(item).toHaveAttribute('aria-disabled', 'true');
-  await expect(item).toHaveAttribute('title', /pairing code, not over Tailscale/);
+  await expect(item).toHaveAttribute('title', /Studio has no Tailscale route/);
   await item.click({ force: true });
   await expect(page.getByRole('dialog', { name: 'Move Session to another machine' })).toHaveCount(0);
 });
@@ -3850,7 +3865,7 @@ test('Switch to chat is always in the Session menu: checking, then why nothing s
     const items = [
       { panelId: 'orch', paneName: 'Session', title: 'Claude', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
       { panelId: 'a', paneName: 'auth-fix', title: 'Claude', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
-      { panelId: 'b', paneName: 'docs', title: 'Codex', skip: { kind: 'plain-codex', reason: 'Pane isn\'t sure which conversation this tab is on.' } },
+      { panelId: 'b', paneName: 'docs', title: 'Codex', skip: { kind: 'no-conversation', reason: 'Pane isn\'t sure which conversation this tab is on.' } },
       { panelId: 'c', paneName: 'docs', title: 'Terminal', skip: { kind: 'not-agent', reason: 'Not an agent.' } },
     ];
     let release: (() => void) | null = null;
@@ -3884,7 +3899,7 @@ test('Switch to chat is always in the Session menu: checking, then why nothing s
 
   // SAFETY: the init script above defines it.
   await page.evaluate(() => (window as typeof window & { __releasePreview: () => void }).__releasePreview());
-  await expect(item).toHaveText('Switch to chat…Nothing to switch: 2 busy, 1 plain Codex');
+  await expect(item).toHaveText('Switch to chat…Nothing to switch: 2 busy, 1 no saved conversation');
   await expect(item).toHaveAttribute('aria-disabled', 'true');
   await page.screenshot({ path: testInfo.outputPath('switch-menu-nothing.png') });
   // Playwright waits for an aria-disabled item to enable; the click must still do nothing.

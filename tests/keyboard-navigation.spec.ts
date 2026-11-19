@@ -45,7 +45,11 @@ async function openFixture(page: Page, { approvals = false, initialConfig }: { a
     initialProjects: [project], initialSessions: sessions, initialPanels: panels, initialLayout: layout,
     activeProjectId: project.id,
   };
-  if (approvals) options.notifySnapshot = notifyFixture();
+  // The back hint lives in the title bar, which Linux and Windows draw only with the window controls overlay on.
+  if (approvals) {
+    options.notifySnapshot = notifyFixture();
+    options.windowControlsOverlayEnabled = true;
+  }
   if (initialConfig) options.initialConfig = initialConfig;
   await installElectronApiMock(page, options);
   await page.addInitScript(() => localStorage.setItem('pane-detail-panel-visible', 'true'));
@@ -142,6 +146,9 @@ test('Space opens a Pane and keeps the cursor; Enter opens it and moves into its
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', { name: 'auth-refactor', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'main' });
+  // The reopened Pane's terminals focus themselves when they finish opening; let them settle first.
+  await expect(page.locator('[data-panel-group-id] .xterm-helper-textarea')).toHaveCount(2);
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
 
   await page.keyboard.press('ControlOrMeta+0');
   await expect.poll(() => focusPlace(page)).toMatchObject({ region: 'sidebar' });
@@ -336,8 +343,7 @@ test('Esc leaves Approvals for where you were, but not while an answer is being 
   await expect(page.getByTestId('approvals-queue')).toBeVisible();
 
   // Typing an answer: Esc belongs to the field and Approvals stays.
-  await page.getByTestId('approvals-queue').getByRole('button', { name: 'Details' }).click();
-  const field = page.getByTestId('notify-inbox').getByRole('textbox').first();
+  const field = page.getByTestId('approval-column').getByTestId('approval-reply-box');
   await field.focus();
   await page.keyboard.type('Postgres');
   await page.keyboard.press('Escape');

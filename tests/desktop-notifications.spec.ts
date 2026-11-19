@@ -82,15 +82,16 @@ test('different panels keep separate notifications while newer status replaces t
   await expect.poll(() => page.evaluate(() => Object.values(window.__visibleNotifications).sort())).toEqual([
     'Bottom Terminal needs your input', 'Input Terminal needs your input',
   ]);
+  // A new version shows in the sidebar's update pill, never as a desktop notification.
   await page.evaluate(() => {
     const update = { current: '1.0.0', latest: '2.0.0', version: '2.0.0', hasUpdate: true };
     window.__emitVersionNotification(update);
     window.__emitVersionNotification(update);
   });
-  await expect.poll(() => page.evaluate(() => Object.values(window.__visibleNotifications).sort())).toEqual([
-    'Bottom Terminal needs your input', 'Input Terminal needs your input', '🚀 Update Available - Pane v2.0.0',
+  expect(await page.evaluate(() => Object.values(window.__visibleNotifications).sort())).toEqual([
+    'Bottom Terminal needs your input', 'Input Terminal needs your input',
   ]);
-  expect(await page.evaluate(() => window.__desktopNotifications.length)).toBe(5);
+  expect(await page.evaluate(() => window.__desktopNotifications.length)).toBe(3);
   await testInfo.attach('notification-records', {
     body: JSON.stringify(await page.evaluate(() => window.__desktopNotifications), null, 2),
     contentType: 'application/json',

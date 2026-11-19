@@ -17,10 +17,10 @@ const box = (page: Page, selector: string) => page.locator(selector).last().eval
   const rect = element.getBoundingClientRect();
   return { top: rect.top, bottom: rect.bottom };
 });
-/** The last thing in the conversation, scrolled to the bottom. */
+/** The last thing in the conversation (its latest turn), scrolled to the bottom. */
 async function lastRow(page: Page) {
   await page.locator('.chat-viewport').evaluate(viewport => { viewport.scrollTop = viewport.scrollHeight; });
-  return box(page, '.chat-column > :last-child');
+  return box(page, '.chat-column .chat-turn');
 }
 
 test('the Working row sits a small gap above the status line, and your message a message gap above it', async ({ page }) => {

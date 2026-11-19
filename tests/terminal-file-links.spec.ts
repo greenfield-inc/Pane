@@ -40,7 +40,7 @@ test('terminal links open worktree files in the editor and explain outside paths
       return invoke(channel, ...args);
     };
   });
-  await page.getByRole('button', { name: 'Expand repository File link fixture', exact: true }).click();
+  await page.getByRole('button', { name: 'Expand project File link fixture', exact: true }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   const terminal = page.getByRole('tabpanel').locator('.xterm-screen').first();
   await expect(terminal).toBeVisible();

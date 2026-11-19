@@ -69,6 +69,9 @@ async function computedVar(page: Page, cssProp: string, value: string): Promise<
 }
 
 test('a split pane keeps its tabs in the group strips and collapses the top row', async ({ page }, testInfo) => {
+  // The title strip that takes the top row's controls renders on macOS (or with
+  // the Window Controls Overlay), which the renderer reads from navigator.platform.
+  await page.addInitScript(() => Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' }));
   await installElectronApiMock(page, {
     platform: 'darwin',
     initialProjects: [project],

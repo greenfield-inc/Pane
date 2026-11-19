@@ -165,7 +165,7 @@ async function capture(page: Page, testInfo: TestInfo, filename: string): Promis
   await testInfo.attach(filename, { path, contentType: 'image/png' });
 }
 
-test('Pinned panes use the short repository and pane name', async ({ page }, testInfo) => {
+test('Pinned panes show the pane name with the repository name beside it', async ({ page }, testInfo) => {
   const pinnedProject = {
     ...project,
     name: 'bloomapi/bloom-mono',
@@ -184,8 +184,12 @@ test('Pinned panes use the short repository and pane name', async ({ page }, tes
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-  await expect(page.getByRole('button', { name: 'bloom-.../do-tm-560', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'bloomapi/bloom-mono/do-tm-560', exact: true })).toHaveCount(0);
+  // The row is named for the Pane; the repository sits beside it without its owner.
+  const pinnedPane = page.getByRole('button', { name: 'do-tm-560', exact: true });
+  await expect(pinnedPane).toBeVisible();
+  const pinnedRow = pinnedPane.locator('..');
+  await expect(pinnedRow.getByText('bloom-mono', { exact: true })).toBeVisible();
+  await expect(pinnedRow).not.toContainText('bloomapi');
   await capture(page, testInfo, '00-pinned-pane-short-label.png');
 });
 

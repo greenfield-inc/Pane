@@ -45,6 +45,8 @@ test('Enter in the sidebar opens a Pane whose main tab is a chat and lands in it
   await openFixture(page);
   // Start on the terminal Pane, so the chat Pane is not yet mounted when Enter opens it.
   await page.getByRole('button', { name: 'terminal-pane', exact: true }).click();
+  // Its terminal takes focus as its activation finishes: wait for that, so it cannot take focus back from the sidebar.
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
   await page.keyboard.press('ControlOrMeta+0');
   await expect(page.getByRole('button', { name: 'terminal-pane', exact: true })).toBeFocused();
   // terminal-pane sorts above chat-pane.
@@ -77,13 +79,13 @@ test('Enter with focus on no control moves into the chat; Enter on a tab shows i
   // Enter on a tab that shows a chat goes on into its message box; Space only shows the tab.
   const chatTab = page.getByRole('tab', { name: /Claude/ }).first();
   const shellTab = page.getByRole('tab', { name: /Shell/ }).first();
+  // Enter on a terminal tab shows the terminal, which takes focus as it activates.
+  const shell = page.locator('[data-panel-group-id] .xterm-helper-textarea:visible');
   await shellTab.focus();
   await page.keyboard.press('Enter');
   await expect(messageBox(page)).toBeHidden();
-  await expect(shellTab).toBeFocused();
+  await expect(shell).toBeFocused();
   // Enter in a terminal is the terminal's.
-  const shell = page.locator('[data-panel-group-id] .xterm-helper-textarea:visible');
-  await shell.focus();
   await page.keyboard.press('Enter');
   await expect(shell).toBeFocused();
   await chatTab.focus();
