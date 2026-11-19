@@ -90,18 +90,21 @@ function topConsumers(snapshot: MachineHealthSnapshot): HealthCardRow[] {
 
 /** The card for a disk below the warning level: free space, and the items Clean up deletes, every one listed. */
 export function diskCard(snapshot: MachineHealthSnapshot, items: readonly ReclaimItem[]): CardQuestion {
-  const volume = [...snapshot.disk.volumes].sort((a, b) => a.freeBytes - b.freeBytes)[0];
+  const volume = [...snapshot.disk.volumes].sort((a, b) => RANK[b.level] - RANK[a.level] || a.freeBytes - b.freeBytes || a.path.localeCompare(b.path))[0];
   const free = volume?.freeBytes ?? 0;
+  const level = volume?.level ?? snapshot.disk.level;
+  const volumes = volume ? [volume, ...snapshot.disk.volumes.filter(item => item !== volume)] : [];
+  const diskContext = volumes.map(item => `${item.path}: ${formatBytes(item.freeBytes)} free of ${formatBytes(item.totalBytes)} (${item.level})`).join('. ') || 'Disk space unavailable';
   const frees = items.reduce((sum, item) => sum + item.sizeBytes, 0);
   const rows = items.map(item => ({ label: item.path.split(/[\\/]/u).pop() ?? item.path, detail: item.reason, bytes: item.sizeBytes, note: `Tier ${item.tier}` }));
   return {
-    title: snapshot.disk.level === 'critical' ? 'Disk is almost full' : 'Disk almost full',
-    context: frees > 0 ? `${formatBytes(free)} free. Pane can free about ${formatBytes(frees)} of its own leftovers and finished work.` : `${formatBytes(free)} free.`,
+    title: level === 'critical' ? 'Disk is almost full' : 'Disk almost full',
+    context: frees > 0 ? `${diskContext}. Pane can free about ${formatBytes(frees)} of its own leftovers and finished work across watched volumes.` : `${diskContext}.`,
     choices: frees > 0 ? [CLEAN_UP, NOT_NOW] : [NOT_NOW],
     card: {
-      kind: 'disk', level: snapshot.disk.level, hostname: snapshot.hostname,
+      kind: 'disk', level, hostname: snapshot.hostname,
       freeBytes: free, totalBytes: volume?.totalBytes, rows, freesBytes: frees,
-      agentPrompt: `${snapshot.hostname} has ${formatBytes(free)} of disk free. Run \`runpane machine health --json\` to see what Pane can free, by tier. ${agentRule}${listed(rows)}`,
+      agentPrompt: `${snapshot.hostname} disk volumes: ${diskContext}. Run \`runpane machine health --json\` to see what Pane can free, by tier. ${agentRule}${listed(rows)}`,
     },
   };
 }

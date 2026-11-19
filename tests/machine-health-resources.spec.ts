@@ -24,6 +24,23 @@ test.describe('Resources page', () => {
     await expect(page.getByText('git worktree remove "/Users/me/bloom-mono/worktrees/agent-made"')).toBeVisible();
   });
 
+  test('mixed volumes keep a healthy primary badge and identify the temp warning', async ({ page }) => {
+    await open(page, 'machine=devbox&mixed-volumes=1');
+    const disk = page.getByRole('region', { name: 'Disk', exact: true });
+    await expect(disk.getByText('· /srv/pane-data')).toBeVisible();
+    await expect(disk.getByText('800 GB free', { exact: true })).toHaveClass(/bg-surface-secondary/);
+    await expect(disk.getByText('/tmp (temp)')).toBeVisible();
+    await expect(disk.getByText('12 GB free of 32 GB')).toHaveClass(/text-status-warning/);
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => { document.documentElement.className = theme === 'dark' ? 'dark dusk dusk-oled' : 'light folio'; }, theme);
+      for (const width of [1300, 420]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await expect(disk.getByText('/tmp (temp)')).toBeVisible();
+        if (shots) await disk.screenshot({ path: `${shots}/mixed-volumes-${theme}-${width}.png` });
+      }
+    }
+  });
+
   test('Per Pane shows CPU, and a Pane opens into its processes grouped by tab', async ({ page }) => {
     await open(page, 'machine=local');
     const table = page.getByRole('region', { name: 'Per Pane' });
