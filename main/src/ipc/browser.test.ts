@@ -140,6 +140,7 @@ function setup(initial: ToolPanel[] = [], options: { cursors?: string[]; held?: 
     showCursor: (panelId) => { options.cursors?.push(panelId); },
     name: () => 'studio-mac',
     uploadsFor: async () => { const folder = path.join(worktree, '.uploads'); mkdirSync(folder, { recursive: true }); return folder; },
+    sizeHidden: () => undefined,
     // As the window does: a tab whose hold ends loses its page; a newly held tab gets one.
     setHeld: (tabIds, painting) => {
       for (const id of options.held ?? []) if (!tabIds.includes(id)) pages.delete(id);

@@ -35,6 +35,8 @@ export interface BrowserHost {
   hasWindow(): boolean;
   /** Where a Pane's screenshots go: its scratch folder, deleted with the Pane. */
   shotsDirectory(paneId: string): Promise<string>;
+  /** A hidden window holding the tab's page (a host with no window) takes `size`, or its default size. */
+  sizeHidden(panelId: string, size: BrowserPageSize | undefined): void;
   /** Shows the agent's cursor where it clicked, in the tab. */
   showCursor(panelId: string, x: number, y: number): void;
   /** This computer's name, as other screens show it ("on studio-mac"). */
@@ -486,6 +488,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (JSON.stringify(state.pageSize ?? null) === JSON.stringify(size ?? null)) return;
     const next: BrowserPanelState = { ...state, pageSize: size };
     await host.update(tab, next);
+    // The page's own view takes the size, so what streams is exactly the page (the window's tab
+    // reads it from the tab's state).
+    host.sizeHidden(tabId, size);
     applyWatch(tabId);
     changedView(tabId);
   }
