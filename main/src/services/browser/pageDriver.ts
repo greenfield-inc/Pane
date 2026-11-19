@@ -335,7 +335,7 @@ export class PageDriver {
       if (this.dialog) return;
       if (Date.now() >= deadline) {
         const wanted = [conditions.text && `text "${conditions.text}"`, conditions.url && `a URL containing "${conditions.url}"`, conditions.ref && `${conditions.ref} visible`].filter(Boolean).join(' and ');
-        throw new PaneError('ERR_BROWSER_WAIT_TIMEOUT', `The page did not show ${wanted} within ${Number((timeoutMs / 1000).toFixed(1))} seconds.`, 'Call browser_snapshot to see what the page shows, or wait longer with --timeout-ms.');
+        throw new PaneError('ERR_BROWSER_WAIT_TIMEOUT', `The page did not ${wanted ? `show ${wanted}` : 'finish loading'} within ${Number((timeoutMs / 1000).toFixed(1))} seconds.`, 'Call browser_snapshot to see what the page shows, or wait longer with --timeout-ms.');
       }
       await sleep(200);
     }

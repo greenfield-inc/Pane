@@ -79,9 +79,9 @@ export async function runVerb(page: PageDriver, contents: BrowserPageContents, r
       return after({ image: await page.screenshot(request.fullPage) });
     case 'click': {
       const target = request.ref !== undefined ? { ref: request.ref } : { x: request.x ?? 0, y: request.y ?? 0 };
-      const clicked = await page.click(target, request.button, request.double);
+      const { x, y, ...clicked } = await page.click(target, request.button, request.double);
       const outcome = after(clicked);
-      outcome.cursor = { x: clicked.x, y: clicked.y };
+      outcome.cursor = { x, y };
       return outcome;
     }
     case 'type':

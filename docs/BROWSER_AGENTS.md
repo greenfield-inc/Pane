@@ -97,7 +97,10 @@ Pane window. A call goes to the copy you watch:
   **Settings › Your computers**, the call runs on that computer's copy: snapshots, clicks and
   screenshots come from the page in front of you, the chip shows there, and touching the page or
   pressing **Take over** there makes the agent wait. That copy uses that computer's sign-ins. An
-  upload sends the file from the agent's worktree; the screenshot is saved on the agent's computer.
+  upload sends the file from the agent's worktree (up to 10 MB per call) and stays on that
+  computer until the tab closes; the screenshot is saved on the agent's computer. A `localhost`
+  URL loads through that computer's tunnel for the port, and fails with `ERR_BROWSER_URL_REFUSED`
+  when the port has none.
 - **On the agent's computer.** Otherwise the call uses the tab here, bringing it forward in its
   Pane and waiting up to 5 seconds for its page.
 

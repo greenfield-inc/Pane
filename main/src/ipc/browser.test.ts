@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,16 +10,19 @@ import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandReg
 import type { BrowserPageContents } from '../services/browser/pageDriver';
 import { registerBrowserHandlers, TOUCH_HOLD_MS, type BrowserHost, type BrowserServices, type LinkedComputers } from './browser';
 import { readFileSync } from 'fs';
+import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { JsonObject } from '../../../shared/validation/boundaryDecoder';
 
 /** A page that answers the page script and the debugger the way a simple form page would. */
-function fakePage(id: number, url: string): BrowserPageContents & EventEmitter & { sent: string[] } {
+function fakePage(id: number, url: string): BrowserPageContents & EventEmitter & { sent: string[]; files: string[] } {
   const events = new EventEmitter();
   const sent: string[] = [];
+  const files: string[] = [];
   let attached = false;
   const page = Object.assign(events, {
     id,
     sent,
+    files,
     isDestroyed: () => false,
     getURL: () => url,
     getTitle: () => 'Sign up',
@@ -43,8 +46,9 @@ function fakePage(id: number, url: string): BrowserPageContents & EventEmitter &
       attach: () => { attached = true; },
       isAttached: () => attached,
       detach: () => { attached = false; },
-      sendCommand: async (method: string) => {
+      sendCommand: async (method: string, params?: { files?: string[] }) => {
         sent.push(method);
+        if (method === 'DOM.setFileInputFiles') files.push(...(params?.files ?? []));
         if (method === 'DOM.getDocument') return { root: { nodeId: 1 } };
         if (method === 'DOM.querySelector') return { nodeId: 7 };
         return {};
@@ -243,14 +247,17 @@ describe('browser tools: the person takes over', () => {
 
 describe('browser tools: a tab a linked computer shows (P2)', () => {
   /** The agent's computer, whose tab only the linked desktop shows, wired to that desktop's real channel. */
-  function linkedPair() {
+  function linkedPair(duringRun?: () => Promise<void>) {
     const viewerCursors: string[] = [];
     const viewer = setup([], { cursors: viewerCursors });
     viewer.pages.set('shown-there', fakePage(9, 'http://localhost:4173/'));
     const linked: LinkedComputers = {
       self: { id: 'devbox', name: 'DEVBOX' },
       online: () => [{ id: 'mac', name: 'Mac' }],
-      invoke: (_machine, request, _timeout) => viewer.registry.invokeRemote('runpane:machine:browser', [request], { caller: { paneId: 'remote' } }),
+      invoke: async (_machine, request, _timeout) => {
+        if (duringRun && JSON.parse(JSON.stringify(request)).op === 'run') await duringRun();
+        return viewer.registry.invokeRemote('runpane:machine:browser', [request], { caller: { paneId: 'remote' } });
+      },
     };
     const agentSide = setup([browserTab('shown-there', 'pane-a', 'claude-a')], { linked, pagesHere: false });
     return { agentSide, viewer, viewerCursors };
@@ -259,10 +266,15 @@ describe('browser tools: a tab a linked computer shows (P2)', () => {
   it('runs the call on the linked computer\'s copy and brings a screenshot home', async () => {
     const { agentSide, viewer, viewerCursors } = linkedPair();
     expect(await call(agentSide, 'snapshot', {})).toMatchObject({ ok: true, tab: 'shown-there', snapshot: expect.stringContaining('[ref=e2]') });
-    expect(await call(agentSide, 'click', { ref: 'e2' })).toMatchObject({ ok: true });
+    const clicked = await call(agentSide, 'click', { ref: 'e2' });
+    expect(clicked).toMatchObject({ ok: true });
     expect(viewerCursors).toEqual(['shown-there']);
     const shot = await call(agentSide, 'screenshot', {});
     expect(shot).toMatchObject({ ok: true, mimeType: 'image/png' });
+    // Results carry only what the published output schemas allow (MCP clients reject the rest).
+    const schemas = RUNPANE_CONTRACT.jsonSchemas;
+    expect(Object.keys(JSON.parse(JSON.stringify(clicked))).filter(key => !(key in schemas.browserActionResult.properties))).toEqual([]);
+    expect(Object.keys(JSON.parse(JSON.stringify(shot))).filter(key => !(key in schemas.browserScreenshotResult.properties))).toEqual([]);
     expect(readFileSync(JSON.parse(JSON.stringify(shot)).path, 'utf8')).toBe('png');
     expect(viewer.pages.get('shown-there')?.sent).toContain('Input.dispatchMouseEvent');
   });
@@ -288,6 +300,62 @@ describe('browser tools: a tab a linked computer shows (P2)', () => {
     const started = Date.now();
     expect(await code(call(agentSide, 'click', { ref: 'e2' }))).toBe('ERR_BROWSER_STALE_REF');
     expect(Date.now() - started).toBeGreaterThanOrEqual(TOUCH_HOLD_MS - 300);
+    // The touch ended, so the tab is the agent's again: the next call runs at once.
+    expect(JSON.stringify(agentSide.tabs.find(tab => tab.id === 'shown-there')?.state.customState)).not.toContain('"by":"person"');
+    await call(agentSide, 'snapshot', {});
+    const again = Date.now();
+    expect(await call(agentSide, 'click', { ref: 'e2' })).toMatchObject({ ok: true });
+    expect(Date.now() - again).toBeLessThan(TOUCH_HOLD_MS);
   });
-});
 
+  it('keeps the person driving when they press Take over during a call on the linked computer', async () => {
+    let holdRun = false;
+    let running = () => {};
+    let release = () => {};
+    const { agentSide } = linkedPair(async () => {
+      if (!holdRun) return;
+      running();
+      await new Promise<void>(resolve => { release = resolve; });
+    });
+    await call(agentSide, 'snapshot', {});
+    holdRun = true;
+    const inside = new Promise<void>(resolve => { running = resolve; });
+    const clicking = call(agentSide, 'click', { ref: 'e2' });
+    await inside;
+    // The person presses Take over while the click runs on the linked computer.
+    expect(await agentSide.registry.invokeRemote('browser:driver', ['shown-there', 'person'], { caller: undefined })).toEqual({ success: true });
+    release();
+    await clicking.catch(() => undefined);
+    expect(JSON.stringify(agentSide.tabs.find(tab => tab.id === 'shown-there')?.state.customState)).toContain('"by":"person"');
+  });
+
+  it('keeps an uploaded file on the linked computer until the page goes, so the form can still send it', async () => {
+    const { agentSide, viewer } = linkedPair();
+    writeFileSync(path.join(agentSide.worktree, 'report.pdf'), 'pdf');
+    await call(agentSide, 'snapshot', {});
+    expect(await call(agentSide, 'upload', { ref: 'e1', paths: ['report.pdf'] })).toMatchObject({ ok: true });
+    const page = viewer.pages.get('shown-there');
+    const [copy] = page?.files ?? [];
+    expect(readFileSync(copy ?? '', 'utf8')).toBe('pdf');
+    page?.emit('destroyed');
+    await vi.waitFor(() => expect(existsSync(copy ?? '')).toBe(false));
+  });
+
+  it('refuses a localhost port the viewing computer has no tunnel for, rather than load its own', async () => {
+    const { agentSide } = linkedPair();
+    expect(await code(call(agentSide, 'navigate', { url: 'http://localhost:3000/' }))).toBe('ERR_BROWSER_URL_REFUSED');
+  });
+
+  it('stops using a linked computer that dropped off, and asks again on the next call', async () => {
+    let offline = false;
+    const { agentSide } = linkedPair(async () => {
+      if (offline) throw new PaneError('ERR_REMOTE_OFFLINE', 'Mac is not connected.', 'Reconnect.');
+    });
+    await call(agentSide, 'snapshot', {});
+    offline = true;
+    // The call never reached the Mac, so it runs on this computer's copy, which here has no page.
+    expect(await code(call(agentSide, 'click', { ref: 'e2' }))).toMatch(/ERR_BROWSER_NOT_(LINKED|SHOWING)/);
+    offline = false;
+    expect(await call(agentSide, 'snapshot', {})).toMatchObject({ ok: true });
+  }, 15_000);
+});

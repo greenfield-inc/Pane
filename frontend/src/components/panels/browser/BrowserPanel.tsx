@@ -72,7 +72,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const toHostUrl = useCallback((localUrl: string) => remapLoopbackPort(localUrl, localToHost), [localToHost]);
   const toHostUrlRef = useRef(toHostUrl);
   const localToHostRef = useRef(localToHost);
-  localToHostRef.current = localToHost;
+  useEffect(() => { localToHostRef.current = localToHost; }, [localToHost]);
   // Main maps an agent's localhost URLs through this desktop's tunnels (docs/BROWSER_AGENTS.md).
   useEffect(() => {
     const wcId = pageWcIdRef.current;
