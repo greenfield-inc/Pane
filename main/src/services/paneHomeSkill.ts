@@ -450,7 +450,8 @@ the tab follows. When the person takes over in the tab, \`device_act\`, \`device
 Browser work in Pane: for any work in a web page (opening it, reading a signed-in page, clicking, typing, screenshots, checking your own change), use Pane's browser tools, browser_* or runpane browser. They drive Pane's browser, which is shared with the person and signed in as them. Use another browser tool (Claude in Chrome, Playwright MCP, a Playwright or Puppeteer script, curl on a page that needs sign-in) only when browser_* is unavailable, when it fails twice on the same step, or when the person names that tool. Public pages you only need to read may use web fetch.
 
 Call \`browser_open\` with the URL (or \`runpane browser open --url <url> --json\`):
-the page opens in a tab beside you, signed in as the person. Read it with
+the page opens in a tab beside you, on this computer, signed in as the person;
+they may watch and drive it from any of their screens. Read it with
 \`browser_snapshot\`, which gives element refs (\`e12\`); act by ref with
 \`browser_click\`, \`browser_type\`, \`browser_press\`, \`browser_select\` and
 \`browser_scroll\`; see it with \`browser_screenshot\`. After
