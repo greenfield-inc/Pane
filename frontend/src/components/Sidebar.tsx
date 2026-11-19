@@ -32,6 +32,7 @@ import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkey
 import { useRemoteRuntimeState } from '../hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from '../hooks/useConnectionPresence';
 import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
+import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { getRemoteFooterStatus } from '../utils/remoteRuntimePresentation';
 import { getHostingSummary } from '../utils/machineList';
@@ -978,16 +979,7 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
         className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: maximized ? '100%' : `${width}px` }}
       >
-        {/* Resize handle */}
-        <div
-          className="absolute top-0 right-0 w-1 h-full cursor-col-resize group z-10"
-          onMouseDown={onResize}
-        >
-          {/* Visual indicator: the theme's border-hover tone, not the accent */}
-          <div className="absolute inset-0 group-hover:bg-border-hover group-active:bg-border-hover" />
-          {/* Larger grab area */}
-          <div className="absolute -left-2 -right-2 top-0 bottom-0" />
-        </div>
+        <SidebarResizeHandle onResize={onResize} />
         {maximized && (
           <div className="absolute right-2 top-1 z-20">
             <RestoreRegionButton onRestore={() => setMaximizedRegion(null)} />
