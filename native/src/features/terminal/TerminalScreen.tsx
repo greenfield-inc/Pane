@@ -193,7 +193,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       {/* An approval's layout is final once the tabs and the tab body stop moving (perf marks). */}
       <View onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `tabs=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
         {/* Tab lists of recent Panes are kept on the phone, so this skeleton shows only for a Pane never opened here. */}
-        <SkeletonSwap loading={!leading && panelList.isPending} skeleton={<PanelTabsSkeleton />}>
+        <SkeletonSwap loading={!leading && panelList.isPending && panels.length === 0} skeleton={<PanelTabsSkeleton />}>
         <PanelTabs
           panels={panels}
           chatId={session?.panel.id}
@@ -209,7 +209,7 @@ export function TerminalScreen({ paneId, session, topBar, leading }: {
       <View style={styles.fill} onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `body=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
       {leading ? <LeadingBodies leading={leading} selectedId={leadingTab?.id ?? null} /> : null}
       {leadingTab ? null : (
-      <SkeletonSwap loading={panelList.isPending} skeleton={<TerminalSkeleton testID="pane-skeleton" label="Loading the Pane" />} style={styles.fill}>
+      <SkeletonSwap loading={panelList.isPending && !panel} skeleton={<TerminalSkeleton testID="pane-skeleton" label="Loading the Pane" />} style={styles.fill}>
       {panel && view !== 'terminal' ? (
         <TabBody panel={panel} title={title} panels={panels} />
       ) : panel && paused ? (

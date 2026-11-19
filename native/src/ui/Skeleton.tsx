@@ -63,7 +63,7 @@ let lastEnded: { started: number; ended: number } | null = null;
 /** Whether a skeleton is up, its bones show, and the content that replaces it fades in. */
 function useSkeletonHold(loading: boolean) {
   const [span, setSpan] = useState<{ started: number; ended: number | null } | null>(() => (loading ? { started: Date.now(), ended: null } : null));
-  const [, rerender] = useState(0);
+  const [tick, rerender] = useState(0);
   if (loading && (span === null || span.ended !== null)) setSpan({ started: Date.now(), ended: null });
   if (!loading && span !== null && span.ended === null) setSpan({ started: span.started, ended: Date.now() });
   const state = span ? skeletonState(span.started, span.ended, Date.now()) : null;
@@ -80,11 +80,12 @@ function useSkeletonHold(loading: boolean) {
     if (!showing) return undefined;
     return () => { lastEnded = { started, ended: Date.now() }; };
   }, [showing, started]);
+  // A timer can fire a moment before `changeAt`; the rerender it causes then arms it again.
   useEffect(() => {
     if (changeAt === null) return undefined;
     const timer = setTimeout(() => rerender(count => count + 1), Math.max(0, changeAt - Date.now()));
     return () => clearTimeout(timer);
-  }, [changeAt]);
+  }, [changeAt, tick]);
   return state ?? { skeleton: false, bones: false, reveal: false };
 }
 

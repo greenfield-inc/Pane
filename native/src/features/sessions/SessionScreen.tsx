@@ -6,7 +6,8 @@ import { useTheme } from '@/theme';
 import { ErrorState, SkeletonSwap } from '@/ui';
 
 import { TerminalScreen } from '../terminal/TerminalScreen';
-import { PanelTabsSkeleton, TerminalSkeleton } from '../terminal/TerminalSkeletons';
+import { ChatRowsSkeleton } from '../chatTab/ChatTabRows';
+import { PanelTabsSkeleton } from '../terminal/TerminalSkeletons';
 import { TerminalTopBar } from '../terminal/TerminalTopBar';
 import { useSessionView } from './hooks';
 
@@ -25,7 +26,10 @@ export function SessionScreen() {
         <View testID="session-skeleton" style={[styles.fill, { backgroundColor: theme.colors.surface }]}>
           <TerminalTopBar paneName="" />
           <PanelTabsSkeleton />
-          <TerminalSkeleton testID="session-terminal-skeleton" label="Loading the Session" />
+          {/* A Session opens on its agent chat. */}
+          <View testID="session-chat-skeleton" accessible accessibilityLabel="Loading the Session" style={[styles.fill, styles.rows, { backgroundColor: theme.chat.background }]}>
+            <ChatRowsSkeleton />
+          </View>
         </View>
       )}
       style={styles.fill}
@@ -44,4 +48,6 @@ export function SessionScreen() {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  // The chat's rows: their inset and the 4 pt padding above and below each.
+  rows: { paddingHorizontal: 16, paddingTop: 12, gap: 8 },
 });
