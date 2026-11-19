@@ -41,6 +41,8 @@ export interface BrowserHost {
 interface TabSummary { id: string; url: string; title: string; openedBy: string; yours: boolean; driving?: string; showing: boolean; dialog?: PendingDialog }
 /** What an action on a tab returns (the contract's browserActionResult). */
 interface ActionResult { ok: true; tab: string; url: string; title: string; dialog?: PendingDialog; fileChooser?: ActionOutcome['fileChooser']; note?: string }
+const SNAPSHOT_TEXT_CUT_NOTE = 'The page is long, so text past the limit was left out; every control on the page still has a ref. Use browser_evaluate to read the rest of the text.';
+const SNAPSHOT_CONTROLS_CUT_NOTE = 'The page is very long, so its later text and its controls past about 60,000 characters were left out. Use browser_evaluate to find them, or browser_click with x and y.';
 interface SnapshotResult { ok: true; tab: string; url: string; title: string; snapshot: string; truncated?: boolean; note?: string }
 interface WaitConditions { text?: string; url?: string; ref?: string }
 
@@ -309,12 +311,13 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
   }
 
   /** The tab's live page, refused when agents may not use it: DevTools open (writes), or not a web page. */
-  async function usablePage(tab: ToolPanel, write: boolean): Promise<BrowserPageContents> {
+  async function usablePage(tab: ToolPanel, write: boolean, loadsUrl = false): Promise<BrowserPageContents> {
     const contents = await livePage(tab);
     if (write && (contents.isDevToolsOpened() || (contents.devToolsWebContents !== null && !contents.devToolsWebContents.isDestroyed()))) {
       throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', `DevTools is open on tab ${tab.id}, and agents don't act on a page while the person inspects it. Nothing ran.`, 'Ask the person to close DevTools on that tab, then try again.');
     }
-    refuseNonWebPage(tab, contents, 'shows');
+    // Loading a web page is how an agent leaves a file: page, so only the page it lands on is checked.
+    if (!loadsUrl) refuseNonWebPage(tab, contents, 'shows');
     return contents;
   }
 
@@ -327,10 +330,10 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
   }
 
   /** Runs a call on a tab: reads go straight through; writes wait their turn behind the person. */
-  async function onTab<Result>(caller: BrowserCaller, tabId: string | undefined, write: boolean, work: (page: PageDriver, tab: ToolPanel, contents: BrowserPageContents) => Promise<Result>): Promise<Result> {
+  async function onTab<Result>(caller: BrowserCaller, tabId: string | undefined, write: boolean, work: (page: PageDriver, tab: ToolPanel, contents: BrowserPageContents) => Promise<Result>, loadsUrl = false): Promise<Result> {
     const tab = pickTab(caller, tabId, write);
     const run = async () => {
-      const contents = await usablePage(tab, write);
+      const contents = await usablePage(tab, write, loadsUrl);
       const result = await work(driverFor(tab, contents), tab, contents);
       refuseNonWebPage(tab, contents, 'is now on');
       return result;
@@ -391,8 +394,10 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     const { tab: tabId } = decode('snapshot', request, schemas.snapshot);
     return onTab(caller, tabId, false, async (page, tab) => {
       const shot = await page.snapshot();
-      const result: SnapshotResult = { ok: true, tab: tab.id, ...shot };
-      if (shot.truncated) result.note = 'The page is long, so text past the limit was left out; every control on the page still has a ref. Use browser_evaluate to read a part of the text.';
+      const { controlsCut, ...reading } = shot;
+      const result: SnapshotResult = { ok: true, tab: tab.id, ...reading };
+      if (controlsCut) result.note = SNAPSHOT_CONTROLS_CUT_NOTE;
+      else if (shot.truncated) result.note = SNAPSHOT_TEXT_CUT_NOTE;
       else delete result.truncated;
       return result;
     });
@@ -464,7 +469,7 @@ export function registerBrowserHandlers(ipcMain: Pick<IpcMain, 'handle'>, servic
     return onTab(caller, tabId, true, async (page, tab, contents) => {
       await page.navigate(target);
       return after(tab, contents);
-    });
+    }, 'url' in target);
   });
 
   commandRegistry.register('runpane:browser:wait', async (request: PaneCommandValue) => {

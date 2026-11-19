@@ -13,7 +13,7 @@ export const PANE_WORLD_ID = 1_337;
 const SNAPSHOT_CHAR_LIMIT = 20_000;
 
 /** What the page script's snapshot returns. */
-interface PageSnapshot { snapshot: string; truncated: boolean; url: string; title: string }
+interface PageSnapshot { snapshot: string; truncated: boolean; controlsCut: boolean; url: string; title: string }
 /** What browser_wait's check returns. */
 interface PageCheck { met: boolean; stale?: string }
 /** The JSON values page calls take. */
@@ -194,20 +194,31 @@ function pageScript(limit: number) {
     const lines: string[] = [];
     let size = 0;
     let truncated = false;
-    // Past the text budget, the walk keeps listing controls with refs (and drops text) up to a hard cap,
-    // so everything on a long page stays actionable.
+    // Past the text budget, the walk lists only lines with a ref (controls, headings, images) up to a
+    // hard cap, so a long page stays actionable; `truncated` then says controls were cut too.
     let textFull = false;
-    const hardLimit = limit + Math.round(limit / 4);
-    // Elements with a shadow root somewhere inside: their text is never collapsed into one line.
+    const hardLimit = limit * 3;
+    // Elements with a shadow root somewhere inside, through nested shadow roots too: their text is
+    // never collapsed into one line, or the controls inside would lose their refs.
     const shadowAncestors = new Set<Element>();
-    for (const host of Array.from(document.querySelectorAll('*'))) {
-      if (!host.shadowRoot) continue;
-      for (let parent = host.parentElement; parent && !shadowAncestors.has(parent); parent = parent.parentElement) shadowAncestors.add(parent);
-    }
+    const markShadowHosts = (root: Document | ShadowRoot) => {
+      for (const host of Array.from(root.querySelectorAll('*'))) {
+        if (!host.shadowRoot) continue;
+        for (let parent: Element | null = host; parent;) {
+          const up: Element | null = parent.parentElement ?? (parent.parentNode instanceof ShadowRoot ? parent.parentNode.host : null);
+          if (!up || shadowAncestors.has(up)) break;
+          shadowAncestors.add(up);
+          parent = up;
+        }
+        markShadowHosts(host.shadowRoot);
+      }
+    };
+    markShadowHosts(document);
     // The last line, when it is text: the next text at the same depth joins it.
     let openText: { depth: number; text: string } | null = null;
     const push = (depth: number, line: string) => {
       if (truncated) return;
+      if (textFull && !line.includes('[ref=')) return;
       openText = null;
       const text = `${'  '.repeat(Math.min(depth, 20))}- ${line}`;
       if (size + text.length + 1 > hardLimit) { truncated = true; return; }
@@ -280,7 +291,7 @@ function pageScript(limit: number) {
       }
     };
     if (document.body) walk(document.body, 0, false);
-    return { snapshot: lines.join('\n'), truncated: truncated || textFull, url: location.href, title: document.title };
+    return { snapshot: lines.join('\n'), truncated: truncated || textFull, controlsCut: truncated, url: location.href, title: document.title };
   }
 
   /** The element behind a ref, or why it can't be used. */

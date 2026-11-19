@@ -26,7 +26,7 @@ opened one tab, or when the Pane has one; with several, the call fails with
 | `browser_open` | `runpane browser open --url <url>` | Opens a tab beside the agent, in a split, owned by it; reuses the agent's tab on the same origin |
 | `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog |
 | `browser_close` | `runpane browser close` | Closes a tab the agent opened |
-| `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title |
+| `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title. On a long page, text is left out before controls |
 | `browser_screenshot` | `runpane browser screenshot [--full-page]` | A PNG in the Pane's scratch folder; MCP clients get the image itself |
 | `browser_click` | `runpane browser click --ref e12` | Clicks an element (or `--x --y`) as real mouse input, once it is visible and enabled |
 | `browser_type` | `runpane browser type --ref e7 --text "hi" [--clear] [--submit]` | Types into a field |
