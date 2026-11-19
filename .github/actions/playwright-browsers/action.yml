@@ -1,0 +1,42 @@
+name: Playwright browsers
+description: >-
+  Restores Playwright's Chromium from the Actions cache that pushes to main
+  write, then installs it. Run it after the install.
+# Playwright's CDN took 35-103 s for one browser on some runs; the cache holds
+# the browser folder, keyed on the image's OS family, arch and playwright-core
+# version, so a key never serves another browser build. No apt: the Ubuntu
+# image already has every library Chromium loads, and --with-deps only added
+# fonts and a Mesa upgrade from a mirror that stalled for minutes.
+inputs:
+  install:
+    description: Run the browser install here; false restores only, for a job that installs in the background.
+    default: 'true'
+  save:
+    description: Save the browsers on a push to main when the cache missed. One job per key saves.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Key the Playwright browsers
+      id: key
+      shell: bash
+      run: echo "key=playwright-${ImageOS}-${{ runner.arch }}-$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the Playwright browsers
+      id: cache
+      uses: actions/cache/restore@v5
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Install Playwright browser dependencies
+      if: inputs.install == 'true'
+      shell: bash
+      run: scripts/playwright-chromium.sh
+
+    - name: Save the Playwright browsers
+      if: inputs.install == 'true' && inputs.save == 'true' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v5
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.key.outputs.key }}

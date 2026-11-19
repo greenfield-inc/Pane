@@ -14,13 +14,19 @@ You need patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), and 
 have pnpm 10, `corepack enable` provides the version pinned in `package.json`.
 
 1. Fork the repository on GitHub and clone your fork.
-2. Install dependencies, rebuild native modules for Electron, and build the
-   main process:
+2. Install dependencies, install the pre-push hook, rebuild native modules
+   for Electron, and build the main process:
    ```bash
    pnpm run setup
    ```
    Setup warns that it can't link `node_modules/.bin/runpane` (the local CLI
    isn't built yet) and lists ignored build scripts. Both are harmless.
+   The pre-push hook lints the files a push changes and, when they touch code
+   or config, runs `pnpm typecheck`, in a few seconds. It keeps a pre-push
+   hook you already have and prints the line to add to it, and it never
+   writes to a `core.hooksPath` folder outside the clone. A worktree without
+   `node_modules` pushes unchecked, with a note. `git push --no-verify` skips
+   it.
 3. Create a branch:
    ```bash
    git checkout -b feature/your-feature-name
@@ -139,10 +145,18 @@ pnpm --filter main exec vitest run
 pnpm test:ci:minimal
 ```
 
-`pnpm typecheck` checks `frontend`, `mobile` and `native` with TypeScript 7
-(the `@typescript/native` alias), and `main` and `packages/runpane` with their
-own `typescript` 5.x, which also builds them. ESLint and editors use the 5.x
-package.
+`pnpm typecheck` runs `bun check` (Bun's TypeScript 7 checker, from the `bun`
+dev dependency) on every project the root `tsconfig.check.json` lists, the renderer
+tests included, in about 3 seconds. `main` and `packages/runpane` are checked
+through their `tsconfig.check.json`, because TypeScript 7 has no
+`moduleResolution: node`; their own `typescript` 5.x still builds them, and
+editors use it. `pnpm typecheck:tsc` runs the previous checkers (TypeScript 7
+through the `@typescript/native` alias, and 5.x for `main` and
+`packages/runpane`) when you want to compare. A new tsconfig joins the
+references in the root `tsconfig.check.json`. The repo root has no
+`tsconfig.json`: Vite would load one for files outside `frontend/` and follow
+its references to tsconfigs (such as `native`'s `expo/tsconfig.base`) that the
+frontend-only install of the PWA preview deploy lacks.
 
 To test approvals' timers without waiting, start a dev build with
 `PANE_APPROVALS_STALE_AFTER_MS` (3 days), `PANE_APPROVALS_PUSH_AFTER_MS` (about
@@ -155,16 +169,22 @@ To test approvals' timers without waiting, start a dev build with
   your real data. They do still see your shell environment: with
   `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
-  `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
-  CI runs: the specs in `testMatch` in `playwright.ci.minimal.config.ts`, among
-  them smoke, health check, accessibility, settings, the remote sidebar, file
-  editor and preview lifecycles, and the Session journeys
-  (`orchestration-sessions.spec.ts`). A spec left out of that list never runs in
-  CI, so add a new one there.
+  `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the
+  browser suite CI runs: every spec `playwright.ci.minimal.config.ts` lists,
+  with the chat composer specs at a desktop and a phone size.
+- `playwright.ci.stabilizing.config.ts` (browser) and
+  `playwright.ci.stabilizing-electron.config.ts` (Electron) list specs that CI
+  runs and reports but `CI result` does not wait for, each with the reason in
+  its comment. A spec moves back to its required config once that is fixed.
 - `pnpm test:chat-tabs` runs the chat tab journeys and the loop Session journey
   (`tests/loop-sessions.spec.ts`): it launches Electron from
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
+  CI runs the specs `playwright.chat-tabs.config.ts` lists, in two shards, with
+  `PANE_ELECTRON_E2E=1` so the remote browser and browser auth specs run too.
+- A new spec runs only once a CI config lists it: CI fails until it is in
+  `playwright.ci.minimal.config.ts`, `playwright.chat-tabs.config.ts`, or the
+  `NOT_IN_CI` list in `scripts/ci-test-inventory.mjs` with its reason.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
   (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
   start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port
@@ -234,17 +254,35 @@ defaults. Tests import `start()` from the script and drive the phases with
 `forceDown()` and `forceUp()`; see `scripts/flapping-link-proxy.test.mjs`, run
 by `pnpm test:flapping-proxy`.
 
+### Testing a Session move on one computer
+
+A Session move normally reaches the other machine over Tailscale. To move one
+between two isolated dev instances on one computer, give each its own
+`PANE_DIR` and `HOME` (see [Running a dev build safely](#running-a-dev-build-safely)),
+and start the source with `PANE_MOVE_TEST_PEERS`, a JSON list naming the
+target and its Pane folder:
+
+```bash
+PANE_MOVE_TEST_PEERS='[{"name":"robert-b","paneDir":"/tmp/pane-b/pane"}]' PANE_DIR=/tmp/pane-a/pane HOME=/tmp/pane-a/Users/alice pnpm dev
+```
+
+The target then appears in **Move to machine…**, and the move reaches it
+through its daemon socket under that folder, never the network. Packaged
+builds ignore the variable.
+
 ## Code Style
 
 - TypeScript throughout; no explicit `any` (use a specific type, or `unknown`
   with narrowing).
-- `pnpm lint` runs Oxlint, the remaining ESLint rules, the advisory anti-slop
-  scan, the boundary-decoder conformance check and Knip. Blocking lint is the floor for new code. See
-  [docs/lint/anti-slop.md](docs/lint/anti-slop.md) and
-  [docs/lint/oxlint-overlap.md](docs/lint/oxlint-overlap.md).
+- `pnpm lint` runs Oxlint, the boundary-decoder conformance check, the
+  agent-facts check and Knip; `pnpm lint:code` runs all but Knip. Blocking lint
+  is the floor for new code. See [docs/lint/oxlint.md](docs/lint/oxlint.md) and
+  [docs/lint/anti-slop.md](docs/lint/anti-slop.md).
 - Two-space indentation. `camelCase` for variables and functions, `PascalCase`
   for React components and types, `kebab-case` for other filenames.
-- There is no formatter or commit hook; follow the surrounding code.
+- There is no formatter; follow the surrounding code. The pre-push hook
+  (`scripts/pre-push.mjs`) runs Oxlint, the agent-facts and boundary-decoder
+  conformance checks and the type check on what you push.
 
 ## How Pane reports errors
 
@@ -299,11 +337,10 @@ happened, why, what changed, and what to do next.
 4. Open the pull request with a clear description, linked issues, the commands
    you ran, and screenshots for UI changes.
 
-CI runs typecheck, lint, a markdown link check, unit tests on Linux, macOS and
-Windows, and the Playwright smoke suite. CI retries a failed unit test once
-(`--retry=1`; local runs never retry) and lists every retried test in the job
-summary, with a warning on each test that passed only on its retry: that test
-is flaky, so fix it. Playwright journeys are not retried. React Doctor also comments on new React
+CI runs typecheck, lint, a markdown link check, unit tests on Linux and
+Windows, and the Playwright smoke suite. CI retries nothing: a test, link
+check or download that fails once fails the run. A flaky test is a bug to fix
+in its own PR. React Doctor also comments on new React
 findings in `frontend/`; it is advisory. To see its findings before you push:
 
 ```bash
@@ -323,11 +360,11 @@ Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
 A pull request is ready to merge when `CI result` is green and its review is
 done. Watch only the required check (`gh pr checks <number> --required`; a PR
 based on another branch has no required checks, so watch its `CI result`
-check by name until it targets `main`). The other checks (Markdown Links,
-Native Android Build, Native OTA Updates, Native Runtime, React Doctor, Notes
+check by name until it targets `main`). `CI result` waits for every
+`Code Quality` job, Markdown Links included. The other workflows' checks
+(Native Android Build, Native OTA Updates, Native Runtime, React Doctor, Notes
 Native QA, the package builds) are advisory: look at them when they fail, but
-they never hold a merge. `CI result` does not wait for Markdown Links, so check
-it yourself when you change docs.
+they never hold a merge.
 
 A single pull request is squash-merged.
 
@@ -344,6 +381,12 @@ A stack (each pull request based on the one below) is merged bottom-up with
    only its own commits, and the green `CI result` on its head still counts.
    Do not rebase or push it.
 4. Merge it with a merge commit, and repeat up the stack.
+
+When the merge queue is on ([RUNBOOK.md](RUNBOOK.md#merge-queue)), every
+merge above, a stack's included, adds the pull request to the queue instead
+(`gh pr merge <number>` does this too). It reaches `main` only after `CI result`
+passes on the merge group, which runs every `Code Quality` job, and the queue
+uses its own merge method in place of the one named above.
 
 Agents merge only when the person asks for that pull request.
 

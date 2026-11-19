@@ -1,0 +1,24 @@
+# dcouple/product-researcher: written by `node scripts/import-agent-farm-profiles.js` from Agent Farm's dcouple plugin 0.1.27; don't edit by hand.
+# A single agent step: the run ends when the agent reports done.
+format: pane-profile/1
+name: dcouple-product-researcher
+version: 0.1.27
+title: Research a technology, product, or approach and get back a clear, sourced write-up.
+
+agents:
+  product-researcher:
+    runs: codex/gpt-6-astra
+    effort: high
+    reads: [agents/astra-researcher]
+    skills: [deep-dive, deep-dive-refresh, tech-deep-dive, product-compare, researcher, research-web, explain-visually, html-explainer, eli5, cold-read, create-ticket]
+
+flow:
+  start: work
+  work:
+    agent: product-researcher
+    goal: Research a technology, product, or approach and get back a clear, sourced write-up
+    outcomes: {done: end}
+
+samples:
+  work:
+    done: ["Done: what it did, with links to what it made.", "Done: what it found, and what is left for you to decide."]

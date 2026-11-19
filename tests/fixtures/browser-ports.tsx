@@ -37,6 +37,12 @@ export interface PortsTest {
   openedLocally: string[];
   /** The error the next `openExternal` call fails with; null succeeds. */
   openExternalError: string | null;
+  /** When set, `openLocalPage` answers only once this is called, as a slow copy from the host does. */
+  finishLocalOpen: (() => void) | null;
+  /** Makes the next `openLocalPage` calls wait for `finishLocalOpen`. */
+  holdLocalOpens(): void;
+  /** Whether the panel listens for this event on this `<webview>` now. */
+  listensTo(webview: Element, type: string): boolean;
 }
 
 declare global {
@@ -45,9 +51,28 @@ declare global {
   }
 }
 
+// The panel listens to its <webview> from an effect that runs a task after the element mounts.
+const webviewListeners = new WeakMap<EventTarget, Map<string, number>>();
+const { addEventListener, removeEventListener } = EventTarget.prototype;
+const countListener = (target: EventTarget, type: string, change: number) => {
+  if (!(target instanceof Element) || target.localName !== 'webview') return;
+  const counts = webviewListeners.get(target) ?? new Map<string, number>();
+  counts.set(type, (counts.get(type) ?? 0) + change);
+  webviewListeners.set(target, counts);
+};
+EventTarget.prototype.addEventListener = function (this: EventTarget, ...args: Parameters<EventTarget['addEventListener']>) {
+  countListener(this, args[0], 1);
+  addEventListener.apply(this, args);
+};
+EventTarget.prototype.removeEventListener = function (this: EventTarget, ...args: Parameters<EventTarget['removeEventListener']>) {
+  countListener(this, args[0], -1);
+  removeEventListener.apply(this, args);
+};
+
 const portLists = answeredByTest<ListeningPortsSnapshot>();
 const connectionStates = answeredByTest<RemotePaneConnectionState>();
 let emitPorts: (snapshot: ListeningPortsSnapshot) => void = () => {};
+let localOpenHeld = false;
 
 const portsTest: PortsTest = {
   answerPortsList: portLists.answer,
@@ -63,6 +88,9 @@ const portsTest: PortsTest = {
   openedExternally: [],
   openedLocally: [],
   openExternalError: null,
+  finishLocalOpen: null,
+  holdLocalOpens: () => { localOpenHeld = true; },
+  listensTo: (webview, type) => (webviewListeners.get(webview)?.get(type) ?? 0) > 0,
 };
 
 Object.assign(window, {
@@ -72,8 +100,9 @@ Object.assign(window, {
       portsTest.openedExternally.push(target);
       return portsTest.openExternalError === null ? { success: true } : { success: false, error: portsTest.openExternalError };
     },
-    openLocalPage: async (fileUrl: string) => {
-      portsTest.openedLocally.push(fileUrl);
+    openLocalPage: async (fileUrl: string, panelId?: string) => {
+      portsTest.openedLocally.push(panelId === undefined ? fileUrl : `${fileUrl} ${panelId}`);
+      if (localOpenHeld) await new Promise<void>(resolve => { portsTest.finishLocalOpen = resolve; });
       return { success: true };
     },
     invoke: (channel: string) => {

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import { app, BrowserWindow, globalShortcut } from 'electron';
 import { AUTOPILOT_OWNER_PANE_PREFIX } from '../../../../shared/types/autopilot';
+import type { LinksOpenIn } from '../../../../shared/types/browser';
 import { randomUUID } from 'crypto';
 import path from 'path';
 import { pathToFileURL } from 'url';
@@ -14,6 +15,7 @@ import {
   type NotifyConnected,
   type NotifyInstructionsFile,
   type NotifyItem,
+  type NotifyLeaseGranted,
   type NotifyLink,
   type NotifyNavigateTarget,
   type NotifyRemoteCommand,
@@ -27,7 +29,7 @@ import {
   type NotifyWindowSize,
 } from '../../../../shared/types/notify';
 import { type NotifyQueueEnvironment, NotifyQueue, type NotifyAgentActed } from './notifyQueue';
-import { PaneError } from '../../../../shared/paneError';
+import { PaneError, paneErrorText } from '../../../../shared/paneError';
 import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
@@ -49,6 +51,10 @@ export interface NotifyServiceDependencies {
   findPane: (caller: NotifyCaller) => { paneId: string; panelId?: string; name: string; agentType?: string } | undefined;
   /** Opens a related link as a tab of a Pane (`runpane panels open`); rejects when the Pane can't show it. */
   openLink?: (paneId: string, link: NotifyLink) => Promise<void>;
+  /** Settings > Links: where links from your work open. */
+  linksOpenIn?: () => LinksOpenIn;
+  /** Opens a link in the system browser. */
+  openExternal?: (url: string) => Promise<void>;
   /** Arguments the main window's renderer reads before its first paint (theme). */
   rendererArguments: () => string[];
   /** A headless host has no screen: no floating windows, tray or shortcut; connected screens show its questions. */
@@ -57,10 +63,16 @@ export interface NotifyServiceDependencies {
   machine: string;
   /** This host's Pane secret store, where secret cards save their answer. */
   secrets?: NotifyQueueEnvironment['secrets'];
+  leases?: NotifyQueueEnvironment['leases'];
   /** Sends the shared state to every connected screen and phone (`notify:shared-changed`). */
   publish: (state: NotifySharedState) => void;
   /** Sends a command for a saved machine's question to that machine, under the id it knows the question by. */
   sendToMachine: (machineId: string, command: NotifyRemoteCommand) => Promise<void>;
+  /**
+   * Start lease on a lease card, on this desktop: reads 1Password (one prompt), stores and pushes the
+   * lease. `machineId` is the saved machine the card came from, or null for this computer's own card.
+   */
+  startLease?: (item: NotifyItem, machineId: string | null) => Promise<NotifyLeaseGranted>;
   /** Reads a saved machine's state again, after it refused or missed a command. */
   refreshMachine: (machineId: string) => Promise<void>;
   /** The phone alert: sent about 90 s after a question starts ringing if it's still waiting, cleared when it stops (D-144). */
@@ -158,6 +170,7 @@ export class NotifyService {
       machine: deps.machine,
       machineId: deps.configManager.getConfig().machineId,
       secrets: deps.secrets,
+      leases: deps.leases,
       sessionOf: deps.sessionOf,
       sameLoop: deps.sameLoop,
       savedMachineIds: () => (deps.configManager.getConfig().remoteDaemon?.client.computers ?? []).map(computer => computer.id),
@@ -409,6 +422,9 @@ export class NotifyService {
     return { id: sent.type === 'agent-rewrite' && sent.newId ? `${target.machineId}:${sent.newId}` : action.id, machine: target.machine };
   }
 
+  /** Lease cards whose Start lease is waiting on 1Password here. */
+  private readonly leasesStarting = new Set<string>();
+
   async run(command: NotifyCommand): Promise<void> {
     switch (command.type) {
       case 'open-round': this.openRound(command.id); return;
@@ -418,9 +434,41 @@ export class NotifyService {
       case 'open-in-pane': await this.openInPane(command.id); return;
       case 'ask-agent': this.askAgentInMainWindow(command.id); return;
       case 'open-link': await this.openLink(command.id, command.index, command.paneId); return;
-      default:
-        if ('id' in command && command.id && this.queue.remoteTarget(command.id)) await this.runOnMachine(command);
-        else await this.queue.run(command);
+      case 'open-url': await this.openUrl(command.id, command.url); return;
+      default: {
+        const remote = 'id' in command && command.id ? this.queue.remoteTarget(command.id) : null;
+        const sent = command.type === 'answer' ? await this.withLease(command, remote?.machineId ?? null) : command;
+        if (remote && 'id' in sent) await this.runOnMachine(sent);
+        else await this.queue.run(sent);
+      }
+    }
+  }
+
+  /**
+   * Start lease pressed on a lease card here: this desktop reads 1Password and pushes the lease first,
+   * then the Approve carries it to the machine that holds the card. A failure keeps the card waiting.
+   */
+  private async withLease<Command extends Extract<NotifyCommand, { type: 'answer' }>>(command: Command, machineId: string | null): Promise<Command> {
+    const { answer } = command;
+    if (!('approved' in answer) || !answer.approved || answer.lease) return command;
+    const item = this.queue.find(command.id);
+    if (!item?.lease) return command;
+    if (!this.deps.startLease) {
+      throw new PaneError('SECRET_LEASE_NEEDS_DESKTOP', 'This Pane can\'t start leases, because it has no 1Password access here. Nothing was leased.', 'Press Start lease in Pane on your Mac or PC.');
+    }
+    // One Start lease at a time per card: a second press while 1Password asks would read it twice.
+    if (this.leasesStarting.has(command.id)) {
+      throw new PaneError('SECRET_LEASE_STARTING', 'This lease is already starting: 1Password is asking. Nothing else was sent.', 'Approve or dismiss the 1Password prompt.');
+    }
+    this.leasesStarting.add(command.id);
+    this.queue.noteLeaseError(command.id, null);
+    try {
+      return { ...command, answer: { ...answer, lease: await this.deps.startLease(item, machineId) } };
+    } catch (error) {
+      this.queue.noteLeaseError(command.id, error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      this.leasesStarting.delete(command.id);
     }
   }
 
@@ -454,7 +502,7 @@ export class NotifyService {
    * A command for a saved machine's question: it goes to that machine only, under the id the
    * machine knows the question by. What stays on this screen runs here.
    */
-  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'ask-agent' }>): Promise<void> {
+  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' | 'open-url' | 'ask-agent' }>): Promise<void> {
     const target = this.queue.remoteTarget(command.id);
     if (!target) return;
     if (command.type === 'close' || command.type === 'reopen' || command.type === 'override') {
@@ -575,6 +623,25 @@ export class NotifyService {
     if (!this.queue.snapshot().items.some(candidate => candidate.id === itemId)) return;
     this.windows.closeRound();
     this.navigate({ approval: itemId });
+  }
+
+  /**
+   * A link in a card's text. The floating card's window has no Settings, so main decides: a web link
+   * from a Pane opens beside that Pane in the main window, raised and showing it (the window opens
+   * the tab, as any link from your work); anything else, or System browser in Settings > Links,
+   * opens in the system browser.
+   */
+  private async openUrl(itemId: string, url: string): Promise<void> {
+    const item = this.queue.snapshot().items.find(candidate => candidate.id === itemId);
+    const paneId = item?.source.paneId;
+    const window = this.deps.getMainWindow();
+    const web = /^https?:\/\//i.test(url);
+    if (paneId && web && window && !window.isDestroyed() && this.deps.linksOpenIn?.() !== 'system') {
+      this.navigate({ link: url, paneId });
+      return;
+    }
+    if (!this.deps.openExternal) throw new PaneError('ERR_NOTIFY_LINK_OPEN', 'Pane has no way to open links here, so nothing was opened.', 'Copy the link and open it yourself.');
+    await this.deps.openExternal(url);
   }
 
   /**

@@ -15,13 +15,6 @@ const ATTENTION_PULSES = 3;
  */
 const WORKING_TURNS = 6;
 
-/**
- * Loading skeletons run Tailwind's pulse in opacity steps: 5 values each way
- * over its 2 s period, so the compositor paints about 4 frames a second instead
- * of one per display refresh (120-144 a second).
- */
-const SKELETON_STEPS = 5;
-
 /** @type {import('tailwindcss').Config} */
 const config = {
   darkMode: 'class',
@@ -86,6 +79,7 @@ const config = {
           'bezel': 'var(--color-device-bezel)',
           'screen': 'var(--color-device-screen)',
           'screen-text': 'var(--color-device-screen-text)',
+          'bone': 'var(--color-device-bone)',
         },
         'bg': {
           'primary': 'var(--color-bg-primary)',
@@ -300,7 +294,6 @@ const config = {
         },
       },
       animation: {
-        skeleton: `pulse 2s steps(${SKELETON_STEPS}, jump-none) infinite`,
         // Tailwind's `animate-pulse`, run a set number of times instead of forever.
         'attention-pulse': defaultTheme.animation.pulse.replace('infinite', String(ATTENTION_PULSES)),
         // Tailwind's `animate-spin`, run a set number of turns instead of forever.

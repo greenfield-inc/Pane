@@ -293,6 +293,9 @@ describe('remote daemon IPC', () => {
       enabled: true,
       listenPort: 42138,
     };
+    // A health refresh looks up where Pane is installed: `where` twice on Windows, which on a busy runner
+    // outlasted the 5 s test timeout. This test is about the state the handler returns, not that lookup.
+    vi.spyOn(remoteHostRuntimeStateStore, 'refreshExecutableHealth').mockImplementation(async () => remoteHostRuntimeStateStore.getState());
     remoteHostRuntimeStateStore.setLive(hostConfig, {
       host: '127.0.0.1',
       port: 42138,
@@ -1103,7 +1106,7 @@ describe('remote daemon IPC', () => {
       transport: 'http+sse',
     })).resolves.toEqual({
       success: false,
-      error: 'Remote daemon connection profile is invalid',
+      error: 'This connection is not valid: it needs a name, a base URL, and a token or a Tailscale machine. Nothing was saved. Next: Fill in the connection name, base URL and token, then save it again.',
     });
   });
 

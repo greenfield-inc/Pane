@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 const project = {
   id: 731,
@@ -160,7 +160,7 @@ const usageReport = {
 
 async function openSettings(page: Page, options: Parameters<typeof installElectronApiMock>[1] = {}): Promise<void> {
   await installElectronApiMock(page, options);
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 10_000 });
 
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
@@ -173,8 +173,9 @@ async function openSettings(page: Page, options: Parameters<typeof installElectr
 }
 
 // Usage & Limits is a regular Settings category: the full usage dashboard,
-// including the provider limits Codex writes into its transcripts.
-const SETTINGS_CATEGORY_COUNT = 12;
+// including the provider limits Codex writes into its transcripts. Autopilot is
+// off here, so its category stays hidden.
+const SETTINGS_CATEGORY_COUNT = 20;
 
 async function capture(page: Page, testInfo: TestInfo, filename: string): Promise<void> {
   const path = testInfo.outputPath(filename);
@@ -202,7 +203,7 @@ test('Settings shows Codex limits from transcripts under Usage & Limits', async 
   await expect(usageTab).toHaveAttribute('aria-current', 'page');
   const content = page.getByTestId('settings-content');
   await expect(content.getByRole('heading', { name: 'Usage & limits' })).toBeVisible();
-  await expect(content.getByRole('heading', { name: 'Provider limits' })).toBeVisible();
+  await expect(content.getByRole('heading', { name: 'Accounts and limits' })).toBeVisible();
   await expect(content.getByText('· pro_lite', { exact: true })).toBeVisible();
   await expect(content.getByText('58% left', { exact: true })).toBeVisible();
   await capture(page, testInfo, 'codex-usage-settings.png');
@@ -229,8 +230,8 @@ test('Settings keeps Usage & Limits reachable and explains missing Codex limits'
   await navigation.getByRole('button', { name: 'Usage & Limits', exact: true }).click();
 
   const content = page.getByTestId('settings-content');
-  await expect(content.getByRole('heading', { name: 'Provider limits' })).toBeVisible();
-  await expect(content.getByText(/^No provider-reported limits available\./)).toBeVisible();
+  await expect(content.getByRole('heading', { name: 'Accounts and limits' })).toBeVisible();
+  await expect(content.getByText('No Claude Code or Codex sign-in found.', { exact: true })).toBeVisible();
   await expect(content.getByText(/% left$/)).toHaveCount(0);
 
   await page.setViewportSize({ width: 640, height: 760 });
@@ -304,9 +305,9 @@ test('main-repository branch detection never renders the previous repository bra
       [project.path]: 'main-a',
       [secondProject.path]: null,
     },
-    mainRepoSessionDelayByProjectId: { [secondProject.id]: 500 },
+    holdMainRepoSessionProjectIds: [secondProject.id],
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   // The inspector is shown by default; open it only if it was hidden.
@@ -330,10 +331,12 @@ test('main-repository branch detection never renders the previous repository bra
   const loadingSession = page.getByRole('status', { name: 'Loading main repository session' });
   await expect(loadingSession).toBeVisible();
   await expect(page.getByText('No session selected', { exact: true })).toHaveCount(0);
-  await page.waitForTimeout(250);
-  await expect(loadingSession).toBeVisible();
   await expect(detailPanel.getByText('main-a', { exact: true })).toHaveCount(0);
-  await page.waitForTimeout(400);
+  // The lookup is held, so the loading state stays until the test lets it answer.
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    (window as typeof window & { __paneTestElectronMock: { releaseMainRepoSessions(): void } }).__paneTestElectronMock.releaseMainRepoSessions();
+  });
   await expect(loadingSession).toHaveCount(0);
   await expect(detailPanel.getByText('main-b', { exact: true })).toBeVisible();
   await expect(detailPanel.getByText('main-a', { exact: true })).toHaveCount(0);
@@ -348,7 +351,7 @@ test('latest main-repository lookup wins across A to delayed B to A', async ({ p
     activeProjectId: project.id,
     mainRepoSessionDelayByProjectId: { [secondProject.id]: 500 },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
   // The inspector is shown by default; open it only if it was hidden.
@@ -404,16 +407,19 @@ test('main-repository lookup failure clears the loading skeleton', async ({ page
     initialSessions: [mainRepoSessionWithBranch],
     initialPanels: mainRepoPanels,
     activeProjectId: project.id,
-    mainRepoSessionDelayByProjectId: { [project.id]: 100 },
+    holdMainRepoSessionProjectIds: [project.id],
     mainRepoSessionErrorByProjectId: { [project.id]: 'Main repository session lookup failed' },
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
   await page.getByText('Open session on main', { exact: true }).click();
 
   const loadingSession = page.getByRole('status', { name: 'Loading main repository session' });
   await expect(loadingSession).toBeVisible();
-  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    (window as typeof window & { __paneTestElectronMock: { releaseMainRepoSessions(): void } }).__paneTestElectronMock.releaseMainRepoSessions();
+  });
   await expect(loadingSession).toHaveCount(0);
   await expect(page.getByText('No session selected', { exact: true })).toBeVisible();
 });

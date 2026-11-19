@@ -165,6 +165,20 @@ export interface UsageRateLimitSample {
   limitName: string | null;
 }
 
+/**
+ * A Claude Code or Codex account a machine is signed in to. Machines that report the same
+ * `key` share the account, so its limits are shown once for all of them.
+ */
+export interface UsageAccount {
+  provider: UsageProvider;
+  /** Stable id of the account (and organisation or workspace); never a credential. */
+  key: string;
+  /** The account's email, or a generic name when the CLI records none. */
+  label: string;
+  /** Plan name as the CLI records it, when it does. */
+  plan: string | null;
+}
+
 export interface UsageReport {
   totals: UsageTotals;
   series: UsageBucket[];
@@ -174,6 +188,8 @@ export interface UsageReport {
   byPane: UsageByPaneReport;
   /** Provider-reported quota state; empty when nobody reported any. */
   rateLimits: UsageRateLimitSample[];
+  /** The accounts this machine is signed in to now. Missing from a Pane before this field. */
+  accounts?: UsageAccount[];
   index: UsageIndexStatus;
   /** Pricing source and date, shown in the footer (e.g. "OpenRouter · 2026-08-26"). */
   pricingAsOf: string;

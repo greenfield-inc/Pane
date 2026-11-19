@@ -863,8 +863,10 @@ export class RemotePaneClient {
       try {
         payload = parseJsonResponse(response, 'Remote daemon returned an invalid invoke response', remoteInvokeResponseSchema);
       } catch (error) {
-        // A host that de-duplicates answers every write with an envelope; a 5xx without one came from the path to it.
-        if (requestId && response.statusCode >= 500) throw new Error(`HTTP ${response.statusCode} without an answer`);
+        // A host that de-duplicates answers every write with an envelope. A 404 or 5xx without one, or
+        // a body that is not JSON at all, came from the path to it (a proxy while the route is down),
+        // so the write is resent; JSON that fails the schema is the host's, a version mismatch.
+        if (requestId && (response.statusCode === 404 || response.statusCode >= 500 || !isJson(response.body))) throw new Error(`HTTP ${response.statusCode} without an answer`);
         throw error;
       }
       this.failedRequestsInARow = 0;
@@ -1656,7 +1658,7 @@ export class RemotePaneClientController extends EventEmitter {
         activeProfileId,
         activeProfileLabel: null,
         activeBaseUrl: null,
-        lastError: `Remote daemon connection profile "${activeProfileId}" does not exist`,
+        lastError: `The saved connection "${activeProfileId}" does not exist. Pick a computer in Settings > Remote Access > Computers, or pair it again.`,
         lastSeenAt: null,
       });
       return;
@@ -1887,7 +1889,7 @@ export class RemotePaneClientController extends EventEmitter {
           activeProfileId: profile.id,
           activeProfileLabel: profile.label,
           activeBaseUrl: profile.baseUrl,
-          lastError: getErrorMessage(error, `Failed to connect to remote daemon profile "${profile.label}"`),
+          lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
           lastSeenAt: null,
         });
         return;
@@ -1914,7 +1916,7 @@ export class RemotePaneClientController extends EventEmitter {
         activeProfileId: profile.id,
         activeProfileLabel: profile.label,
         activeBaseUrl: profile.baseUrl,
-        lastError: getErrorMessage(error, `Failed to connect to remote daemon profile "${profile.label}"`),
+        lastError: getErrorMessage(error, `Failed to connect to "${profile.label}"`),
         lastSeenAt: null,
       });
       throw error;
@@ -2368,7 +2370,7 @@ async function requestJson(
     const request = createRequest(url, {
       ...options,
       headers: {
-        ...(options.headers ?? {}),
+        ...options.headers,
         'Content-Length': Buffer.byteLength(body),
       },
     }, (response) => {
@@ -2403,6 +2405,16 @@ function hostOutdatedError(hostLabel: string, channel: string): PaneError {
     `${hostLabel} runs an older Pane that does not have this command (${channel}). Nothing was changed.`,
     `Update Pane on ${hostLabel} (run \`runpane update\` there), then try again.`,
   );
+}
+
+/** Whether `body` parses as JSON at all. */
+function isJson(body: string): boolean {
+  try {
+    JSON.parse(body);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function parseJsonResponse<Value>(

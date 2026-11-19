@@ -24,6 +24,36 @@ export interface NotifySecretTarget {
   replaces?: boolean;
 }
 
+/**
+ * A lease card (ui `approve` with this set): an agent asks to lease 1Password references.
+ * Only a desktop starts the lease, since only it can show 1Password's prompt: it reads 1Password,
+ * pushes the lease, then answers `{ approved: true, lease }`. An older screen shows a plain
+ * approve card, and the host refuses its Approve with the next step.
+ */
+export interface NotifyLeaseTarget {
+  project: string;
+  names: string[];
+  /** Set by the host: each name's 1Password reference, as its synced index has it. */
+  references?: Record<string, string>;
+  /** Set by the host: lease length in ms for the project. */
+  lengthMs?: number;
+  /** Set by the host: its own machine name, where the asking agent runs. */
+  machine?: string;
+  /** Set by the host: it can't encrypt at rest, so its copy is held in memory only. */
+  memoryOnly?: boolean;
+  /** A renewal: the lease being extended. */
+  renews?: string;
+}
+
+/** The lease a desktop started for a lease card, sent with its Approve. */
+export interface NotifyLeaseGranted {
+  id: string;
+  expiresAt: string;
+  machines: string[];
+  /** Machines it could not reach, each as "<machine>: <why>"; a renewal reaches them when they reconnect. */
+  refused?: string[];
+}
+
 export interface NotifyChoice {
   label: string;
   detail?: string;
@@ -84,6 +114,12 @@ export interface NotifyQuestion {
   secret?: NotifySecretTarget;
   /** secret only, set by the host: why the last save failed (never contains the value). The card stays waiting for another try. */
   secretError?: string;
+  /** approve only: this card asks to lease 1Password references. */
+  lease?: NotifyLeaseTarget;
+  /** lease only, set by the desktop that tried: why the lease could not start. The card stays waiting. */
+  leaseError?: string;
+  /** lease only, set by the desktop: rises with each finished Start lease attempt, so a screen can end its busy state even when the same error repeats. */
+  leaseAttempt?: number;
   /** Set when the question mirrors a prompt in an agent's terminal (Claude's permission and plan prompts). */
   agentPrompt?: NotifyAgentPrompt;
   /**
@@ -183,6 +219,8 @@ export type NotifyResultBody =
   /** secret: the value was saved as `project/name`; it is never returned. */
   | { status: 'saved'; project: string; name: string }
   | { status: 'declined' }
+  /** lease: the person approved and the desktop leased the secrets; never a value. */
+  | { status: 'leased'; project: string; names: string[]; leaseId: string; expiresAt: string; machines: string[] }
   | { waiting: true; id: string; next: string }
   | { unavailable: string; next: string };
 
@@ -339,6 +377,11 @@ export interface NotifyItem extends NotifyQuestion {
   machine?: string;
   /** Epoch ms when a snoozed question comes back to the strip. */
   snoozedUntil?: number;
+  /**
+   * Epoch ms the person dismissed it (Dismiss on a card). It still waits in Approvals, but no longer
+   * counts as open for its Session (`isOpenForSession`) until it changes: a new version, Undo or a reopen.
+   */
+  dismissedAt?: number;
   /**
    * Snapshot only, with `machine`: `local` (this computer) or the saved machine's id. A saved
    * machine's card has the id `<machineId>:<its id there>`, as the glasses key cards.
@@ -583,7 +626,7 @@ export type NotifyAnswer =
    */
   | { picks: string[]; text?: string }
   | { choice: string; note?: string }
-  | { approved: boolean; note?: string }
+  | { approved: boolean; note?: string; lease?: NotifyLeaseGranted }
   | { text: string };
 
 export type NotifyCommand =
@@ -599,6 +642,8 @@ export type NotifyCommand =
   | { type: 'ask-agent'; id: string }
   /** Approvals: open the item's link `index` as a tab of `paneId` (the Pane shown beside it), else of the asking Pane. */
   | { type: 'open-link'; id: string; index: number; paneId?: string }
+  /** A link in a card's text: opens where Settings > Links says, beside the asking Pane by default. */
+  | { type: 'open-url'; id: string; url: string }
   | { type: 'hover-info'; id: string; hovering: boolean }
   | { type: 'pause'; minutes: number }
   | { type: 'resume' }
@@ -628,7 +673,7 @@ export interface NotifyFixCommand {
  * Where main asks the window to go. `toggle-inbox` is the Notify shortcut
  * pressed while Pane is in front: Approvals, or back to where you were (D-251).
  */
-export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string } | { askAgent: string };
+export type NotifyNavigateTarget = 'inbox' | 'toggle-inbox' | 'settings' | { approval: string } | { askAgent: string } | { link: string; paneId: string };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {

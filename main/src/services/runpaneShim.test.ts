@@ -11,6 +11,7 @@ import {
   PANE_MANAGED_SHIM_MARKER,
   withRunpaneBinOnPath,
   withRunpaneOnPath,
+  writeBrowserShim,
   type RunpaneShimState,
   type WindowsUserPath,
 } from './runpaneShim';
@@ -359,8 +360,48 @@ describe.each([
   });
 });
 
+/**
+ * BROWSER in Pane's terminals, run as gh or Python's webbrowser run it: one URL argument. A fake
+ * CLI records what it was asked, and a fake `open` stands in for the system browser.
+ */
+describe.skipIf(process.platform === 'win32')('pane-browser', () => {
+  const url = 'https://github.com/acme/app/pull/12?files=1&w=1#diff-%20a';
+
+  function run(cliExit: number) {
+    fs.writeFileSync(bundledCliPath, `require('fs').writeFileSync(process.env.PANE_TEST_LOG, process.argv.slice(2).join(' ')); process.exit(${cliExit});\n`);
+    const state = install();
+    return runBrowser(state);
+  }
+
+  function runBrowser(state: RunpaneShimState) {
+    const fakeBin = path.join(root, 'fake bin');
+    fs.mkdirSync(fakeBin, { recursive: true });
+    const openLog = path.join(root, 'opened.txt');
+    const cliLog = path.join(root, 'cli.txt');
+    fs.writeFileSync(path.join(fakeBin, 'open'), `#!/bin/sh\nprintf '%s' "$1" > '${openLog}'\n`, { mode: 0o755 });
+    const result = spawnSync(state.browserPath, [url], { encoding: 'utf8', env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, PANE_TEST_LOG: cliLog } });
+    expect(result.status).toBe(0);
+    const read = (file: string) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
+    return { cli: read(cliLog), opened: read(openLog) };
+  }
+
+  it('opens the link in a Pane tab beside the terminal, with the URL intact', () => {
+    expect(run(0)).toEqual({ cli: `panels open --url ${url} --split --source user --yes`, opened: '' });
+  });
+
+  it('opens the link in the system browser when Pane cannot open the tab', () => {
+    expect(run(1).opened).toBe(url);
+  });
+
+  it('opens links in the system browser when Settings > Links says so', () => {
+    const state = install();
+    writeBrowserShim('system', state, 'darwin');
+    expect(runBrowser(state)).toEqual({ cli: '', opened: url });
+  });
+});
+
 describe('withRunpaneOnPath', () => {
-  const state: RunpaneShimState = { binDir: '/pane/bin', shimPath: '/pane/bin/runpane', zshDotDir: '/pane/shell/zsh', bashRcFile: '/pane/shell/bash/rcfile' };
+  const state: RunpaneShimState = { binDir: '/pane/bin', shimPath: '/pane/bin/runpane', cli: { executable: '/pane/electron', script: '/pane/bin/runpane.cjs' }, browserPath: '/pane/bin/pane-browser', zshDotDir: '/pane/shell/zsh', bashRcFile: '/pane/shell/bash/rcfile' };
   const env = { PATH: '/usr/bin:/pane/bin:/bin', HOME: '/home/me' };
 
   it('leaves the launch untouched without an installed shim', () => {
@@ -393,7 +434,9 @@ describe('withRunpaneOnPath', () => {
   it('only prepends PATH on Windows and for non-interactive commands', () => {
     const win = withRunpaneOnPath({ name: 'bash', args: ['-i'] }, { PATH: 'C:\\Windows' }, { ...state, binDir: 'C:\\pane\\bin' }, 'win32');
     expect(win).toEqual({ args: ['-i'], env: { PATH: 'C:\\pane\\bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane', AGENT_FARM_SESSION_HOOK: '/pane/bin/runpane' } });
-    expect(withRunpaneBinOnPath({ PATH: '/usr/bin' }, state, 'linux')).toEqual({ PATH: '/pane/bin:/usr/bin', PANE_RUNPANE_BIN: '/pane/bin/runpane' });
+    expect(withRunpaneBinOnPath({ PATH: '/usr/bin' }, state, 'linux')).toEqual({ PATH: '/pane/bin:/usr/bin', PANE_RUNPANE_BIN: '/pane/bin/runpane', BROWSER: '/pane/bin/pane-browser' });
+    // Windows tools hand BROWSER the URL unquoted, which a batch file would split at `&`.
+    expect(withRunpaneBinOnPath({ PATH: 'C:\\Windows' }, state, 'win32')).toEqual({ PATH: '/pane/bin;C:\\Windows', PANE_RUNPANE_BIN: '/pane/bin/runpane' });
   });
 });
 

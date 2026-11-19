@@ -16,6 +16,7 @@ import { QueuedBodies } from './queuedBodies';
 import { agentConfig, agentLabel } from '../../../../shared/agents';
 import { chatPausedViewSchema } from '../../../../shared/types/chatTabDecoders';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
+import { sessionMovingError } from '../../../../shared/types/sessionMove';
 import { CHAT_STALL_MS, chatMidTurn, isRunpaneWait } from '../agentStatus/midTurn';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
@@ -303,6 +304,9 @@ export class ChatTabManager {
 
   /** Starts the tab's agent once; concurrent callers share the same start. */
   ensure(panelId: string): Promise<void> {
+    const moving = this.options.store.state(panelId)?.paused;
+    // Only the move itself starts a tab it stopped (`releaseMove`).
+    if (moving?.by === 'move') return Promise.reject(sessionMovingError(moving));
     const tab = this.tab(panelId);
     if (tab.runtime?.isAlive()) return Promise.resolve();
     // A send or open during a pause starts the agent once the pause has stopped it.
@@ -323,6 +327,35 @@ export class ChatTabManager {
       this.drain(panelId);
     });
     return tab.starting;
+  }
+
+  /** A Session move: stops the tab (interrupting its turn when `interrupt`) and marks it moving. */
+  async pauseForMove(panelId: string, mark: TerminalPausedMark, interrupt: boolean): Promise<void> {
+    const state = this.options.store.state(panelId);
+    const tab = this.tabs.get(panelId);
+    if (!state) return;
+    if (interrupt && this.busy(panelId)) await this.cancel(panelId).catch(() => undefined);
+    if (!tab?.runtime?.isAlive()) {
+      this.update(panelId, current => ({ ...current, paused: mark }));
+      this.publish(panelId);
+      return;
+    }
+    await this.stopForPause(panelId, tab, mark);
+  }
+
+  /** Ends a move's hold on a tab that wasn't running, without starting it. */
+  async clearMoveHold(panelId: string): Promise<void> {
+    if (this.options.store.state(panelId)?.paused?.by !== 'move') return;
+    this.update(panelId, current => ({ ...current, paused: undefined }));
+    this.publish(panelId);
+  }
+
+  /** Ends a move's hold on the tab and starts it again (cancelled move, or arrived on this machine). */
+  async releaseMove(panelId: string): Promise<void> {
+    if (this.options.store.state(panelId)?.paused?.by !== 'move') return;
+    this.update(panelId, current => ({ ...current, paused: undefined }));
+    this.publish(panelId);
+    await this.ensure(panelId);
   }
 
   async restart(panelId: string): Promise<void> {
@@ -355,6 +388,7 @@ export class ChatTabManager {
     if (request.images?.some(image => !/^image\/(png|jpeg|webp|gif)$/.test(image.mimeType) || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data))) {
       throw new PaneError('CHAT_IMAGE_UNSUPPORTED', 'An attachment is not a PNG, JPEG, WebP or GIF image. Nothing was sent.', 'Attach a supported image, or send text only.');
     }
+    if (state.paused?.by === 'move') throw sessionMovingError(state.paused);
     if (state.status === 'stopped') {
       throw new PaneError('CHAT_STOPPED', `This chat is stopped${state.problem ? `: ${state.problem.message}` : '.'} Nothing was sent.`, state.problem?.next ?? 'Press Restart to start it again.');
     }
@@ -653,6 +687,8 @@ export class ChatTabManager {
     tab.transcript?.dispose();
     tab.transcript = undefined;
     tab.notice = undefined;
+    // A new agent process runs none of the old one's tool calls (one that died mid-call never ended them).
+    tab.toolsRunning = undefined;
     const generation = tab.generation;
     // A resume from pause reads as idle while it starts; a crash Restart does not (watch must not see READY early).
     tab.resuming = !!this.required(panelId).paused;
@@ -679,7 +715,8 @@ export class ChatTabManager {
       generation,
       onUpdate: update => {
         this.lastUpdateAt = tab.activeAt = Date.now();
-        trackToolCall(tab, update);
+        // A replayed call is history: one it left open (Pane quit mid-call) runs in no turn now.
+        if (!tab.loading) trackToolCall(tab, update);
         let event: ChatTabEvent | undefined;
         try { event = transcript.accept(update); }
         catch (error) {
@@ -878,6 +915,9 @@ export class ChatTabManager {
       tab.ownTurnStartedAt = undefined;
       if (marker && !tab.loading) this.options.send('chat-tab:event', marker);
     }
+    // A tool call the turn left open is over with it, unless a prompt is still in flight: its
+    // calls share the map, and its own end forgets them.
+    if (outcome !== 'started' && !tab.delivering) tab.toolsRunning = undefined;
     if (tab.loading) return;
     this.publish(panelId);
     if (outcome !== 'started') this.drain(panelId);

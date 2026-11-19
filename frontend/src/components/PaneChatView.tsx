@@ -1,6 +1,7 @@
 import { registerRemoteWorkspaceRestore } from '../utils/remoteRestoration';
 import { useApprovalColumnStore } from '../stores/approvalColumnStore';
 import { SessionApprovalColumn, SessionApprovalsButton } from './approvals/SessionApprovals';
+import { openNewSessionApprovals } from './approvals/useSessionApprovals';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Info, List, PanelRight, Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
@@ -23,7 +24,8 @@ import { DropOverlay } from './panels/DropOverlay';
 import { SessionWorkspacePanels } from './SessionWorkspacePanels';
 import { SessionTileLayout, type SessionTileContext } from './SessionTileLayout';
 import { Button } from './ui/Button';
-import { SelectionLoading } from './ui/SelectionLoading';
+import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
+import { Bone, LoadingStatus, Skeleton, SkeletonSwap } from './ui/Skeleton';
 import { Input } from './ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
@@ -42,6 +44,7 @@ import { useSessionWorkspaceLayoutStore } from '../stores/sessionWorkspaceLayout
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { usePanelStore } from '../stores/panelStore';
+import { configuredAgent } from '../../../shared/agents';
 import { useHotkey } from '../hooks/useHotkey';
 import { getPanelIcon } from './panels/panelIcon';
 import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from './InspectorTabs';
@@ -116,14 +119,7 @@ export function PaneChatView() {
 
   const isOpening = legacyLoading || availability === 'idle' || (availability === 'loading' && !hasActiveSessions);
   if (isOpening) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-bg-primary text-text-secondary">
-        <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm">
-          <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" />
-          <span>{availability === 'unavailable' ? 'Opening Pane Chat…' : 'Opening Sessions…'}</span>
-        </div>
-      </div>
-    );
+    return <OpeningSessionSkeleton />;
   }
 
   if (hasActiveSessions) return <SessionWorkspace />;
@@ -369,14 +365,7 @@ function SessionWorkspace() {
   ), [closeTile, dropSession, draggedSessionId, focusTile, toggleTileMaximize]);
 
   if (!layout) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-bg-primary text-text-secondary">
-        <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm">
-          <RefreshCw aria-hidden="true" className="h-4 w-4 animate-spin" />
-          <span>Opening Sessions…</span>
-        </div>
-      </div>
-    );
+    return <OpeningSessionSkeleton />;
   }
 
   // The displayed tree follows intent in this commit. The passive effect above
@@ -573,7 +562,7 @@ function SessionTile({
         />
       ) : (
         <SessionTileFallback
-          name={record?.name}
+          record={record}
           error={loadingSessionId === sessionId && loadingHostId === hostId && loadingVisit === visit ? selectionError ?? error : null}
           isLoading={!selectionError && (loadingSessionId !== sessionId || loadingHostId !== hostId || loadingVisit !== visit || isLoading)}
           chrome={chrome}
@@ -600,27 +589,52 @@ function SessionTile({
   );
 }
 
-function SessionTileFallback({ name, error, isLoading, chrome, onRetry }: {
-  name?: string;
+function SessionTileFallback({ record, error, isLoading, chrome, onRetry }: {
+  record?: OrchestrationSessionRecord;
   error: string | null;
   isLoading: boolean;
   chrome: SessionTileChrome;
   onRetry: () => void;
 }) {
+  const name = record?.name;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <SessionTileHeader name={name ?? 'Session'} chrome={chrome} />
-      <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center">
-        {isLoading ? (
-          <SelectionLoading name={name ?? 'Session'} />
-        ) : (
+      {isLoading ? (
+        <SavedSessionSkeleton record={record} name={name ?? 'Session'} chromeInline={chrome.tiled || Boolean(chrome.inline)} />
+      ) : (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-4 text-center">
           <div>
             <p role="alert" className="text-sm text-text-secondary">{error ?? 'This Session did not open.'}</p>
             <Button type="button" variant="secondary" size="sm" className="mt-3"
               icon={<RefreshCw className="h-4 w-4" />} onClick={onRetry}>Retry</Button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The agent tab's title, as the host names it, for a Session not open yet. */
+function agentTabTitle(record: OrchestrationSessionRecord | undefined): string {
+  return record ? `${record.name} · ${configuredAgent(record.agent).title}` : 'Session';
+}
+
+/** A Session's workspace skeleton, in the layout this window last showed it with. */
+function SavedSessionSkeleton({ record, name, chromeInline }: { record?: OrchestrationSessionRecord; name: string; chromeInline: boolean }) {
+  const internalId = record?.internalSessionId;
+  const layout = usePanelStore(state => (internalId ? state.layouts[internalId] : undefined));
+  const panels = usePanelStore(state => (internalId ? state.panels[internalId] : undefined));
+  return <SessionWorkspaceSkeleton name={name} tabTitle={agentTabTitle(record)} agentPanelId={record?.panelIds[record.agent]}
+    chain={internalId} layout={layout} panels={panels} chromeInline={chromeInline} />;
+}
+
+/** Before the Sessions list arrives: the selected Session's workspace, if it is known yet. */
+function OpeningSessionSkeleton() {
+  const record = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId));
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary">
+      <SavedSessionSkeleton record={record} name={record?.name ?? 'Sessions'} chromeInline={false} />
     </div>
   );
 }
@@ -871,6 +885,8 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
   }, [onOverviewUpdate]);
 
   const approvalOpen = useApprovalColumnStore(state => state.open[`session:${view.session.id}`] !== undefined);
+  // A new approval opens beside the chat on its own; shown inside another approval's column, it doesn't (D-114).
+  useEffect(() => (chrome.inline ? undefined : openNewSessionApprovals(view.session.id, view.panel.id)), [chrome.inline, view.session.id, view.panel.id]);
   const sessionControls = (<>
     {/* Shown inside another approval's column (its origin tab), the Session doesn't open approvals of its own. */}
     {!chrome.inline && <SessionApprovalsButton sessionId={view.session.id} />}
@@ -1006,7 +1022,7 @@ interface SessionOverviewPanelProps {
 const OVERVIEW_ACTION = 'rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive';
 
 /**
- * The Overview tab. With a status page in the Session folder it shows the page under this
+ * The Overview tab, first in the Session's right split. With a status page in the Session folder it shows the page under this
  * header, and Show Session details brings back the record below; without one it is the record alone.
  */
 function SessionOverviewPanel({ record, folderSessionId, overview, error, onRefresh, onUpdate, onRetry }: SessionOverviewPanelProps) {
@@ -1056,7 +1072,7 @@ function SessionOverviewPanel({ record, folderSessionId, overview, error, onRefr
           <button type="button" aria-label="Refresh Session overview" title="Refresh" onClick={() => void onRefresh()} className={OVERVIEW_ACTION}><RefreshCw className="h-3.5 w-3.5" /></button>
           <button type="button" aria-label={editing ? 'Cancel renaming Session' : 'Rename Session'} title={editing ? 'Cancel renaming' : 'Rename Session'} onClick={() => setEditing(value => !value)} className={OVERVIEW_ACTION}>{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</button>
           {statusPage && <>
-            <button type="button" aria-label="Open beside chat" title="Open beside chat" className={OVERVIEW_ACTION}
+            <button type="button" aria-label="Open as a browser tab" title="Open as a browser tab" className={OVERVIEW_ACTION}
               onClick={() => void openBesideChat(folderSessionId, statusPage).catch((cause: unknown) => console.error('[SessionOverview] Did not open the status page beside chat:', cause))}>
               <PanelRight className="h-3.5 w-3.5" />
             </button>
@@ -1108,10 +1124,11 @@ function SessionOverviewPanel({ record, folderSessionId, overview, error, onRefr
 
         <div>
           <h3 className={OVERVIEW_HEADING}>Associated Panes</h3>
-          {!overview && !error && <p className="text-text-muted">Loading live state…</p>}
           {error && <div className="space-y-1"><p role="alert" className="text-status-error">{error}</p><button type="button" className="underline text-text-secondary" onClick={onRetry}>Retry</button></div>}
-          {overview?.panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
-          {overview?.panes.map(pane => <PaneOverviewCard key={pane.paneId} pane={pane} />)}
+          {!error && <SkeletonSwap loading={!overview} skeleton={<><LoadingStatus label="Loading the Session's Panes" /><PaneCardsSkeleton /></>}>
+            {overview?.panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
+            {overview?.panes.map(pane => <PaneOverviewCard key={pane.paneId} pane={pane} />)}
+          </SkeletonSwap>}
         </div>
 
         <div className="border-t border-border-primary pt-3">
@@ -1140,9 +1157,9 @@ function SessionChangesPanel({ overview, error, onRetry }: {
   const panes = overview?.panes ?? [];
 
   return (
-    <div className="space-y-2 p-3 text-[12px] text-text-secondary">
+    <div className="flex flex-col gap-2 p-3 text-[12px] text-text-secondary">
       {error && <div role="alert" className="space-y-1"><p className="text-status-error">{error}</p><button type="button" className="underline" onClick={onRetry}>Retry</button></div>}
-      {!overview && !error && <p className="text-text-muted">Loading Panes…</p>}
+      {!error && <SkeletonSwap loading={!overview} skeleton={<><LoadingStatus label="Loading the Session's Panes" /><PaneChangeRowsSkeleton /></>}>
       {overview && panes.length === 0 && <p className="text-text-muted">No Panes in this Session yet.</p>}
       {panes.map(pane => (
         <div key={pane.paneId} className="rounded-md bg-surface-secondary px-2 py-2">
@@ -1164,7 +1181,36 @@ function SessionChangesPanel({ overview, error, onRetry }: {
           ) : null}
         </div>
       ))}
+      </SkeletonSwap>}
     </div>
+  );
+}
+
+/** Two of PaneOverviewCard's cards: the Pane's name and its branch line. */
+function PaneCardsSkeleton() {
+  return (
+    <Skeleton>
+      {[40, 55].map(width => (
+        <div key={width} className="mt-2 rounded border border-border-primary bg-surface-secondary p-2">
+          <div className="flex h-5 items-center"><Bone className="h-3" style={{ width: `${width}%` }} /></div>
+          <div className="flex h-[15px] items-center"><Bone className="h-2" style={{ width: `${width - 15}%` }} /></div>
+        </div>
+      ))}
+    </Skeleton>
+  );
+}
+
+/** Two of SessionChangesPanel's Pane rows: name and Open Pane, then the changes line. */
+function PaneChangeRowsSkeleton() {
+  return (
+    <Skeleton className="space-y-2">
+      {[45, 60].map(width => (
+        <div key={width} className="rounded-md bg-surface-secondary px-2 py-2">
+          <div className="flex h-[18px] items-center justify-between gap-2"><Bone className="h-3" style={{ width: `${width}%` }} /><Bone className="h-3 w-14" /></div>
+          <div className="mt-1 flex h-4 items-center"><Bone className="h-2.5 w-2/3" /></div>
+        </div>
+      ))}
+    </Skeleton>
   );
 }
 

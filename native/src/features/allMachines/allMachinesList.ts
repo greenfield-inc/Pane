@@ -27,6 +27,28 @@ export interface MachineFeed {
   snapshot: MachineSnapshot | undefined;
   /** Set while the machine can't be reached: its rows are from this time, and are drawn dimmed. */
   offlineSince?: number;
+  /** The machine the phone is on answers list by list: which lists are still on their way. */
+  waiting?: { lists: boolean; approvals: boolean };
+  /** It answers, but its list couldn't be read. */
+  error?: string;
+}
+
+/**
+ * Whether every machine's lists, and every machine's approvals, have answered. An offline machine
+ * counts with its last-known rows; with none it counts as unreachable, adding nothing, once another
+ * machine has rows, so one asleep computer never holds up All. One whose lists failed counts its
+ * lists. Until then a count shows a dash and "Nothing needs you" waits, so a list on its way, or a
+ * lone machine that is offline and never seen, never reads as zero.
+ */
+export function feedsAnswered(feeds: readonly MachineFeed[]): { lists: boolean; approvals: boolean } {
+  const anyRows = feeds.some(feed => feed.snapshot !== undefined);
+  const answered = (feed: MachineFeed, part: 'lists' | 'approvals') => (feed.offlineSince !== undefined && anyRows)
+    || (part === 'lists' && feed.error !== undefined)
+    || (feed.snapshot !== undefined && !feed.waiting?.[part]);
+  return {
+    lists: feeds.every(feed => answered(feed, 'lists')),
+    approvals: feeds.every(feed => answered(feed, 'approvals')),
+  };
 }
 
 interface RowBase {

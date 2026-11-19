@@ -11,6 +11,9 @@ import { useConfigStore } from '../src/stores/configStore';
 import { useNotifyStore } from '../src/stores/notifyStore';
 import { useNavigationStore } from '../src/stores/navigationStore';
 import { useHotkeyStore } from '../src/stores/hotkeyStore';
+import { openSessionApproval, useApprovalColumnStore } from '../src/stores/approvalColumnStore';
+import { KeySequenceHint } from '../src/components/KeySequenceHint';
+import { sessionApprovals } from '../src/components/approvals/approvalCard';
 import type { AppConfig } from '../src/types/config';
 import '../src/index.css';
 
@@ -29,7 +32,14 @@ const api = {
 // resolves a benign empty reply.
 Object.defineProperty(window, 'electronAPI', { configurable: true, value: new Proxy(api, { get: (target, key) => (key in target ? target[key as keyof typeof target] : defaultMethod) }) });
 
-const source = { name: 'plan-keyboard-approvals', agent: 'Claude' };
+const surface = new URLSearchParams(location.search).get('surface');
+// The Session chat surface (?surface=session): its approvals belong to Session `plans`;
+// with &waiting=none, nothing in it waits.
+const SESSION_ID = 'plans';
+const nothingWaiting = new URLSearchParams(location.search).get('waiting') === 'none';
+const source = surface === 'session' && !nothingWaiting
+  ? { name: 'plan-keyboard-approvals', agent: 'Claude', session: { id: SESSION_ID, name: 'Pane UI/UX improvements', paneId: 'plans-pane' } }
+  : { name: 'plan-keyboard-approvals', agent: 'Claude' };
 const twoQuestions: NotifyItem = {
   id: 'q12', ui: 'options', title: 'Q-12: Which key opens the keyboard shortcut sheet?', context: '⌘/ follows VS Code-style apps.',
   questions: [
@@ -88,11 +98,31 @@ function Column() {
   );
 }
 
-const surface = new URLSearchParams(location.search).get('surface');
+/** A Session's chat with its approval column beside it, as SessionWorkspacePanels lays them out. */
+function SessionChat() {
+  const open = useApprovalColumnStore((state) => state.open[`session:${SESSION_ID}`]);
+  return (
+    <div className="flex h-screen" data-session-content-id={SESSION_ID}>
+      <div className="flex min-w-0 flex-1" data-focus-region="main">
+        <div className="flex min-w-0 flex-1 flex-col justify-end p-4" data-panel-group-id="chat-group" data-group-focused="true">
+          <textarea aria-label="Chat composer" className="h-20 rounded border border-border-primary bg-surface-primary p-2 text-text-primary" />
+        </div>
+      </div>
+      {open && (
+        <div className="flex w-1/2 min-w-0 border-l border-border-primary" data-focus-region="approvals">
+          <ApprovalColumn surface={`session:${SESSION_ID}`} itemId={open.itemId} order={sessionApprovals(items, SESSION_ID).map((item) => item.id)} onSelect={(id) => openSessionApproval(SESSION_ID, id)} groupLabel="Pane UI/UX improvements approvals" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 if (surface === 'screen') useNavigationStore.setState({ activeView: 'notify' });
+if (surface === 'session') useNavigationStore.setState({ activeView: 'pane-chat' });
 createRoot(document.getElementById('root')!).render(
   <ThemeProvider>
     <Hotkeys />
-    {surface === 'screen' ? <div className="flex h-screen"><ApprovalsView paneView={null} /></div> : <Column />}
+    {surface === 'screen' ? <div className="flex h-screen"><ApprovalsView paneView={null} /></div> : surface === 'session' ? <SessionChat /> : <Column />}
+    <KeySequenceHint />
   </ThemeProvider>,
 );

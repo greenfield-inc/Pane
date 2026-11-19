@@ -20,6 +20,7 @@ import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '.
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import { LoadingStatus } from './ui/Skeleton';
 import { Tooltip } from './ui/Tooltip';
 import { UndoToast } from './ui/UndoToast';
 import { PopoverButton, TerminalPopover } from './terminal/TerminalPopover';
@@ -38,6 +39,7 @@ import { PausedTooltipLines } from './SessionDetailTooltip';
 import { resumeIfOpenResumes, runPauseAction } from '../utils/pause';
 import { usePanelStore } from '../stores/panelStore';
 import { panePausedMark } from '../../../shared/types/panels';
+import { moveMarkLabel } from '../utils/sessionMoveView';
 
 interface OrchestrationSessionNavProps {
   compact?: boolean;
@@ -447,6 +449,9 @@ export function OrchestrationSessionNav({
     const panesId = `orchestration-session-panes-${placement}-${session.id}`;
     const isOpen = activeView === 'pane-chat' && session.id === selectedSessionId;
     const drag = sessionDragProps(session, placement);
+    // Moving and arriving Sessions say so in place of their activity; an arriving one opens once it has arrived.
+    const moveLabel = session.move && session.move.state !== 'moved' ? moveMarkLabel(session.move) : null;
+    const arriving = session.move?.state === 'arriving';
     const loopName = loopsBySessionTarget.get(session.id)?.name;
     const rowButton = (
       <button
@@ -455,17 +460,25 @@ export function OrchestrationSessionNav({
         data-sidebar-item
         data-sidebar-key={`session-${placement}-${session.id}`}
         aria-current={isOpen ? 'page' : undefined}
-        aria-label={isLegacy ? label : `Open Session ${session.name}`}
+        aria-label={isLegacy ? label : `Open Session ${session.name}${moveLabel ? ` (${moveLabel})` : ''}`}
+        aria-disabled={arriving || undefined}
+        title={arriving ? `${moveLabel}: it opens here once it has arrived` : undefined}
         // Dragging a row tiles the Session beside another, the same gesture
         // as dragging a tab, or reorders it within its own list. Repository
         // rows carry only text/plain, so the drags never answer each other.
         {...drag.source}
-        onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
+        onClick={event => { if (arriving) return; openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
         onContextMenu={event => handleSessionContextMenu(event, session)}
         onKeyDown={event => handleSessionKeyDown(event, session, placement)}
         className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
       >
-        {session.paused ? (
+        {moveLabel ? (
+          <>
+            <PausedGlyph size="sm" className="flex-shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-[13px] text-text-muted">{label}</span>
+            <span data-testid="session-move-label" className="max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
+          </>
+        ) : session.paused ? (
           <>
             <PausedGlyph size="sm" className="flex-shrink-0" />
             <span className="min-w-0 flex-1 truncate text-[13px] text-text-muted">{label}</span>
@@ -502,7 +515,7 @@ export function OrchestrationSessionNav({
               {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             </button>
           ) : <span className="ml-1 h-6 w-4 flex-shrink-0" aria-hidden="true" />}
-          {session.paused ? <Tooltip content={<PausedTooltipLines mark={session.paused} />} side="right">{rowButton}</Tooltip> : rowButton}
+          {session.paused && !moveLabel ? <Tooltip content={<PausedTooltipLines mark={session.paused} />} side="right">{rowButton}</Tooltip> : rowButton}
           {/* Same masked hover slot as Pane rows; it covers the activity summary while shown. */}
           <div className={cn(
             'absolute inset-y-0.5 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100',
@@ -557,7 +570,7 @@ export function OrchestrationSessionNav({
         {activeSessions.map(session => {
           const drag = sessionDragProps(session, 'rail');
           return (
-          <Tooltip key={session.id} content={session.paused ? <><p>{session.name}</p><PausedTooltipLines mark={session.paused} /></> : `${session.name} · ${statusLabel(session)}`} side="right">
+          <Tooltip key={session.id} content={session.move && session.move.state !== 'moved' ? `${session.name} · ${moveMarkLabel(session.move)}` : session.paused ? <><p>{session.name}</p><PausedTooltipLines mark={session.paused} /></> : `${session.name} · ${statusLabel(session)}`} side="right">
             <button
               type="button"
               data-testid={sessionTestId(session, 'rail')}
@@ -566,13 +579,14 @@ export function OrchestrationSessionNav({
               title={session.name}
               {...drag.source}
               {...drag.target}
-              onClick={event => { openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
+              aria-disabled={session.move?.state === 'arriving' || undefined}
+              onClick={event => { if (session.move?.state === 'arriving') return; openApprovalsFromCount(event.target, session.id); resumeChatOnOpen(session); void openSession(session.id); }}
               onContextMenu={event => handleSessionContextMenu(event, session)}
               onKeyDown={event => handleSessionKeyDown(event, session, 'rail')}
               className={cn(
                 'flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-interactive',
                 session.id === selectedSessionId ? 'bg-surface-selected text-text-primary' : 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary',
-                session.paused && 'text-text-disabled',
+                (session.paused || session.move) && 'text-text-disabled',
                 // The drop line is drawn outside the item, so it takes no room and moves nothing.
                 drag.indicator && 'relative before:pointer-events-none before:absolute before:inset-x-1 before:h-0.5 before:rounded-full before:bg-interactive before:content-[""]',
                 drag.indicator === 'before' && 'before:-top-[3px]',
@@ -666,13 +680,7 @@ export function OrchestrationSessionNav({
           >
             <span className="flex min-w-0 items-center gap-1.5">
               <span className="truncate">Sessions</span>
-              <span
-                className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center"
-                role={availability === 'loading' ? 'status' : undefined}
-                aria-label={availability === 'loading' ? 'Loading Sessions' : undefined}
-              >
-                {availability === 'loading' && <RefreshCw aria-hidden="true" className="h-3 w-3 animate-spin text-text-muted" />}
-              </span>
+              {availability === 'loading' && <LoadingStatus label="Loading Sessions" />}
             </span>
             <span className="flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-visible/section:opacity-100">
               {sectionExpanded ? (

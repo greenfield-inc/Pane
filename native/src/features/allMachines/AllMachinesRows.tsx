@@ -25,8 +25,6 @@ const STALE_OPACITY = 0.45;
 export interface AllMachinesFeed extends MachineFeed {
   /** Reads the machine again now. */
   retry(): void;
-  /** It answers, but its list couldn't be read: the reason, shown with Try again. */
-  error?: string;
 }
 
 /** Pin, pause and archive on the machine the phone is on; other machines' rows don't swipe. */

@@ -17,9 +17,12 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 - Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x); `.nvmrc` pins 22.23.4. Use pnpm 10. Setup `pnpm run setup`; run
   `PANE_DIR=~/.pane_test pnpm dev` (not `electron-dev`: its watcher overwrites
   the bundled preload). Build the local CLI with `pnpm --filter runpane build`.
+- `pnpm run setup` installs a pre-push hook (`scripts/pre-push.mjs`) that
+  lints the pushed files and runs `pnpm typecheck` in a few seconds;
+  `git push --no-verify` skips it.
 - Before a push: `pnpm check:fast` (type check, lint, offline links when
-  lychee is installed, renderer test types, and the unit tests your changes
-  reach), plus any other tests your change touches.
+  lychee is installed, and the unit tests your changes reach), plus any other
+  tests your change touches.
   Agent facts (ids, executables, modes, versions, env var names) live in
   `contracts/runpane/contract.json` `agents`; read them through
   `shared/agents.ts`, never as literals. `pnpm lint` (and CI) fails on one;
@@ -54,6 +57,14 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   first, and keep refits hidden behind its loading overlay (`isRefreshing`).
 - UI: theme tokens only; swapping indicators share a fixed-size box; animations
   on one surface share a period.
+- Unit test cleanup: Vitest runs many test files in one worker, in shuffled
+  file order. A test file leaves the process as it found it: real timers,
+  `process.env` (use `vi.stubEnv`), globals (use `vi.stubGlobal`),
+  `process.platform` and `process.arch`, and the working directory. The setup
+  files (`main/src/test/setup.ts`, `frontend/src/test/setup.ts`) reset modules
+  and `process` listeners between files and fail any file that leaves the rest
+  behind. To replay a run's order, pass the seed it prints:
+  `vitest run --sequence.seed=<seed>`.
 - Errors say what happened, why, what changed, and the next step: throw
   `PaneError` (main) or `RunpaneError` (CLI) with a `code` and `next`. See
   [How Pane reports errors](CONTRIBUTING.md#how-pane-reports-errors).
@@ -86,6 +97,8 @@ When you need the person (a choice, an approval, a short answer), call the `noti
 To free disk or memory, run `runpane machine health` and delete only with `runpane machine cleanup` (a dry run until `--yes`), never `rm`. Put QA roots and test instances in the Pane's scratch folder (`$PANE_SCRATCH_DIR`).
 
 Loops: before `runpane loops create` or `loops update`, read its `--help`. A loop runs while the person is away, so it reaches them only through cards that wait, keeps a ledger so it never repeats itself, and keeps its prompt in a file.
+
+Profiles: a profile is a team of agents and a fixed workflow in one file. Once Profiles is on (Settings › Advanced › Profiles), `runpane profiles list` shows them, `profiles launch <name> --prompt <text> --yes` runs one (Pane opens each step as a tab), and an agent in a profile step ends it with `"$PANE_RUNPANE_BIN" report --outcome "<outcome>"`, using one of the outcomes its first message lists.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 

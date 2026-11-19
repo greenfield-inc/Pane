@@ -16,6 +16,7 @@ import { THIS_COMPUTER, type MachineEntry } from '../../../utils/machineList';
 import { cn } from '../../../utils/cn';
 import { ipcErrorMessage } from '../../../utils/ipcErrorMessage';
 import { Dropdown } from '../../ui/Dropdown';
+import { Bone, Skeleton, LoadingStatus, useSkeletonHold } from '../../ui/Skeleton';
 import { computerRelayId } from '../../../../../shared/types/remoteComputers';
 import { relayCarrier } from '../../../utils/relayCarrier';
 import type { RemoteDaemonClientRecord } from '../../../../../shared/types/remoteDaemon';
@@ -198,10 +199,8 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
         ))}
       </div>
 
+      {controller.loading && <LoadingStatus label="Loading Remote Pane status" />}
       <div role="tabpanel" id={`remote-panel-${tab}`} aria-labelledby={`remote-tab-${tab}`} className="space-y-8">
-        {controller.loading && (
-          <p className="text-sm text-text-tertiary" aria-live="polite">Loading Remote Pane status...</p>
-        )}
         {controller.error && (
           <ErrorBanner message={controller.error}>
             <Button type="button" variant="secondary" size="sm" onClick={() => void controller.reload()}>Retry</Button>
@@ -459,6 +458,12 @@ function PhoneRows({ controller, here }: { controller: RemoteAccessController; h
   const recordIds = new Set(records.map((client) => client.id));
   const unpaired = live.filter((client) => !client.clientId || !recordIds.has(client.clientId));
   const lastUsed = (at?: string) => (at ? `Last used ${new Date(at).toLocaleString()}` : 'Never used');
+  const empty = paired.length === 0 && unpaired.length === 0;
+  // Rows stay direct children of the card, whose divide-y draws the lines between them.
+  const { holding, reveal } = useSkeletonHold(empty && controller.loading);
+  const rowClass = reveal ? 'skeleton-reveal' : undefined;
+
+  if (holding) return <PhoneRowSkeleton />;
 
   return (
     <>
@@ -466,7 +471,7 @@ function PhoneRows({ controller, here }: { controller: RemoteAccessController; h
         const connected = live.some((entry) => entry.clientId === client.id);
         const detail = [connected ? 'Connected now' : lastUsed(client.lastUsedAt), client.linkedBy && `Added by ${client.linkedBy}`].filter(Boolean).join(' · ');
         return (
-          <PhoneRow key={client.id} title={client.label} detail={detail}>
+          <PhoneRow key={client.id} title={client.label} detail={detail} className={rowClass}>
             {connected && <Button type="button" variant="ghost" size="sm" disabled={controller.busy} onClick={() => controller.disconnectClients([client.id])}>Disconnect</Button>}
             <Dropdown
               menuLabel={`Remove ${client.label}`}
@@ -503,23 +508,39 @@ function PhoneRows({ controller, here }: { controller: RemoteAccessController; h
         );
       })}
       {unpaired.map(({ id, clientId, deviceLabel, label, remoteAddress }) => (
-        <PhoneRow key={id} title={deviceLabel ?? label ?? remoteAddress ?? 'A device'} detail="Connected now">
+        <PhoneRow key={id} title={deviceLabel ?? label ?? remoteAddress ?? 'A device'} detail="Connected now" className={rowClass}>
           {clientId && (
             <Button type="button" variant="ghost" size="sm" disabled={controller.busy} onClick={() => controller.disconnectClients([clientId])}>Disconnect</Button>
           )}
         </PhoneRow>
       ))}
-      {paired.length === 0 && unpaired.length === 0 && (
-        <p className={`text-sm text-text-tertiary ${CARD_ROW}`}>No phones yet. Pair one to use Pane from anywhere.</p>
+      {empty && (
+        <p className={cn('text-sm text-text-tertiary', CARD_ROW, rowClass)}>No phones yet. Pair one to use Pane from anywhere.</p>
       )}
       {outcome && <p className={`text-xs text-text-secondary ${CARD_ROW}`} role="status">{outcome}</p>}
     </>
   );
 }
 
-function PhoneRow({ title, detail, children }: { title: string; detail: string; children: ReactNode }) {
+/** A PhoneRow while the paired phones load. */
+function PhoneRowSkeleton() {
   return (
-    <div className={cn('flex items-center justify-between gap-3', CARD_ROW)}>
+    <Skeleton className={cn('flex items-center justify-between gap-3', CARD_ROW)}>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-surface-secondary"><Bone className="h-4 w-4" /></span>
+        <div className="min-w-0 flex-1">
+          <div className="flex h-5 items-center"><Bone className="h-3.5 w-32" /></div>
+          <div className="flex h-4 items-center"><Bone className="h-3 w-44" /></div>
+        </div>
+      </div>
+      <Bone className="h-8 w-20 rounded-button" />
+    </Skeleton>
+  );
+}
+
+function PhoneRow({ title, detail, className, children }: { title: string; detail: string; className?: string; children: ReactNode }) {
+  return (
+    <div className={cn('flex items-center justify-between gap-3', CARD_ROW, className)}>
       <div className="flex min-w-0 items-center gap-3">
         <span className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-surface-secondary text-text-secondary" aria-hidden="true">
           <Smartphone className="h-4 w-4" />

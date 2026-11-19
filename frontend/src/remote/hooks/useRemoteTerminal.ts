@@ -31,6 +31,9 @@ const terminalOutputPayloadSchema = boundary.object({
 const VISIBILITY_REFRESH_MS = 60_000;
 const TERMINAL_VIEWER_ID = getTerminalViewerId();
 
+/** Where the phone's terminal is: loading (a skeleton shows), ready, or stopped by a problem the person should read. */
+type RemoteTerminalStatus = { kind: 'loading' } | { kind: 'ready' } | { kind: 'problem'; message: string };
+
 export function useRemoteTerminal({
   adapter,
   panel,
@@ -43,7 +46,8 @@ export function useRemoteTerminal({
   const caretRestingRef = useCommittedRef(caretResting);
   const snapshotGenerationRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const [statusText, setStatusText] = useState('Starting terminal...');
+  // Loading shows a terminal skeleton; only a problem gets words.
+  const [status, setStatus] = useState<RemoteTerminalStatus>({ kind: 'loading' });
   const connectedRef = useRef(connectionStatus === 'connected');
   useEffect(() => {
     connectedRef.current = connectionStatus === 'connected';
@@ -57,7 +61,7 @@ export function useRemoteTerminal({
     try {
       await adapter.sendTerminalInput(panel.id, data);
     } catch (error) {
-      setStatusText(error instanceof Error ? error.message : 'Failed to send input');
+      setStatus({ kind: 'problem', message: error instanceof Error ? error.message : 'Failed to send input' });
       throw error;
     }
   }, [adapter, panel.id]);
@@ -66,7 +70,7 @@ export function useRemoteTerminal({
     terminalRef.current?.clear();
     terminalRef.current?.focus();
     void adapter.clearTerminalScrollback(panel.id).catch(error => {
-      setStatusText(error instanceof Error ? error.message : 'Failed to reset terminal');
+      setStatus({ kind: 'problem', message: error instanceof Error ? error.message : 'Failed to reset terminal' });
     });
   };
 
@@ -128,7 +132,7 @@ export function useRemoteTerminal({
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
-    setStatusText('Connecting to terminal...');
+    setStatus({ kind: 'loading' });
 
     const fitTerminal = () => {
       if (!container.isConnected || container.clientWidth <= 0 || container.clientHeight <= 0) {
@@ -189,11 +193,11 @@ export function useRemoteTerminal({
         fitTerminal();
         await adapter.setTerminalVisibility(panel.id, true, TERMINAL_VIEWER_ID);
         if (owns()) {
-          setStatusText('Connected');
+          setStatus({ kind: 'ready' });
         }
       } catch (error) {
         if (owns()) {
-          setStatusText(error instanceof Error ? error.message : 'Terminal failed to initialize');
+          setStatus({ kind: 'problem', message: error instanceof Error ? error.message : 'Terminal failed to initialize' });
         }
       }
     };
@@ -223,13 +227,13 @@ export function useRemoteTerminal({
     if (!terminal || signal.aborted) return;
     const generation = ++snapshotGenerationRef.current;
     const owns = () => !signal.aborted && terminalRef.current === terminal && snapshotGenerationRef.current === generation;
-    setStatusText('Restoring terminal…');
+    setStatus({ kind: 'loading' });
     try {
       if (!await hydrateTerminal(terminal, owns)) return;
       await adapter.setTerminalVisibility(panel.id, true, TERMINAL_VIEWER_ID);
-      if (owns()) setStatusText('Connected');
+      if (owns()) setStatus({ kind: 'ready' });
     } catch (error) {
-      if (owns()) setStatusText(error instanceof Error ? error.message : 'Terminal snapshot failed; reconnect to retry.');
+      if (owns()) setStatus({ kind: 'problem', message: error instanceof Error ? error.message : 'Terminal snapshot failed; reconnect to retry.' });
     }
   }), [adapter, panel.id, hydrateTerminal]);
 
@@ -238,7 +242,12 @@ export function useRemoteTerminal({
     void adapter.setTerminalVisibility(panel.id, true, TERMINAL_VIEWER_ID).catch(() => {});
   }, [adapter, connectionStatus, panel.id]);
 
-  return { containerRef, statusText, focusTerminal, sendInput, resetTerminal, scrollLines, scrollToBottom };
+  return {
+    containerRef,
+    loading: status.kind === 'loading',
+    problem: status.kind === 'problem' ? status.message : null,
+    focusTerminal, sendInput, resetTerminal, scrollLines, scrollToBottom,
+  };
 }
 
 function getTerminalViewerId(): string {

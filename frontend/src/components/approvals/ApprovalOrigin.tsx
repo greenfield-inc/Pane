@@ -10,9 +10,11 @@ import { useSessionStore } from '../../stores/sessionStore';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { openOnMachine } from '../../utils/machineRowActions';
 import { PanelContainer } from '../panels/PanelContainer';
+import { TerminalSkeleton } from '../panels/TerminalSkeleton';
 import { SessionBeside } from '../PaneChatView';
 import { MachineContext } from './MachineContext';
 import { besideOf } from './approvalGroups';
+import { LoadingStatus } from '../ui/Skeleton';
 
 /**
  * The column's origin tab in a Session and in Autopilot (D-289): the chat where it was asked,
@@ -79,7 +81,14 @@ function AskingTab({ paneId, panelId }: { paneId: string; panelId?: string }) {
   const panels = stored?.length ? stored : loaded ?? [];
   const panel = panels.find((candidate) => candidate.id === panelId) ?? panels.find((candidate) => candidate.type === 'terminal' || candidate.type === 'chat');
   if (!pane || failed) return <p className="p-6 text-[13px] text-text-tertiary">The Pane that asked isn't open here.</p>;
-  if (!panel) return <p className="p-6 text-[13px] text-text-tertiary">{loaded || stored ? 'Its tab is no longer open.' : 'Loading its tab…'}</p>;
+  if (!panel && (loaded || stored)) return <p className="p-6 text-[13px] text-text-tertiary">Its tab is no longer open.</p>;
+  // An asking tab is an agent's terminal: its screen, from the last time it was shown here.
+  if (!panel) return (
+    <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]">
+      <LoadingStatus label="Loading its tab" />
+      <TerminalSkeleton panelId={panelId} />
+    </div>
+  );
   return (
     <div className="relative min-h-0 flex-1" data-testid="approval-origin-tab">
       <SessionProvider session={pane}>

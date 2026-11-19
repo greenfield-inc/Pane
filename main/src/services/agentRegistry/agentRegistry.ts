@@ -331,7 +331,7 @@ export class AgentRegistry {
 
   /** The entry's icon: its own URL, or the one the registry serves beside its index. */
   private iconUrl(entry: RegistryEntry): string {
-    if (entry.icon && /^https:\/\//.test(entry.icon)) return entry.icon;
+    if (entry.icon?.startsWith('https://')) return entry.icon;
     return new URL(`${entry.id}.svg`, this.options.url).toString();
   }
 

@@ -5,7 +5,7 @@ import { createLoopTestDb } from './loopTestDb';
 import type { LoopInput } from '../../../../shared/types/loop';
 
 // Expected instants are worked for New York (EDT, UTC-4, in October 2026).
-process.env.TZ = 'America/New_York';
+vi.stubEnv('TZ', 'America/New_York');
 
 const utc = (iso: string) => Date.parse(iso);
 

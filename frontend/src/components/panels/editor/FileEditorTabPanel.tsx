@@ -7,7 +7,7 @@ import { createEditorStateWriter } from './editorStateWriter';
 import { usePanelStore } from '../../../stores/panelStore';
 import { editorTitleFor, pinEditorPanel } from '../../../services/openFileInEditor';
 import { FindBar } from '../../find/FindBar';
-import { usePageTextFind } from '../../find/usePageTextFind';
+import { useSurfaceFind } from '../../find/surfaceFind';
 
 interface FileEditorTabPanelProps {
   panel: ToolPanel;
@@ -22,7 +22,7 @@ const FileEditorTabPanel: React.FC<FileEditorTabPanelProps> = ({ panel, isActive
   // Previews (markdown, notebook, tables, the single-file diff) use Pane's
   // find; Monaco keeps its own, and media tabs say there is nothing to search.
   const findRootRef = useRef<HTMLDivElement>(null);
-  usePageTextFind(panel.id, findRootRef);
+  useSurfaceFind(panel.id, findRootRef);
 
   useEffect(() => {
     if (isActive && !panel.state?.hasBeenViewed) {

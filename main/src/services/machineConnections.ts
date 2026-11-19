@@ -10,6 +10,7 @@ import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema }
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '../../../shared/types/remoteDaemon';
 import type { OrchestrationPanelOverview } from '../../../shared/types/orchestrationSession';
 import { configuredAgentSchema } from '../../../shared/agents';
+import { SESSION_MOVE_CHANNELS } from '../../../shared/types/sessionMove';
 import { agentReportFields } from './workspaceJournalSchema';
 import type { RemoteMachineAccess } from './orchestrationSessionManager';
 import { readingMachines } from '../daemon/readingMachines';
@@ -73,7 +74,7 @@ const eventChannels = new Set<string>(MACHINE_EVENT_CHANNELS);
 const isMachineEventChannel = (channel: string): channel is MachineEventChannel => eventChannels.has(channel);
 const itemSchema = boundary.object({ kind: boundary.enumeration('pane', 'session'), id: boundary.nonEmptyString });
 const commandTypeSchema = boundary.object({
-  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session', 'preview-switch-to-chat', 'switch-to-chat', 'submit-to-agent', 'machine-health'),
+  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session', 'preview-switch-to-chat', 'switch-to-chat', 'submit-to-agent', 'machine-health', 'move-session'),
 });
 const commandSchemas = {
   notify: boundary.object({ command: boundary.jsonObject }),
@@ -89,6 +90,7 @@ const commandSchemas = {
   'switch-to-chat': boundary.object({ sessionId: boundary.nonEmptyString, panelIds: boundary.array(boundary.nonEmptyString) }),
   'machine-health': boundary.object({ action: boundary.enumeration(...MACHINE_HEALTH_ACTIONS), request: boundary.jsonObject }),
   'submit-to-agent': boundary.object({ panelId: boundary.nonEmptyString, input: boundary.nonEmptyString }),
+  'move-session': boundary.object({ channel: boundary.enumeration(...Object.values(SESSION_MOVE_CHANNELS)), request: boundary.jsonObject }),
 };
 
 /**
@@ -357,7 +359,7 @@ function toInvocation(command: PaneCommandValue): Invocation {
   if (!type) {
     const named = decodeOptionalBoundary(command, boundary.object({ type: boundary.string }))?.type;
     throw new PaneError('ERR_MACHINE_COMMAND_REFUSED',
-      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, pause, resume, archive, rename, create, switching a Session to chat, asking a Session's agent to hand it off and machine health actions are allowed. Nothing was sent.`,
+      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, pause, resume, archive, rename, create, switching a Session to chat, asking a Session's agent to hand it off, machine health actions and moving a Session are allowed. Nothing was sent.`,
       'Switch to that machine to do this there.');
   }
   try {
@@ -404,6 +406,11 @@ function toInvocation(command: PaneCommandValue): Invocation {
       case 'switch-to-chat': {
         const { sessionId, panelIds } = decodeBoundary(command, commandSchemas['switch-to-chat']);
         return { channel: 'chat-tab:switch-session', args: [sessionId, panelIds] };
+      }
+      case 'move-session': {
+        // The Move dialog in All machines drives a move that machine runs; only the dialog's own calls pass.
+        const { channel, request } = decodeBoundary(command, commandSchemas['move-session']);
+        return { channel, args: [request] };
       }
       case 'machine-health': {
         // The host decodes the request and applies its own tiers and protections.

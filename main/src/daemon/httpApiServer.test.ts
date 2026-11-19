@@ -292,7 +292,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1500): Promise<void
 }
 
 describe('PaneRemoteHttpApiServer', () => {
-  it.each(['mobile:push-status', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke', 'credentials:shared:get', 'credentials:shared:apply', 'notify:switch:get', 'notify:switch:apply'])(
+  it.each(['mobile:push-status', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke', 'credentials:shared:get', 'credentials:shared:apply', 'notify:switch:get', 'notify:switch:apply', 'secrets:lease:push', 'secrets:lease:end', 'secrets:lease:list'])(
     'uses the authenticated client for %s even when extra arguments forge an identity', async channel => {
       const registry = new PaneCommandRegistry();
       const handler = vi.fn(async () => ({ ok: true }));
@@ -384,7 +384,7 @@ describe('PaneRemoteHttpApiServer', () => {
     });
   });
 
-  it.each(['credentials:shared:get', 'credentials:shared:apply'])(
+  it.each(['credentials:shared:get', 'credentials:shared:apply', 'secrets:lease:push', 'secrets:lease:end', 'secrets:lease:list'])(
     'refuses %s when the host does not require pairing, so no unpaired caller reads keys', async channel => {
       const registry = new PaneCommandRegistry();
       const handler = vi.fn(async () => ({}));
@@ -433,6 +433,21 @@ describe('PaneRemoteHttpApiServer', () => {
         result: [{ id: 'session-1' }],
       },
     });
+  });
+
+  it('refuses every Session move call, source and target, from a paired phone', async () => {
+    const registry = new PaneCommandRegistry();
+    for (const channel of ['runpane:sessions:move', 'runpane:sessions:move-check', 'runpane:sessions:move-cancel', 'runpane:move:abort', 'runpane:move:status']) {
+      registry.register(channel, async () => ({ ran: channel }));
+    }
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+
+    for (const channel of ['runpane:sessions:move', 'runpane:sessions:move-check', 'runpane:sessions:move-cancel', 'runpane:move:abort', 'runpane:move:status']) {
+      await expect(requestJson(server, 'POST', '/invoke', { channel, args: [{ sessionId: 's', moveId: 'm' }] }, 'secret-token'))
+        .resolves.toMatchObject({ statusCode: 403, body: { ok: false, error: { code: 'ERR_WORKSPACE_ONLY_COMMAND' } } });
+    }
   });
 
   it('runs machine commands for a computer linked by QR pairing, and refuses them for a paired phone', async () => {
@@ -1698,7 +1713,7 @@ describe('workspace identity mode', () => {
     expect((await requestJson(server, 'POST', invokePath, invoke, undefined, as(owner))).body).toEqual({ ok: true, result: { teammate: null } });
   });
 
-  it.each(['credentials:shared:get', 'credentials:shared:apply'])(
+  it.each(['credentials:shared:get', 'credentials:shared:apply', 'secrets:lease:push', 'secrets:lease:end', 'secrets:lease:list'])(
     'shares keys over %s with the owner only, even when teammates can connect', async (channel) => {
       const registry = new PaneCommandRegistry();
       const handler = vi.fn(async () => ({}));

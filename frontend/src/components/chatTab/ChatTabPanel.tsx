@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore, type Attachment as ComposerAttachment,
+  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Eraser, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission, AgentChatReceipt } from '../../../../shared/types/agentChat';
@@ -30,12 +30,14 @@ import { ChatAttachmentAdapter, dragHasFiles, MAX_IMAGE_BYTES, type SaveChatFile
 import { describeUpload } from '../../utils/hostUpload';
 import type { UploadProgress } from '../../../../shared/chunkedUpload';
 import { ChatCopyButton } from './ChatCopyButton';
+import { draftAttachments, shownComposers } from './chatDrafts';
 import { useChatAgents } from '../../stores/chatAgentsStore';
 import { chatAgentLabel } from '../../../../shared/chatAgentMenu';
 import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import { FindBar } from '../find/FindBar';
-import { usePageTextFind } from '../find/usePageTextFind';
+import { useSurfaceFind } from '../find/surfaceFind';
 import { takeLaunchDraft } from '../../utils/launchOutline';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -183,12 +185,6 @@ export interface ChatTabPanelProps {
   working?: readonly WorkingAgent[];
 }
 
-/**
- * The attachments of each chat's unsent draft, kept with its viewer as the draft text is: the
- * composer is rebuilt when the tab or its Pane is shown again, and they go back into it then.
- */
-const draftAttachments = new WeakMap<ChatTabViewer, readonly ComposerAttachment[]>();
-
 /** The most text one paste puts in the composer, in UTF-16 units (about 1 MiB). */
 const PASTE_LIMIT = 1024 * 1024;
 
@@ -197,6 +193,19 @@ const NO_ACTIONS: ChatTurnActions = {};
 /** How long after the handover an Enter pressed before the chat loaded may still send. */
 const LAUNCH_SEND_MS = 5_000;
 const NO_RENDERING: ChatRendering = {};
+
+/** Two turns shaped like ChatTurnView: the person's bubble, then the reply's lines. */
+function TurnsSkeleton() {
+  return <>
+    <LoadingStatus label="Loading conversation" />
+    <Skeleton className="flex flex-col">
+      {['w-56', 'w-40'].map((bubble, turn) => <div key={turn} className="chat-turn">
+        <Bone className={`self-end h-10 rounded-2xl ${bubble}`} />
+        <div className="flex flex-col gap-2"><Bone className="h-4 w-full" /><Bone className="h-4 w-11/12" /><Bone className="h-4 w-2/3" /></div>
+      </div>)}
+    </Skeleton>
+  </>;
+}
 
 export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile, rendering = NO_RENDERING, stoppedNotice, dock, clearable = true, pr, working: workingOverride }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
@@ -224,7 +233,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   const viewportRef = useRef<HTMLDivElement>(null);
   // ⌘F searches the whole loaded conversation and the cards docked under it (approvals, questions).
   const findRootRef = useRef<HTMLDivElement>(null);
-  usePageTextFind(panelId, findRootRef);
+  useSurfaceFind(panelId, findRootRef);
   const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length, !!snapshot.hasNewer);
   const onViewportScroll = () => {
     recordAnchor();
@@ -386,9 +395,14 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
     }
     const run = restore.current;
     run.mounted += 1;
+    shownComposers.set(viewer, composer);
     // Sending empties the composer's attachments, and with them the saved ones.
     const unsubscribe = composer.subscribe(() => { if (run.done) save(); });
-    return () => { run.mounted -= 1; unsubscribe(); };
+    return () => {
+      run.mounted -= 1;
+      unsubscribe();
+      if (shownComposers.get(viewer) === composer) shownComposers.delete(viewer);
+    };
   }, [runtime, viewer]);
   // The launch outline's message box (index.html) hands over as this tab first paints: its text and
   // caret, focus when it had it, and an Enter pressed before the chat loaded, which sends that text
@@ -554,10 +568,12 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {view?.clearedAt && (snapshot.transcript?.start ?? 0) === 0 && <ClearedDivider at={view.clearedAt} />}
-          {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
-          <ChatBlocksContext.Provider value={rendering}>
-            {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
-          </ChatBlocksContext.Provider>
+          {!snapshot.transcript && !view?.problem && (view?.status === 'starting' || !view) && <p role="status" className="chat-notice">Starting {agentName}…</p>}
+          <SkeletonSwap loading={!snapshot.transcript && !view?.problem && !!view && view.status !== 'starting'} skeleton={<TurnsSkeleton />}>
+            <ChatBlocksContext.Provider value={rendering}>
+              {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} waiting={waiting} actions={actions} />)}
+            </ChatBlocksContext.Provider>
+          </SkeletonSwap>
           {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
             {snapshot.loadingNewer ? 'Loading…' : 'Newer messages'}
@@ -587,7 +603,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
           onSendNow={operationId => void act(() => client.sendNow(panelId, operationId))}
           onEdit={editQueued} />
         {view && <ChatStatusBar context={view.context} tasks={view.tasks}
-          queued={view.queue.length} pr={pr} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} sendNowSteers={view.sendNowSteers} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
+          queued={view.queue.length} pr={pr} onOpenLink={rendering.openLink} agents={agentsWorking} onOpenAgent={actions.onOpenWorker} working={working} sendNowSteers={view.sendNowSteers} phone={phone} onClear={clearable && !disabled ? requestClear : undefined}
           onStopTask={taskId => void act(() => client.stopTask(panelId, taskId))} onShowQueue={showQueue} />}
         <ComposerPrimitive.Root className="chat-composer" data-pane-part="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />

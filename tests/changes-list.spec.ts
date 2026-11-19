@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { ChangedFileSummary, DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import { expectNoAxeViolations } from './axeTest';
 
 const timestamp = new Date(0).toISOString();
@@ -84,7 +84,7 @@ interface OpenChangesOptions {
   manifests?: Record<string, DiffManifest>;
   manifestDelays?: Record<string, number>;
   fileDiffs?: Record<string, FileDiffResult>;
-  fileDelays?: Record<string, number>;
+  holdFileDiffs?: string[];
   sessions?: JsonObject[];
   panels?: JsonObject[];
   gitCommands?: JsonObject;
@@ -100,12 +100,12 @@ async function openChanges(page: Page, options: OpenChangesOptions = {}): Promis
     diffManifests: options.manifests ?? { session: manifest },
     diffManifestDelayMs: options.manifestDelays,
     fileDiffs: options.fileDiffs,
-    fileDiffDelayMs: options.fileDelays,
+    holdFileDiffs: options.holdFileDiffs,
     gitCommands: options.gitCommands,
     initialUiState: { expandedProjects: [project.id] },
     activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await page.getByRole('tab', { name: 'Changes', exact: true }).click();
   if (options.waitForList !== false) await expect(page.getByRole('listbox', { name: 'Changed files' })).toBeVisible();
@@ -229,7 +229,7 @@ test('new file keys show loading and late file responses cannot replace the acti
       'session:race/a.ts': renameResult(1),
       'session:race/b.ts': renameResult(2),
     },
-    fileDelays: { 'session:race/a.ts': 160 },
+    holdFileDiffs: ['session:race/a.ts'],
   });
 
   await page.getByRole('option', { name: 'Open diff for race/seed.ts' }).click();
@@ -240,6 +240,11 @@ test('new file keys show loading and late file responses cannot replace the acti
   await expect(page.getByText('Renamed from race/seed-old.ts → race/seed.ts, no content changes', { exact: true })).toHaveCount(0);
   await page.getByRole('option', { name: 'Open diff for race/b.ts' }).click();
   await expect(page.getByText('Renamed from race/b-old.ts → race/b.ts, no content changes', { exact: true })).toBeVisible();
+  // a.ts answers only now, after b.ts is showing; give its late answer time to arrive.
+  await page.evaluate(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    (window as typeof window & { __paneTestElectronMock: { releaseFileDiffs(): void } }).__paneTestElectronMock.releaseFileDiffs();
+  });
   await page.waitForTimeout(190);
   await expect(page.getByText('Renamed from race/b-old.ts → race/b.ts, no content changes', { exact: true })).toBeVisible();
   await expect(page.getByText('Renamed from race/a-old.ts → race/a.ts, no content changes', { exact: true })).toHaveCount(0);
@@ -365,13 +370,15 @@ test('the inspector opens on the Changes tab by default', async ({ page }) => {
     initialUiState: { expandedProjects: [project.id] },
     activeProjectId: project.id,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: session.name, exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Changes', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('listbox', { name: 'Changed files' })).toBeVisible();
 });
 
 test('inspector width matrix keeps basename and status visible without horizontal overflow', async ({ page }) => {
+  // Five app starts (one per width): 21.6 s on a CI runner (run 44466821062).
+  test.setTimeout(60_000);
   // AC8 is about the inspector rail's width, not the window's: the window stays
   // regular and the persisted rail width varies from its minimum to wide.
   await openChanges(page);

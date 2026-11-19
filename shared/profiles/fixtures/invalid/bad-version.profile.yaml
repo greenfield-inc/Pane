@@ -1,0 +1,4 @@
+# expect: PROFILE_VERSION
+format: pane-profile/1
+name: bad-version
+version: one

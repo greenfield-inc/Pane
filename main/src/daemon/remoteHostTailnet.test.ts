@@ -25,11 +25,11 @@ function createConfigStore(initial: RemoteDaemonConfig) {
   };
 }
 
-describe('RemoteHostTailnetMonitor', () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+afterEach(() => {
+  vi.useRealTimers();
+});
 
+describe('RemoteHostTailnetMonitor', () => {
   it('re-applies the 443 forward and refreshes saved access within a minute of a tailnet switch', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const tailscale = createFakeTailscale({ tailnet: TAILNET_A });

@@ -5,6 +5,7 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
+const { inShard } = require('./runpane-test-shard');
 
 const rootDir = path.resolve(__dirname, '..');
 const npmCli = path.join(rootDir, 'packages', 'runpane', 'dist', 'cli.js');
@@ -1246,6 +1247,230 @@ async function checkReportStructuredOptions() {
   }
 }
 
+/**
+ * `report --outcome` ends a profile step: it sends state done with the trimmed outcome, takes
+ * --state only as done, and refuses --question. A refusal sends nothing.
+ */
+async function checkReportOutcome() {
+  const report = { state: 'done', reportedAt: '2026-11-16T00:00:00.000Z' };
+  const result = { ok: true, paneId: 'pane-1', panelId: 'panel-1', report, sessionIds: [], liveWatchers: 0 };
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-report-outcome-${runtime}-`));
+    try {
+      for (const args of [['--outcome', ' plan ready '], ['--outcome', 'plan ready', '--state', 'done'], ['--state=done', '--outcome=plan ready']]) {
+        const frames = [];
+        const run = await withFakeDaemon(paneDir, () => ({ result }),
+          () => runCliOnce(runtime, ['report', ...args, '--panel', 'panel-1', '--json'], paneDir),
+          (frame) => { if (frame.type === 'request' && frame.id === 1) frames.push(frame); });
+        assert.strictEqual(run.code, 0, `${runtime} report ${args.join(' ')} exits 0. stderr=${run.stderr} stdout=${run.stdout}`);
+        assert.strictEqual(frames[0].args[0].state, 'done', `${runtime} report ${args.join(' ')} sends state done`);
+        assert.strictEqual(frames[0].args[0].outcome, 'plan ready', `${runtime} report ${args.join(' ')} sends the trimmed outcome`);
+      }
+      const text = await withFakeDaemon(paneDir, () => ({ result }),
+        () => runCliOnce(runtime, ['report', '--outcome', 'plan ready', '--panel', 'panel-1'], paneDir));
+      assertIncludes(text.stdout, 'Reported outcome "plan ready" (done) for panel panel-1.', `${runtime} report --outcome names the outcome in its text`);
+      const plain = [];
+      await withFakeDaemon(paneDir, () => ({ result }),
+        () => runCliOnce(runtime, ['report', '--state', 'done', '--panel', 'panel-1', '--json'], paneDir),
+        (frame) => { if (frame.type === 'request' && frame.id === 1) plain.push(frame); });
+      assert.ok(!('outcome' in plain[0].args[0]), `${runtime} report without --outcome sends no outcome`);
+      for (const [args, code] of [
+        [['--outcome', 'plan ready', '--state', 'blocked', '--question', 'q'], 'ERR_REPORT_OUTCOME_STATE'],
+        [['--outcome', 'plan ready', '--state', 'ready'], 'ERR_REPORT_OUTCOME_STATE'],
+        [['--outcome', 'plan ready', '--question', 'Which plan?'], 'ERR_REPORT_OUTCOME_QUESTION'],
+        [['--outcome', '   '], 'ERR_RUNPANE_INVALID_ARGUMENT'],
+      ]) {
+        let sent = 0;
+        const run = await withFakeDaemon(paneDir, () => { sent += 1; return { result }; },
+          () => runCliOnce(runtime, ['report', ...args, '--panel', 'panel-1', '--json'], paneDir));
+        assert.strictEqual(run.code, 1, `${runtime} report ${args.join(' ')} exits 1. stdout=${run.stdout}`);
+        const { error } = JSON.parse(run.stdout);
+        assert.strictEqual(error.code, code, `${runtime} report ${args.join(' ')}`);
+        assertIncludes(error.message, '--outcome', `${runtime} report ${args.join(' ')} names --outcome`);
+        assertIncludes(error.next, 'runpane report', `${runtime} report ${args.join(' ')} says how to fix the report`);
+        assert.strictEqual(sent, 0, `${runtime} a refused --outcome report sends nothing`);
+      }
+      const elsewhere = await withFakeDaemon(paneDir, () => ({ result }),
+        () => runCliOnce(runtime, ['notify', '--ui', 'info', '--title', 'T', '--outcome', 'x', '--json'], paneDir));
+      assert.strictEqual(elsewhere.code, 1, `${runtime} --outcome on another command is refused. stdout=${elsewhere.stdout}`);
+      // A daemon refusal (an outcome the step does not declare) prints its message and next step.
+      const refusal = { code: 'ERR_PROFILE_OUTCOME_UNKNOWN', message: 'Step plan has no outcome "shipped". Allowed: plan ready, plan blocked.', next: 'Run `runpane report --outcome "plan ready"`.' };
+      const refused = await withFakeDaemon(paneDir, () => ({ error: refusal }),
+        () => runCliOnce(runtime, ['report', '--outcome', 'shipped', '--panel', 'panel-1', '--json'], paneDir));
+      assert.notStrictEqual(refused.code, 0, `${runtime} a daemon refusal fails the report`);
+      const shown = JSON.parse(refused.stdout).error;
+      assert.strictEqual(shown.message, refusal.message, `${runtime} prints the daemon's message`);
+      assert.strictEqual(shown.next, refusal.next, `${runtime} prints the daemon's next step`);
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+}
+
+/**
+ * `profiles list|show|runs` print the daemon's JSON unchanged with --json and the same text from
+ * both CLIs; `profiles launch` sends the request with its defaults (the caller's Pane's repo, its
+ * orchestrated Session and its tab), refuses a launch without --prompt before sending anything, and
+ * passes a daemon refusal through with its code, message and next.
+ */
+async function checkProfiles() {
+  const greenfield = {
+    name: 'greenfield', version: '1.0.0', title: 'Greenfield', origin: 'bundled', file: '/profiles/greenfield/profile.yaml',
+    valid: true, launchable: true, teamOnly: false, enabled: true, errors: [],
+    profile: {
+      format: 'pane-profile/1', name: 'greenfield', version: '1.0.0', loopLimit: 3, samples: {}, runs: {},
+      agents: [{ id: 'planner', runs: 'claude/opus', cli: 'claude', model: 'opus', reads: [], skills: [] }],
+      flow: {
+        start: 'plan',
+        steps: [
+          { id: 'plan', kind: 'agent', title: 'Plan the work', agent: 'planner', goal: 'Plan', outcomes: [{ name: 'plan ready', to: 'approve' }] },
+          { id: 'approve', kind: 'ask', title: 'Approve the plan', ask: 'Go?', choices: [{ name: 'yes', to: 'end' }] },
+        ],
+      },
+    },
+  };
+  const broken = {
+    name: 'broken', origin: 'yours', file: '/profiles/broken.yaml', valid: false, launchable: false, teamOnly: false, enabled: true,
+    errors: [{ code: 'PROFILE_STEP_UNKNOWN', message: 'Step plan points to "nowhere".', fix: 'Point it at a step or end.', step: 'plan' }],
+  };
+  const team = {
+    ...greenfield, name: 'reviewers', version: '0.2.0', launchable: false, teamOnly: true, enabled: false,
+    profile: Object.fromEntries(Object.entries(greenfield.profile).filter(([key]) => key !== 'flow')),
+  };
+  const list = {
+    ok: true, profiles: [greenfield, team, broken],
+    agentFarm: { state: 'installing', version: '0.9.0' }, ownAgentFarm: { profiles: [{ name: 'mine', source: '/home/me/farm' }] },
+  };
+  const run = {
+    id: 'run-1', profile: 'greenfield', profileVersion: '1.0.0', sessionId: 'sess-1', repoId: 7, paneId: 'pane-9', prompt: 'Add dark mode',
+    harness: {}, commands: {}, state: 'running', step: 'plan', wait: { kind: 'step', panelId: 'panel-3' }, edgeCounts: {}, history: [],
+    createdAt: '2026-11-17T00:00:00.000Z', updatedAt: '2026-11-17T00:00:00.000Z',
+  };
+  const callerPane = {
+    id: 'pane-1', paneId: 'pane-1', name: 'feature', status: 'ready', agentStatus: 'idle', worktreePath: '/repo/worktrees/feature',
+    repoId: 7, panelCount: 1, pinned: false, ownership: 'pane',
+  };
+  const results = {
+    'runpane:profiles:list': list,
+    'runpane:profiles:show': { ok: true, profile: greenfield, yaml: 'format: pane-profile/1\nname: greenfield\n' },
+    'runpane:profiles:runs': { ok: true, runs: [{ ...run, attention: 'Answer the trust prompt.' }, { ...run, id: 'run-2', state: 'failed', step: 'approve', error: 'The tab closed.' }] },
+    'runpane:profiles:launch': { ok: true, run },
+    'runpane:panes:list': { ok: true, panes: [callerPane] },
+  };
+  const answer = (frame) => ({ result: results[frame.channel] });
+  const outsidePane = { PANE_SESSION_ID: '', PANE_PANEL_ID: '', PANE_ORCHESTRATION_SESSION_ID: '' };
+  const texts = {};
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-profiles-${runtime}-`));
+    try {
+      const call = async (args, env = outsidePane, respond = answer) => {
+        const frames = [];
+        const result = await withFakeDaemon(paneDir, respond,
+          () => runCliOnce(runtime, args, paneDir, 20_000, env),
+          (frame) => { if (frame.type === 'request' && frame.id === 1) frames.push({ channel: frame.channel, args: frame.args }); });
+        // Python writes text-mode stdout, which is CRLF on Windows.
+        return { ...result, stdout: result.stdout.replace(/\r\n/g, '\n'), frames };
+      };
+      for (const [args, channel, request] of [
+        [['profiles', 'list', '--json'], 'runpane:profiles:list', {}],
+        [['profiles', 'show', 'greenfield', '--json'], 'runpane:profiles:show', { name: 'greenfield' }],
+        [['profiles', 'runs', '--json'], 'runpane:profiles:runs', {}],
+      ]) {
+        const result = await call(args);
+        assert.strictEqual(result.code, 0, `${runtime} ${args.join(' ')} exits 0. stderr=${result.stderr}`);
+        assert.deepStrictEqual(JSON.parse(result.stdout), results[channel], `${runtime} ${args.join(' ')} prints the daemon's JSON unchanged`);
+        assert.deepStrictEqual(result.frames, [{ channel, args: [request] }], `${runtime} ${args.join(' ')} sends ${channel}`);
+      }
+      const yaml = await call(['profiles', 'show', 'greenfield', '--yaml']);
+      assert.strictEqual(yaml.stdout, 'format: pane-profile/1\nname: greenfield\n', `${runtime} show --yaml prints the file only`);
+      texts[runtime] = [];
+      for (const args of [['profiles', 'list'], ['profiles', 'show', 'greenfield'], ['profiles', 'show', 'broken'], ['profiles', 'runs'], ['profiles', 'launch', 'greenfield', '--prompt', 'Add dark mode', '--yes']]) {
+        const respond = args[2] === 'broken' ? () => ({ result: { ok: true, profile: broken, yaml: '' } }) : answer;
+        const result = await call(args, outsidePane, respond);
+        assert.strictEqual(result.code, 0, `${runtime} ${args.join(' ')} exits 0. stderr=${result.stderr}`);
+        texts[runtime].push(result.stdout);
+      }
+
+      // Launch inside a Session orchestrator's Pane: its repo and Session are the defaults.
+      const inPane = await call(['profiles', 'launch', 'greenfield', '--prompt', 'Add dark mode', '--yes', '--json'],
+        { PANE_SESSION_ID: 'pane-1', PANE_PANEL_ID: 'panel-9', PANE_ORCHESTRATION_SESSION_ID: 'sess-1' });
+      assert.strictEqual(inPane.code, 0, `${runtime} launch exits 0. stderr=${inPane.stderr}`);
+      assert.deepStrictEqual(JSON.parse(inPane.stdout), results['runpane:profiles:launch'], `${runtime} launch prints the run as Pane sent it`);
+      assert.deepStrictEqual(inPane.frames, [
+        { channel: 'runpane:panes:list', args: [{}] },
+        { channel: 'runpane:profiles:launch', args: [{ name: 'greenfield', prompt: 'Add dark mode', repo: { id: 7 }, session: 'sess-1' }] },
+      ], `${runtime} launch defaults to the caller's repo and Session`);
+      // Outside Pane: the active repo, and no Session (Pane makes one).
+      const outside = await call(['profiles', 'launch', 'greenfield', '--prompt', 'Add dark mode', '--yes', '--json']);
+      assert.deepStrictEqual(outside.frames, [
+        { channel: 'runpane:profiles:launch', args: [{ name: 'greenfield', prompt: 'Add dark mode', repo: { active: true } }] },
+      ], `${runtime} launch outside Pane runs in the active repo`);
+      // Flags win over the defaults; --agent-harness and --command repeat or take a JSON object.
+      const flagged = await call(['profiles', 'launch', 'greenfield', '--prompt=Add dark mode', '--repo', '3', '--session', 'Nightly', '--harness', 'codex',
+        '--agent-harness', 'planner=claude/opus', '--agent-harness={"reviewer":"codex"}', '--command', 'aider=aider --yes-always', '--yes', '--json'],
+      { PANE_SESSION_ID: 'pane-1', PANE_PANEL_ID: '', PANE_ORCHESTRATION_SESSION_ID: 'sess-1' });
+      assert.strictEqual(flagged.code, 0, `${runtime} flagged launch exits 0. stderr=${flagged.stderr}`);
+      assert.deepStrictEqual(flagged.frames, [{
+        channel: 'runpane:profiles:launch',
+        args: [{
+          name: 'greenfield', prompt: 'Add dark mode', repo: '3', session: 'Nightly', harness: 'codex',
+          agentHarness: { planner: 'claude/opus', reviewer: 'codex' }, commands: { aider: 'aider --yes-always' },
+        }],
+      }], `${runtime} launch sends its flags`);
+
+      // Refused before anything is sent.
+      for (const [args, code] of [
+        [['profiles', 'launch', 'greenfield', '--yes', '--json'], 'ERR_PROFILES_PROMPT_REQUIRED'],
+        [['profiles', 'launch', 'greenfield', '--prompt', '  ', '--yes', '--json'], 'ERR_PROFILES_PROMPT_REQUIRED'],
+        [['profiles', 'launch', '--prompt', 'x', '--yes', '--json'], 'ERR_PROFILES_NAME_REQUIRED'],
+        [['profiles', 'launch', 'greenfield', '--prompt', 'x', '--json'], 'ERR_RUNPANE_CONFIRMATION_REQUIRED'],
+        [['profiles', 'launch', 'greenfield', '--prompt', 'x', '--agent-harness', 'planner', '--yes', '--json'], 'ERR_RUNPANE_INVALID_ARGUMENT'],
+        [['profiles', 'launch', 'greenfield', '--prompt', 'x', '--command={"aider":1}', '--yes', '--json'], 'ERR_RUNPANE_INVALID_ARGUMENT'],
+      ]) {
+        const refused = await call(args);
+        assert.strictEqual(refused.code, 1, `${runtime} ${args.join(' ')} exits 1. stdout=${refused.stdout}`);
+        const { error } = JSON.parse(refused.stdout);
+        assert.strictEqual(error.code, code, `${runtime} ${args.join(' ')}`);
+        assert.ok(error.next, `${runtime} ${args.join(' ')} says what to do next`);
+        assert.deepStrictEqual(refused.frames, [], `${runtime} ${args.join(' ')} sends nothing`);
+      }
+      const misplaced = await call(['panes', 'list', '--harness', 'codex', '--json']);
+      assert.strictEqual(misplaced.code, 1, `${runtime} --harness on another command is refused`);
+
+      // A daemon refusal fails with its code, message and next.
+      const refusal = { code: 'PROFILE_TEAM_ONLY', message: 'reviewers is a team with no workflow, so it cannot launch. Nothing was started.', next: 'Launch a profile with a workflow, such as greenfield.' };
+      for (const json of [true, false]) {
+        const refused = await call(['profiles', 'launch', 'reviewers', '--prompt', 'x', '--yes', ...(json ? ['--json'] : [])], outsidePane, () => ({ error: refusal }));
+        assert.strictEqual(refused.code, 1, `${runtime} a refused launch exits 1`);
+        if (json) assert.deepStrictEqual(JSON.parse(refused.stdout).error, refusal, `${runtime} prints the daemon's code, message and next`);
+        assertIncludes(refused.stderr, refusal.message);
+        assertIncludes(refused.stderr, `Next: ${refusal.next}`);
+      }
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+  assert.deepStrictEqual(texts.pip, texts.npm, 'both CLIs print the same profiles text');
+  const [listText, showText, brokenText, runsText, launchText] = texts.npm;
+  assert.strictEqual(listText, [
+    'greenfield 1.0.0 · bundled · on · launchable',
+    'reviewers 0.2.0 · bundled · off · no flow',
+    'broken - · yours · on · invalid: Step plan points to "nowhere".',
+    'Agent Farm 0.9.0: installing',
+    'Your Agent Farm: mine',
+    '',
+  ].join('\n'));
+  assert.strictEqual(showText, [
+    'greenfield 1.0.0 · bundled · on · launchable', 'Greenfield', 'File: /profiles/greenfield/profile.yaml',
+    '', 'Agents:', '  planner  runs claude/opus',
+    '', 'Steps (start: plan):', '  plan (agent planner): Plan the work', '    plan ready → approve', '  approve (ask): Approve the plan', '    yes → end',
+    '',
+  ].join('\n'));
+  assertIncludes(brokenText, '  PROFILE_STEP_UNKNOWN: Step plan points to "nowhere". Fix: Point it at a step or end.');
+  assert.strictEqual(runsText, 'run-1 · greenfield · running · step plan · Answer the trust prompt.\nrun-2 · greenfield · failed · step approve · The tab closed.\n');
+  assert.strictEqual(launchText, 'Started run run-1 of greenfield in Session sess-1: step plan in Pane pane-9.\n');
+}
+
 /** Runs the CLI with its stdin held open until `holdMs` passes, and times the run. */
 function runCliHoldingStdin(runtime, args, paneDir, extraEnv, holdMs) {
   const command = runtime === 'npm' ? process.execPath : findPython();
@@ -1478,7 +1703,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false, closed: false,
   quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false, stackTabs: [], stackNext: false,
-  answerApprove: false, answerDeny: false, hook: false,
+  answerApprove: false, answerDeny: false, hook: false, yaml: false,
 };
 
 function normalizeParsedArgs(value) {
@@ -4576,7 +4801,16 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue(), "errors": errors}
 async function checkSecretsParity() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-'));
   const secret = { project: 'stripe', name: 'STRIPE_SECRET_KEY', updatedAt: '2026-11-04T10:00:00.000Z', machine: 'studio' };
-  const listResult = { ok: true, secrets: [secret], storage: { kind: 'file', encrypted: false } };
+  const references = [
+    { project: 'stripe', name: 'STRIPE_LIVE_KEY', reference: 'op://Dev/Stripe/live key', updatedAt: '2026-11-04T11:00:00.000Z', machine: 'studio' },
+    { project: 'stripe', name: 'STRIPE_RESTRICTED_KEY', reference: 'op://Dev/Stripe/restricted', updatedAt: '2026-11-04T11:00:00.000Z', machine: 'studio' },
+  ];
+  const lease = (id, expiresAt) => ({
+    id, project: 'stripe', names: ['STRIPE_LIVE_KEY'], grantedAt: '2026-11-04T12:00:00.000Z', expiresAt, requestedBy: 'panel-1', grantedOn: 'studio', memoryOnly: false,
+  });
+  const listResult = {
+    ok: true, secrets: [secret], references, leases: [lease('lease-b', '2026-11-05T15:00:00.000Z'), lease('lease-a', '2026-11-05T12:00:00.000Z')], storage: { kind: 'file', encrypted: false },
+  };
   const values = { STRIPE_SECRET_KEY: 'sk_test_canary', WEBHOOK_SECRET: 'whsec_canary' };
   const respond = (frame) => {
     const [request] = frame.args;
@@ -4587,8 +4821,17 @@ async function checkSecretsParity() {
       const names = request.names ?? Object.keys(values);
       return { ok: true, values: Object.fromEntries(names.filter((name) => name in values).map((name) => [name, values[name]])) };
     }
+    if (frame.channel === 'runpane:secrets:lease:end') return { ok: true, ended: request.leaseId === 'lease-a' };
+    if (request.lease) {
+      if (request.lease.names.includes('DECLINED')) return { approved: false };
+      return { status: 'leased', project: request.lease.project, names: request.lease.names, leaseId: 'lease-a', expiresAt: '2026-11-05T12:00:00.000Z', machines: ['studio', 'devbox'] };
+    }
     return request.secret.name === 'DECLINED' ? { status: 'declined' } : { status: 'saved', project: request.secret.project, name: request.secret.name };
   };
+  // A Pane from before leases has no lease:end channel.
+  const reply = (frame) => (frame.channel === 'runpane:secrets:lease:end' && frame.args[0].leaseId === 'old-pane'
+    ? { error: { code: 'ERR_UNKNOWN_CHANNEL', message: 'Unknown channel runpane:secrets:lease:end' } }
+    : { result: respond(frame) });
   // The child reports what it got: the injected variables, each --file's contents and mode, and its own path.
   const probe = [
     'const fs = require("fs");',
@@ -4608,6 +4851,12 @@ async function checkSecretsParity() {
     { args: ['secrets', 'exec', '--project', 'stripe', '--', process.execPath, '-e', 'process.stdout.write(`${process.env.STRIPE_SECRET_KEY} ${process.env.WEBHOOK_SECRET}`)'] },
     { args: ['secrets', 'request', '--project', 'stripe', '--name', 'STRIPE_SECRET_KEY', '--title', 'Stripe test secret key', '--reason', 'Run the webhook tests.'] },
     { args: ['secrets', 'request', '--project', 'stripe', '--name', 'DECLINED', '--title', 'Stripe test secret key', '--reason', 'Run the webhook tests.', '--json'] },
+    // Names go before, between or after the options; a repeated name is asked for once.
+    { args: ['secrets', 'lease', 'STRIPE_LIVE_KEY', '--project', 'stripe', '--reason', '- the webhook tests', 'STRIPE_RESTRICTED_KEY', 'STRIPE_LIVE_KEY'] },
+    { args: ['secrets', 'lease', '--project', 'stripe', 'DECLINED'] },
+    { args: ['secrets', 'lease', 'end', '--id', 'lease-a', '--yes'] },
+    { args: ['secrets', 'lease', 'end', '--id', 'lease-gone', '--yes', '--json'] },
+    { args: ['secrets', 'lease', 'end', '--id', 'old-pane', '--yes', '--json'] },
   ];
   const outputs = { npm: [], pip: [] };
   const frames = { npm: [], pip: [] };
@@ -4616,7 +4865,7 @@ async function checkSecretsParity() {
       for (const { args, input } of runs) {
         const run = await withFakeDaemon(paneDir, (frame) => {
           frames[runtime].push({ channel: frame.channel, args: frame.args });
-          return { result: respond(frame) };
+          return reply(frame);
         }, () => runCliOnce(runtime, args, paneDir, 20_000, { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' }, input));
         outputs[runtime].push({ code: run.code, stdout: lf(run.stdout) });
       }
@@ -4633,8 +4882,14 @@ async function checkSecretsParity() {
   }
   assert.deepStrictEqual(outputs.pip, outputs.npm, 'Python and Node secrets commands printed different output');
   assert.deepStrictEqual(frames.pip, frames.npm, 'Python and Node secrets commands sent different requests');
-  const [list, listJson, set, setJson, deleted, exec, execAll, saved, declined] = outputs.npm;
-  assert.strictEqual(list.stdout, 'stripe/STRIPE_SECRET_KEY  set 2026-11-04T10:00:00.000Z on studio\nThis machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.\n');
+  const [list, listJson, set, setJson, deleted, exec, execAll, saved, declined, leased, leaseDeclined, ended, notEnded, oldPane] = outputs.npm;
+  assert.strictEqual(list.stdout, [
+    'stripe/STRIPE_SECRET_KEY  set 2026-11-04T10:00:00.000Z on studio',
+    'stripe/STRIPE_LIVE_KEY  from 1Password (op://Dev/Stripe/live key)  leased until 2026-11-05T15:00:00.000Z',
+    'stripe/STRIPE_RESTRICTED_KEY  from 1Password (op://Dev/Stripe/restricted)  no lease',
+    'This machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.',
+    '',
+  ].join('\n'));
   assert.deepStrictEqual(JSON.parse(listJson.stdout), listResult);
   assert.strictEqual(set.stdout, 'Replaced stripe/STRIPE_SECRET_KEY\n');
   assert.deepStrictEqual(JSON.parse(setJson.stdout), { ok: true, replaced: true, secret });
@@ -4646,6 +4901,15 @@ async function checkSecretsParity() {
   assert.deepStrictEqual(execAll, { code: 0, stdout: 'sk_test_canary whsec_canary' });
   assert.deepStrictEqual(saved, { code: 0, stdout: 'Saved as stripe/STRIPE_SECRET_KEY\n' });
   assert.deepStrictEqual(JSON.parse(declined.stdout), { status: 'declined' });
+  assert.deepStrictEqual(leased, {
+    code: 0,
+    stdout: 'Leased stripe/STRIPE_LIVE_KEY, STRIPE_RESTRICTED_KEY until 2026-11-05T12:00:00.000Z on studio, devbox. Lease lease-a. Use them with `runpane secrets exec --project stripe -- <command>`.\n',
+  });
+  assert.deepStrictEqual(leaseDeclined, { code: 0, stdout: 'The person declined the lease.\n' });
+  assert.deepStrictEqual(ended, { code: 0, stdout: 'Ended lease lease-a.\n' });
+  assert.deepStrictEqual(JSON.parse(notEnded.stdout), { ok: true, ended: false });
+  assert.strictEqual(oldPane.code, 1);
+  assert.deepStrictEqual(JSON.parse(oldPane.stdout).error, { code: 'SECRET_LEASE_UNSUPPORTED', message: 'This Pane doesn\'t support leases yet. Nothing was ended.', next: 'Update Pane.' });
   assert.deepStrictEqual(frames.npm.map(({ channel, args }) => ({ channel, args })), [
     { channel: 'runpane:secrets:list', args: [{}] },
     { channel: 'runpane:secrets:list', args: [{ project: 'stripe' }] },
@@ -4668,6 +4932,20 @@ async function checkSecretsParity() {
         caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir },
       }],
     },
+    {
+      channel: 'runpane:notify',
+      args: [{
+        ui: 'approve', title: 'Lease 2 secrets', context: '- the webhook tests', lease: { project: 'stripe', names: ['STRIPE_LIVE_KEY', 'STRIPE_RESTRICTED_KEY'] },
+        caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir },
+      }],
+    },
+    {
+      channel: 'runpane:notify',
+      args: [{ ui: 'approve', title: 'Lease 1 secret', lease: { project: 'stripe', names: ['DECLINED'] }, caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir } }],
+    },
+    { channel: 'runpane:secrets:lease:end', args: [{ leaseId: 'lease-a' }] },
+    { channel: 'runpane:secrets:lease:end', args: [{ leaseId: 'lease-gone' }] },
+    { channel: 'runpane:secrets:lease:end', args: [{ leaseId: 'old-pane' }] },
   ]);
   for (const { stdout } of [...outputs.npm.slice(0, 5), ...outputs.npm.slice(7)]) {
     assert.ok(!stdout.includes('canary'), `runpane printed a secret value: ${stdout}`);
@@ -4706,6 +4984,8 @@ async function checkSecretsParity() {
     [['secrets', 'set', '--project', 'stripe', '--name', 'K'], 'ERR_RUNPANE_CONFIRMATION_REQUIRED', 'value', /needs confirmation/],
     [['secrets', 'request', '--project', 'stripe', '--name', 'K', '--title', 'Key'], 'SECRET_INVALID', undefined, /requires --reason\. Nothing was shown to the person\./],
     [['secrets', 'set', '--project', 'stripe', '--name', 'K', '--value', 'x', '--yes'], 'ERR_RUNPANE_FAILED', '', /Unknown option for secrets set: --value/],
+    [['secrets', 'lease', '--project', 'stripe'], 'SECRET_INVALID', undefined, /^runpane secrets lease needs the names of the secrets to lease\. Nothing was shown to the person\./],
+    [['secrets', 'lease', '--project', 'stripe', 'GOOD', '9BAD'], 'SECRET_INVALID', undefined, /^"9BAD" is not a valid secret name/],
   ];
   const refusalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-refusals-'));
   try {
@@ -4728,13 +5008,14 @@ async function checkSecretsParity() {
     [['secrets', 'delete', '--project', 'stripe', '--name', 'K', '--yes'], 'delete one'],
     [['secrets', 'exec', '--project', 'stripe', '--', 'true'], 'run secrets exec'],
     [['secrets', 'request', '--project', 'stripe', '--name', 'K', '--title', 'Key', '--reason', 'Tests.'], 'ask for one'],
+    [['secrets', 'lease', '--project', 'stripe', 'K'], 'ask for a lease'],
   ];
   const teammateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-teammate-'));
   try {
     for (const [args, action, input] of teammateRefusals) {
       for (const runtime of ['npm', 'pip']) {
         const asked = [];
-        const run = await withFakeDaemon(teammateDir, (frame) => { asked.push(frame.channel); return { result: respond(frame) }; },
+        const run = await withFakeDaemon(teammateDir, (frame) => { asked.push(frame.channel); return reply(frame); },
           () => runCliOnce(runtime, [...args.slice(0, 2), '--json', ...args.slice(2)], teammateDir, 20_000, { PANE_TEAMMATE_LOGIN: 'ana@github' }, input));
         assert.strictEqual(run.code, 1, `${runtime} ${args.join(' ')} should refuse a teammate`);
         assert.deepStrictEqual(JSON.parse(run.stdout).error, {
@@ -7003,7 +7284,7 @@ print(json.dumps(errors))
     '--about-session is only valid with runpane notify.',
     '--decision is only valid with runpane inbox ack.',
     '--because is only valid with runpane autopilot answer.',
-    '--reason is only valid with runpane secrets request or runpane autopilot close.',
+    '--reason is only valid with runpane secrets request or runpane secrets lease or runpane autopilot close.',
     '--approve is only valid with runpane autopilot answer.',
     '--took is only valid with runpane notify.',
     '--update is only valid with runpane notify.',
@@ -7036,100 +7317,127 @@ print(json.dumps(errors))
   assert.ok(!validAnswer({ id: 'n-1', answer: { text: 'main', note: 'x' }, because: 'D-1' }), 'a typed answer takes no note');
 }
 
+function runSetupPtyCheck() {
+  runPythonSnippet('import runpy; runpy.run_path("scripts/test-runpane-setup-pty.py", run_name="__main__")');
+}
+
+function runNodeTestFile(name) {
+  childProcess.execFileSync(process.execPath, ['--test', path.join(__dirname, name)], {
+    cwd: rootDir,
+    env: { ...process.env, PYTHON: findPython() },
+    stdio: 'inherit',
+  });
+}
+
+function runDispatchTests() {
+  runNodeTestFile('test-runpane-dispatch.js');
+}
+
+function runPythonParityTests() {
+  runNodeTestFile('test-runpane-python-parity.js');
+}
+
+// Each runs in one RUNPANE_TEST_SHARD part (scripts/runpane-test-shard.js),
+// dealt out back and forth, so the list runs slowest first (Windows CI times)
+// to give each part a fair share of the slow checks. The two prerequisites above the
+// list run in every part.
+const checks = [
+  checkWatchStreamParity,
+  checkAutopilotParity,
+  checkPanelsConversation,
+  checkWatchUntilEvent,
+  checkNotifyParity,
+  checkProfiles,
+  checkDispatchWait,
+  checkSecretsParity,
+  compareAgentContextParity,
+  checkPythonDaemonTimeouts,
+  checkReportOutcome,
+  checkReportStructuredOptions,
+  runPythonParityTests,
+  checkPauseCommands,
+  checkDryRunMessages,
+  checkReportDeliveryLine,
+  runDispatchTests,
+  compareParserParity,
+  checkSessionPinCommands,
+  checkHelpOutput,
+  checkPanesCreateBaseNotice,
+  checkReportParity,
+  checkCliEventSubscriptions,
+  checkPaneArchiveDryRunParity,
+  compareRemoteSetupDiagnosticParity,
+  checkNoArgsAndSetupFallback,
+  checkDoctorExitStatus,
+  checkOverviewReportsAndLocks,
+  checkDoctorReportSafety,
+  compareLegacyRemoteDaemonHealthParity,
+  checkGuidedRemoteSetup,
+  checkFollowRequiresPositiveTimeout,
+  checkExistingDaemonShortCircuit,
+  checkComposerStrategyRequests,
+  checkLockParity,
+  checkLeadingDashTextArguments,
+  checkWatchFormatterGoldens,
+  checkPythonWatchReaderClosedErrnos,
+  compareWrapperTelemetrySanitizers,
+  checkFromJsonAcceptsBom,
+  checkWrapperAgentParity,
+  checkAttachParity,
+  checkDeliveryParity,
+  checkOlderOutputNote,
+  checkArchiveClosedAndCallerPanel,
+  checkPanesCostParity,
+  checkPanesAdoptCliParity,
+  checkPaneCreateResultFields,
+  compareExistingReusePolicy,
+  checkCreateAssociationSource,
+  checkPanePinParity,
+  checkFilePointerParity,
+  checkChatTabCreateParity,
+  checkPanelsCloseParity,
+  checkPanelResumeCommandExitedReadiness,
+  checkPanelCloseForceParity,
+  checkSessionChildPinDefaults,
+  checkPaneRenameParity,
+  checkRepoSettingsParity,
+  checkMachineParity,
+  checkLoopsParity,
+  checkInstallerFailures,
+  compareArtifactSelectionParity,
+  checkPreferredDownloadUrls,
+  compareDaemonLaunchEnvironmentParity,
+  checkPythonUnixEndpointSeparatorsAreHostIndependent,
+  compareDaemonLaunchArgsParity,
+  checkPlatformMatchingEdgeCases,
+  checkWindowsPaneVersionDoesNotLaunchExecutable,
+  checkCreatePayloadErrorPaths,
+  comparePlatformParity,
+  compareDaemonEndpointParity,
+  runSetupPtyCheck,
+  compareDaemonRepairJsonParity,
+  checkLinuxPackageCompatibilityAlias,
+  checkUpdateInstallsWhenPaneIsNotRunning,
+  checkPaneAdoptOverrides,
+  checkPaneCreateBlockedReadiness,
+  checkSessionRuntime,
+  checkBoundaryDecoderCollectsEveryIssue,
+  checkSessionPayloadErrors,
+  checkContractDocListsEveryCommand,
+  checkAgentTemplateParity,
+  checkWorkspacesSummarySchema,
+  checkNodeReleaseTimeout,
+];
+
 async function runChecks() {
   checkGeneratedContractFresh();
   ensureBuiltCli();
-  await checkCliEventSubscriptions();
-  checkFollowRequiresPositiveTimeout();
-  await checkDoctorExitStatus();
-  await checkInstallerFailures();
-  await checkCreatePayloadErrorPaths();
-  await checkPaneCreateResultFields();
-  await checkDryRunMessages();
-  checkLeadingDashTextArguments();
-  await checkPythonDaemonTimeouts();
-  compareParserParity();
-  checkWatchFormatterGoldens();
-  await checkWatchStreamParity();
-  await checkWatchUntilEvent();
-  await checkDispatchWait();
-  checkPythonWatchReaderClosedErrnos();
-  compareLegacyRemoteDaemonHealthParity();
-  compareDaemonRepairJsonParity();
-  await checkLinuxPackageCompatibilityAlias();
-  comparePlatformParity();
-  compareDaemonEndpointParity();
-  checkPythonUnixEndpointSeparatorsAreHostIndependent();
-  compareArtifactSelectionParity();
-  await checkPreferredDownloadUrls();
-  await checkUpdateInstallsWhenPaneIsNotRunning();
-  compareWrapperTelemetrySanitizers();
-  compareExistingReusePolicy();
-  compareDaemonLaunchEnvironmentParity();
-  compareDaemonLaunchArgsParity();
-  compareRemoteSetupDiagnosticParity();
-  checkPlatformMatchingEdgeCases();
-  await checkGuidedRemoteSetup();
-  runPythonSnippet('import runpy; runpy.run_path("scripts/test-runpane-setup-pty.py", run_name="__main__")');
-  await checkExistingDaemonShortCircuit();
-  checkWindowsPaneVersionDoesNotLaunchExecutable();
-  await checkFromJsonAcceptsBom();
-  await checkCreateAssociationSource();
-  checkComposerStrategyRequests();
-  await checkPaneAdoptOverrides();
-  await checkPaneArchiveDryRunParity();
-  await checkPanePinParity();
-  await checkWrapperAgentParity();
-  await checkFilePointerParity();
-  await checkAttachParity();
-  await checkChatTabCreateParity();
-  await checkDeliveryParity();
-  await checkReportParity();
-  await checkOlderOutputNote();
-  await checkPanelsCloseParity();
-  await checkArchiveClosedAndCallerPanel();
-  await checkReportDeliveryLine();
-  await checkReportStructuredOptions();
-  await checkPanelsConversation();
-  await checkNotifyParity();
-  await checkAutopilotParity();
-  await checkPaneCreateBlockedReadiness();
-  await checkPanelResumeCommandExitedReadiness();
-  await checkPanelCloseForceParity();
-  await checkSessionChildPinDefaults();
-  await checkPanesCostParity();
-  await checkPaneRenameParity();
-  await checkRepoSettingsParity();
-  await checkSecretsParity();
-  await checkLockParity();
-  await checkMachineParity();
-  await checkLoopsParity();
-  await checkOverviewReportsAndLocks();
-  await checkSessionRuntime();
-  checkBoundaryDecoderCollectsEveryIssue();
-  await checkSessionPayloadErrors();
-  await checkSessionPinCommands();
-  await checkPauseCommands();
-  await checkPanesAdoptCliParity();
-  await checkPanesCreateBaseNotice();
-  checkContractDocListsEveryCommand();
-  await checkAgentTemplateParity();
-  checkHelpOutput();
-  checkWorkspacesSummarySchema();
-  compareAgentContextParity();
-  await checkNodeReleaseTimeout();
-  checkNoArgsAndSetupFallback();
-  checkDoctorReportSafety();
-  childProcess.execFileSync(process.execPath, ['--test', path.join(__dirname, 'test-runpane-dispatch.js')], {
-    cwd: rootDir,
-    env: { ...process.env, PYTHON: findPython() },
-    stdio: 'inherit',
-  });
-  childProcess.execFileSync(process.execPath, ['--test', path.join(__dirname, 'test-runpane-python-parity.js')], {
-    cwd: rootDir,
-    env: { ...process.env, PYTHON: findPython() },
-    stdio: 'inherit',
-  });
+  for (const [position, check] of checks.entries()) {
+    if (!inShard(position)) continue;
+    const started = Date.now();
+    await check();
+    console.log(`contract check ${check.name} passed (${((Date.now() - started) / 1000).toFixed(1)}s)`);
+  }
   console.log('runpane CLI contract checks passed');
 }
 

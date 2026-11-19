@@ -6,6 +6,7 @@ import { cn } from '../../utils/cn';
 import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import { onSessionOverviewChange } from '../../utils/sessionOverviewEvents';
+import { Bone, Skeleton, TextBone, LoadingStatus, useSkeletonHold } from '../ui/Skeleton';
 
 /** One Pane's line: its state from its report or its tabs, with its PR. */
 interface PaneLine { tone: 'done' | 'waiting' | 'running' | 'idle'; text: string }
@@ -43,15 +44,36 @@ export function AutopilotSessionOverview({ sessionId }: { sessionId: string }) {
     const stop = onSessionOverviewChange(read);
     return () => { live = false; stop(); };
   }, [sessionId]);
+  const { holding, reveal } = useSkeletonHold(!overview && !error);
 
   if (error) return <p className="m-auto text-[13px] text-text-secondary" role="alert">{error}</p>;
-  if (!overview) return <p className="m-auto text-[13px] text-text-tertiary" role="status">Reading the Session…</p>;
+  if (!overview || holding) {
+    return (
+      <>
+        <LoadingStatus label="Reading the Session" />
+        <Skeleton className="flex min-h-0 flex-1 flex-col gap-5 px-5 py-4">
+          <section>
+            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide"><TextBone text="Panes" /></h3>
+            <ul className="divide-y divide-border-primary rounded-xl ring-1 ring-border-secondary">
+              {[34, 46, 28].map((name, index) => (
+                <li key={index} className="flex items-center gap-2.5 px-3.5 py-2.5 text-[13px]">
+                  <Bone className="h-2 w-2 shrink-0 rounded-full" />
+                  <span className="flex h-[19.5px] min-w-0 flex-1 items-center"><Bone className="h-3" style={{ width: `${name}%` }} /></span>
+                  <TextBone text="working · 0m ago" className="text-[12px]" />
+                </li>
+              ))}
+            </ul>
+          </section>
+        </Skeleton>
+      </>
+    );
+  }
   const panes = overview.panes.filter(pane => !pane.archived && !pane.missing);
   const finished = panes.flatMap(pane => pane.panels.flatMap(panel => panel.report?.state === 'done' && panel.state !== 'working'
     ? [{ id: panel.panelId, label: `${panel.title} · ${pane.name}`, at: panel.report.reportedAt }]
     : []));
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4" data-testid="autopilot-session-overview">
+    <div className={cn('flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 py-4', reveal && 'skeleton-reveal')} data-testid="autopilot-session-overview">
       <section>
         <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">Panes</h3>
         {panes.length === 0 ? <p className="text-[13px] text-text-tertiary">No Panes in this Session.</p> : (

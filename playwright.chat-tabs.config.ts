@@ -6,9 +6,11 @@ import { getPlaywrightBaseURL, getPlaywrightPort, getPlaywrightServerEnv } from 
 // (the minimal suite's server) runs `tsc -w`, which overwrites the bundled preload.
 const port = getPlaywrightPort();
 
+// session-activity-real.spec.ts skips itself unless SESSION_ACTIVITY_REAL=1, which CI never sets.
+// browser-auth-persistence and remote-browser-files run only with PANE_ELECTRON_E2E=1, which CI sets.
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['chat-tabs.spec.ts', 'autopilot.spec.ts', 'session-activity.spec.ts', 'session-activity-real.spec.ts', 'loop-sessions.spec.ts'],
+  testMatch: ['chat-tabs.spec.ts', 'loop-sessions.spec.ts', 'session-activity-real.spec.ts', 'browser-auth-persistence.spec.ts', 'remote-browser-files.spec.ts'],
   timeout: 120 * 1000,
   forbidOnly: true,
   retries: 0,

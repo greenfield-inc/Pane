@@ -7,6 +7,7 @@ import { RoutePillView } from './settings/computers/RoutePills';
 import { useAddDeviceStore } from './addDevice/addDeviceStore';
 import { showActionError } from '../stores/errorStore';
 import { cn } from '../utils/cn';
+import { Bone, Skeleton, SkeletonSwap } from './ui/Skeleton';
 import type { HostingSummary, MachineEntry, RoutePill } from '../utils/machineList';
 import type { MachineSelectOutcome } from '../hooks/useMachines';
 
@@ -49,7 +50,7 @@ function latencyKey(machineId: string, routeId: string): string {
 /**
  * Line two of a machine row. Connected: the route pill, its latency and the OS. Otherwise the
  * subtitle says what it is ("Windows · Last seen 2 h ago"). The latency keeps one fixed box while
- * "…" turns into a number, so the OS after it never moves.
+ * its bone turns into a number, so the OS after it never moves.
  */
 function MachineLine({ machine, latencies }: { machine: MachineEntry; latencies: Latencies }) {
   const route = routeInUse(machine);
@@ -57,13 +58,15 @@ function MachineLine({ machine, latencies }: { machine: MachineEntry; latencies:
   if (!route) return <span className="flex h-5 min-w-0 items-center"><span className="truncate">{machine.subtitle}</span></span>;
   const latency = latencies[latencyKey(machine.id, route.id)];
   // From one second up, seconds keep the text inside its box ("1.5 s", not "1510 ms").
-  const text = latency === undefined ? '…' : latency === null ? '—' : latency >= 1000 ? `${(latency / 1000).toFixed(1)} s` : `${latency} ms`;
+  const text = latency === undefined ? '' : latency === null ? '—' : latency >= 1000 ? `${(latency / 1000).toFixed(1)} s` : `${latency} ms`;
   const spoken = latency === undefined ? 'measuring latency' : latency === null ? 'no answer' : `latency ${text}`;
   return (
     <span className="flex h-5 min-w-0 items-center gap-1.5">
       <RoutePillView route={route} />
       <span className="w-11 flex-none whitespace-nowrap tabular-nums text-text-secondary" data-testid="machine-latency">
-        <span aria-hidden="true">{text}</span>
+        <SkeletonSwap loading={latency === undefined} skeleton={<Skeleton className="flex h-5 items-center"><Bone className="h-3 w-9" /></Skeleton>}>
+          <span aria-hidden="true">{text}</span>
+        </SkeletonSwap>
         <span className="sr-only">{spoken}</span>
       </span>
       {machine.os && <span className="truncate">{machine.os}</span>}

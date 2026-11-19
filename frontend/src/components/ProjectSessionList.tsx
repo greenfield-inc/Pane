@@ -1,16 +1,17 @@
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat, Inbox } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat, Inbox, Workflow } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
+import { isMissionControlEnabled, isProfilesEnabled, useConfigStore } from '../stores/configStore';
 import { SETTINGS_PREFERENCE_KEYS, normalizeSidebarPaneRowLayout, type SidebarPaneRowLayout } from '../types/settings';
 import { CreateSessionDialog } from './CreateSessionDialog';
 import { AddProjectDialog } from './AddProjectDialog';
 import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
+import { Bone, Skeleton, SkeletonSwap, TextBone, LoadingStatus } from './ui/Skeleton';
 import { AgentStatusDot, PausedGlyph } from './ui/AgentStatusDot';
 import { resumeIfOpenResumes } from '../utils/pause';
 import type { DropdownItem } from './ui/Dropdown';
@@ -30,6 +31,7 @@ import { paneHasWaitingQuestion, useNotifyStore } from '../stores/notifyStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { AutopilotNavRow } from './autopilot/AutopilotNavRow';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
+import { MovedSessionRow } from './MovedSessionRow';
 import { confirmPaneArchive } from './archiveConfirm';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
@@ -47,6 +49,7 @@ import {
   useOrchestrationSessionStore,
 } from '../stores/orchestrationSessionStore';
 import type { SidebarNavigationScope } from '../stores/navigationStore';
+import { restoreArchivedPanes } from './orchestrationSessionActions';
 import {
   createProjectById,
   flattenSessionsByProjects,
@@ -456,6 +459,8 @@ export function ProjectSessionList({
           </button>
         ) : null}
 
+        {/* Profiles sits above Loops: Loops, Autopilot and Approvals stay together (D-117). */}
+        <ProfilesNavRow active={activeView === 'profiles'} />
         <LoopsNavRow active={activeView === 'loops'} />
         {/* Approvals sits right under Autopilot, which answers them for you (D-117). */}
         <AutopilotNavRow />
@@ -766,6 +771,33 @@ export function LoopsNavRow({ active }: { active: boolean }) {
           <span aria-label={running ? `${loops.length} loops, a run in progress` : `${loops.length} loops`}>{loops.length}</span>
         </span>
       )}
+    </button>
+  );
+}
+
+// --- Profiles nav entry ---
+
+/** Opens the Profiles page: teams of agents and the workflows Pane runs for them. */
+export function ProfilesNavRow({ active }: { active: boolean }) {
+  const profilesOn = useConfigStore(state => isProfilesEnabled(state.config));
+  if (!profilesOn) return null;
+  return (
+    <button
+      type="button"
+      data-testid="profiles-nav"
+      data-sidebar-item
+      data-sidebar-key="profiles"
+      onClick={() => useNavigationStore.getState().navigateToProfiles()}
+      className={cn(
+        SIDEBAR_ROW_BASE,
+        SIDEBAR_ROW_GAP,
+        SIDEBAR_ROW_PADDING,
+        'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+        active ? 'bg-surface-hover text-text-primary' : 'text-text-secondary',
+      )}
+    >
+      <Workflow className="h-3.5 w-3.5" />
+      <span>Profiles</span>
     </button>
   );
 }
@@ -1328,10 +1360,17 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
   const handleRestoreOrchestrationSession = async (sessionId: string) => {
     setOrchestrationRestoreError(null);
     try {
+      const moved = archivedOrchestrationSessions.find(session => session.id === sessionId && session.move?.state === 'moved');
       await updateOrchestrationSession(
         { sessionId },
         { archived: false },
       );
+      // A Session that moved away archived its Panes; Restore here brings them back, uncommitted work included.
+      if (moved) {
+        await restoreArchivedPanes(moved.associations.filter(association => !association.machine).map(association => association.paneId));
+        // Restored Panes leave the Archived list now, not on the next reload.
+        await loadArchivedSessions();
+      }
       // Keep the current Session selected when a historical Session is restored.
       await refreshOrchestrationSessions();
     } catch (cause) {
@@ -1437,18 +1476,37 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
 
       {showArchived && (
         <div id={archivedContentId} className="pb-2 max-h-[40vh] overflow-y-auto">
-          {isLoadingArchived ? (
-            <div className="px-4 py-2 space-y-2 animate-skeleton">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-7 bg-surface-tertiary rounded" />
-              ))}
-            </div>
-          ) : (
+          <SkeletonSwap loading={isLoadingArchived} skeleton={
+            <>
+              <LoadingStatus label="Loading archived Sessions and Panes" />
+              <Skeleton>
+                <div className="pb-1">
+                  <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide"><TextBone text="Sessions" /></p>
+                  {[44, 32].map(width => (
+                    <div key={width} className="flex h-8 items-center gap-2 pl-8 pr-1">
+                      <Bone className="h-3 w-3 flex-shrink-0" />
+                      <Bone className="h-3" style={{ width: `${width}%` }} />
+                    </div>
+                  ))}
+                </div>
+                <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide"><TextBone text="Panes" /></p>
+                {[38, 50].map(width => (
+                  <div key={width} className="flex h-7 items-center gap-2 pl-5 pr-4">
+                    <Bone className="h-3 w-3 flex-shrink-0" />
+                    <Bone className="h-3" style={{ width: `${width}%` }} />
+                    <Bone className="ml-auto h-2.5 w-2" />
+                  </div>
+                ))}
+              </Skeleton>
+            </>
+          }>
             <>
               <div data-testid="archived-orchestration-sessions" className="pb-1">
                 <p className="px-5 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-muted">Sessions</p>
                 {archivedOrchestrationSessions.length === 0 && <p className="px-5 py-2 text-xs text-text-tertiary">No archived Sessions</p>}
-                {archivedOrchestrationSessions.map(session => (
+                {archivedOrchestrationSessions.map(session => session.move?.state === 'moved' ? (
+                  <MovedSessionRow key={`archived-orchestration-${session.id}`} session={session} mark={session.move} onRestore={handleRestoreOrchestrationSession} />
+                ) : (
                   <div
                     key={`archived-orchestration-${session.id}`}
                     data-testid={`archived-orchestration-session-${session.id}`}
@@ -1534,7 +1592,7 @@ export function ArchivedSessions({ expanded: showArchived, onExpandedChange }: {
                 );
               })}
             </>
-          )}
+          </SkeletonSwap>
         </div>
       )}
     </div>

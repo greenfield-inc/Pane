@@ -1,6 +1,7 @@
 import type { DeviceSettings } from '../../../shared/types/devices';
+import type { BrowserSettings } from '../../../shared/types/browser';
 import type { MachineHealthSettings } from '../../../shared/types/machineHealth';
-import type { PaneSecretMeta } from '../services/paneSecrets';
+import type { PaneSecretMeta, PaneSecretReferenceMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { CustomLink } from '../../../shared/types/customLinks';
@@ -59,10 +60,14 @@ export interface AnalyticsIdentity {
 type HtmlFileOpenMode = 'preview' | 'source';
 
 export interface AppConfig {
+  /** Profiles (docs/PROFILES.md): the bundled profiles that are on, by name. Absent: greenfield only. */
+  profiles?: { enabled?: string[] };
   // Chat tabs (Claude and Codex over ACP, no terminal). On for a fresh install; see ConfigManager.
   chatTabsEnabled?: boolean;
   /** Settings > Devices (docs/DEVICES.md). */
   devices?: Partial<DeviceSettings>;
+  /** Settings > Browser. */
+  browser?: Partial<BrowserSettings>;
   /** Experimental: Autopilot, one always-running agent above every Session (needs chat tabs). */
   autopilotEnabled?: boolean;
   verbose?: boolean;
@@ -76,6 +81,12 @@ export interface AppConfig {
   sharedCredentials?: Partial<Record<SharedCredentialId, SharedCredentialMeta>>;
   /** Pane secrets index by `<project>/<NAME>`: when and where each was set or deleted. Values live in the OS store, never here. */
   paneSecrets?: Record<string, PaneSecretMeta>;
+  /** 1Password references by `<project>/<NAME>`. Addresses only: their values exist only in leases. */
+  paneSecretReferences?: Record<string, PaneSecretReferenceMeta>;
+  /** Lease length per secret project, in ms (default 24 h). */
+  secretLeaseLengths?: Record<string, number>;
+  /** The 1Password vault "Move to 1Password" writes into. */
+  onePasswordMoveVault?: string;
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   // Legacy fields for backward compatibility
   gitRepoPath?: string;
@@ -192,6 +203,8 @@ export interface AppConfig {
   missionControlEnabled?: boolean;
   // Experimental: show Notes tabs and give agents their scoped notes (off by default).
   notesEnabled?: boolean;
+  // Profiles (docs/PROFILES.md): the Profiles page, its nav entry, + menu › Profile… and `runpane profiles` (off by default).
+  profilesEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
   answerPromptsFromPane?: boolean;
   // Set once Notify has shown the one-time note about Claude prompts.
@@ -254,6 +267,7 @@ export interface AppConfig {
 }
 
 export interface UpdateConfigRequest {
+  browser?: Partial<BrowserSettings>;
   verbose?: boolean;
   anthropicApiKey?: string;
   openaiApiKey?: string;
@@ -325,6 +339,8 @@ export interface UpdateConfigRequest {
   missionControlEnabled?: boolean;
   // Experimental: show Notes tabs and give agents their scoped notes (off by default).
   notesEnabled?: boolean;
+  // Profiles (docs/PROFILES.md): the Profiles page, its nav entry, + menu › Profile… and `runpane profiles` (off by default).
+  profilesEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
   answerPromptsFromPane?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source

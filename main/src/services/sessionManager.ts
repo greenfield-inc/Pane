@@ -1255,6 +1255,11 @@ export class SessionManager extends EventEmitter {
     this.db.clearSessionOutputs(id);
   }
 
+  /** Drops a Pane from memory only; its saved rows stay (a move back sets an archived Pane aside). */
+  forgetSession(id: string): void {
+    this.activeSessions.delete(id);
+  }
+
   markSessionAsViewed(id: string): void {
     const updatedDbSession = this.db.markSessionAsViewed(id);
     if (updatedDbSession) {

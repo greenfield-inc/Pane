@@ -13,6 +13,7 @@ export type SettingsCategoryId =
   | 'notifications'
   | 'remote-access'
   | 'devices'
+  | 'browser'
   | 'integrations'
   | 'secrets'
   | 'shortcuts'
@@ -64,6 +65,7 @@ export type SettingsSettingId =
   | 'terminal-reference-paste-mode'
   | 'terminal-reference-line-count'
   | 'terminal-shell'
+  | 'links-open-in'
   | 'custom-links'
   | 'default-pane-chat-agent'
   | 'chat-tab-keys'
@@ -111,6 +113,7 @@ export type SettingsSettingId =
   | 'apns-credentials'
   | 'pane-secrets'
   | 'devices-enabled'
+  | 'browser-agent-tools'
   | 'devices-max-booted'
   | 'devices-ios-machine'
   | 'keyboard-shortcuts'
@@ -131,6 +134,7 @@ export type SettingsSettingId =
   | 'autopilot'
   | 'autopilot-instructions'
   | 'notes'
+  | 'profiles'
   | 'usage-leaderboard';
 
 export interface SettingsTarget {

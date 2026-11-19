@@ -1,3 +1,5 @@
+import { secretLeaseStore } from '../services/paneSecrets';
+import { secretLeaseService } from '../services/secretLeaseRuntime';
 import { allRouteProfiles, primaryProfile, saveProfileRoute } from '../../../shared/types/remoteComputers';
 import { runRemoteSetupCommand } from '../daemon/remote-setup-command';
 import {
@@ -48,6 +50,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { ShellDetector } from '../utils/shellDetector';
 import { disconnectActiveRemoteHostClients } from '../daemon/remoteTransportController';
 import { revokeClients } from '../daemon/relay/relayLinks';
+import { PaneError, paneErrorText } from '../../../shared/paneError';
 import {
   getConnectedClientCountBucket,
   getRemoteFailureCategory,
@@ -392,7 +395,7 @@ export function registerRemoteDaemonHandlers(
             await remotePaneClientController.activateProfile(profile);
             connected = true;
           } catch (error) {
-            connectionError = getErrorMessage(error, 'Failed to connect to imported remote daemon profile');
+            connectionError = getErrorMessage(error, 'Failed to connect to the imported connection');
           }
         }
 
@@ -541,6 +544,8 @@ export function registerRemoteDaemonHandlers(
 
       await configManager.updateConfig({ remoteDaemon: next });
       dependencies.disconnectActiveRemoteHostClients([...new Set([decodedClientId, ...revoked])]);
+      // Leases a removed desktop pushed here end with it: nothing could end them for it any more.
+      await secretLeaseStore().endPushedBy([decodedClientId, ...revoked]).catch((error: Error) => console.warn(`[SecretLeases] Could not end leases of a removed client: ${error.message}`));
       return { success: true, data: next.host.clients };
     } catch (error) {
       return { success: false, error: getErrorMessage(error, 'Failed to delete remote daemon client record') };
@@ -550,7 +555,11 @@ export function registerRemoteDaemonHandlers(
   ipcMain.handle('remote-daemon:upsert-connection-profile', async (_event, profile: PaneCommandValue) => {
     try {
       if (!isRemotePaneConnectionProfile(profile)) {
-        throw new Error('Remote daemon connection profile is invalid');
+        throw new PaneError(
+          'ERR_REMOTE_CONNECTION_INVALID',
+          'This connection is not valid: it needs a name, a base URL, and a token or a Tailscale machine. Nothing was saved.',
+          'Fill in the connection name, base URL and token, then save it again.',
+        );
       }
 
       const current = getRemoteDaemonConfig(configManager.getConfig().remoteDaemon);
@@ -565,13 +574,15 @@ export function registerRemoteDaemonHandlers(
       await configManager.updateConfig({ remoteDaemon: next });
       return { success: true, data: next.client.computers.map(primaryProfile) };
     } catch (error) {
-      return { success: false, error: getErrorMessage(error, 'Failed to save remote daemon connection profile') };
+      return { success: false, error: getErrorMessage(error, 'Failed to save connection') };
     }
   });
 
   ipcMain.handle('remote-daemon:delete-connection-profile', async (_event, profileId: PaneCommandValue) => {
     try {
       const decodedProfileId = decodeBoundary(profileId, boundary.nonEmptyString);
+      // End the leases pushed to it while it can still be told; an offline one keeps them until they expire there.
+      await secretLeaseService()?.releaseMachine(decodedProfileId);
 
       const next = await applyRemoteClientTransition(async (current) => {
         const isActiveRemoteProfile = current.client.mode === 'remote' && current.client.activeProfileId === decodedProfileId;
@@ -605,7 +616,7 @@ export function registerRemoteDaemonHandlers(
       });
       return { success: true, data: next.client };
     } catch (error) {
-      return { success: false, error: getErrorMessage(error, 'Failed to delete remote daemon connection profile') };
+      return { success: false, error: getErrorMessage(error, 'Failed to delete saved connection') };
     }
   });
 
@@ -624,7 +635,7 @@ export function registerRemoteDaemonHandlers(
         const activeComputer = candidate.client.computers.find((computer) => computer.id === candidate.client.activeProfileId);
         const activeProfile = activeComputer ? primaryProfile(activeComputer) : undefined;
         if (!activeProfile) {
-          throw new Error(`Remote daemon connection profile "${candidate.client.activeProfileId}" does not exist`);
+          throw missingSavedConnection(candidate.client.activeProfileId);
         }
 
         await remotePaneClientController.activateProfile(activeProfile, options);
@@ -752,11 +763,15 @@ function buildNextClientState(
   }
 
   if (nextMode === 'remote' && !nextActiveProfileId) {
-    throw new Error('Remote mode requires an active connection profile');
+    throw new PaneError(
+      'ERR_REMOTE_CONNECTION_REQUIRED',
+      'Remote mode needs a saved connection, and none was chosen. Remote mode was not turned on.',
+      'Pick a computer in Settings > Remote Access > Computers.',
+    );
   }
 
   if (nextActiveProfileId && !current.computers.some((computer) => computer.id === nextActiveProfileId)) {
-    throw new Error(`Remote daemon connection profile "${nextActiveProfileId}" does not exist`);
+    throw missingSavedConnection(nextActiveProfileId);
   }
 
   return {
@@ -1037,5 +1052,15 @@ function decodeOptionalBoolean(value: PaneCommandValue): boolean | undefined {
 }
 
 function getErrorMessage(cause: unknown, fallback: string): string {
+  if (cause instanceof PaneError) return paneErrorText(cause);
   return cause instanceof Error ? cause.message : fallback;
+}
+
+/** The chosen saved connection is not in the list, so remote mode stays as it was. */
+function missingSavedConnection(id: string | null): PaneError {
+  return new PaneError(
+    'ERR_REMOTE_CONNECTION_MISSING',
+    `The saved connection "${id ?? ''}" does not exist, so Pane did not switch to it. Remote mode was not changed.`,
+    'Pick a computer in Settings > Remote Access > Computers, or pair it again.',
+  );
 }

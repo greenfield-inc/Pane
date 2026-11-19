@@ -1,4 +1,5 @@
 import type { DeviceSettings } from '../../../shared/types/devices';
+import type { BrowserSettings } from '../../../shared/types/browser';
 import type { MachineHealthSettings } from '../../../shared/types/machineHealth';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
@@ -97,6 +98,8 @@ export interface AppConfig {
   chatTabsEnabled?: boolean;
   /** Settings > Devices (docs/DEVICES.md). */
   devices?: Partial<DeviceSettings>;
+  /** Settings > Browser. */
+  browser?: Partial<BrowserSettings>;
   autopilotEnabled?: boolean;
   // Auto-check for updates
   autoCheckUpdates?: boolean;
@@ -187,6 +190,8 @@ export interface AppConfig {
   missionControlEnabled?: boolean;
   // Experimental: show Notes tabs and give agents their scoped notes (off by default).
   notesEnabled?: boolean;
+  // Profiles (docs/PROFILES.md): the Profiles page, its nav entry, + menu › Profile… and `runpane profiles` (off by default).
+  profilesEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
   answerPromptsFromPane?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
@@ -238,6 +243,7 @@ export type PreferredShell = NonNullable<AppConfig['preferredShell']>;
 export type PreferredTerminalPowerMode = NonNullable<AppConfig['terminalPowerMode']>;
 
 export interface UpdateConfigRequest {
+  browser?: Partial<BrowserSettings>;
   verbose?: boolean;
   anthropicApiKey?: string;
   openaiApiKey?: string;
@@ -285,6 +291,8 @@ export interface UpdateConfigRequest {
   missionControlEnabled?: boolean;
   // Experimental: show Notes tabs and give agents their scoped notes (off by default).
   notesEnabled?: boolean;
+  // Profiles (docs/PROFILES.md): the Profiles page, its nav entry, + menu › Profile… and `runpane profiles` (off by default).
+  profilesEnabled?: boolean;
   // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
   answerPromptsFromPane?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source

@@ -96,7 +96,16 @@ from .local_control import (
 from .machine import run_machine_cleanup, run_machine_health
 from .notify import RunpaneError, run_notify
 from .pairing_link import run_link
-from .secrets import run_secrets_delete, run_secrets_exec, run_secrets_list, run_secrets_request, run_secrets_set
+from .profiles import run_profiles_launch, run_profiles_list, run_profiles_runs, run_profiles_show
+from .secrets import (
+    run_secrets_delete,
+    run_secrets_exec,
+    run_secrets_lease,
+    run_secrets_lease_end,
+    run_secrets_list,
+    run_secrets_request,
+    run_secrets_set,
+)
 from .platforms import detect_platform
 from .releases import resolve_release
 from .telemetry import (
@@ -123,9 +132,11 @@ COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
 COMMAND_GROUP_HELP_TOPICS.add("machine")
 COMMAND_GROUP_HELP_TOPICS.add("loops")
+COMMAND_GROUP_HELP_TOPICS.add("profiles")
 COMMAND_GROUP_HELP_TOPICS.add("secrets")
 COMMAND_GROUP_HELP_TOPICS.add("autopilot")
 COMMAND_GROUP_HELP_TOPICS.add("devices")
+COMMAND_GROUP_HELP_TOPICS.add("browser")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
@@ -174,6 +185,7 @@ FLAG_OWNERS = {
     "--relays": ("notify",),
     "--about-session": ("notify",),
     "--questions": ("notify", "report"),
+    "--outcome": ("report",),
     "--took": ("notify",),
     "--took-as": ("notify",),
     "--status": ("notify", "update"),
@@ -185,11 +197,18 @@ FLAG_OWNERS = {
     "--approve": ("autopilot answer",),
     "--deny": ("autopilot answer",),
     "--because": ("autopilot answer",),
-    "--reason": ("secrets request", "autopilot close"),
+    "--reason": ("secrets request", "secrets lease", "autopilot close"),
+    "--id": ("secrets lease end",),
     "--kind": ("machine cleanup",),
     "--conversation": ("panels conversation",),
     "--hook": ("panels conversation",),
+    "--harness": ("profiles launch",),
+    "--agent-harness": ("profiles launch",),
+    "--command": ("profiles launch",),
+    "--yaml": ("profiles show",),
 }
+# The profiles commands that take the profile's name as their first word.
+PROFILE_NAME_COMMANDS = {"profiles show", "profiles launch"}
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
 
@@ -254,6 +273,9 @@ class ParsedArgs:
     project: Optional[str] = None
     only: Optional[List[str]] = None
     secret_files: Optional[List[str]] = None
+    # secrets lease: the secret names, given as words; secrets lease end --id: the lease to end.
+    secret_names: Optional[List[str]] = None
+    lease_id: Optional[str] = None
     reason: Optional[str] = None
     kind: Optional[str] = None
     exec_command: Optional[List[str]] = None
@@ -319,6 +341,8 @@ class ParsedArgs:
     summary: Optional[str] = None
     summary_file: Optional[str] = None
     question: Optional[str] = None
+    # report --outcome: which of a profile step's declared outcomes happened (trimmed); implies --state done.
+    report_outcome: Optional[str] = None
     # panels conversation: --conversation, --source (what started it), and --hook.
     conversation_id: Optional[str] = None
     conversation_source: Optional[str] = None
@@ -369,6 +393,16 @@ class ParsedArgs:
     loop_id: Optional[str] = None
     cron: Optional[str] = None
     paused: bool = False
+    # `runpane profiles show|launch <name>`: the profile's name.
+    profile_name: Optional[str] = None
+    # profiles launch --harness: one CLI (`cli` or `cli/model`) for every agent.
+    profile_harness: Optional[str] = None
+    # profiles launch --agent-harness <agent>=<cli>: agent id -> CLI, over the file's runs.
+    agent_harness: Optional[Dict[str, str]] = None
+    # profiles launch --command <cli>=<command>: a CLI Pane doesn't know -> the command that starts it.
+    profile_commands: Optional[Dict[str, str]] = None
+    # profiles show --yaml: print the file text only.
+    yaml: bool = False
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -635,6 +669,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     parsed = ParsedArgs(command=command)
     if parsed.command == "secrets exec":
         parsed.exec_command = take_exec_command(args)
+    if parsed.command == "secrets lease":
+        parsed.secret_names = take_secret_names(args)
     if parsed.command == "relay":
         # Every word after `relay` is pane-relay's; this package points to npx instead.
         del args[:]
@@ -645,6 +681,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
             parsed.inbox_ids.append(args.pop(0))
     if parsed.command in AUTOPILOT_ITEM_COMMANDS and args and not args[0].startswith("-"):
         parsed.item = args.pop(0)
+    if parsed.command in PROFILE_NAME_COMMANDS and args and not args[0].startswith("-"):
+        parsed.profile_name = args.pop(0)
     if parsed.command == "install" and args and not args[0].startswith("-"):
         target = args.pop(0)
         if target not in TARGETS:
@@ -698,6 +736,18 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     if parsed.command == "autopilot stack push":
         validate_stack_push_args(parsed)
     return parsed
+
+
+def take_secret_names(args: List[str]) -> Optional[List[str]]:
+    """secrets lease takes the names as words before, between or after its options."""
+    names: List[str] = []
+    index = 0
+    while index < len(args):
+        if args[index].startswith("-"):
+            index += 2 if args[index] in LOCAL_VALUE_FLAGS else 1
+        else:
+            names.append(args.pop(index))
+    return names or None
 
 
 def take_exec_command(args: List[str]) -> Optional[List[str]]:
@@ -791,6 +841,8 @@ def validate_until_event_args(parsed: ParsedArgs) -> None:
 
 
 def validate_report_args(parsed: ParsedArgs) -> None:
+    if parsed.report_outcome is not None:
+        validate_report_outcome(parsed, parsed.report_outcome)
     if not parsed.report_state:
         raise ValueError(f"runpane report requires --state <{'|'.join(REPORT_STATES)}>.")
     if parsed.summary is not None and parsed.summary_file is not None:
@@ -799,6 +851,23 @@ def validate_report_args(parsed: ParsedArgs) -> None:
         raise ValueError('runpane report --state blocked requires --question "<what you need answered>".')
     if parsed.report_state != "blocked" and (parsed.notify_choices is not None or parsed.notify_questions is not None):
         raise ValueError("runpane report takes --choices and --questions only with --state blocked: they are the buttons on its question card.")
+
+
+def validate_report_outcome(parsed: ParsedArgs, outcome: str) -> None:
+    """`--outcome` ends a profile step, so it is a done report: it implies `--state done` and takes no question."""
+    if parsed.report_state is not None and parsed.report_state != "done":
+        raise RunpaneError(
+            "ERR_REPORT_OUTCOME_STATE",
+            f"runpane report --outcome ends the step as done, so it cannot be sent with --state {parsed.report_state}. Nothing was reported.",
+            f'Run `runpane report --outcome "{outcome}"` without --state, or drop --outcome to report {parsed.report_state}.',
+        )
+    if parsed.question is not None:
+        raise RunpaneError(
+            "ERR_REPORT_OUTCOME_QUESTION",
+            "runpane report --outcome ends the step, and a --question would block it instead. Nothing was reported.",
+            'To ask something, run `runpane report --state blocked --question "<text>"`; once it is answered, run `runpane report --outcome <name>`.',
+        )
+    parsed.report_state = "done"
 
 
 def validate_conversation_args(parsed: ParsedArgs) -> None:
@@ -872,7 +941,7 @@ def split_inline_values(raw_args: List[str]) -> Tuple[List[str], Set[int]]:
 
 
 def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
-    if parsed.command.startswith("devices "):
+    if parsed.command.startswith(("devices ", "browser ")):
         # npm-only: any of its options gets its help and the npm-only message.
         own_args = raw_args[: raw_args.index("--")] if "--" in raw_args else raw_args
         if "-h" in own_args or "--help" in own_args:
@@ -1024,6 +1093,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
         return
     if flag == "--pinned":
         parsed.pinned = True
+        return
+    if flag == "--yaml":
+        parsed.yaml = True
         return
     if flag == "--launch":
         parsed.launch = True
@@ -1260,6 +1332,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--reason":
         parsed.reason = value
         return
+    if flag == "--id":
+        parsed.lease_id = value
+        return
     if flag == "--timeout-ms":
         if parsed.command == "watch":
             parsed.timeout_ms = parse_watch_duration(flag, value)
@@ -1437,6 +1512,16 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--question":
         parsed.question = value
         return
+    if flag == "--outcome":
+        outcome = value.strip()
+        if not outcome:
+            raise RunpaneError(
+                "ERR_RUNPANE_INVALID_ARGUMENT",
+                "--outcome needs the name of one of the step's declared outcomes; it was empty. Nothing was reported.",
+                'Run `runpane report --outcome "<name>"` with an outcome the step declares, such as "plan ready".',
+            )
+        parsed.report_outcome = outcome
+        return
     if flag == "--conversation":
         if not CONVERSATION_ID_PATTERN.fullmatch(value):
             raise ValueError('--conversation must be a conversation id: up to 256 letters, digits, ".", "_", ":" or "-", starting with a letter or digit.')
@@ -1469,6 +1554,15 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--cron":
         parsed.cron = value
         return
+    if flag == "--harness":
+        parsed.profile_harness = value
+        return
+    if flag == "--agent-harness":
+        parsed.agent_harness = parse_assignments(flag, value, parsed.agent_harness)
+        return
+    if flag == "--command":
+        parsed.profile_commands = parse_assignments(flag, value, parsed.profile_commands)
+        return
     if flag == "--item":
         parsed.item = value
         return
@@ -1484,6 +1578,40 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
+
+
+def parse_assignments(flag: str, value: str, current: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """`--agent-harness <agent>=<cli>` and `--command <cli>=<command>`: one key=value pair, or a JSON
+    object of them (what the MCP tool sends), merged over the pairs given before."""
+    example = '--command aider="aider --yes-always"' if flag == "--command" else "--agent-harness planner=claude/opus"
+
+    def invalid(problem: str) -> RunpaneError:
+        return RunpaneError(
+            "ERR_RUNPANE_INVALID_ARGUMENT",
+            f"{flag} {problem}. Nothing was launched.",
+            f"Pass {flag} as key=value, such as `{example}`, once per key, or one JSON object of them.",
+        )
+
+    pairs: List[Tuple[str, str]] = []
+    if value.strip().startswith("{"):
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            decoded = None
+        if not isinstance(decoded, dict) or not all(isinstance(text, str) for text in decoded.values()):
+            raise invalid('must be a JSON object of strings when it starts with "{"')
+        pairs.extend(decoded.items())
+    else:
+        if "=" not in value:
+            raise invalid(f'needs key=value; got "{value}"')
+        key, text = value.split("=", 1)
+        pairs.append((key, text))
+    merged = dict(current or {})
+    for key, text in pairs:
+        if not key.strip() or not text.strip():
+            raise invalid(f'needs a key and a value; got "{key}={text}"')
+        merged[key.strip()] = text.strip()
+    return merged
 
 
 def split_list(value: str) -> List[str]:
@@ -1752,6 +1880,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "secrets delete": lambda parsed, context: run_secrets_delete(parsed),
     "secrets exec": lambda parsed, context: run_secrets_exec(parsed),
     "secrets request": lambda parsed, context: run_secrets_request(parsed),
+    "secrets lease": lambda parsed, context: run_secrets_lease(parsed),
+    "secrets lease end": lambda parsed, context: run_secrets_lease_end(parsed),
     "sessions list": lambda parsed, context: run_sessions_list(parsed),
     "sessions create": lambda parsed, context: run_sessions_create(parsed),
     "sessions get": lambda parsed, context: run_sessions_get(parsed),
@@ -1776,6 +1906,10 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "loops pause": lambda parsed, context: run_loops_set_enabled(parsed, False),
     "loops resume": lambda parsed, context: run_loops_set_enabled(parsed, True),
     "loops delete": lambda parsed, context: run_loops_delete(parsed),
+    "profiles list": lambda parsed, context: run_profiles_list(parsed),
+    "profiles show": lambda parsed, context: run_profiles_show(parsed),
+    "profiles launch": lambda parsed, context: run_profiles_launch(parsed),
+    "profiles runs": lambda parsed, context: run_profiles_runs(parsed),
     "panes list": lambda parsed, context: run_panes_list(parsed),
     "panes cost": lambda parsed, context: run_panes_cost(parsed),
     "workspace state": lambda parsed, context: run_workspace_state(parsed),
@@ -1800,6 +1934,21 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "devices close": lambda parsed, context: run_unsupported_contract(parsed, context),
     "devices usage": lambda parsed, context: run_unsupported_contract(parsed, context),
     "devices free": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser open": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser tabs": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser close": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser snapshot": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser screenshot": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser click": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser type": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser press": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser select": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser scroll": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser navigate": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser wait": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser dialog": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser evaluate": lambda parsed, context: run_unsupported_contract(parsed, context),
+    "browser upload": lambda parsed, context: run_unsupported_contract(parsed, context),
     "handoff": lambda parsed, context: run_unsupported_contract(parsed, context),
     "ask": lambda parsed, context: run_unsupported_contract(parsed, context),
     "models": lambda parsed, context: run_unsupported_contract(parsed, context),

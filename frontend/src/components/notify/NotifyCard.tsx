@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
-import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, ShieldCheck, X } from 'lucide-react';
+import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, Loader2, ShieldCheck, X } from 'lucide-react';
 import type { NotifyAnswer, NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { showActionError } from '../../stores/errorStore';
 import { useDraftChoice } from '../../stores/approvalColumnStore';
 import { canReplyAlone } from '../approvals/approvalCard';
 import { canClose, canCopyAnswer, canOverride, canReopen, decisionLine, originLine, receiptLine } from '../../../../shared/approvalReceipts';
 import { cn } from '../../utils/cn';
-import { askedBy, cardAnswer, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
+import { askedBy, cardAnswer, leaseRemoteMachine, leaseSummary, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
 import { SecretValueInput } from '../ui/SecretValueInput';
 import { ClampedText } from './ClampedText';
@@ -85,7 +85,16 @@ export function NotifyCard(props: NotifyCardProps) {
 
 // --- Shared pieces ---
 
-function cardShell(form: NotifyCardForm, narrow?: boolean, className?: string): string {
+/**
+ * Every card's root is a focus target: when Dismiss (or an answer) removes the card that held the
+ * focus, the surface hands it to the card shown next (the card itself, not a choice, so Enter can't answer).
+ */
+export const CARD_FOCUS_TARGET = '[data-notify-focus-target]';
+const cardFocus = { tabIndex: -1, 'data-notify-focus-target': '' } as const;
+const CARD_FOCUS_RING = 'outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle';
+
+function cardShell(form: NotifyCardForm, narrow?: boolean, extra?: string): string {
+  const className = cn(CARD_FOCUS_RING, extra);
   if (form === 'inbox') return cn('relative w-full rounded-[18px] bg-surface-primary shadow-card ring-1 ring-border-secondary', className);
   if (form === 'docked') return cn('relative w-full rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', className);
   return cn('relative rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', narrow ? 'w-[504px]' : 'w-[768px]', className);
@@ -482,6 +491,8 @@ function QueueSegments({ queue }: { queue: NotifyQueuePosition }) {
  * was clicked and its window has the keyboard. Runs before the page's own handlers, such as a
  * terminal's, and ignores keys typed into any field and chords with modifiers.
  */
+const FOCUSED_CONTROL = 'button, a[href], summary, [role="button"], [role="link"], [role="menuitem"], [role="option"], [role="tab"]';
+
 function useCardKeys(rootRef: RefObject<HTMLDivElement | null>, floating: boolean, onKey: (key: string) => boolean): void {
   const handler = useRef(onKey);
   useEffect(() => {
@@ -505,6 +516,8 @@ function useCardKeys(rootRef: RefObject<HTMLDivElement | null>, floating: boolea
       // A field has the keyboard (the card's own, a terminal, a chat composer): the keys are its.
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+      // A focused control (Dismiss, a choice, a link) keeps its own Enter: it clicks that control, never sends.
+      if (event.key === 'Enter' && target instanceof HTMLElement && target.closest(FOCUSED_CONTROL)) return;
       if (!handler.current(event.key)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -557,6 +570,17 @@ function QuestionCard({
     if (choice) sendAnswer(cardAnswer(item, { choice: choice.label }, withNote ?? ''));
   };
   const answerApproval = (approved: boolean, reason?: string) => sendAnswer(cardAnswer(item, { approved }, reason ?? ''));
+  // A lease card's Start lease waits on 1Password in main: busy until the item changes state, error or
+  // attempt count (leaseAttempt rises on each finished attempt, so the same error twice still ends it).
+  const [leasePress, setLeasePress] = useState<string | null>(null);
+  const leaseKey = `${item.state}|${item.leaseError ?? ''}|${item.leaseAttempt ?? 0}`;
+  const leaseBusy = leasePress === leaseKey;
+  const startLease = () => {
+    if (leaseBusy) return;
+    setLeasePress(leaseKey);
+    sendAnswer({ approved: true });
+  };
+  const declineLease = () => sendAnswer({ approved: false });
   const answerText = (value: string) => sendAnswer(cardAnswer(item, null, value));
   // An options card sends its pick (with any note), or the note alone as a reply (D-245).
   const replyAlone = selected < 0 && note.trim().length > 0 && canReplyAlone(item);
@@ -585,11 +609,18 @@ function QuestionCard({
         else answerChoice(index);
         return true;
       }
-      if (key === 'Enter' && expanded && selected >= 0) {
-        answerChoice(selected, note);
+      // Enter is Send: the pick with its note, or the note alone as a reply.
+      if (key === 'Enter' && expanded && canSendChoice) {
+        sendChoiceOrNote();
         return true;
       }
       return false;
+    }
+    if (item.ui === 'approve' && item.lease) {
+      if (key.toLowerCase() === 'y') startLease();
+      else if (key.toLowerCase() === 'n') declineLease();
+      else return false;
+      return true;
     }
     if (item.ui === 'approve' && !denying) {
       if (key.toLowerCase() === 'y') answerApproval(true);
@@ -675,6 +706,17 @@ function QuestionCard({
           <span className="ml-auto pr-2 text-[13px] text-text-tertiary">{recommended + 1} is recommended</span>
         )}
       </div>
+    );
+  } else if (item.ui === 'approve' && item.lease) {
+    body = (
+      <LeaseBody
+        item={item}
+        busy={leaseBusy}
+        inbox={form === 'inbox'}
+        className={fieldPad}
+        onStart={startLease}
+        onDecline={declineLease}
+      />
     );
   } else if (item.ui === 'approve') {
     body = (
@@ -849,6 +891,7 @@ function QuestionCard({
   return (
     <div
       ref={rootRef}
+      {...cardFocus}
       className={cardShell(form, narrow, className)}
       data-testid="notify-card" data-pane-part="notify-card"
       data-notify-ui={item.ui}
@@ -901,6 +944,74 @@ function QuestionCard({
   );
 }
 
+/** A lease's names, each with its 1Password reference or a warning that it has none there. */
+export function LeaseRows({ item, className }: { item: NotifyItem; className?: string }) {
+  const lease = item.lease;
+  if (!lease) return null;
+  const host = leaseRemoteMachine(item) ?? lease.machine ?? 'this computer';
+  return (
+    <ul className={cn('space-y-1 text-[13px]', className)}>
+      {lease.names.map((name) => {
+        const reference = lease.references?.[name];
+        return (
+          <li key={name} className="flex min-w-0 items-baseline gap-3" data-testid="notify-lease-row">
+            <span className="w-[38%] shrink-0 truncate font-mono text-text-primary" title={name}>{name}</span>
+            {reference
+              ? <span className="min-w-0 truncate font-mono text-text-tertiary" title={reference}>{reference}</span>
+              : <span className="min-w-0 truncate text-status-warning">not a 1Password reference on {host}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** A lease card: each name with its 1Password reference, where the lease goes and when it ends, then Start lease or Decline. */
+function LeaseBody({ item, busy, inbox, className, onStart, onDecline }: {
+  item: NotifyItem;
+  busy: boolean;
+  inbox: boolean;
+  className: string;
+  onStart: () => void;
+  onDecline: () => void;
+}) {
+  const now = useNow();
+  const lease = item.lease;
+  if (!lease) return null;
+  const remote = leaseRemoteMachine(item);
+  const host = remote ?? lease.machine ?? 'this computer';
+  return (
+    <div className={cn(className, 'space-y-2.5')} data-testid="notify-lease">
+      <LeaseRows item={item} />
+      <div className="text-[12.5px] text-text-tertiary" data-testid="notify-lease-summary">
+        {leaseSummary(item, now)}
+        {lease.memoryOnly && <span className="block">{host === 'this computer' ? 'This computer' : host} holds it in memory only</span>}
+      </div>
+      {item.leaseError && (
+        <div className="text-[12.5px] leading-[18px] text-status-error" role="alert" data-testid="notify-lease-error">{item.leaseError}</div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Chip keyLabel="N" label="Decline" inbox={inbox} onClick={onDecline} />
+        {/* The spinner keeps its box while idle, so the button never changes size. */}
+        <button
+          type="button"
+          onClick={onStart}
+          disabled={busy}
+          aria-busy={busy}
+          className={cn(
+            'inline-flex h-[42px] items-center gap-2.5 whitespace-nowrap rounded-xl bg-surface-tertiary pl-3 pr-4 font-medium text-text-primary disabled:cursor-default',
+            inbox ? 'text-[14.5px]' : 'text-[15px]',
+          )}
+        >
+          <KeyCap>Y</KeyCap>
+          {lease.renews ? 'Extend' : 'Start lease'}
+          <Loader2 className={cn('h-4 w-4 animate-spin text-text-tertiary', !busy && 'invisible')} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** What happened to an item so far: its receipt and the decision it was recorded as. */
 function ReceiptLines({ item, className }: { item: NotifyItem; className?: string }) {
   const lines = [receiptLine(item), decisionLine(item)].filter(Boolean);
@@ -943,7 +1054,7 @@ function CardFooter({ left, right }: { left: ReactNode; right: ReactNode }) {
 
 function SentLine({ item, onCommand }: NotifyCardProps) {
   return (
-    <div className="flex w-max min-w-[360px] max-w-[560px] items-center gap-2 rounded-[24px] bg-surface-primary py-3 pl-4 pr-3.5 text-[13px] text-text-tertiary shadow-modal ring-1 ring-border-secondary" data-testid="notify-card" data-pane-part="notify-card" data-notify-view="sent">
+    <div {...cardFocus} className={cn('flex w-max min-w-[360px] max-w-[560px] items-center gap-2 rounded-[24px] bg-surface-primary py-3 pl-4 pr-3.5 text-[13px] text-text-tertiary shadow-modal ring-1 ring-border-secondary', CARD_FOCUS_RING)} data-testid="notify-card" data-pane-part="notify-card" data-notify-view="sent">
       <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-status-success text-text-on-status-success" aria-hidden="true">
         <Check className="h-3 w-3" strokeWidth={3} />
       </span>
@@ -982,7 +1093,7 @@ export function UnreachableNotice({ item, className }: { item: NotifyItem; class
 function InTerminalCard({ item, form, queue, narrow, onCommand, menuPlacement, machineMark, className }: NotifyCardProps) {
   const inbox = form === 'inbox';
   return (
-    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-pane-part="notify-card" data-notify-ui={item.ui} data-notify-view="in-terminal">
+    <div {...cardFocus} className={cardShell(form, narrow, className)} data-testid="notify-card" data-pane-part="notify-card" data-notify-ui={item.ui} data-notify-view="in-terminal">
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div
         className={cn(inbox ? 'px-3.5 pt-1 text-[14.5px] font-semibold leading-snug' : 'px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em]', 'line-clamp-3 text-text-primary')}
@@ -1005,7 +1116,7 @@ function InTerminalCard({ item, form, queue, narrow, onCommand, menuPlacement, m
 function ExpiredCard({ item, form, narrow, onCommand, menuPlacement, machineMark, related, className }: NotifyCardProps) {
   const reopen = form === 'inbox' && canReopen(item) && !item.unreachable;
   return (
-    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-pane-part="notify-card" data-notify-view="expired">
+    <div {...cardFocus} className={cardShell(form, narrow, className)} data-testid="notify-card" data-pane-part="notify-card" data-notify-view="expired">
       <CardHeader item={item} form={form} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       {/* On Approvals, the same type and inset as the answered and waiting cards beside it. */}
       <div className={form === 'inbox' ? 'line-clamp-3 px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-tertiary' : 'line-clamp-3 px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-tertiary'}>{item.title}</div>
@@ -1045,7 +1156,7 @@ function AnsweredCard(props: NotifyCardProps) {
   }
   const correction = item.corrections?.at(-1);
   return (
-    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-pane-part="notify-card" data-notify-view="answered">
+    <div {...cardFocus} className={cardShell(form, narrow, className)} data-testid="notify-card" data-pane-part="notify-card" data-notify-view="answered">
       <CardHeader item={item} form={form} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div className="px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-tertiary">{item.title}</div>
       <div className="px-3.5 pb-3 pt-2.5">
@@ -1104,7 +1215,8 @@ function Countdown({ hideAt, hideAfterMs }: { hideAt: number | null; hideAfterMs
 function UpdatedLine({ item, onCommand, hideAt = null, hideAfterMs = 6000 }: NotifyCardProps) {
   return (
     <div
-      className="w-max min-w-[360px] max-w-[560px] overflow-hidden rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary"
+      {...cardFocus}
+      className={cn('w-max min-w-[360px] max-w-[560px] overflow-hidden rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', CARD_FOCUS_RING)}
       data-testid="notify-card" data-pane-part="notify-card"
       data-notify-view="updated"
       onMouseEnter={() => onCommand({ type: 'hover-info', id: item.id, hovering: true })}
@@ -1131,7 +1243,8 @@ function InfoLine({ item, onCommand, hideAt = null, hideAfterMs = 6000, onOpenUr
   const action = item.action;
   return (
     <div
-      className="w-max min-w-[360px] max-w-[560px] overflow-hidden rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary"
+      {...cardFocus}
+      className={cn('w-max min-w-[360px] max-w-[560px] overflow-hidden rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', CARD_FOCUS_RING)}
       data-testid="notify-card" data-pane-part="notify-card"
       data-notify-view="info"
       onMouseEnter={() => onCommand({ type: 'hover-info', id: item.id, hovering: true })}
@@ -1159,7 +1272,7 @@ function InfoLine({ item, onCommand, hideAt = null, hideAfterMs = 6000, onOpenUr
 /** A machine health card on a Notify surface: the same body as the in-window dialog. Ask an agent runs in the main window, which shows the Session. */
 function HealthNotifyCard({ item, form, onCommand, className }: NotifyCardProps & { item: HealthNotifyItem }) {
   return (
-    <div className={cn('rounded-xl border border-border-primary bg-surface-primary p-4', className)}>
+    <div {...cardFocus} className={cn('rounded-xl border border-border-primary bg-surface-primary p-4', CARD_FOCUS_RING, className)}>
       <HealthCardBody
         item={item}
         compact={form === 'strip'}

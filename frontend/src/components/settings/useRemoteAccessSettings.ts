@@ -319,7 +319,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
 
   const useProfile = (profileId: string) => runRemoteAction(async () => {
     const response = await showChecklist(() => API.remoteDaemon.updateClientState({ activeProfileId: profileId, mode: 'remote' }));
-    if (!response.success) throw new Error(response.error || 'Failed to connect to profile');
+    if (!response.success) throw new Error(response.error || 'Failed to connect to the saved connection');
     return 'Remote runtime connected.';
   });
 
@@ -351,7 +351,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     if (!outcome.success) return false;
     setCreatedToken(outcome.value.token ?? null);
     setPairLabel('');
-    setResult('Paired profile created.');
+    setResult('Device paired.');
     return true;
   };
 
@@ -365,12 +365,12 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     };
     const outcome = await runRemoteRequest(async () => {
       const response = await API.remoteDaemon.upsertConnectionProfile(profile);
-      if (!response.success) throw new Error(response.error || 'Failed to save remote profile');
+      if (!response.success) throw new Error(response.error || 'Failed to save connection');
     });
     if (!outcome.success) return false;
     setProfileLabel('');
     setProfileToken('');
-    setResult('Remote profile saved.');
+    setResult('Connection saved.');
     return true;
   };
 

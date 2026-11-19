@@ -1,4 +1,5 @@
 import { HealthCardDialog } from './components/machineHealth/HealthCardDialog';
+import { BrowserLayer } from './components/panels/browser/BrowserLayer';
 import { askAgentAbout, isHealthCard } from './components/machineHealth/healthCardActions';
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
 import { AddDeviceHost } from './components/addDevice/AddDeviceDialog';
@@ -40,6 +41,7 @@ import { DISCORD_INVITE_URL } from './components/DiscordIcon';
 import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
 import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
+import { openLink } from './utils/openLink';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeSessionActivity } from './services/sessionActivitySync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
@@ -49,7 +51,7 @@ import { acceleratorFromKeys } from './components/notify/notifyFormat';
 import { openApprovals, toggleApprovals } from './components/approvals/approvalsNavigation';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
-import { forgetShownTerminal, forgetShownTerminalsInSession } from './utils/shownTerminals';
+import { forgetRevealedTerminal, forgetRevealedTerminalsInSession } from './utils/revealedTerminals';
 import { API } from './utils/api';
 import { onOpenSettingsRequest } from './utils/openSettings';
 import { onOpenFirstRunRequest } from './utils/openFirstRun';
@@ -241,6 +243,11 @@ function App() {
       openApprovals();
       return;
     }
+    if ('link' in target) {
+      // A link from a floating card: show the Pane it came from, then open the link beside it.
+      void useSessionStore.getState().setActiveSession(target.paneId).then(() => openLink(target.link, target.paneId));
+      return;
+    }
     if ('askAgent' in target) {
       // A health card's Ask an agent from a floating window: this window knows the active machine.
       const item = useNotifyStore.getState().snapshot?.items.find(candidate => candidate.id === target.askAgent);
@@ -265,11 +272,11 @@ function App() {
     const events = window.electronAPI?.events;
     const unsubscribePanel = events?.onPanelDeleted?.((data) => {
       usePanelStore.getState().forgetPanel(data.panelId);
-      forgetShownTerminal(data.panelId);
+      forgetRevealedTerminal(data.panelId);
     });
     const unsubscribeSession = events?.onSessionDeleted?.((session) => {
       usePanelStore.getState().forgetSession(session.id);
-      forgetShownTerminalsInSession(session.id);
+      forgetRevealedTerminalsInSession(session.id);
     });
     return () => {
       unsubscribePanel?.();
@@ -1100,6 +1107,7 @@ function App() {
           isOpen={isSupportPaneOpen}
           onClose={() => setIsSupportPaneOpen(false)}
         />
+        <BrowserLayer />
         <Welcome isOpen={isWelcomeOpen} onClose={() => setIsWelcomeOpen(false)} />
         <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} onUpdate={handleUpdateRequest} />
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />

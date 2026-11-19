@@ -17,8 +17,11 @@ const TASK_KEEP_MS = 15 * 60_000;
 type Outcome = { value: PaneCommandValue } | { error: Error };
 const tasks = new Map<string, { key: string; outcome: Promise<Outcome>; expires: number }>();
 
-/** `work`'s result if it settles within the answer window, else `{ pending: <task> }` to await. */
-async function answerWithin(key: string, work: Promise<PaneCommandValue>): Promise<PaneCommandValue> {
+/**
+ * `work`'s result if it settles within the answer window, else `{ pending: <task> }` to await.
+ * Linked computers answer every call this way, under their 15 s idle limit (devices and browser tabs).
+ */
+export async function answerWithin(key: string, work: Promise<PaneCommandValue>): Promise<PaneCommandValue> {
   const now = Date.now();
   for (const [id, task] of tasks) if (task.expires < now) tasks.delete(id);
   const outcome = work.then((value): Outcome => ({ value }), (cause): Outcome => ({ error: cause instanceof Error ? cause : new Error(String(cause)) }));
@@ -30,13 +33,17 @@ async function answerWithin(key: string, work: Promise<PaneCommandValue>): Promi
 }
 
 /** The task's result once it settles within the answer window, else `{ pending }` again. */
-async function awaitTask(key: string, id: string | undefined): Promise<PaneCommandValue> {
+export async function awaitTask(key: string, id: string | undefined, gone: () => PaneError = deviceTaskGone): Promise<PaneCommandValue> {
   const task = id ? tasks.get(id) : undefined;
-  if (!id || !task || task.key !== key) throw new PaneError('ERR_DEVICE_TASK_GONE', 'The Mac no longer has that device call.', 'Call the device tool again.');
+  if (!id || !task || task.key !== key) throw gone();
   const settled = await settledWithin(task.outcome);
   if (!settled) return { pending: id };
   tasks.delete(id);
   return unwrap(settled);
+}
+
+function deviceTaskGone(): PaneError {
+  return new PaneError('ERR_DEVICE_TASK_GONE', 'The Mac no longer has that device call.', 'Call the device tool again.');
 }
 
 function settledWithin(outcome: Promise<Outcome>): Promise<Outcome | undefined> {
@@ -143,7 +150,9 @@ export function registerMacDeviceHandler(commandRegistry: PaneCommandRegistry, d
             : { jobId: job.jobId, state: job.state, logTail: job.logTail, cwd: checkout, exitCode: job.exitCode };
         }
         case 'close':
-          return service.close(caller);
+          return request.shutdownBy ? service.close(caller, undefined, { shutdownBy: request.shutdownBy }) : service.close(caller);
+        case 'status':
+          return service.status(key);
         case 'archived':
           await service.paneArchived(key);
           rmSync(checkout, { recursive: true, force: true });

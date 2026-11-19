@@ -1,6 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import { dropRemoteConnection, openConnectedRemotePwa, restoreRemoteConnection } from './remotePwaMock';
 
 test.beforeEach(async ({ page }) => {
@@ -96,7 +96,7 @@ async function openAdvancedRemoteSetup(page: Page) {
 test.describe('Smoke Tests', () => {
   test('Application should start successfully', async ({ page }) => {
     // Navigate to the app
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     // Wait for any content to appear
     await page.waitForSelector('body', { timeout: 10000 });
@@ -111,7 +111,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Main UI elements should be visible', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -125,7 +125,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Settings menu item is clickable', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -136,7 +136,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Worktree file sync custom entries remain editable while typing', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -157,7 +157,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Repository menu opens Project Settings with editable Worktree Folder', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -189,8 +189,8 @@ test.describe('Smoke Tests', () => {
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
   });
 
-  test('Remote daemon settings can create a paired profile and switch modes', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  test('Remote daemon settings can pair a device and switch modes', async ({ page }) => {
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -200,7 +200,7 @@ test.describe('Smoke Tests', () => {
 
     await setInputValue(page.getByLabel('Connection Label', { exact: true }), 'Office Mac mini');
     await setInputValue(page.getByLabel('Remote Base URL', { exact: true }), 'http://127.0.0.1:42137');
-    await clickDomNode(page.getByRole('button', { name: 'Create Paired Profile' }));
+    await clickDomNode(page.getByRole('button', { name: 'Pair a device' }));
 
     await expect(page.getByText('Latest generated remote token')).toBeVisible();
     await clickDomNode(page.getByRole('button', { name: 'Back to Remote Access' }));
@@ -220,8 +220,8 @@ test.describe('Smoke Tests', () => {
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
   });
 
-  test('Remote daemon settings can save an existing remote profile', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  test('Remote daemon settings can save an existing connection', async ({ page }) => {
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -229,10 +229,10 @@ test.describe('Smoke Tests', () => {
     await openRemotePaneSettings(page);
     await openAdvancedRemoteSetup(page);
 
-    await setInputValue(page.getByLabel('Existing Profile Label'), 'Tunnel from laptop');
+    await setInputValue(page.getByLabel('Connection name'), 'Tunnel from laptop');
     await setInputValue(page.getByLabel('Existing Remote Base URL'), 'http://127.0.0.1:42137');
     await setInputValue(page.getByLabel('Existing Remote Token'), 'shared-host-token');
-    await clickDomNode(page.getByRole('button', { name: 'Save Remote Profile' }));
+    await clickDomNode(page.getByRole('button', { name: 'Save connection' }));
 
     await clickDomNode(page.getByRole('button', { name: 'Back to Remote Access' }));
     await clickDomNode(page.getByRole('tab', { name: /^Computers/ }));
@@ -241,7 +241,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Remote daemon settings seed IPv6 loopback defaults with brackets', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -261,7 +261,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Permission dialog can approve a daemonized permission request', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 
@@ -291,11 +291,9 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Remote daemon resync refreshes renderer config', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
-
-    await page.waitForTimeout(250);
 
     const beforeCount = await page.evaluate(() => {
       // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
@@ -322,7 +320,7 @@ test.describe('Smoke Tests', () => {
   });
 
   test('Remote daemon resync replaces stale renderer sessions', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await gotoApp(page);
 
     await dismissStartupDialogs(page);
 

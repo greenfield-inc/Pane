@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 async function rejectUnhandled(page: import('@playwright/test').Page, message: string) {
   await page.evaluate((message) => {
@@ -16,7 +16,7 @@ test('losing the remote host after sleep does not raise the crash dialog', async
     void dialog.dismiss();
   });
   await installElectronApiMock(page);
-  await page.goto('/');
+  await gotoApp(page);
   await expect(page.getByRole('button', { name: 'Collapse sidebar', exact: true })).toBeVisible();
 
   await rejectUnhandled(page, "Error invoking remote method 'daemon:invoke': Error: connect ENETUNREACH 100.115.240.77:443");

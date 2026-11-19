@@ -8,7 +8,7 @@ import { useSessionHistoryStore } from '../stores/sessionHistoryStore';
 import { useHotkey } from '../hooks/useHotkey';
 import { useCommittedRef } from '../hooks/useCommittedRef';
 import { useHotkeyStore } from '../stores/hotkeyStore';
-import { SelectionLoading } from './ui/SelectionLoading';
+import { PaneWorkspaceSkeleton } from './PaneWorkspaceSkeleton';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { HomePage } from './HomePage';
 import { PaneChatView } from './PaneChatView';
@@ -36,6 +36,8 @@ import { panelApi } from '../services/panelApi';
 import { requestBrowserNavigation } from './panels/browser/browserNavigation';
 import { setPendingViewCommit } from './panels/diff/pendingViewCommit';
 import { PanelTabBar } from './panels/PanelTabBar';
+import { TabStripSkeleton } from './panels/TabStripSkeleton';
+import { TerminalSkeleton } from './panels/TerminalSkeleton';
 import { PanelContainer } from './panels/PanelContainer';
 import { getDockTerminalPanel } from '../utils/terminalDock';
 import { SplitLayout } from './panels/SplitLayout';
@@ -72,7 +74,7 @@ import { requestOpenSettings } from '../utils/openSettings';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
-import { isChatTabsEnabled, isMissionControlEnabled, useConfigStore } from '../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isProfilesEnabled, useConfigStore } from '../stores/configStore';
 import { configuredIde } from '../../../shared/utils/ideCommands';
 import { cycleIndex } from '../utils/arrayUtils';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
@@ -81,6 +83,9 @@ import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from '
 import { showActionError, useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
+import { ProfilesView } from './profiles/ProfilesView';
+import { LaunchProfileDialog } from './profiles/LaunchProfileDialog';
+import type { LibraryProfile } from '../../../shared/types/profiles';
 import { LivePreviewPrompt } from './LivePreviewPrompt';
 import { ApprovalsView } from './approvals/ApprovalsView';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
@@ -89,6 +94,7 @@ import { useRegionActions } from '../hooks/useRegionNavigation';
 import { announceTerminalReflow } from '../utils/terminalReflow';
 import { focusActiveTabSoon } from '../services/regionFocus';
 import { useLoopsStore } from '../stores/loopsStore';
+import { LoadingStatus, useSkeletonHold } from './ui/Skeleton';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
   return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
@@ -128,6 +134,11 @@ export const SessionView = memo(() => {
   useEffect(() => {
     if (config && !missionControlEnabled && activeView === 'mission-control') navigateToSessions();
   }, [activeView, config, missionControlEnabled, navigateToSessions]);
+  // Profiles is opt-in the same way (D-106).
+  const profilesOn = isProfilesEnabled(config);
+  useEffect(() => {
+    if (config && !profilesOn && activeView === 'profiles') navigateToSessions();
+  }, [activeView, config, profilesOn, navigateToSessions]);
   const customCommands = useMemo(
     () => (config?.customCommands ?? []).filter(cmd => cmd?.name && cmd?.command),
     [config?.customCommands]
@@ -1296,6 +1307,7 @@ export const SessionView = memo(() => {
   }, [hotkeys]);
 
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [launchingProfile, setLaunchingProfile] = useState<LibraryProfile | null>(null);
   // The empty stage is the "+" menu laid out inline: one click (or the
   // shortcut beside it) from a running tool, instead of a placeholder.
   const emptyStage = useMemo(() => (
@@ -1311,8 +1323,10 @@ export const SessionView = memo(() => {
             hotkeyId: '',
             onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.label} chat`, error)); },
           })) : []),
+          // Profiles run in terminal tabs, so "Profile…" is here with chat tabs off too.
+          // With Profiles off it still opens an Agent Farm profile by name as a chat tab.
+          ...(activeSession && (profilesOn || chatTabs) ? [{ key: 'chat-profile', label: 'Profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
           ...(chatTabs && activeSession ? [
-            { key: 'chat-profile', label: 'Agent Farm profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) },
             { key: 'chat-more', label: 'More agents…', icon: <Boxes className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => requestOpenSettings({ category: 'agents' }) },
           ] : []),
           { key: 'terminal', label: 'Terminal', icon: <Terminal className="h-3.5 w-3.5" />, hotkeyId: 'add-tool-terminal', onClick: () => handlePanelCreate('terminal') },
@@ -1348,10 +1362,15 @@ export const SessionView = memo(() => {
           onClose={() => setProfileDialogOpen(false)}
           // The new tab replaces this empty stage, so the parent closes the dialog itself.
           onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: activeSession.id, launch }); setProfileDialogOpen(false); }}
+          onLaunchProfile={profilesOn ? profile => { setProfileDialogOpen(false); setLaunchingProfile(profile); } : undefined}
+          byName={chatTabs}
         />
       )}
+      {launchingProfile && activeSession && (
+        <LaunchProfileDialog profile={launchingProfile} defaults={{ repoId: activeSession.projectId }} onClose={() => setLaunchingProfile(null)} onLaunched={() => setLaunchingProfile(null)} />
+      )}
     </div>
-  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
+  ), [activeSession, agentPresets, chatAgents, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen, launchingProfile, profilesOn]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1890,6 +1909,11 @@ export const SessionView = memo(() => {
 
   // Removed unused variables - now handled by panels
 
+  // The tab the Pane's stage showed last; a revisited terminal there makes the Pane's skeleton quiet.
+  const stagePanelId = usePanelStore(state => (selectedPaneId ? state.activePanels[selectedPaneId] : undefined));
+  // The project view's skeleton waits 150 ms, stays 300 ms once shown, then the view fades in.
+  const projectHold = useSkeletonHold(activeView === 'project' && Boolean(activeProjectId) && (isProjectLoading || !projectData));
+
   // Live grid of every agent pane — spans all projects.
   if (activeView === 'mission-control' && missionControlEnabled) {
     return <MissionControlView />;
@@ -1897,21 +1921,19 @@ export const SessionView = memo(() => {
 
   // Show project view if navigation is set to project
   if (activeView === 'project' && activeProjectId) {
-    if (isProjectLoading || !projectData) {
+    if (isProjectLoading || !projectData || projectHold.holding) {
+      // ProjectView's own shape: its tab bar over the primary checkout's terminal.
       return (
-        <div className="flex-1 flex flex-col overflow-hidden bg-surface-secondary p-6">
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-interactive mx-auto mb-4"></div>
-              <p className="text-text-secondary">Loading project...</p>
-            </div>
-          </div>
+        <div className="flex flex-1 flex-col overflow-hidden bg-bg-primary">
+          <LoadingStatus label="Loading project" />
+          <TabStripSkeleton titles={['Terminal']} inset="pr-2" />
+          <div className="relative min-h-0 flex-1 bg-[var(--color-terminal-bg)]"><TerminalSkeleton /></div>
         </div>
       );
     }
 
     return (
-      <>
+      <div className="contents" data-skeleton-reveal={projectHold.reveal ? '' : undefined}>
         <ProjectView
           projectId={activeProjectId}
           projectName={projectData.name || 'Project'}
@@ -1933,7 +1955,7 @@ export const SessionView = memo(() => {
           }}
           onDelete={() => setShowProjectSettings(false)}
         />
-      </>
+      </div>
     );
   }
 
@@ -1947,6 +1969,10 @@ export const SessionView = memo(() => {
 
   if (activeView === 'loops') {
     return <LoopsView />;
+  }
+
+  if (activeView === 'profiles' && profilesOn) {
+    return <ProfilesView />;
   }
 
   if (activeView === 'autopilot') {
@@ -1964,7 +1990,13 @@ export const SessionView = memo(() => {
         <button type="button" className="mt-3 rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => {
           if (selectionError) void useSessionStore.getState().setActiveSession(selectedPaneId);
           else { setPanelLoad(null); setPanelRetry(value => value + 1); }
-        }}>Retry</button></div> : <SelectionLoading name={activeSession?.name ?? selectedPaneId} />}
+        }}>Retry</button></div> : <PaneWorkspaceSkeleton name={activeSession?.name ?? selectedPaneId} swapped={layoutSwapped && !immersiveMode}
+          dockHeight={immersiveMode ? 0 : isTerminalCollapsed ? 32 : terminalResize.renderedPx || terminalResize.effectivePx}
+          inspectorWidth={detailVisible && !immersiveMode ? detailResize.renderedPx || detailResize.effectivePx : 0}
+          railWidth={rightTerminalResize.renderedPx || rightTerminalResize.effectivePx}
+          bottomInspectorHeight={isDetailCollapsed ? 32 : bottomDetailResize.renderedPx || bottomDetailResize.effectivePx}
+          contentRef={sessionContentBox.ref} centerRef={centerColumnBox.ref} chain={selectedPaneId}
+          stagePanelId={stagePanelId} />}
     </div>
     : null;
 

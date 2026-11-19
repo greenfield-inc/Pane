@@ -1,6 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { RemoteRequestError, RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 
 import {
@@ -24,8 +23,6 @@ import {
   nextApproval,
   NO_PROJECT,
   NOT_IN_A_SESSION,
-  openApprovalLink,
-  openLinkCommand,
   parseApprovalList,
   parseApprovalSort,
   questionDetail,
@@ -37,7 +34,6 @@ import {
   startOfDay,
   staleItems,
   summaryItemId,
-  summaryLoadAllowed,
   waitingCounts,
   type ApprovalSort,
 } from './approvals';
@@ -228,13 +224,13 @@ describe('the approval screen', () => {
   });
 });
 
-describe('the asking tab (F-2)', () => {
+describe('the tabs beside an item', () => {
   const asking = item('asking', 1, { source: { name: 'api-fix', agent: 'Claude', paneId: 'pane-api', panelId: 'tab-a' } });
 
-  it('opens a worker’s or standalone Pane’s item on the tab that asked', () => {
-    expect(approvalWorkspace(asking)).toEqual({ kind: 'pane', paneId: 'pane-api', panelId: 'tab-a' });
+  it('shows a worker’s or standalone Pane’s tabs beside its item', () => {
+    expect(approvalWorkspace(asking)).toEqual({ kind: 'pane', paneId: 'pane-api' });
     const inSession = item('in-session', 1, { source: { name: 'api-fix', agent: 'Claude', paneId: 'pane-api', panelId: 'tab-a', session: launch } });
-    expect(approvalWorkspace(inSession)).toEqual({ kind: 'pane', paneId: 'pane-api', panelId: 'tab-a' });
+    expect(approvalWorkspace(inSession)).toEqual({ kind: 'pane', paneId: 'pane-api' });
   });
 
   it('keeps the orchestrator’s selection for Session and fallback items', () => {
@@ -246,61 +242,6 @@ describe('the asking tab (F-2)', () => {
   it('drops the last item’s tab on every move to another item (1 of N, Next, answered elsewhere)', () => {
     expect(approvalParams('q2')).toEqual({ notifyId: 'q2', panelId: undefined });
     expect(Object.keys(approvalParams('q2'))).toContain('panelId');
-  });
-});
-
-describe('opening a related link (F-4, F-6)', () => {
-  const links = [{ label: 'plan.md', path: '/work/worker/plan.md' }, { label: 'Docs', url: 'https://example.com' }];
-  const orch = item('q1', 1, { links, source: { name: 'Pane Fixes', agent: 'Claude', paneId: 'ws-fixes', session: { ...fixes, orchestrator: true } } });
-
-  it('sends the host one command naming the item as the host knows it, the link and the shown Pane', () => {
-    expect(openLinkCommand(orch, 0, 'ws-fixes')).toEqual({ type: 'open-link', id: 'q1', index: 0, paneId: 'ws-fixes' });
-    const saved = { ...orch, id: 'studio-1:q1', machineId: 'studio-1' };
-    expect(openLinkCommand(saved, 1, 'ws-fixes')).toEqual({ type: 'open-link', id: 'q1', index: 1, paneId: 'ws-fixes' });
-    expect(openLinkCommand({ ...orch, machineId: 'local' }, 0, undefined)).toEqual({ type: 'open-link', id: 'q1', index: 0 });
-  });
-
-  it('opens an orchestrator’s link to a worker file with one call, and brings the new tab forward', async () => {
-    const send = vi.fn(async () => null);
-    const readPanels = vi.fn(async () => ['chat', 'plan-page']);
-    const outcome = await openApprovalLink(orch, 0, 'ws-fixes', ['chat'], { send, readPanels });
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith({ type: 'open-link', id: 'q1', index: 0, paneId: 'ws-fixes' });
-    expect(outcome).toEqual({ kind: 'opened', panelId: 'plan-page' });
-  });
-
-  it('opens without moving the tabs when no new tab appeared (an existing tab came forward)', async () => {
-    const outcome = await openApprovalLink(orch, 0, 'ws-fixes', ['chat', 'plan-page'], { send: async () => null, readPanels: async () => ['chat', 'plan-page'] });
-    expect(outcome).toEqual({ kind: 'opened' });
-  });
-
-  it('stops on a lost reply: no second call, the tabs are read again, and the result is unknown', async () => {
-    const send = vi.fn(async () => { throw new RemoteUnconfirmedResultError('Delivery unknown'); });
-    const readPanels = vi.fn(async () => ['chat']);
-    const outcome = await openApprovalLink(orch, 1, 'ws-fixes', ['chat'], { send, readPanels });
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(readPanels).toHaveBeenCalledTimes(1);
-    expect(outcome.kind).toBe('unknown');
-    if (outcome.kind !== 'unknown') return;
-    expect(outcome.message).toContain('may have opened Docs');
-    expect(outcome.message).not.toContain('Nothing was opened');
-  });
-
-  it('still says the result is unknown when reading the tabs again fails', async () => {
-    const outcome = await openApprovalLink(orch, 1, 'ws-fixes', ['chat'], {
-      send: async () => { throw new RemoteUnconfirmedResultError('Delivery unknown'); },
-      readPanels: async () => { throw new Error('offline'); },
-    });
-    expect(outcome.kind).toBe('unknown');
-  });
-
-  it('shows the host’s message for a definite rejection, after one call', async () => {
-    const send = vi.fn(async () => { throw new RemoteRequestError('Pane couldn\'t open plan.md as a tab (outside the worktree). Nothing was opened. Next: Check the file still exists inside the asking Pane\'s folder.', 500, 'ERR_APPROVALS_LINK_OPEN'); });
-    const readPanels = vi.fn(async () => ['chat']);
-    const outcome = await openApprovalLink(orch, 0, 'ws-fixes', ['chat'], { send, readPanels });
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(readPanels).not.toHaveBeenCalled();
-    expect(outcome).toEqual({ kind: 'failed', message: expect.stringContaining('Pane couldn\'t open plan.md') });
   });
 });
 
@@ -440,7 +381,8 @@ describe('what an opened item is connected to (J32)', () => {
 });
 
 describe('a link to another approval', () => {
-  const now = 10 * 24 * 60 * 60 * 1000;
+  // Local noon, so an item answered 30 s earlier is today in every time zone.
+  const now = new Date(1970, 0, 11, 12).getTime();
   const answered = item('answered-q', now - 60_000, { state: 'answered', resolvedAt: now - 30_000 });
   const old = item('old-q', 1_000, { state: 'answered', resolvedAt: 2_000 });
   const links = at(loose, answered, old);
@@ -512,11 +454,4 @@ describe('the subtitle and the Summary (P4)', () => {
     expect(summaryItemId(item('studio:q1', 1, { machineId: 'studio' }))).toBeNull();
   });
 
-  it('loads only the page it was handed, never a link', () => {
-    expect(summaryLoadAllowed('about:blank')).toBe(true);
-    expect(summaryLoadAllowed('https://example.com/')).toBe(false);
-    expect(summaryLoadAllowed('file:///etc/hosts')).toBe(false);
-    expect(summaryLoadAllowed('pane://open?pane=1')).toBe(false);
-    expect(summaryLoadAllowed('about:blank#top')).toBe(false);
-  });
 });

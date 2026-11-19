@@ -17,6 +17,7 @@ import { machineLetter } from '../../../../shared/utils/machineMarks';
 import { AutopilotNavRow } from '../autopilot/AutopilotNavRow';
 import {
   LoopsNavRow,
+  ProfilesNavRow,
   ApprovalsNavRow,
   SIDEBAR_SECTION_LABEL,
   SIDEBAR_SECTION_ROW,
@@ -34,6 +35,7 @@ import { confirmMachineArchive } from '../archiveConfirm';
 import { savedOrderAfterMove, type AllMachinesPane, type AllMachinesSession, type MachineRef } from '../../utils/allMachinesTree';
 import { DropLine, useRowReorder, type ReorderList, type RowReorder } from '../../hooks/useRowReorder';
 import { cn } from '../../utils/cn';
+import { moveMarkLabel } from '../../utils/sessionMoveView';
 
 /** "9:14", in this computer's clock format. */
 function formatClock(iso: string | null): string {
@@ -248,6 +250,10 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
 }) {
   const { session, machine } = row;
   const openMenu = (x: number, y: number) => onMenu({ x, y, machine, target: { kind: 'session', row } });
+  // Moving and arriving Sessions say so in place of their counts; an arriving one opens once it has arrived.
+  const moveLabel = session.move && session.move.state !== 'moved' ? moveMarkLabel(session.move) : null;
+  const arriving = session.move?.state === 'arriving';
+  const dimmed = Boolean(session.paused || moveLabel);
   return (
     <div className={cn('relative', row.offline && 'opacity-50')} data-row-key={row.key} {...reorder.drag} onKeyDown={reorder.onKeyDown}>
       <DropLine edge={reorder.indicator} />
@@ -266,9 +272,11 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
           data-row-open
           data-sidebar-item
           data-sidebar-key={`machine-session-${row.key}`}
-          onClick={() => void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name })}
+          onClick={() => { if (!arriving) void openOnMachine(machine.id, { kind: 'session', id: session.id, name: session.name }); }}
           aria-current={active ? 'page' : undefined}
-          aria-label={`Session ${session.name} on ${machine.name}`}
+          aria-disabled={arriving || undefined}
+          title={arriving ? `${moveLabel}: it opens once it has arrived` : undefined}
+          aria-label={`Session ${session.name} on ${machine.name}${moveLabel ? ` (${moveLabel})` : ''}`}
           className="absolute inset-0 z-0 rounded-md focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"
         />
         <button
@@ -281,17 +289,21 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane, reord
         >
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </button>
-        {session.paused
+        {dimmed
           ? <PausedGlyph size="sm" className="pointer-events-none flex-shrink-0" />
           : <SessionActivityIcon state={row.activity} className="pointer-events-none" />}
-        <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', session.paused ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
-        <SessionApprovalsCount
-          sessionId={session.id}
-          machineId={machine.id}
-          otherwise={row.workingPanes > 0
-            ? <span className="text-[12px] tabular-nums text-text-secondary">{row.workingPanes} working</span>
-            : row.panes.length > 0 && <span className="text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
-        />
+        <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', dimmed ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
+        {moveLabel ? (
+          <span data-testid="session-move-label" className="pointer-events-none max-w-[55%] flex-shrink-0 truncate text-[11px] text-text-tertiary">{moveLabel}</span>
+        ) : (
+          <SessionApprovalsCount
+            sessionId={session.id}
+            machineId={machine.id}
+            otherwise={row.workingPanes > 0
+              ? <span className="text-[12px] tabular-nums text-text-secondary">{row.workingPanes} working</span>
+              : row.panes.length > 0 && <span className="text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
+          />
+        )}
         {session.isPinned && <PinnedMark />}
         <MarkSlot machine={machine} label={session.name} onMenu={openMenu} />
       </div>
@@ -398,6 +410,8 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
     <div className="flex flex-col pb-2" data-testid="all-machines-sidebar">
       <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
       {/* Same order as the single-machine sidebar: Loops, Autopilot, Approvals (D-117, D-198). */}
+      {/* Profiles sits above Loops: Loops, Autopilot and Approvals stay together (D-117). */}
+      <ProfilesNavRow active={activeView === 'profiles'} />
       <LoopsNavRow active={activeView === 'loops'} />
       <AutopilotNavRow />
       <ApprovalsNavRow />
@@ -480,7 +494,7 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
       <MoveSessionToHostDialog
         target={moving}
         onClose={() => setMoving(null)}
-        // Opens the Session on its machine, so the person can watch its agent hand it off.
+        // A note handoff opens the Session on its machine, so the person can watch its agent hand it off.
         onMoved={() => {
           if (moving?.kind === 'machine') void openOnMachine(moving.machineId, { kind: 'session', id: moving.session.id, name: moving.session.name });
         }}

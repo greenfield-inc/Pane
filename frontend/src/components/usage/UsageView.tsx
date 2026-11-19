@@ -4,12 +4,17 @@ import { BarChart3, CalendarDays, Check, Download, Loader2, RefreshCw, Share2 } 
 import { toPng } from 'html-to-image';
 import { API } from '../../utils/api';
 import { useHotkey } from '../../hooks/useHotkey';
-import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { AreaChart } from '../ui/charts/AreaChart';
+import { Bone, Skeleton, TextBone, useSkeletonHold, LoadingStatus } from '../ui/Skeleton';
 import { BarChart } from '../ui/charts/BarChart';
 import { DonutChart } from '../ui/charts/DonutChart';
 import { formatTokens, formatUsd } from '../ui/charts/chartScales';
-import { LimitBar, LimitStatusBanners, CreditsLine } from './ProviderLimits';
+import { AccountsSection, MachinesNotice } from './ProviderLimits';
+import { formatTimeAgo } from '../../utils/timestampUtils';
+import { ALL_MACHINES, MachineSwitcher, type MachineLine } from '../machineHealth/MachineSwitcher';
+import { accountUsage, mergeMachineReports } from './allMachinesUsage';
+import { useMachinesUsage } from './useMachinesUsage';
+import type { MachineState } from '../../../../shared/types/machineConnections';
 import { LeaderboardTab } from './LeaderboardTab';
 import { settingDomId } from '../settings/catalog';
 import { PaneUsageSummary } from './PaneUsageSummary';
@@ -95,6 +100,75 @@ function StatCard({
   );
 }
 
+/** A StatCard while usage loads: its label, a value and an optional detail line. */
+function StatCardSkeleton({ label, detail = true }: { label: string; detail?: boolean }) {
+  return (
+    <div className="min-w-0 rounded border border-border-primary bg-surface-secondary px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wider"><TextBone text={label} /></p>
+      <div className="mt-0.5 flex h-7 items-center"><Bone className="h-5 w-16" /></div>
+      {detail && <div className="flex h-[15px] items-center"><Bone className="h-2.5 w-24" /></div>}
+    </div>
+  );
+}
+
+/** The usage report's first screen while it is read: range line, stat cards, per-pane summary and the first charts. */
+function UsageSkeleton() {
+  const heading = 'mb-2 text-[11px] font-medium uppercase tracking-wider';
+  return (
+    <>
+      <Skeleton className="mx-auto flex max-w-6xl flex-col gap-4">
+        <div className="flex h-4 items-center"><Bone className="h-3 w-40" /></div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <StatCardSkeleton label="Total tokens" />
+          <StatCardSkeleton label="Input" />
+          <StatCardSkeleton label="Output" />
+          <StatCardSkeleton label="Cache hit rate" />
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <StatCardSkeleton label="Messages" />
+          <StatCardSkeleton label="Busiest project" />
+          <StatCardSkeleton label="Saved by caching" />
+        </div>
+        <section className="rounded border border-border-primary bg-surface-secondary p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h2 className="text-[11px] font-medium uppercase tracking-wider"><TextBone text="Per-pane usage" /></h2>
+            <div className="flex gap-1"><Bone className="h-6 w-16" /><Bone className="h-6 w-16" /></div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="rounded border border-border-primary px-3 py-2">
+                <div className="flex h-[15px] items-center"><Bone className="h-2.5 w-20" /></div>
+                <div className="mt-0.5 flex h-7 items-center"><Bone className="h-5 w-16" /></div>
+                <div className="flex h-[15px] items-center"><Bone className="h-2.5 w-28" /></div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex h-4 items-center"><Bone className="h-3 w-3/4" /></div>
+        </section>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <section className="rounded border border-border-primary bg-surface-secondary p-3 lg:col-span-2">
+            <h2 className={heading}><TextBone text="Tokens over time" /></h2>
+            <Bone className="aspect-[16/5] w-full" />
+            <div className="mt-2 flex gap-2"><Bone className="h-[19px] w-24" /><Bone className="h-[19px] w-24" /></div>
+          </section>
+          <section className="rounded border border-border-primary bg-surface-secondary p-3">
+            <h2 className={heading}><TextBone text="Accounts and limits" /></h2>
+            <div className="mt-2 space-y-2">
+              {[0, 1, 2].map((index) => (
+                <div key={index}>
+                  <div className="flex h-4 items-center justify-between"><Bone className="h-3 w-28" /><Bone className="h-3 w-8" /></div>
+                  <Bone className="mt-0.5 h-1.5 w-full rounded-full" />
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </Skeleton>
+      <LoadingStatus label="Reading usage" />
+    </>
+  );
+}
+
 function PaneCostCells({ pane }: { pane: UsagePaneCostSlice }) {
   const cost = (value: number) => pane.costIncomplete ? 'n/a' : formatUsd(value);
   return (
@@ -151,15 +225,12 @@ export type UsageTab = 'usage' | 'leaderboard';
 export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<UsageTab>(initialTab);
-  const [report, setReport] = useState<UsageReport | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [machineId, setMachineId] = useState<string>(ALL_MACHINES);
+  const [rescanning, setRescanning] = useState(false);
   const [rangeDays, setRangeDays] = useState<number>(DEFAULT_USAGE_RANGE_DAYS);
   const [customRange, setCustomRange] = useState<UsageDateRange | null>(null);
   const [showDateRange, setShowDateRange] = useState(false);
   const [trimPaneUsage, setTrimPaneUsage] = useState(false);
-  const requestId = useRef(0);
   const [provider, setProvider] = useState<UsageProvider | 'all'>('all');
   const [downloadStatus, setDownloadStatus] = useState<'idle' | 'capturing' | 'done'>('idle');
   const [shareStatus, setShareStatus] = useState<'idle' | 'capturing' | 'done'>('idle');
@@ -171,57 +242,67 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
   /** Series switched off in the legend — see `visibleAreaSeries`. */
   const [hiddenSeries, setHiddenSeries] = useState<string[]>([]);
 
-  const load = useCallback(async (mode: 'initial' | 'refresh') => {
-    const id = ++requestId.current;
-    if (mode === 'refresh') setRefreshing(true);
-    else setLoading(true);
-    try {
-      const response = await API.usage.getReport({
-        ...(customRange ? usageDateBounds(customRange) : rollingUsageRange(rangeDays)),
-        providers: provider === 'all' ? undefined : [provider],
-      });
-      if (id !== requestId.current) return;
-      if (!response.success || !response.data) {
-        throw new Error(response.error || 'Failed to load usage');
-      }
-      setReport(response.data);
-      setError(null);
-    } catch (err: unknown) {
-      if (id === requestId.current) setError(err instanceof Error ? err.message : 'Failed to load usage');
-    } finally {
-      if (id === requestId.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  }, [rangeDays, customRange, provider]);
+  // A rolling range is computed when each read starts, so Refresh and the scan poll reach now.
+  const viewKey = JSON.stringify({ customRange, rangeDays, provider });
+  const buildRequest = useCallback(() => ({
+    ...(customRange ? usageDateBounds(customRange) : rollingUsageRange(rangeDays)),
+    providers: provider === 'all' ? undefined : [provider],
+  }), [customRange, rangeDays, provider]);
+  const { machines, usages, states, reload, loading: firstRead, reading } = useMachinesUsage(viewKey, buildRequest);
+  const allView = machineId === ALL_MACHINES;
+  const shown = useMemo(() => (allView ? usages : usages.filter(usage => usage.machineId === machineId)), [allView, usages, machineId]);
+  const report: UsageReport | null = useMemo(() => mergeMachineReports(shown), [shown]);
+  const accounts = useMemo(() => accountUsage(shown), [shown]);
+  const pickedState = allView ? undefined : states[machineId];
+  const loading = !report && (firstRead || reading || (!allView && !pickedState));
+  const refreshing = reading || rescanning;
+  const { holding, reveal } = useSkeletonHold(loading);
+  const pickedName = machines.find(machine => machine.id === machineId)?.label ?? 'This machine';
+  const error = report || loading ? null
+    : allView ? 'No machine answered with its usage. Check that your machines are online, then refresh.'
+      : pickedState?.kind === 'stale'
+        ? pickedState.reason === 'offline'
+          ? `${pickedName} is offline, and Pane has not read its usage since it opened. Its numbers show here once it is back online.`
+          : `Pane could not read the usage on ${pickedName}: ${pickedState.message ?? 'it did not answer'}. Update Pane there if it is older, then refresh.`
+        : null;
 
+  // Usage comes from each machine, so read again when the active host reconnects.
+  useEffect(() => window.electronAPI?.events?.onRemoteDaemonResyncRequested?.(() => { void reload(); }), [reload]);
+
+  // While a shown machine's index is still building, read that machine again so its numbers fill in.
+  const scanningKey = shown.filter(usage => !usage.stale && usage.report.index.scanning).map(usage => usage.machineId).join('\n');
   useEffect(() => {
-    void load('initial');
-    return () => { requestId.current += 1; };
-  }, [load]);
-
-  // Usage comes from the active host, so reload when it changes or reconnects.
-  useEffect(() => window.electronAPI?.events?.onRemoteDaemonResyncRequested?.(() => { void load('refresh'); }), [load]);
-
-  // While the index is still building, keep refreshing so numbers fill in.
-  const scanning = report?.index.scanning ?? false;
-  useEffect(() => {
-    if (!scanning) return;
-    const timer = window.setInterval(() => { void load('refresh'); }, SCAN_POLL_MS);
+    if (!scanningKey) return;
+    const ids = scanningKey.split('\n');
+    const timer = window.setInterval(() => { void reload(ids); }, SCAN_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [scanning, load]);
+  }, [scanningKey, reload]);
 
-  const currentLoad = useCommittedRef(load);
   const handleRescan = useCallback(async () => {
-    setRefreshing(true);
+    setRescanning(true);
     try {
-      await API.usage.rescan();
-      await currentLoad.current('refresh');
-    } catch {
-      setRefreshing(false);
+      // Only this computer's index can be rescanned from here; every machine is read again.
+      if (allView || machineId === 'local') await API.usage.rescan().catch(() => undefined);
+      await reload(allView ? undefined : [machineId]);
+    } finally {
+      setRescanning(false);
     }
-  }, [currentLoad]);
+  }, [allView, machineId, reload]);
+
+  /** Each machine's line in the picker: whether its numbers are live, and its tokens in the range. */
+  const describeMachine = useCallback((machine: MachineState): MachineLine | null => {
+    const state = states[machine.id];
+    const usage = usages.find(item => item.machineId === machine.id);
+    const tokens = usage ? `${formatTokens(usage.report.totals.totalTokens)} tokens` : null;
+    if (!state) return null;
+    if (state.kind === 'live') return { text: tokens ?? 'No usage in this range' };
+    const why = state.reason === 'offline' ? 'Offline' : 'Not answering';
+    return state.readAt === null
+      ? { text: `${why} · not read yet`, tone: 'warning', dim: true }
+      : { text: `${why} · ${tokens ?? 'no usage'}, read ${formatTimeAgo(new Date(state.readAt).toISOString())}`, tone: 'warning', dim: true };
+  }, [states, usages]);
+
+  const allLine = `${machines.length} machine${machines.length === 1 ? '' : 's'} · each account counted once`;
 
   const rangeLabel = customRange
     ? `${customRange.start} to ${customRange.end}`
@@ -453,6 +534,10 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
         </nav>
 
         {activeTab === 'usage' && (
+          <MachineSwitcher machineId={machineId} hostname={undefined} onSelect={setMachineId} all={allLine} describe={describeMachine} />
+        )}
+
+        {activeTab === 'usage' && (
           <div className="ml-auto flex flex-wrap items-center gap-3">
             <fieldset className="flex items-center gap-1">
               <legend className="sr-only">Provider</legend>
@@ -568,15 +653,12 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
         </div>
       ) : (
       <div ref={contentRef} className="relative min-h-0 flex-1 overflow-auto p-4">
-        {loading ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-xs text-text-tertiary">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Reading usage…
-          </div>
-        ) : error ? (
+        {!loading && error ? (
           <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}
           </div>
+        ) : holding ? (
+          <UsageSkeleton />
         ) : noAgentTranscripts ? (
           <div className="mx-auto max-w-lg rounded border border-border-primary bg-surface-secondary p-6 text-center">
             <h2 className="mb-2 text-sm font-medium text-text-primary">No agent transcripts found</h2>
@@ -588,8 +670,9 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
             </p>
           </div>
         ) : report ? (
-          <div className="mx-auto flex max-w-6xl flex-col gap-4">
-            <p className="text-xs text-text-tertiary">{customRange ? rangeLabel : `Last ${rangeLabel}`} · {provider === 'all' ? 'All providers' : PROVIDER_OPTIONS.find(option => option.value === provider)?.label}</p>
+          <div className={`mx-auto flex max-w-6xl flex-col gap-4${reveal ? ' skeleton-reveal' : ''}`}>
+            <p className="text-xs text-text-tertiary">{allView ? 'All machines' : pickedName} · {customRange ? rangeLabel : `Last ${rangeLabel}`} · {provider === 'all' ? 'All providers' : PROVIDER_OPTIONS.find(option => option.value === provider)?.label}</p>
+            <MachinesNotice machines={machines.filter(machine => allView || machine.id === machineId)} states={states} />
             {/* Summary — all from logs */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <StatCard
@@ -690,30 +773,7 @@ export function UsageView({ initialTab = 'usage' }: { initialTab?: UsageTab }) {
                 </ul>
               </section>
 
-              {/* Provider-reported limits */}
-              <section className="rounded border border-border-primary bg-surface-secondary p-3">
-                <h2 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
-                  Provider limits
-                </h2>
-
-                <LimitStatusBanners limits={report.rateLimits} />
-
-                {report.rateLimits.length > 0 ? (
-                  <ul className="mt-2 space-y-2">
-                    {report.rateLimits.map(limit => (
-                      <li key={`${limit.provider}-${limit.limitId}-${limit.scope}`}>
-                        <LimitBar limit={limit} />
-                      </li>
-                    ))}
-                    <CreditsLine limits={report.rateLimits} />
-                  </ul>
-                ) : (
-                  <p className="mt-2 text-[11px] text-text-muted">
-                    No provider-reported limits available. Codex writes quota state
-                    into its transcripts; Anthropic does not expose plan limits locally.
-                  </p>
-                )}
-              </section>
+              <AccountsSection accounts={accounts} several={allView && machines.length > 1} />
             </div>
 
             <div className="grid gap-4 lg:grid-cols-3">

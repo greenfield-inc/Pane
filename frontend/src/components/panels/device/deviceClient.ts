@@ -1,13 +1,33 @@
 import { createContext } from 'react';
-import type { DeviceInput } from '../../../../../shared/types/devices';
+import type { DeviceCapture, DeviceControls, DeviceInput, DeviceLogPage, DeviceRecording } from '../../../../../shared/types/devices';
+import { addDraftAttachment } from '../../chatTab/chatDrafts';
 
 /** How a device tab reaches the device on the host its client shows. Each call throws on failure. */
 export interface DeviceTabClient {
   /** Names this client's view of the tab, so the lease knows where the tab is on screen. */
   clientId: string;
-  /** A URL that streams the screen, when this client can stream; else the tab polls frames. */
-  streamUrl(panelId: string): string | undefined;
-  frame(panelId: string): Promise<string>;
+  /**
+   * A URL that streams the screen sized so its longest side is `maxPx` device pixels. Clients
+   * that cannot stream leave it out, and the tab polls frames.
+   */
+  streamUrl?(panelId: string, maxPx: number): string;
+  /** Frames per second the stream delivers now, for clients that stream; null when unknown. */
+  frameRate?(panelId: string): Promise<number | null>;
+  /** The latest frame as a data URL; given `maxPx`, no larger than that on its longest side. */
+  frame(panelId: string, maxPx?: number): Promise<string>;
+  /** Whether the device turns and folds, and how it is turned and folded now. */
+  controls(panelId: string): Promise<DeviceControls>;
+  /** A full-resolution screenshot saved as a PNG on the host; given `image` (a PNG data URL), that image saved instead. */
+  capture(panelId: string, image?: string): Promise<DeviceCapture>;
+  /** Types `text` at the prompt of a terminal agent tab in the same Pane, unsent. */
+  stage(panelId: string, agentPanelId: string, text: string): Promise<void>;
+  /** Adds a file to a chat tab's unsent draft. */
+  attachToChat(chatPanelId: string, file: File): Promise<void>;
+  /** Starts a recording (answering null) or stops it (answering the saved recording). */
+  record(panelId: string, action: 'start' | 'stop'): Promise<DeviceRecording | null>;
+  logs(panelId: string, since: number): Promise<DeviceLogPage>;
+  /** Take over (`person`), or hand the device back to the agent. */
+  driver(panelId: string, who: 'person' | 'agent'): Promise<void>;
   input(panelId: string, input: DeviceInput): Promise<void>;
   visible(panelId: string, visible: boolean): Promise<void>;
   takeOver(panelId: string): Promise<void>;
@@ -28,8 +48,16 @@ export function desktopDeviceClient(remote: boolean): DeviceTabClient {
   const devices = window.electronAPI.devices;
   return {
     clientId: 'desktop',
-    streamUrl: panelId => (remote ? undefined : `pane-media://device/${panelId}`),
-    frame: panelId => unwrap(devices.frame(panelId)),
+    streamUrl: remote ? undefined : (panelId, maxPx) => `pane-media://device/${panelId}?max=${maxPx}`,
+    frameRate: remote ? undefined : panelId => unwrap(devices.frameRate(panelId)),
+    frame: (panelId, maxPx) => unwrap(devices.frame(panelId, maxPx)),
+    controls: panelId => unwrap(devices.controls(panelId)),
+    capture: (panelId, image) => unwrap(devices.capture(panelId, image)),
+    stage: async (panelId, agentPanelId, text) => { await unwrap(devices.stage(panelId, agentPanelId, text)); },
+    attachToChat: (chatPanelId, file) => addDraftAttachment(window.electronAPI.chatTab, chatPanelId, file),
+    record: (panelId, action) => unwrap(devices.record(panelId, action)),
+    logs: (panelId, since) => unwrap(devices.logs(panelId, since)),
+    driver: async (panelId, who) => { await unwrap(devices.driver(panelId, who)); },
     input: async (panelId, input) => { await unwrap(devices.input(panelId, input)); },
     visible: async (panelId, visible) => { await unwrap(devices.visible(panelId, 'desktop', visible)); },
     takeOver: async panelId => { await unwrap(devices.takeOver(panelId)); },

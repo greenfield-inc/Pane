@@ -1,0 +1,8 @@
+# expect: STEP_RESERVED
+format: pane-profile/1
+name: end-reserved
+version: 1.0.0
+flow:
+  start: test
+  test: { run: npm test, outcomes: { green: end, red: end } }
+  end: { run: echo done }

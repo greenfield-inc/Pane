@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type ReactNode, type RefObject, type SetStateAction } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PaneError } from '@shared/paneError';
@@ -24,6 +24,8 @@ import { isDemoProfile } from '../demo/demoHost';
 import { explainDemoLimit } from '../demo/explainDemoLimit';
 import { draftKey } from '../composer/composerDrafts';
 import { useComposerDraft } from '../composer/useComposerDraft';
+import { perfMark } from '../perf/perfMarks';
+import { useJourneyMark, useLiveMarks, useScreenJourney } from '../perf/usePerfMarks';
 import { Dimmed } from '../hosts/ConnectionStatus';
 import { useAffordances } from '../hosts/hostSettings';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
@@ -44,7 +46,7 @@ import { useControllerShown } from './controllerPreference';
 import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
 import { followsHost, pickPanel, sessionWorkspacePanels, stripPanels, tabView } from './panels';
-import { PanelTabs } from './PanelTabs';
+import { offerClose, PanelTabs, type LeadingTab } from './PanelTabs';
 import { PausedTerminal } from './PausedTerminal';
 import { TerminalInputBar } from './TerminalInputBar';
 import { TerminalTopBar } from './TerminalTopBar';
@@ -63,22 +65,18 @@ const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:
  * on top, then the open tab. A terminal shows xterm with the composer box
  * below; other tabs get a view for their type. With a `session`, it shows
  * that Session's workspace pane, its agent chat first. The approval screen
- * passes its own `topBar` and puts its card `above` the tabs.
+ * passes its own `topBar` and its own tabs (`leading`), which open first.
  */
-export function TerminalScreen({ paneId, session, topBar, above, initialPanelId }: {
+export function TerminalScreen({ paneId, session, topBar, leading }: {
   paneId: string;
   session?: OrchestrationSessionView;
-  /** The tab to open on until the person picks one (an approval's asking tab). */
-  initialPanelId?: string;
   /** Replaces the host bar. */
   topBar?: ReactNode;
-  /** Sits between the bar and the tabs. */
-  above?: ReactNode;
+  leading?: LeadingTabs;
 }) {
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const keyboardVisible = useKeyboardVisible();
   const { client, profile } = useDaemon();
   const { presence } = useConnectionPresence();
   const queryClient = useQueryClient();
@@ -124,21 +122,24 @@ export function TerminalScreen({ paneId, session, topBar, above, initialPanelId 
 
   const strip = stripPanels(panelList.data ?? []);
   const panels = session ? sessionWorkspacePanels(session, strip) : strip;
-  const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id, initialPanelId);
+  const leadingTab = leading?.tabs.find(tab => tab.id === (panelId ?? leading.tabs[0]?.id));
+  const panel = leadingTab ? null : pickPanel(panels, panelId ?? null, hostActive.data?.id);
   const view = panel ? tabView(panel) : null;
   const paused = panel ? pausedMarkOf(panel) : undefined;
   const followed = follow ? panels.find(candidate => candidate.id === follow) : undefined;
   useEffect(() => {
     if (!followed) return;
-    if (followsHost(followed)) router.setParams({ panelId: followed.id });
+    // Reading the screen's own tab (an approval), the phone stays put.
+    if (followsHost(followed) && !leadingTab) router.setParams({ panelId: followed.id });
     setFollow(null);
-  }, [followed]);
+  }, [followed, leadingTab]);
   // The tab on screen stays put until the person or a host announcement moves it,
   // so the host's active tab changing to one the phone doesn't follow never jumps it.
   const shownId = panel?.id;
+  const hasLeading = leading !== undefined;
   useEffect(() => {
-    if (!panelId && shownId) router.setParams({ panelId: shownId });
-  }, [panelId, shownId]);
+    if (!panelId && shownId && !hasLeading) router.setParams({ panelId: shownId });
+  }, [panelId, shownId, hasLeading]);
   const terminalActive = view === 'terminal' && !paused;
   const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
 
@@ -155,9 +156,10 @@ export function TerminalScreen({ paneId, session, topBar, above, initialPanelId 
   const resumeOnOpen = affordances.data?.resumePausedOnOpen === true;
   const openChecked = useRef(false);
   useEffect(() => {
-    if (openChecked.current || !panel || affordances.isPending) return;
+    if (openChecked.current || (!panel && !leadingTab) || affordances.isPending) return;
     openChecked.current = true;
-    if (resumeOnOpen && pausedMarkOf(panel)) resume(panel);
+    // Opening on the screen's own tab, only a picked tab resumes (selectPanel).
+    if (panel && resumeOnOpen && pausedMarkOf(panel)) resume(panel);
   });
 
   const selectPanel = (next: ToolPanel) => {
@@ -177,14 +179,7 @@ export function TerminalScreen({ paneId, session, topBar, above, initialPanelId 
         { text: 'Close', style: 'destructive', onPress: close },
       ])
       : close;
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { title: tab.title, options: ['Close', 'Cancel'], destructiveButtonIndex: 0, cancelButtonIndex: 1 },
-        index => { if (index === 0) confirm(); },
-      );
-    } else {
-      Alert.alert(tab.title, undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Close', style: 'destructive', onPress: confirm }]);
-    }
+    offerClose(tab.title, confirm);
   };
 
   return (
@@ -194,16 +189,22 @@ export function TerminalScreen({ paneId, session, topBar, above, initialPanelId 
       style={[styles.fill, { backgroundColor: theme.colors.surface }]}
     >
       {topBar ?? <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />}
-      {above}
-      <PanelTabs
-        panels={panels}
-        chatId={session?.panel.id}
-        selectedId={panel?.id ?? null}
-        onSelect={selectPanel}
-        onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
-        onClose={closePanel}
-      />
-      {panel && view !== 'terminal' ? (
+      {/* An approval's layout is final once the tabs and the tab body stop moving (perf marks). */}
+      <View onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `tabs=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
+        <PanelTabs
+          panels={panels}
+          chatId={session?.panel.id}
+          selectedId={leadingTab?.id ?? panel?.id ?? null}
+          leading={leading?.tabs}
+          onSelectLeading={id => router.setParams({ panelId: id })}
+          onSelect={selectPanel}
+          onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
+          onClose={closePanel}
+        />
+      </View>
+      <View style={styles.fill} onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `body=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })}>
+      {leading ? <LeadingBodies leading={leading} selectedId={leadingTab?.id ?? null} /> : null}
+      {leadingTab ? null : panel && view !== 'terminal' ? (
         <TabBody panel={panel} title={title} panels={panels} />
       ) : panel && paused ? (
         <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resumePanel.isPending} onResume={() => resume(panel)} />
@@ -237,9 +238,31 @@ export function TerminalScreen({ paneId, session, topBar, above, initialPanelId 
           )}
         </View>
       )}
+      </View>
       {/* The box sits on the bottom safe area (HIG: controls stay out of it), or a hair above the keyboard. */}
-      <View style={{ height: keyboardVisible ? KEYBOARD_GAP : insets.bottom }} />
+      <BottomGap />
     </KeyboardAvoidingView>
+  );
+}
+
+/** A screen's own tabs ahead of the Pane's, picked through the `panelId` route param like the rest; the first opens when none is picked. */
+export interface LeadingTabs {
+  tabs: readonly LeadingTab[];
+  render: (id: string) => ReactNode;
+}
+
+/**
+ * The bodies of a screen's own tabs. The first stays mounted, hidden while another tab shows, so
+ * what was typed or picked there (an approval's answer) survives a look at another tab.
+ */
+export function LeadingBodies({ leading, selectedId }: { leading: LeadingTabs; selectedId: string | null }) {
+  const first = leading.tabs[0];
+  const other = leading.tabs.find(tab => tab.id === selectedId && tab !== first);
+  return (
+    <>
+      {first ? <View style={first.id === selectedId ? styles.fill : styles.hidden}>{leading.render(first.id)}</View> : null}
+      {other ? <View key={other.id} style={styles.fill}>{leading.render(other.id)}</View> : null}
+    </>
   );
 }
 
@@ -261,7 +284,7 @@ function TabBody({ panel, title, panels }: { panel: ToolPanel; title: string; pa
     case 'logs':
       return <LogsTab key={panel.id} panel={panel} />;
     case 'device':
-      return <DeviceTab key={panel.id} panel={panel} />;
+      return <DeviceTab key={panel.id} panel={panel} panels={panels} />;
     default:
       return <PlaceholderTab panel={panel} />;
   }
@@ -285,8 +308,9 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   onOpenShortcuts: () => void;
 }) {
   const theme = useTheme();
+  useScreenJourney('terminal', panel.id);
   const { profile } = useDaemon();
-  const { presence } = useConnectionPresence();
+  const { live } = useConnectionPresence();
   const terminal = useTerminal(panel.id, panel.sessionId);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
@@ -302,9 +326,13 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   }, [voiceSaved]);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  // Input waits for a live terminal; until then its last screen stays up, dimmed.
-  const disabled = terminal.status !== 'ready' || presence !== 'connected';
+  // Input waits for a live terminal. While the connection comes back the last screen stays at full
+  // strength and keys wait for it (useTerminal); past the grace window it dims.
+  const disabled = terminal.status !== 'ready' || !live;
   const shown = terminal.status === 'ready' || terminal.hasContent;
+  useJourneyMark('terminal', 'content', terminal.hasContent);
+  useJourneyMark('terminal', 'live', !disabled);
+  useLiveMarks('terminal', !disabled);
 
   const sendKey = (data: string) => {
     terminal.scrollToBottom();
@@ -461,6 +489,13 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   );
 }
 
+/** The space under a screen's last row: the bottom safe area, or a hair above the keyboard while it is up. */
+export function BottomGap() {
+  const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
+  return <View style={{ height: keyboardVisible ? KEYBOARD_GAP : insets.bottom }} />;
+}
+
 function useKeyboardVisible(): boolean {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -476,6 +511,7 @@ function useKeyboardVisible(): boolean {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  hidden: { display: 'none' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   // The web app insets xterm 8 pt from the sides and top.
   screen: { flex: 1, paddingHorizontal: 8, paddingTop: 8 },

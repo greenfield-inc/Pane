@@ -308,7 +308,7 @@ export function RemoteCreateSessionDialog({
                   }}
                   onKeyDown={handleBranchKeyDown}
                   className="min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted disabled:cursor-not-allowed disabled:opacity-60"
-                  placeholder={loadingBranches ? 'Loading branches...' : 'Search branches'}
+                  placeholder="Search branches"
                 />
                 <ChevronDown className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
               </div>

@@ -552,11 +552,12 @@ export class TaskQueue {
     await this.writeSetupLines(sessionId, worktreePath, ctx, [`Setup failed: ${message}`]);
   }
 
-  /** File sync, dependency install, build script, then the session's own tool. */
-  private async runSetup(data: CreateSessionJob, session: Session, targetProject: Project, worktreePath: string, ctx: ProjectContext): Promise<void> {
-    const { prompt, permissionMode, toolType } = data;
-    const { sessionManager, claudeCodeManager } = this.options;
-
+  /**
+   * Pane's normal setup for a worktree: sync the ignored files the project lists, install
+   * dependencies, run the setup script. A Pane that moved here from another machine gets the same.
+   */
+  async runWorktreeSetup(session: Pick<Session, 'id'>, targetProject: Project, worktreePath: string, ctx: ProjectContext): Promise<void> {
+    const { sessionManager } = this.options;
     // Copy gitignored files (node_modules, .env, ...) before installing over them.
     const syncResult = await worktreeFileSyncService.syncWorktree(
       targetProject.path,
@@ -615,6 +616,15 @@ export class TaskQueue {
       const buildResult = await sessionManager.runBuildScript(session.id, buildCommands, worktreePath, ctx.commandRunner);
       console.log(`[TaskQueue] Build script completed. Success: ${buildResult.success}`);
     }
+  }
+
+  /** File sync, dependency install, build script, then the session's own tool. */
+  private async runSetup(data: CreateSessionJob, session: Session, targetProject: Project, worktreePath: string, ctx: ProjectContext): Promise<void> {
+    const { prompt, permissionMode, toolType } = data;
+    const { sessionManager, claudeCodeManager } = this.options;
+
+    await this.runWorktreeSetup(session, targetProject, worktreePath, ctx);
+
 
     // Only start Claude if there's a prompt
     if (prompt && prompt.trim().length > 0) {

@@ -37,7 +37,9 @@ test('a Session loop lives under Loops, and archiving it anywhere pauses the loo
   try {
     await page.evaluate(async () => { await window.electronAPI.config.update({ notify: { enabled: true, showOutsidePane: false } }); });
     await dismissDialogs(page);
-    await expect.poll(() => runpane(pane, ['doctor', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
+    // The bundled runpane reaches this Pane. Not `runpane doctor`: its exit code also needs the latest
+    // release from api.github.com, which CI can't count on.
+    await expect.poll(() => runpane(pane, ['sessions', 'list', '--json']).then(() => true, () => false), { timeout: 30_000 }).toBe(true);
 
     const { loop } = await json<{ loop: { id: string; orchestrationSessionId: string } }>(pane, [
       'loops', 'create', '--session', 'new', '--name', 'promises-watch', '--cron', '30 7 * * *',

@@ -5,6 +5,7 @@ import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder'
 import type { BoundaryCursor, BoundarySchema } from '../validation/boundaryDecoder';
 import type { ConfiguredAgentId } from '../agents';
 import type { NotifyChoice, NotifySubQuestion } from './notify';
+import type { DeviceDriver } from './devices';
 
 /**
  * Panel and session types for Pane.
@@ -77,11 +78,17 @@ export interface TerminalConversationReport {
 /** Why and when a tab was paused. */
 export interface TerminalPausedMark {
   at: string;
-  by: 'manual' | 'auto';
+  /** `move`: the Session is moving to (or arriving from) another machine; only the move starts it again. */
+  by: 'manual' | 'auto' | 'move';
   /** The auto-pause threshold in hours when `by` is `auto`. */
   idleHours?: number;
   /** Pause stopped the Pane's run script too; Resume runs it again. */
   runScript?: boolean;
+  /** `move` only: the other machine, and whether this copy is the one arriving there. */
+  machine?: string;
+  arriving?: boolean;
+  /** `move` only: the agent was mid-turn when Stop now interrupted it. */
+  interrupted?: boolean;
 }
 
 /** The pause mark of a terminal tab, if Pause stopped it. */
@@ -327,6 +334,11 @@ export interface BrowserPanelState {
   /** Set when an agent reopens this page (runpane panels open); the tab reloads to show the latest file. */
   reopenedAt?: string;
   reopenedWithFocus?: boolean;
+  /**
+   * Who drives the tab now: an agent while its browser_* call runs, or the person after they touch
+   * the page or press Take over. Only main writes it (main/src/ipc/browser.ts).
+   */
+  driver?: DeviceDriver;
 }
 
 export interface ToolPanelMetadata {

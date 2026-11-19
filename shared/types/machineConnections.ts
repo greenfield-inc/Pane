@@ -1,3 +1,4 @@
+import type { JsonObject } from '../validation/boundaryDecoder';
 import type { NotifyRemoteCommand } from './notify';
 import type { OrchestrationSessionCreateInput } from './orchestrationSession';
 import type { PanePermissionResponse } from './permissions';
@@ -58,6 +59,8 @@ export const MACHINE_READ_CHANNELS = [
   'resource-monitor:machine-relief',
   'resource-monitor:machine-cleanup-history',
   'resource-monitor:machine-apps',
+  // Usage & Limits: one machine's usage report, accounts and provider limits.
+  'usage:get-report',
 ] as const;
 export type MachineReadChannel = typeof MACHINE_READ_CHANNELS[number];
 
@@ -109,6 +112,8 @@ export type MachineCommand =
   | { type: 'switch-to-chat'; sessionId: string; panelIds: string[] }
   /** Sends `input` to an agent tab as the person's message (`runpane panels submit`); Move to machine… uses it. */
   | { type: 'submit-to-agent'; panelId: string; input: string }
+  /** The Move dialog's calls on the machine the Session lives on (`SESSION_MOVE_CHANNELS`). */
+  | { type: 'move-session'; channel: string; request: JsonObject }
   /** Machine health on that machine, through its own engine and protections. */
   | { type: 'machine-health'; action: MachineHealthAction; request: object };
 

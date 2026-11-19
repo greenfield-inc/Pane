@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 
 const dist = path.join(__dirname, '..', 'packages', 'runpane', 'dist');
 

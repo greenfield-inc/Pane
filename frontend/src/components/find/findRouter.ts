@@ -8,6 +8,7 @@ import { useHotkey } from '../../hooks/useHotkey';
 import { usePanelStore } from '../../stores/panelStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { getFindBar, getFindTarget, getFindTargets, openFind, refreshFind, stepFind } from './findController';
+import { isTypingTarget } from '../../utils/typingTarget';
 import { FIND_FRAME_ATTRIBUTE, FIND_WEBVIEW_ATTRIBUTE, markWebviewReady, prepareFindFrame } from './surfaceFind';
 
 export interface FindRouteInput<N> {
@@ -98,11 +99,6 @@ function targetIdContaining(node: EventTarget | null): string | null {
   return null;
 }
 
-function isEditable(element: Element): boolean {
-  if (element instanceof HTMLElement && element.isContentEditable) return true;
-  return ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW', 'IFRAME'].includes(element.tagName);
-}
-
 function focusedGroupActivePanelId(): string | null {
   const sessionId = useSessionStore.getState().activeSessionId;
   if (!sessionId) return null;
@@ -117,7 +113,8 @@ function resolveFocusedFindPanelId(): string | null {
     : null;
   const id = resolveFindPanelId<Node>({
     active,
-    activeIsEditable: active ? isEditable(active) : false,
+    // Embedded pages keep their keys too. A terminal's own textarea counts as a field; the rest of .xterm never did.
+    activeIsEditable: isTypingTarget(active, { frames: true, terminals: false }),
     // Monaco has its own find; the Files tree uses Cmd/Ctrl+F as its filter.
     activeOwnsFind: !!active?.closest('.monaco-editor, [data-native-find]'),
     targets: targetsInnermostFirst().map(({ id: targetId, root }) => ({ id: targetId, root, visible: isFindRootShown(root, hitTest) })),

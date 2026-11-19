@@ -1,7 +1,6 @@
-import { normalizeKeyboardShortcutOverrides, resolveEffectiveChord } from '../../../../shared/utils/keyboardBindings';
 import type { KeyboardShortcutId } from '../../../../shared/constants/keyboardShortcuts';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../stores/configStore';
-import { chordForEvent, rendererKeyPlatform } from '../../stores/hotkeyStore';
+import { chordForEvent, effectiveCatalogChord } from '../../stores/hotkeyStore';
 import { openSessionApproval, useApprovalColumnStore } from '../../stores/approvalColumnStore';
 import { selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -10,6 +9,7 @@ import { showKeyHint } from '../../stores/keyHintStore';
 import { leaveApprovalColumn } from '../../services/regionFocus';
 import { firstToOpen, sessionApprovals } from './approvalCard';
 import { openApprovals } from './approvalsNavigation';
+import { APPROVAL_COLUMN, APPROVAL_REPLY_BOX, APPROVALS_REGION, APPROVALS_SORT, approvalStepButton } from './approvalDom';
 
 /**
  * The approvals keys (standard keys only, D-381): the catalog commands' actions, and the helpers
@@ -17,17 +17,8 @@ import { openApprovals } from './approvalsNavigation';
  * components; every key with a modifier is a catalog command the person can change.
  */
 
-const COLUMN = '[data-testid="approval-column"]';
-
 function isShown(element: Element): boolean {
   return element.isConnected && element.getClientRects().length > 0;
-}
-
-/** The key a catalog command answers to now ('' when it has none). */
-function effectiveChord(id: KeyboardShortcutId): string {
-  const config = useConfigStore.getState().config;
-  const overrides = normalizeKeyboardShortcutOverrides(config?.keyboardShortcutOverrides).overrides;
-  return resolveEffectiveChord(id, overrides, rendererKeyPlatform()) ?? '';
 }
 
 /** Whether a key press is one of these commands' keys, as the hotkey store would read it. */
@@ -35,13 +26,7 @@ export function pressedCommand<T extends KeyboardShortcutId>(event: KeyboardEven
   if (!areKeyboardShortcutsEnabled(useConfigStore.getState().config)) return null;
   const chord = chordForEvent(event);
   if (!chord) return null;
-  return ids.find((id) => effectiveChord(id) === chord) ?? null;
-}
-
-/** A text field, where single keys type. */
-export function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName) || target.closest('.xterm') !== null;
+  return ids.find((id) => effectiveCatalogChord(id) === chord) ?? null;
 }
 
 // --- Focus ---
@@ -49,7 +34,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 /** Into an approval: its first question's focused option, else the column itself. */
 export function focusFirstQuestion(column: HTMLElement): void {
   const option = Array.from(column.querySelectorAll<HTMLElement>('[role="radiogroup"] [role="radio"][tabindex="0"]')).find(isShown);
-  const target = option ?? column.querySelector<HTMLElement>('[data-testid="approval-reply-box"]') ?? column;
+  const target = option ?? column.querySelector<HTMLElement>(APPROVAL_REPLY_BOX) ?? column;
   if (target === column && !column.hasAttribute('tabindex')) column.setAttribute('tabindex', '-1');
   // Focus follows a ⌘ key here, so ask for the ring browsers otherwise keep for plain keys.
   target.focus({ preventScroll: false, focusVisible: true });
@@ -75,7 +60,7 @@ function currentSessionId(): string | null {
 
 function sessionColumn(sessionId: string): HTMLElement | null {
   const content = document.querySelector(`[data-session-content-id="${CSS.escape(sessionId)}"]`);
-  const column = content?.querySelector<HTMLElement>(`[data-focus-region="approvals"] ${COLUMN}`);
+  const column = content?.querySelector<HTMLElement>(`${APPROVALS_REGION} ${APPROVAL_COLUMN}`);
   return column && isShown(column) ? column : null;
 }
 
@@ -112,10 +97,10 @@ export function toggleSessionApproval(): void {
  * approval from its chat, or Approvals.
  */
 export function stepApproval(direction: 1 | -1): void {
-  const columns = Array.from(document.querySelectorAll<HTMLElement>(COLUMN)).filter(isShown);
+  const columns = Array.from(document.querySelectorAll<HTMLElement>(APPROVAL_COLUMN)).filter(isShown);
   const column = columns.find((candidate) => candidate.contains(document.activeElement)) ?? columns[0];
   if (column) {
-    column.querySelector<HTMLButtonElement>(`[data-approval-step="${direction > 0 ? 'next' : 'previous'}"]`)?.click();
+    column.querySelector<HTMLButtonElement>(approvalStepButton(direction > 0 ? 'next' : 'previous'))?.click();
     return;
   }
   const sessionId = currentSessionId();
@@ -131,7 +116,7 @@ export function stepApproval(direction: 1 | -1): void {
 /** Opens Approvals' Group by menu, opening Approvals first when it is elsewhere. */
 export function openApprovalsGroupBy(): void {
   if (useNavigationStore.getState().activeView !== 'notify') openApprovals();
-  whenShown(() => document.querySelector<HTMLElement>('[data-testid="approvals-sort"]'), (trigger) => {
+  whenShown(() => document.querySelector<HTMLElement>(APPROVALS_SORT), (trigger) => {
     trigger.focus();
     trigger.click();
   });

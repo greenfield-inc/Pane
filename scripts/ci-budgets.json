@@ -1,0 +1,205 @@
+{
+  "enforce": false,
+  "targets": {
+    "waiting": 10,
+    "setup": 30,
+    "running": 60
+  },
+  "jobs": {
+    "changes": {
+      "ceilings": {
+        "setup": 10,
+        "running": 20
+      },
+      "setupSteps": [
+        "Checkout code"
+      ]
+    },
+    "quality-checks": {
+      "ceilings": {
+        "setup": 60,
+        "running": 180
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies"
+      ]
+    },
+    "main-tests": {
+      "ceilings": {
+        "setup": 60,
+        "running": 110
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies",
+        "Fetch Electron",
+        "Rebuild native modules for Node tests"
+      ]
+    },
+    "typecheck-lint": {
+      "ceilings": {
+        "setup": 50,
+        "running": 70
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies"
+      ],
+      "steps": {
+        "Lint": {
+          "target": 5,
+          "ceiling": 10
+        },
+        "Type check": {
+          "target": 5,
+          "ceiling": 10
+        }
+      }
+    },
+    "markdown-links": {
+      "ceilings": {
+        "setup": 20,
+        "running": 10
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Restore lychee"
+      ]
+    },
+    "functional-smoke-browser": {
+      "ceilings": {
+        "setup": 180,
+        "running": 280
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies",
+        "Install Playwright browsers"
+      ]
+    },
+    "functional-smoke-stabilizing": {
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies",
+        "Install Playwright browsers"
+      ]
+    },
+    "functional-smoke-webgl": {
+      "ceilings": {
+        "setup": 90,
+        "running": 80
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies",
+        "Install Playwright browser dependencies"
+      ]
+    },
+    "renderer-selection": {
+      "ceilings": {
+        "setup": 200,
+        "running": 90
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies",
+        "Install Playwright browsers"
+      ]
+    },
+    "functional-smoke-electron": {
+      "ceilings": {
+        "setup": 190,
+        "running": 120
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies",
+        "Restore Playwright browsers",
+        "Fetch Electron",
+        "Restore the Electron SQLite build",
+        "Start native module rebuild for Electron",
+        "Configure Electron sandbox",
+        "Finish native module rebuild for Electron"
+      ]
+    },
+    "runpane-wrapper-tests": {
+      "ceilings": {
+        "setup": 160,
+        "running": 120
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Setup Python",
+        "Setup uv for Python 3.8",
+        "Install Python 3.8 with uv",
+        "Install wrapper dependencies"
+      ]
+    },
+    "cross-os-main-tests": {
+      "ceilings": {
+        "setup": 200,
+        "running": 210
+      },
+      "setupSteps": [
+        "Keep temp files on the workspace drive",
+        "Exclude temp files and workspace from Defender scanning",
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies",
+        "Fetch Electron",
+        "Rebuild native modules for Node tests"
+      ]
+    },
+    "relay-rust": {
+      "ceilings": {
+        "setup": 120,
+        "running": 160
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Set up Rust",
+        "Cache cargo",
+        "Set up Go",
+        "Install Pebble"
+      ]
+    },
+    "relay-tests": {
+      "ceilings": {
+        "setup": 150,
+        "running": 130
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Set up Rust",
+        "Restore cargo cache",
+        "Set up Go",
+        "Install Pebble",
+        "Setup Node.js and pnpm",
+        "Install dependencies",
+        "Fetch Electron",
+        "Rebuild native modules for Node tests"
+      ]
+    },
+    "pwa-build": {
+      "ceilings": {
+        "setup": 100,
+        "running": 20
+      },
+      "setupSteps": [
+        "Checkout code",
+        "Setup Node.js and pnpm",
+        "Install dependencies"
+      ]
+    }
+  }
+}

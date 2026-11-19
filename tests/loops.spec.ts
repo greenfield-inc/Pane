@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { Loop } from '../shared/types/loop';
-import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
+import { gotoApp, installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
 const projects = [
@@ -29,7 +29,7 @@ async function open(page: Page, options: ElectronApiMockOptions = {}, addElectro
     ...options,
   });
   if (addElectronApi) await page.addInitScript(addElectronApi);
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
 }
 
 test('creates, runs, pauses, edits and deletes a loop', async ({ page }) => {
@@ -233,88 +233,85 @@ const seededLoops: Loop[] = [
   },
 ];
 
-for (const theme of ['light-rounded', 'dark'] as const) {
-  test(`shows loops, their runs and a run Pane (${theme})`, async ({ page }) => {
-    await open(page, {
-      initialSessions: seededSessions,
-      initialLoops: seededLoops,
-      initialConfig: { theme, appearanceMode: 'fixed' },
-      initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
-    });
-    const prefix = theme === 'dark' ? 'dark-' : '';
-
-    await page.getByTestId('loops-nav').click();
-    const detail = page.getByTestId('loop-detail');
-    await expect(detail.getByRole('heading', { name: 'Nightly bug sweep' })).toBeVisible();
-    await expect(detail).toContainText('2 ok · 1 with a warning · 1 failed');
-    await expect(detail.getByRole('row').filter({ hasText: 'started with a warning' })).toContainText(TRUST_WARNING);
-    await expect(page.getByTestId('loops-nav')).toContainText('3');
-    await shoot(page, `${prefix}01-loops-page`);
-
-    // Oldest first: skipped, ok, the warning, then the newest ok run in the fourth square.
-    await detail.getByRole('group', { name: 'Last 10 runs' }).getByRole('button').nth(3).hover();
-    await expect(page.getByText('Finished · loop-nightly-bug-sweep-22')).toBeVisible();
-    await shoot(page, `${prefix}02-run-tooltip`);
-
-    await page.getByTestId('loop-list-item').filter({ hasText: 'Weekly docs audit' }).click();
-    await expect(detail.getByRole('button', { name: 'Resume' })).toBeVisible();
-    await shoot(page, `${prefix}03-paused-loop`);
-
-    await page.getByRole('button', { name: 'New loop' }).click();
-    const drawer = page.getByRole('dialog');
-    await drawer.getByLabel('Name').fill('Nightly bug sweep');
-    await drawer.getByRole('radio', { name: 'Command' }).click();
-    await drawer.getByLabel('Command').fill('agent-farm run greenfield/bug-sweep --since 24h');
-    await chooseRepeat(page, 'Weekly on Monday');
-    await drawer.getByRole('button', { name: 'Wednesday' }).click();
-    await drawer.getByRole('button', { name: 'Friday' }).click();
-    await expect(drawer.getByTestId('loop-schedule-preview')).toContainText('Weekly on Mon, Wed, Fri at 3:00 AM');
-    await shoot(page, `${prefix}04-drawer-weekly`);
-    await chooseRepeat(page, 'Monthly on day 1');
-    await expect(drawer.getByTestId('loop-schedule-preview')).toContainText('cron: 0 3 1 * *');
-    await shoot(page, `${prefix}05-drawer-monthly`);
-    await chooseRepeat(page, 'Custom cron');
-    await drawer.getByLabel('Cron', { exact: true }).fill('*/15 * * * *');
-    await expect(drawer.getByRole('button', { name: 'Save' })).toBeDisabled();
-    await shoot(page, `${prefix}06-drawer-custom-cron-error`);
-    await drawer.getByRole('button', { name: 'Cancel' }).click();
-
-    // A saved weekly cron opens in the Weekly picker.
-    await page.getByTestId('loop-list-item').filter({ hasText: 'Weekly docs audit' }).click();
-    await detail.getByRole('button', { name: 'Edit' }).click();
-    await expect(drawer.getByRole('combobox', { name: 'Repeat' })).toHaveText('Weekly on Friday');
-    await expect(drawer.getByRole('button', { name: 'Friday' })).toHaveAttribute('aria-pressed', 'true');
-    await expect(drawer.getByLabel('At', { exact: true })).toHaveValue('16:00');
-    await shoot(page, `${prefix}07-drawer-edit-weekly`);
-    await drawer.getByRole('button', { name: 'Cancel' }).click();
-
-    await page.getByTestId('loop-list-item').filter({ hasText: 'Nightly bug sweep' }).click();
-    await detail.getByRole('button', { name: 'Edit' }).click();
-    await expect(drawer.getByLabel('Command')).toHaveValue('agent-farm run greenfield/bug-sweep --since 24h');
-    await expect(drawer.getByRole('combobox', { name: 'Repeat' })).toHaveText('Daily');
-    await drawer.getByRole('button', { name: 'Delete loop' }).click();
-    await expect(drawer.getByText('Delete this loop? Its schedule stops, and its run Panes stay and move to their project\'s list.')).toBeVisible();
-    await shoot(page, `${prefix}08-drawer-edit-delete-confirm`);
-    await drawer.getByRole('button', { name: 'Keep' }).click();
-    await drawer.getByRole('button', { name: 'Cancel' }).click();
-
-    await detail.getByRole('button', { name: /^Open run / }).first().click();
-    const header = page.getByTestId('loop-run-header');
-    await expect(page.getByTestId('loop-runs-rail').getByRole('button')).toHaveCount(6);
-    await expect(page.getByRole('button', { name: 'Show details' })).toBeVisible();
-    await shoot(page, `${prefix}09-run-pane`);
-
-    // The rail switches between runs without leaving the run Pane.
-    await page.getByTestId('loop-runs-rail').getByRole('button').nth(2).click();
-    await expect(header.getByRole('navigation', { name: 'Breadcrumb' })).toContainText(new Date(sweepSlots[2]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-    await expect(page.getByTestId('loop-runs-rail').getByRole('button').nth(2)).toHaveAttribute('aria-current', 'page');
-
-    // Opening the inspector in one run Pane keeps it open in the next.
-    await page.getByRole('button', { name: 'Show details' }).click();
-    await page.getByTestId('loop-runs-rail').getByRole('button').nth(3).click();
-    await expect(page.getByRole('button', { name: 'Hide details' })).toBeVisible();
+test(`shows loops, their runs and a run Pane`, async ({ page }) => {
+  await open(page, {
+    initialSessions: seededSessions,
+    initialLoops: seededLoops,
+    initialConfig: { theme: 'light-rounded', appearanceMode: 'fixed' },
+    initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
   });
-}
+
+  await page.getByTestId('loops-nav').click();
+  const detail = page.getByTestId('loop-detail');
+  await expect(detail.getByRole('heading', { name: 'Nightly bug sweep' })).toBeVisible();
+  await expect(detail).toContainText('2 ok · 1 with a warning · 1 failed');
+  await expect(detail.getByRole('row').filter({ hasText: 'started with a warning' })).toContainText(TRUST_WARNING);
+  await expect(page.getByTestId('loops-nav')).toContainText('3');
+  await shoot(page, `01-loops-page`);
+
+  // Oldest first: skipped, ok, the warning, then the newest ok run in the fourth square.
+  await detail.getByRole('group', { name: 'Last 10 runs' }).getByRole('button').nth(3).hover();
+  await expect(page.getByText('Finished · loop-nightly-bug-sweep-22')).toBeVisible();
+  await shoot(page, `02-run-tooltip`);
+
+  await page.getByTestId('loop-list-item').filter({ hasText: 'Weekly docs audit' }).click();
+  await expect(detail.getByRole('button', { name: 'Resume' })).toBeVisible();
+  await shoot(page, `03-paused-loop`);
+
+  await page.getByRole('button', { name: 'New loop' }).click();
+  const drawer = page.getByRole('dialog');
+  await drawer.getByLabel('Name').fill('Nightly bug sweep');
+  await drawer.getByRole('radio', { name: 'Command' }).click();
+  await drawer.getByLabel('Command').fill('agent-farm run greenfield/bug-sweep --since 24h');
+  await chooseRepeat(page, 'Weekly on Monday');
+  await drawer.getByRole('button', { name: 'Wednesday' }).click();
+  await drawer.getByRole('button', { name: 'Friday' }).click();
+  await expect(drawer.getByTestId('loop-schedule-preview')).toContainText('Weekly on Mon, Wed, Fri at 3:00 AM');
+  await shoot(page, `04-drawer-weekly`);
+  await chooseRepeat(page, 'Monthly on day 1');
+  await expect(drawer.getByTestId('loop-schedule-preview')).toContainText('cron: 0 3 1 * *');
+  await shoot(page, `05-drawer-monthly`);
+  await chooseRepeat(page, 'Custom cron');
+  await drawer.getByLabel('Cron', { exact: true }).fill('*/15 * * * *');
+  await expect(drawer.getByRole('button', { name: 'Save' })).toBeDisabled();
+  await shoot(page, `06-drawer-custom-cron-error`);
+  await drawer.getByRole('button', { name: 'Cancel' }).click();
+
+  // A saved weekly cron opens in the Weekly picker.
+  await page.getByTestId('loop-list-item').filter({ hasText: 'Weekly docs audit' }).click();
+  await detail.getByRole('button', { name: 'Edit' }).click();
+  await expect(drawer.getByRole('combobox', { name: 'Repeat' })).toHaveText('Weekly on Friday');
+  await expect(drawer.getByRole('button', { name: 'Friday' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(drawer.getByLabel('At', { exact: true })).toHaveValue('16:00');
+  await shoot(page, `07-drawer-edit-weekly`);
+  await drawer.getByRole('button', { name: 'Cancel' }).click();
+
+  await page.getByTestId('loop-list-item').filter({ hasText: 'Nightly bug sweep' }).click();
+  await detail.getByRole('button', { name: 'Edit' }).click();
+  await expect(drawer.getByLabel('Command')).toHaveValue('agent-farm run greenfield/bug-sweep --since 24h');
+  await expect(drawer.getByRole('combobox', { name: 'Repeat' })).toHaveText('Daily');
+  await drawer.getByRole('button', { name: 'Delete loop' }).click();
+  await expect(drawer.getByText('Delete this loop? Its schedule stops, and its run Panes stay and move to their project\'s list.')).toBeVisible();
+  await shoot(page, `08-drawer-edit-delete-confirm`);
+  await drawer.getByRole('button', { name: 'Keep' }).click();
+  await drawer.getByRole('button', { name: 'Cancel' }).click();
+
+  await detail.getByRole('button', { name: /^Open run / }).first().click();
+  const header = page.getByTestId('loop-run-header');
+  await expect(page.getByTestId('loop-runs-rail').getByRole('button')).toHaveCount(6);
+  await expect(page.getByRole('button', { name: 'Show details' })).toBeVisible();
+  await shoot(page, `09-run-pane`);
+
+  // The rail switches between runs without leaving the run Pane.
+  await page.getByTestId('loop-runs-rail').getByRole('button').nth(2).click();
+  await expect(header.getByRole('navigation', { name: 'Breadcrumb' })).toContainText(new Date(sweepSlots[2]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+  await expect(page.getByTestId('loop-runs-rail').getByRole('button').nth(2)).toHaveAttribute('aria-current', 'page');
+
+  // Opening the inspector in one run Pane keeps it open in the next.
+  await page.getByRole('button', { name: 'Show details' }).click();
+  await page.getByTestId('loop-runs-rail').getByRole('button').nth(3).click();
+  await expect(page.getByRole('button', { name: 'Hide details' })).toBeVisible();
+});
 
 // A loop's Session and its run Panes live under Loops (#1446).
 const WATCH_SESSION = '__orchestration_session_watch__';
@@ -391,61 +388,58 @@ function installLoopSessions() {
   });
 }
 
-for (const theme of ['light-rounded', 'dark'] as const) {
-  test(`keeps a loop's Session and run Panes under Loops, and marks one that waits on you (${theme})`, async ({ page }) => {
-    const prefix = theme === 'dark' ? 'dark-' : '';
-    // No card waits: the loop's Session and its run Panes stay out of the main lists, even pinned.
-    await open(page, {
-      initialSessions: seededSessions,
-      initialLoops: [seededLoops[0], watchLoop],
-      initialConfig: { theme, appearanceMode: 'fixed' },
-      initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
-      notifySnapshot: emptyApprovals,
-    }, installLoopSessions);
-    await expect(page.getByTestId('orchestration-session-__orchestration_session_launch__')).toBeVisible();
-    await expect(page.getByTestId('orchestration-session-__orchestration_session_watch__')).toHaveCount(0);
-    await expect(page.getByTestId('orchestration-pinned-session-__orchestration_session_watch__')).toHaveCount(0);
-    await expect(page.locator('[data-pane-part="sidebar-pane"]')).toHaveCount(0);
+test(`keeps a loop's Session and run Panes under Loops, and marks one that waits on you`, async ({ page }) => {
+  // No card waits: the loop's Session and its run Panes stay out of the main lists, even pinned.
+  await open(page, {
+    initialSessions: seededSessions,
+    initialLoops: [seededLoops[0], watchLoop],
+    initialConfig: { theme: 'light-rounded', appearanceMode: 'fixed' },
+    initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
+    notifySnapshot: emptyApprovals,
+  }, installLoopSessions);
+  await expect(page.getByTestId('orchestration-session-__orchestration_session_launch__')).toBeVisible();
+  await expect(page.getByTestId('orchestration-session-__orchestration_session_watch__')).toHaveCount(0);
+  await expect(page.getByTestId('orchestration-pinned-session-__orchestration_session_watch__')).toHaveCount(0);
+  await expect(page.locator('[data-pane-part="sidebar-pane"]')).toHaveCount(0);
 
-    // A card waits from each: they join the lists with the loop icon and "Loop: <name>", never pinned.
-    await open(page, {
-      initialSessions: seededSessions,
-      initialLoops: [seededLoops[0], watchLoop],
-      initialConfig: { theme, appearanceMode: 'fixed' },
-      initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
-      notifySnapshot: loopCards(),
-    }, installLoopSessions);
-    const sessionRow = page.getByTestId('orchestration-session-__orchestration_session_watch__');
-    await expect(sessionRow).toContainText('Loop: promises-watch');
-    await expect(sessionRow.getByTestId('loop-mark')).toBeVisible();
-    await expect(page.getByTestId('orchestration-pinned-session-__orchestration_session_watch__')).toHaveCount(0);
-    const runRow = page.locator('[data-pane-part="sidebar-pane"]').filter({ hasText: 'Loop: Nightly bug sweep' });
-    await expect(runRow).toHaveCount(1);
-    await expect(runRow.getByTestId('loop-mark')).toBeVisible();
-    await expect(runRow.getByRole('button', { name: /^(Pin|Unpin) / })).toHaveCount(0);
-    await runRow.click({ button: 'right' });
-    const paneMenu = page.getByRole('menu', { name: /^Pane actions for / });
-    await expect(paneMenu.getByRole('menuitem').first()).toBeVisible();
-    await expect(paneMenu.getByRole('menuitem', { name: /^(Pin|Unpin)$/ })).toHaveCount(0);
-    await page.keyboard.press('Escape');
-    await shoot(page, `${prefix}12-sidebar-loop-rows`);
+  // A card waits from each: they join the lists with the loop icon and "Loop: <name>", never pinned.
+  await open(page, {
+    initialSessions: seededSessions,
+    initialLoops: [seededLoops[0], watchLoop],
+    initialConfig: { theme: 'light-rounded', appearanceMode: 'fixed' },
+    initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
+    notifySnapshot: loopCards(),
+  }, installLoopSessions);
+  const sessionRow = page.getByTestId('orchestration-session-__orchestration_session_watch__');
+  await expect(sessionRow).toContainText('Loop: promises-watch');
+  await expect(sessionRow.getByTestId('loop-mark')).toBeVisible();
+  await expect(page.getByTestId('orchestration-pinned-session-__orchestration_session_watch__')).toHaveCount(0);
+  const runRow = page.locator('[data-pane-part="sidebar-pane"]').filter({ hasText: 'Loop: Nightly bug sweep' });
+  await expect(runRow).toHaveCount(1);
+  await expect(runRow.getByTestId('loop-mark')).toBeVisible();
+  await expect(runRow.getByRole('button', { name: /^(Pin|Unpin) / })).toHaveCount(0);
+  await runRow.click({ button: 'right' });
+  const paneMenu = page.getByRole('menu', { name: /^Pane actions for / });
+  await expect(paneMenu.getByRole('menuitem').first()).toBeVisible();
+  await expect(paneMenu.getByRole('menuitem', { name: /^(Pin|Unpin)$/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await shoot(page, `12-sidebar-loop-rows`);
 
-    // Its menu has no Pin, and archiving says what it does to the loop.
-    await sessionRow.click({ button: 'right' });
-    const menu = page.getByRole('menu', { name: 'Session actions for promises-watch' });
-    await expect(menu.getByRole('menuitem', { name: /Pin Session|Unpin Session/ })).toHaveCount(0);
-    await menu.getByRole('menuitem', { name: 'Archive Session' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Archive promises-watch?' });
-    await expect(dialog).toContainText('promises-watch runs here daily at 7:30 AM. Archiving the Session pauses the loop; once it is resumed on the Loops page, its next run brings the Session back.');
-    await shoot(page, `${prefix}13-archive-loop-session`);
-    await dialog.getByRole('button', { name: 'Archive and pause' }).click();
-    await expect(page.getByText('Archived promises-watch · paused promises-watch')).toBeVisible();
+  // Its menu has no Pin, and archiving says what it does to the loop.
+  await sessionRow.click({ button: 'right' });
+  const menu = page.getByRole('menu', { name: 'Session actions for promises-watch' });
+  await expect(menu.getByRole('menuitem', { name: /Pin Session|Unpin Session/ })).toHaveCount(0);
+  await menu.getByRole('menuitem', { name: 'Archive Session' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Archive promises-watch?' });
+  await expect(dialog).toContainText('promises-watch runs here daily at 7:30 AM. Archiving the Session pauses the loop; once it is resumed on the Loops page, its next run brings the Session back.');
+  await shoot(page, `13-archive-loop-session`);
+  await dialog.getByRole('button', { name: 'Archive and pause' }).click();
+  await expect(page.getByText('Archived promises-watch · paused promises-watch')).toBeVisible();
 
-    await page.getByTestId('loops-nav').click();
-    await page.getByTestId('loop-list-item').filter({ hasText: 'promises-watch' }).click();
-    await expect(page.getByTestId('loop-detail').getByText('paused', { exact: true })).toBeVisible();
-  });
-}
+  await page.getByTestId('loops-nav').click();
+  await page.getByTestId('loop-list-item').filter({ hasText: 'promises-watch' }).click();
+  await expect(page.getByTestId('loop-detail').getByText('paused', { exact: true })).toBeVisible();
+});
 
 test('says what deleting a Session loop does to its Session', async ({ page }) => {
   await open(page, { initialLoops: [watchLoop], notifySnapshot: emptyApprovals }, installLoopSessions);

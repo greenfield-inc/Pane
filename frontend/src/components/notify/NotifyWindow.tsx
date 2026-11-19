@@ -6,6 +6,7 @@ import { readAppearanceCache } from '../../utils/appearanceCache';
 import { runNotify, subscribeNotify, useNotifyStore } from '../../stores/notifyStore';
 import { cn } from '../../utils/cn';
 import { NotifyStrip } from './NotifyStrip';
+import { CARD_FOCUS_TARGET } from './NotifyCard';
 import { NotifyRound } from './NotifyRound';
 
 /**
@@ -97,6 +98,33 @@ function useReportSize(rootRef: React.RefObject<HTMLDivElement | null>): void {
   }, [rootRef]);
 }
 
+/**
+ * Dismiss (or an answer) removes the card that held the focus: it goes to the card shown next,
+ * else to the window, never to the page's body.
+ */
+function useFocusAfterCard(rootRef: React.RefObject<HTMLDivElement | null>): void {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    let held: Element | null = null;
+    const focusIn = (event: FocusEvent) => { held = event.target instanceof Element ? event.target : null; };
+    const observer = new MutationObserver(() => {
+      if (!held || held.isConnected) return;
+      held = null;
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      // The card shown next, whatever it is; the window only when none is left.
+      (root.querySelector<HTMLElement>(CARD_FOCUS_TARGET) ?? root).focus();
+    });
+    root.addEventListener('focusin', focusIn);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      root.removeEventListener('focusin', focusIn);
+      observer.disconnect();
+    };
+  }, [rootRef]);
+}
+
 export function NotifyWindow({ view, startId }: { view: 'strip' | 'round'; startId?: string }) {
   const snapshot = useNotifyStore((state) => state.snapshot);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -104,6 +132,7 @@ export function NotifyWindow({ view, startId }: { view: 'strip' | 'round'; start
   useLayoutEffect(() => watchTheme(), []);
   useEffect(() => subscribeNotify(), []);
   useReportSize(rootRef);
+  useFocusAfterCard(rootRef);
 
   const position = snapshot?.settings.position ?? 'bottom-center';
   const atTop = position === 'top-right';
@@ -114,10 +143,12 @@ export function NotifyWindow({ view, startId }: { view: 'strip' | 'round'; start
   return (
     <div
       ref={rootRef}
+      tabIndex={-1}
+      data-testid="notify-window"
       style={style}
       className={cn(
         // Cards keep their natural height so the window can grow to fit them instead of clipping.
-        'fixed inset-0 flex flex-col [&>*]:shrink-0',
+        'fixed inset-0 flex flex-col outline-none [&>*]:shrink-0',
         view === 'round' ? 'items-center justify-start'
           : cn(atTop ? 'justify-start' : 'justify-end', position === 'bottom-center' ? 'items-center' : 'items-end'),
       )}

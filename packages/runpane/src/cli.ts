@@ -14,10 +14,12 @@ import { runAsk, runModels } from './ask';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
 import { runLink } from './pairingLink';
-import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
+import { runSecretsDelete, runSecretsExec, runSecretsLease, runSecretsLeaseEnd, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
+import { BROWSER_VERBS, runBrowser } from './browser';
 import { runDevicesAct, runDevicesClose, runDevicesFree, runDevicesList, runDevicesOpen, runDevicesRun, runDevicesScreenshot, runDevicesUsage } from './devices';
 import { runThemeRead, runThemeReset, runThemeSet } from './theme';
 import { runMachineCleanup, runMachineHealth } from './machine';
+import { runProfilesLaunch, runProfilesList, runProfilesRuns, runProfilesShow } from './profiles';
 import { runAutopilotAnswer, runAutopilotClose, runAutopilotRewrite, runAutopilotStack, runAutopilotStackPush, runAutopilotStatus, runAutopilotWaiting } from './autopilot';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, routeDaemonCallsTo } from './daemonClient';
@@ -171,9 +173,11 @@ const THIS_MACHINE_ONLY = new Set<string>([
   // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
   'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
   // These read or change this machine's own secret store; another machine runs its own.
-  'secrets list', 'secrets set', 'secrets delete', 'secrets exec', 'secrets request',
+  'secrets list', 'secrets set', 'secrets delete', 'secrets exec', 'secrets request', 'secrets lease', 'secrets lease end',
   // Device tools act for the calling tab's Pane; a machine without Xcode reaches its Mac itself.
   'devices list', 'devices open', 'devices screenshot', 'devices act', 'devices run', 'devices close', 'devices usage', 'devices free',
+  // Browser tools act on the browser tabs of the calling tab's Pane.
+  ...BROWSER_VERBS.map((verb) => `browser ${verb}`),
 ]);
 
 /** `runpane workspace <machine> <command...>`: the same command, answered by that machine's Pane. */
@@ -206,7 +210,7 @@ async function dispatchWithWorkspaceHint(parsed: ParsedArgs, telemetryContext: W
 type CommandHandler = (parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext) => number | Promise<number>;
 
 const commandHandlers = new Map<string, CommandHandler>(Object.entries({
-  'help': async (parsed, telemetryContext) => {
+  'help': async (parsed, _telemetryContext) => {
     if (!parsed.helpTopic) console.log(`${renderPaneIntro(paneIntro(resolvePaneDirectory(parsed.paneDir)))}\n`);
     console.log(helpText(parsed.helpTopic));
     if (!parsed.helpTopic || parsed.helpTopic === 'workspace') {
@@ -217,53 +221,53 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'setup': async (parsed, telemetryContext) => {
     return runNoArgsEntrypoint(telemetryContext);
   },
-  'version': async (parsed, telemetryContext) => {
+  'version': async (parsed, _telemetryContext) => {
     return printVersion(parsed.panePath);
   },
-  'doctor': async (parsed, telemetryContext) => {
+  'doctor': async (parsed, _telemetryContext) => {
     return runDoctor(parsed, SOURCE);
   },
-  'daemon repair': async (parsed, telemetryContext) => {
+  'daemon repair': async (parsed, _telemetryContext) => {
     return runDaemonRepair(parsed);
   },
-  'agent-context': async (parsed, telemetryContext) => {
+  'agent-context': async (parsed, _telemetryContext) => {
     return runAgentContext(parsed);
   },
-  'mcp': async (parsed, telemetryContext) => {
+  'mcp': async (parsed, _telemetryContext) => {
     const { runMcpServer } = await import('./mcp');
     return runMcpServer({ toolsets: parsed.toolsets, readOnly: parsed.readOnly === true });
   },
-  'links create': async (parsed, telemetryContext) => {
+  'links create': async (parsed, _telemetryContext) => {
     return runLinksCreate(parsed);
   },
-  'docs search': async (parsed, telemetryContext) => {
+  'docs search': async (parsed, _telemetryContext) => {
     return runDocsSearch(parsed);
   },
-  'docs read': async (parsed, telemetryContext) => {
+  'docs read': async (parsed, _telemetryContext) => {
     return runDocsRead(parsed);
   },
-  'agents start': async (parsed, telemetryContext) => {
+  'agents start': async (parsed, _telemetryContext) => {
     return runAgentsStart(parsed);
   },
-  'agents status': async (parsed, telemetryContext) => {
+  'agents status': async (parsed, _telemetryContext) => {
     return runAgentsStatus(parsed);
   },
-  'agents send': async (parsed, telemetryContext) => {
+  'agents send': async (parsed, _telemetryContext) => {
     return runAgentsSend(parsed);
   },
-  'repos list': async (parsed, telemetryContext) => {
+  'repos list': async (parsed, _telemetryContext) => {
     return runReposList(parsed);
   },
-  'repos add': async (parsed, telemetryContext) => {
+  'repos add': async (parsed, _telemetryContext) => {
     return runReposAdd(parsed);
   },
-  'repos get': async (parsed, telemetryContext) => {
+  'repos get': async (parsed, _telemetryContext) => {
     return runReposGet(parsed);
   },
-  'repos update': async (parsed, telemetryContext) => {
+  'repos update': async (parsed, _telemetryContext) => {
     return runReposUpdate(parsed);
   },
-  'repos rename': async (parsed, telemetryContext) => {
+  'repos rename': async (parsed, _telemetryContext) => {
     return runReposRename(parsed);
   },
   'secrets list': async (parsed) => runSecretsList(parsed),
@@ -271,6 +275,8 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'secrets delete': async (parsed) => runSecretsDelete(parsed),
   'secrets exec': async (parsed) => runSecretsExec(parsed),
   'secrets request': async (parsed) => runSecretsRequest(parsed),
+  'secrets lease': async (parsed) => runSecretsLease(parsed),
+  'secrets lease end': async (parsed) => runSecretsLeaseEnd(parsed),
   'devices list': async (parsed) => runDevicesList(parsed),
   'devices open': async (parsed) => runDevicesOpen(parsed),
   'devices screenshot': async (parsed) => runDevicesScreenshot(parsed),
@@ -279,50 +285,65 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'devices close': async (parsed) => runDevicesClose(parsed),
   'devices usage': async (parsed) => runDevicesUsage(parsed),
   'devices free': async (parsed) => runDevicesFree(parsed),
+  'browser open': async (parsed) => runBrowser(parsed),
+  'browser tabs': async (parsed) => runBrowser(parsed),
+  'browser close': async (parsed) => runBrowser(parsed),
+  'browser snapshot': async (parsed) => runBrowser(parsed),
+  'browser screenshot': async (parsed) => runBrowser(parsed),
+  'browser click': async (parsed) => runBrowser(parsed),
+  'browser type': async (parsed) => runBrowser(parsed),
+  'browser press': async (parsed) => runBrowser(parsed),
+  'browser select': async (parsed) => runBrowser(parsed),
+  'browser scroll': async (parsed) => runBrowser(parsed),
+  'browser navigate': async (parsed) => runBrowser(parsed),
+  'browser wait': async (parsed) => runBrowser(parsed),
+  'browser dialog': async (parsed) => runBrowser(parsed),
+  'browser evaluate': async (parsed) => runBrowser(parsed),
+  'browser upload': async (parsed) => runBrowser(parsed),
   'theme read': async (parsed) => runThemeRead(parsed),
   'theme set': async (parsed) => runThemeSet(parsed),
   'theme reset': async (parsed) => runThemeReset(parsed),
-  'panes list': async (parsed, telemetryContext) => {
+  'panes list': async (parsed, _telemetryContext) => {
     return runPanesList(parsed);
   },
-  'panes cost': async (parsed, telemetryContext) => {
+  'panes cost': async (parsed, _telemetryContext) => {
     return runPanesCost(parsed);
   },
-  'sessions list': async (parsed, telemetryContext) => {
+  'sessions list': async (parsed, _telemetryContext) => {
     return runSessionsList(parsed);
   },
-  'sessions create': async (parsed, telemetryContext) => {
+  'sessions create': async (parsed, _telemetryContext) => {
     return runSessionsCreate(parsed);
   },
-  'sessions get': async (parsed, telemetryContext) => {
+  'sessions get': async (parsed, _telemetryContext) => {
     return runSessionsGet(parsed);
   },
-  'sessions update': async (parsed, telemetryContext) => {
+  'sessions update': async (parsed, _telemetryContext) => {
     return runSessionsUpdate(parsed);
   },
   'sessions pin': async (parsed) => runSessionsPin(parsed, true),
   'sessions unpin': async (parsed) => runSessionsPin(parsed, false),
   'sessions pause': async (parsed) => runPause(parsed, 'session', 'pause'),
   'sessions resume': async (parsed) => runPause(parsed, 'session', 'resume'),
-  'sessions set-agent': async (parsed, telemetryContext) => {
+  'sessions set-agent': async (parsed, _telemetryContext) => {
     return runSessionsSetAgent(parsed);
   },
-  'sessions associate': async (parsed, telemetryContext) => {
+  'sessions associate': async (parsed, _telemetryContext) => {
     return runSessionsAssociate(parsed);
   },
-  'sessions detach': async (parsed, telemetryContext) => {
+  'sessions detach': async (parsed, _telemetryContext) => {
     return runSessionsDetach(parsed);
   },
-  'sessions overview': async (parsed, telemetryContext) => {
+  'sessions overview': async (parsed, _telemetryContext) => {
     return runSessionsOverview(parsed);
   },
-  'lock acquire': async (parsed, telemetryContext) => {
+  'lock acquire': async (parsed, _telemetryContext) => {
     return runLockAcquire(parsed);
   },
-  'lock release': async (parsed, telemetryContext) => {
+  'lock release': async (parsed, _telemetryContext) => {
     return runLockRelease(parsed);
   },
-  'lock list': async (parsed, telemetryContext) => {
+  'lock list': async (parsed, _telemetryContext) => {
     return runLockList(parsed);
   },
   'machine health': async (parsed) => runMachineHealth(parsed),
@@ -334,7 +355,11 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'loops pause': async (parsed) => runLoopsSetEnabled(parsed, false),
   'loops resume': async (parsed) => runLoopsSetEnabled(parsed, true),
   'loops delete': async (parsed) => runLoopsDelete(parsed),
-  'workspace state': async (parsed, telemetryContext) => {
+  'profiles list': async (parsed) => runProfilesList(parsed),
+  'profiles show': async (parsed) => runProfilesShow(parsed),
+  'profiles launch': async (parsed) => runProfilesLaunch(parsed),
+  'profiles runs': async (parsed) => runProfilesRuns(parsed),
+  'workspace state': async (parsed, _telemetryContext) => {
     return runWorkspaceState(parsed);
   },
   'workspace list': async (parsed) => runWorkspaceList(parsed),
@@ -351,71 +376,71 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'pr watch': async parsed => runPrWatchCommand(parsed),
   'pr unwatch': async parsed => runPrWatchCommand(parsed),
   'pr list': async parsed => runPrWatchCommand(parsed),
-  'watch': async (parsed, telemetryContext) => {
+  'watch': async (parsed, _telemetryContext) => {
     return runWatch(parsed);
   },
-  'panes create': async (parsed, telemetryContext) => {
+  'panes create': async (parsed, _telemetryContext) => {
     return runPanesCreate(parsed);
   },
-  'panes adopt': async (parsed, telemetryContext) => {
+  'panes adopt': async (parsed, _telemetryContext) => {
     return runPanesAdopt(parsed);
   },
-  'panes archive': async (parsed, telemetryContext) => {
+  'panes archive': async (parsed, _telemetryContext) => {
     return runPanesArchive(parsed);
   },
-  'panes pin': async (parsed, telemetryContext) => {
+  'panes pin': async (parsed, _telemetryContext) => {
     return runPanesPin(parsed, true);
   },
-  'panes unpin': async (parsed, telemetryContext) => {
+  'panes unpin': async (parsed, _telemetryContext) => {
     return runPanesPin(parsed, false);
   },
   'panes pause': async (parsed) => runPause(parsed, 'pane', 'pause'),
   'panes resume': async (parsed) => runPause(parsed, 'pane', 'resume'),
-  'panes rename': async (parsed, telemetryContext) => {
+  'panes rename': async (parsed, _telemetryContext) => {
     return runPanesRename(parsed);
   },
-  'panes focus': async (parsed, telemetryContext) => {
+  'panes focus': async (parsed, _telemetryContext) => {
     return runPanesFocus(parsed);
   },
-  'panels list': async (parsed, telemetryContext) => {
+  'panels list': async (parsed, _telemetryContext) => {
     return runPanelsList(parsed);
   },
-  'panels create': async (parsed, telemetryContext) => {
+  'panels create': async (parsed, _telemetryContext) => {
     return runPanelsCreate(parsed);
   },
-  'panels open': async (parsed, telemetryContext) => {
+  'panels open': async (parsed, _telemetryContext) => {
     return runPanelsOpen(parsed);
   },
-  'panels close': async (parsed, telemetryContext) => {
+  'panels close': async (parsed, _telemetryContext) => {
     return runPanelsClose(parsed);
   },
-  'panels output': async (parsed, telemetryContext) => {
+  'panels output': async (parsed, _telemetryContext) => {
     return runPanelsOutput(parsed);
   },
-  'panels input': async (parsed, telemetryContext) => {
+  'panels input': async (parsed, _telemetryContext) => {
     return runPanelsInput(parsed);
   },
-  'panels screen': async (parsed, telemetryContext) => {
+  'panels screen': async (parsed, _telemetryContext) => {
     return runPanelsScreen(parsed);
   },
-  'panels submit': async (parsed, telemetryContext) => {
+  'panels submit': async (parsed, _telemetryContext) => {
     return runPanelsSubmit(parsed);
   },
-  'panels submit-composer': async (parsed, telemetryContext) => {
+  'panels submit-composer': async (parsed, _telemetryContext) => {
     return runPanelsSubmitComposer(parsed);
   },
-  'panels wait': async (parsed, telemetryContext) => {
+  'panels wait': async (parsed, _telemetryContext) => {
     return runPanelsWait(parsed);
   },
-  'panels resume': async (parsed, telemetryContext) => {
+  'panels resume': async (parsed, _telemetryContext) => {
     return runPanelsResume(parsed);
   },
   'panels pause': async (parsed) => runPause(parsed, 'panel', 'pause'),
-  'panels last-message': async (parsed, telemetryContext) => {
+  'panels last-message': async (parsed, _telemetryContext) => {
     return runPanelsLastMessage(parsed);
   },
   'panels conversation': async (parsed) => runPanelsConversation(parsed),
-  'report': async (parsed, telemetryContext) => {
+  'report': async (parsed, _telemetryContext) => {
     return runReport(parsed);
   },
   'notify': async (parsed) => runNotify(parsed),
@@ -428,7 +453,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'autopilot answer': async (parsed) => runAutopilotAnswer(parsed),
   'autopilot close': async (parsed) => runAutopilotClose(parsed),
   'autopilot rewrite': async (parsed) => runAutopilotRewrite(parsed),
-  'agents doctor': async (parsed, telemetryContext) => {
+  'agents doctor': async (parsed, _telemetryContext) => {
     return runAgentsDoctor(parsed);
   },
   'install': async (parsed, telemetryContext) => {

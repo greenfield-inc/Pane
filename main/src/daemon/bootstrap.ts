@@ -1,6 +1,7 @@
 import { prepareNotifyForQuit } from '../ipc/notify';
 import { getChatTabManager } from '../services/chatTabs';
-import { getRunpaneShimState, installRunpaneShimBestEffort } from '../services/runpaneShim';
+import { getRunpaneShimState, installRunpaneShimBestEffort, writeBrowserShim } from '../services/runpaneShim';
+import { DEFAULT_BROWSER_SETTINGS } from '../../../shared/types/browser';
 import { BUNDLED_MCP_HTTP_MODULE, PaneMcpEndpoint, setPaneMcpEndpoint, type PaneMcpHttpModule } from '../services/paneMcpEndpoint';
 import { tabListener } from '../services/tabListener';
 import os from 'os';
@@ -29,6 +30,8 @@ import { WorktreeNameGenerator } from '../services/worktreeNameGenerator';
 import { RunCommandManager } from '../services/runCommandManager';
 import { VersionChecker } from '../services/versionChecker';
 import { SkillCacheManager } from '../services/skillCacheManager';
+import { installBundledAgentFarm } from '../services/agentFarm/bundledAgentFarm';
+import { startProfileRunner } from '../services/profiles/profileRunnerHost';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import { PaneChatManager } from '../services/paneChatManager';
 import { OrchestrationSessionManager } from '../services/orchestrationSessionManager';
@@ -295,7 +298,17 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   const runCommandManager = new RunCommandManager(databaseService);
   const versionChecker = new VersionChecker(configManager, logger);
   // Terminals launched below find this build's runpane first on PATH.
-  installRunpaneShimBestEffort(getAppDirectory());
+  // Their BROWSER follows Settings > Links (pane-browser).
+  const openLinksIn = () => ({ ...DEFAULT_BROWSER_SETTINGS, ...configManager.getConfig().browser }).openLinksIn;
+  installRunpaneShimBestEffort(getAppDirectory(), openLinksIn());
+  configManager.on('config-updated', () => {
+    // A shim Pane can't write keeps the last choice; the setting still saves and other listeners still run.
+    try {
+      writeBrowserShim(openLinksIn());
+    } catch (error) {
+      console.error('[runpane] Could not rewrite pane-browser for Settings > Links:', error);
+    }
+  });
   // The loopback listener for the tabs Pane starts (Claude's prompt hooks, Pane's MCP tools). Not awaited: the
   // first window doesn't wait for it, and a tab spawned before it listens just keeps stdio.
   void tabListener.start().catch(error => {
@@ -317,6 +330,10 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     logger.warn('[SkillCache] Failed to install Pane Chat skills', error instanceof Error ? error : undefined);
   });
   await skillCacheManager.syncHomeSkill(configManager.getConfig(), databaseService.getAllProjects());
+  // Bundled profiles: set up greenfield and the other bundled plugins in Pane's own Agent Farm
+  // config root, without delaying startup. It never touches the person's own Agent Farm.
+  // The Profiles page shows the install's state, so it reads the library again when it ends.
+  void installBundledAgentFarm({ paneDir: getAppDirectory(), log: message => logger.info(message) }).then(() => getPaneEventSink().send('profiles:changed'));
   if (configManager.getConfig().agentContext?.cleanupPending && configManager.getConfig().agentContext?.managedAgentsMd !== true) {
     // Retry until all saved repositories are available, without delaying startup.
     const migrationConfig = configManager.getConfig();
@@ -719,6 +736,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   );
 
   setupEventListeners(services);
+  // Profiles: Pane runs each launched profile's workflow from its file, and resumes saved runs.
+  startProfileRunner(services, commandRegistry, workspaceJournal, message => logger.info(message));
   // A member Pane's reports and exits go to every connected computer: one whose Session holds this
   // Pane records them (`RemoteMemberEvents`). Entries recorded from another machine are not sent on.
   workspaceJournal.subscribe(entry => {

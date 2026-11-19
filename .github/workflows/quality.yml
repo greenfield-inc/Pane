@@ -5,13 +5,24 @@ on:
     branches: [ main ]
   # Stacked and integration PRs need the same gates before they reach main.
   pull_request:
+  # The merge queue's runs. Each merge group runs every job on its exact merge
+  # commit. The queue is a repository setting (RUNBOOK.md, "Merge queue").
+  merge_group:
+    types: [ checks_requested ]
   workflow_dispatch:
 
 # A new push to a PR cancels that PR's in-flight run. Every other event gets
-# its own group, so no main commit ever loses its run.
+# its own group, so no main commit or merge group ever loses its run.
 concurrency:
   group: code-quality-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
+
+# Installs here pass --os=current --cpu=current: these jobs test on the
+# runner's own platform, so they skip the other platforms' binaries that
+# pnpm-workspace.yaml's supportedArchitectures adds for package builds (about
+# 1.2 GB of the 3.2 GB store on Linux). Jobs that test only the desktop app
+# also leave out the mobile, native and glasses workspaces (about 500 of the
+# 2,165 locked packages); Type Check and Lint installs every workspace.
 
 jobs:
   changes:
@@ -21,12 +32,18 @@ jobs:
       runpane: ${{ steps.filter.outputs.runpane }}
       main: ${{ steps.filter.outputs.main }}
       relay: ${{ steps.filter.outputs.relay }}
+      # The jobs this run may skip, each with its reason (scripts/ci-gate.mjs).
+      # Skippable jobs read it in their `if:`, and CI result allows only these skips.
+      skip: ${{ steps.manifest.outputs.skip }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
 
+    # A merge group selects nothing, so it never diffs paths (the manifest
+    # below skips jobs only on pull requests).
     - name: Filter changed paths
       id: filter
+      if: github.event_name != 'merge_group'
       uses: dorny/paths-filter@v3
       with:
         filters: |
@@ -46,6 +63,8 @@ jobs:
             - 'scripts/test-runpane-handoff.js'
             - 'scripts/test-runpane-ask.js'
             - 'scripts/test-runpane-managed-cli.js'
+            - 'scripts/test-runpane-submit.js'
+            - 'scripts/runpane-test-shard.js'
             - 'scripts/fixtures/**'
             - '.github/workflows/quality.yml'
           relay:
@@ -63,6 +82,14 @@ jobs:
             - 'pnpm-workspace.yaml'
             - '.github/workflows/quality.yml'
 
+    - name: Declare the jobs this run may skip
+      id: manifest
+      env:
+        CHANGED_RUNPANE: ${{ steps.filter.outputs.runpane }}
+        CHANGED_MAIN: ${{ steps.filter.outputs.main }}
+        CHANGED_RELAY: ${{ steps.filter.outputs.relay }}
+      run: node scripts/ci-gate.mjs manifest >> "$GITHUB_OUTPUT"
+
   quality-checks:
     name: Quality Checks
     runs-on: ubuntu-latest
@@ -74,10 +101,11 @@ jobs:
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
 
-    # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
-    # builds the only native module these tests load.
+    # The frontend tests load no native module and no Electron, so the
+    # Electron-targeted postinstall rebuild is skipped.
+    # Every workspace: this job also runs the native, glasses and mobile unit tests.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current
 
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
@@ -85,21 +113,19 @@ jobs:
     - name: Verify macOS updater metadata merge
       run: node scripts/test-merge-mac-latest.js
 
-    # The unit tests load the real electron package (main/src/utils/shellPath.ts).
-    - name: Fetch Electron
-      uses: ./.github/actions/fetch-electron
-
-    - name: Rebuild native modules for Node tests
-      run: pnpm rebuild better-sqlite3-multiple-ciphers
-
-    # CI retries a failed unit test once; the retry report lists every retried
-    # test in the job summary, so flaky tests stay visible (--retry, see
-    # CONTRIBUTING.md). Playwright journeys are never retried.
-    - name: Run main process test suite
-      run: CI=1 pnpm --filter main exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
-
     - name: Run frontend unit tests
-      run: CI=1 pnpm --filter frontend exec vitest run --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: CI=1 pnpm --filter frontend exec vitest run
+
+    # The Expo app, the glasses app and the Capacitor shell, each its own Vitest run.
+    - name: Run native, glasses and mobile unit tests
+      if: ${{ !cancelled() }}
+      run: CI=1 pnpm --filter native --filter glasses --filter mobile run test
+
+    - name: Run release and network script tests
+      if: ${{ !cancelled() }}
+      run: |
+        node scripts/test-license-generation.js
+        node --test scripts/flapping-link-proxy.test.mjs scripts/patch-electron-builder-macos-keychain.test.js
 
     # Catches hand edits to the generated contract files (docs, TS, Python,
     # fixture). It needs no dependencies, and runs even if the tests above
@@ -112,9 +138,45 @@ jobs:
           exit 1
         }
 
+  # The main process suite on Linux, in five Vitest shards (files split by
+  # Vitest's --shard). Windows runs the same suite in cross-os-main-tests.
+  # Sharded jobs take the shard count from strategy.job-total, so removing a
+  # matrix entry rebalances the suite instead of dropping part of it.
+  main-tests:
+    name: Main Process Tests (ubuntu-latest, ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
+    # builds the only native module these tests load.
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
+
+    # The unit tests load the real electron package (main/src/utils/shellPath.ts).
+    - name: Fetch Electron
+      uses: ./.github/actions/fetch-electron
+
+    - name: Rebuild native modules for Node tests
+      run: pnpm rebuild better-sqlite3-multiple-ciphers
+
+    - name: Run main process unit tests
+      run: CI=1 pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
   # Type checking and lint get their own runner: beside the unit tests they
-  # competed for its CPUs and slowed the tests by about 30s. They run in
-  # parallel here; the Finish steps print each output and fail on errors.
+  # competed for its CPUs and slowed the tests by about 30s. Oxlint, then the
+  # type check (bun check over every tsconfig), each run alone on the 4 CPUs;
+  # then the lint checks and Knip run in parallel. The Finish steps print each
+  # output and fail on errors.
   typecheck-lint:
     name: Type Check and Lint
     runs-on: ubuntu-latest
@@ -126,68 +188,177 @@ jobs:
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
 
+    # bun's install script puts its binary in place (0.1s; `pnpm rebuild bun`
+    # took 6s). It is the one install script this job needs.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current && node node_modules/bun/install.js
 
-    - name: Start type checking
-      run: scripts/ci-background.sh start typecheck pnpm typecheck
+    # Oxlint runs alone first: beside the type check it shared the 4 CPUs and
+    # took 21-23s.
+    - name: Lint
+      run: scripts/ci-background.sh start lint node scripts/oxlint.mjs && scripts/ci-background.sh wait lint
 
-    - name: Start consolidated lint harness
-      run: scripts/ci-background.sh start lint pnpm lint
-
-    - name: Finish type checking
+    # Alone too: beside Knip and the lint checks it took 6s.
+    - name: Type check
       if: ${{ !cancelled() }}
-      run: scripts/ci-background.sh wait typecheck
+      run: scripts/ci-background.sh start typecheck pnpm typecheck && scripts/ci-background.sh wait typecheck
 
-    - name: Finish consolidated lint harness
+    - name: Start lint checks
       if: ${{ !cancelled() }}
-      run: scripts/ci-background.sh wait lint
+      run: scripts/ci-background.sh start lint-checks sh -c 'pnpm lint:ox:boundary-conformance && pnpm lint:agent-facts'
+
+    - name: Start dead-code check
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh start deadcode pnpm deadcode
+
+    - name: Finish dead-code check
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh wait deadcode
+
+    - name: Finish lint checks
+      if: ${{ !cancelled() }}
+      run: scripts/ci-background.sh wait lint-checks
+
+    # CI result's gate and budgets and their contract with this file (expected
+    # jobs, needs, skip manifest, a budget per job). Here rather than in CI
+    # result, which runs it every time at the end of the critical path.
+    - name: Test the CI result gate and the pre-push hook
+      if: ${{ !cancelled() }}
+      run: node --test scripts/ci-gate.test.mjs scripts/ci-timings.test.mjs scripts/pre-push.test.mjs scripts/ci-test-inventory.test.mjs
+
+    # Every tracked test file runs in a lane of this workflow (or another
+    # workflow), or is listed with its reason in scripts/ci-test-inventory.mjs.
+    - name: Check every test file has a lane
+      if: ${{ !cancelled() }}
+      run: node scripts/ci-test-inventory.mjs check
 
   # Offline check of relative links and #anchors in every tracked markdown file.
   # External URLs are not fetched, so the check never flakes on the network.
   markdown-links:
     name: Markdown Links
     runs-on: ubuntu-latest
+    env:
+      LYCHEE_VERSION: 0.24.2
+      LYCHEE_SHA256: 1f4e0ef7f6554a6ed33dd7ac144fb2e1bbed98598e7af973042fc5cd43951c9a
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
 
-    # The action downloads lychee from GitHub's releases, which fail for hours
-    # at a time, so a failed first try runs once more. A broken link fails both.
+    # lychee is a pinned release binary kept in the Actions cache, so a run
+    # downloads nothing. A cache miss downloads it once; that download is not
+    # retried, so a failure there fails the job.
+    - name: Restore lychee
+      id: lychee-cache
+      uses: actions/cache@v5
+      with:
+        path: ${{ runner.temp }}/lychee
+        key: lychee-${{ env.LYCHEE_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Download lychee
+      if: steps.lychee-cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p "$RUNNER_TEMP/lychee"
+        curl -fsSL -o "$RUNNER_TEMP/lychee.tar.gz" "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-x86_64-unknown-linux-gnu.tar.gz"
+        echo "${LYCHEE_SHA256}  $RUNNER_TEMP/lychee.tar.gz" | sha256sum -c -
+        tar -xzf "$RUNNER_TEMP/lychee.tar.gz" -C "$RUNNER_TEMP/lychee" --strip-components=1
+
     - name: Check markdown links
-      id: links
-      continue-on-error: true
-      uses: lycheeverse/lychee-action@v2
-      with:
-        args: >-
-          --offline --include-fragments --no-progress
-          --exclude-path node_modules --exclude-path dist-electron
-          './**/*.md'
-        fail: true
+      run: >-
+        "$RUNNER_TEMP/lychee/lychee"
+        --offline --include-fragments --no-progress
+        --exclude-path node_modules --exclude-path dist-electron
+        './**/*.md'
 
-    - name: Wait before checking links again
-      if: steps.links.outcome == 'failure'
-      run: sleep 20
-
-    - name: Check markdown links again
-      if: steps.links.outcome == 'failure'
-      uses: lycheeverse/lychee-action@v2
-      with:
-        args: >-
-          --offline --include-fragments --no-progress
-          --exclude-path node_modules --exclude-path dist-electron
-          './**/*.md'
-        fail: true
-
-  # The smoke suites run beside quality-checks in three jobs. The two browser
-  # shards split the minimal suite, which loads the renderer from Vite with a
-  # mocked Electron API. The Electron job runs the renderer selection races
-  # (also Vite) while better-sqlite3 rebuilds for Electron, then the journeys
-  # that launch main/dist in real Electron.
+  # The smoke suites run beside quality-checks. The browser shards split the
+  # browser suite (playwright.ci.minimal.config.ts), which loads the renderer
+  # from Vite with a mocked Electron API; the two renderer selection race shards
+  # also run from Vite alone. The two Electron shards launch real Electron and
+  # split the specs playwright.chat-tabs.config.ts lists.
+  # scripts/ci-test-inventory.mjs (in Type Check and Lint) fails when a test file
+  # runs in no lane.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke-browser:
-    name: Functional Smoke (browser ${{ matrix.shard }}/2)
+    name: Functional Smoke (browser ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
+
+    - name: Install Playwright browsers
+      uses: ./.github/actions/playwright-browsers
+      with:
+        # This shard saves the browsers for every job on main pushes.
+        save: ${{ matrix.shard == 1 }}
+
+    - name: Run maintained functional smoke tests
+      run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # Reported only: CI result does not wait for this job (REPORTED_ONLY_JOBS in
+  # scripts/ci-gate.mjs). It runs playwright.ci.stabilizing.config.ts, whose
+  # comment says why each spec there is not yet required.
+  functional-smoke-stabilizing:
+    name: Functional Smoke (stabilizing)
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
+
+    - name: Install Playwright browsers
+      uses: ./.github/actions/playwright-browsers
+
+    - name: Run stabilizing browser tests
+      run: pnpm exec playwright test --config=playwright.ci.stabilizing.config.ts
+
+  # The WebGL renderer recovery spec, split off the browser shards: its 25 tests
+  # take about 16 s each, and Playwright shards by test count in file order, so
+  # in the browser lane they all landed in one shard and set the run's time.
+  functional-smoke-webgl:
+    name: Functional Smoke (WebGL ${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
+
+    - name: Install Playwright browser dependencies
+      run: scripts/playwright-chromium.sh
+
+    - name: Run WebGL renderer recovery tests
+      run: pnpm exec playwright test --config=playwright.ci.webgl.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+  # One worker per shard: the tests are CPU-bound, so four workers on one
+  # 4-vCPU runner took as long as one. fullyParallel lets --shard split files.
+  renderer-selection:
+    name: Renderer Selection Races (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -202,17 +373,23 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
-    - name: Install Playwright browser dependencies
-      run: pnpm exec playwright install --with-deps chromium
+    - name: Install Playwright browsers
+      uses: ./.github/actions/playwright-browsers
 
-    - name: Run maintained functional smoke tests
-      run: pnpm test:ci:minimal --shard=${{ matrix.shard }}/2
+    - name: Verify renderer selection races
+      run: pnpm exec playwright test --config=tests/renderer/playwright.config.ts --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
 
   functional-smoke-electron:
-    name: Functional Smoke (Electron)
+    name: Functional Smoke (Electron ${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
     - name: Checkout code
@@ -222,13 +399,17 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
-    # The browser download and apt packages overlap the build steps below.
-    # apt upgrades libraries Electron loads, so the wait step comes before
-    # Electron first starts.
+    - name: Restore Playwright browsers
+      uses: ./.github/actions/playwright-browsers
+      with:
+        install: 'false'
+
+    # The browser install overlaps the build steps below; the wait step comes
+    # before the tests first start Chromium.
     - name: Start Playwright browser dependencies install
-      run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
+      run: scripts/ci-background.sh start playwright scripts/playwright-chromium.sh
 
     # The install skipped Electron's binary download, and Electron 42+ logs a
     # first-use fetch to stdout, so fetch it first to keep require('electron')
@@ -236,7 +417,29 @@ jobs:
     - name: Fetch Electron
       uses: ./.github/actions/fetch-electron
 
+    # SQLite built for Electron depends only on the runner image, arch,
+    # Electron version, the module's installed folder and the rebuild tool, so
+    # it is cached on those and rebuilt only on a miss: no Electron 43 prebuilt
+    # exists to download. Pushes to main save it once the tests below pass.
+    - name: Key the Electron SQLite build
+      id: sqlite
+      run: |
+        electron="$(node -p "require('./node_modules/electron/package.json').version")"
+        # The .pnpm folder name carries the version, patch hash and peer suffix.
+        module="$(cd node_modules/.pnpm && printf '%s\n' better-sqlite3-multiple-ciphers@* | sort | paste -sd+ -)"
+        rebuild="$(cd node_modules/.pnpm && printf '%s\n' @electron+rebuild@* | sort | paste -sd+ -)"
+        # The runner image fixes the compiler and system headers the build used.
+        echo "key=electron-sqlite-${ImageOS}-${ImageVersion}-${{ runner.arch }}-electron${electron}-${module}-${rebuild}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the Electron SQLite build
+      id: sqlite-cache
+      uses: actions/cache/restore@v5
+      with:
+        path: node_modules/.pnpm/better-sqlite3-multiple-ciphers@*/node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node
+        key: ${{ steps.sqlite.outputs.key }}
+
     - name: Start native module rebuild for Electron
+      if: steps.sqlite-cache.outputs.cache-hit != 'true'
       run: scripts/ci-background.sh start electron-rebuild pnpm run electron:rebuild
 
     - name: Configure Electron sandbox
@@ -252,50 +455,72 @@ jobs:
     - name: Finish Playwright browser dependencies install
       run: scripts/ci-background.sh wait playwright
 
-    # Needs no native module, so the rebuild finishes behind it; only the
-    # Electron launches below wait for it.
-    - name: Verify renderer selection races
-      run: pnpm test:renderer-selection
-      env:
-        PANE_DIR: ${{ runner.temp }}/pane-renderer-selection
-
     - name: Finish native module rebuild for Electron
-      if: ${{ !cancelled() }}
+      if: steps.sqlite-cache.outputs.cache-hit != 'true'
       run: scripts/ci-background.sh wait electron-rebuild
 
     - name: Verify sandboxed Electron preload
-      if: ${{ !cancelled() }}
+      if: ${{ matrix.shard == 1 }}
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
+    - name: Verify worktree trash sweep under Electron's ASAR
+      if: ${{ !cancelled() && matrix.shard == 1 }}
+      run: xvfb-run -a node scripts/test-worktree-trash-electron.cjs
+
     # Launches Electron from the build above with a scripted ACP agent; never a real account.
+    # PANE_ELECTRON_E2E turns on the remote browser and browser auth specs.
     - name: Run chat tab journeys
       if: ${{ !cancelled() }}
-      run: xvfb-run -a pnpm test:chat-tabs
+      run: xvfb-run -a pnpm test:chat-tabs --shard=${{ matrix.shard }}/${{ strategy.job-total }}
       env:
         PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+        PANE_ELECTRON_E2E: '1'
+
+    # Reported only: a failure here marks the step and leaves the job green. The
+    # config's comment says why each spec there is not yet required.
+    - name: Run stabilizing Electron specs
+      if: ${{ !cancelled() && matrix.shard == 1 }}
+      continue-on-error: true
+      run: xvfb-run -a pnpm exec playwright test --config=playwright.ci.stabilizing-electron.config.ts
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-stabilizing-electron
+        PANE_ELECTRON_E2E: '1'
+
+    # Last, so only a build that Electron loaded and passed the tests with is saved.
+    - name: Save the Electron SQLite build
+      if: steps.sqlite-cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@v5
+      with:
+        path: node_modules/.pnpm/better-sqlite3-multiple-ciphers@*/node_modules/better-sqlite3-multiple-ciphers/build/Release/better_sqlite3.node
+        key: ${{ steps.sqlite.outputs.key }}
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
-  # change on a PR; always runs on pushes to main. Each OS is tested once at
-  # the runtime floors (Node 22.23.4 / Python 3.8) and once at current (Node 24.22.1 /
-  # Python 3.13) instead of the full Node x Python cross product. The Linux
-  # floor entry runs on ubuntu-24.04. It was pinned there because setup-python
-  # has no Python 3.8 build for Ubuntu 26.04 (ubuntu-latest); uv now installs
-  # 3.8, so that reason no longer applies.
+  # change on a PR; always runs on pushes to main. Linux is tested at the
+  # runtime floors (Node 22.23.4 / Python 3.8) and at current (Node 24.22.1 /
+  # Python 3.13); Windows at the floors only, since every Windows defect it has
+  # caught failed both Windows legs. No macOS leg: its one catch (#939) failed
+  # on Windows too. The Linux floor entry runs on ubuntu-24.04: setup-python
+  # has no Python 3.8 build for Ubuntu 26.04 (ubuntu-latest), and uv installs
+  # 3.8 there.
+  # Each leg runs in seven lanes: `package` checks versions and packs the
+  # wrappers, and lanes 1/6 to 6/6 each run a sixth of the contract checks
+  # and of the node:test suites (RUNPANE_TEST_SHARD, scripts/runpane-test-shard.js).
+  # scripts/ci-gate.test.mjs checks the lanes are package plus 1/n to n/n.
   runpane-wrapper-tests:
-    name: Runpane Wrapper (${{ matrix.os }}, Node ${{ matrix.node-version }}, Python ${{ matrix.python-version }})
+    name: Runpane Wrapper (${{ matrix.leg.os }}, Node ${{ matrix.leg.node-version }}, Python ${{ matrix.leg.python-version }}, ${{ matrix.lane }})
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.runpane == 'true'
-    runs-on: ${{ matrix.os }}
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['runpane-wrapper-tests'] }}
+    runs-on: ${{ matrix.leg.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
+        leg:
           - { os: ubuntu-24.04, node-version: '22.23.4', python-version: '3.8' }
           - { os: ubuntu-latest, node-version: '24.22.1', python-version: '3.13' }
-          - { os: macos-latest, node-version: '22.23.4', python-version: '3.8' }
-          - { os: macos-latest, node-version: '24.22.1', python-version: '3.13' }
           - { os: windows-2022, node-version: '22.23.4', python-version: '3.8' }
-          - { os: windows-2022, node-version: '24.22.1', python-version: '3.13' }
+        lane: [package, 1/6, 2/6, 3/6, 4/6, 5/6, 6/6]
+    env:
+      RUNPANE_TEST_SHARD: ${{ matrix.lane != 'package' && matrix.lane || '' }}
 
     steps:
     - name: Checkout code
@@ -304,19 +529,19 @@ jobs:
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
       with:
-        node-version: ${{ matrix.node-version }}
+        node-version: ${{ matrix.leg.node-version }}
 
-    # Python 3.8 is not preinstalled on macOS or Windows runners, and
+    # Python 3.8 is not preinstalled on Windows runners, and
     # setup-python took 31-56 s to fetch it there. uv installs its standalone
     # CPython build in a few seconds. The test scripts read PYTHON.
     - name: Setup Python
-      if: matrix.python-version != '3.8'
+      if: matrix.leg.python-version != '3.8'
       uses: actions/setup-python@v6
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: ${{ matrix.leg.python-version }}
 
     - name: Setup uv for Python 3.8
-      if: matrix.python-version == '3.8'
+      if: matrix.leg.python-version == '3.8'
       uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       with:
         # A pinned uv, so a new uv release can't change the required jobs.
@@ -325,7 +550,7 @@ jobs:
         enable-cache: false
 
     - name: Install Python 3.8 with uv
-      if: matrix.python-version == '3.8'
+      if: matrix.leg.python-version == '3.8'
       shell: bash
       run: |
         uv python install 3.8
@@ -335,75 +560,59 @@ jobs:
         "$python" -c "import os, sys; print(os.path.dirname(sys.executable))" >> "$GITHUB_PATH"
 
     - name: Install wrapper dependencies
-      run: pnpm install --filter runpane --ignore-scripts
+      run: pnpm install --filter runpane --ignore-scripts --os=current --cpu=current
 
     - name: Check wrapper package versions
+      if: matrix.lane == 'package'
       run: node scripts/sync-runpane-package-versions.js --check
 
     - name: Build npm wrapper
       run: pnpm --filter runpane build
 
-    # Packing runs runpane's prepack, which rebuilds dist/, so the package
-    # smoke tests run before anything else reads dist/.
+    # Packing runs runpane's prepack, which rebuilds dist/.
     - name: Run package manager smoke tests
+      if: matrix.lane == 'package'
       run: node scripts/test-runpane-package-smoke.js
 
-    # The two slow suites (about 95 and 120 s on Windows) use their own temp
-    # directories, so they run in the background beside the short ones. Each
-    # Finish step prints that suite's output and fails with it.
+    # The contract checks use their own temp directories, so they run in the
+    # background beside the node:test suites. The Finish step prints their
+    # output and fails with them.
     - name: Start wrapper contract tests
+      if: matrix.lane != 'package'
       shell: bash
       run: scripts/ci-background.sh start contract node scripts/test-runpane-contract.js
 
-    - name: Start handoff tests
-      shell: bash
-      run: scripts/ci-background.sh start handoff node --test scripts/test-runpane-handoff.js
-
-    - name: Check patched Node runtime guard
-      run: node --test scripts/test-runpane-node-runtime.js
-
-    - name: Run MCP server tests
-      run: node --test scripts/test-runpane-mcp.js
-
-    - name: Run ask and models tests
-      run: node --test scripts/test-runpane-ask.js
-
-    - name: Run workspace routing tests
-      run: node --test scripts/test-runpane-workspace.js
-
-    - name: Run managed CLI hand-off tests
-      run: node --test scripts/test-runpane-managed-cli.js
-
-    - name: Run wrapper telemetry tests
-      run: node --test scripts/test-runpane-telemetry.js
+    - name: Run wrapper node:test suites
+      if: matrix.lane != 'package'
+      run: >-
+        node --test
+        scripts/test-runpane-handoff.js
+        scripts/test-runpane-mcp.js
+        scripts/test-runpane-node-runtime.js
+        scripts/test-runpane-ask.js
+        scripts/test-runpane-workspace.js
+        scripts/test-runpane-managed-cli.js
+        scripts/test-runpane-telemetry.js
+        scripts/test-runpane-submit.js
 
     - name: Finish wrapper contract tests
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && matrix.lane != 'package' }}
       shell: bash
       run: scripts/ci-background.sh wait contract
 
-    - name: Finish handoff tests
-      if: ${{ !cancelled() }}
-      shell: bash
-      run: scripts/ci-background.sh wait handoff
-
-  # Ubuntu is already covered by quality-checks above; this job only adds the
-  # other platforms, and only when main-process code (or its deps) changed.
-  # Windows runs the suite in two vitest shards, each about half of it. macOS
-  # runs it whole: the org has 5 macOS runners, and a second macOS job waited
-  # longer for one than the shard saved.
+  # Ubuntu is already covered by main-tests above; this job only adds
+  # Windows, and only when main-process code (or its deps) changed. It runs the
+  # suite in six vitest shards, each about a sixth of it. Type Check and Lint
+  # already type-checks main, and a type check gives the same result on any OS.
   cross-os-main-tests:
-    name: Main Process Tests (${{ matrix.os }}${{ matrix.shards > 1 && format(', {0}/{1}', matrix.shard, matrix.shards) || '' }})
+    name: Main Process Tests (windows-2022, ${{ matrix.shard }}/${{ strategy.job-total }})
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.main == 'true'
-    runs-on: ${{ matrix.os }}
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['cross-os-main-tests'] }}
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: macos-latest, shard: 1, shards: 1 }
-          - { os: windows-2022, shard: 1, shards: 2 }
-          - { os: windows-2022, shard: 2, shards: 2 }
+        shard: [1, 2, 3, 4, 5, 6]
 
     steps:
     # The default Windows TEMP is on the runner's slow C: drive; the database
@@ -431,12 +640,7 @@ jobs:
     # Skip the Electron-targeted postinstall rebuild; the Node rebuild below
     # builds the only native module these tests load.
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
-
-    - name: Start main process type checking
-      if: matrix.shard == 1
-      shell: bash
-      run: scripts/ci-background.sh start typecheck pnpm --filter main typecheck
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     # The unit tests load the real electron package (main/src/utils/shellPath.ts);
     # without this, each test worker downloads Electron and they collide on Windows.
@@ -447,23 +651,18 @@ jobs:
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 
     - name: Run main process unit tests
-      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --retry=1 --reporter=default --reporter=../scripts/vitest-retry-report.mjs
+      run: pnpm --filter main exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
-    - name: Finish main process type checking
-      if: ${{ !cancelled() && matrix.shard == 1 }}
-      shell: bash
-      run: scripts/ci-background.sh wait typecheck
-
-  # The relay (Rust) and the computer side of QR pairing against it: a real relay
-  # with its DNS helper, and Pebble validating certificates through that DNS.
-  # Also the direct-path helper (direct/), and a desktop reaching a computer over it.
-  relay-tests:
-    name: Relay Tests
+  # The relay and direct-path helper (Rust): format, lints and cargo tests,
+  # including the relay's ACME test against Pebble. It also builds both
+  # binaries, so the cargo cache it saves serves Relay Tests below.
+  relay-rust:
+    name: Relay Rust Checks
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.relay == 'true'
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['relay-rust'] }}
     runs-on: ubuntu-latest
     env:
-      # The relay, Pebble and pane-direct suites fail here instead of skipping when a binary is missing.
+      # The Pebble test fails here instead of skipping when Pebble is missing.
       PANE_RELAY_INTEGRATION_REQUIRED: '1'
     timeout-minutes: 30
     steps:
@@ -483,14 +682,6 @@ jobs:
           direct/target
         key: relay-${{ runner.os }}-${{ hashFiles('relay/Cargo.lock', 'direct/Cargo.lock') }}
 
-    - name: Check, test and build pane-direct
-      working-directory: direct
-      run: |
-        cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
-        cargo test --locked
-        cargo build --locked
-        echo "PANE_DIRECT_BIN=$GITHUB_WORKSPACE/direct/target/debug/pane-direct" >> "$GITHUB_ENV"
-
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
@@ -502,7 +693,14 @@ jobs:
         GOBIN="$RUNNER_TEMP/bin" go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.8.0
         echo "PEBBLE_BIN=$RUNNER_TEMP/bin/pebble" >> "$GITHUB_ENV"
         echo "PEBBLE_DIR=$(go env GOMODCACHE)/github.com/letsencrypt/pebble/v2@v2.8.0" >> "$GITHUB_ENV"
-        echo "PANE_RELAY_BIN=$GITHUB_WORKSPACE/relay/target/debug/pane-relay" >> "$GITHUB_ENV"
+
+    - name: Check, test and build pane-direct
+      working-directory: direct
+      run: |
+        cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings
+        cargo test --locked
+        cargo build --locked
+        echo "PANE_DIRECT_BIN=$GITHUB_WORKSPACE/direct/target/debug/pane-direct" >> "$GITHUB_ENV"
 
     - name: Check formatting and lints
       working-directory: relay
@@ -516,11 +714,60 @@ jobs:
       working-directory: relay
       run: cargo build --locked
 
+  # The computer side of QR pairing against a real relay with its DNS helper,
+  # and Pebble validating certificates through that DNS. Also a desktop
+  # reaching a computer over the direct-path helper (direct/).
+  relay-tests:
+    name: Relay Tests
+    needs: changes
+    if: ${{ !fromJSON(needs.changes.outputs.skip)['relay-tests'] }}
+    runs-on: ubuntu-latest
+    env:
+      # The relay, Pebble and pane-direct suites fail here instead of skipping when a binary is missing.
+      PANE_RELAY_INTEGRATION_REQUIRED: '1'
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Set up Rust
+      run: rustup toolchain install stable --profile minimal && rustup default stable
+
+    # Relay Rust Checks saves this cache; this job only reads it.
+    - name: Restore cargo cache
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          relay/target
+          direct/target
+        key: relay-${{ runner.os }}-${{ hashFiles('relay/Cargo.lock', 'direct/Cargo.lock') }}
+
+    - name: Build pane-direct and the relay
+      run: |
+        cargo build --locked --manifest-path direct/Cargo.toml
+        cargo build --locked --manifest-path relay/Cargo.toml
+        echo "PANE_DIRECT_BIN=$GITHUB_WORKSPACE/direct/target/debug/pane-direct" >> "$GITHUB_ENV"
+        echo "PANE_RELAY_BIN=$GITHUB_WORKSPACE/relay/target/debug/pane-relay" >> "$GITHUB_ENV"
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: stable
+        cache: false
+
+    - name: Install Pebble
+      run: |
+        GOBIN="$RUNNER_TEMP/bin" go install github.com/letsencrypt/pebble/v2/cmd/pebble@v2.8.0
+        echo "PEBBLE_BIN=$RUNNER_TEMP/bin/pebble" >> "$GITHUB_ENV"
+        echo "PEBBLE_DIR=$(go env GOMODCACHE)/github.com/letsencrypt/pebble/v2@v2.8.0" >> "$GITHUB_ENV"
+
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install --ignore-scripts
+      run: pnpm install --ignore-scripts --os=current --cpu=current --filter '!@pane/mobile' --filter '!@pane/native' --filter '!@pane/glasses'
 
     - name: Fetch Electron
       uses: ./.github/actions/fetch-electron
@@ -534,14 +781,69 @@ jobs:
     - name: Run runpane relay against the relay
       run: pnpm run test:runpane-relay
 
-  # The one check branch protection requires. Skipped jobs pass; failed or
-  # cancelled ones fail it.
+  # The Remote PWA preview deploy's install and build, exactly as
+  # deploy-remote-pwa-preview.yml runs them on main. Its frontend-only install
+  # catches a build that needs another package's dependencies.
+  pwa-build:
+    name: Remote PWA Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile --filter 'frontend...' --ignore-scripts --os=current --cpu=current
+
+    - name: Build remote PWA assets
+      run: pnpm run build:frontend
+
+  # The one check branch protection requires. It runs even when the run is
+  # cancelled, and fails unless every job in scripts/ci-gate.mjs EXPECTED_JOBS
+  # succeeded or skipped with a reason from Detect changed areas' manifest.
+  # A missing, cancelled, failed or unexpectedly skipped job fails it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, typecheck-lint, functional-smoke-browser, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-tests]
-    if: ${{ !cancelled() }}
+    needs: [changes, quality-checks, main-tests, typecheck-lint, markdown-links, functional-smoke-browser, functional-smoke-webgl, renderer-selection, functional-smoke-electron, runpane-wrapper-tests, cross-os-main-tests, relay-rust, relay-tests, pwa-build]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
-    - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
-      run: exit 1
+    # Four files at the run's exact commit, read in parallel: about 2 s
+    # faster than actions/checkout and its post step. Any failed read fails.
+    - name: Fetch the gate
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        pids=()
+        for file in .github/workflows/quality.yml scripts/ci-gate.mjs scripts/ci-timings.mjs scripts/ci-budgets.json; do
+          mkdir -p "$(dirname "$file")"
+          gh api -H 'Accept: application/vnd.github.raw' "repos/$GITHUB_REPOSITORY/contents/$file?ref=$GITHUB_SHA" > "$file" &
+          pids+=("$!")
+        done
+        for pid in "${pids[@]}"; do wait "$pid"; done
+
+    - name: Decide
+      env:
+        NEEDS_JSON: ${{ toJSON(needs) }}
+      run: node scripts/ci-gate.mjs decide
+
+    # Each job's head SHA, runner and waiting/setup/running seconds, in the
+    # job summary and the log, for measuring CI speed (scripts/ci-timings.mjs).
+    # A job over a ceiling in scripts/ci-budgets.json fails this step; a
+    # missed target or a value that could not be measured is only reported.
+    - name: Record job timings and check budgets
+      if: ${{ always() }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        status=0
+        node scripts/ci-timings.mjs --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/ci-run-timings.json" --summary "$GITHUB_STEP_SUMMARY" --budgets scripts/ci-budgets.json || status=$?
+        if [ -f "$RUNNER_TEMP/ci-run-timings.json" ]; then cat "$RUNNER_TEMP/ci-run-timings.json"; fi
+        exit "$status"

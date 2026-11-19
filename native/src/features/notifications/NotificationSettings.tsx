@@ -91,7 +91,7 @@ function present(profile: RemotePaneConnectionProfile, result: PushSetupResult |
 function explain(profile: RemotePaneConnectionProfile, message: string): void {
   Alert.alert(profile.label, message, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Try Again', onPress: requestPushRegistration },
+    { text: 'Try Again', onPress: () => requestPushRegistration() },
   ]);
 }
 

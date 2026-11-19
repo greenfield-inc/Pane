@@ -36,13 +36,14 @@
         "playwright*.ts"
       ],
       "ignoreUnresolved": ["/usr/bin/time"],
-      "ignoreBinaries": ["lychee"],
+      "ignoreBinaries": ["lychee", "check"],
       "ignoreDependencies": [
         "original-fs",
         "@agentclientprotocol/claude-agent-acp",
         "@agentclientprotocol/codex-acp",
         "@agentclientprotocol/sdk",
         "@anthropic-ai/sdk",
+        "@greenfieldco/agent-farm",
         "@lydell/node-pty",
         "@modelcontextprotocol/sdk",
         "@xterm/addon-serialize",
@@ -77,6 +78,7 @@
       "entry": [
         "src/index.ts",
         "src/preload.ts",
+        "src/services/devices/frameScalerPreload.ts",
         "src/daemon/headless.ts",
         "src/ptyHost/ptyHostMain.ts",
         "src/services/mcpPermissionBridge.ts",

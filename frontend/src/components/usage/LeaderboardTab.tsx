@@ -7,6 +7,7 @@ import type {
   LeaderboardStatus,
 } from '../../../../shared/types/leaderboard';
 import { formatTokens, formatUsd } from '../ui/charts/chartScales';
+import { Bone, Skeleton, TextBone, useSkeletonHold, LoadingStatus } from '../ui/Skeleton';
 
 function JoinBanner({
   status,
@@ -242,6 +243,7 @@ export function LeaderboardTab() {
   const [status, setStatus] = useState<LeaderboardStatus | null>(null);
   const [board, setBoard] = useState<LeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const { holding, reveal } = useSkeletonHold(loading);
   const [error, setError] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -375,17 +377,10 @@ export function LeaderboardTab() {
     }
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-10 text-xs text-text-tertiary">
-        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-        Loading leaderboard…
-      </div>
-    );
-  }
+  if (holding) return <LeaderboardSkeleton />;
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
+    <div className={`mx-auto flex max-w-4xl flex-col gap-4${reveal ? ' skeleton-reveal' : ''}`}>
       {error && (
         <div className="rounded border border-status-error/30 bg-status-error/10 p-3 text-xs text-text-primary">
           {error}
@@ -440,6 +435,52 @@ export function LeaderboardTab() {
         Ranked by estimated cost at API prices. The rank comes from the server's reply to your last submission, never computed locally.
       </p>
     </div>
+  );
+}
+
+const SKELETON_HEADINGS: ReadonlyArray<[string, string]> = [
+  ['#', 'w-10'], ['User', ''], ['Est. cost (30d)', 'text-right'], ['Output tokens', 'text-right'], ['Messages', 'text-right'], ['Top model', ''],
+];
+
+/** The leaderboard while status and board load: a banner, the meta row, and the table's first rows. */
+function LeaderboardSkeleton() {
+  return (
+    <>
+      <Skeleton className="mx-auto flex max-w-4xl flex-col gap-4">
+        <div className="rounded border border-border-primary bg-surface-secondary p-4">
+          <div className="flex h-5 items-center"><Bone className="h-3.5 w-48" /></div>
+          <div className="mt-0.5 flex h-[15px] items-center"><Bone className="h-2.5 w-40" /></div>
+        </div>
+        <div className="flex items-center justify-between">
+          <p className="text-[10px]"><TextBone text="Last 30 days · all providers · top 100" /></p>
+          <span className="p-1"><Bone className="h-3.5 w-3.5" /></span>
+        </div>
+        <div className="rounded border border-border-primary bg-surface-secondary p-3">
+          <table className="w-full min-w-[640px] border-collapse text-left text-xs">
+            <thead>
+              <tr className="border-b border-border-primary">
+                {SKELETON_HEADINGS.map(([label, className]) => (
+                  <th key={label} className={`px-2 py-2 text-[10px] font-medium uppercase tracking-wider ${className}`}><TextBone text={label} /></th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[28, 36, 22, 32, 26, 30].map((user, index) => (
+                <tr key={index} className="border-b border-border-primary last:border-b-0">
+                  <td className="px-2 py-2"><TextBone text="00" /></td>
+                  <td className="px-2 py-2"><Bone className="h-3 max-w-full" style={{ width: `${user * 4}px` }} /></td>
+                  <td className="px-2 py-2 text-right"><TextBone text="$0,000.00" /></td>
+                  <td className="px-2 py-2 text-right"><TextBone text="00.0M" /></td>
+                  <td className="px-2 py-2 text-right"><TextBone text="00,000" /></td>
+                  <td className="px-2 py-2"><TextBone text="claude-opus-0" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Skeleton>
+      <LoadingStatus label="Loading leaderboard" />
+    </>
   );
 }
 

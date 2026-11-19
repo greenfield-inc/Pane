@@ -1,0 +1,24 @@
+# dcouple/reviewer: written by `node scripts/import-agent-farm-profiles.js` from Agent Farm's dcouple plugin 0.1.27; don't edit by hand.
+# A single agent step: the run ends when the agent reports done.
+format: pane-profile/1
+name: dcouple-reviewer
+version: 0.1.27
+title: Review a pull request from many angles at once and list what to fix, most important first.
+
+agents:
+  reviewer:
+    runs: claude/claude-opus-5-5
+    effort: high
+    reads: [agents/claude-pr-reviewer]
+    skills: [principled-review, review, create-plan, implementer, pr-test-automation]
+
+flow:
+  start: work
+  work:
+    agent: reviewer
+    goal: Review a pull request from many angles at once and list what to fix, most important first
+    outcomes: {done: end}
+
+samples:
+  work:
+    done: ["Done: what it did, with links to what it made.", "Done: what it found, and what is left for you to decide."]

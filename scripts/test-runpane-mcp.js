@@ -7,7 +7,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 
 const rootDir = path.resolve(__dirname, '..');
 const runpaneDir = path.join(rootDir, 'packages', 'runpane');
@@ -305,10 +305,10 @@ test('a tool call never runs a CLI from the paneDir it names', async () => {
   }
 });
 
-test('agents reach secrets only through list, delete and request: no MCP tool sets or prints a value', async () => {
+test('agents reach secrets only through list, delete, request and leases: no MCP tool sets or prints a value', async () => {
   const { buildMcpTools } = require(dist('mcpTools.js'));
   const names = buildMcpTools().map((tool) => tool.name).filter((name) => name.startsWith('secrets_')).sort();
-  assert.deepEqual(names, ['secrets_delete', 'secrets_list', 'secrets_request']);
+  assert.deepEqual(names, ['secrets_delete', 'secrets_lease', 'secrets_lease_end', 'secrets_list', 'secrets_request']);
 
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const listed = { ok: true, secrets: [{ project: 'stripe', name: 'STRIPE_SECRET_KEY', updatedAt: '2026-11-04T10:00:00.000Z', machine: 'studio' }], storage: { kind: 'keychain', encrypted: true } };
@@ -349,6 +349,45 @@ test('agents reach secrets only through list, delete and request: no MCP tool se
             returnAfterMs: 50000, caller: { cwd: requests[2].args[0].caller.cwd, agent: 'Cursor' },
           }],
         },
+      ]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('secrets_lease asks for a lease on a card and secrets_lease_end ends one', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const leased = { status: 'leased', project: 'stripe', names: ['STRIPE_LIVE_KEY', 'WEBHOOK_KEY'], leaseId: 'lease-a', expiresAt: '2026-11-05T12:00:00.000Z', machines: ['studio'] };
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:notify': leased,
+      'runpane:secrets:lease:end': { ok: true, ended: true },
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const tools = (await client.listTools()).tools;
+        const lease = tools.find((tool) => tool.name === 'secrets_lease');
+        assert.deepEqual(lease.inputSchema.required.sort(), ['names', 'project']);
+        const answer = await client.callTool({
+          name: 'secrets_lease',
+          arguments: { names: ['STRIPE_LIVE_KEY', 'WEBHOOK_KEY'], project: 'stripe', reason: 'Run the webhook tests.', paneDir },
+        });
+        assert.deepEqual(answer.structuredContent, leased);
+        assertMatchesAdvertisedSchema(lease, answer.structuredContent);
+        const refused = await client.callTool({ name: 'secrets_lease_end', arguments: { id: 'lease-a', paneDir } });
+        assert.equal(refused.isError, true);
+        const ended = await client.callTool({ name: 'secrets_lease_end', arguments: { id: 'lease-a', yes: true, paneDir } });
+        assert.deepEqual(ended.structuredContent, { ok: true, ended: true });
+      }, { args: ['--toolsets', 'core,secrets'], clientName: 'cursor-agent', env: { PANE_SESSION_ID: '', PANE_PANEL_ID: '' } });
+      assert.deepEqual(requests.map(({ channel, args }) => ({ channel, args })), [
+        {
+          channel: 'runpane:notify',
+          args: [{
+            ui: 'approve', title: 'Lease 2 secrets', context: 'Run the webhook tests.', lease: { project: 'stripe', names: ['STRIPE_LIVE_KEY', 'WEBHOOK_KEY'] },
+            returnAfterMs: 50000, caller: { cwd: requests[0].args[0].caller.cwd, agent: 'Cursor' },
+          }],
+        },
+        { channel: 'runpane:secrets:lease:end', args: [{ leaseId: 'lease-a' }] },
       ]);
     });
   } finally {
@@ -823,16 +862,24 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
     'agents_ask', 'agents_send', 'agents_start', 'agents_status',
+    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_navigate', 'browser_open', 'browser_press',
+    'browser_screenshot', 'browser_scroll', 'browser_select', 'browser_snapshot', 'browser_tabs', 'browser_type', 'browser_upload', 'browser_wait',
     'device_act', 'device_close', 'device_list', 'device_open', 'device_run', 'device_screenshot',
     'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
-    'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
+    'profiles_launch', 'profiles_list', 'profiles_runs', 'profiles_show',
+    'repos_add', 'repos_list', 'repos_rename', 'secrets_lease', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'theme_read', 'theme_set', 'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
   ]);
   const devices = await names(['--toolsets', 'devices']);
   assert.deepEqual(devices.map((tool) => tool.name).sort(), [
     'device_act', 'device_close', 'device_free', 'device_list', 'device_open', 'device_run', 'device_screenshot', 'device_usage',
+  ]);
+  const browser = await names(['--toolsets', 'browser']);
+  assert.deepEqual(browser.map((tool) => tool.name).sort(), [
+    'browser_click', 'browser_close', 'browser_dialog', 'browser_evaluate', 'browser_navigate', 'browser_open', 'browser_press',
+    'browser_screenshot', 'browser_scroll', 'browser_select', 'browser_snapshot', 'browser_tabs', 'browser_type', 'browser_upload', 'browser_wait',
   ]);
   const git = await names(['--toolsets', 'git']);
   assert.deepEqual(git.map((tool) => tool.name).sort(), [
@@ -840,7 +887,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'panes_soft_reset', 'panes_squash_rebase', 'panes_stash', 'panes_stash_pop',
   ]);
   const secrets = await names(['--toolsets', 'secrets']);
-  assert.deepEqual(secrets.map((tool) => tool.name).sort(), ['secrets_delete', 'secrets_list']);
+  assert.deepEqual(secrets.map((tool) => tool.name).sort(), ['secrets_delete', 'secrets_lease', 'secrets_lease_end', 'secrets_list']);
   const readOnly = await names(['--toolsets', 'all', '--read-only']);
   assert.ok(readOnly.length > 0 && readOnly.every((tool) => tool.annotations.readOnlyHint));
   assert.ok(!readOnly.some((tool) => tool.name === 'panes_archive'));
@@ -854,6 +901,7 @@ test('the plugin toolset is core without the tools that reach other machines', a
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_close', 'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
+    'profiles_launch', 'profiles_list', 'profiles_runs', 'profiles_show',
     'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'workspace_state',
   ]);

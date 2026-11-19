@@ -33,7 +33,7 @@ export function SidebarSectionScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const section = parseSection(useLocalSearchParams<{ section?: string }>().section);
-  const { presence, notice, retry } = useConnectionPresence();
+  const { presence, live, notice, retry } = useConnectionPresence();
   const here = useCurrentMachine({ unreachable: presence === 'unreachable', retry });
   const actions = usePaneActions();
   const archived = useArchivedProjects(section === 'archived');
@@ -67,7 +67,7 @@ export function SidebarSectionScreen() {
     <View style={[styles.fill, { backgroundColor: theme.colors.background }]}>
       <Stack.Screen options={{ title: TITLES[section] }} />
       <ConnectionBar notice={notice} onRetry={retry} />
-      <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
+      <Dimmed dimmed={!live} style={styles.fill}>
         <LegendList
           testID={`section-list-${section}`}
           data={here.loading ? [] : items}

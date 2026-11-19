@@ -235,7 +235,13 @@ describe('strict archive process teardown', () => {
     expect(persisted).toHaveLength(4);
     terminal.pty.kill.mockImplementation(() => { table = table.filter(item => item.pid !== 1000001); });
     runKill.mockImplementation(() => { table = table.filter(item => item.pid !== 1000003); });
-    await manager.retireSessionTerminalsForArchive(terminal.sessionId);
+    // destroyTerminal snapshots the real process table (PowerShell CIM on Windows); the archive tracker above owns these fake PIDs.
+    const destroyCapture = vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue();
+    try {
+      await manager.retireSessionTerminalsForArchive(terminal.sessionId);
+    } finally {
+      destroyCapture.mockRestore();
+    }
     await commands.retireRunCommandsForArchive(terminal.sessionId);
     expect(manager.getSessionPids().size).toBe(0);
     expect(commands.getArchiveProcessPids(terminal.sessionId)).toEqual([]);
@@ -2266,6 +2272,8 @@ type AgentStatusAccess = {
 
 describe('TerminalPanelManager latest output', () => {
   it('counts a terminal closing as output, so port reads notice its server is gone', async () => {
+    // The fake shell pid may be a real process here: destroy must not read the process table or track it.
+    const capture = vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue();
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       const manager = testAccess<AgentStatusAccess>(new TerminalPanelManager());
@@ -2280,6 +2288,7 @@ describe('TerminalPanelManager latest output', () => {
       expect(manager.latestOutputAt()).toBe(Date.parse('2026-11-13T10:05:00.000Z'));
     } finally {
       vi.useRealTimers();
+      capture.mockRestore();
     }
   });
 });

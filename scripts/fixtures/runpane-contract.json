@@ -669,6 +669,13 @@
       "/tmp/pane"
     ],
     [
+      "report",
+      "--outcome",
+      " plan ready ",
+      "--summary-file",
+      "status.json"
+    ],
+    [
       "panels",
       "resume",
       "--all-stopped",
@@ -1198,6 +1205,47 @@
       "--help"
     ],
     [
+      "profiles",
+      "list",
+      "--json"
+    ],
+    [
+      "profiles",
+      "show",
+      "greenfield",
+      "--yaml"
+    ],
+    [
+      "profiles",
+      "launch",
+      "greenfield",
+      "--prompt",
+      "Add dark mode",
+      "--repo",
+      "active",
+      "--session",
+      "Nightly",
+      "--harness",
+      "claude/opus",
+      "--agent-harness",
+      "planner=codex",
+      "--agent-harness={\"reviewer\":\"claude\"}",
+      "--command",
+      "aider=aider --yes-always",
+      "--yes",
+      "--json"
+    ],
+    [
+      "profiles",
+      "runs",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "profiles",
+      "--help"
+    ],
+    [
       "notify",
       "--ui",
       "options",
@@ -1311,6 +1359,26 @@
       "Stripe test key",
       "--reason",
       "- for the webhook tests",
+      "--json"
+    ],
+    [
+      "secrets",
+      "lease",
+      "--project",
+      "stripe",
+      "STRIPE_SECRET_KEY",
+      "--reason",
+      "- for the webhook tests",
+      "WEBHOOK_SECRET",
+      "--json"
+    ],
+    [
+      "secrets",
+      "lease",
+      "end",
+      "--id",
+      "3f9a2c1b7d4e8f06",
+      "--yes",
       "--json"
     ],
     [

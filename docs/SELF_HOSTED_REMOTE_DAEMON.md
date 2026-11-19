@@ -10,7 +10,7 @@ The intended flow is:
 2. Copy the generated `pane-remote://...` connection code.
 3. Paste it into desktop Pane under `Settings > Remote Access > Tailscale > Paste a connection code`, or open `https://runpane.com/app/` and paste it there.
 
-Pane saves the profile and attempts to connect immediately. Local desktop mode is unchanged until a remote profile is imported and activated.
+Pane saves the connection and attempts to connect immediately. Local desktop mode is unchanged until a saved connection is imported and activated.
 
 ## Workspaces or pairing codes?
 
@@ -274,7 +274,7 @@ A desktop connected to a remote host reaches every port listening on the host as
 - When something on the desktop already answers on 5173, the desktop uses the next free port, or any free port when the next 19 are taken too. The tab still reads `localhost:5173`, and the Ports list shows the local number as **here :5174**.
 - A tab never loads the desktop's own service in the host's place. While the host's Ports list is loading it waits, and when a port stops listening on the host it says the port isn't reachable, then loads once the port is back.
 - **Copy URL** copies the address that works on the desktop, for its system browser.
-- Clicking a `localhost` link in a terminal opens the host's server in your system browser, using the local port number if it moved. A link to a port that isn't forwarded right now doesn't open, so it never reaches the desktop's own service on that port.
+- Clicking a `localhost` link in a terminal opens the host's server in a browser tab beside it, or in your system browser when Settings › Links says so, using the local port number if it moved. A link to a port that isn't forwarded right now doesn't open, so it never reaches the desktop's own service on that port.
 - When a port closes on the host, the desktop closes its listener. Disconnecting closes all of them.
 
 Each connection the desktop accepts travels over the Pane connection as a WebSocket to `/ports/<port>` on the host, which connects to `localhost:<port>` there. The host accepts it only with the same sign-in as every other request, and only for a port in its current list. Listeners stay on loopback on both machines.
@@ -340,9 +340,9 @@ From `Pairing tools` on the same page:
 
 1. Enter a label such as `Office Mac mini`.
 2. Enter the base URL the client will use after tunneling, for example `http://127.0.0.1:42137`.
-3. Click `Create Paired Profile`.
+3. Click `Pair a device`.
 
-Pane adds a host-side allowed client record, adds a matching local profile, and shows the generated bearer token once.
+Pane adds a host-side allowed client record, adds a matching saved connection, and shows the generated bearer token once.
 
 ### 4. Start the Headless Daemon
 
@@ -360,13 +360,13 @@ On Windows the endpoint is `pipe:<pipe name>`. This is the local control endpoin
 
 ### 5. Connect the Desktop Client
 
-Use `Paste a connection code` under `Settings > Remote Access > Tailscale` for a generated code, or use `Save existing remote profile` under `Tailscale > Advanced > Pairing tools` with:
+Use `Paste a connection code` under `Settings > Remote Access > Tailscale` for a generated code, or use `Save existing connection` under `Tailscale > Advanced > Pairing tools` with:
 
-- label
+- connection name
 - base URL
 - bearer token
 
-Click `Save Remote Profile`, then pick the saved computer from `Settings > Remote Access > Computers` or the sidebar's machine menu.
+Click `Save connection`, then pick the saved computer from `Settings > Remote Access > Computers` or the sidebar's machine menu.
 
 ## Validation
 
@@ -460,7 +460,7 @@ Check:
 
 - the daemon uses the same `PANE_DIR` that setup wrote
 - the tunnel/proxy forwards to the same loopback port as the host config
-- the client profile base URL matches the client-side tunnel endpoint
+- the saved connection's base URL matches the client-side tunnel endpoint
 - the `pane-remote://...` code was not truncated
 
 ### A remote action could not be confirmed

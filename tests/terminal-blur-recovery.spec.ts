@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import {
   loseWebglContext,
   readSnapshot,
@@ -9,7 +9,6 @@ import {
   xtermEvaluate,
 } from './terminalXterm';
 
-test.describe.configure({ mode: 'serial' });
 const now = new Date(0).toISOString();
 const project = {
   id: 610,
@@ -165,12 +164,13 @@ async function bootFixture(
     },
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await page.getByRole('button', { name: /^Expand project Terminal blur fixture$/ }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
   const panel = page.getByRole('tabpanel', { name: primaryPanel.title });
   await expect(panel.locator('.xterm-screen')).toBeVisible({ timeout: 15_000 });
-  await expect(panel.getByTestId('terminal-activation-mask')).toHaveCount(0);
+  // The mask lifts when the boot's full refresh settles, so it shares the boot's bound.
+  await expect(panel.getByTestId('terminal-activation-mask')).toHaveCount(0, { timeout: 15_000 });
   await expect.poll(() => lifecycleLogs(page).then((logs) => (
     logs.filter((line) => line.includes(`Activation depth for panel ${primaryPanel.id}: full`)).length
   ))).toBe(1);
@@ -398,6 +398,10 @@ async function waitForActivation(page: Page, panelId: string, depth: 'full' | 'h
 // Opens a terminal per browser WebGL context, visiting each tab once in strip
 // order so every one is eligible to keep its renderer while hidden.
 async function bootWithEveryTabVisited(page: Page): Promise<BootFixtureResult> {
+  // Sixteen full WebGL refreshes on software GL take 28-30 s on a 4-vCPU CI
+  // runner (main run 44457570565: 28.4 s, 29.7 s and a 30.2 s timeout), so these
+  // tests get twice the suite's 30 s.
+  test.setTimeout(60_000);
   const result = await bootFixture(page, 'performance', false, false, 'darwin', extraPanels);
   if (!result.webglLoaded) return result;
   for (const next of visitOrder.slice(1)) {

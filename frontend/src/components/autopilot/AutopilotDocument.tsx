@@ -3,6 +3,7 @@ import { ExternalLink } from 'lucide-react';
 import type { AutopilotDocument as AutopilotDocumentContent } from '../../../../shared/types/autopilot';
 import { SHARED_BROWSER_PARTITION } from '../../../../shared/constants/browserPartitions';
 import { guestColorSchemeScript } from './guestColorScheme';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 
 /**
  * A page shown in a stack tab keeps Pane's scrollbars (D-70): the theme's own scrollbar tokens,
@@ -72,6 +73,9 @@ export function AutopilotWebPage({ src, title }: { src: string; title: string })
   );
 }
 
+/** Line widths (percent) of the text a document opens to; 0 is a blank line. */
+const DOC_LINES = [38, 0, 92, 86, 71, 0, 88, 94, 63, 0, 45, 90, 82, 57, 0, 91, 76];
+
 /** A document tab: an HTML file renders as a page; any other file shows as text. */
 export function AutopilotDocument({ path, label }: { path: string; label: string }) {
   const [content, setContent] = useState<AutopilotDocumentContent | null>(null);
@@ -84,21 +88,32 @@ export function AutopilotDocument({ path, label }: { path: string; label: string
     return () => { live = false; };
   }, [path]);
 
-  if (!content) return <p className="m-auto text-[13px] text-text-tertiary" role="status">Opening {label}…</p>;
-  if (content.kind === 'html') return <AutopilotWebPage src={content.url} title={label} />;
-  if (content.kind === 'text') {
+  if (content?.kind === 'missing') {
     return (
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="autopilot-text-doc">
-        {content.text}
-      </pre>
+      <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" role="status" data-testid="autopilot-doc-missing">
+        <p>{content.message}</p>
+        <button type="button" onClick={() => void window.electronAPI.openExternal(`file://${content.path}`)} className="mt-2 inline-flex items-center gap-1 text-text-tertiary hover:text-text-primary">
+          Open {label} outside Pane <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </div>
     );
   }
   return (
-    <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" role="status" data-testid="autopilot-doc-missing">
-      <p>{content.message}</p>
-      <button type="button" onClick={() => void window.electronAPI.openExternal(`file://${content.path}`)} className="mt-2 inline-flex items-center gap-1 text-text-tertiary hover:text-text-primary">
-        Open {label} outside Pane <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-      </button>
-    </div>
+    <SkeletonSwap loading={!content} skeleton={
+      <>
+        <LoadingStatus label={`Opening ${label}`} />
+        <Skeleton className="min-h-0 flex-1 px-5 py-4">
+          {DOC_LINES.map((width, index) => (
+            <div key={index} className="flex h-[20.3px] items-center">{width > 0 && <Bone className="h-2.5" style={{ width: `${width}%` }} />}</div>
+          ))}
+        </Skeleton>
+      </>
+    }>
+      {content?.kind === 'html' ? <AutopilotWebPage src={content.url} title={label} /> : content?.kind === 'text' && (
+        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-5 py-4 font-mono text-[12.5px] leading-relaxed text-text-primary" data-testid="autopilot-text-doc">
+          {content.text}
+        </pre>
+      )}
+    </SkeletonSwap>
   );
 }

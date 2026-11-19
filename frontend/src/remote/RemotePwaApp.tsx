@@ -51,6 +51,7 @@ import { PortalContainerProvider } from '../contexts/PortalContainerContext';
 import { DevicePanel } from '../components/panels/device/DevicePanel';
 import { DeviceClientContext } from '../components/panels/device/deviceClient';
 import { remoteDeviceClient } from './components/remoteDeviceClient';
+import { LoadingStatus } from '../components/ui/Skeleton';
 
 const EMPTY_AFFORDANCES: RemotePwaAffordances = {
   terminalShortcuts: [],
@@ -552,7 +553,7 @@ export function RemotePwaApp() {
         }
       }
       return activeRuntimeRef.current === runtime ? runtime : null;
-    } catch (error) {
+    } catch {
       if (activeRuntimeRef.current !== runtime) return null;
       const state = runtime.getStatus();
       updateConnection({ connectionStatus: state.status, lastError: state.lastError });
@@ -1054,7 +1055,9 @@ export function RemotePwaApp() {
   const connectionBar = (
     <RelayConnectionBar profile={activeProfile ?? reconnectingProfile ?? savedProfiles[0]} status={connectionStatus} lastError={lastError} />
   );
-  if (profilesLoading) return <main className="flex min-h-dvh items-center justify-center bg-bg-primary text-text-secondary">Loading saved connections…</main>;
+  // What follows is unknown until the saved connections are read (a reconnect, a pairing join, or
+  // the connection screen), so the screen stays blank; reading local storage is near-instant.
+  if (profilesLoading) return <main className="min-h-dvh bg-bg-primary"><LoadingStatus label="Loading saved connections" /></main>;
   if (pendingJoin) {
     return (
       <RemotePairJoinScreen

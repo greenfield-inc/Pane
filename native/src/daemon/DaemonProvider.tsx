@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type Query } from '@tanstack/react-query';
 import { createContext, use, useEffect, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
@@ -6,10 +6,12 @@ import type { RemoteDaemonClient, RemoteDaemonConnectionState } from '@shared/re
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { requestSharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
-import { requestPushRegistration } from '@/features/notifications/usePushSetup';
+import { AFTER_RETURN_MS, requestPushRegistration } from '@/features/notifications/usePushSetup';
+import { connectionMark, markNextFrame, startJourney } from '@/features/perf/perfMarks';
 
 import { createDaemonClient, streamingFetch } from './createClient';
 import { startDirectRoute } from './direct/directRoute';
+import { readOnScreen } from './screenFocus';
 
 interface DaemonContextValue {
   client: RemoteDaemonClient;
@@ -19,6 +21,9 @@ interface DaemonContextValue {
 
 const DaemonContext = createContext<DaemonContextValue | null>(null);
 
+/** The first provider is the launch; every later one is a machine switch. */
+let providersMounted = 0;
+
 
 /**
  * Owns the connection to the active host. Render it with `key={profile.id}` so
@@ -26,7 +31,14 @@ const DaemonContext = createContext<DaemonContextValue | null>(null);
  */
 export function DaemonProvider({ profile, children }: { profile: RemotePaneConnectionProfile; children: ReactNode }) {
   const queryClient = useQueryClient();
-  const [binding, setBinding] = useState(() => ({ profile, client: createDaemonClient(profile) }));
+  const [binding, setBinding] = useState(() => {
+    providersMounted += 1;
+    if (providersMounted > 1) {
+      startJourney('switch');
+      markNextFrame(['switch']);
+    }
+    return { profile, client: createDaemonClient(profile) };
+  });
   // Updating a saved host's password must replace its authenticated connection too.
   if (binding.profile.baseUrl !== profile.baseUrl || binding.profile.token !== profile.token) {
     setBinding({ profile, client: createDaemonClient(profile) });
@@ -35,13 +47,33 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
   const [connection, setConnection] = useState<RemoteDaemonConnectionState>(() => client.getState());
 
   useEffect(() => {
-    const unsubscribeRestore = client.onRestore(async signal => {
-      await queryClient.refetchQueries({ queryKey: [profile.id], type: 'active' }, { throwOnError: true });
-      if (signal.aborted) return;
-      // A switch changed while this computer was away reaches it now.
-      requestPushRegistration();
+    // When the connection last stopped being live: lists answered before then may have missed events.
+    let since = Date.now();
+    const unsubscribeRestore = client.onRestore(async () => {
+      // The stream replays nothing, so each open list reads again: once. A read already on its way
+      // since the return (the focus refetch) is joined, a list answered since then is skipped, and
+      // one list failing (a channel an older host lacks) fails only itself. Nothing here holds up
+      // the connection: screens show what they have and update as the answers land.
+      // Lists only a screen out of view reads (Home under a Pane) wait until it is in view again,
+      // so the screen in view gets the connection first.
+      const missed = (query: Query) => query.state.dataUpdatedAt < since;
+      void queryClient.invalidateQueries({ queryKey: [profile.id], refetchType: 'none', predicate: query => missed(query) && !readOnScreen(query) });
+      void queryClient.refetchQueries(
+        { queryKey: [profile.id], type: 'active', predicate: query => missed(query) && readOnScreen(query) },
+        { cancelRefetch: false },
+      ).then(() => connectionMark('restored=workspace-lists', { repeat: true }));
+      // A switch changed while this computer was away reaches it, after the screen's own reads.
+      requestPushRegistration(AFTER_RETURN_MS);
     }, 'workspace lists');
-    const unsubscribeStatus = client.onStatus(setConnection);
+    let lastStatus = client.getState().status;
+    const unsubscribeStatus = client.onStatus(state => {
+      connectionMark(`status=${state.status}`, { changes: true });
+      // A trip to the background suspends the connection, and a drop with the app open (the host
+      // slept or restarted, the network changed) reconnects it: either way the stream missed events.
+      if (lastStatus === 'connected' && state.status !== 'connected') since = Date.now();
+      lastStatus = state.status;
+      setConnection(state);
+    });
     const connect = () => client.connect().catch(() => undefined);
     void connect();
     // Only a real trip to the background suspends. Control Center, Notification

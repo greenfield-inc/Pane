@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyItem, type NotifySnapshot } from '../shared/types/notify';
 
 // Cmd+F (Ctrl+F off macOS) opens Pane's find bar in the focused tab: J1
@@ -41,7 +41,7 @@ const scrollback = Array.from({ length: 40 }, (_, index) => (index % 10 < 3 ? `l
 const markdown = '# Install\n\nRun the install step first.\n\n```sh\npnpm install\n```\n';
 
 async function openPane(page: Page) {
-  await page.goto('/');
+  await gotoApp(page);
   await page.getByRole('button', { name: `Expand project ${project.name}`, exact: true }).click();
   await page.getByRole('button', { name: session.name, exact: true }).click();
 }
@@ -342,4 +342,35 @@ test('chat: Cmd+F from the composer searches the whole conversation', async ({ p
   await page.keyboard.press('Escape');
   await expect(findBar(page)).toHaveCount(0);
   await expect(composer).toHaveText('draft');
+});
+
+test('chat: the count keeps up while the conversation streams, not only once it pauses', async ({ page }) => {
+  const chat = panel('find-chat', 'chat', 'Claude', 0, true, { agent: 'claude', launch: { kind: 'new' }, cwd: project.path, status: 'idle' });
+  await installElectronApiMock(page, {
+    initialProjects: [project], initialSessions: [session], initialPanels: [chat], activeProjectId: project.id,
+    chatMessages: { [chat.id]: [{ id: 'm1', role: 'assistant', text: 'Streaming the needle report.' }] },
+  });
+  await openPane(page);
+  const message = page.getByText('Streaming the needle report.');
+  await message.click();
+  await page.keyboard.press('ControlOrMeta+f');
+  await findBar(page).getByRole('textbox', { name: 'Find' }).fill('needle');
+  await expect(findBar(page)).toContainText('1 of 1');
+  // A chunk every 60 ms for 2 seconds: the stream never pauses long enough for a quiet-period search.
+  const { counts, chunks } = await message.evaluate(async (host) => {
+    const seen = new Set<string>();
+    const bar = () => document.querySelector('search[aria-label="Find in tab"]')?.textContent?.match(/of (\d+)/)?.[1] ?? '';
+    const started = performance.now();
+    while (performance.now() - started < 2000) {
+      const chunk = document.createElement('span');
+      chunk.textContent = ' another needle';
+      host.appendChild(chunk);
+      seen.add(bar());
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    return { counts: [...seen], chunks: host.querySelectorAll('span').length };
+  });
+  expect(counts.length).toBeGreaterThan(1);
+  // Once it stops, the count covers every chunk.
+  await expect(findBar(page)).toContainText(`of ${chunks + 1}`);
 });

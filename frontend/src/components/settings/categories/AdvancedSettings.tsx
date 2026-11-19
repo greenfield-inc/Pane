@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../../ui/Button';
 import { Textarea } from '../../ui/Input';
+import { Skeleton, SkeletonSwap, TextBone, LoadingStatus } from '../../ui/Skeleton';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
-import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled } from '../../../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled, isProfilesEnabled } from '../../../stores/configStore';
 import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
 import type { IPCResponse } from '../../../utils/api';
 import { useAutopilotStore } from '../../../stores/autopilotStore';
@@ -85,30 +86,58 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
           description="Time from your action to the result on screen, over the last 200 runs of each. Never leaves this device."
           align="start"
         >
-          {journeyTimings?.length ? (
-            <table className="text-xs text-text-secondary tabular-nums">
-              <thead className="text-text-tertiary">
-                <tr>
-                  <th className="pr-4 text-left font-medium">Journey</th>
-                  <th className="px-2 text-right font-medium">p50</th>
-                  <th className="px-2 text-right font-medium">p75</th>
-                  <th className="pl-2 text-right font-medium">Runs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {journeyTimings.map((timing) => (
-                  <tr key={timing.journey}>
-                    <td className="pr-4">{JOURNEY_LABELS[timing.journey]}</td>
-                    <td className="px-2 text-right">{formatDuration(timing.p50Ms)}</td>
-                    <td className="px-2 text-right">{formatDuration(timing.p75Ms)}</td>
-                    <td className="pl-2 text-right">{timing.count}</td>
+          <SkeletonSwap loading={!journeyTimings} skeleton={
+            <>
+              <Skeleton>
+                <table className="text-xs tabular-nums">
+                  <thead>
+                    <tr>
+                      <th className="pr-4 text-left font-medium"><TextBone text="Journey" /></th>
+                      <th className="px-2 text-right font-medium"><TextBone text="p50" /></th>
+                      <th className="px-2 text-right font-medium"><TextBone text="p75" /></th>
+                      <th className="pl-2 text-right font-medium"><TextBone text="Runs" /></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.values(JOURNEY_LABELS).map((label) => (
+                      <tr key={label}>
+                        <td className="pr-4"><TextBone text={label} /></td>
+                        <td className="px-2 text-right"><TextBone text="000 ms" /></td>
+                        <td className="px-2 text-right"><TextBone text="000 ms" /></td>
+                        <td className="pl-2 text-right"><TextBone text="000" /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Skeleton>
+              <LoadingStatus label="Loading journey timings" />
+            </>
+          }>
+            {journeyTimings?.length ? (
+              <table className="text-xs text-text-secondary tabular-nums">
+                <thead className="text-text-tertiary">
+                  <tr>
+                    <th className="pr-4 text-left font-medium">Journey</th>
+                    <th className="px-2 text-right font-medium">p50</th>
+                    <th className="px-2 text-right font-medium">p75</th>
+                    <th className="pl-2 text-right font-medium">Runs</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <span className="text-xs text-text-tertiary">{journeyTimings ? 'No timings yet' : 'Loading'}</span>
-          )}
+                </thead>
+                <tbody>
+                  {journeyTimings.map((timing) => (
+                    <tr key={timing.journey}>
+                      <td className="pr-4">{JOURNEY_LABELS[timing.journey]}</td>
+                      <td className="px-2 text-right">{formatDuration(timing.p50Ms)}</td>
+                      <td className="px-2 text-right">{formatDuration(timing.p75Ms)}</td>
+                      <td className="pl-2 text-right">{timing.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <span className="text-xs text-text-tertiary">No timings yet</span>
+            )}
+          </SkeletonSwap>
         </SettingRow>
       </SettingsSection>
 
@@ -189,6 +218,18 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
             label="Notes"
             value={isNotesEnabled(config)}
             onSave={(value) => persistence.saveConfig('notes', { notesEnabled: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="profiles"
+          label="Profiles"
+          description="Add the Profiles page, the + menu's Profile… and runpane profiles: teams of agents that run a fixed workflow, one step per tab. Turning it off hides them; runs already started keep going."
+          saveState={persistence.saveStates.profiles}
+        >
+          <ImmediateToggle
+            label="Profiles"
+            value={isProfilesEnabled(config)}
+            onSave={(value) => persistence.saveConfig('profiles', { profilesEnabled: value })}
           />
         </SettingRow>
         <SettingRow

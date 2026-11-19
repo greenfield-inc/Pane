@@ -12,6 +12,7 @@ import type {
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
+import type { ProfileLibraryView } from '../shared/types/profiles';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
@@ -19,7 +20,7 @@ import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
-import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
+import type { PaneSecretsOverview, SecretLeaseStartRequest } from '../shared/types/paneSecrets';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { RelayPairingInfo, RelayStatus } from '../shared/types/relay';
 import type { ComputerRoute, ComputerRoutesReport, RemoteComputer } from '../shared/types/remoteComputers';
@@ -57,6 +58,9 @@ export type ElectronApiMockOptions = {
   /** The host runs an older Pane with no Pane order commands: they fail as the remote client says. */
   paneOrderUnsupported?: boolean;
   initialLoops?: Loop[];
+  /** profiles:list answer (the Profiles page); profiles:get reads each file's text from profileYaml. */
+  profileLibrary?: ProfileLibraryView;
+  profileYaml?: Record<string, string>;
   /** remote-daemon:list-tailnet-machines answer. */
   tailnetMachines?: TailnetMachineList;
   /** Remote connections end in `error` with this message instead of connecting. */
@@ -81,7 +85,8 @@ export type ElectronApiMockOptions = {
   diffManifests?: Record<string, DiffManifest>;
   fileDiffs?: Record<string, FileDiffResult>;
   diffManifestDelayMs?: Record<string, number>;
-  fileDiffDelayMs?: Record<string, number>;
+  /** Hold these file diff reads (`<sessionId>:<path>` or `<path>`, as fileDiffs keys them) until releaseFileDiffs(). */
+  holdFileDiffs?: string[];
   diffManifestErrors?: Record<string, string>;
   fileDiffErrors?: Record<string, string>;
   testPerf?: boolean;
@@ -105,6 +110,8 @@ export type ElectronApiMockOptions = {
   detectedBranch?: string | null;
   detectedBranchByPath?: Record<string, string | null>;
   mainRepoSessionDelayByProjectId?: Record<number, number>;
+  /** Hold these projects' main-repository Session lookups until releaseMainRepoSessions(). */
+  holdMainRepoSessionProjectIds?: number[];
   mainRepoSessionErrorByProjectId?: Record<number, string>;
   activeProjectId?: number | null;
   paneChatAgentChangeDelayMs?: number;
@@ -135,8 +142,8 @@ export type ElectronApiMockOptions = {
   chatMessages?: Record<string, Array<{ id: string; role: 'user' | 'assistant'; text: string }>>;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
   notifySnapshot?: NotifySnapshot;
-  /** window.electronAPI.paneSecrets: the saved secrets and this host's store. Absent: none saved, in the keychain. */
-  paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage };
+  /** window.electronAPI.paneSecrets: what Settings → Secrets lists. Absent parts: nothing saved, in the keychain, no leases, this computer alone, no vault. */
+  paneSecrets?: Partial<PaneSecretsOverview>;
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
   /** machines:latency answers by machine, in ms, over the route its machine state names; `pending` never answers. Absent: null (no answer). */
@@ -158,6 +165,23 @@ export type ElectronApiMockOptions = {
   /** Saved computers with their routes, listed before the ones saved during the test. */
   computers?: RemoteComputer[];
 };
+
+/**
+ * Opens the desktop app and waits until it reports ready. `page.goto` returns before the app's code
+ * has loaded; on a cold Vite server the app can start seconds later. The app reports ready after its
+ * first loaded frame, when its event listeners are subscribed and its first data is on screen, so a
+ * test's own waits count from a running app. The mock drops events emitted before that.
+ */
+export async function gotoApp(page: Page, path = '/'): Promise<void> {
+  await page.goto(path, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.waitForFunction(() => {
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const mock = (window as typeof window & {
+      __paneTestElectronMock?: { isRendererReady: () => boolean };
+    }).__paneTestElectronMock;
+    return mock?.isRendererReady() ?? false;
+  }, undefined, { timeout: 30_000 });
+}
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
   type SerializedOptions = ElectronApiMockOptions & {
@@ -355,6 +379,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockSessions = clone(mockOptions.initialSessions ?? []);
     const mockArchivedSessions: JsonObject[] = [];
     let mockLoops = clone(mockOptions.initialLoops ?? []);
+    const mockProfiles: ProfileLibraryView = clone(mockOptions.profileLibrary ?? { profiles: [] });
     /** A plausible loops:preview answer for the form's preset shapes. */
     const previewLoopCron = (cron: string): LoopSchedulePreview => {
       const fields = cron.trim().split(/\s+/);
@@ -383,6 +408,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     let mockPanels = clone(mockOptions.initialPanels ?? []);
     let nextPanelId = mockPanels.length + 1;
     const heldSshPanelReads: Array<() => void> = [];
+    const heldMainRepoSessions: Array<() => void> = [];
+    const heldFileDiffs: Array<() => void> = [];
     const openSshHost = (alias: string, newTab: boolean) => {
       const sessionId = '__ssh_hosts_session__';
       const existing = newTab ? undefined : mockPanels.find(panel => sshHostOf(panel) === alias);
@@ -485,6 +512,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       : mockOptions.activeProjectId;
     let lastProjectUpdate: { projectId: string; updates: JsonObject } | null = null;
     let configGetCount = 0;
+    // The app reports ready after its first loaded frame, when its event listeners are subscribed.
+    let rendererReady = false;
     let nextConfigUpdateError: string | null = null;
     let nextPreferenceSetError: string | null = null;
     let nextBackgroundColorWriteError: string | null = null;
@@ -609,6 +638,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onPaneFocusRequested') {
           return (callback: MockEventCallback) => subscribe('pane:focus-requested', callback);
         }
+        if (prop === 'onPaneOpenLink') {
+          return (callback: MockEventCallback) => subscribe('pane:open-link', callback);
+        }
         if (prop === 'onRemoteDaemonResyncRequested') {
           return (callback: () => void) => subscribe('remote-daemon:resync-required', callback);
         }
@@ -639,6 +671,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onSessionCreated') {
           return (callback: MockEventCallback) => subscribe('session:created', callback);
         }
+        if (prop === 'onProfilesChanged') {
+          return (callback: MockEventCallback) => subscribe('profiles:changed', callback);
+        }
         if (prop === 'onLoopsChanged') {
           return (callback: MockEventCallback) => subscribe('loops:changed', callback);
         }
@@ -665,9 +700,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
         if (prop === 'onPanelAgentStatus') {
           return (callback: MockEventCallback) => subscribe('panel:agent-status', callback);
-        }
-        if (prop === 'onOrchestrationSessionActivity') {
-          return (callback: MockEventCallback) => subscribe('orchestration-sessions:activity', callback);
         }
         if (prop === 'onArchiveProgress') {
           return (callback: MockEventCallback) => subscribe('archive:progress', callback);
@@ -950,12 +982,63 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const machineLatencyCalls: string[] = [];
     const machineReads: Array<{ machineId: string; channel: string }> = [];
     const machineListeners = new Set<(event: MachineConnectionsEvent) => void>();
+    /** The usage report this computer answers, on `usage.getReport` and as a `machines:read`. */
+    const usageReport = () => clone(mockOptions.initialUsageReport ?? {
+      totals: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalTokens: 0,
+        messageCount: 0,
+        estimatedCostUsd: 0,
+        costIncomplete: false,
+        cacheSavingsUsd: 0,
+      },
+      series: [],
+      byModel: [],
+      byProject: [],
+      byPane: {
+        panes: [],
+        unattributed: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          totalTokens: 0,
+          messageCount: 0,
+          estimatedCostUsd: 0,
+          costIncomplete: false,
+          cacheSavingsUsd: 0,
+          uncachedCostUsd: 0,
+          uncachedInputTokens: 0,
+          cacheHitRate: 0,
+          byModel: [],
+        },
+      },
+      rateLimits: [],
+      index: {
+        lastScanStartedMs: null,
+        lastScanFinishedMs: null,
+        filesTracked: 0,
+        eventsIndexed: 0,
+        missingRoots: [],
+        scanning: false,
+        filesScanned: 0,
+        filesTotal: 0,
+        lastError: null,
+      },
+      pricingAsOf: '2026-08-10',
+    });
     const machinesApi = {
       list: () => Promise.resolve(clone(machineConnections.machines)),
-      read: (machineId: string, channel: string) => {
+      read: async (machineId: string, channel: string, args: unknown[] = []) => {
         machineReads.push({ machineId, channel });
         const answers = machineConnections.reads[machineId] ?? {};
-        return Promise.resolve({ machineId, data: clone(channel in answers ? answers[channel] : { success: true, data: [] }) });
+        if (channel in answers) return { machineId, data: clone(answers[channel]) };
+        // This computer answers with the same command `usage.getReport` runs, so a test that wraps it reaches both.
+        if (machineId === 'local' && channel === 'usage:get-report') return { machineId, data: await window.electronAPI.usage.getReport(...args) };
+        return { machineId, data: { success: true, data: [] } };
       },
       run: (machineId: string, command: MachineCommand) => {
         machineRuns.push({ machineId, command: clone(command) });
@@ -975,24 +1058,105 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return () => { machineListeners.delete(callback); };
       },
     };
-    const paneSecrets = clone(mockOptions.paneSecrets ?? { secrets: [], storage: { kind: 'keychain' as const, encrypted: true } });
-    const paneSecretCalls: Array<{ action: 'set' | 'delete'; project: string; name: string }> = [];
+    const paneSecrets: PaneSecretsOverview = clone({
+      secrets: [],
+      references: [],
+      storage: { kind: 'keychain' as const, encrypted: true },
+      leases: [],
+      machines: [{ id: 'local', name: 'This computer', online: true, refusal: null, memoryOnly: false }],
+      leaseLengths: {},
+      moveVault: null,
+      ...mockOptions.paneSecrets,
+    });
+    /** What Settings asked of paneSecrets; values are never recorded. */
+    type PaneSecretCall =
+      | { action: 'set' | 'delete' | 'moveToOnePassword'; project: string; name: string }
+      | { action: 'setReference'; project: string; name: string; reference: string }
+      | { action: 'startLease'; request: SecretLeaseStartRequest }
+      | { action: 'endLease'; leaseId: string }
+      | { action: 'endAllLeases' | 'listVaults' }
+      | { action: 'setLeaseLength'; project: string; lengthMs: number }
+      | { action: 'setMoveVault'; vault: string };
+    const paneSecretCalls: PaneSecretCall[] = [];
+    const sameSecret = (project: string, name: string) => (secret: { project: string; name: string }) => secret.project === project && secret.name === name;
+    const addReference = (project: string, name: string, reference: string) => {
+      paneSecrets.secrets = paneSecrets.secrets.filter((secret) => !sameSecret(project, name)(secret));
+      paneSecrets.references = [
+        ...paneSecrets.references.filter((secret) => !sameSecret(project, name)(secret)),
+        { project, name, reference, updatedAt: new Date().toISOString(), machine: 'this-mac' },
+      ];
+    };
+    let leaseCount = 0;
     const paneSecretsApi = {
       list: () => Promise.resolve({ success: true, data: clone(paneSecrets) }),
       set: (project: string, name: string, _value: string) => {
         paneSecretCalls.push({ action: 'set', project, name });
-        const replaced = paneSecrets.secrets.some((secret) => secret.project === project && secret.name === name);
+        const replaced = paneSecrets.secrets.some(sameSecret(project, name));
         paneSecrets.secrets = [
-          ...paneSecrets.secrets.filter((secret) => !(secret.project === project && secret.name === name)),
+          ...paneSecrets.secrets.filter((secret) => !sameSecret(project, name)(secret)),
           { project, name, updatedAt: new Date().toISOString(), machine: 'this-mac' },
         ];
         return Promise.resolve({ success: true, data: replaced });
       },
       delete: (project: string, name: string) => {
         paneSecretCalls.push({ action: 'delete', project, name });
-        paneSecrets.secrets = paneSecrets.secrets.filter((secret) => !(secret.project === project && secret.name === name));
+        paneSecrets.secrets = paneSecrets.secrets.filter((secret) => !sameSecret(project, name)(secret));
+        paneSecrets.references = paneSecrets.references.filter((secret) => !sameSecret(project, name)(secret));
         return Promise.resolve({ success: true, data: true });
       },
+      setReference: (project: string, name: string, reference: string) => {
+        paneSecretCalls.push({ action: 'setReference', project, name, reference });
+        const replaced = paneSecrets.secrets.some(sameSecret(project, name));
+        addReference(project, name, reference);
+        return Promise.resolve({ success: true, data: replaced });
+      },
+      startLease: (request: SecretLeaseStartRequest) => {
+        paneSecretCalls.push({ action: 'startLease', request: clone(request) });
+        leaseCount += 1;
+        const id = `lease-${leaseCount}`;
+        const grantedAt = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + (paneSecrets.leaseLengths[request.project] ?? 24 * 60 * 60 * 1000)).toISOString();
+        const holders = paneSecrets.machines.filter((machine) => request.machines.includes(machine.id));
+        for (const machine of holders) {
+          paneSecrets.leases.push({
+            id, project: request.project, names: [...request.names], grantedAt, expiresAt, requestedBy: 'you',
+            grantedOn: 'this-mac', memoryOnly: machine.memoryOnly, machineId: machine.id, machine: machine.name,
+          });
+        }
+        return Promise.resolve({ success: true, data: { leaseId: id, expiresAt, machines: holders.map((machine) => machine.name), refused: [] } });
+      },
+      endLease: (leaseId: string) => {
+        paneSecretCalls.push({ action: 'endLease', leaseId });
+        paneSecrets.leases = paneSecrets.leases.filter((lease) => lease.id !== leaseId);
+        return Promise.resolve({ success: true, data: true });
+      },
+      endAllLeases: () => {
+        paneSecretCalls.push({ action: 'endAllLeases' });
+        const ended = new Set(paneSecrets.leases.map((lease) => lease.id)).size;
+        paneSecrets.leases = [];
+        return Promise.resolve({ success: true, data: ended });
+      },
+      setLeaseLength: (project: string, lengthMs: number) => {
+        paneSecretCalls.push({ action: 'setLeaseLength', project, lengthMs });
+        paneSecrets.leaseLengths[project] = lengthMs;
+        return Promise.resolve({ success: true, data: true });
+      },
+      setMoveVault: (vault: string) => {
+        paneSecretCalls.push({ action: 'setMoveVault', vault });
+        paneSecrets.moveVault = vault;
+        return Promise.resolve({ success: true, data: true });
+      },
+      listVaults: () => {
+        paneSecretCalls.push({ action: 'listVaults' });
+        return Promise.resolve({ success: true, data: ['Private', 'Dev'] });
+      },
+      moveToOnePassword: (project: string, name: string) => {
+        paneSecretCalls.push({ action: 'moveToOnePassword', project, name });
+        const reference = `op://${paneSecrets.moveVault ?? 'Private'}/${project}-${name}/credential`;
+        addReference(project, name, reference);
+        return Promise.resolve({ success: true, data: { reference } });
+      },
+      onChanged: (callback: () => void) => subscribe('pane-secrets:changed', callback),
     };
     const autopilotSnapshot = mockOptions.autopilotSnapshot;
     // Settings › Autopilot (D-196): the file's text, saved as main would (trimmed; applied at once while it runs).
@@ -1077,7 +1241,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         titleBarOverlayWrites.push(clone(colors));
         return success();
       },
-      notifyRendererReady: () => {},
+      notifyRendererReady: () => {
+        rendererReady = true;
+      },
       setBackgroundColor: (payload: { theme: string; color: string }) => {
         backgroundColorWrites.push(clone(payload));
         if (nextBackgroundColorWriteError) {
@@ -1187,53 +1353,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
       }),
       usage: namespace({
-        getReport: (...args: unknown[]) => { trackCall('usage:get-report', args); return success(clone(mockOptions.initialUsageReport ?? {
-          totals: {
-            inputTokens: 0,
-            outputTokens: 0,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0,
-            totalTokens: 0,
-            messageCount: 0,
-            estimatedCostUsd: 0,
-            costIncomplete: false,
-            cacheSavingsUsd: 0,
-          },
-          series: [],
-          byModel: [],
-          byProject: [],
-          byPane: {
-            panes: [],
-            unattributed: {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheCreationTokens: 0,
-              totalTokens: 0,
-              messageCount: 0,
-              estimatedCostUsd: 0,
-              costIncomplete: false,
-              cacheSavingsUsd: 0,
-              uncachedCostUsd: 0,
-              uncachedInputTokens: 0,
-              cacheHitRate: 0,
-              byModel: [],
-            },
-          },
-          rateLimits: [],
-          index: {
-            lastScanStartedMs: null,
-            lastScanFinishedMs: null,
-            filesTracked: 0,
-            eventsIndexed: 0,
-            missingRoots: [],
-            scanning: false,
-            filesScanned: 0,
-            filesTotal: 0,
-            lastError: null,
-          },
-          pricingAsOf: '2026-08-10',
-        })); },
+        getReport: (...args: unknown[]) => { trackCall('usage:get-report', args); return success(usageReport()); },
         getStatus: () => { trackCall('usage:get-status', []); return success(clone(mockOptions.initialUsageReport?.index ?? {
           lastScanStartedMs: null,
           lastScanFinishedMs: null,
@@ -1507,6 +1627,25 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       resourceMonitor: namespace({
         getSnapshot: () => success(null),
       }),
+      profiles: namespace({
+        list: () => success(clone(mockProfiles)),
+        get: (name: string) => {
+          const profile = mockProfiles.profiles.find((candidate) => candidate.name === name);
+          return profile ? success({ profile: clone(profile), yaml: mockOptions.profileYaml?.[name] ?? '' }) : Promise.resolve({ success: false, error: `No profile is named "${name}".` });
+        },
+        setEnabled: (name: string, enabled: boolean) => {
+          trackCall('profiles:set-enabled', [name, enabled]);
+          for (const profile of mockProfiles.profiles) if (profile.name === name) profile.enabled = enabled;
+          return success(clone(mockProfiles));
+        },
+        launch: (input: JsonObject) => {
+          trackCall('profiles:launch', [input]);
+          return Promise.resolve({ success: false, error: 'Launching is not available in this preview.' });
+        },
+        runs: () => success([]),
+        setOutcome: () => success(null),
+        stop: () => success(null),
+      }),
       loops: namespace({
         list: () => success(clone(mockLoops)),
         save: (input: LoopInput) => {
@@ -1589,6 +1728,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getOrCreateMainRepoSession: async (projectId: number) => {
           const delayMs = mockOptions.mainRepoSessionDelayByProjectId?.[projectId] ?? 0;
           if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+          if (mockOptions.holdMainRepoSessionProjectIds?.includes(projectId)) {
+            await new Promise<void>(resolve => { heldMainRepoSessions.push(resolve); });
+          }
           const error = mockOptions.mainRepoSessionErrorByProjectId?.[projectId];
           if (error) throw new Error(error);
           return success(clone(
@@ -1663,8 +1805,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getFileDiff: async (sessionId: string, scope: DiffScope, request: { path: string }) => {
           const key = `${scopeMockKey(scope)}:${request.path}`;
           fileDiffCalls.push({ sessionId, scope: clone(scope), path: request.path });
-          const delay = requestOption(mockOptions.fileDiffDelayMs, sessionId, key) ?? 0;
-          if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
+          if (mockOptions.holdFileDiffs?.some(held => held === key || held === `${sessionId}:${key}`)) {
+            await new Promise<void>(resolve => { heldFileDiffs.push(resolve); });
+          }
           const failure = requestOption(mockOptions.fileDiffErrors, sessionId, key);
           if (failure) return { success: false as const, error: failure };
           const explicit = requestOption(mockOptions.fileDiffs, sessionId, key);
@@ -1803,6 +1946,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             remoteDaemonConfig.client.profiles.push(profile);
           }
           syncRemoteDaemonConfig();
+          // As main does: saving a connection updates the config, which it announces.
+          emit('config:updated', clone(configState));
           return success(clone(remoteDaemonConfig.client.profiles));
         },
         deleteConnectionProfile: (profileId: string) => {
@@ -1822,6 +1967,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             });
           }
           syncRemoteDaemonConfig();
+          emit('config:updated', clone(configState));
           return success(clone(remoteDaemonConfig.client));
         },
         updateClientState: (updates: { activeProfileId?: string | null; mode?: 'local' | 'remote' }) => {
@@ -1837,7 +1983,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             const activeComputer = remoteDaemonConfig.client.computers.find(
               (computer) => computer.id === remoteDaemonConfig.client.activeProfileId
             );
-            const failure = activeComputer ? mockOptions.remoteConnectError ?? null : 'Missing remote profile';
+            const failure = activeComputer ? mockOptions.remoteConnectError ?? null : 'Missing saved connection';
             setRemoteConnectionState({
               mode: 'remote',
               status: failure ? 'error' : 'connected',
@@ -2060,6 +2206,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         emitWindowFocusChanged(focused: boolean) {
           emit('window:focus-changed', focused);
         },
+        /** A pane:// link main resolved to a Session or repo, as it sends it to the renderer. */
+        emitPaneOpenLink(target: JsonObject) {
+          emit('pane:open-link', clone(target));
+        },
         emitSessionCreationFailed(name: string, error: string) {
           emit('session:creation-failed', { name, error });
         },
@@ -2119,6 +2269,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getConfigReadCount() {
           return configGetCount;
         },
+        isRendererReady() {
+          return rendererReady;
+        },
         setSessions(sessions: JsonObject[]) {
           mockSessions = clone(sessions);
         },
@@ -2164,6 +2317,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         releaseSshPanelReads() {
           for (const release of heldSshPanelReads.splice(0)) release();
         },
+        releaseMainRepoSessions() {
+          for (const release of heldMainRepoSessions.splice(0)) release();
+        },
+        releaseFileDiffs() {
+          for (const release of heldFileDiffs.splice(0)) release();
+        },
         emitPanelCreated(panel: JsonObject) {
           if (!mockPanels.some(existing => existing.id === panel.id)) {
             mockPanels.push(clone(panel));
@@ -2202,10 +2361,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitPanelAgentStatus(panelId: string, sessionId: string, state: string, reason?: string) {
           emit('panel:agent-status', { panelId, sessionId, state, reason });
-        },
-        // Stands in for the host's Session activity, which counts a Session's working Panes.
-        emitOrchestrationSessionActivity(activity: { sessionId: string; state: 'working' | 'idle'; workingPanes: number }) {
-          emit('orchestration-sessions:activity', clone(activity));
         },
         emitPanelDeleted(panelId: string, sessionId: string) {
           emit('panel:deleted', { panelId, sessionId });

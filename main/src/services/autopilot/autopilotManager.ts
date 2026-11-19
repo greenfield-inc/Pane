@@ -24,6 +24,7 @@ import { pushEntry, resolveEntries, sameRef, showEntry, shownEntry, stepStack } 
 import { assertAutopilotEntitled, autopilotEntitlement } from './entitlement';
 import { autopilotInstructions, OWN_INSTRUCTIONS_LABEL } from './autopilotInstructions';
 import { DEFAULT_AGENT_ID } from '../../../../shared/agents';
+import { isOpenForSession } from '../../../../shared/approvalOpen';
 
 /** A Session as the walk sees it, in sidebar order. */
 /** What a push did: the snapshot after it, and the entry it made or refreshed. */
@@ -689,7 +690,7 @@ export class AutopilotManager extends EventEmitter {
   private walk(): AutopilotWalk {
     const counts = new Map<string, number>();
     for (const item of this.ports.notify.items()) {
-      const id = item.state === 'waiting' && (item.machineId ?? 'local') === 'local' ? item.source.session?.id : undefined;
+      const id = isOpenForSession(item) && (item.machineId ?? 'local') === 'local' ? item.source.session?.id : undefined;
       if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
     }
     const sessions = this.ports.sessions.list().filter(session => !session.archived).map(session => ({ id: session.id, name: session.name, waiting: counts.get(session.id) ?? 0 }));

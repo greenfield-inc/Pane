@@ -1,5 +1,7 @@
 import type { DeviceInput } from '../../shared/types/devices';
+import type { SecretLeaseStartRequest } from '../../shared/types/paneSecrets';
 import type { LoopInput } from '../../shared/types/loop';
+import type { ProfileLaunchInput } from '../../shared/types/profiles';
 import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
@@ -8,6 +10,7 @@ import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult }
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
+import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../shared/types/browser';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
   type WindowControlsOverlayColors,
@@ -287,6 +290,30 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  // A call runs on a browser tab: its hidden page paints while it does (P4).
+  ipcRenderer.on('browser-panel:busy', (_event: Electron.IpcRendererEvent, data: { panelId: string; busy: boolean }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:busy', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:busy to window:', e);
+    }
+  });
+  // The browser tabs agents hold: their pages stay alive while hidden (P4).
+  ipcRenderer.on('browser-panel:held', (_event: Electron.IpcRendererEvent, data: { tabs: Array<{ panelId: string; sessionId?: string }> }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:held', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:held to window:', e);
+    }
+  });
+  // An agent clicked in a browser tab's page: draw its cursor there.
+  ipcRenderer.on('browser-panel:agent-cursor', (_event: Electron.IpcRendererEvent, data: { panelId: string; x: number; y: number }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:agent-cursor', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:agent-cursor to window:', e);
+    }
+  });
   // A browser tab's page took keyboard focus (a click inside it never reaches this DOM).
   ipcRenderer.on('browser-panel:page-focused', (_event: Electron.IpcRendererEvent, data: { panelId: string }) => {
     try {
@@ -308,6 +335,22 @@ try {
       window.dispatchEvent(new CustomEvent('browser-panel:file-refused', { detail: data }));
     } catch (e) {
       console.error('Failed to dispatch browser-panel:file-refused to window:', e);
+    }
+  });
+  // A line under a browser tab's address bar: an app link to confirm, a sign-in sent out, a download.
+  ipcRenderer.on(BROWSER_TAB_NOTICE_CHANNEL, (_event: Electron.IpcRendererEvent, data: { panelId: string; notice: BrowserTabNotice }) => {
+    try {
+      window.dispatchEvent(new CustomEvent(BROWSER_TAB_NOTICE_CHANNEL, { detail: data }));
+    } catch (e) {
+      console.error(`Failed to dispatch ${BROWSER_TAB_NOTICE_CHANNEL} to window:`, e);
+    }
+  });
+  // A docs page's link that opens a new window.
+  ipcRenderer.on('docs:open-link', (_event: Electron.IpcRendererEvent, url: string) => {
+    try {
+      window.dispatchEvent(new CustomEvent('docs:open-link', { detail: url }));
+    } catch (e) {
+      console.error('Failed to dispatch docs:open-link to window:', e);
     }
   });
 } catch {
@@ -384,11 +427,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
     list: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list'),
     set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
     delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
+    setReference: (project: string, name: string, reference: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-reference', project, name, reference),
+    startLease: (request: SecretLeaseStartRequest): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:start-lease', request),
+    endLease: (leaseId: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-lease', leaseId),
+    endAllLeases: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:end-all-leases'),
+    setLeaseLength: (project: string, lengthMs: number): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-lease-length', project, lengthMs),
+    setMoveVault: (vault: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set-move-vault', vault),
+    listVaults: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list-vaults'),
+    moveToOnePassword: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:move-to-1password', project, name),
+    /** Fires when leases start, renew or end here or on a machine this desktop follows. Carries no values. */
+    onChanged: (callback: () => void): (() => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('pane-secrets:changed', listener);
+      return () => ipcRenderer.removeListener('pane-secrets:changed', listener);
+    },
   },
   /** The device tab (docs/DEVICES.md): the local screen, frames, and the person's own controls. */
   devices: {
     input: (panelId: string, input: DeviceInput): Promise<IPCResponse> => invokeIpc('devices:input', panelId, input),
-    frame: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame', panelId),
+    frame: (panelId: string, maxPx?: number): Promise<IPCResponse> => invokeIpc('devices:frame', panelId, maxPx),
+    frameRate: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:frame-rate', panelId),
+    controls: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:controls', panelId),
+    capture: (panelId: string, image?: string): Promise<IPCResponse> => invokeIpc('devices:capture', panelId, image),
+    stage: (panelId: string, agentPanelId: string, text: string): Promise<IPCResponse> => invokeIpc('devices:stage', panelId, agentPanelId, text),
+    record: (panelId: string, action: 'start' | 'stop'): Promise<IPCResponse> => invokeIpc('devices:record', panelId, action),
+    logs: (panelId: string, since: number): Promise<IPCResponse> => invokeIpc('devices:logs', panelId, since),
+    driver: (panelId: string, who: 'person' | 'agent'): Promise<IPCResponse> => invokeIpc('devices:driver', panelId, who),
     visible: (panelId: string, clientId: string, visible: boolean): Promise<IPCResponse> => invokeIpc('devices:visible', panelId, clientId, visible),
     takeOver: (panelId: string): Promise<IPCResponse> => invokeIpc('devices:take-over', panelId),
     power: (panelId: string, action: 'boot' | 'restart' | 'shutdown'): Promise<IPCResponse> => invokeIpc('devices:power', panelId, action),
@@ -450,7 +514,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // System utilities
   openExternal: (url: string): Promise<IPCResponse> => invokeIpc('openExternal', url),
-  openLocalPage: (fileUrl: string): Promise<IPCResponse> => invokeIpc('openLocalPage', fileUrl),
+  openLocalPage: (fileUrl: string, panelId?: string): Promise<IPCResponse> => invokeIpc('openLocalPage', fileUrl, panelId),
 
   feedback: {
     submit: (request: SubmitFeedbackRequest): Promise<IPCResponse> => invokeIpc('feedback:submit', request),
@@ -615,6 +679,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setEnabled: (id: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('loops:set-enabled', id, enabled),
     runNow: (id: string): Promise<IPCResponse> => invokeIpc('loops:run-now', id),
     preview: (cron: string): Promise<IPCResponse> => invokeIpc('loops:preview', cron),
+  },
+  // Profiles: the library, launches and runs (docs/PROFILES.md)
+  profiles: {
+    list: (): Promise<IPCResponse> => invokeIpc('profiles:list'),
+    get: (name: string): Promise<IPCResponse> => invokeIpc('profiles:get', name),
+    setEnabled: (name: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('profiles:set-enabled', name, enabled),
+    launch: (input: ProfileLaunchInput): Promise<IPCResponse> => invokeIpc('profiles:launch', input),
+    runs: (): Promise<IPCResponse> => invokeIpc('profiles:runs'),
+    setOutcome: (runId: string, outcome: string): Promise<IPCResponse> => invokeIpc('profiles:set-outcome', runId, outcome),
+    stop: (runId: string): Promise<IPCResponse> => invokeIpc('profiles:stop', runId),
   },
   // Mission Control — live overview of every agent pane across all sessions
   missionControl: {
@@ -1036,6 +1110,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = () => callback();
       ipcRenderer.on('remote:settings-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('remote:settings-changed', wrappedCallback);
+    },
+    onProfilesChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('profiles:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('profiles:changed', wrappedCallback);
     },
     onLoopsChanged: (callback: () => void) => {
       const wrappedCallback = () => callback();

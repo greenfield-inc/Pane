@@ -79,7 +79,7 @@ const PREFERENCE_CONFIG_KEYS = [
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
   'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'backgroundActivity', 'terminalPowerMode',
   'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours', 'chatIdleReleaseMinutes',
-  'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'notesEnabled',
+  'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'notesEnabled', 'profilesEnabled',
   'sessionCreationPreferences',
 ] as const satisfies readonly (keyof SetupPreferences)[];
 
@@ -105,7 +105,7 @@ const FIELD_LABELS = {
   defaultOrchestratorAgent: 'Pane Chat agent',
   defaultSessionCommand: 'Session command',
   defaultSessionResume: 'Session resume',
-  defaultSessionProfile: 'Session profile',
+  defaultSessionProfile: 'Session behavior',
   defaultSessionPinned: 'Pin new Sessions',
   defaultPermissionMode: 'Permission mode',
   defaultModel: 'Model',
@@ -141,6 +141,7 @@ const FIELD_LABELS = {
   voiceTranscriptionMode: 'Voice transcription',
   missionControlEnabled: 'Mission Control',
   notesEnabled: 'Notes',
+  profilesEnabled: 'Profiles',
   sessionCreationPreferences: 'New Pane defaults',
   auto_rename_sessions_to_pr: 'Rename Panes to their PR',
   sidebar_pane_row_layout: 'Sidebar Pane rows',
@@ -513,6 +514,7 @@ const sectionSchemas = {
     voiceTranscriptionMode: boundary.optional(boundary.enumeration('recorded', 'streaming')),
     missionControlEnabled: booleanField,
     notesEnabled: booleanField,
+    profilesEnabled: booleanField,
     sessionCreationPreferences: boundary.optional(boundary.object({
       sessionCount: boundary.optional(boundary.number),
       toolType: boundary.optional(boundary.enumeration('claude', 'none')),

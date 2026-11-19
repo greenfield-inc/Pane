@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { NotifyItem } from '../../../../shared/types/notify';
+import type { NotifyItem, NotifyLeaseTarget } from '../../../../shared/types/notify';
 import { NotifyCard, type NotifyCardProps } from './NotifyCard';
 import { acceleratorFromKeys, askedBy, cardAnswer, machineLabel, originOf, shortcutLabel, withMachineLabels } from './notifyFormat';
 
@@ -111,6 +111,40 @@ describe('NotifyCard', () => {
     expect(visible).toMatch(/N Deny Y Approve/);
     expect(visible).toContain('Show the SQL');
     expect(visible).not.toContain('ALTER TABLE');
+  });
+
+  describe('a lease card', () => {
+    const target: NotifyLeaseTarget = {
+      project: 'stripe',
+      names: ['STRIPE_KEY', 'DATABASE_URL', 'SENTRY_DSN'],
+      references: { STRIPE_KEY: 'op://Dev/Stripe/credential', DATABASE_URL: 'op://Dev/Neon/url' },
+      lengthMs: 24 * 60 * 60 * 1000,
+      machine: 'parsa-devbox',
+    };
+    const lease: NotifyItem = { ...base, ui: 'approve', title: 'Lease 3 secrets for 24 hours?', lease: target };
+
+    it('lists each name with its reference, says where the lease goes, and offers Start lease and Decline', () => {
+      const visible = text(render(lease));
+      expect(visible).toContain('Lease 3 secrets for 24 hours?');
+      expect(visible).toContain('STRIPE_KEY op://Dev/Stripe/credential');
+      expect(visible).toContain('DATABASE_URL op://Dev/Neon/url');
+      expect(visible).toContain('SENTRY_DSN not a 1Password reference on parsa-devbox');
+      expect(visible).toMatch(/On: this computer · Ends .+ · 1Password will ask once/);
+      expect(visible).toMatch(/N Decline Y Start lease/);
+      expect(visible).not.toContain('Approve');
+    });
+
+    it("adds the asking machine when the card is another machine's, and says it holds the lease in memory only", () => {
+      const visible = text(render({ ...lease, machine: 'parsa-devbox', machineId: 'devbox', lease: { ...target, memoryOnly: true } }));
+      expect(visible).toMatch(/On: this computer, parsa-devbox · Ends/);
+      expect(visible).toContain('parsa-devbox holds it in memory only');
+    });
+
+    it('offers Extend on a renewal and shows why the last try failed', () => {
+      const markup = render({ ...lease, lease: { ...target, renews: 'lease-1' }, leaseError: '1Password was locked. Unlock it and choose Extend again.' });
+      expect(text(markup)).toContain('Y Extend');
+      expect(markup).toMatch(/role="alert"[^>]*>1Password was locked\. Unlock it and choose Extend again\.</);
+    });
   });
 
   it('labels the disclosure Show details when the agent gives no label', () => {

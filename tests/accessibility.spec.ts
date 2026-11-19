@@ -1,6 +1,6 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { expectNoAxeViolations } from './axeTest';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import type { JsonValue } from '../shared/validation/boundaryDecoder';
 
 const project = {
@@ -148,7 +148,7 @@ async function openDesktop(
     initialPanels: panels,
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
 }

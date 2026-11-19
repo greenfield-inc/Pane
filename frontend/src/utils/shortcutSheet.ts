@@ -81,7 +81,7 @@ const PLACEMENTS = {
     { reference: 'reference-approval-page' }, { reference: 'reference-approval-tabs' },
     { reference: 'reference-approval-move' }, { reference: 'reference-approval-pick' }, { reference: 'reference-approval-question' },
     { command: 'send-approval', label: 'Send your answer' },
-    { reference: 'reference-approvals-list' },
+    { reference: 'reference-approvals-list' }, { reference: 'reference-approvals-archive' },
     { command: 'approvals-group-by', label: 'Approvals list: Group by… (set your own key)' },
     { reference: 'reference-approvals-filter' }, { reference: 'reference-approvals-back' }, { reference: 'reference-answer-all' },
   ],

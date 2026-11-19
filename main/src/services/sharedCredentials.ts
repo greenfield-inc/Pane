@@ -44,6 +44,7 @@ export const sharedCredentialsSchema: BoundarySchema<SharedCredentials> = bounda
   openRouterApiKey: boundary.optional(credentialSchema),
   apns: boundary.optional(credentialSchema),
   paneSecrets: boundary.optional(boundary.record(credentialSchema)),
+  paneSecretReferences: boundary.optional(boundary.record(credentialSchema)),
 });
 
 function configValue(config: AppConfig, id: SharedCredentialId): string | undefined {

@@ -4,7 +4,7 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PaneError } from '../../../shared/paneError';
-import { externalUrlOrNull, toExternalUrl, toLocalPageFile, toLocalPagePath } from './externalUrl';
+import { appLinkOrNull, externalUrlOrNull, toExternalUrl, toLocalPageFile, toLocalPagePath } from './externalUrl';
 
 describe('externalUrlOrNull', () => {
   it.each([
@@ -32,6 +32,28 @@ describe('externalUrlOrNull', () => {
     ['an empty string', ''],
   ])('refuses %s', (_label, input) => {
     expect(externalUrlOrNull(input)).toBeNull();
+  });
+});
+
+describe('appLinkOrNull', () => {
+  it.each([
+    'zoommtg://zoom.us/join?confno=123',
+    'slack://open?team=T1',
+    'mailto:hello@dcouple.ai',
+  ])('lets a page offer %s', (url) => {
+    expect(appLinkOrNull(url)).toBe(url);
+  });
+
+  it.each([
+    'https://example.com/',
+    'file:///Applications/Calculator.app',
+    'javascript:alert(1)',
+    'search-ms:query=x&crumb=location:\\\\evil\\share',
+    'ms-msdt:/id PCWDiagnostic',
+    'pane://open?session=x',
+    'not a url',
+  ])('never offers %s', (url) => {
+    expect(appLinkOrNull(url)).toBeNull();
   });
 });
 

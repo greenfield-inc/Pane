@@ -334,7 +334,9 @@ const GLASSES_OWNER_REQUIRED = {
  * Commands that act on the whole machine. On the paired listener, only a linked computer runs
  * machine commands, and only a paired phone or linked computer manages glasses.
  */
-const WORKSPACE_ONLY_CHANNEL_PREFIXES = ['runpane:machine:', 'runpane:glasses:'];
+// A Session move (the target's `runpane:move:` and the source's `runpane:sessions:move*`) reaches a
+// machine only from the owner's own machines, never a paired phone or code.
+const WORKSPACE_ONLY_CHANNEL_PREFIXES = ['runpane:machine:', 'runpane:glasses:', 'runpane:move:', 'runpane:sessions:move'];
 
 const WORKSPACE_LISTEN_HOST = '127.0.0.1';
 
@@ -1815,7 +1817,8 @@ export class PaneRemoteHttpApiServer {
       );
     }
     if (invokeRequest.channel.startsWith('notify:switch:')) return this.notifySwitchArgs(args, auth, request);
-    const sharesKeys = invokeRequest.channel.startsWith('credentials:shared:');
+    // Secret leases take the same owner-only, paired-device gate as key sharing.
+    const sharesKeys = invokeRequest.channel.startsWith('credentials:shared:') || invokeRequest.channel.startsWith('secrets:lease:');
     if (sharesKeys && this.workspace) {
       // Keys belong to the owner: a teammate this workspace lets in may neither read nor replace them.
       const owner = this.workspaceOwnerLogin(request);

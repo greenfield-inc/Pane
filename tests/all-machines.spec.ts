@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { gotoApp, installElectronApiMock } from './electronApiMock';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
@@ -99,7 +99,7 @@ async function openAllMachines(page: Page, colorScheme: 'light' | 'dark' = 'ligh
     initialConfig: { appearanceMode: 'system' },
     ...extra,
   });
-  await page.goto('/');
+  await gotoApp(page);
   await page.evaluate(async (saved) => {
     for (const machine of saved) {
       await window.electronAPI.remoteDaemon.upsertConnectionProfile({
@@ -123,6 +123,11 @@ async function openAllMachines(page: Page, colorScheme: 'light' | 'dark' = 'ligh
     }
   }
 }
+
+// The window title bar is drawn only on macOS (isMac reads navigator.platform), so its tests run as a Mac whatever the host.
+const asMac = (page: Page) => page.addInitScript(() => {
+  Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'MacIntel' });
+});
 
 const sessionRows = (page: Page) => page.getByTestId('all-machines-session-row');
 const savedLayout = async (page: Page) => (await mock(page)).evaluate(api => api.getPreferences().sidebar_all_machines_layout ?? null);
@@ -191,6 +196,8 @@ test('All machines shows each machine\'s own Session activity, and an offline ma
 });
 
 test('switching to All machines opens no project, and what you open is remembered across a relaunch', async ({ page, browser }) => {
+  // Two app starts (the relaunch included): 12.5 s on a CI runner (run 44466821062).
+  test.setTimeout(60_000);
   await openAllMachines(page, 'light', { open: false });
   for (const name of PROJECTS) await expect(page.getByRole('button', { name: `Expand project ${name}` })).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByTestId('all-machines-pane-row')).toHaveCount(0);
@@ -216,6 +223,8 @@ test('switching to All machines opens no project, and what you open is remembere
 });
 
 test('two computers keep their own arrangement: a drag saves on this computer only and survives a relaunch', async ({ page, browser }) => {
+  // Three app starts (another computer and a relaunch): 17.2 s on a CI runner (run 44466821062).
+  test.setTimeout(60_000);
   await openAllMachines(page);
   // Drag build-box's Session above this computer's; move a Pane down with Alt+Down.
   await sessionRows(page).filter({ hasText: 'Backup rotation' }).dragTo(sessionRows(page).filter({ hasText: 'Spring sale launch' }), { targetPosition: { x: 20, y: 2 } });
@@ -358,7 +367,7 @@ for (const scheme of ['light', 'dark'] as const) {
   test(`Switch to chat on a Session runs on its own machine, after showing what it will skip (${scheme})`, async ({ page }, testInfo) => {
     const tab = (panelId: string, paneName: string, title: string) => ({ panelId, paneName, title });
     const busy = { kind: 'busy', reason: 'Claude is in the middle of a turn. Nothing was switched.' };
-    const plain = { kind: 'plain-codex', reason: 'Pane could not tell which conversation this terminal is running: Codex reports its conversation ID only when it exits. Nothing was switched.' };
+    const plain = { kind: 'no-conversation', reason: 'Pane isn\'t sure which conversation this tab is on (Codex reports its conversation ID only when it exits). Switch it from its tab\'s menu to pick one' };
     const shell = { kind: 'not-agent', reason: 'Only a terminal tab running Claude or Codex can switch to chat. Nothing was switched.' };
     const items = [
       tab('s1-c', 'Session', 'Claude'), tab('p-1', 'terraform-upgrade', 'Claude'), tab('p-2', 'terraform-upgrade', 'Review'),
@@ -377,11 +386,11 @@ for (const scheme of ['light', 'dark'] as const) {
     const dialog = page.getByRole('dialog', { name: 'Switch Session to chat' });
     await expect(dialog).toContainText('Will switch (4)');
     await expect(dialog).toContainText('Will skip (3)');
-    await expect(dialog).toContainText('plain Codex: ');
+    await expect(dialog).toContainText('no saved conversation: ');
     await page.screenshot({ path: testInfo.outputPath(`all-machines-session-switch-confirm-${scheme}.png`) });
     await dialog.getByRole('button', { name: 'Switch 4 tabs' }).click();
 
-    await expect(dialog.getByTestId('session-switch-summary')).toHaveText('4 switched, 3 skipped: busy, plain Codex, not an agent');
+    await expect(dialog.getByTestId('session-switch-summary')).toHaveText('4 switched, 3 skipped: busy, no saved conversation, not an agent');
     await page.screenshot({ path: testInfo.outputPath(`all-machines-session-switch-summary-${scheme}.png`) });
     expect(await (await mock(page)).evaluate(api => api.getMachineRuns())).toEqual([
       { machineId: 'build', command: { type: 'preview-switch-to-chat', sessionId: 's1' } },
@@ -391,7 +400,7 @@ for (const scheme of ['light', 'dark'] as const) {
 }
 
 for (const scheme of ['light', 'dark'] as const) {
-  test(`Move to machine… on a Session asks its agent on its own machine to hand it off (${scheme})`, async ({ page }, testInfo) => {
+  test(`Move to machine… Hand off with a note asks a Session's agent on its own machine to hand it off (${scheme})`, async ({ page }, testInfo) => {
     await openAllMachines(page, scheme);
     await sessionRows(page).filter({ hasText: 'Backup rotation' }).click({ button: 'right' });
     const item = page.getByRole('menuitem', { name: 'Move to machine…' });
@@ -402,7 +411,10 @@ for (const scheme of ['light', 'dark'] as const) {
 
     // build-box runs the Session, so it is left out; this computer is a target because the Session lives elsewhere.
     const dialog = page.getByRole('dialog', { name: 'Move Session to another machine' });
-    await expect(dialog).toContainText('Move Backup rotation to another machine');
+    await expect(dialog).toContainText('Move “Backup rotation”');
+    // A whole-Session move runs on build-box too; the note handoff keeps asking its agent.
+    await dialog.getByRole('button', { name: 'Hand off with a note…' }).click();
+    await expect(dialog).toContainText('Hand off “Backup rotation” with a note');
     await expect(dialog.getByRole('radio')).toHaveCount(3);
     await expect(dialog.getByRole('radio', { name: 'studio-mac' })).toBeEnabled();
     await expect(dialog.getByRole('radio', { name: 'parsa-devbox' })).toBeEnabled();
@@ -410,7 +422,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await expect(dialog.getByRole('radio', { name: 'build-box' })).toHaveCount(0);
     await dialog.getByRole('radio', { name: 'parsa-devbox' }).check({ force: true });
     await page.screenshot({ path: testInfo.outputPath(`all-machines-session-move-dialog-${scheme}.png`) });
-    await dialog.getByRole('button', { name: 'Move Session' }).click();
+    await dialog.getByRole('button', { name: 'Ask the agent to hand off' }).click();
     await expect(dialog).toHaveCount(0);
 
     const runs = await (await mock(page)).evaluate(api => api.getMachineRuns());
@@ -447,13 +459,13 @@ test('a Session with nothing that can switch still shows Switch to chat, disable
   await openAllMachines(page, 'light', { extra: { machineRunAnswers: { build: {
     'preview-switch-to-chat': { sessionId: 's1', items: [
       { panelId: 'p-4', paneName: 'terraform-upgrade', title: 'QA', skip: { kind: 'busy', reason: 'Claude is in the middle of a turn.' } },
-      { panelId: 'p-5', paneName: 'terraform-upgrade', title: 'Codex 2', skip: { kind: 'plain-codex', reason: 'Pane isn\'t sure which conversation.' } },
+      { panelId: 'p-5', paneName: 'terraform-upgrade', title: 'Codex 2', skip: { kind: 'no-conversation', reason: 'Pane isn\'t sure which conversation.' } },
       { panelId: 'p-6', paneName: 'terraform-upgrade', title: 'Terminal', skip: { kind: 'not-agent', reason: 'Not an agent.' } },
     ] },
   } } } });
   await sessionRows(page).filter({ hasText: 'Backup rotation' }).click({ button: 'right' });
   const item = page.getByTestId('session-switch-to-chat');
-  await expect(item).toHaveText('Switch to chat…Nothing to switch: 1 busy, 1 plain Codex');
+  await expect(item).toHaveText('Switch to chat…Nothing to switch: 1 busy, 1 no saved conversation');
   await expect(item).toHaveAttribute('aria-disabled', 'true');
   await page.screenshot({ path: testInfo.outputPath('all-machines-switch-nothing.png') });
   // Playwright waits for an aria-disabled item to enable; the click must still do nothing.
@@ -535,6 +547,7 @@ test('a pinned Pane shows its pin at rest and sorts first in its project', async
 });
 
 test('opening a Pane on another machine switches to it, opens the Pane and keeps the sidebar in All machines', async ({ page }, testInfo) => {
+  await asMac(page);
   await openAllMachines(page);
   await page.getByRole('button', { name: 'load-test-checkout on build-box' }).click();
   // The switch leaves the Pane in build-box's navigation memory; main's host-change resync restores it.
@@ -550,6 +563,7 @@ test('opening a Pane on another machine switches to it, opens the Pane and keeps
 });
 
 for (const scheme of ['light', 'dark'] as const) test(`opening a Pane on an offline machine says it is offline (${scheme})`, async ({ page }, testInfo) => {
+  await asMac(page);
   await openAllMachines(page, scheme);
   await page.getByRole('button', { name: 'trip-notes on travel-laptop' }).click();
 

@@ -14,7 +14,7 @@ import { panelManager } from './panelManager';
 import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
 import type { SessionAdoption } from './chatTabs/switchToChat';
-import type { ChatPanelState, ChatTabLaunch } from '../../../shared/types/chatTab';
+import type { ChatPanelState } from '../../../shared/types/chatTab';
 import type { NotifySession } from '../../../shared/types/notify';
 
 /** What a Session needs from the host's chat tabs. */
@@ -73,6 +73,8 @@ import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { agentReportData, readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
 import { PaneError, reasonOf } from '../../../shared/paneError';
+import type { SessionMoveMark } from '../../../shared/types/sessionMove';
+import { releaseMoveHolds } from './sessionMove/restore';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 
@@ -184,6 +186,84 @@ export class OrchestrationSessionManager extends EventEmitter {
     });
   }
 
+  /**
+   * Moves (docs/SESSIONS.md, "Move a Session to another machine"): sets or clears a Session's move
+   * mark. `moving` freezes the source; `moved` also archives it.
+   */
+  async setMoveMark(sessionId: string, mark: SessionMoveMark | undefined, message?: string): Promise<OrchestrationSessionRecord> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const current = this.findSession(data, { sessionId });
+      const next: OrchestrationSessionRecord = { ...current, revision: current.revision + 1, updatedAt: new Date().toISOString(), activity: [...current.activity] };
+      if (mark) next.move = { ...mark };
+      else delete next.move;
+      if (mark?.state === 'moved') {
+        next.archived = true;
+        next.archivedAt = next.archivedAt ?? new Date().toISOString();
+      }
+      if (message) next.activity.push(this.activity('updated', message, 'system'));
+      this.trimActivity(next);
+      const replaced = replaceSession(data, next);
+      const selectedSessionId = mark?.state === 'moved' && data.selectedSessionId === current.id
+        ? orderedSessions(replaced).find(session => session.id !== current.id && session.archived !== true)?.id
+        : data.selectedSessionId;
+      this.store.write({ ...replaced, selectedSessionId });
+      this.emitChanged(next, 'updated', selectedSessionId !== data.selectedSessionId);
+      return this.withPaused(clone(next));
+    });
+  }
+
+  /**
+   * The target of a move: saves a Session record that arrives with its own ID, marked arriving, and
+   * creates its hidden owner Pane. Nothing starts. An archived copy that moved away from here earlier
+   * is replaced (moving a Session back); any other Session with this ID or name refuses.
+   */
+  async importArriving(record: OrchestrationSessionRecord): Promise<OrchestrationSessionRecord> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const existing = data.sessions.find(session => session.id === record.id);
+      if (existing && existing.move?.state !== 'moved') {
+        throw new PaneError('ERR_MOVE_SESSION_EXISTS', `This machine already has Session “${existing.name}” with the same ID, and it didn't move away from here, so the arriving copy wasn't saved.`, 'Archive or remove that Session here, then move again.');
+      }
+      const clash = data.sessions.find(session => session.id !== record.id && session.archived !== true && normalizeSessionName(session.name) === normalizeSessionName(record.name));
+      if (clash) {
+        throw new PaneError('ERR_MOVE_SESSION_NAME_TAKEN', `This machine already has a Session named “${clash.name}”, so the arriving copy wasn't saved.`, 'Rename one of them, then move again.');
+      }
+      const arriving: OrchestrationSessionRecord = clone(record);
+      arriving.archived = false;
+      delete arriving.archivedAt;
+      const sessions = existing ? data.sessions.map(session => session.id === record.id ? arriving : session) : [...data.sessions, arriving];
+      this.store.write({ ...data, sessions });
+      if (existing) {
+        // The old archived copy's owner Pane comes back with the arriving one.
+        const owner = databaseService.getSession(arriving.internalSessionId);
+        if (owner?.archived) databaseService.restoreSession(arriving.internalSessionId);
+      }
+      this.createInternalSession(arriving);
+      this.emitChanged(arriving, 'created');
+      return clone(arriving);
+    });
+  }
+
+  /** The target removes a Session it was building when the move fails, or the old archived copy it replaced is put back. */
+  async removeArriving(sessionId: string, restore?: OrchestrationSessionRecord): Promise<void> {
+    await withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const current = data.sessions.find(session => session.id === sessionId);
+      if (!current) return;
+      if (current.move?.state !== 'arriving') {
+        throw new PaneError('ERR_MOVE_NOT_ARRIVING', `Session “${current.name}” isn't arriving here, so it wasn't removed.`, 'Nothing to do.');
+      }
+      const sessions = restore ? data.sessions.map(session => session.id === sessionId ? clone(restore) : session) : data.sessions.filter(session => session.id !== sessionId);
+      const selectedSessionId = data.selectedSessionId === sessionId ? orderedSessions({ ...data, sessions }).find(session => session.archived !== true)?.id : data.selectedSessionId;
+      this.store.write({ ...data, sessions, selectedSessionId });
+      this.emit('changed', { sessionId, kind: 'updated' });
+    });
+  }
+
   async get(selector: OrchestrationSessionSelector): Promise<OrchestrationSessionRecord> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
@@ -197,6 +277,9 @@ export class OrchestrationSessionManager extends EventEmitter {
       const record = this.findSession(this.store.read(), selector);
       if (record.archived === true) {
         throw new Error(`Session ${record.name} is archived; restore it before opening it`);
+      }
+      if (record.move?.state === 'arriving') {
+        throw new PaneError('ERR_SESSION_ARRIVING', `Session ${record.name} is still arriving from ${record.move.machine}, so it can't open yet.`, `Wait for the move to finish on ${record.move.machine}.`);
       }
       this.createInternalSession(record);
       const panel = await this.ensurePanelForAgent(record);
@@ -406,6 +489,11 @@ export class OrchestrationSessionManager extends EventEmitter {
         activity: [...current.activity],
       };
       if (input.name !== undefined) delete nextRecord.nameIsDefault;
+      // Restore here: a Session that moved away runs here again, so it is no longer marked moved.
+      if (input.archived === false && nextRecord.move?.state === 'moved') delete nextRecord.move;
+      if (nextRecord.move && nextRecord.move.state !== 'moved' && input.archived !== undefined) {
+        throw new PaneError('ERR_SESSION_MOVING', `Session ${current.name} is ${nextRecord.move.state === 'arriving' ? `arriving from ${nextRecord.move.machine}` : `moving to ${nextRecord.move.machine}`}, so it can't be archived or restored now.`, 'Wait for the move to finish.');
+      }
       if (input.name !== undefined && data.sessions.some(session => session.id !== current.id && normalizeSessionName(session.name) === normalizeSessionName(nextRecord.name))) {
         throw new Error(`A Session named ${nextRecord.name} already exists`);
       }
@@ -425,6 +513,8 @@ export class OrchestrationSessionManager extends EventEmitter {
         nextRecord.reportAcceptedAt = undefined;
       }
       this.trimActivity(nextRecord);
+      // Restore here after a move away: the orchestrator's tabs leave the move's hold first.
+      if (input.archived === false && current.move?.state === 'moved') await releaseMoveHolds(current.internalSessionId);
       if (nextRecord.archived !== true) await this.ensurePanelForAgent(nextRecord);
       if (current.archived !== true && nextRecord.archived === true) nextRecord.archivedAt = new Date().toISOString();
       if (nextRecord.archived !== true) delete nextRecord.archivedAt;

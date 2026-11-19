@@ -13,6 +13,7 @@ import {
   type AgentRegistryState,
 } from '../../../stores/agentRegistryStore';
 import { Button } from '../../ui/Button';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 import { ConfirmDialog } from '../../ConfirmDialog';
 
 const CAPABILITY_LABELS: ReadonlyArray<[keyof ChatAgentCapabilities, string]> = [
@@ -71,6 +72,33 @@ function registryLabels(agent: RegistryAgent, entry: ChatAgentEntry | undefined)
   return agent.verified ? learned : [...learned, 'No checksum'];
 }
 
+/** Agent SettingRows while the list loads: icon, name, description and support labels, version on the right (and a button for registry rows). */
+function AgentRowsSkeleton({ label, action = false }: { label: string; action?: boolean }) {
+  return <>
+    <Skeleton className="divide-y divide-border-secondary">
+      {[[24, 62, 3], [30, 74, 2], [20, 56, 3]].map(([name, description, labels], index) => (
+        <div key={index} className="grid gap-4 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(180px,auto)] sm:items-center">
+          <div className="flex min-w-0 items-start gap-2">
+            <Bone className="mt-0.5 h-4 w-4 flex-none" />
+            <div className="min-w-0 flex-1">
+              <div className="flex h-5 items-center"><Bone className="h-3.5" style={{ width: `${name}%` }} /></div>
+              <div className="mt-1 flex h-[19.5px] items-center"><Bone className="h-3" style={{ width: `${description}%` }} /></div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 sm:justify-self-end">
+            <Bone className="h-3 w-20" />
+            {action && <Bone className="h-8 w-20 rounded-button" />}
+          </div>
+          <div className="flex gap-1.5 pl-6 sm:col-span-2">
+            {Array.from({ length: labels }, (_, pill) => <Bone key={pill} className="h-[22px] w-24 rounded-full" />)}
+          </div>
+        </div>
+      ))}
+    </Skeleton>
+    <LoadingStatus label={label} />
+  </>;
+}
+
 /** Install, Remove or Refresh; its spinner takes the label's place in the same box, so the row never moves. */
 function RowAction({ label, busyLabel, busy, disabled, onClick }: { label: string; busyLabel: string; busy: boolean; disabled: boolean; onClick: () => void }) {
   return <Button type="button" size="sm" variant="secondary" className="w-20" disabled={disabled} aria-busy={busy} onClick={onClick}>
@@ -99,43 +127,45 @@ export function RegistryAgentList({ state, catalog, canInstall, onInstall, onRem
   onRemove: (agent: RegistryAgent) => void;
 }) {
   const { list, rows } = state;
-  if (!list) return <p role="status" className="py-4 text-sm text-text-tertiary">Loading agents from the ACP Registry…</p>;
-  return <>
-    {list.error && <p role="status" className="mt-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-text-primary">
-      This list may be out of date. {list.error}
-    </p>}
-    <div role="list" aria-label="ACP Registry agents" className="divide-y divide-border-secondary">
-      {list.agents.map(agent => {
-        const row = rows[agent.id] ?? {};
-        const labels = registryLabels(agent, catalog?.find(entry => entry.id === agent.id));
-        const { installedVersion } = agent;
-        return <div key={agent.id} role="listitem" aria-label={agent.name}>
-          <SettingRow
-            label={agent.name}
-            description={agent.description}
-            disabled={!canInstall && !installedVersion}
-            leading={<span className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center text-text-secondary">{agentIcon(agent, 'h-4 w-4')}</span>}
-            details={(labels.length > 0 || row.error) && <div className="space-y-2">
-              {labels.length > 0 && <LabelList name={agent.name} labels={labels} />}
-              {row.error && <p role="alert" className="pl-6 text-xs text-status-error">{row.error}</p>}
-            </div>}
-          >
-            <span className="flex items-center gap-3 text-xs">
-              {installedVersion
-                ? <>
-                  <span className="text-text-tertiary">{installedStatus(agent, installedVersion)}</span>
-                  <RowAction label="Remove" busyLabel="Removing" busy={row.busy === 'remove'} disabled={row.busy !== undefined || state.reading === true} onClick={() => onRemove(agent)} />
-                </>
-                : <>
-                  <span className="text-text-tertiary">{agent.needs ? `Needs ${agent.needs}` : `Version ${agent.version}`}</span>
-                  {canInstall && <RowAction label="Install" busyLabel="Installing" busy={row.busy === 'install'} disabled={row.busy !== undefined || state.reading === true || agent.needs !== undefined} onClick={() => onInstall(agent)} />}
-                </>}
-            </span>
-          </SettingRow>
-        </div>;
-      })}
-    </div>
-  </>;
+  // One block, so the section's space-y and divide-y between the notice and the list still apply inside the swap.
+  return <SkeletonSwap loading={!list} skeleton={<AgentRowsSkeleton label="Loading agents from the ACP Registry" action />}>
+    {list && <div className="space-y-4 divide-y divide-border-secondary">
+      {list.error && <p role="status" className="mt-3 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-text-primary">
+        This list may be out of date. {list.error}
+      </p>}
+      <div role="list" aria-label="ACP Registry agents" className="divide-y divide-border-secondary">
+        {list.agents.map(agent => {
+          const row = rows[agent.id] ?? {};
+          const labels = registryLabels(agent, catalog?.find(entry => entry.id === agent.id));
+          const { installedVersion } = agent;
+          return <div key={agent.id} role="listitem" aria-label={agent.name}>
+            <SettingRow
+              label={agent.name}
+              description={agent.description}
+              disabled={!canInstall && !installedVersion}
+              leading={<span className="mt-0.5 flex h-4 w-4 flex-none items-center justify-center text-text-secondary">{agentIcon(agent, 'h-4 w-4')}</span>}
+              details={(labels.length > 0 || row.error) && <div className="space-y-2">
+                {labels.length > 0 && <LabelList name={agent.name} labels={labels} />}
+                {row.error && <p role="alert" className="pl-6 text-xs text-status-error">{row.error}</p>}
+              </div>}
+            >
+              <span className="flex items-center gap-3 text-xs">
+                {installedVersion
+                  ? <>
+                    <span className="text-text-tertiary">{installedStatus(agent, installedVersion)}</span>
+                    <RowAction label="Remove" busyLabel="Removing" busy={row.busy === 'remove'} disabled={row.busy !== undefined || state.reading === true} onClick={() => onRemove(agent)} />
+                  </>
+                  : <>
+                    <span className="text-text-tertiary">{agent.needs ? `Needs ${agent.needs}` : `Version ${agent.version}`}</span>
+                    {canInstall && <RowAction label="Install" busyLabel="Installing" busy={row.busy === 'install'} disabled={row.busy !== undefined || state.reading === true || agent.needs !== undefined} onClick={() => onInstall(agent)} />}
+                  </>}
+              </span>
+            </SettingRow>
+          </div>;
+        })}
+      </div>
+    </div>}
+  </SkeletonSwap>;
 }
 
 /** Settings › Agents: the ACP Registry's agents, installed here with one click. */
@@ -184,7 +214,14 @@ export function AgentsSettings() {
     <SettingsPage title="Agents" description="The agents this machine can open as chat tabs. Pane learns what an agent supports the first time it starts a chat with it.">
       <SettingsSection title="Chat agents" description={chatTabsOn ? undefined : 'Chat tabs are off. Turn them on in AI & Agents to open these agents as chats.'}>
         {error && <p role="alert" className="py-2 text-sm text-status-error">{error}</p>}
-        {agents ? <AgentList agents={agents} /> : !error && <p role="status" className="py-4 text-sm text-text-tertiary">Loading agents…</p>}
+        {(agents || !error) && (
+          // A block of its own, so the section's spacing and divider after an error reach the list.
+          <div>
+            <SkeletonSwap loading={!agents} skeleton={<AgentRowsSkeleton label="Loading agents" />}>
+              {agents && <AgentList agents={agents} />}
+            </SkeletonSwap>
+          </div>
+        )}
       </SettingsSection>
       <RegistrySection chatTabsOn={chatTabsOn} />
     </SettingsPage>

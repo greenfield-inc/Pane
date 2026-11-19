@@ -14,14 +14,20 @@ import { useListeningPorts } from '../../../hooks/useListeningPorts';
 import { useConfigStore } from '../../../stores/configStore';
 import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
 import { Dropdown } from '../../ui/Dropdown';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../../ui/Skeleton';
 import { PortsList } from './PortsList';
 import { RefusedFilesNotice, type FileRefusal } from './RefusedFilesNotice';
+import { TabNotices, type ShownTabNotice } from './TabNotices';
+import { BROWSER_TAB_NOTICE_CHANNEL, type BrowserTabNotice } from '../../../../../shared/types/browser';
 import { FindBar } from '../../find/FindBar';
 import { usePanelFind } from '../../find/usePanelFind';
 import { closeFind, getFindBar, reportFindResult, setFindQuery, useFindBar } from '../../find/findController';
 import { createBrowserFindAdapter } from './browserFind';
+import { AgentOverlay } from './AgentDriving';
 
 const COPIED_FEEDBACK_MS = 1500;
+/** The most notices a tab shows at once; older ones drop off. */
+const MAX_NOTICES = 3;
 
 interface BrowserPanelProps {
   panel: ToolPanel;
@@ -33,8 +39,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [url, setUrl] = useState('');
   const [inputUrl, setInputUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // A host's file page is copied over the relay first, so a click can take seconds; further clicks wait for it.
+  const [openingExternally, setOpeningExternally] = useState(false);
   const [urlError, setUrlError] = useState('');
   const [refusals, setRefusals] = useState<FileRefusal[]>([]);
+  const [notices, setNotices] = useState<ShownTabNotice[]>([]);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -67,6 +76,13 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   }, [remoteMode, ports]);
   const toHostUrl = useCallback((localUrl: string) => remapLoopbackPort(localUrl, localToHost), [localToHost]);
   const toHostUrlRef = useRef(toHostUrl);
+  const localToHostRef = useRef(localToHost);
+  useEffect(() => { localToHostRef.current = localToHost; }, [localToHost]);
+  // Main maps an agent's localhost URLs through this desktop's tunnels (docs/BROWSER_AGENTS.md).
+  useEffect(() => {
+    const wcId = pageWcIdRef.current;
+    if (wcId) void window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHost]);
+  }, [localToHost, panel.id, panel.sessionId]);
   // Navigation reads the current mapping without depending on it: a ports or
   // remote-mode update recomputes where a URL loads but never navigates the tab.
   const targetOfRef = useRef(targetOf);
@@ -87,8 +103,17 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const isHostFileUrl = hasFileProtocol(currentUrlFromPanelState);
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const reopenedAt = (panel.state.customState as BrowserPanelState | undefined)?.reopenedAt;
+  // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
+  const driver = (panel.state.customState as BrowserPanelState | undefined)?.driver;
 
   const webviewRef = useRef<Electron.WebviewTag>(null);
+  // The mounted <webview>, as state so its listeners attach whenever it mounts:
+  // SkeletonSwap can mount it from its own timer, without a render of this panel.
+  const [webview, setWebview] = useState<Electron.WebviewTag | null>(null);
+  const attachWebview = useCallback((element: Electron.WebviewTag | null) => {
+    webviewRef.current = element;
+    setWebview(element);
+  }, []);
   const devToolsPlaceholderRef = useRef<HTMLDivElement>(null);
   const persistTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const panelIdRef = useRef(panel.id);
@@ -390,16 +415,17 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   };
 
   // The page the tab shows now, in host form: main maps a host port to where this computer reaches it.
-  const externalUrl = shownUrl || url;
+  // A target the tab can't load never navigates, so the tab's own address names it.
+  const externalUrl = target.kind === 'load' ? shownUrl || url : url;
   const isLocalPage = hasFileProtocol(externalUrl);
-  // Why the button can't open this page, shown as its tooltip; null when it can.
+  // Why the button can't open this page, shown as its tooltip and, on a click, under the address bar; null when it can.
+  // A remote desktop opens a copy of a host file page, so only the page type matters there.
   const openExternalBlock = ((): string | null => {
     if (!externalUrl) return 'Open a page first';
     if (isLocalPage) {
-      if (isRemoteMode) return `This file is on ${ports?.host ?? 'the host'}, so your browser on this computer can't open it`;
       const page = new URL(externalUrl);
       // A file URL's host is another computer's share, except the hosts Windows serves local WSL files from.
-      if (page.host && !/^wsl(?:\.localhost|\$)$/i.test(page.hostname)) return `This file is on ${page.hostname}, not this computer`;
+      if (!isRemoteMode && page.host && !/^wsl(?:\.localhost|\$)$/i.test(page.hostname)) return `This file is on ${page.hostname}, not this computer`;
       return /\.html?$/i.test(page.pathname) ? null : 'Only .html and .htm files open in your browser';
     }
     if (!/^https?:/i.test(externalUrl)) return 'Only http, https and .html pages open in your browser';
@@ -408,12 +434,18 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     if (external.kind === 'unreachable') return `Port ${external.port} on ${ports?.host ?? 'the host'} isn't forwarded to this computer`;
     return null;
   })();
-  const canOpenExternal = openExternalBlock === null;
   const handleOpenExternal = () => {
-    const open = isLocalPage ? window.electronAPI.openLocalPage : window.electronAPI.openExternal;
-    void open(externalUrl).then(result => {
+    if (openingExternally) return;
+    if (openExternalBlock !== null) {
+      setUrlError(`Pane can't open this page in your browser: ${openExternalBlock}.`);
+      return;
+    }
+    setOpeningExternally(true);
+    const opening = isLocalPage ? window.electronAPI.openLocalPage(externalUrl, panel.id) : window.electronAPI.openExternal(externalUrl);
+    void opening.then(result => {
       if (!result.success) setUrlError(result.error || 'Pane could not open this page in your browser');
-    });
+    }, (error: Error) => setUrlError(error.message || 'Pane could not open this page in your browser'))
+      .finally(() => setOpeningExternally(false));
   };
 
   const handleViewSource = () => {
@@ -427,17 +459,18 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     navigateTo(inputUrl);
   };
 
-  // Wire webview events when the webview element is mounted.
-  // Depends on `url` because the <webview> is only rendered when url is non-empty,
-  // so the ref is null until the first URL is set.
+  // Wire webview events to each <webview> element that mounts.
   useEffect(() => {
-    const webview = webviewRef.current;
     if (!webview) return;
 
-    const onDomReady = () => {
+    // Registered on attach as well as dom-ready, so agents reach a page that fails to load.
+    const register = () => {
       const wcId = webview.getWebContentsId();
       pageWcIdRef.current = wcId;
-      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId);
+      window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId, [...localToHostRef.current]);
+    };
+    const onDomReady = () => {
+      register();
       webviewReadyRef.current = true;
       syncFindActive(getFindBar(panel.id).open);
     };
@@ -479,6 +512,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       setCanGoForward(webview.canGoForward());
     };
 
+    webview.addEventListener('did-attach', register);
     webview.addEventListener('dom-ready', onDomReady);
     webview.addEventListener('did-navigate', onDidNavigateDocument);
     webview.addEventListener('did-navigate', onDidNavigate);
@@ -495,6 +529,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       webview.removeEventListener('found-in-page', onFoundInPage);
       webview.removeEventListener('did-finish-load', rerunOpenFind);
       webview.removeEventListener('did-navigate-in-page', rerunOpenFind);
+      webview.removeEventListener('did-attach', register);
       webview.removeEventListener('dom-ready', onDomReady);
       webview.removeEventListener('did-navigate', onDidNavigateDocument);
       webview.removeEventListener('did-navigate', onDidNavigate);
@@ -503,8 +538,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       webview.removeEventListener('did-fail-load', onDidFailLoad);
       webview.removeEventListener('did-stop-loading', onDidStopLoading);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run when url becomes non-empty (webview mounts); persistState reads from refs
-  }, [panel.id, url, fileSession, target.kind]);
+  }, [webview, panel.id, panel.sessionId, findAdapter, persistState, rerunOpenFind, syncFindActive]);
 
   // Listen for popup-requested events from the main process.
   // Uses stopImmediatePropagation so only the originating browser panel handles the event,
@@ -548,7 +582,40 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     return () => window.removeEventListener('browser-panel:file-refused', handler);
   }, [panel.id]);
 
-  // Navigate requests (terminal links, "Open in Browser") name the tab they target;
+  // Main's lines for this tab: an app link to confirm, a sign-in sent out, a finished download.
+  // The newest few stay until the person acts on them.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      // SAFETY: The preload bridge is the only sender of this event.
+      const { panelId, notice } = (e as CustomEvent<{ panelId: string; notice: BrowserTabNotice }>).detail;
+      if (panelId !== panel.id) return;
+      setNotices(current => {
+        const next = [...current, { key: crypto.randomUUID(), notice }];
+        // Over the limit, the oldest notice goes, but never an app bar still waiting for Open or Cancel.
+        while (next.length > MAX_NOTICES) {
+          const oldest = next.findIndex(shown => shown.notice.kind !== 'app');
+          next.splice(oldest < 0 ? 0 : oldest, 1);
+        }
+        return next;
+      });
+    };
+    window.addEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
+    return () => window.removeEventListener(BROWSER_TAB_NOTICE_CHANNEL, handler);
+  }, [panel.id]);
+  const dismissNotice = useCallback((key: string) => setNotices(current => current.filter(shown => shown.key !== key)), []);
+  const openApp = useCallback((key: string, id: string) => {
+    dismissNotice(key);
+    void window.electronAPI.invoke('browser-panel:open-app-link', id).then((result: { success: boolean; error?: string }) => {
+      if (!result.success) setUrlError(result.error || 'Pane could not open the app.');
+    });
+  }, [dismissNotice]);
+  const showInFolder = useCallback((file: string) => {
+    void window.electronAPI.invoke('app:showItemInFolder', file).then((result: { success: boolean; error?: string }) => {
+      if (!result.success) setUrlError(result.error || 'Pane could not show the file.');
+    });
+  }, []);
+
+  // Navigate requests (an editor's HTML preview, a project's run URL) name the tab they target;
   // only that tab acts, and it takes focus so the person sees the page.
   useEffect(() => {
     const handler = (e: Event) => {
@@ -687,12 +754,13 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
         <button
           type="button"
           onClick={handleOpenExternal}
-          disabled={!canOpenExternal}
+          disabled={!externalUrl}
           className={cn(
             'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
-            !canOpenExternal && 'opacity-30 cursor-not-allowed'
+            !externalUrl && 'opacity-30 cursor-not-allowed'
           )}
-          title={openExternalBlock ? `Can't open in your browser: ${openExternalBlock}` : 'Open in your browser'}
+          aria-busy={openingExternally}
+          title={openingExternally ? 'Opening in your browser…' : openExternalBlock ? `Can't open in your browser: ${openExternalBlock}` : 'Open in your browser'}
         >
           <ExternalLink className="w-3.5 h-3.5" />
         </button>
@@ -755,6 +823,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
         </div>
       )}
       {refusals.length > 0 && <RefusedFilesNotice refusals={refusals} onDismiss={() => setRefusals([])} />}
+      <TabNotices notices={notices} onOpenApp={openApp} onShowInFolder={showInFolder} onDismiss={dismissNotice} />
 
       {/* Content area */}
       {!url ? (
@@ -784,11 +853,19 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
             <FindBar panelId={panel.id} className="pointer-events-auto" />
           </div>
           {/* Page webview */}
-          {target.kind === 'waiting' && (
-            <div className="flex flex-1 items-center justify-center text-xs text-text-tertiary">
-              Connecting to the host's ports…
-            </div>
-          )}
+          <SkeletonSwap loading={target.kind === 'waiting'} skeleton={
+            <>
+              <LoadingStatus label="Connecting to the host's ports…" />
+              {/* The page it loads is unknown: a generic page, a top bar over a heading and text. */}
+              <Skeleton className="flex flex-1 flex-col">
+                <div className="flex h-12 items-center gap-4 border-b border-border-primary px-6"><Bone className="h-5 w-24" /><Bone className="ml-auto h-3 w-16" /><Bone className="h-3 w-16" /></div>
+                <div className="flex flex-col gap-3 px-6 pt-8">
+                  <Bone className="mb-2 h-7 w-1/3" />
+                  <Bone className="h-3.5 w-2/3" /><Bone className="h-3.5 w-1/2" />
+                </div>
+              </Skeleton>
+            </>
+          }>
           {target.kind === 'unreachable' && (
             <div role="status" className="flex flex-1 flex-col items-center justify-center gap-1 px-6 text-center">
               <p className="text-sm text-text-secondary">
@@ -803,13 +880,16 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           )}
           {nextWebviewSrc && ((!isFileUrl && !isHostFileUrl) || fileSession?.panelId === panel.id) && <webview
             key={fileSession?.partition ?? 'local'}
-            ref={webviewRef}
+            ref={attachWebview}
             src={nextWebviewSrc.src}
             partition={webviewPartition(fileSession)}
             {...WEBVIEW_ALLOW_POPUPS}
             className="flex-1 border-0"
             style={{ display: 'inline-flex' }}
           />}
+          </SkeletonSwap>
+
+          <AgentOverlay panelId={panel.id} driver={driver} />
 
           {/* DevTools resize handle + placeholder div (overlaid by WebContentsView from main process) */}
           {devToolsOpen && (

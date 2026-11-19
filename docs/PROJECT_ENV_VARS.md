@@ -16,7 +16,7 @@ Each variable is one of:
 | Source | What the project stores |
 | --- | --- |
 | Plain text | The value, in the Pane database |
-| Pane secret | Only the secret's address, `<project>/<NAME>`. The value lives in [Pane secrets](PANE_SECRETS.md), so every repo and agent that uses it shares one copy, synced to your other machines. |
+| Pane secret | Only the secret's address, `<project>/<NAME>`. The value lives in [Pane secrets](PANE_SECRETS.md), so every repo and agent that uses it shares one copy, synced to your other machines. A secret from 1Password has a value only during a [lease](PANE_SECRETS.md#leases). |
 | macOS Keychain | Only the service and account of a generic-password item you already have (macOS hosts only) |
 
 For a Pane secret row, type a value to create or replace that secret when you save;
@@ -77,6 +77,12 @@ and the reason (a missing secret, a locked keychain); setup and archive scripts
 write the same line to the Pane's logs. The value is never printed. Set the secret
 in Settings → Secrets, fix the item in Keychain Access, or change the variable in
 Project Settings, then open a new terminal.
+
+A variable that points at a secret from 1Password with no live lease on that machine
+starts the terminal with a warning that names the lease command, such as
+`runpane secrets lease --project stripe STRIPE_LIVE_KEY`. Run it (or have the agent
+run it), approve the card, then open a new terminal. A terminal that started during a
+lease keeps the value after the lease ends.
 
 ## Example
 

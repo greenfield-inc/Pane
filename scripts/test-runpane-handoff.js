@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { test } = require('node:test');
+const { test } = require('./runpane-test-shard');
 
 const dist = path.join(__dirname, '..', 'packages', 'runpane', 'dist');
 const cli = path.join(dist, 'cli.js');
@@ -741,6 +741,7 @@ test('--note-only starts a fresh agent even when the session could be carried', 
 
 // ---------------------------------------------------------------- carrying a session to another machine
 
+let powershellStarted = process.platform !== 'win32';
 /**
  * A stand-in for Pane on another machine (test-remote), reached over HTTP like a real workspace,
  * with its own home folder and a clone of the fixture's remote. The CLI's tailnet lookup is
@@ -748,6 +749,12 @@ test('--note-only starts a fresh agent even when the session could be carried', 
  */
 function remoteMachine(f, options = {}) {
   const { spawn } = require('node:child_process');
+  // The stand-in runs each command in powershell.exe, and the first start on a fresh Windows runner
+  // is slow. Pay it once here, outside the 20 s the handoff gives its first remote command.
+  if (!powershellStarted) {
+    execFileSync('powershell.exe', ['-NoProfile', '-Command', 'exit'], { stdio: 'ignore', windowsHide: true });
+    powershellStarted = true;
+  }
   const home = path.join(f.root, 'remote-home');
   const repoPath = path.join(home, 'repo');
   fs.mkdirSync(home, { recursive: true });

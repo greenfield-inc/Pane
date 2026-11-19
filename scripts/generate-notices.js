@@ -152,7 +152,7 @@ function getPackageInfo(packagePath) {
         repository: packageJson.repository,
         license: packageJson.license
       };
-    } catch (e) {
+    } catch {
       return null;
     }
   }

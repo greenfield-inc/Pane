@@ -2,8 +2,12 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import type { WebView, WebViewMessageEvent } from 'react-native-webview';
 
+import { CONNECTION_GRACE_MS } from '@shared/remoteClient';
+
 import { invokeChannel, useDaemon, useDaemonEvent } from '@/daemon';
 import { useTheme } from '@/theme';
+
+import { connectionMark, perfMark } from '../perf/perfMarks';
 
 import { parsePageEvent, type TerminalCommand } from './bridge';
 import { TerminalSession, type TerminalSize } from './terminalSession';
@@ -34,6 +38,7 @@ export function useTerminal(panelId: string, sessionId: string) {
 
   // Output arrives in bursts of small events; hand it to xterm once per frame.
   const pending = useRef('');
+  const connectionWait = useRef<Promise<void> | null>(null);
   const frame = useRef<number | null>(null);
 
   const send = (command: TerminalCommand) => {
@@ -57,6 +62,9 @@ export function useTerminal(panelId: string, sessionId: string) {
         if (pending.current) session.ack(pending.current.length);
         pending.current = '';
         send({ type: 'reset', data });
+        // A screen read after a return, open or switch: the terminal now matches the computer.
+        connectionMark('terminal-screen', { repeat: true });
+        perfMark('terminal', 'screen', { repeat: true });
         setHasContent(true);
         setStatus('ready');
         setError(null);
@@ -84,27 +92,29 @@ export function useTerminal(panelId: string, sessionId: string) {
     if (!signal.aborted && size) await session.restore(size);
   }, 'terminal'), [client, session, size]);
 
-  // Restore once the page has measured itself, and again after every
-  // reconnect: the event stream does not replay output missed while offline.
-  const connected = connection.status === 'connected';
+  // Restore once the page has measured itself. A connection that comes back, after a drop or a
+  // return to the app, restores through the listener above: the event stream does not replay
+  // output missed while away, so the screen is read again once it is open, and only then.
+  // A screen opened during another restore (a tab switch right after a return) missed those
+  // listeners, so it restores when the connection turns live and it still shows nothing.
   const measured = size !== null;
   useEffect(() => {
-    if (connected && measured) restore();
-  }, [connected, measured]);
+    if (!measured) return undefined;
+    let status = client.getState().status;
+    if (status === 'connected') restore();
+    return client.onStatus(state => {
+      if (state.status === 'connected' && status !== 'connected' && !session.isLive) restore();
+      status = state.status;
+    });
+  }, [measured, client, session]);
 
   useEffect(() => {
     const keepAlive = setInterval(() => session.keepAlive(), VISIBILITY_REFRESH_MS);
-    // Only a real trip to the background detaches. Notification Center, Face ID
-    // and permission prompts pass through 'inactive' and leave the screen live.
-    let backgrounded = false;
+    // Only a real trip to the background detaches. Notification Center, Face ID and permission
+    // prompts pass through 'inactive' and leave the screen live. The client reconnects on return,
+    // and its restore listener reads the screen again.
     const appState = AppState.addEventListener('change', state => {
-      if (state === 'background') {
-        backgrounded = true;
-        session.detach();
-      } else if (state === 'active' && backgrounded) {
-        backgrounded = false;
-        restore();
-      }
+      if (state === 'background') session.detach();
     });
     return () => {
       clearInterval(keepAlive);
@@ -136,7 +146,7 @@ export function useTerminal(panelId: string, sessionId: string) {
         const next = { cols: message.cols, rows: message.rows };
         // A page that loads again (after iOS reclaimed it) starts blank.
         setHasContent(false);
-        if (size && connected) {
+        if (size && connection.status === 'connected') {
           setStatus('loading');
           void session.restore(next);
         }
@@ -184,7 +194,12 @@ export function useTerminal(panelId: string, sessionId: string) {
       setStatus('loading');
       if (size) void session.restore(size);
     },
-    sendInput: (data: string) => session.sendInput(data),
+    // Typed while the connection comes back: wait for it, up to the grace window, then send once.
+    // Keys typed meanwhile share one wait, so they all go out in order or none do.
+    sendInput: (data: string) => {
+      const wait = connectionWait.current ??= client.whenConnected(CONNECTION_GRACE_MS).finally(() => { connectionWait.current = null; });
+      return wait.then(() => session.sendInput(data));
+    },
     /** Clears the scrollback on the host, then redraws the screen from the host's copy. */
     clearScrollback: async () => {
       await invokeChannel(client, 'terminal:clearScrollback', [panelId]);

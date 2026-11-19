@@ -1,7 +1,7 @@
 /**
- * Find for a surface that shows different kinds of content in one place: an
- * approval's column (Decide, its Summary frame, a web or text reference) and
- * the Approvals screen around it. Each search goes to what is shown now:
+ * Pane's find for any container of rendered content: a chat, a file preview,
+ * an approval's column (Decide, its Summary frame, a web or text reference)
+ * and the Approvals screen around it. Each search goes to what is shown now:
  * - a Summary frame (`data-find-frame`): the page text inside the frame,
  *   highlighted with the frame's own highlight registry;
  * - a web or HTML reference (`data-find-webview`): the page's find-in-page;
@@ -152,8 +152,10 @@ function createSurfaceFindAdapter(findId: string, getRoot: () => HTMLElement | n
 }
 
 /**
- * Make a surface searchable with Pane's find. `enabled: false` leaves it to
- * a surface around it (the Approvals screen searches its column itself).
+ * Make a container searchable with Pane's find: the one way to do it for
+ * rendered content (a terminal, a log or a browser tab brings its own adapter
+ * to `usePanelFind`). `enabled: false` leaves it to a surface around it (the
+ * Approvals screen searches its column itself).
  */
 export function useSurfaceFind(findId: string, rootRef: RefObject<HTMLElement | null>, enabled = true): void {
   const [adapter] = useState(() => createSurfaceFindAdapter(findId, () => rootRef.current));

@@ -22,7 +22,7 @@ import {
 } from './commands';
 import type { BoundarySchema, JsonObject, JsonValue } from './boundaryDecoder';
 import { parseSessionCreatePayload, parseSessionUpdatePayload } from './sessionPayload';
-import { describeReport, effectiveWatchHeartbeatMs, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
+import { describeReport, effectiveWatchHeartbeatMs, sanitizeName, formatNonEntry, formatWaitResult, type WatchFormat } from './watchLines';
 
 interface OrchestrationLink {
   label: string;
@@ -464,9 +464,12 @@ interface PaneSummary {
 
 interface PausedMark {
   at: string;
-  by: 'manual' | 'auto';
+  by: 'manual' | 'auto' | 'move';
   idleHours?: number;
   runScript?: boolean;
+  machine?: string;
+  arriving?: boolean;
+  interrupted?: boolean;
 }
 
 interface PauseResult {
@@ -1227,9 +1230,12 @@ const repoAddPreviewSchema: BoundarySchema<RepoAddPreview> = boundary.object({
 });
 const pausedMarkSchema: BoundarySchema<PausedMark> = boundary.object({
   at: boundary.string,
-  by: boundary.enumeration('manual', 'auto'),
+  by: boundary.enumeration('manual', 'auto', 'move'),
   idleHours: boundary.optional(boundary.number),
   runScript: boundary.optional(boundary.boolean),
+  machine: boundary.optional(boundary.string),
+  arriving: boundary.optional(boundary.boolean),
+  interrupted: boundary.optional(boundary.boolean),
 });
 const pauseResultSchema: BoundarySchema<PauseResult> = boundary.object({
   ok: boundary.boolean,
@@ -4004,6 +4010,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
     summary: summaryText?.slice(0, MAX_SENT_SUMMARY_LENGTH),
     summaryPath,
     question: parsed.question,
+    outcome: parsed.reportOutcome,
     ...options,
   }], reportResultSchema, {
     paneDir: parsed.paneDir,
@@ -4012,7 +4019,7 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
   if (parsed.json) {
     printJson(result);
   } else {
-    for (const line of describeReportDelivery(result)) console.log(line);
+    for (const line of describeReportDelivery(result, parsed.reportOutcome)) console.log(line);
   }
   return 0;
 }
@@ -4021,11 +4028,13 @@ export async function runReport(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
  * What `runpane report` prints: the report, who recorded it, and how many watches were waiting.
  * Zero waiting watchers means nobody is waiting right now, not that the report is lost.
  */
-function describeReportDelivery(result: ReportResult): string[] {
+function describeReportDelivery(result: ReportResult, outcome?: string): string[] {
   const sessions = result.sessionIds.length > 0 ? ` Recorded on Session ${result.sessionIds.join(', ')}.` : '';
   const watchers = result.liveWatchers ?? 0;
   const delivered = watchers > 0 ? ` Delivered to ${watchers} waiting watcher${watchers === 1 ? '' : 's'}.` : '';
-  const lines = [`Reported ${describeReport(result.report)} for panel ${result.panelId}.${sessions}${delivered}`];
+  // A profile step's outcome is what moved its run, so the line names it.
+  const reported = outcome ? `outcome "${sanitizeName(outcome)}" (${describeReport(result.report)})` : describeReport(result.report);
+  const lines = [`Reported ${reported} for panel ${result.panelId}.${sessions}${delivered}`];
   // The blocked question's card check: posted anyway, but worth fixing next time.
   const warnings = (result.warnings ?? []).map(warning => `Warning: ${warning}`);
   if (result.sessionIds.length > 0 || watchers > 0) return [...lines, ...warnings];

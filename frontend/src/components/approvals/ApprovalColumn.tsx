@@ -11,7 +11,7 @@ import { AutopilotDocument, AutopilotWebPage } from '../autopilot/AutopilotDocum
 import { isLightTheme, useTheme } from '../../contexts/ThemeContext';
 import { sentenceStart } from '../../../../shared/approvalStatus';
 import { readSummaryPage, type SummaryRead } from './summaryPage';
-import { withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
+import { SUMMARY_FRAME_SANDBOX, withSummaryPolicy } from '../../../../shared/utils/summaryPolicy';
 import { MachineDocument } from './MachineContext';
 import { linkedFileReadsHere } from './machineDoc';
 import { ItemCloseForm, NotifyCard } from '../notify/NotifyCard';
@@ -25,11 +25,14 @@ import { registerApprovalSend } from './approvalSend';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
 import { useNow } from '../notify/useNow';
 import { FindBar } from '../find/FindBar';
+import { Bone, Skeleton, SkeletonSwap, LoadingStatus } from '../ui/Skeleton';
 import { approvalFindId, useSurfaceFind } from '../find/surfaceFind';
+import { isTypingTarget } from '../../utils/typingTarget';
 import {
   askedBy, canSend, cardChip, replyBeingRead, cardTabs, dotTone, markedQuestions, previousVersion, questionsOf, replyLine,
   type CardChip, type CardQuestion, type CardTab, type ReplyLine,
 } from './approvalCard';
+import { APPROVAL_COLUMN, APPROVAL_COLUMN_ID, APPROVAL_REPLY_BOX_ID, approvalStepProps } from './approvalDom';
 
 /**
  * The approval column (P3, D-243): one tabbed column, shared by a Session, Autopilot and the
@@ -120,7 +123,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
   if (!item) {
     return (
       // No tabs to mark: a thin accent edge along the top says it has focus.
-      <div className={cn('flex min-h-0 flex-1 flex-col bg-bg-primary', focused && 'shadow-[inset_0_2px_0_0_var(--color-interactive-primary)]')} data-testid="approval-column" data-focused={focused}>
+      <div className={cn('flex min-h-0 flex-1 flex-col bg-bg-primary', focused && 'shadow-[inset_0_2px_0_0_var(--color-interactive-primary)]')} data-testid={APPROVAL_COLUMN_ID} data-focused={focused}>
         <ColumnHeader index={0} total={0} groupLabel={groupLabel} closeLabel={closeLabel} onClose={onClose} onStep={step} dots={[]} chip={null} />
         <p className="m-auto px-6 text-center text-[13px] text-text-tertiary">That approval is no longer here: it was answered or closed.</p>
       </div>
@@ -129,7 +132,7 @@ export function ApprovalColumn({ surface, itemId, order, onSelect, groupLabel, c
 
   return (
     // Focusable, so its ← → keys belong to it alone; clicking anywhere in it gives it focus.
-    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} data-focus-entry={focused !== undefined || undefined} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid="approval-column" data-item-id={item.id} data-narrow={narrow || undefined}>
+    <div ref={rootRef} role="region" aria-label={`Approval: ${item.title}`} tabIndex={-1} data-focus-entry={focused !== undefined || undefined} onKeyDown={(event) => pagerKey(event, step)} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg-primary outline-none" data-testid={APPROVAL_COLUMN_ID} data-item-id={item.id} data-narrow={narrow || undefined}>
       <ColumnHeader
         narrow={narrow}
         index={index}
@@ -171,8 +174,7 @@ function resolveApproval(items: readonly NotifyItem[], ref: string): string | un
 function pagerKey(event: React.KeyboardEvent, step: (direction: 1 | -1) => void): void {
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-  const target = event.target instanceof HTMLElement ? event.target : null;
-  if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'WEBVIEW'].includes(target.tagName) || target.closest('[role="menu"], [role="tablist"], [role="radiogroup"], .xterm'))) return;
+  if (isTypingTarget(event.target) || (event.target instanceof Element && event.target.closest('[role="menu"], [role="tablist"], [role="radiogroup"]'))) return;
   event.preventDefault();
   event.stopPropagation();
   step(event.key === 'ArrowLeft' ? -1 : 1);
@@ -199,11 +201,11 @@ function ColumnHeader({ index, total, groupLabel, closeLabel, onClose, onStep, d
   return (
     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border-primary px-3 text-[13px]" data-testid="approval-column-header">
       <Tooltip content={<KeyTip label="Previous approval" keys="←" />} side="bottom">
-        <button type="button" className={stepButton} aria-label="Previous approval" disabled={total < 2} onClick={() => onStep(-1)} data-approval-step="previous"><ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" /></button>
+        <button type="button" className={stepButton} aria-label="Previous approval" disabled={total < 2} onClick={() => onStep(-1)} {...approvalStepProps('previous')}><ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" /></button>
       </Tooltip>
       <span className="shrink-0 font-semibold tabular-nums text-text-primary" data-testid="approval-pager">{total > 0 ? `${index + 1} of ${total}` : '0 of 0'}</span>
       <Tooltip content={<KeyTip label="Next approval" keys="→" />} side="bottom">
-        <button type="button" className={stepButton} aria-label="Next approval" disabled={total < 2} onClick={() => onStep(1)} data-approval-step="next"><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
+        <button type="button" className={stepButton} aria-label="Next approval" disabled={total < 2} onClick={() => onStep(1)} {...approvalStepProps('next')}><ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
       </Tooltip>
       {!narrow && <span className="min-w-0 truncate text-text-tertiary">{groupLabel}</span>}
       <span className={cn('shrink-0 items-center gap-1', narrow ? 'hidden' : 'flex')} aria-hidden="true" data-testid="approval-dots">
@@ -290,8 +292,8 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
     return () => { shown.current = false; };
   }, []);
   const waiting = item.state === 'waiting';
-  // What the column has no form of its own for: a secret, a prompt the terminal now holds, an update, a machine health card.
-  const plain = item.ui === 'secret' || item.ui === 'info' || item.agentPrompt?.inTerminal || item.relay || item.machineHealth;
+  // What the column has no form of its own for: a secret, a lease, a prompt the terminal now holds, an update, a machine health card.
+  const plain = item.ui === 'secret' || item.lease || item.ui === 'info' || item.agentPrompt?.inTerminal || item.relay || item.machineHealth;
   // Answered or closed: its receipt, Reopen and Override are the card's own.
   const ended = item.state === 'answered' || item.state === 'expired';
   const [closing, setClosing] = useState(false);
@@ -481,7 +483,7 @@ function QuestionsTab({ item, onSent, tabs, onOpenTab }: { item: NotifyItem; onS
               aria-label="Reply"
               placeholder="Reply: pick above, add a note, answer in your own words, or ask about it…"
               className="w-full resize-none overflow-y-auto rounded-lg border border-border-primary bg-surface-primary px-3 py-2 text-[14px] text-text-primary placeholder:text-text-tertiary focus:border-border-focus focus:outline-none"
-              data-testid="approval-reply-box"
+              data-testid={APPROVAL_REPLY_BOX_ID}
             />
           )}
           {waiting && closing && <ItemCloseForm item={item} onCommand={(command) => { runNotify(command); setClosing(false); }} onCancel={() => setClosing(false)} className="mt-2" />}
@@ -679,18 +681,27 @@ export function SummaryView({ item, page, onRetry }: { item: NotifyItem; page: S
           {machine && <span className="min-w-0 shrink truncate" data-testid="approval-summary-machine">· on {machine}</span>}
           <span className="shrink-0">· sandboxed, no scripts</span>
         </div>
-        {page === null && <p className="m-auto text-[13px] text-text-tertiary">Loading the Summary…</p>}
-        {page?.kind === 'failed' && (
+        {page?.kind === 'failed' ? (
           <div className="m-auto px-6 text-center text-[13px] text-text-secondary" role="status">
             <p>{page.message}</p>
             <button type="button" onClick={onRetry} className="mt-2 font-medium text-interactive hover:underline" data-testid="approval-summary-retry">Retry</button>
           </div>
-        )}
+        ) : <SkeletonSwap loading={page === null} skeleton={<>
+          <LoadingStatus label="Loading the Summary" />
+          {/* A Summary page: its title, a lead paragraph, then a section. */}
+          <Skeleton className="flex min-h-0 w-full flex-1 flex-col gap-3 bg-surface-primary p-6">
+            <Bone className="mb-2 h-6 w-1/2" />
+            <Bone className="h-3.5 w-full" /><Bone className="h-3.5 w-11/12" /><Bone className="h-3.5 w-3/5" />
+            <Bone className="mb-1 mt-4 h-4 w-1/3" />
+            <Bone className="h-3.5 w-full" /><Bone className="h-3.5 w-4/5" />
+          </Skeleton>
+        </>}>
         {(page?.kind === 'page' || page?.kind === 'template') && (
           // Sandboxed: no scripts, no forms, no navigation; the page's own policy blocks the network. Same origin (never
           // with scripts) only so Pane's find can read and highlight its text.
-          <iframe title={`Summary: ${item.title}`} sandbox="allow-same-origin" srcDoc={withSummaryPolicy(page.html)} data-find-frame="" className="min-h-0 w-full flex-1 border-0 bg-surface-primary" data-testid="approval-summary-frame" />
+          <iframe title={`Summary: ${item.title}`} sandbox={SUMMARY_FRAME_SANDBOX} srcDoc={withSummaryPolicy(page.html)} data-find-frame="" className="min-h-0 w-full flex-1 border-0 bg-surface-primary" data-testid="approval-summary-frame" />
         )}
+        </SkeletonSwap>}
       </div>
     </div>
   );
@@ -754,7 +765,7 @@ function useGrowingBox(ref: RefObject<HTMLTextAreaElement | null>, value: string
   useEffect(() => {
     const box = ref.current;
     if (!box) return;
-    const column = box.closest('[data-testid="approval-column"]');
+    const column = box.closest(APPROVAL_COLUMN);
     const limit = Math.max(64, (column?.clientHeight ?? 600) / 2);
     box.style.height = 'auto';
     box.style.height = `${Math.min(Math.max(box.scrollHeight, 64), limit)}px`;

@@ -1,15 +1,17 @@
 import { execFile } from 'child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { lstat, readdir } from 'fs/promises';
+import net from 'net';
 import path from 'path';
 import { promisify } from 'util';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
-import type { DevicePlatform, DeviceStreamInfo, DeviceSummary } from '../../../../shared/types/devices';
+import type { DevicePlatform, DeviceStopCause, DeviceStreamInfo, DeviceSummary } from '../../../../shared/types/devices';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../shared/validation/boundaryDecoder';
 import { DeviceHelpers, paneNode, refuseRetarget, runAgentDevice, startHub, type NodeRunner, type RunningHub } from './deviceHelpers';
 import { DeviceJobs, type DeviceJobResult } from './deviceJobs';
 import { DeviceLifecycle, type DeviceRecord } from './deviceLifecycle';
 import { probeDevices, type DeviceCapabilities, type ProbeEnvironment } from './deviceProbe';
+import { LiveFrames } from './deviceStream';
 import { getShellPath } from '../../utils/shellPath';
 
 const execFileAsync = promisify(execFile);
@@ -17,8 +19,10 @@ const execFileAsync = promisify(execFile);
 const BUSY_WAIT_MS = 60_000;
 const SWEEP_MS = 30_000;
 const SHUTDOWN_WAIT_MS = 60_000;
-const JPEG_START = Buffer.from([0xff, 0xd8]);
-const JPEG_END = Buffer.from([0xff, 0xd9]);
+/** How long quitting waits for the devices Pane booted to shut down. */
+const QUIT_SHUTDOWN_MS = 10_000;
+/** How long a device listing answers the device tab's frequent lookups. */
+const RECENT_LISTING_MS = 5_000;
 const PANE_DEVICE_NAMES = { ios: 'Pane iPhone', android: 'Pane_Android' } satisfies Record<DevicePlatform, string>;
 
 /** A Pane-made device, as the state file keeps it. */
@@ -34,10 +38,15 @@ const stateSchema = boundary.object({
     slimmed: boundary.optional(boundary.boolean),
     lastPane: boundary.optional(boundary.string),
   })),
+  booted: boundary.optional(boundary.array(boundary.string)),
+  boots: boundary.optional(boundary.record(boundary.string)),
 });
 
-/** The devices state file: Pane-made devices, who used them and when. */
-interface DeviceState { made: Record<string, MadeDevice> }
+/**
+ * The devices state file: Pane-made devices, who used them and when, and the devices Pane booted
+ * and still owes a shutdown (kept so a crash leaves none running past the next start).
+ */
+interface DeviceState { made: Record<string, MadeDevice>; booted?: string[]; boots?: Record<string, string> }
 
 /** The hub's device list entries Pane reads. */
 const simctlDevicesSchema = boundary.object({ devices: boundary.record(boundary.array(boundary.object({ udid: boundary.string, name: boundary.string, state: boundary.string, isAvailable: boundary.optional(boundary.boolean) }))) });
@@ -79,15 +88,28 @@ export interface DeviceServiceOptions {
   node?: NodeRunner;
   /** A device's state changed (lease moved, shut down, booted); the device tabs follow. */
   onChange?: (event: DeviceChange) => void;
+  /**
+   * A Pane's lease on a device is about to end (`by`: its agent's device_close, the person's Shut
+   * down, the idle timer): work that needs the lease, such as stopping its tab's recording, runs first.
+   */
+  beforeRelease?: (paneId: string, id: string, by: 'agent' | 'device') => Promise<void>;
+  /**
+   * Which boot a running device is in (a simulator's launchd_sim, an emulator's kernel boot id), or
+   * undefined when Pane cannot tell; this machine's own check when absent.
+   */
+  bootIdentity?: (device: BootTarget) => Promise<string | undefined>;
   /** The helpers started installing on this machine. */
   onInstall?: () => void;
   log?: (message: string) => void;
 }
 
+/** A device as the boot check names it: its id, platform and, for an emulator, its adb serial. */
+export interface BootTarget { id: string; platform: DevicePlatform; serial?: string }
+
 export type DeviceChange =
   | { kind: 'held'; id: string; paneId: string; previous?: string }
-  | { kind: 'released'; id: string; paneId: string; reason: 'closed' | 'idle' | 'archived' | 'taken' }
-  | { kind: 'shutdown'; id: string };
+  | { kind: 'released'; id: string; paneId: string; reason: 'closed' | 'idle' | 'archived' | 'taken'; by?: 'agent' | 'person' }
+  | { kind: 'shutdown'; id: string; by: DeviceStopCause };
 
 /**
  * The devices service on one machine. Lazy: nothing runs until the first device call, and the
@@ -107,6 +129,19 @@ export class DeviceService {
   private selectedEmulator?: string;
   /** The last frame read of each device, kept for its off and closed states. */
   private readonly lastFrames = new Map<string, Buffer>();
+  /** Devices the last run booted and had not shut down when it ended, read once at start. */
+  private leftovers: Set<string>;
+  /** Which boot each device Pane booted was in when Pane booted it: Pane shuts down only that boot. */
+  private readonly boots = new Map<string, string>();
+  /** Set when Pane quits: the hub never starts again in this run. */
+  private disposed = false;
+  /** How each Pane's lease last ended, for a linked computer's tab that asks (`status`). */
+  private readonly lastStop = new Map<string, { id: string; by: DeviceStopCause; booted: boolean }>();
+  /** Devices Pane is shutting down now, so a check for one stopped outside Pane skips them. */
+  private readonly stopping = new Set<string>();
+  /** iOS frames from a stream kept open while they are asked for (remote tabs, phones). */
+  private readonly liveFrames = new LiveFrames((id, signal) => this.openStream(id, signal));
+  private listed?: { at: number; devices: Promise<HubDevice[]> };
   /** The platform each Pane opened last: calls without a platform act on it. */
   private readonly lastOpened = new Map<string, DevicePlatform>();
   /** The pick-and-lease in progress for each platform. */
@@ -118,7 +153,16 @@ export class DeviceService {
     this.helpers = new DeviceHelpers({ root: options.root, findExecutable: options.findExecutable, machineName: options.machineName });
     this.lifecycle = new DeviceLifecycle({ now: this.now, cap: () => Math.min(4, Math.max(1, options.maxBooted())) });
     this.jobs = new DeviceJobs({ shell: () => process.platform === 'win32' ? { executable: 'cmd.exe', args: (command) => ['/d', '/s', '/c', `"${command}"`], verbatim: true } : { executable: process.env.SHELL || '/bin/sh', args: (command) => ['-lc', command] } });
-    for (const [id, made] of Object.entries(this.readState().made)) for (const paneId of made.users) this.lifecycle.restoreUser(id, paneId);
+    const saved = this.readState();
+    for (const [id, made] of Object.entries(saved.made)) for (const paneId of made.users) this.lifecycle.restoreUser(id, paneId);
+    // Only a device whose boot Pane recorded counts as Pane's: an older list without boots does not.
+    for (const id of saved.booted ?? []) {
+      const boot = saved.boots?.[id];
+      if (!boot) continue;
+      this.lifecycle.restoreBooted(id);
+      this.boots.set(id, boot);
+    }
+    this.leftovers = new Set(this.boots.keys());
   }
 
   /** What this machine can run; probed once, on the first device call. */
@@ -155,7 +199,8 @@ export class DeviceService {
           throw this.busy(chosen, holder);
         }
         if (holder === caller.paneId) return { chosen, fresh: false };
-        this.lifecycle.lease(caller.paneId, chosen.id, chosen.platform, { bootedByPane: !chosen.booted && !chosen.paneMade });
+        this.lifecycle.lease(caller.paneId, chosen.id, chosen.platform, { bootedByPane: !chosen.booted });
+        this.saveBooted();
         this.options.onChange?.({ kind: 'held', id: chosen.id, paneId: caller.paneId });
         return { chosen, fresh: true };
       });
@@ -170,6 +215,7 @@ export class DeviceService {
         onPhase?.('booting');
         await this.boot(chosen, capabilities);
       }
+      if (!chosen.booted) await this.recordBoot(chosen);
       // A pooled device moves between Panes: the next Pane gets it without the last one's apps (D-84).
       if (previousPane && previousPane !== caller.paneId) {
         await this.wipeApps(chosen, capabilities).catch((cause) => this.options.log?.(`[devices] clearing apps on ${chosen.id} failed: ${reasonOf(cause)}`));
@@ -320,8 +366,22 @@ export class DeviceService {
   async act(caller: DeviceCaller, args: readonly string[], platform?: DevicePlatform): Promise<{ exitCode: number; output: string }> {
     if (args.length === 0) throw new PaneError('ERR_DEVICE_ACT_EMPTY', 'device_act needs an agent-device command, such as ["snapshot", "-i"].', 'Pass the command as args.');
     refuseRetarget(args);
-    const device = await this.leasedDevice(caller.paneId, platform);
-    const result = await runAgentDevice(this.paths().agentDevice, args, this.target(caller.paneId, device), { node: this.node, stateDir: this.stateDir() });
+    return this.runAgentDeviceFor(caller.paneId, await this.leasedDevice(caller.paneId, platform), args);
+  }
+
+  /**
+   * Stops the screen recording `paneId`'s session is making on `id`, whether or not the Pane still
+   * holds it: a lease ending (idle, Shut down) stops its recording first.
+   */
+  async stopRecording(paneId: string, id: string): Promise<{ exitCode: number; output: string }> {
+    const device = (await this.devices()).find(candidate => candidate.id === id);
+    if (!device?.booted) throw new PaneError('ERR_DEVICE_OFF', 'The device is off, so its recording did not save.', 'Record again after booting it.');
+    return this.runAgentDeviceFor(paneId, device, ['record', 'stop', '--json']);
+  }
+
+  /** agent-device run on `device` in `paneId`'s session, with its exit code and output together. */
+  private async runAgentDeviceFor(paneId: string, device: HubDevice, args: readonly string[]): Promise<{ exitCode: number; output: string }> {
+    const result = await runAgentDevice(this.paths().agentDevice, args, this.target(paneId, device), { node: this.node, stateDir: this.stateDir() });
     return { exitCode: result.code, output: `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`.trim() };
   }
 
@@ -333,20 +393,34 @@ export class DeviceService {
     return this.jobs.start(owner, command, cwd, options.background ? Math.min(options.waitMs, 5_000) : options.waitMs, { PATH: process.platform === 'linux' ? (process.env.PATH ?? '') : getShellPath() });
   }
 
-  /** Ends the Pane's lease on `platform`'s device, or on all of them; its jobs stop with its last lease. */
-  async close(caller: DeviceCaller, platform?: DevicePlatform): Promise<{ closed: string[]; jobsStopped: number }> {
+  /**
+   * Ends the Pane's lease on `platform`'s device, or on all of them; its jobs stop with its last
+   * lease. A device Pane booted stays warm for the next open. With `shutdownBy`, it shuts down
+   * now: `person` (the Shut down a linked computer's tab sent) shuts down whatever the lease held,
+   * as the tab's Shut down does here; `quit` (that computer is quitting) only a device Pane booted.
+   */
+  async close(caller: DeviceCaller, platform?: DevicePlatform, options: { shutdownBy?: 'person' | 'quit' } = {}): Promise<{ closed: string[]; jobsStopped: number; shutDown: string[] }> {
     const one = platform ? this.lifecycle.leaseOf(caller.paneId, platform) : undefined;
     const ids = platform ? (one ? [one] : []) : this.lifecycle.leasesOf(caller.paneId);
     const devices = ids.length > 0 ? await this.devices() : [];
+    const shutDown: string[] = [];
     for (const id of ids) {
       const device = devices.find(candidate => candidate.id === id);
+      const by = options.shutdownBy === 'person' ? 'person' : 'agent';
+      await this.options.beforeRelease?.(caller.paneId, id, by === 'person' ? 'device' : 'agent').catch(() => undefined);
       if (device) await this.agentDevice(caller.paneId, device, ['close']).catch(() => undefined);
       this.lifecycle.release(caller.paneId, id);
-      this.options.onChange?.({ kind: 'released', id, paneId: caller.paneId, reason: 'closed' });
+      this.stopped(caller.paneId, id, by, true);
+      this.options.onChange?.({ kind: 'released', id, paneId: caller.paneId, reason: 'closed', by });
+      if (device?.booted && options.shutdownBy) {
+        // The person's Shut down is theirs to give; quitting shuts down only Pane's own boot.
+        const stopping = options.shutdownBy === 'person' ? this.shutdown(device, 'person').then(() => true) : this.shutdownOwnBoot(device, 'quit');
+        await stopping.then((stopped) => { if (stopped) shutDown.push(id); }, (cause) => this.options.log?.(`[devices] shutdown ${id} failed: ${reasonOf(cause)}`));
+      }
     }
     const jobsStopped = this.lifecycle.leasesOf(caller.paneId).length === 0 ? await this.jobs.stopAll(caller.paneId) : 0;
     if (ids.length > 0) this.scheduleSweep();
-    return { closed: ids, jobsStopped };
+    return { closed: ids, jobsStopped, shutDown };
   }
 
   /** The person pressed Take over in `paneId`'s device tab. */
@@ -368,8 +442,12 @@ export class DeviceService {
     await this.jobs.stopAll(paneId);
     if (!this.hub && this.lifecycle.leasesOf(paneId).length === 0 && !this.hasUser(paneId)) return;
     const devices = await this.devices({ inventory: true });
-    const { erase, ended } = this.lifecycle.archived(paneId, devices);
+    const { erase, ended, shutdown } = this.lifecycle.archived(paneId, devices);
     for (const lease of ended) this.options.onChange?.({ kind: 'released', id: lease.id, paneId, reason: 'archived' });
+    for (const id of shutdown) {
+      const device = devices.find(candidate => candidate.id === id);
+      if (device) await this.shutdownOwnBoot(device, 'archived').catch((cause) => this.options.log?.(`[devices] shutdown ${id} failed: ${reasonOf(cause)}`));
+    }
     const state = this.readState();
     for (const made of Object.values(state.made)) made.users = made.users.filter(user => user !== paneId);
     this.writeState(state);
@@ -377,13 +455,14 @@ export class DeviceService {
       const device = devices.find(candidate => candidate.id === id);
       if (device) await this.erase(device).catch((cause) => this.options.log?.(`[devices] erase ${id} failed: ${reasonOf(cause)}`));
     }
+    this.saveBooted();
     this.scheduleSweep();
   }
 
   /** Where main reads the device's screen and sends input. The token never leaves main. */
   async stream(id: string): Promise<DeviceStreamInfo> {
     const hub = await this.ensureHub();
-    const device = (await this.devices()).find(candidate => candidate.id === id);
+    const device = await this.recentDevice(id);
     if (!device) throw new PaneError('ERR_DEVICE_NOT_FOUND', 'That device is gone from this machine.', 'Open a device again with device_open.');
     const base = `127.0.0.1:${hub.port}`;
     if (device.platform === 'ios') {
@@ -410,60 +489,41 @@ export class DeviceService {
   /** The newest frame: live while the device is booted, else the last one Pane read. */
   async latestFrame(id: string): Promise<Buffer> {
     const cached = this.lastFrames.get(id);
-    const device = this.hub ? (await this.devices()).find(candidate => candidate.id === id) : undefined;
+    // A listing a few seconds old: remote tabs ask for a frame several times a second.
+    const device = this.hub ? await this.recentDevice(id) : undefined;
     if (device?.booted) return this.frame(id).catch((cause) => { if (cached) return cached; throw cause; });
     if (cached) return cached;
     throw new PaneError('ERR_DEVICE_OFF', 'This device is shut down and Pane has no earlier frame of it.', 'Boot it from the device tab.');
   }
 
-  /** An Android emulator's REST call on the hub (serve-emu), after selecting that emulator. */
-  async emulatorCall(id: string, route: 'screenshot' | 'tap' | 'swipe' | 'key', body: EmulatorRequest): Promise<Response> {
+  /** An Android emulator's REST call on the hub (serve-emu), after selecting that emulator; a GET when `body` is undefined. */
+  async emulatorCall(id: string, route: 'screenshot' | 'tap' | 'swipe' | 'key' | 'text' | 'orientation' | 'fold', body?: EmulatorRequest): Promise<Response> {
     const hub = await this.ensureHub();
-    const device = (await this.devices()).find(candidate => candidate.id === id && candidate.platform === 'android');
+    const found = await this.recentDevice(id);
+    const device = found?.platform === 'android' ? found : undefined;
     if (!device?.serial) throw new PaneError('ERR_DEVICE_OFF', 'That emulator is not running.', 'Boot it from the device tab or with device_open.');
     if (this.selectedEmulator !== device.serial) {
       await hub.post('/vendor/serve-emu/api/devices/select', { serial: device.serial });
       this.selectedEmulator = device.serial;
     }
-    return hub.post(`/vendor/serve-emu/api/${route}`, body);
+    return body === undefined ? hub.request(`/vendor/serve-emu/api/${route}`) : hub.post(`/vendor/serve-emu/api/${route}`, body);
   }
 
   /** One frame of the device's screen: JPEG from an iOS simulator's MJPEG stream, PNG from an emulator. */
   async frame(id: string): Promise<Buffer> {
-    if ((await this.devices()).find(candidate => candidate.id === id)?.platform === 'android') {
+    if ((await this.recentDevice(id))?.platform === 'android') {
       const response = await this.emulatorCall(id, 'screenshot', {});
       if (!response.ok) throw new PaneError('ERR_DEVICE_FRAME', `The emulator's screenshot failed with HTTP ${response.status}.`, 'Try again in a moment.');
       const png = Buffer.from(await response.arrayBuffer());
       this.lastFrames.set(id, png);
       return png;
     }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
     try {
-      const response = await this.openStream(id, controller.signal);
-      if (!response.ok || !response.body) throw new Error(`the stream answered ${response.status}`);
-      const reader = response.body.getReader();
-      let buffered = Buffer.alloc(0);
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffered = Buffer.concat([buffered, Buffer.from(value)]);
-        const start = buffered.indexOf(JPEG_START);
-        const end = start === -1 ? -1 : buffered.indexOf(JPEG_END, start + 2);
-        if (end !== -1) {
-          await reader.cancel().catch(() => undefined);
-          const jpeg = Buffer.from(buffered.subarray(start, end + 2));
-          this.lastFrames.set(id, jpeg);
-          return jpeg;
-        }
-        if (buffered.length > 16 * 1024 * 1024) break;
-      }
-      throw new Error('the stream ended before a whole frame');
+      const jpeg = await this.liveFrames.latest(id);
+      this.lastFrames.set(id, jpeg);
+      return jpeg;
     } catch (cause) {
       throw new PaneError('ERR_DEVICE_FRAME', `Pane could not read a frame of the device's screen: ${reasonOf(cause)}.`, 'Try again in a moment; a booting device has no screen yet.');
-    } finally {
-      clearTimeout(timer);
-      controller.abort();
     }
   }
 
@@ -549,11 +609,13 @@ export class DeviceService {
     if (!device?.booted) return;
     const holder = this.lifecycle.holderOf(id);
     if (holder) {
+      await this.options.beforeRelease?.(holder, id, 'device').catch(() => undefined);
       await this.agentDevice(holder, device, ['close']).catch(() => undefined);
       this.lifecycle.release(holder, id);
-      this.options.onChange?.({ kind: 'released', id, paneId: holder, reason: 'closed' });
+      this.stopped(holder, id, 'person', true);
+      this.options.onChange?.({ kind: 'released', id, paneId: holder, reason: 'closed', by: 'person' });
     }
-    await this.shutdown(device);
+    await this.shutdown(device, 'person');
     await this.stopIfIdle();
   }
 
@@ -580,7 +642,7 @@ export class DeviceService {
     const unleased = devices.filter(device => device.paneMade && !this.lifecycle.holderOf(device.id));
     const shutdown: string[] = [];
     for (const device of unleased.filter(candidate => candidate.booted)) {
-      await this.shutdown(device).catch(() => undefined);
+      await this.shutdown(device, 'freed').catch(() => undefined);
       shutdown.push(device.id);
     }
     const deleted: string[] = [];
@@ -608,15 +670,19 @@ export class DeviceService {
     // A running build or Metro is use of the Pane's device.
     for (const owner of new Set(this.jobs.running().map(job => job.owner))) this.lifecycle.touch(owner);
     const devices = await this.devices({ inventory: true });
-    const { ended, shutdown } = this.lifecycle.sweep(devices);
+    const { ended, shutdown, forgotten } = this.lifecycle.sweep(devices);
+    for (const id of forgotten) this.boots.delete(id);
+    if (forgotten.length > 0) this.saveBooted();
     for (const lease of ended) {
       const device = devices.find(candidate => candidate.id === lease.id);
+      await this.options.beforeRelease?.(lease.paneId, lease.id, 'device').catch(() => undefined);
       if (device) await this.agentDevice(lease.paneId, device, ['close']).catch(() => undefined);
+      this.stopped(lease.paneId, lease.id, 'idle', true);
       this.options.onChange?.({ kind: 'released', id: lease.id, paneId: lease.paneId, reason: 'idle' });
     }
     for (const id of shutdown) {
       const device = devices.find(candidate => candidate.id === id);
-      if (device) await this.shutdown(device).catch((cause) => this.options.log?.(`[devices] shutdown ${id} failed: ${reasonOf(cause)}`));
+      if (device) await this.shutdownOwnBoot(device, 'idle').catch((cause) => this.options.log?.(`[devices] shutdown ${id} failed: ${reasonOf(cause)}`));
     }
     for (const id of this.lifecycle.stale(devices)) {
       const device = devices.find(candidate => candidate.id === id);
@@ -625,11 +691,101 @@ export class DeviceService {
     await this.stopIfIdle();
   }
 
+  /** Pane is quitting: jobs stop, every device Pane booted shuts down, then the helpers stop for good. */
   async dispose(): Promise<void> {
+    // A shutdown still running when quitting's bound passes must not start the hub again.
+    this.disposed = true;
     for (const owner of new Set(this.jobs.running().map(job => job.owner))) await this.jobs.stopAll(owner);
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.sweepTimer = undefined;
+    this.liveFrames.closeAll();
+    if (this.hub) {
+      // Quitting waits a bounded time; a device still shutting down then is shut down at the next start.
+      let timer: NodeJS.Timeout | undefined;
+      const shuttingDown = this.shutDownBooted('quit').catch((cause) => { this.options.log?.(`[devices] shutting down Pane's devices failed: ${reasonOf(cause)}`); });
+      await Promise.race([shuttingDown, new Promise((resolve) => { timer = setTimeout(resolve, QUIT_SHUTDOWN_MS); })]).finally(() => clearTimeout(timer));
+    }
     await this.stopHelpers();
+  }
+
+  /**
+   * What Pane's last run left when it ended without quitting (a crash or force quit): stops the
+   * device hub it left running, shuts down the devices it booted that still run, then stops the
+   * helpers. A no-op when it left nothing.
+   */
+  async shutDownLeftovers(): Promise<string[]> {
+    if (!this.hub) await this.stopPreviousHub();
+    const ids = [...this.leftovers];
+    this.leftovers = new Set();
+    if (ids.length === 0) return [];
+    const devices = await this.devices();
+    // Only what nothing in this run holds: a resumed agent may have opened one already.
+    const stopped = await this.shutDownBooted('quit', ids.filter(id => !this.lifecycle.holderOf(id)), devices);
+    await this.stopIfIdle();
+    return stopped;
+  }
+
+  /**
+   * Shuts down `ids` (by default every device Pane booted, held or not), giving `by` as the reason.
+   * A device stays on the list until it is seen shut down, so a failed shutdown is tried at the next start.
+   */
+  private async shutDownBooted(by: DeviceStopCause, ids: readonly string[] = this.lifecycle.booted(), listed?: readonly HubDevice[]): Promise<string[]> {
+    const devices = listed ?? await this.devices();
+    const stopped: string[] = [];
+    // All at once: quitting has a bound, and each shutdown mostly waits for its device.
+    await Promise.all(ids.map(async (id) => {
+      const device = devices.find(candidate => candidate.id === id);
+      if (!device) return;
+      if (!device.booted) {
+        // Off already, unless this run is booting it now.
+        if (!this.lifecycle.holderOf(id)) this.lifecycle.shutDown(id);
+        return;
+      }
+      try {
+        if (await this.shutdownOwnBoot(device, by)) stopped.push(id);
+      } catch (cause) {
+        this.options.log?.(`[devices] shutdown ${id} failed: ${reasonOf(cause)}`);
+      }
+    }));
+    this.saveBooted();
+    return stopped;
+  }
+
+  /**
+   * Whether `paneId` still holds a device and it runs, or how its lease ended: what a linked
+   * computer's tab asks to show the real cause of a stop that happened here.
+   */
+  async status(paneId: string): Promise<{ held: boolean; booted?: boolean; stoppedBy?: DeviceStopCause }> {
+    const id = this.lifecycle.leaseOf(paneId);
+    if (id) {
+      const booted = await this.isBooted(id);
+      return booted === false ? { held: true, booted: false, stoppedBy: 'outside' } : { held: true, booted: true };
+    }
+    const last = this.lastStop.get(paneId);
+    return last ? { held: false, booted: last.booted, stoppedBy: last.by } : { held: false };
+  }
+
+  /** Records how `paneId`'s lease on `id` ended, and that a shutdown followed for every Pane that used it. */
+  private stopped(paneId: string | undefined, id: string, by: DeviceStopCause, booted: boolean): void {
+    if (paneId) {
+      this.lastStop.set(paneId, { id, by, booted });
+      return;
+    }
+    for (const [pane, last] of this.lastStop) if (last.id === id) this.lastStop.set(pane, { id, by, booted: false });
+  }
+
+  /**
+   * Whether `id` is booted now; undefined when the hub is not running. A listing a few seconds old
+   * answers yes; a no is checked against a fresh one, so a device that just booted never reads as off.
+   */
+  async isBooted(id: string): Promise<boolean | undefined> {
+    if (!this.hub || this.stopping.has(id)) return undefined;
+    if ((await this.recentDevice(id))?.booted) return true;
+    const listing = { at: this.now(), devices: this.devices() };
+    this.listed = listing;
+    // A listing that failed is not kept for the next ask.
+    const devices = await listing.devices.catch((cause: unknown) => { if (this.listed === listing) this.listed = undefined; throw cause; });
+    return devices.some(device => device.id === id && device.booted);
   }
 
   // ---- internals
@@ -688,8 +844,25 @@ export class DeviceService {
     return path.join(this.options.root, 'agent-device');
   }
 
+  /**
+   * A device from a listing at most a few seconds old: the device tab's controls, logs and frames
+   * ask several times a second, and each listing makes the hub ask simctl and adb. A device missing
+   * from it (one just booted) is looked up again.
+   */
+  private async recentDevice(id: string): Promise<HubDevice | undefined> {
+    const now = this.now();
+    if (!this.listed || now - this.listed.at > RECENT_LISTING_MS) this.listed = { at: now, devices: this.devices() };
+    const listing = this.listed;
+    const cached = (await listing.devices.catch((cause) => { if (this.listed === listing) this.listed = undefined; throw cause; })).find(candidate => candidate.id === id);
+    if (cached) return cached;
+    this.listed = { at: this.now(), devices: this.devices() };
+    return (await this.listed.devices).find(candidate => candidate.id === id);
+  }
+
   private ensureHub(onInstall?: () => void): Promise<RunningHub> {
+    if (!this.hub && this.disposed) return Promise.reject(new PaneError('ERR_DEVICE_QUITTING', 'Pane is quitting, so its device tools are stopping.', 'Open Pane again to use devices.'));
     this.hub ??= (async () => {
+      await this.stopPreviousHub();
       const paths = await this.helpers.ensure(() => { onInstall?.(); this.options.onInstall?.(); });
       const capabilities = await this.probe();
       // The hub publishes its port and token to a state file; keep it in Pane's own folder, not the shared temp folder.
@@ -702,9 +875,49 @@ export class DeviceService {
         env.ANDROID_SDK_ROOT = capabilities.android.sdk;
         if (capabilities.android.javaHome) env.JAVA_HOME = capabilities.android.javaHome;
       }
-      return startHub(paths.hub, { node: this.node, env, onExit: () => { this.hub = undefined; } });
+      const hub = await startHub(paths.hub, { node: this.node, env, onExit: () => { this.hub = undefined; } });
+      if (hub.pid !== undefined) writeFileSync(this.hubFile(), JSON.stringify({ pid: hub.pid, port: hub.port }));
+      return hub;
     })().catch((cause) => { this.hub = undefined; throw cause; });
     return this.hub;
+  }
+
+  /** Where the running hub's pid and port are kept, so a run that crashed does not leave it running. */
+  private hubFile(): string {
+    return path.join(this.options.root, 'hub.json');
+  }
+
+  /**
+   * Stops a hub an earlier run left behind (a crash or force quit kills Pane, not its hub). Only a
+   * process that is still the hub, alive and listening on the hub's port, is stopped.
+   */
+  private async stopPreviousHub(): Promise<void> {
+    let saved: { pid: number; port: number } | undefined;
+    try {
+      saved = decodeBoundary(JSON.parse(readFileSync(this.hubFile(), 'utf8')), boundary.object({ pid: boundary.number, port: boundary.number }));
+    } catch {
+      return;
+    }
+    rmSync(this.hubFile(), { force: true });
+    // Never a signal to "every process" (0, -1) or init: only a real child process id.
+    if (!Number.isInteger(saved.pid) || saved.pid <= 1 || saved.pid === process.pid) return;
+    try {
+      process.kill(saved.pid, 0);
+    } catch {
+      return;
+    }
+    const listening = await new Promise<boolean>((resolve) => {
+      const socket = net.connect({ host: '127.0.0.1', port: saved.port });
+      const done = (open: boolean) => { socket.destroy(); resolve(open); };
+      socket.once('connect', () => done(true));
+      socket.once('error', () => done(false));
+      socket.setTimeout(1_000, () => done(false));
+    });
+    if (!listening) return;
+    try {
+      process.kill(saved.pid, 'SIGTERM');
+      this.options.log?.(`[devices] stopped the device hub an earlier run left running (pid ${saved.pid})`);
+    } catch { /* gone already */ }
   }
 
   /**
@@ -778,21 +991,89 @@ export class DeviceService {
     return summary;
   }
 
-  private async shutdown(device: HubDevice): Promise<void> {
-    const hub = await this.ensureHub();
-    // Keep its last screen for the tab's off state and the chat card.
-    await this.frame(device.id).catch(() => undefined);
-    await hub.request('/api/devices/shutdown', { platform: device.platform, id: device.serial ?? device.id, name: device.name });
-    // The hub answers before the device stops; erasing or deleting it earlier fails on locked files.
-    const deadline = this.now() + SHUTDOWN_WAIT_MS;
-    while ((await this.devices()).some(candidate => candidate.id === device.id && candidate.booted) && this.now() < deadline) {
-      await sleep(1_000);
+  /** Records which boot a device Pane just booted is in; one Pane cannot tell is not Pane's to shut down. */
+  private async recordBoot(device: HubDevice): Promise<void> {
+    const boot = await this.bootIdentityOf(device).catch(() => undefined);
+    if (boot) this.boots.set(device.id, boot);
+    else {
+      this.lifecycle.shutDown(device.id);
+      this.boots.delete(device.id);
+      this.options.log?.(`[devices] could not tell which boot ${device.id} is in, so Pane will not shut it down on its own`);
     }
-    this.options.onChange?.({ kind: 'shutdown', id: device.id });
+    this.saveBooted();
+  }
+
+  /**
+   * Shuts `device` down for one of Pane's own rules (idle, quit, archive) only when it is still in
+   * the boot Pane started: one that went off and was booted again (Simulator, a script, another
+   * Pane) is someone else's, so Pane forgets it instead. Answers whether it shut it down.
+   */
+  private async shutdownOwnBoot(device: HubDevice, by: DeviceStopCause): Promise<boolean> {
+    const recorded = this.boots.get(device.id);
+    const current = recorded ? await this.bootIdentityOf(device).catch(() => undefined) : undefined;
+    if (!recorded || current !== recorded) {
+      this.lifecycle.shutDown(device.id);
+      this.boots.delete(device.id);
+      this.saveBooted();
+      this.options.log?.(`[devices] left ${device.id} running: it is not in the boot Pane started`);
+      return false;
+    }
+    await this.shutdown(device, by);
+    return true;
+  }
+
+  private bootIdentityOf(device: HubDevice): Promise<string | undefined> {
+    const target: BootTarget = { id: device.id, platform: device.platform };
+    if (device.serial) target.serial = device.serial;
+    return (this.options.bootIdentity ?? (candidate => this.ownBootIdentity(candidate)))(target);
+  }
+
+  /**
+   * This machine's answer to which boot a device is in: a simulator's launchd_sim process (its pid
+   * and start time, new on every boot), or an emulator's kernel boot id.
+   */
+  private async ownBootIdentity(device: BootTarget): Promise<string | undefined> {
+    if (device.platform === 'ios') {
+      if (process.platform !== 'darwin') return undefined;
+      const { stdout } = await execFileAsync('ps', ['-axo', 'pid=,lstart=,command='], { maxBuffer: 16 * 1024 * 1024 });
+      const marker = `/Devices/${device.id}/data/var/run/launchd_bootstrap.plist`;
+      const line = stdout.split('\n').find(entry => entry.includes('launchd_sim') && entry.includes(marker));
+      return line?.slice(0, line.indexOf('launchd_sim')).trim().replace(/\s+/g, ' ');
+    }
+    const capabilities = await this.probe();
+    if (!capabilities.android.ready) return undefined;
+    const { stdout } = await execFileAsync(capabilities.android.adb, ['-s', device.serial ?? device.id, 'shell', 'cat', '/proc/sys/kernel/random/boot_id'], { timeout: 10_000 });
+    return stdout.trim() || undefined;
+  }
+
+  private async shutdown(device: HubDevice, by: DeviceStopCause): Promise<void> {
+    const hub = await this.ensureHub();
+    this.stopping.add(device.id);
+    try {
+      // Keep its last screen for the tab's off state and the chat card; quitting has no time for it.
+      if (by !== 'quit') await this.frame(device.id).catch(() => undefined);
+      await hub.request('/api/devices/shutdown', { platform: device.platform, id: device.serial ?? device.id, name: device.name });
+      // The hub answers before the device stops; erasing or deleting it earlier fails on locked files.
+      const deadline = this.now() + SHUTDOWN_WAIT_MS;
+      let running = true;
+      while ((running = (await this.devices()).some(candidate => candidate.id === device.id && candidate.booted)) && this.now() < deadline) {
+        await sleep(1_000);
+      }
+      // Still running: Pane still owes it a shutdown, so it stays on the list for the next try.
+      if (running) throw new PaneError('ERR_DEVICE_SHUTDOWN_TIMEOUT', `${device.name} was still running ${SHUTDOWN_WAIT_MS / 1000} s after Pane asked it to shut down.`, 'Pane tries again at its next sweep or start; shut it down from Simulator or Android Studio if it stays up.');
+    } finally {
+      this.stopping.delete(device.id);
+    }
+    this.lifecycle.shutDown(device.id);
+    this.boots.delete(device.id);
+    this.saveBooted();
+    this.stopped(undefined, device.id, by, false);
+    this.options.onChange?.({ kind: 'shutdown', id: device.id, by });
   }
 
   private async erase(device: HubDevice): Promise<void> {
-    if (device.booted) await this.shutdown(device);
+    // A running device someone else booted is theirs now: no shutdown, and no erase under them.
+    if (device.booted && !(await this.shutdownOwnBoot(device, 'archived'))) return;
     if (device.platform === 'ios') {
       const capabilities = await this.probe();
       if (capabilities.ios.ready) await execFileAsync(capabilities.ios.xcrun, ['simctl', 'erase', device.id], { timeout: 120_000 });
@@ -810,7 +1091,7 @@ export class DeviceService {
 
   private async remove(device: HubDevice): Promise<void> {
     const hub = await this.ensureHub();
-    if (device.booted) await this.shutdown(device);
+    if (device.booted) await this.shutdown(device, 'freed');
     if (device.platform === 'android') {
       // The hub's remove shuts the emulator down by serial first, which fails once it is off.
       await this.deleteAvd(device.name);
@@ -849,7 +1130,7 @@ export class DeviceService {
   private async stopIfIdle(): Promise<void> {
     if (!this.hub || this.lifecycle.active() || this.jobs.running().length > 0) return;
     const devices = await this.devices();
-    if (devices.some(device => device.booted && (device.paneMade || this.lifecycle.holderOf(device.id)))) return;
+    if (devices.some(device => device.booted && (this.lifecycle.booted().includes(device.id) || this.lifecycle.holderOf(device.id)))) return;
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     this.sweepTimer = undefined;
     await this.stopHelpers();
@@ -860,6 +1141,7 @@ export class DeviceService {
     this.hub = undefined;
     if (hub) await (await hub.catch(() => undefined))?.stop();
     rmSync(this.hubStateDir(), { recursive: true, force: true });
+    rmSync(this.hubFile(), { force: true });
     // agent-device's daemon keeps its pid in its state folder.
     const daemon = path.join(this.stateDir(), 'daemon.json');
     if (existsSync(daemon)) {
@@ -918,11 +1200,25 @@ export class DeviceService {
 
   private readState(): DeviceState {
     try {
-      const { made } = decodeBoundary(JSON.parse(readFileSync(this.statePath(), 'utf8')), stateSchema);
-      return { made: Object.fromEntries(Object.entries(made).map(([id, device]) => [id, { ...device, users: [...device.users] }])) };
+      const { made, booted, boots } = decodeBoundary(JSON.parse(readFileSync(this.statePath(), 'utf8')), stateSchema);
+      const state: DeviceState = { made: Object.fromEntries(Object.entries(made).map(([id, device]) => [id, { ...device, users: [...device.users] }])) };
+      if (booted) state.booted = [...booted];
+      if (boots) state.boots = { ...boots };
+      return state;
     } catch {
       return { made: {} };
     }
+  }
+
+  /** Saves which devices Pane booted, when that changed. */
+  private saveBooted(): void {
+    const state = this.readState();
+    const booted = this.lifecycle.booted();
+    const boots = Object.fromEntries(booted.flatMap(id => { const boot = this.boots.get(id); return boot ? [[id, boot] as const] : []; }));
+    if (state.booted && JSON.stringify(state.booted) === JSON.stringify(booted) && JSON.stringify(state.boots ?? {}) === JSON.stringify(boots)) return;
+    state.booted = booted;
+    state.boots = boots;
+    this.writeState(state);
   }
 
   private writeState(state: DeviceState): void {
@@ -934,7 +1230,17 @@ export class DeviceService {
 }
 
 /** serve-emu's REST bodies: a normalized tap or swipe, a key, or nothing for a screenshot. */
-export type EmulatorRequest = { x: number; y: number } | { x1: number; y1: number; x2: number; y2: number } | { key: 'home' | 'back' } | Record<string, never>;
+/** A body for serve-emu's REST routes: a tap or swipe, a key, typed text, a turn, a fold, or nothing. */
+export type EmulatorRequest =
+  | { x: number; y: number }
+  | { x1: number; y1: number; x2: number; y2: number }
+  | { key: 'home' | 'back' }
+  | { keycode: number }
+  | { text: string }
+  | { orientation: string }
+  | { posture: 'closed' | 'opened' }
+  | { hingeAngle: number }
+  | Record<string, never>;
 
 export interface DeviceScreenshot { path: string; width?: number; height?: number }
 

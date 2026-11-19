@@ -14,7 +14,7 @@ side of it, and keeps its name in the CLI, the MCP server and the code.
 | `ui` | Card | Result |
 | --- | --- | --- |
 | `options` | The question and 1 to 9 `choices` (`{label, detail?, recommended?}`), or 2 to 4 `questions` (`{title, choices}`, one pick each) instead. The strip shows four, then **More**. | `{answer, note?}` (`answers[]` too for several questions), or `{reply, picks?, id, next}` when the person typed something ([Replies](#replies-and-new-versions)) |
-| `approve` | Deny and Approve, plus a disclosure with the preformatted `detail`. `detailLabel` names the disclosure (up to 40 characters; default **Show details**). | `{approved, note?}` |
+| `approve` | Deny and Approve, plus a disclosure with the preformatted `detail`. `detailLabel` names the disclosure (up to 40 characters; default **Show details**). | `{approved, note?}`. A lease card (an approve card with a lease section, posted by `runpane secrets lease`) returns `{status: "leased", project, names, leaseId, expiresAt, machines}` or `{status: "declined"}` instead. |
 | `ask` | A text field, with optional `suggestions` as chips above it. | `{answer}` |
 | `secret` | A masked field with **Save securely** and **Decline**. Created only by `runpane secrets request` (MCP `secrets_request`), never with `notify --ui`. The host saves the value as a [Pane secret](PANE_SECRETS.md) and drops it; it never reaches the agent, history or other screens. No Undo. | `{status: "saved", project, name}` or `{status: "declined"}` |
 | `info` | One line, with at most one `action` button (`{label, url}`). It returns at once and hides after a few seconds. | `{delivered: "screen" \| "inbox"}` |
@@ -91,7 +91,10 @@ Session go under "Not in a Session". Items Autopilot asks itself go under
   `needs_you` lists them). A question that ends with its options in brackets
   ("(A / B)") and gives no buttons either way is refused
   (`ERR_REPORT_PACKED_OPTIONS`) and nothing is shown; a question with no
-  options is an open question, answered in words. That question is a card at once, with an answer box, and it
+  options is an open question, answered in words. A unit in brackets with a
+  spaced slash, "(requests / second)", reads as options too: when you ask for
+  a value, word it as prose ("in requests per second") or drop the spaces
+  ("(requests/second)"); the refusal says so. That question is a card at once, with an answer box, and it
   rings once the orchestrator relays it or after 10 minutes, so the orchestrator
   first settles what the plan already answers. Your answer goes straight to the
   worker's tab (`answer: Q-n → <answer> (by you)`), even with the orchestrator
@@ -231,7 +234,19 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   **Open on <machine>** for another machine's item). Below about 1,100px wide,
   the list stacks above the column. After a pick, the column shows "Sent:
   …" with **Undo** for 3 seconds; the item then moves to **Done today**,
-  which lists the last 24 hours, updates (`ui info`) included. Under Most
+  which lists the last 24 hours, updates (`ui info`) included. **Archive**
+  closes a waiting item without opening it: hover a row (or move the key
+  focus to it) and click the archive button where its age sits, press ⌫ on
+  the focused row, or choose **Archive all** on a group's header. Nothing
+  asks first: the items leave the list and every count at once, a toast
+  offers **Undo** for 5 seconds (it brings the items and the selection back),
+  and when it ends each asker is told the person closed it, as by the
+  column's **Close…** with no reason. Archiving again while the toast shows
+  joins it and starts it over, so one Undo brings back every one. The
+  selection moves to the next row. On the phone, swipe a Needs you row left
+  to **Archive**, with the same Undo; a close the computer refuses shows why
+  under its row until dismissed. Permission prompts, relayed questions
+  and items on an unreachable machine have no archive. Under Most
   recent, once a typed reply is with an agent, Waiting splits into **Waiting
   on you** and **With the agent**, each row naming who reads the reply. Inside Pane there is no
   floating strip and no Notify row in the sidebar.
@@ -240,7 +255,7 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   and → while it has focus) and ✕ closes it. On the Approvals screen ✕ is
   **Dismiss**: the column closes without answering, the item stays in the list
   (and leaves the floating strip), and no other item opens until you pick a
-  row. Its tabs are **Decide** (the
+  row; keyboard focus goes to that row. Its tabs are **Decide** (the
   subtitle, each question with its why and options, recommended ones
   marked but none selected until you pick, the references and one reply box that grows up to half the
   column), **Summary** (one HTML page: the asker's own, an `.html` passed as a
@@ -252,7 +267,11 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   it was asked, left out when you're already in it. In a **Session**, the
   column lays over the Session's right split view without resizing it, and ✕
   ("Back to <tab>") shows the split again as it was; with no split open it
-  opens a split of its own, and ✕ ("Close split") collapses it. There it is a
+  opens a split of its own, and ✕ ("Close split") collapses it. A new
+  approval asked while the Session is shown opens there on its own, once,
+  unless the column already shows one; it never moves keyboard focus. A
+  worker's question waits while its orchestrator may answer it and opens when
+  relayed, and the chat's own prompts stay in the chat. There it is a
   focus stop of its own: Focus Right (⌘⌥→) and F6 move into it from the chat,
   the tab keys (⌘⇧[ ⌘⇧], ⌘⇧1-9) walk its tabs while it has focus, Focus Left
   or Esc go back to the chat's message box, and its active tab carries the
@@ -264,7 +283,7 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   while Pane is in front. ⌘F finds text in Decide, the Summary (the frame
   shares Pane's origin so it can be searched, with scripts still off) and
   each reference. ⌘/ lists every key. The right
-  sidebar (Overview, Files, Changes) is never covered. The Session's title
+  sidebar (Files, Changes) is never covered. The Session's title
   bar shows **Approvals n · n ready**, and a Session row's count in the
   sidebar opens the newest ready-again approval, or the first waiting one. A
   Session's orchestrator chat docks one compact card above its composer:
@@ -273,7 +292,8 @@ Codex panel also closes when that panel sits idle at its prompt for 10 seconds.
   with the column's. Its ✕ (**Dismiss**) takes the card out of that chat
   without answering it (and closes the column if it was open there): it
   keeps waiting in Approvals, and comes back to the chat only when it changes
-  (a new version, a reply or ready again). The chat's own AskUserQuestion isn't docked: the chat
+  (a new version, a reply or ready again). Focus moves to the next card (the
+  one before when it was last), or to the message box when none is left. The chat's own AskUserQuestion isn't docked: the chat
   already shows Claude's card, and Approvals and the phone keep the copy.
   **Send** closes the column, and a status line in the chat names the agent
   reading the reply ("okta-sso-account is reading your reply to Q-42"), then
@@ -306,9 +326,14 @@ box) stay there, even with the pointer over a card. The floating strip over
 another app takes keys once you click it, so typing in that app never answers
 by accident. Keys work whatever Pane's keyboard-shortcuts setting says. On
 Approvals, **More** (or **Details**, when choices have notes) opens the card in
-place with every choice, its note and **Send**.
+place with every choice, its note and **Send**; ↵ there does what **Send**
+does, sending the pick with its note, or the note alone as a reply.
 
 ✕ (**Dismiss**) hides a question from the strip without answering it; it keeps waiting in Approvals.
+Keyboard focus moves to the card the strip shows next.
+A dismissed question no longer counts as open for its Session: the Session's
+count and badge leave it out, and it doesn't hold back a move to another
+machine. It counts again when it changes (a new version, Undo or a reopen).
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
 switch to Pane. The clock at the bottom right of a card snoozes it for 3, 5
 or 15 minutes: it leaves the strip, then comes back in its place in the
@@ -463,7 +488,7 @@ An approval exists only while you can act on it and someone can take the answer
 | Its asker is gone: its Pane archived or deleted, its tab closed, the worker sent a newer report, or a `notify` caller stopped waiting | Closes within 5 s of Pane learning it, with the reason: "closed: the asking tab was closed", "closed: the worker moved on", "closed: the asker stopped waiting". A sweep every 60 seconds catches anything missed. One exception: when only its tab closed and the orchestrator that relayed it, or Autopilot, can still read a reply for it, it stays open. |
 | Pane restarts | Items whose asking tab still exists stay waiting. |
 | Unanswered for 3 days | Stale: moved to a collapsed **Stale** group at the bottom of Waiting. It never rings or pushes again. |
-| You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab. **Reopen** puts it back. |
+| You close one | One action on any card, with an optional reason. Its asker's open call returns "The person closed this question.", or `closed: Q-n (by you)` is typed into its tab; several closes waiting for the same tab go as one line, `closed: Q-1, Q-2, Q-3 (by you)`. **Reopen** puts it back. |
 | You or Autopilot answered | Done today lists it for 24 hours. |
 
 The store keeps answered and closed items 7 days for the record and for
@@ -557,8 +582,8 @@ the agent:
   since its cards can't be answered; the agents keep waiting. After reconnecting
   the screen shows what is waiting there now. Autopilot says "<machine> offline".
 - **Your phone**: the Pane app lists approvals on home's **Needs you** tile, in
-  the same three sorts (chosen on its sort sheet), and an item opens above its
-  Session's tabs and chat. A question still waiting after
+  the same three sorts (chosen on its sort sheet), and an item opens as the
+  first tab, before its references and its Session's tabs and chat. A question still waiting after
   about 90 seconds sends one alert to every phone signed
   in to the host in the Pane app with notifications allowed and **Needs
   Input** on. The alert is titled with the Pane's name and says only "<Pane>

@@ -10,7 +10,7 @@ import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const connectedClients: Array<RemoteDaemonBrowserClient | RemoteRuntimeAdapter> = [];
 const originalFetch = globalThis.fetch;
-const originalEventSource = globalThis.EventSource;
+const originalEventSource = Object.getOwnPropertyDescriptor(globalThis, 'EventSource');
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 
@@ -18,7 +18,11 @@ afterEach(() => {
   for (const client of connectedClients.splice(0)) client.disconnect();
   vi.restoreAllMocks();
   globalThis.fetch = originalFetch;
-  globalThis.EventSource = originalEventSource;
+  if (originalEventSource) {
+    Object.defineProperty(globalThis, 'EventSource', originalEventSource);
+  } else {
+    Reflect.deleteProperty(globalThis, 'EventSource');
+  }
 
   if (originalNavigator) {
     Object.defineProperty(globalThis, 'navigator', originalNavigator);
@@ -79,7 +83,8 @@ describe('Remote PWA browser runtime', () => {
 
     expect(result).toEqual({ projects: [] });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith('https://host.example.test/invoke', {
+    // A read also carries its per-attempt deadline as an abort signal.
+    expect(fetchMock).toHaveBeenCalledWith('https://host.example.test/invoke', expect.objectContaining({
       method: 'POST',
       headers: {
         Authorization: 'Bearer secret-token',
@@ -92,7 +97,8 @@ describe('Remote PWA browser runtime', () => {
         runtimeId: 'runtime-id-1',
         clientLabel: 'Pane PWA on TestOS',
       }),
-    });
+      signal: expect.any(AbortSignal),
+    }));
   });
 
   it.each(['terminal:input', 'sessions:create', 'panels:create', 'sessions:get-or-create-main-repo', 'new:command'])(

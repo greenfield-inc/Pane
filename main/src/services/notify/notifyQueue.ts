@@ -11,6 +11,7 @@ import type {
   NotifyConnected,
   NotifyInstructionsFile,
   NotifyItem,
+  NotifyLeaseTarget,
   NotifyQuestion,
   NotifyReply,
   NotifyReplyReader,
@@ -124,6 +125,8 @@ interface TabMessage {
   reply?: string;
   /** The asking tab's Pane, which says which machine a Session member on another computer is on. */
   paneId?: string;
+  /** A close's line, `closed: <ref> <tail>`: closes waiting for the same tab with the same tail go as one line. */
+  closed?: { ref: string; tail: string };
 }
 
 /** Which item Autopilot's action left in place: for a rewrite, the new one. */
@@ -167,6 +170,11 @@ export interface NotifyQueueEnvironment {
   secrets?: {
     exists(project: string, name: string): boolean;
     save(project: string, name: string, value: string): Promise<void>;
+  };
+  /** What a lease card shows about this machine's side of a lease. */
+  leases?: {
+    /** `lengthMs` is null on a machine that doesn't grant leases (a headless host). */
+    describe(project: string, names: readonly string[]): { references: Record<string, string>; lengthMs: number | null; memoryOnly: boolean };
   };
   /** The Session a Pane (and tab) works in, filed on each new item; Approvals groups by it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
@@ -341,6 +349,7 @@ export class NotifyQueue extends EventEmitter {
         continue;
       }
       this.queue.push(item.id);
+      if (item.dismissedAt !== undefined) this.hidden.add(item.id);
       if (item.quiet) this.armRing(entry);
     }
     for (const entry of this.entries.values()) {
@@ -404,6 +413,10 @@ export class NotifyQueue extends EventEmitter {
     if (question.secret) {
       const { project, name } = question.secret;
       item.secret = { project, name, replaces: this.env.secrets?.exists(project, name) ?? false };
+    }
+    if (question.lease) {
+      if (question.ui !== 'approve' || !this.env.leases) return Promise.resolve(unavailable('This Pane cannot lease secrets.'));
+      Object.assign(item, leaseCard(question.lease, this.env.leases, this.machine()));
     }
     item.originKind = originOf(item);
     item.connected = request.connected ?? connectedOf(item, this.machine());
@@ -478,8 +491,9 @@ export class NotifyQueue extends EventEmitter {
     if (teammate && command.type.startsWith('agent-')) {
       throw new PaneError('ERR_NOTIFY_NOT_AUTOPILOT', `${teammate} can't act as Autopilot on ${this.machine()}. Nothing was changed.`, 'Answer or close it as yourself instead.');
     }
-    if (teammate && entry.item.ui === 'secret' && command.type !== 'dismiss' && command.type !== 'skip' && command.type !== 'remind') {
-      throw teammateSecretRefusal(teammate, command.type === 'answer' ? 'answer a secret card' : `${command.type} a secret card`);
+    if (teammate && (entry.item.ui === 'secret' || entry.item.lease) && command.type !== 'dismiss' && command.type !== 'skip' && command.type !== 'remind') {
+      const card = entry.item.lease ? 'a lease card' : 'a secret card';
+      throw teammateSecretRefusal(teammate, command.type === 'answer' ? `answer ${card}` : `${command.type} ${card}`);
     }
     switch (command.type) {
       case 'close': this.closeBy(command.id, 'you', command.reason ?? '', device); return;
@@ -562,6 +576,27 @@ export class NotifyQueue extends EventEmitter {
     }
   }
 
+  /** Another machine's lease card, rewritten with this desktop's references and length, when this desktop grants leases. */
+  private asGranted(item: NotifyItem): NotifyItem {
+    if (!item.lease || !this.env.leases) return item;
+    const granted = leaseCard(item.lease, this.env.leases, item.lease.machine ?? item.machine ?? '');
+    if (granted.lease?.lengthMs === undefined) return item;
+    return { ...item, title: granted.title, lease: { ...granted.lease, memoryOnly: item.lease.memoryOnly } };
+  }
+
+  /** Why this desktop could not start the lease a card asks for; the card keeps waiting with it shown. Null clears it. */
+  noteLeaseError(id: string, text: string | null): void {
+    // Another machine's card too: this screen shows the error until that machine's next state replaces the item.
+    const item = this.find(id);
+    if (!item?.lease || item.state !== 'waiting') return;
+    if (text === null) delete item.leaseError;
+    else {
+      item.leaseError = text;
+      item.leaseAttempt = (item.leaseAttempt ?? 0) + 1;
+    }
+    this.changed();
+  }
+
   /** The orchestrator recorded this answer as a D-n (J8). */
   recordDecision(id: string, decision: string): boolean {
     const entry = this.entries.get(id);
@@ -581,6 +616,10 @@ export class NotifyQueue extends EventEmitter {
     if (!entry) throw new PaneError('ERR_NOTIFY_GONE', `That item is no longer on ${this.machine()}. Nothing was changed.`, 'List what waits again with runpane autopilot waiting --json.');
     if (entry.item.agentPrompt) {
       throw new PaneError('AUTOPILOT_CANNOT_ANSWER', `Autopilot can't answer or close the permission prompt "${entry.item.title}": permission prompts grant an agent power, so they stay the person's (D-149). Nothing was changed; it still waits.`, 'Point the person to the buttons on its card.');
+    }
+    if (entry.item.lease && action.type !== 'agent-close') {
+      // Only the person grants access to their 1Password, on their computer (D-130).
+      throw new PaneError('AUTOPILOT_CANNOT_ANSWER', `Autopilot can't answer or rewrite the lease card "${entry.item.title}": only the person starts a lease, on their computer. Nothing was changed; it still waits.`, 'Point the person to the card.');
     }
     if (entry.item.ui === 'secret' && action.type !== 'agent-close') {
       // A secret's value goes only to the secret store, from the person (#1014); Autopilot has none to give.
@@ -772,7 +811,7 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** One conditional row write: false means another answer or close got there first, and the row's version is back in memory. */
-  private claimRow(entry: Entry, before: NotifyItem): boolean {
+  private claimRow(entry: Entry, _before: NotifyItem): boolean {
     const { store } = this.env;
     if (!store) return true;
     let claimed: boolean;
@@ -1037,6 +1076,7 @@ export class NotifyQueue extends EventEmitter {
     item.readyAgain = now;
     clearTimeout(entry.graceTimer);
     item.staleSince = undefined;
+    item.dismissedAt = undefined;
     this.hidden.delete(item.id);
     this.save(entry);
     // Ready again is quiet: a notice where the person is, and no chime (D-244).
@@ -1087,6 +1127,8 @@ export class NotifyQueue extends EventEmitter {
     item.answerSummary = undefined;
     item.answeredBy = undefined;
     item.delivered = undefined;
+    // It asks again, so a Dismiss from before no longer holds (as Reopen and Undo).
+    item.dismissedAt = undefined;
     // An answer still waiting for the next --resume is no longer the answer.
     entry.pending = undefined;
     this.queue = [item.id, ...this.queue.filter(other => other !== item.id)];
@@ -1163,7 +1205,8 @@ export class NotifyQueue extends EventEmitter {
     const heardOnCall = entry.waiter !== undefined || entry.resumeLoop;
     this.closeOpen(entry, { by, reason }, closedResult(`${who} closed this question${reason ? `: ${reason}` : ''}.`));
     if (!heardOnCall && entry.item.source.panelId) {
-      this.enqueueTabMessage(entry.item, `closed: ${askerRef(entry.item)} (by ${by === 'autopilot' ? 'Autopilot' : 'you'})${reason ? `: ${reason}` : ''}`, false);
+      const tail = `(by ${by === 'autopilot' ? 'Autopilot' : 'you'})${reason ? `: ${reason}` : ''}`;
+      this.enqueueTabMessage(entry.item, closedLine([askerRef(entry.item)], tail), false, undefined, { ref: askerRef(entry.item), tail });
     }
   }
 
@@ -1195,6 +1238,7 @@ export class NotifyQueue extends EventEmitter {
     entry.item.resolvedAt = undefined;
     entry.item.answeredOn = undefined;
     entry.item.staleSince = undefined;
+    entry.item.dismissedAt = undefined;
     entry.item.reopened = { by: 'you', at: Date.now(), closedBy: previous.by, closedReason: previous.reason };
     if (device) entry.item.reopened.device = device;
     entry.restored = true;
@@ -1251,15 +1295,15 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** Types `text` into the asker's tab, or `to.panelId` (a reply's reader). */
-  private enqueueTabMessage(item: NotifyItem, text: string, answer: boolean, to?: { panelId: string; reply?: string }): void {
+  private enqueueTabMessage(item: NotifyItem, text: string, answer: boolean, to?: { panelId: string; reply?: string }, closed?: TabMessage['closed']): void {
     const panelId = to?.panelId ?? item.source.panelId;
     if (!panelId || !this.env.typeIntoTab) return;
     // The same reply is never typed twice (D-258).
     if (to?.reply && this.tabMessages.some(message => message.reply === to.reply)) return;
-    // One line: a newline in an answer would submit early, and a control character is a key press.
-    const message: TabMessage = { itemId: item.id, panelId, text: text.replace(/\p{Cc}+/gu, ' '), answer };
+    const message: TabMessage = { itemId: item.id, panelId, text: oneLine(text), answer };
     if (!to && item.source.paneId) message.paneId = item.source.paneId;
     if (to?.reply) message.reply = to.reply;
+    if (closed) message.closed = closed;
     this.tabMessages.push(message);
     this.flushTabMessages();
   }
@@ -1272,11 +1316,14 @@ export class NotifyQueue extends EventEmitter {
       if (this.tabsTyping.has(message.panelId)) continue;
       this.tabsTyping.add(message.panelId);
       if (message.reply) this.repliesTyping.add(message.reply);
+      // Archive all on one asker's cards: their closes reach its tab as one line, so one turn.
+      const batch = message.closed ? this.tabMessages.filter(other => other.panelId === message.panelId && other.closed?.tail === message.closed?.tail) : [message];
+      const text = batch.length > 1 && message.closed ? closedLine(batch.map(other => other.closed?.ref ?? ''), message.closed.tail) : message.text;
       let again = false;
-      void type(message.panelId, message.text, message.paneId).then((outcome) => {
+      void type(message.panelId, text, message.paneId).then((outcome) => {
         if (outcome === 'busy') return;
         again = true;
-        this.tabMessages = this.tabMessages.filter(other => other !== message);
+        this.tabMessages = this.tabMessages.filter(other => !batch.includes(other));
         const entry = this.entries.get(message.itemId);
         if (message.reply && entry) this.replyTyped(entry, message, outcome);
         if (message.answer && entry) {
@@ -1482,7 +1529,8 @@ export class NotifyQueue extends EventEmitter {
     const machine = next.machine;
     // The card key, as the glasses key cards: `<machineId>:<id>`.
     const key = (id: string) => `${machineId}:${id}`;
-    const keyed = state.items.map(item => ({ ...item, id: key(item.id), machine, machineId }));
+    // A lease card shows the length and references this desktop will grant, not the asking host's (F-3).
+    const keyed = state.items.map(item => this.asGranted({ ...item, id: key(item.id), machine, machineId }));
     const items = new Map(keyed.map(item => [item.id, item]));
     const queue = state.queue.map(key);
     const stripId = this.strip()?.itemId;
@@ -1782,6 +1830,7 @@ export class NotifyQueue extends EventEmitter {
       throw new PaneError('ERR_NOTIFY_IN_TERMINAL', `${entry.item.source.agent} stopped waiting on Pane and is asking in its terminal now. Nothing was sent.`, 'Open the tab and answer in the terminal.');
     }
     if (entry.item.ui === 'secret') return this.answerSecret(entry, answer, device);
+    if (entry.item.lease) return this.answerLease(entry, answer, device);
     const typed = 'picks' in answer ? answer.text?.trim() ?? '' : '';
     if ('picks' in answer && typed && entry.item.optionsOnly) {
       throw new Error('This question takes only one of its options: pick one, or answer in its chat.');
@@ -1844,6 +1893,37 @@ export class NotifyQueue extends EventEmitter {
     this.finishSecret(entry, { status: 'saved', project: target.project, name: target.name }, `Saved as ${target.project}/${target.name}`, device);
   }
 
+  /**
+   * A lease card ends at once: Decline, or Approve from a desktop that already read 1Password and
+   * pushed the lease (it sends the lease with the answer). A plain Approve, from a screen too old for
+   * leases or from the phone, is refused with the next step: only a computer can show 1Password's prompt.
+   */
+  private answerLease(entry: Entry, answer: NotifyAnswer, device?: string): void {
+    const target = entry.item.lease;
+    if (!target) return;
+    if (!('approved' in answer)) throw new Error('A lease card takes Start lease or Decline.');
+    if (!answer.approved) {
+      this.finishSecret(entry, { status: 'declined' }, 'Declined', device);
+      return;
+    }
+    if (!answer.lease) {
+      throw new PaneError(
+        'SECRET_LEASE_NEEDS_DESKTOP',
+        'Only Pane on a computer can start a lease, because 1Password asks for approval there. Nothing was leased.',
+        'Press Start lease on the card in Pane on your Mac or PC.',
+      );
+    }
+    const { id, expiresAt, machines, refused } = answer.lease;
+    // The receipt names machines the lease could not reach, so a refusal is never lost.
+    const missed = refused?.length ? `; not on ${refused.join('; ')}` : '';
+    this.finishSecret(
+      entry,
+      { status: 'leased', project: target.project, names: [...target.names], leaseId: id, expiresAt, machines: [...machines] },
+      `Leased until ${new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} on ${machines.join(', ')}${missed}`,
+      device,
+    );
+  }
+
   private finishSecret(entry: Entry, result: NotifyResult, summary: string, device?: string): void {
     const id = entry.item.id;
     delete entry.item.secretError;
@@ -1881,6 +1961,7 @@ export class NotifyQueue extends EventEmitter {
     entry.item.answerSummary = undefined;
     entry.item.answeredOn = undefined;
     entry.item.answeredBy = undefined;
+    entry.item.dismissedAt = undefined;
     this.save(entry);
     this.queue = [id, ...this.queue];
     if (this.transient?.view.itemId === id) this.clearTransient();
@@ -1922,7 +2003,11 @@ export class NotifyQueue extends EventEmitter {
     }
     this.hidden.add(id);
     const entry = this.entries.get(id);
-    if (entry) endReminder(entry);
+    if (entry) {
+      endReminder(entry);
+      entry.item.dismissedAt = Date.now();
+      this.save(entry);
+    }
     this.changed();
   }
 
@@ -2012,7 +2097,8 @@ export class NotifyQueue extends EventEmitter {
     return { ...source, ...(session && { session }), ...(project && { project }) };
   }
 
-  private find(id: string): NotifyItem | undefined {
+  /** This machine's item, or another machine's this screen follows (keyed `<machineId>:<id>`). */
+  find(id: string): NotifyItem | undefined {
     const local = this.entries.get(id)?.item;
     if (local) return local;
     for (const remote of this.remotes.values()) {
@@ -2142,6 +2228,16 @@ function unavailable(reason: string): NotifyResult {
 }
 
 /** How the asker recognises its question in a typed line: its Q-n, else its title. */
+/** One line: a newline in an answer would submit early, and a control character is a key press. */
+function oneLine(text: string): string {
+  return text.replace(/\p{Cc}+/gu, ' ');
+}
+
+/** A tab's close line, for one close or several waiting for the same tab: `closed: Q-1, Q-2 (by you): <reason>`. */
+function closedLine(refs: readonly string[], tail: string): string {
+  return oneLine(`closed: ${refs.join(', ')} ${tail}`);
+}
+
 function askerRef(item: NotifyItem): string {
   return leadingQn(item.title) ?? `"${item.title.length > 80 ? `${item.title.slice(0, 79)}…` : item.title}"`;
 }
@@ -2240,4 +2336,29 @@ function summarize(item: NotifyItem, result: NotifyResult): string {
   if ('approved' in result) return `${result.approved ? 'Approved' : 'Denied'}${note}`;
   if ('answer' in result) return `${result.answer}${note}`;
   return item.title;
+}
+
+/** The host's side of a lease card: its references, length and storage, and a title the agent can't word. */
+function leaseCard(
+  lease: NotifyLeaseTarget,
+  leases: NonNullable<NotifyQueueEnvironment['leases']>,
+  machine: string,
+): Pick<NotifyItem, 'lease' | 'title'> {
+  const names = [...new Set(lease.names)];
+  const described = leases.describe(lease.project, names);
+  const what = names.length === 1 ? `${lease.project}/${names[0]}` : `${names.length} ${lease.project} secrets`;
+  const card: NotifyLeaseTarget = { project: lease.project, names, references: described.references, machine, memoryOnly: described.memoryOnly };
+  if (lease.renews) card.renews = lease.renews;
+  const lengthMs = described.lengthMs;
+  if (lengthMs === null) return { title: lease.renews ? `Extend the lease on ${what}?` : `Lease ${what}?`, lease: card };
+  card.lengthMs = lengthMs;
+  const length = leaseLengthText(lengthMs);
+  return { title: lease.renews ? `Extend the lease on ${what} for ${length}?` : `Lease ${what} for ${length}?`, lease: card };
+}
+
+/** "24 hours", "3 days", "30 minutes". */
+function leaseLengthText(lengthMs: number): string {
+  const hours = lengthMs / 3_600_000;
+  if (hours >= 48 && Number.isInteger(hours / 24)) return `${hours / 24} days`;
+  return hours >= 1 ? `${Math.round(hours * 10) / 10} hours` : `${Math.round(lengthMs / 60_000)} minutes`;
 }

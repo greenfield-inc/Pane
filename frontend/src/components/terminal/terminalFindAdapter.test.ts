@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  blendHex, cellColumnToStringOffset, countBufferMatches, createTerminalFindAdapter, parseCssColor,
+  blendHex, cellColumnToStringOffset, countBufferMatches, createTerminalFindAdapter, HIGHLIGHT_LIMIT, parseCssColor,
   type FindBuffer, type FindBufferLine, type FindCell, type FindSearchAddon, type FindTerminal,
 } from './terminalFindAdapter';
 
@@ -65,23 +65,19 @@ describe('countBufferMatches', () => {
     expect(cellColumnToStringOffset(line, 5)).toBe(3);
   });
 
-  it('counts a late current match in one long soft-wrapped line quickly (C5: 2,500 x 200)', () => {
+  it('counts a late current match in one long soft-wrapped line in one pass (C5: 2,500 x 200)', () => {
     const buffer = fakeBuffer(['a'.repeat(200), ...Array.from({ length: 2499 }, () => '~' + 'a'.repeat(200))]);
-    const start = performance.now();
-    const result = countBufferMatches(buffer, 'a', { row: 2499, col: 199 });
-    const elapsed = performance.now() - start;
-    expect(result).toEqual({ current: 500_000, total: 500_000 });
-    // The old per-hit row walk took 625 million steps here (seconds); one pass takes tens of ms.
-    expect(elapsed).toBeLessThan(250);
+    let reads = 0;
+    const counted: FindBuffer = { length: buffer.length, getLine: (index: number) => { reads++; return buffer.getLine(index); } };
+    expect(countBufferMatches(counted, 'a', { row: 2499, col: 199 })).toEqual({ current: 500_000, total: 500_000 });
+    // One pass reads each row a few times; the old per-hit row walk read rows 625 million times (seconds).
+    expect(reads).toBeLessThan(3 * 2500);
   });
 
-  it('counts past the highlight limit (one letter over a full 2,500 x 200 scrollback)', () => {
-    const buffer = fakeBuffer(Array.from({ length: 2500 }, () => 'a'.repeat(200)));
-    const start = performance.now();
-    const result = countBufferMatches(buffer, 'a', { row: 0, col: 0 });
-    const elapsed = performance.now() - start;
-    expect(result).toEqual({ current: 1, total: 500_000 });
-    expect(elapsed).toBeLessThan(100);
+  it('counts past the highlight limit (one letter over 30 x 100 rows: 3,000 matches)', () => {
+    expect(3_000).toBeGreaterThan(HIGHLIGHT_LIMIT);
+    const buffer = fakeBuffer(Array.from({ length: 30 }, () => 'a'.repeat(100)));
+    expect(countBufferMatches(buffer, 'a', { row: 0, col: 0 })).toEqual({ current: 1, total: 3_000 });
   });
 });
 
