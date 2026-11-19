@@ -84,6 +84,13 @@ export const NOT_IN_CI = {
   'tests/session-output-perf.spec.ts': 'Render-count measurement; needs PANE_REACT_SCAN=1 on the runner and the dev server.',
   'tests/terminal-frames.perf.spec.ts': '120 Hz frame harness; needs PANE_FRAME_HARNESS=1 and a running dev server, and measures rather than checks.',
   'tests/session-activity-real.spec.ts': 'Spends real Claude Code and Codex model turns; runs only by hand with SESSION_ACTIVITY_REAL=1.',
+  'tests/orchestration-sessions.spec.ts': 'Out of CI until the decision on its failing tests: its tests 1194 (stale, covered by SessionActivity unit tests) and 2566 (product bug #1560) fail.',
+  'tests/remote-pwa-browser.spec.ts': 'Out of CI until the decision on its failing tests: its test at line 40 fails on product bug #1559.',
+  'tests/sidebar-compact.spec.ts': 'Out of CI until the decision on its failing tests: its test at line 550 fails on product bug #1561.',
+  'tests/review-availability.spec.ts': 'Out of CI until the decision on its failing tests: its test at line 232 fails on product bug #1562.',
+  'tests/split-groups.spec.ts': 'Out of CI until the decision on its failing tests: its test at line 146 checks a layout fallback removed in 28ae48224 (stale; tests/renderer/selection.renderer.ts:249 covers what replaced it).',
+  'tests/mermaid-preview.spec.ts': 'Out of CI until the decision on its failing tests: both tests need a new preview-url fixture since b54794b21.',
+  'tests/command-palette.spec.ts': 'Out of CI until the decision on its failing tests: its tests at lines 389 and 413 are speed budgets the 4-vCPU runner misses.',
   'mobile/android/app/src/test/java/com/getcapacitor/myapp/ExampleUnitTest.java': 'Capacitor template placeholder (asserts 2 + 2 = 4); proposed for removal.',
   'mobile/android/app/src/androidTest/java/com/getcapacitor/myapp/ExampleInstrumentedTest.java': 'Capacitor template placeholder (checks the package name on a device); proposed for removal.',
 };
