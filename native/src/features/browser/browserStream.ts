@@ -16,7 +16,7 @@ export type StreamStop = 'unreachable' | 'older' | 'asleep' | 'gone';
 export function isOlderHost(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined;
-  return code === 'ERR_UNKNOWN_CHANNEL' || /ERR_UNKNOWN_CHANNEL|No Pane daemon command registered/i.test(error.message);
+  return code === 'ERR_UNKNOWN_CHANNEL' || code === 'ERR_HOST_OUTDATED' || /ERR_UNKNOWN_CHANNEL|ERR_HOST_OUTDATED|No Pane daemon command registered|runs an older Pane/i.test(error.message);
 }
 
 /** The one line a stopped stream shows over its last frame. */

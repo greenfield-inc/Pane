@@ -160,6 +160,8 @@ const FRAME_WAIT_MS = 1_000;
 const STREAM_IDLE_MS = 10_000;
 /** JPEG quality of streamed frames (T3 Code's default). */
 const FRAME_QUALITY = 70;
+/** How long a batch of a screen's input may take before the host answers that it didn't land. */
+const INPUT_MS = 15_000;
 /** How long a state read waits for a change before answering with the same state. */
 const VIEW_WAIT_MS = 10_000;
 /** Files a person sends one page's picker in one batch, at most (base64 grows it by a third). */
@@ -215,10 +217,11 @@ function checkedUploadPath(worktree: string | undefined, raw: string): string {
 /**
  * Holds: how many tabs one agent keeps alive while hidden, and for how long without an action
  * (D-126); how many tabs the person's screens keep alive, for how long after the last one leaves,
- * and when a screen that stopped reporting counts as gone (D-134).
+ * and when a screen that stopped reporting counts as gone (D-134). Deadlines: the longest a
+ * screenshot, and any other call past its own wait, may take before the agent hears why.
  */
-export interface BrowserHoldSettings { limit: number; idleMs: number; sweepMs: number; watch: WatchLimits }
-const DEFAULT_HOLDS: BrowserHoldSettings = { limit: 4, idleMs: 15 * 60_000, sweepMs: 5_000, watch: { limit: 8, graceMs: 15 * 60_000, silentMs: 15_000 } };
+export interface BrowserHoldSettings { limit: number; idleMs: number; sweepMs: number; watch: WatchLimits; screenshotMs: number; callMs: number }
+const DEFAULT_HOLDS: BrowserHoldSettings = { limit: 4, idleMs: 15 * 60_000, sweepMs: 5_000, watch: { limit: 8, graceMs: 15 * 60_000, silentMs: 15_000 }, screenshotMs: 15_000, callMs: 45_000 };
 
 /**
  * The browser tools (docs/BROWSER_AGENTS.md): agents read and act on the browser tabs of their own
@@ -429,7 +432,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   function driverFor(tabId: string, page: BrowserPageContents): PageDriver {
     let driver = pages.get(page.id);
     if (driver) return driver;
-    driver = new PageDriver(page);
+    driver = new PageDriver(page, holdSettings.screenshotMs);
     pages.set(page.id, driver);
     page.once('destroyed', () => pages.delete(page.id));
     // The person touching a page an agent drives takes it over until they stop (TOUCH_HOLD_MS).
@@ -533,6 +536,22 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   }
 
 
+  /**
+   * Every call answers by a deadline, so an agent never waits forever on a page that stopped
+   * answering. A screenshot needs the page to paint, which it can't while Pane's window is
+   * minimized or covered on some systems: the page driver gives it a shorter deadline that says so.
+   */
+  function withinDeadline(tab: ToolPanel, request: VerbRequest, work: Promise<VerbOutcome>): Promise<VerbOutcome> {
+    work.catch(() => undefined);
+    // A screenshot's own deadline is in the page driver's capture queue; this one backs every call.
+    const ms = holdSettings.callMs + (request.verb === 'wait' ? request.timeoutMs : 0);
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new PaneError('ERR_BROWSER_CALL_TIMEOUT', `browser_${request.verb} on tab ${tab.id} did not finish within ${Math.round(ms / 1000)} seconds. It may still finish on the page.`, 'Call browser_snapshot to see where the page is, then continue from there.')), ms);
+    });
+    return Promise.race([work, late]).finally(() => clearTimeout(timer));
+  }
+
   /** Runs a verb on the tab's page, which lives on this computer; the agent holds the tab while it does. */
   async function runLocal(tab: ToolPanel, request: VerbRequest, write: boolean, holder: string): Promise<VerbOutcome> {
     // A page that is still here never went away, whatever the hold says.
@@ -563,7 +582,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     try {
       // A hidden page starts painting again for the call; give it a frame before capturing it.
       if (request.verb === 'screenshot') await new Promise(resolve => setTimeout(resolve, 150));
-      outcome = await runVerb(driverFor(tab.id, contents), contents, request);
+      outcome = await withinDeadline(tab, request, runVerb(driverFor(tab.id, contents), contents, request));
     } finally {
       host.setBusy(tab.id, false);
     }
@@ -890,7 +909,14 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const files = batch.flatMap(input => (input.kind === 'files' ? input.files : []));
     const bytes = files.reduce((sum, file) => sum + Math.floor(file.data.length * 3 / 4), 0);
     if (bytes > PERSON_UPLOAD_BYTES) throw new PaneError('ERR_BROWSER_UPLOAD_TOO_LARGE', `The files come to ${(bytes / 1_048_576).toFixed(1)} MB, and a page takes up to ${PERSON_UPLOAD_BYTES / 1_048_576} MB from another screen at once. Nothing was sent.`, 'Choose smaller files, or upload them on the computer that runs the tab.');
-    const result = await driver.personInput(batch);
+    // Input answers by a deadline too: a page that stopped answering never holds a screen's queue.
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new PaneError('ERR_BROWSER_INPUT_TIMEOUT', `The page did not take the input within ${INPUT_MS / 1000} seconds. Part of it may have landed.`, 'Look at the page, then try again.')), INPUT_MS);
+    });
+    const applying = driver.personInput(batch);
+    applying.catch(() => undefined);
+    const result = await Promise.race([applying, late]).finally(() => clearTimeout(timer));
     if (files.length) {
       const folder = await host.uploadsFor(page);
       const paths: string[] = [];
