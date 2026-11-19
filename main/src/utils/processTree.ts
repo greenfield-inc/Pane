@@ -106,8 +106,8 @@ export async function readControllingTerminals(): Promise<Map<number, string>> {
 /**
  * Forcefully terminates `pids` and everything descended from them, then waits
  * for them to leave the process table and, on Windows, to close their handles.
- * Returns the pids still running when
- * `timeoutMs` ran out — empty when the whole tree is gone.
+ * Returns the pids not confirmed exited when `timeoutMs` ran out — empty when
+ * the whole tree is gone.
  *
  * Used when a process outlives the polite shutdown its owner asked for. On
  * Windows that matters beyond leaking a process: a directory cannot be renamed
@@ -125,9 +125,10 @@ export async function terminateProcessTrees(
   // Deepest first: killing a parent can orphan a child nothing can walk to.
   await killProcesses([...tree].reverse());
   const alive = await waitForProcessesToExit(tree, Math.max(0, deadline - Date.now()));
-  if (process.platform !== 'win32') return alive;
-  const exiting = await waitForWindowsExit(tree.filter(pid => !alive.includes(pid)), killedAt, Math.max(0, deadline - Date.now()));
-  return [...alive, ...exiting];
+  // A survivor already decides the answer, and with no time left there is nothing to wait on.
+  const left = deadline - Date.now();
+  if (process.platform !== 'win32' || alive.length > 0 || left <= 0) return alive;
+  return waitForWindowsExit(tree, killedAt, left);
 }
 
 /**
@@ -135,9 +136,11 @@ export async function terminateProcessTrees(
  * sees, before it closes that process's handles (its current directory among
  * them), and signals the process only once they are closed. Waits for that
  * signal, so the directories the processes sat in can be moved once this
- * returns. Returns the pids not signalled in time, or every pid when the wait
- * itself could not run. A pid whose process is gone, or that a process born
- * after `killedAt` now holds, has exited.
+ * returns. Returns the pids not signalled in time. A pid whose process is
+ * gone, or that a process born after `killedAt` now holds, has exited. When the
+ * wait cannot run (PowerShell's Constrained Language Mode, which AppLocker and
+ * WDAC enforce, blocks `Add-Type`), returns none: the exit-code poll's answer
+ * stands, as it did before this wait existed.
  */
 async function waitForWindowsExit(pids: readonly number[], killedAt: number, timeoutMs: number): Promise<number[]> {
   if (pids.length === 0) return [];
@@ -170,7 +173,7 @@ async function waitForWindowsExit(pids: readonly number[], killedAt: number, tim
     return stdout.split(/\r?\n/u).filter(line => /^\d+$/u.test(line.trim())).map(line => Number.parseInt(line, 10));
   } catch (error) {
     console.warn('[ProcessTree] exit_wait_failed:', error);
-    return [...pids];
+    return [];
   }
 }
 
