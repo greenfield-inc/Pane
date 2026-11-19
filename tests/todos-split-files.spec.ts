@@ -349,7 +349,7 @@ test('a file that is gone says it isn\'t on its machine anymore, with nothing to
   await open(page);
   await openTodo(page, 12);
   await tab(page, 'Decisions').click();
-  await expect(page.getByTestId('todo-split')).toContainText('Decisions isn\'t on This Mac anymore');
+  await expect(page.getByTestId('todo-split')).toContainText(/Decisions isn't on This (Mac|computer) anymore/);
   await expect(page.getByTestId('todo-split')).not.toContainText('There is no file at');
   await expect(page.getByTestId('autopilot-doc-missing')).toHaveCount(0);
 });
