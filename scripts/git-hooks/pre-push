@@ -1,0 +1,6 @@
+#!/bin/sh
+# pane-pre-push: installed by scripts/install-git-hooks.mjs (pnpm run setup).
+# Runs this worktree's scripts/pre-push.mjs; skip it with git push --no-verify.
+hook="$(git rev-parse --show-toplevel)/scripts/pre-push.mjs"
+[ -f "$hook" ] || exit 0
+exec node "$hook" "$@"

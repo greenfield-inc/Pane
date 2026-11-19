@@ -14,13 +14,17 @@ You need patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), and 
 have pnpm 10, `corepack enable` provides the version pinned in `package.json`.
 
 1. Fork the repository on GitHub and clone your fork.
-2. Install dependencies, rebuild native modules for Electron, and build the
-   main process:
+2. Install dependencies, install the pre-push hook, rebuild native modules
+   for Electron, and build the main process:
    ```bash
    pnpm run setup
    ```
    Setup warns that it can't link `node_modules/.bin/runpane` (the local CLI
    isn't built yet) and lists ignored build scripts. Both are harmless.
+   The pre-push hook lints the files a push changes and type checks the
+   workspaces they reach, in a few seconds (the first run fills a cache and
+   takes longer). It keeps a pre-push hook you already have and prints the line
+   to add to it. `git push --no-verify` skips it.
 3. Create a branch:
    ```bash
    git checkout -b feature/your-feature-name
@@ -257,7 +261,9 @@ builds ignore the variable.
   [docs/lint/anti-slop.md](docs/lint/anti-slop.md).
 - Two-space indentation. `camelCase` for variables and functions, `PascalCase`
   for React components and types, `kebab-case` for other filenames.
-- There is no formatter or commit hook; follow the surrounding code.
+- There is no formatter; follow the surrounding code. The pre-push hook
+  (`scripts/pre-push.mjs`) runs Oxlint, the agent-facts check and the type
+  check on what you push.
 
 ## How Pane reports errors
 
