@@ -77,7 +77,7 @@ export function useBrowserStream(panelId: string, on: boolean, space: { width: n
     let cancelled = false;
     let seq = 0;
     let version = 0;
-    let page: number | undefined;
+    let page: string | undefined;
     let frameRetry = RETRY_MIN_MS;
     let viewRetry = RETRY_MIN_MS;
     const timers = new Set<ReturnType<typeof setTimeout>>();
