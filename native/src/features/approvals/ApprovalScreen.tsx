@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { originLine } from '@shared/approvalReceipts';
@@ -26,7 +26,7 @@ import { StateScreen } from '@/features/tabs/StateScreen';
 import { perfMark } from '@/features/perf/perfMarks';
 import { useJourneyMark, useScreenJourney } from '@/features/perf/usePerfMarks';
 import { useTheme } from '@/theme';
-import { Button, ErrorState, Icon, Text } from '@/ui';
+import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 import { ApprovalActions, ConnectedRow, QuestionActions } from './ApprovalActions';
 import { useApprovalSort } from './approvalSortPreference';
@@ -92,16 +92,17 @@ export function ApprovalScreen({ notifyId, hintPaneId, list = 'waiting' }: { not
     if (panelId === id) router.setParams({ panelId: APPROVAL_TAB });
   };
 
-  let card: ReactNode;
+  // The card draws from the Approvals snapshot the phone saved, so a skeleton shows only before the
+  // first one this machine ever sent (or while the screen steps to another item).
+  let content: ReactNode = null;
   if (item && shared.data) {
-    card = <ApprovalCard key={item.id} item={item} shared={shared.data} onNext={onNext} onOpenTab={openTab} />;
+    content = <ApprovalCard key={item.id} item={item} shared={shared.data} onNext={onNext} onOpenTab={openTab} />;
   } else if (selection?.kind === 'gone') {
-    card = <TabFrame testID="approval-gone"><Text variant="subhead" tone="secondary">This question is no longer waiting. Nothing else is waiting on you.</Text></TabFrame>;
+    content = <TabFrame testID="approval-gone"><Text variant="subhead" tone="secondary">This question is no longer waiting. Nothing else is waiting on you.</Text></TabFrame>;
   } else if (shared.isError) {
-    card = <TabFrame testID="approval-error"><ErrorState title="Couldn’t read Approvals" error={shared.error} onRetry={() => void shared.refetch()} /></TabFrame>;
-  } else {
-    card = <TabFrame testID="approval-loading"><ActivityIndicator /></TabFrame>;
+    content = <TabFrame testID="approval-error"><ErrorState title="Couldn’t read Approvals" error={shared.error} onRetry={() => void shared.refetch()} /></TabFrame>;
   }
+  const card = <SkeletonSwap loading={content === null} skeleton={<CardSkeleton />} style={styles.fill}>{content}</SkeletonSwap>;
 
   const tabs: LeadingTab[] = [{ id: APPROVAL_TAB, title: 'Approval', icon: { ios: 'checkmark.circle', android: 'check_circle' } }];
   for (const id of openIds) {
@@ -201,15 +202,17 @@ function Workspace({ workspace, topBar, leading }: { workspace: ApprovalWorkspac
   return <Bare topBar={topBar} leading={leading} />;
 }
 
+/**
+ * The Session's workspace Pane from the first frame, its saved tabs included, with the Session's
+ * chat tab added when the Session is read. One screen throughout, so the card keeps its state and
+ * place. A host that can't read the Session still shows its workspace Pane's tabs.
+ */
 function SessionWorkspace({ sessionId, paneId, topBar, leading }: { sessionId: string; paneId: string; topBar: ReactNode; leading: LeadingTabs }) {
   const view = useSessionView(sessionId);
-  if (view.data) return <TerminalScreen key={view.data.internalSession.id} paneId={view.data.internalSession.id} session={view.data} topBar={topBar} leading={leading} />;
-  // A host that can't read the Session still shows its workspace Pane's tabs.
-  if (view.isError) return <TerminalScreen key={paneId} paneId={paneId} topBar={topBar} leading={leading} />;
-  return <Bare topBar={topBar} leading={leading} />;
+  return <TerminalScreen paneId={view.data?.internalSession.id ?? paneId} session={view.data} topBar={topBar} leading={leading} />;
 }
 
-/** The approval's own tabs with no Pane's after them: asked from outside Pane, finished, or its Session still loading. */
+/** The approval's own tabs with no Pane's after them: asked from outside Pane, or finished. */
 function Bare({ topBar, leading }: { topBar: ReactNode; leading: LeadingTabs }) {
   const theme = useTheme();
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
@@ -273,6 +276,27 @@ function ApprovalTopBar({ position, onNext }: { position: string | null; onNext?
 function TabFrame({ children, testID }: { children: ReactNode; testID: string }) {
   const theme = useTheme();
   return <View testID={testID} onLayout={({ nativeEvent: { layout } }) => perfMark('approval', `card=${Math.round(layout.y)}+${Math.round(layout.height)}`, { changes: true })} style={[styles.fill, styles.cardContent, { backgroundColor: theme.colors.background }]}>{children}</View>;
+}
+
+/** The card's footprint before the first snapshot: its kind line, origin, question, context and two answer buttons. */
+function CardSkeleton() {
+  const theme = useTheme();
+  return (
+    <View testID="approval-skeleton" accessible accessibilityLabel="Loading the approval" style={[styles.fill, styles.cardContent, { backgroundColor: theme.colors.background }]}>
+      <View style={styles.metaRow}>
+        <Skeleton width={15} height={15} radius={8} />
+        <Skeleton width="35%" height={12} />
+      </View>
+      <Skeleton width="50%" height={12} style={styles.boneFootnote} />
+      <Skeleton width="85%" height={16} style={styles.boneHeadline} />
+      <Skeleton width="95%" height={14} style={styles.boneSubhead} />
+      <Skeleton width="60%" height={14} style={styles.boneSubhead} />
+      <View style={styles.actions}>
+        <View style={styles.action}><Skeleton height={44} radius={theme.radius.md} /></View>
+        <View style={styles.action}><Skeleton height={44} radius={theme.radius.md} /></View>
+      </View>
+    </View>
+  );
 }
 
 /**
@@ -431,4 +455,8 @@ const styles = StyleSheet.create({
   chipLabel: { flexShrink: 1 },
   summary: { alignSelf: 'flex-start' },
   tidied: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // Bones sit centred in their text's line: footnote 16, headline 24, subhead 20.
+  boneFootnote: { marginVertical: 2 },
+  boneHeadline: { marginVertical: 4 },
+  boneSubhead: { marginVertical: 3 },
 });

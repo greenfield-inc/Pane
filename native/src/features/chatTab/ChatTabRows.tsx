@@ -10,7 +10,7 @@ import { imageOf, planEntryKeys } from '@shared/chatTabPresentation';
 import { userMarkdown } from '@shared/chatTabMarkdown';
 
 import { monoFontFamily, useTheme } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Icon, Skeleton, Text } from '@/ui';
 
 import type { ChatRow } from './chatRows';
 
@@ -188,6 +188,27 @@ export const ChatRowView = memo(function ChatRowView({ row, actions }: { row: Ch
   }
 });
 
+/**
+ * Two turns of bones in the transcript's footprint while a conversation it never showed loads:
+ * a user bubble (the bubble's radius and height for one line), then the reply's text lines.
+ */
+export function ChatRowsSkeleton() {
+  const { chat } = useTheme();
+  const bubble = (width: `${number}%`) => <Skeleton width={width} height={USER_BUBBLE_HEIGHT} radius={styles.user.borderRadius} style={[styles.boneBubble, { backgroundColor: chat.muted }]} />;
+  const reply = (widths: `${number}%`[]) => <View>
+    {widths.map((width, index) => <Skeleton key={index} width={width} height={14} radius={4} style={[styles.boneLine, { backgroundColor: chat.muted }]} />)}
+  </View>;
+  return <>
+    {bubble('62%')}
+    {reply(['100%', '94%', '58%'])}
+    {bubble('44%')}
+    {reply(['100%', '46%'])}
+  </>;
+}
+
+/** One line of body text (24) inside the user bubble's vertical padding (8 + 8). */
+const USER_BUBBLE_HEIGHT = 40;
+
 const styles = StyleSheet.create({
   userRow: { alignSelf: 'flex-end', alignItems: 'flex-end', maxWidth: '88%', gap: 2 },
   user: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
@@ -202,4 +223,8 @@ const styles = StyleSheet.create({
   card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, gap: 6 },
   todoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   notice: { alignSelf: 'center', textAlign: 'center', paddingVertical: 2 },
+  // A user bubble sits on the right.
+  boneBubble: { alignSelf: 'flex-end' },
+  // 14 pt bars on the reply's 24 pt lines.
+  boneLine: { marginVertical: 5 },
 });

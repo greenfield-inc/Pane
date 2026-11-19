@@ -19,7 +19,7 @@ vi.mock('@/auth/hostsStore', () => ({ useHostsStore: (select: (state: { profiles
 vi.mock('@/daemon', () => ({ useDaemon: () => ({ profile: { id: 'host-1' } }) }));
 vi.mock('@/features/panes/PaneKit', () => ({ DialogSection: 'DialogSection', DialogSheet: 'DialogSheet', Notice: 'Notice', SheetButton: 'SheetButton' }));
 vi.mock('@/theme', () => ({ monoFontFamily: 'Menlo', useTheme: () => ({ radius: { lg: 12 }, colors: {} }) }));
-vi.mock('@/ui', () => ({ Icon: 'Icon', Text: 'Text', TextField: 'TextField' }));
+vi.mock('@/ui', () => ({ Icon: 'Icon', Skeleton: 'Skeleton', SkeletonSwap: 'SkeletonSwap', Text: 'Text', TextField: 'TextField' }));
 
 const { shared, command } = vi.hoisted(() => {
   const secret: NotifyItem = {

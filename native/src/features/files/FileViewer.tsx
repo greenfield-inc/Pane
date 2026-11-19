@@ -1,7 +1,7 @@
 import { LegendList } from '@legendapp/list/react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useState, type ReactNode } from 'react';
-import { ActionSheetIOS, ActivityIndicator, Alert, Image, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActionSheetIOS, Alert, Image, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useMarkdown } from 'react-native-marked';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -10,7 +10,7 @@ import { filePreviewKind } from '@shared/utils/filePreview';
 
 import { useDaemon } from '@/daemon';
 import { monoFontFamily, useTheme } from '@/theme';
-import { Button, ErrorState, Icon, Text } from '@/ui';
+import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 import { StateScreen } from '../tabs/StateScreen';
 import { TabFooter } from '../tabs/TabFooter';
@@ -57,7 +57,9 @@ export function FileViewer({ sessionId, path: givenPath, size: knownSize, back }
     }
   };
 
-  const markdown = viewer === 'markdown' && text.data?.kind === 'text';
+  const loading = lookingUp || (viewer === 'image' ? image.isPending : (viewer === 'code' || viewer === 'markdown') && text.isPending);
+  // Preview and Source show while a Markdown file loads too, so the header stays put when it lands.
+  const markdown = viewer === 'markdown' && (text.isPending || text.data?.kind === 'text');
   const views = markdown ? (
     <View style={[styles.segments, { borderRadius: theme.radius.md, backgroundColor: colors.surfaceRaised }]} accessibilityRole="tablist">
       {(['Preview', 'Source'] as const).map(label => {
@@ -99,10 +101,10 @@ export function FileViewer({ sessionId, path: givenPath, size: knownSize, back }
     </View>
   ) : null;
 
-  let body: ReactNode;
+  let body: ReactNode = null;
   let footer: string | null = null;
-  if (lookingUp || (viewer === 'image' ? image.isPending : (viewer === 'code' || viewer === 'markdown') && text.isPending)) {
-    body = <View style={styles.center}><ActivityIndicator color={colors.textMuted} /></View>;
+  if (loading) {
+    // Drawn by the skeleton below.
   } else if (viewer === 'unsized' && folder.isError) {
     body = <ErrorState title={`Couldn’t open ${name}`} error={folder.error} onRetry={() => void folder.refetch()} testID="file-size-error" />;
   } else if (viewer === 'unsized') {
@@ -150,8 +152,44 @@ export function FileViewer({ sessionId, path: givenPath, size: knownSize, back }
   return (
     <View testID="file-viewer" style={[styles.fill, { backgroundColor: colors.background }]}>
       {header}
-      <View style={styles.fill}>{body}</View>
+      <View style={styles.fill}>
+        <SkeletonSwap loading={loading} skeleton={<FileSkeleton viewer={viewer} />} style={styles.fill}>{body}</SkeletonSwap>
+      </View>
       {footer ? <TabFooter left={footer} right="Read-only" /> : null}
+    </View>
+  );
+}
+
+/** A file's footprint while it loads: the image's frame, Markdown's paragraphs, or numbered code lines. */
+function FileSkeleton({ viewer }: { viewer: ReturnType<typeof fileViewer> }) {
+  if (viewer === 'image') {
+    // The image's frame fills the tab; `flex` sizes the bone over its height.
+    return (
+      <View testID="file-skeleton" accessible accessibilityLabel="Loading the image" style={styles.fill}>
+        <Skeleton height={0} radius={0} style={styles.fill} />
+      </View>
+    );
+  }
+  if (viewer === 'markdown') {
+    return (
+      <View testID="file-skeleton" accessible accessibilityLabel="Loading the file" style={[styles.markdown, styles.markdownBones]}>
+        <Skeleton width="55%" height={22} />
+        {[[1, 0.9, 0.6], [0.95, 1, 0.8, 0.4]].map(lines => (
+          <View key={lines.join()}>
+            {lines.map((width, index) => <View key={index} style={styles.markdownLine}><Skeleton width={`${width * 100}%`} height={14} /></View>)}
+          </View>
+        ))}
+      </View>
+    );
+  }
+  return (
+    <View testID="file-skeleton" accessible accessibilityLabel="Loading the file" style={styles.code}>
+      {[0.45, 0.7, 0.6, 0.85, 0.3, 0.75, 0.55, 0.8, 0.4, 0.65, 0.5, 0.7].map((width, index) => (
+        <View key={index} style={[styles.line, styles.codeBone]}>
+          <View style={styles.codeNumber}><Skeleton width={12} height={10} /></View>
+          <Skeleton width={`${width * 80}%`} height={12} />
+        </View>
+      ))}
     </View>
   );
 }
@@ -262,7 +300,6 @@ function imageType(path: string): string {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   shrink: { flexShrink: 1 },
   header: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderBottomWidth: 1 },
   back: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -276,6 +313,11 @@ const styles = StyleSheet.create({
   mono: { fontFamily: monoFontFamily, fontSize: 13, lineHeight: 20 },
   number: { textAlign: 'right' },
   markdown: { padding: 16 },
+  // Bones keep the lines' heights: code 20 pt, Markdown text 26 with 12 between paragraphs.
+  codeBone: { height: 20, alignItems: 'center' },
+  codeNumber: { width: 21, alignItems: 'flex-end' },
+  markdownBones: { gap: 12 },
+  markdownLine: { height: 26, justifyContent: 'center' },
   imageContent: { flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   imageFrame: { width: '100%', alignItems: 'center' },
   image: { width: '100%', aspectRatio: 1 },

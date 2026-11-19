@@ -11,7 +11,7 @@ import { useDaemon } from '@/daemon';
 
 import { DialogSection, DialogSheet, Notice, SheetButton } from '@/features/panes/PaneKit';
 import { monoFontFamily, useTheme } from '@/theme';
-import { Icon, Text, TextField } from '@/ui';
+import { Icon, Skeleton, SkeletonSwap, Text, TextField } from '@/ui';
 
 import { useMachineNotifyCommand, useMachineNotifyShared, useNotifyCommand, useNotifyShared } from './hooks';
 import { type AnsweredHere, initialPicks, isReply, leaseLengthText, NOTIFY_KIND_LABEL, notifySheetState, optionsAnswer, replyStatus, revisionNote, type ReplyTone } from './notifyQuestions';
@@ -64,11 +64,16 @@ export function NotifySheet({ notifyId, host }: { notifyId: string; host?: strin
   }
 
   if (!state || state.kind === 'closed') {
-    const message = shared.isPending ? 'Loading…' : shared.isError ? shared.error.message : state?.message ?? '';
+    const message = shared.isError ? shared.error.message : state?.message ?? '';
     return (
-      <DialogSheet testID="notify-sheet" title="Question" onClose={close} footer={<SheetButton title="Close" onPress={close} />}>
+      <DialogSheet testID="notify-sheet" title="Question" onClose={close} footer={
+        <SkeletonSwap loading={shared.isPending} style={styles.footer} skeleton={<SheetButtonsSkeleton />}>
+          <SheetButton title="Close" onPress={close} />
+        </SkeletonSwap>}>
         <DialogSection divided={false}>
-          <Text testID="notify-closed" variant="subhead" tone={shared.isError ? 'danger' : 'secondary'}>{message}</Text>
+          <SkeletonSwap loading={shared.isPending} skeleton={<QuestionSkeleton />}>
+            <Text testID="notify-closed" variant="subhead" tone={shared.isError ? 'danger' : 'secondary'}>{message}</Text>
+          </SkeletonSwap>
         </DialogSection>
       </DialogSheet>
     );
@@ -111,6 +116,29 @@ function QuestionSheet({ item, machine, answer, busy, error, onClose }: {
         </DialogSheet>
       )}
     </QuestionForm>
+  );
+}
+
+/** A question's body while it loads: where it came from, its title and two lines of context. */
+function QuestionSkeleton() {
+  return (
+    <View testID="notify-skeleton" accessible accessibilityLabel="Loading question" style={styles.bones}>
+      <Skeleton width="45%" height={12} style={styles.footnoteBone} />
+      <Skeleton width="80%" height={18} style={styles.headlineBone} />
+      <Skeleton height={14} style={styles.subheadBone} />
+      <Skeleton width="65%" height={14} style={styles.subheadBone} />
+    </View>
+  );
+}
+
+/** Two answer buttons side by side, in the sheet footer. */
+function SheetButtonsSkeleton() {
+  const theme = useTheme();
+  return (
+    <View style={styles.footer}>
+      <Skeleton height={40} radius={theme.radius.md} style={styles.answer} />
+      <Skeleton height={40} radius={theme.radius.md} style={styles.answer} />
+    </View>
   );
 }
 
@@ -403,6 +431,13 @@ const styles = StyleSheet.create({
   secretLine: { height: 32 },
   bold: { fontWeight: '600' },
   answer: { flex: 1 },
+  // The sheet footer's row, so a skeleton's buttons and Close sit where the answers do.
+  footer: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  // Each bone centered on its text's line: footnote 16, headline 24, subhead 20; the section adds 8 between.
+  bones: { gap: 8 },
+  footnoteBone: { marginVertical: 2 },
+  headlineBone: { marginVertical: 3 },
+  subheadBone: { marginVertical: 3 },
   choices: { gap: 8, marginTop: 4 },
   choice: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1 },
   block: { padding: 12, borderWidth: 1 },

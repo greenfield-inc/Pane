@@ -6,12 +6,12 @@ import { normalizeUrl } from '@shared/utils/browserUrl';
 import { useQueryClient } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
 import { useDaemon, useDaemonQueryKey, useInvokeMutation, useInvokeQuery } from '@/daemon';
 import { useTheme } from '@/theme';
-import { Button, ErrorState, Icon, Text } from '@/ui';
+import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 import { isDemoProfile } from '../demo/demoHost';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
@@ -118,6 +118,11 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
   const [host, path] = splitAddress(page.address);
   const offline = presence === 'unreachable';
   const failed = page.kind === 'web' && loadError?.src === page.src;
+  // A page's first load, and the wait for its phone address, draw a page skeleton over the body.
+  const opening = !offline && (
+    (page.kind === 'web' && loadedKey !== loadKey && !failed)
+    || (page.kind === 'loading' && !read.error && !addressError)
+  );
 
   return (
     <View testID="browser-tab" style={[styles.fill, { backgroundColor: colors.background }]}>
@@ -226,10 +231,6 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
                   />
                 )}
               </View>
-            ) : loadedKey !== loadKey ? (
-              <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]}>
-                <LoadingScreen address={host} from={profile.label} />
-              </View>
             ) : null}
           </>
         ) : page.kind === 'file' ? (
@@ -237,7 +238,7 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
         ) : page.kind === 'loading' ? (
           read.error ? <ErrorState title="Couldn’t read the computer’s pages" error={read.error} onRetry={read.refetch} />
             : addressError ? <ErrorState title={`Couldn’t open ${host} on this phone`} error={addressError} onRetry={reload} testID="browser-address-error" />
-            : <LoadingScreen address={host} from={profile.label} />
+            : null
         ) : page.kind === 'refused' ? (
           <StateScreen
             testID="browser-refused"
@@ -276,6 +277,7 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
             message="Tap the address above and enter one, like localhost:5173."
           />
         )}
+        <SkeletonSwap loading={opening} skeleton={<PageSkeleton overlay />}>{null}</SkeletonSwap>
       </View>
     </View>
   );
@@ -289,9 +291,7 @@ function FileView({ panelId, page, onNavigate, webView }: {
   webView: React.RefObject<WebView | null>;
 }) {
   const { colors } = useTheme();
-  const { profile } = useDaemon();
   const file = useInvokeQuery<{ data: string }>('panels:read-browser-file', [panelId, page.url], { retry: false });
-  if (file.isPending) return <LoadingScreen address={page.address} from={profile.label} />;
   let html: string | null = null;
   let problem: unknown = file.error;
   if (file.data) {
@@ -301,31 +301,40 @@ function FileView({ panelId, page, onNavigate, webView }: {
       problem = new Error(`${page.address} isn’t a UTF-8 text file, so it can’t show here.`);
     }
   }
-  if (html === null) return <ErrorState title={`Couldn’t open ${page.address}`} error={problem} onRetry={() => void file.refetch()} testID="browser-file-error" />;
   return (
-    <WebView
-      ref={webView}
-      testID="browser-webview"
-      source={{ html }}
-      originWhitelist={['*']}
-      setSupportMultipleWindows={false}
-      onNavigationStateChange={state => onNavigate({ back: state.canGoBack, forward: state.canGoForward })}
-      style={[styles.fill, { backgroundColor: colors.background }]}
-      webviewDebuggingEnabled={__DEV__}
-    />
+    <SkeletonSwap loading={file.isPending} skeleton={<PageSkeleton />} style={styles.fill}>
+      {file.isPending ? null : html === null ? (
+        <ErrorState title={`Couldn’t open ${page.address}`} error={problem} onRetry={() => void file.refetch()} testID="browser-file-error" />
+      ) : (
+        <WebView
+          ref={webView}
+          testID="browser-webview"
+          source={{ html }}
+          originWhitelist={['*']}
+          setSupportMultipleWindows={false}
+          onNavigationStateChange={state => onNavigate({ back: state.canGoBack, forward: state.canGoForward })}
+          style={[styles.fill, { backgroundColor: colors.background }]}
+          webviewDebuggingEnabled={__DEV__}
+        />
+      )}
+    </SkeletonSwap>
   );
 }
 
-function LoadingScreen({ address, from }: { address: string; from: string }) {
+/** A page not drawn yet: a heading and paragraphs in the body's footprint. `overlay` covers a page view that loads underneath. */
+function PageSkeleton({ overlay = false }: { overlay?: boolean }) {
   const { colors } = useTheme();
   return (
-    <StateScreen
-      testID="browser-loading"
-      icon={{ ios: 'globe', android: 'language' }}
-      title={`Opening ${address}`}
-      message={`From ${from}`}
-      actions={<ActivityIndicator color={colors.accent} />}
-    />
+    <View
+      testID="browser-skeleton"
+      accessible
+      accessibilityLabel="Loading page"
+      style={[overlay ? StyleSheet.absoluteFill : styles.fill, styles.page, { backgroundColor: colors.background }]}
+    >
+      <Skeleton width="55%" height={22} />
+      <Skeleton height={120} />
+      {(['100%', '92%', '96%', '64%'] as const).map(width => <Skeleton key={width} width={width} height={14} />)}
+    </View>
   );
 }
 
@@ -377,4 +386,5 @@ const styles = StyleSheet.create({
   track: { height: 2 },
   progress: { height: 2 },
   notice: { paddingHorizontal: 12, paddingVertical: 6 },
+  page: { padding: 16, gap: 12 },
 });

@@ -58,7 +58,9 @@ export type SidebarItem =
     nestedExpanded: boolean;
   }
   | { type: 'archived'; key: string; kind: 'session' | 'pane'; id: string; label: string; detail?: string }
-  | { type: 'note'; key: string; text: string; danger?: boolean; retry?: 'sessions' | 'archived' };
+  | { type: 'note'; key: string; text: string; danger?: boolean; retry?: 'sessions' | 'archived' }
+  /** Archived's rows while they load, drawn as a skeleton. */
+  | { type: 'loading'; key: string };
 
 interface StatusLookup {
   status: (paneId: string) => AgentDisplayStatus;
@@ -175,7 +177,7 @@ export function buildSidebar(input: SidebarInput): SidebarItem[] {
   if (archivedMatches) items.push(...section('archived', 'Archived', () => {
     const errors: SidebarItem[] = input.archivedError ? [{ type: 'note', key: 'archived-error', text: input.archivedError, danger: true, retry: 'archived' }] : [];
     if (!input.archivedProjects && errors.length) return errors;
-    if (!input.archivedProjects) return [{ type: 'note', key: 'archived-loading', text: 'Loading archived panes…' }];
+    if (!input.archivedProjects) return [{ type: 'loading', key: 'archived-loading' }];
     if (archivedCount === 0 && errors.length) return errors;
     if (archivedCount === 0) return [{ type: 'note', key: 'archived-empty', text: 'No archived panes' }];
     return [

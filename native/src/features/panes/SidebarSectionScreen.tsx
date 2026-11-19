@@ -10,6 +10,7 @@ import { useCurrentMachine } from '@/features/home/useHomeData';
 import { ConnectionBar, Dimmed } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { useTheme } from '@/theme';
+import { SkeletonSwap } from '@/ui';
 
 import { useArchivedProjects } from './hooks';
 import { LoadingRows, Notice } from './PaneKit';
@@ -57,6 +58,11 @@ export function SidebarSectionScreen() {
     },
   }).filter(item => item.type !== 'section');
 
+  // Sessions and Archived wait for their own reads too, so their rows come in one swap.
+  const waiting = here.loading
+    || (section === 'sessions' && !here.sessions.data && !here.sessions.isError && !here.sessions.unavailable)
+    || (section === 'archived' && !archived.data && !archived.isError);
+
   const refresh = async () => {
     setRefreshing(true);
     await Promise.all([here.refetch(), section === 'archived' ? archived.refetch() : undefined]);
@@ -68,35 +74,40 @@ export function SidebarSectionScreen() {
       <Stack.Screen options={{ title: TITLES[section] }} />
       <ConnectionBar notice={notice} onRetry={retry} />
       <Dimmed dimmed={!live} style={styles.fill}>
-        <LegendList
-          testID={`section-list-${section}`}
-          data={here.loading ? [] : items}
-          keyExtractor={item => item.key}
-          getItemType={item => item.type}
-          estimatedItemSize={44}
-          refreshing={refreshing}
-          onRefresh={() => void refresh()}
-          contentInsetAdjustmentBehavior="automatic"
-          style={{ backgroundColor: theme.colors.background }}
-          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
-          ListEmptyComponent={here.loading ? <LoadingRows />
-            : here.projects.isError ? <Notice danger message={here.projects.error.message} action={{ title: 'Try again', onPress: () => void here.projects.refetch() }} />
-            : <Notice testID="section-empty" message={section === 'repositories' ? 'No repositories on this host yet.' : 'Nothing here yet.'} />}
-          renderItem={({ item, index }) => (
-            <SidebarItemView
-              item={item}
-              previous={items[index - 1]}
-              first={index === 0}
-              context={{
-                actions,
-                waitingFor: sessionId => waitingBySession.get(sessionKey(here.profile.id, sessionId)) ?? 0,
-                onToggleSection: () => undefined,
-                onToggleNested: nestedKey => setCollapsedSessions(current => toggleMember(current, nestedKey)),
-                retry: what => void (what === 'archived' ? archived.refetch() : here.sessions.refetch()),
-              }}
-            />
-          )}
-        />
+        <SkeletonSwap
+          loading={waiting}
+          style={styles.fill}
+          skeleton={<View style={styles.content}><LoadingRows archived={section === 'archived'} /></View>}
+        >
+          <LegendList
+            testID={`section-list-${section}`}
+            data={items}
+            keyExtractor={item => item.key}
+            getItemType={item => item.type}
+            estimatedItemSize={44}
+            refreshing={refreshing}
+            onRefresh={() => void refresh()}
+            contentInsetAdjustmentBehavior="automatic"
+            style={{ backgroundColor: theme.colors.background }}
+            contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
+            ListEmptyComponent={here.projects.isError ? <Notice danger message={here.projects.error.message} action={{ title: 'Try again', onPress: () => void here.projects.refetch() }} />
+              : <Notice testID="section-empty" message={section === 'repositories' ? 'No repositories on this host yet.' : 'Nothing here yet.'} />}
+            renderItem={({ item, index }) => (
+              <SidebarItemView
+                item={item}
+                previous={items[index - 1]}
+                first={index === 0}
+                context={{
+                  actions,
+                  waitingFor: sessionId => waitingBySession.get(sessionKey(here.profile.id, sessionId)) ?? 0,
+                  onToggleSection: () => undefined,
+                  onToggleNested: nestedKey => setCollapsedSessions(current => toggleMember(current, nestedKey)),
+                  retry: what => void (what === 'archived' ? archived.refetch() : here.sessions.refetch()),
+                }}
+              />
+            )}
+          />
+        </SkeletonSwap>
       </Dimmed>
     </View>
   );

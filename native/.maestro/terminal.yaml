@@ -22,7 +22,7 @@ appId: com.dcouple.pane.mobile
     index: 0
 - extendedWaitUntil:
     notVisible:
-      id: terminal-loading
+      id: terminal-skeleton
     timeout: 20000
 
 # Input bar: the command runs on the host and its output comes back.
@@ -126,7 +126,7 @@ appId: com.dcouple.pane.mobile
 - tapOn: "Claude Code"
 - extendedWaitUntil:
     notVisible:
-      id: terminal-loading
+      id: terminal-skeleton
     timeout: 20000
 - takeScreenshot: terminal-agent-tab
 - tapOn:

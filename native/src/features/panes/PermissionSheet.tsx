@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { monoFontFamily, useTheme } from '@/theme';
-import { Text } from '@/ui';
+import { Skeleton, SkeletonSwap, Text } from '@/ui';
 
 import { usePendingPermissions, useProjects, useRespondToPermission } from './hooks';
 import { DialogSection, DialogSheet, Notice, SheetButton } from './PaneKit';
@@ -28,12 +28,27 @@ export function PermissionSheet({ paneId, requestId }: { paneId: string; request
         testID="permission-sheet"
         title="Permission request"
         onClose={() => router.back()}
-        footer={<SheetButton title="Close" onPress={() => router.back()} />}
+        footer={
+          <SkeletonSwap loading={pending.isPending} style={styles.footer} skeleton={
+            <View style={styles.footer}>
+              <Skeleton height={40} radius={theme.radius.md} style={styles.answer} />
+              <Skeleton height={40} radius={theme.radius.md} style={styles.answer} />
+            </View>}>
+            <SheetButton title="Close" onPress={() => router.back()} />
+          </SkeletonSwap>}
       >
         <DialogSection divided={false}>
-          <Text testID="permission-missing" variant="subhead" tone={pending.isError ? 'danger' : 'secondary'}>
-            {pending.isPending ? 'Loading…' : pending.isError ? pending.error.message : 'This request was already answered.'}
-          </Text>
+          <SkeletonSwap loading={pending.isPending} skeleton={
+            // Who is waiting, then the target's card, then Show full input.
+            <View testID="permission-skeleton" accessible accessibilityLabel="Loading permission request" style={styles.bones}>
+              <Skeleton width="70%" height={14} style={styles.subheadBone} />
+              <Skeleton height={46} radius={theme.radius.lg} />
+              <Skeleton width="40%" height={12} style={styles.footnoteBone} />
+            </View>}>
+            <Text testID="permission-missing" variant="subhead" tone={pending.isError ? 'danger' : 'secondary'}>
+              {pending.isError ? pending.error.message : 'This request was already answered.'}
+            </Text>
+          </SkeletonSwap>
         </DialogSection>
       </DialogSheet>
     );
@@ -91,4 +106,10 @@ const styles = StyleSheet.create({
   // rounded-xl border bg-surface-secondary p-3.
   card: { padding: 12, borderWidth: 1 },
   answer: { flex: 1 },
+  // The sheet footer's row, so the skeleton's buttons and Close sit where Deny and Allow do.
+  footer: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', gap: 12 },
+  // Bones centered on their text's line (subhead 20, footnote 16); the card is one subhead line in p-3 with a border.
+  bones: { gap: 8 },
+  subheadBone: { marginVertical: 3 },
+  footnoteBone: { marginVertical: 2 },
 });

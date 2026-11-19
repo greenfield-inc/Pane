@@ -29,10 +29,10 @@ import { usePaneActions } from '@/features/panes/usePaneActions';
 import { markNextFrame } from '@/features/perf/perfMarks';
 import { useLiveMarks, useValueMark } from '@/features/perf/usePerfMarks';
 import { useTheme, withAlpha } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Icon, SkeletonSwap, Text } from '@/ui';
 import type { IconProps } from '@/ui/Icon';
 
-import { ActivityRow, ApprovalRow, BoardHeader, Card, EmptyCard, GroupRow, HistoryLine, RowDivider } from './BoardRows';
+import { ActivityRow, ApprovalRow, BoardHeader, BoardSkeleton, Card, CardSkeleton, EmptyCard, GroupRow, HistoryLine, RowDivider } from './BoardRows';
 import { useBoardTile } from './boardTile';
 import { bottomBarHeight, HomeBottomBar } from './HomeBottomBar';
 import { boardCounts, PINNED_PREVIEW, terminalWaiting, tilePanes, type PaneRecentRow } from './statusBoard';
@@ -135,7 +135,6 @@ export function HomeScreen() {
 
   // What the list holds below its header.
   const rows: HomeRow[] = (() => {
-    if (loading) return [];
     if (searching) {
       if (all) return buildAllMachinesList(feeds, query).recent.map(row => ({ kind: 'recent', key: row.key, row }));
       // Every section, whatever the person last folded, so a match never hides under a header.
@@ -202,6 +201,7 @@ export function HomeScreen() {
   // Needs you: Autopilot, the approvals in the chosen sort, Panes waiting in their terminal (D-81),
   // then the line that opens History.
   const inTerminal = terminalWaiting(board, held);
+  const nothingWaiting = board.waiting.length + board.offline.length + inTerminal.length === 0;
   // The approvals card's amber: both lists wait on you.
   const needsTint = withAlpha(theme.colors.warning, 0.09);
   const autopilotSnapshot = autopilot.data?.enabled ? autopilot.data : undefined;
@@ -225,57 +225,59 @@ export function HomeScreen() {
           </Pressable>
         )}
       />
-      {board.waiting.length + board.offline.length > 0 ? (
-        <ApprovalGroups
-          entries={board.waiting}
-          offline={board.offline}
-          machineOf={machineOf}
-          renderEntry={(row, divided, list) => {
-            const { title, detail } = waitingRowText(row);
-            const id = row.type === 'question' ? `notify-row-${row.item.id}` : `permission-row-${row.request.sessionId}`;
-            const machine = machineOf(row.machineKey);
-            return (
-              <>
-                <ApprovalRow
-                  testID={id}
-                  title={title}
-                  detail={detail}
-                  below={row.type === 'question' ? <ApprovalRowLines item={row.item} testID={id} /> : undefined}
-                  spoken={row.type === 'question' ? approvalRowSpoken(row.item) : undefined}
-                  at={row.at}
-                  machine={markOf(row.machineKey)}
-                  stale={row.stale}
-                  done={list === 'agent' || !row.waiting}
-                  divided={divided}
-                  onPress={() => openWaitingRow(row, list, profile.id)}
-                  // The card's Close with no reason, for this machine's questions it can close.
-                  onArchive={row.type === 'question' && list === 'waiting' && row.machineKey === profile.id && !row.stale && canClose(row.item) ? {
-                    swipeId: row.item.id,
-                    archive: () => archiving.archive({ key: row.key, id: row.item.id, title: row.item.title }),
-                  } : undefined}
-                  background={needsTint}
-                />
-                {row.type === 'question' && row.item.state === 'waiting' ? (
-                  <AgentPromptActions item={row.item} inset={33} machine={row.machineKey === profile.id ? null : machine?.profile ?? null} />
-                ) : null}
-                {archiving.failed.has(row.key) ? (
-                  <Notice testID={`approvals-archive-error-${row.key}`} danger message={`Not archived: ${archiving.failed.get(row.key)}`} action={{ title: 'Dismiss', onPress: () => archiving.dismiss(row.key) }} />
-                ) : null}
-              </>
-            );
-          }}
-        />
-      ) : null}
-      {inTerminal.length > 0 ? (
-        <View testID="needs-terminal" style={styles.terminalGroup}>
-          <Text variant="footnote" tone="secondary" style={styles.groupLabel} accessibilityRole="header">{`Waiting in the terminal · ${inTerminal.length}`}</Text>
-          {/* The board's own padding already insets the column; the rows bring the card. */}
-          <View style={styles.flush}>{inTerminal.map((row, index) => activityRow(row, index === 0, index === inTerminal.length - 1, needsTint))}</View>
-        </View>
-      ) : null}
-      {board.waiting.length + board.offline.length + inTerminal.length > 0 ? null : !answered.approvals ? <LoadingRows /> : (
-        <EmptyCard testID="approvals-empty" title="Nothing needs you" detail="Questions, permission requests and agents waiting in their terminal land here." />
-      )}
+      <SkeletonSwap loading={nothingWaiting && !answered.approvals} skeleton={<CardSkeleton testID="approvals-skeleton" label="Loading approvals" />}>
+        {board.waiting.length + board.offline.length > 0 ? (
+          <ApprovalGroups
+            entries={board.waiting}
+            offline={board.offline}
+            machineOf={machineOf}
+            renderEntry={(row, divided, list) => {
+              const { title, detail } = waitingRowText(row);
+              const id = row.type === 'question' ? `notify-row-${row.item.id}` : `permission-row-${row.request.sessionId}`;
+              const machine = machineOf(row.machineKey);
+              return (
+                <>
+                  <ApprovalRow
+                    testID={id}
+                    title={title}
+                    detail={detail}
+                    below={row.type === 'question' ? <ApprovalRowLines item={row.item} testID={id} /> : undefined}
+                    spoken={row.type === 'question' ? approvalRowSpoken(row.item) : undefined}
+                    at={row.at}
+                    machine={markOf(row.machineKey)}
+                    stale={row.stale}
+                    done={list === 'agent' || !row.waiting}
+                    divided={divided}
+                    onPress={() => openWaitingRow(row, list, profile.id)}
+                    // The card's Close with no reason, for this machine's questions it can close.
+                    onArchive={row.type === 'question' && list === 'waiting' && row.machineKey === profile.id && !row.stale && canClose(row.item) ? {
+                      swipeId: row.item.id,
+                      archive: () => archiving.archive({ key: row.key, id: row.item.id, title: row.item.title }),
+                    } : undefined}
+                    background={needsTint}
+                  />
+                  {row.type === 'question' && row.item.state === 'waiting' ? (
+                    <AgentPromptActions item={row.item} inset={33} machine={row.machineKey === profile.id ? null : machine?.profile ?? null} />
+                  ) : null}
+                  {archiving.failed.has(row.key) ? (
+                    <Notice testID={`approvals-archive-error-${row.key}`} danger message={`Not archived: ${archiving.failed.get(row.key)}`} action={{ title: 'Dismiss', onPress: () => archiving.dismiss(row.key) }} />
+                  ) : null}
+                </>
+              );
+            }}
+          />
+        ) : null}
+        {inTerminal.length > 0 ? (
+          <View testID="needs-terminal" style={styles.terminalGroup}>
+            <Text variant="footnote" tone="secondary" style={styles.groupLabel} accessibilityRole="header">{`Waiting in the terminal · ${inTerminal.length}`}</Text>
+            {/* The board's own padding already insets the column; the rows bring the card. */}
+            <View style={styles.flush}>{inTerminal.map((row, index) => activityRow(row, index === 0, index === inTerminal.length - 1, needsTint))}</View>
+          </View>
+        ) : null}
+        {nothingWaiting ? (
+          <EmptyCard testID="approvals-empty" title="Nothing needs you" detail="Questions, permission requests and agents waiting in their terminal land here." />
+        ) : null}
+      </SkeletonSwap>
       <HistoryLine stale={board.staleQuestions.length} done={board.answered.length} onPress={() => router.push('/history')} />
     </>
   );
@@ -344,39 +346,47 @@ export function HomeScreen() {
     <View>
       <StatusTiles counts={counts} selected={tile} onSelect={selectTile} />
       <View style={styles.below}>
-        {loading ? <LoadingRows />
-          : tile === 'needs' ? needsYou
+        {tile === 'needs' ? needsYou
           : tile === 'all' ? (all ? <BoardHeader title={allOffline(feeds) ? 'Last seen' : 'Recent'} count={counts?.all} /> : allPanes)
           : <BoardHeader title={tileTitle} count={counts?.[tile]} right={<Text variant="rowDetail" tone="muted">Newest first</Text>} />}
       </View>
     </View>
   );
-  const empty = loading ? (searching ? <LoadingRows /> : null)
-    : searching ? <Notice testID="panes-no-results" message={all ? `No panes match “${query}” on any machine.` : `No panes match “${query}”.`} />
+  const empty = searching ? <Notice testID="panes-no-results" message={all ? `No panes match “${query}” on any machine.` : `No panes match “${query}”.`} />
     : !answered.lists ? null
     : tile === 'working' ? <EmptyCard testID="board-working-empty" title="Nothing working" detail="Panes show here while their agent works." />
     : tile === 'ready' ? <EmptyCard testID="board-ready-empty" title="Nothing ready" detail="Panes show here when their agent finishes, until you open them." />
     : null;
 
+  // Until the board's first read lands, the tiles sit over a skeleton of what the selected one lists.
+  const skeleton = searching ? <View style={styles.below}><LoadingRows /></View> : (
+    <View>
+      <StatusTiles counts={undefined} selected={tile} onSelect={selectTile} />
+      <View style={styles.below}><BoardSkeleton groups={tile === 'all' && !all} /></View>
+    </View>
+  );
   const list = (
-    <LegendList
-      testID="panes-list"
-      data={rows}
-      keyExtractor={row => row.key}
-      getItemType={row => row.kind}
-      estimatedItemSize={52}
-      keyboardDismissMode="on-drag"
-      keyboardShouldPersistTaps="handled"
-      // Search results scroll clear of the keyboard.
-      automaticallyAdjustKeyboardInsets
-      refreshing={refreshing}
-      onRefresh={() => void refresh()}
-      style={styles.fill}
-      contentContainerStyle={[{ paddingBottom: bottomBarHeight(insets.bottom) + 12 }]}
-      ListHeaderComponent={header}
-      ListEmptyComponent={empty ? <View style={searching ? undefined : styles.below}>{empty}</View> : null}
-      renderItem={renderRow}
-    />
+    // The skeleton draws the tiles too, so the board doesn't fade them in again.
+    <SkeletonSwap loading={loading} skeleton={skeleton} style={styles.fill} fade={false}>
+      <LegendList
+        testID="panes-list"
+        data={rows}
+        keyExtractor={row => row.key}
+        getItemType={row => row.kind}
+        estimatedItemSize={52}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        // Search results scroll clear of the keyboard.
+        automaticallyAdjustKeyboardInsets
+        refreshing={refreshing}
+        onRefresh={() => void refresh()}
+        style={styles.fill}
+        contentContainerStyle={[{ paddingBottom: bottomBarHeight(insets.bottom) + 12 }]}
+        ListHeaderComponent={header}
+        ListEmptyComponent={empty ? <View style={searching ? undefined : styles.below}>{empty}</View> : null}
+        renderItem={renderRow}
+      />
+    </SkeletonSwap>
   );
 
   return (

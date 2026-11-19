@@ -1,7 +1,7 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { router } from 'expo-router';
 import { useMemo, type ReactNode } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { decisionModel } from '@shared/autopilotDecision';
@@ -17,10 +17,10 @@ import { MachineBadge } from '@/features/machines/MachineBadge';
 import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { useTheme, withAlpha } from '@/theme';
-import { Button, ErrorState, Icon, Text } from '@/ui';
+import { Button, ErrorState, Icon, Skeleton, SkeletonSwap, Text } from '@/ui';
 
 import { composerPlaceholder, startBlocked, walkBar, autopilotItems } from './autopilot';
-import { DecisionCard, useDecisionAnswer } from './DecisionCard';
+import { DecisionCard, DecisionCardSkeleton, useDecisionAnswer } from './DecisionCard';
 import { useAutopilot, useAutopilotControl, useAutopilotOpened, useAutopilotSentinel } from './hooks';
 import { SentinelAwayCard, SentinelLogRows } from './SentinelBlocks';
 
@@ -50,13 +50,13 @@ export function AutopilotScreen() {
     [AWAY_BLOCK]: (content: string) => <SentinelAwayCard content={content} panelId={panelId} />,
   }), [panelId]);
 
-  let body: ReactNode;
+  let body: ReactNode = null;
   if (autopilot.unsupported) {
     body = <Message testID="autopilot-update" title="Update Pane on the computer" text={`${profile.label}’s Pane is older than Autopilot. Update it, then open Autopilot again.`} />;
   } else if (autopilot.isError) {
     body = <ErrorState title="Couldn’t read Autopilot" error={autopilot.error} onRetry={() => void autopilot.refetch()} />;
   } else if (!snapshot) {
-    body = <View style={[styles.fill, styles.center]}><ActivityIndicator /></View>;
+    // Drawn by the skeleton below.
   } else if (!snapshot.enabled) {
     body = <Message testID="autopilot-off" title="Autopilot is off" text={`Turn it on on ${profile.label} in Settings › Advanced › Experimental › Autopilot.`} />;
   } else if (snapshot.state === 'stopped' || !snapshot.panelId) {
@@ -80,7 +80,9 @@ export function AutopilotScreen() {
     <KeyboardAvoidingView testID="autopilot-screen" behavior="padding" style={[styles.fill, { backgroundColor: colors.surface }]}>
       <Header snapshot={snapshot} />
       {snapshot?.enabled && snapshot.state !== 'stopped' ? <WalkBar snapshot={snapshot} /> : null}
-      <View style={styles.fill}>{body}</View>
+      <View style={styles.fill}>
+        <SkeletonSwap loading={!autopilot.unsupported && !autopilot.isError && !snapshot} skeleton={<StartSkeleton />} style={styles.fill}>{body}</SkeletonSwap>
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -212,6 +214,24 @@ function StartPanel({ snapshot }: { snapshot: AutopilotSnapshot }) {
   );
 }
 
+/**
+ * Autopilot before its first snapshot, in the footprint of Start (and of the off notice, which
+ * shares it): a phone that has opened Autopilot before paints its saved snapshot instead.
+ */
+function StartSkeleton() {
+  return (
+    <View testID="autopilot-skeleton" accessible accessibilityLabel="Loading Autopilot" style={[styles.fill, styles.center]}>
+      <Skeleton width={56} height={56} radius={17} />
+      <Skeleton width={120} height={20} style={styles.boneTitle} />
+      <View style={styles.boneLines}>
+        <Skeleton width="90%" height={16} />
+        <Skeleton width="70%" height={16} />
+      </View>
+      <Skeleton width={140} height={44} style={styles.startButton} />
+    </View>
+  );
+}
+
 /** Centred while it fits; scrolls when it doesn't (a long error under Start), so Start stays reachable. */
 function Centered({ testID, children }: { testID: string; children: ReactNode }) {
   return <ScrollView testID={testID} style={styles.fill} contentContainerStyle={styles.center} keyboardShouldPersistTaps="handled">{children}</ScrollView>;
@@ -240,8 +260,11 @@ function ItemCards({ content }: { content: string }) {
 
 function ChatCard({ notifyId, items }: { notifyId: string; items: readonly NotifyItem[] | undefined }) {
   const answer = useDecisionAnswer(notifyId);
-  if (!items) return <View style={styles.cardLoading}><ActivityIndicator /></View>;
-  return <DecisionCard notifyId={notifyId} item={items.find(item => item.id === notifyId)} variant="chat" answer={answer} onOpen={() => openAutopilotItem(notifyId)} />;
+  return (
+    <SkeletonSwap loading={!items} skeleton={<DecisionCardSkeleton testID="autopilot-card-skeleton" />}>
+      <DecisionCard notifyId={notifyId} item={items?.find(item => item.id === notifyId)} variant="chat" answer={answer} onOpen={() => openAutopilotItem(notifyId)} />
+    </SkeletonSwap>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -261,5 +284,7 @@ const styles = StyleSheet.create({
   centerText: { textAlign: 'center' },
   startButton: { marginTop: 8, minWidth: 140 },
   cards: { gap: 10, paddingVertical: 4 },
-  cardLoading: { minHeight: 80, alignItems: 'center', justifyContent: 'center' },
+  // The title's line is 28 pt and the body's 24, so the bones keep their text's height.
+  boneTitle: { marginVertical: 4 },
+  boneLines: { width: '100%', alignItems: 'center', gap: 8 },
 });

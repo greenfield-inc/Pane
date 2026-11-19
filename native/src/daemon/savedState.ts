@@ -8,8 +8,8 @@ const VERSION = 1;
 const WRITE_DELAY_MS = 2_000;
 /** …but never longer than this after the first change of a burst. */
 const WRITE_MAX_WAIT_MS = 10_000;
-/** How many Panes keep their tab list. */
-const RECENT_PANES = 20;
+/** How many Panes keep their tab list, and Sessions their own data, each. */
+const RECENT = 20;
 
 /** What Home and a Pane's tabs paint from: each machine's lists, keyed `[machineId, channel, ...]`. */
 const SAVED_CHANNELS = new Set([
@@ -23,7 +23,8 @@ const SAVED_CHANNELS = new Set([
   // The machine's lists as All reads them while the phone is on another machine.
   'all-machines:snapshot',
 ]);
-const PANE_TABS = 'panels:list';
+/** Lists kept for the Panes and Sessions read most recently: their tabs, and a Session's name and members. */
+const RECENT_CHANNELS = new Set(['panels:list', 'orchestration-sessions:get']);
 
 /** Files by name, one per machine; the name carries nothing of the machine's token. */
 export interface SavedStateFiles {
@@ -110,17 +111,17 @@ export function createSavedState(queryClient: QueryClient, files: SavedStateFile
 }
 
 function isSaved(channel: unknown): boolean {
-  return typeof channel === 'string' && (SAVED_CHANNELS.has(channel) || channel === PANE_TABS);
+  return typeof channel === 'string' && (SAVED_CHANNELS.has(channel) || RECENT_CHANNELS.has(channel));
 }
 
 /** Lists with data, a failed refresh included: the last answer is still the best one to paint. */
 function savedQueries(queryClient: QueryClient, machineId: string): Query[] {
   const answered = queryClient.getQueryCache().findAll({ queryKey: [machineId], predicate: query => query.state.data !== undefined });
-  const tabs = answered
-    .filter(query => query.queryKey[1] === PANE_TABS)
+  const recent = [...RECENT_CHANNELS].flatMap(channel => answered
+    .filter(query => query.queryKey[1] === channel)
     .sort((a, b) => b.state.dataUpdatedAt - a.state.dataUpdatedAt)
-    .slice(0, RECENT_PANES);
-  return [...answered.filter(query => SAVED_CHANNELS.has(query.queryKey[1] as string)), ...tabs];
+    .slice(0, RECENT));
+  return [...answered.filter(query => SAVED_CHANNELS.has(query.queryKey[1] as string)), ...recent];
 }
 
 type SavedQuery = DehydratedState['queries'][number];
