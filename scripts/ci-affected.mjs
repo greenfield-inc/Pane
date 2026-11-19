@@ -18,19 +18,21 @@
 // The guard keeps the map honest. It scans each lane's inputs for paths
 // into the rest of the repository, and fails when one lands in another
 // lane's inputs or in LANE_FREE but outside this lane. (A path no entry names
-// is fine to read: a change to it runs every lane.) It sees, outside comments:
+// is fine to read: a change to it runs every lane.) It reads past comments
+// and regex literals, and sees:
 //   - string literals that start with ./ or ../, from the file's folder and
 //     from its workspace folder (the repository root for tests/ and scripts/);
 //   - string literals that start with a top-level folder (`contracts/x`);
-//   - join(), resolve() and new URL() of __dirname, import.meta, process.cwd()
-//     or a name bound to a folder above the file
-//     (`const root = join(__dirname, '..')`, then `join(root, 'claude-plugin')`);
-//   - a climb followed by a computed part (`join(__dirname, '..', name)`,
-//     `../${name}`), and any other use of such a root name, which fail as
-//     unverifiable unless they stay inside the lane.
-// It misses a path built entirely from variables or environment values, and a
-// file a spawned program opens by itself. Only a merge queue that runs every
-// lane would catch those; none is enabled yet.
+//   - join(), resolve(), new URL(), templates (`${__dirname}/../x`) and
+//     concatenation (`__dirname + '/../x'`) built on the file's location, and
+//     names bound to it (`join(__dirname, '..')`, `dirname(dirname(__dirname))`,
+//     `fileURLToPath(new URL('..', import.meta.url))`);
+//   - a climb followed by a computed part, any other use of such a name, and a
+//     template literal that never closes, which fail as unverifiable.
+// It misses a path built entirely from variables, function results or
+// environment values, a location passed through a function or object first,
+// a file a spawned program opens by itself, and a read a wrong NOT_READ entry
+// excuses. Only a merge queue that runs every lane catches those.
 
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';

@@ -252,13 +252,19 @@ the run when the map is broken (an empty map, a job the gate does not know,
 an entry that names no file, a path a lane's job names in `quality.yml`
 outside that lane, a test file `scripts/ci-test-inventory.mjs` names for a
 lane's job outside that lane) or when a lane's code names a path in another lane or in
-`LANE_FREE`: a `../` or top-level literal, a `join()`/`resolve()` of
-`__dirname`, `process.cwd()` or a name for a folder above the file, or a
-climb followed by a computed part. Declare the path in the lane, or in
-`NOT_READ` with a reason when the code does not read it. The guard misses a
-path built entirely from variables or environment values, and one a spawned
-program opens by itself; only a merge queue that runs every lane would catch
-those, and none is enabled yet. `pnpm check:fast` and
+`LANE_FREE`. It reads past comments and regex literals, and sees `../` and
+top-level literals; `join()`, `resolve()`, `new URL()`, templates
+(`` `${__dirname}/../x` ``) and concatenation (`__dirname + '/../x'`) built on
+the file's location; and names bound to it (`join(__dirname, '..')`,
+`dirname(dirname(__dirname))`, `fileURLToPath(new URL('..', import.meta.url))`).
+A climb followed by a computed part, any other use of such a name, and a
+template literal that never closes fail as unverifiable. Declare the path in
+the lane, or in `NOT_READ` with a reason when the code does not read it. The
+guard misses a path built entirely from variables, function results or
+environment values; a location passed through a function or an object before
+the path is built; and a file a spawned program opens by itself. A wrong
+`NOT_READ` entry also hides a read. Only a merge queue that runs every lane
+catches those, and none is enabled yet. `pnpm check:fast` and
 `node scripts/ci-affected.mjs guard` run the same guard locally.
 
 `node scripts/ci-timings.mjs --since <date> --until <time>` writes
