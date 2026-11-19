@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { EXPECTED_JOBS, SKIP_WHEN_UNCHANGED, evaluate, skipManifest, workflowJobIds } from './ci-gate.mjs';
+import { LANES } from './ci-affected.mjs';
+import { EXPECTED_JOBS, evaluate, workflowJobIds } from './ci-gate.mjs';
 
 const WORKFLOW = readFileSync(new URL('../.github/workflows/quality.yml', import.meta.url), 'utf8');
 const ALL_JOBS = [...EXPECTED_JOBS, 'ci-result'];
-const PR_SKIP = skipManifest({ event: 'pull_request', changed: { runpane: 'false', main: 'true', relay: 'false' } });
+const PR_SKIP = { 'relay-tests': 'no changed path is in the relay-tests lane\'s inputs' };
 
 function needsWith(overrides = {}, skip = PR_SKIP) {
   const needs = Object.fromEntries(EXPECTED_JOBS.map((job) => [job, { result: 'success', outputs: {} }]));
@@ -28,7 +29,7 @@ test('every job succeeding passes', () => {
 test('a skip the manifest declares passes, with its reason', () => {
   const verdict = evaluate({ needs: needsWith({ 'relay-tests': { result: 'skipped' } }), workflowJobs: ALL_JOBS });
   assert.equal(verdict.ok, true);
-  assert.match(verdict.rows.find((row) => row.job === 'relay-tests').reason, /no relay files changed/);
+  assert.match(verdict.rows.find((row) => row.job === 'relay-tests').reason, /relay-tests lane/);
 });
 
 for (const result of ['failure', 'cancelled']) {
@@ -86,12 +87,6 @@ test('an unreadable manifest allows no skip', () => {
   assert.match(verdict.problems[0], /skip manifest is not JSON/);
 });
 
-test('pushes and manual runs skip nothing; pull requests skip only unchanged areas', () => {
-  assert.deepEqual(skipManifest({ event: 'push', changed: {} }), {});
-  assert.deepEqual(skipManifest({ event: 'workflow_dispatch', changed: {} }), {});
-  assert.deepEqual(Object.keys(PR_SKIP).sort(), ['relay-rust', 'relay-tests', 'runpane-wrapper-tests']);
-});
-
 // The contract with the real workflow file.
 test('quality.yml has exactly the expected jobs plus CI result', () => {
   assert.deepEqual(workflowJobIds(WORKFLOW).sort(), [...ALL_JOBS].sort());
@@ -110,7 +105,7 @@ test('CI result runs even when jobs fail or the run is cancelled', () => {
 
 test('each skippable job skips only through the manifest', () => {
   const text = WORKFLOW.replace(/\r\n/g, '\n');
-  for (const job of Object.keys(SKIP_WHEN_UNCHANGED)) {
+  for (const job of Object.values(LANES).flatMap((lane) => lane.jobs)) {
     const block = text.split(new RegExp(`^ {2}${job}:\\n`, 'm'))[1].split(/^ {2}\S/m)[0];
     assert.match(block, new RegExp(`^ {4}if: \\$\\{\\{ !fromJSON\\(needs\\.changes\\.outputs\\.skip\\)\\['${job}'\\] \\}\\}$`, 'm'), job);
   }

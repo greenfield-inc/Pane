@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 // The CI result gate: the one check branch protection requires.
 //
-//   node scripts/ci-gate.mjs manifest   (in Detect changed areas) prints
-//     `skip=<json>` for $GITHUB_OUTPUT: the jobs this run may skip, each with
-//     its reason. Jobs read it in their `if:`, so one list decides both.
 //   node scripts/ci-gate.mjs decide     (in CI result) reads the jobs' results
 //     from NEEDS_JSON (`toJSON(needs)`) and fails unless every expected job
-//     succeeded or was skipped with a reason from the manifest.
+//     succeeded or was skipped with a reason from the skip manifest that
+//     Detect changed areas writes (scripts/ci-affected.mjs).
 //
 // A job that is missing (removed from the workflow or from CI result's needs),
 // cancelled, failed, or skipped without a manifest reason turns CI result red.
@@ -35,26 +33,6 @@ export const EXPECTED_JOBS = [
   'relay-tests',
   'pwa-build',
 ];
-
-// Jobs a pull request may skip when none of their files changed, keyed by job
-// id, with the Detect changed areas output that says whether they did. Pushes
-// to main and manual runs skip nothing.
-export const SKIP_WHEN_UNCHANGED = {
-  'runpane-wrapper-tests': 'runpane',
-  'cross-os-main-tests': 'main',
-  'relay-rust': 'relay',
-  'relay-tests': 'relay',
-};
-
-/** The jobs this run may skip, with a reason each. */
-export function skipManifest({ event, changed }) {
-  if (event !== 'pull_request') return {};
-  const skip = {};
-  for (const [job, area] of Object.entries(SKIP_WHEN_UNCHANGED)) {
-    if (changed[area] !== 'true') skip[job] = `no ${area} files changed in this pull request`;
-  }
-  return skip;
-}
 
 /** Top-level job ids in a workflow file, read without a YAML parser. */
 export function workflowJobIds(workflowText) {
@@ -143,18 +121,6 @@ function summaryMarkdown({ ok, rows, problems }) {
 
 function main() {
   const [command] = process.argv.slice(2);
-  if (command === 'manifest') {
-    const skip = skipManifest({
-      event: process.env.GITHUB_EVENT_NAME,
-      changed: {
-        runpane: process.env.CHANGED_RUNPANE,
-        main: process.env.CHANGED_MAIN,
-        relay: process.env.CHANGED_RELAY,
-      },
-    });
-    process.stdout.write(`skip=${JSON.stringify(skip)}\n`);
-    return;
-  }
   if (command === 'decide') {
     if (!process.env.NEEDS_JSON) throw new Error('NEEDS_JSON is not set. CI result passes it as `toJSON(needs)`.');
     const workflowPath = new URL('../.github/workflows/quality.yml', import.meta.url);
@@ -169,7 +135,7 @@ function main() {
     process.exitCode = verdict.ok ? 0 : 1;
     return;
   }
-  throw new Error(`Unknown command ${command ?? '(none)'}. Use \`manifest\` or \`decide\`.`);
+  throw new Error(`Unknown command ${command ?? '(none)'}. Use \`decide\`.`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

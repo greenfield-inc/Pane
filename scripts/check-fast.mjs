@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // pnpm check:fast: the checks that catch most red CI runs, in a few minutes,
-// before a push. It runs the type check and lint (side by side), the offline
-// markdown link check (when lychee is installed), the renderer-test type check (lint includes the
+// before a push. It runs the type check and lint (side by side), the CI lane
+// map guard (scripts/ci-affected.mjs), the offline markdown link check (when
+// lychee is installed), the renderer-test type check (lint includes the
 // check that code hard-codes no agent fact, scripts/check-agent-names.mjs), and the unit tests that
 // the branch's changes reach, in each workspace the branch changed. It does
 // not run the Playwright journeys, the runpane wrapper suites or other OSes;
@@ -67,6 +68,7 @@ console.log(`check:fast against ${base.slice(0, 12)}: ${changed.length} changed 
 results.push(...(await Promise.all([
   run('pnpm typecheck', 'pnpm', ['typecheck'], { quiet: true }),
   run('pnpm lint', 'pnpm', ['lint'], { quiet: true }),
+  run('CI lane map guard', process.execPath, ['scripts/ci-affected.mjs', 'guard'], { quiet: true }),
 ])).map(report));
 
 if (spawnSync('lychee', ['--version'], { stdio: 'ignore', shell: process.platform === 'win32' }).status === 0) {

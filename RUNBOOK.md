@@ -223,8 +223,7 @@ namespace. Check the listing with
 `CI result` is the check branch protection requires. It runs even when the
 run is cancelled, and passes only when every `Code Quality` job named in
 `scripts/ci-gate.mjs` `EXPECTED_JOBS` succeeded, or skipped with a reason from
-the manifest that Detect changed areas writes (a pull request that changes no
-wrapper, main or relay files skips those jobs). A job that fails, is
+the manifest that Detect changed areas writes. A job that fails, is
 cancelled, is skipped without a reason, or is missing from the workflow or
 from `CI result`'s needs fails it, and so does a `Code Quality` job the list
 does not name. Add a new job to `EXPECTED_JOBS` and to `CI result`'s needs in
@@ -233,6 +232,24 @@ by `node --test scripts/ci-gate.test.mjs` locally) checks they match the
 workflow. It is the only check a merge waits for; how
 to merge a pull request or a stack is in
 [CONTRIBUTING.md](CONTRIBUTING.md#merging).
+
+Detect changed areas runs `node scripts/ci-affected.mjs manifest`. On a pull
+request it skips a lane (a set of jobs in `LANES`) only when every changed
+path, both sides of a rename or delete, is inside another lane's inputs or in
+`LANE_FREE`. A path no entry names (root config, the lockfile, patches,
+workflows, most of `scripts/`), an empty diff, an unreadable base and every
+event other than `pull_request` run every lane. Before it selects, it fails
+the run when the map is broken (an empty map, a job the gate does not know,
+an entry that names no file, a path a lane's job names in `quality.yml`
+outside that lane) or when a lane's code names a path in another lane or in
+`LANE_FREE`: a `../` or top-level literal, a `join()`/`resolve()` of
+`__dirname`, `process.cwd()` or a name for a folder above the file, or a
+climb followed by a computed part. Declare the path in the lane, or in
+`NOT_READ` with a reason when the code does not read it. The guard misses a
+path built entirely from variables or environment values, and one a spawned
+program opens by itself; only a merge queue that runs every lane would catch
+those, and none is enabled yet. `pnpm check:fast` and
+`node scripts/ci-affected.mjs guard` run the same guard locally.
 
 `node scripts/ci-timings.mjs --since <date> --until <time>` writes
 `ci-timings.json`: the wall time (first job start to last job end, attempt 1)
