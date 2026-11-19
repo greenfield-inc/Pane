@@ -99,8 +99,10 @@ export class BrowserHolds {
   /** A screen shows the tab (or still does). A watched tab over the limit puts another to sleep. */
   watch(tabId: string, viewerId: string, report: ViewerReport): void {
     const now = this.now();
-    this.asleep.delete(tabId);
     const existing = this.watches.get(tabId);
+    // A report with the tab off screen keeps a watch going but never starts one (nor wakes the tab).
+    if (!existing && !report.onScreen) return;
+    this.asleep.delete(tabId);
     const watch = existing ?? { viewers: new Map<string, Viewer>(), lastWatched: now, lastOnScreen: now };
     const joined = !watch.viewers.has(viewerId);
     watch.viewers.set(viewerId, { ...report, id: viewerId, lastSeen: now });
@@ -183,7 +185,26 @@ export class BrowserHolds {
         watch.lastWatched = Math.max(watch.lastWatched, viewer.lastSeen);
         changed = true;
       }
-      if (watch.viewers.size > 0 || now - watch.lastWatched < this.options.watch.graceMs || busy(tabId)) continue;
+      // A screen that has the tab off screen (a minimized window, a backgrounded app) doesn't keep it:
+      // the grace time runs from the last moment any screen had it on screen.
+      const shown = [...watch.viewers.values()].some(viewer => viewer.onScreen);
+      if (shown || now - Math.max(watch.lastOnScreen, watch.viewers.size > 0 ? 0 : watch.lastWatched) < this.options.watch.graceMs || busy(tabId)) continue;
+      this.dropWatch(tabId);
+      changed = true;
+    }
+    if (changed) this.changed();
+  }
+
+  /**
+   * This computer's window went away: its own screen stops watching every tab at once, with no
+   * grace, so its pages don't reload into hidden windows nobody watches. Agent holds and other
+   * devices' watches stay.
+   */
+  forgetScreensOfKind(kind: ViewerKind): void {
+    let changed = false;
+    for (const [tabId, watch] of this.watches) {
+      for (const [id, viewer] of watch.viewers) if (viewer.kind === kind) watch.viewers.delete(id);
+      if (watch.viewers.size > 0) continue;
       this.dropWatch(tabId);
       changed = true;
     }

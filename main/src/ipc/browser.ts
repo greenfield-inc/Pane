@@ -174,6 +174,8 @@ const VIEW_WAIT_MS = 10_000;
 const PERSON_UPLOAD_BYTES = 10 * 1_048_576;
 /** Electron's cursor names that differ from CSS's. */
 const CSS_CURSOR = new Map([['pointer', 'default'], ['hand', 'pointer'], ['nodrop', 'no-drop'], ['custom', 'default'], ['column-resize', 'col-resize']]);
+/** A controlling screen's size must hold this long before the page follows it. */
+const RESIZE_SETTLE_MS = 250;
 /** The smallest and largest page a viewer may ask for, in CSS pixels. */
 const PAGE_MIN = 100;
 const PAGE_MAX = { width: 3840, height: 2160 };
@@ -240,7 +242,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   const holdSettings = { ...DEFAULT_HOLDS, ...settingsOverride };
   const pages = new Map<number, PageDriver>();
   /** Tabs another device watches: their pages keep painting and running while hidden here. */
-  const remotelyWatched = (): string[] => holds.held().filter(tabId => holds.viewers(tabId).some(viewer => viewer.kind !== 'host'));
+  const remotelyWatched = (): string[] => holds.held().filter(tabId => holds.viewers(tabId).some(viewer => viewer.kind !== 'host' && viewer.onScreen));
   const holds = new BrowserHolds({ limit: holdSettings.limit, idleMs: holdSettings.idleMs, watch: holdSettings.watch, onChange: held => host.setHeld(held, remotelyWatched()) });
   /** Whether this Pane had a window when the held tabs were last handed over. */
   let hadWindow = host.hasWindow();
@@ -257,6 +259,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     // are handed over again (each reloads once from its URL).
     if (host.hasWindow() !== hadWindow) {
       hadWindow = host.hasWindow();
+      // Tabs only this window showed go with it; agent-held and remotely watched pages move.
+      if (!hadWindow) holds.forgetScreensOfKind('host');
       host.setHeld(holds.held(), remotelyWatched());
     }
     for (const tabId of holds.held()) applyWatch(tabId);
@@ -273,6 +277,15 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   host.onGone(sweep);
   /** Tabs the person holds by touching the page; they go back to the agent TOUCH_HOLD_MS after the last touch. */
   const touchTimers = new Map<string, NodeJS.Timeout>();
+  /** A screen's resize waiting to settle before the page follows it, by tab. */
+  const resizeTimers = new Map<string, NodeJS.Timeout>();
+  function followSize(tabId: string, viewerId: string): void {
+    clearTimeout(resizeTimers.get(tabId));
+    resizeTimers.set(tabId, setTimeout(() => {
+      resizeTimers.delete(tabId);
+      if (controllers.get(tabId) === viewerId) void takeControl(tabId, viewerId).catch(cause => console.warn(`[browser] Could not resize tab ${tabId}:`, cause));
+    }, RESIZE_SETTLE_MS));
+  }
   /** The screen each tab's page takes its size from, while one on another device controls it. */
   const controllers = new Map<string, string>();
   /** Tabs the person took over with the chip: they hold them until Hand to agent. */
@@ -453,7 +466,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       driver.notePersonInput();
       void personTouched(tabId, page.id);
       // The person here clicked into the tab: the page fills it again.
-      if (tabOf(tabId)?.pageSize) void setPageSize(tabId, undefined);
+      if ((input.type === 'mouseDown' || input.type === 'touchStart') && tabOf(tabId)?.pageSize) {
+        void setPageSize(tabId, undefined).catch(cause => console.warn(`[browser] Could not give tab ${tabId} its size back:`, cause));
+      }
     });
     return driver;
   }
@@ -472,7 +487,8 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const page = host.page(tabId);
     if (!page || page.isDestroyed()) return;
     const viewers = holds.viewers(tabId);
-    const remote = viewers.some(viewer => viewer.kind !== 'host');
+    // Only a screen that has the tab on screen keeps it running unthrottled here.
+    const remote = viewers.some(viewer => viewer.kind !== 'host' && viewer.onScreen);
     const shownHere = viewers.some(viewer => viewer.kind === 'host' && viewer.onScreen);
     const key = JSON.stringify([remote, shownHere]);
     if (applied.get(page.id) !== key) {
@@ -777,7 +793,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
   commandRegistry.register('browser:driver', async (panelId: PaneCommandValue, who: PaneCommandValue, viewer?: PaneCommandValue) => {
     if (paneCommandCaller() || teammatePaneCaller()) return { success: false, error: 'This channel belongs to the person\'s browser tab.' };
     const id = decodeOptionalBoundary(panelId, boundary.string);
-    if (!id || !host.tab(id) || (who !== 'person' && who !== 'agent')) return { success: false, error: 'That browser tab is gone.' };
+    if (!id || host.tab(id)?.type !== 'browser' || (who !== 'person' && who !== 'agent')) return { success: false, error: 'That browser tab is gone.' };
     await setDriverFromChip(id, who, decodeOptionalBoundary(viewer, boundary.string));
     return { success: true };
   });
@@ -791,7 +807,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (paneCommandCaller() || teammatePaneCaller()) return { success: false, error: 'This channel belongs to the person\'s screens.' };
     const id = decodeOptionalBoundary(panelId, boundary.string);
     const viewerId = decodeOptionalBoundary(viewer, boundary.nonEmptyString);
-    if (!id || !viewerId || !host.tab(id)) return { success: false, error: 'That browser tab is gone.' };
+    if (!id || !viewerId || host.tab(id)?.type !== 'browser') return { success: false, error: 'That browser tab is gone.' };
     let decoded;
     try {
       decoded = decodeBoundary(report ?? undefined, watchReportSchema);
@@ -804,8 +820,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       // This computer's own window is the host's screen, whatever it calls itself.
       const kind: ViewerKind = isRemotePaneCommand() ? decoded.kind : 'host';
       holds.watch(id, viewerId, { ...decoded, kind });
-      // The page follows the size of the screen in control as it changes (a window resized, a sidebar closed).
-      if (controllers.get(id) === viewerId && tabOf(id)?.pageSize) await takeControl(id, viewerId);
+      // The page follows the size of the screen in control as it changes (a window resized, a
+      // sidebar closed), once the size holds still, so a drag doesn't reflow it at frame rate.
+      if (controllers.get(id) === viewerId && tabOf(id)?.pageSize) followSize(id, viewerId);
     }
     applyWatch(id);
     return { success: true };
@@ -1066,7 +1083,10 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     return now ? JSON.parse(JSON.stringify(tabView(id, now))) : { version: 0, stopped: 'gone' };
   });
 
-  return () => clearInterval(sweeper);
+  return () => {
+    clearInterval(sweeper);
+    for (const timer of resizeTimers.values()) clearTimeout(timer);
+  };
 }
 
 /** `name` in `directory`, or "name (2).ext" and on when a file has it, as browsers name downloads. */
