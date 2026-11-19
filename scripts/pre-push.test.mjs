@@ -1,5 +1,5 @@
 // The pre-push hook's plan (--dry-run) for the pushes git hands it, in a
-// throwaway repository: which files it lints and which projects it type checks.
+// throwaway repository: which files it lints and whether it type checks.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -36,7 +36,7 @@ function plan(remoteSha, localSha = git('rev-parse', 'HEAD')) {
     encoding: 'utf8',
     input: `refs/heads/topic ${localSha} refs/heads/topic ${remoteSha}\n`,
   });
-  const checks = result.stdout.split('\n').filter((line) => /^[a-z][^:]*: node /.test(line));
+  const checks = result.stdout.split('\n').filter((line) => /^[a-z][^:]*: (?:node|pnpm) /.test(line));
   return { status: result.status, checks, output: result.stdout + result.stderr };
 }
 
@@ -71,15 +71,7 @@ test('a new branch is checked from where it left origin/main, with renames, dele
   const { status, checks } = plan(ZERO);
   assert.equal(status, 0);
   assert.equal(lintedFiles(checks), 'main/src/new name.ts packages/runpane/src/cli.ts');
-  assert.deepEqual(names(checks), [
-    'oxlint (2 files)',
-    'agent facts',
-    'typecheck main',
-    'typecheck frontend',
-    'typecheck frontend node config',
-    'typecheck renderer tests',
-    'typecheck runpane',
-  ]);
+  assert.deepEqual(names(checks), ['oxlint (2 files)', 'agent facts', 'typecheck']);
 });
 
 test('a push onto a branch the remote has checks only the new commits', () => {
@@ -90,7 +82,7 @@ test('a push onto a branch the remote has checks only the new commits', () => {
 
   const { checks } = plan(remote);
   assert.equal(lintedFiles(checks), 'main/src/second.ts');
-  assert.deepEqual(names(checks), ['oxlint (1 file)', 'agent facts', 'typecheck main']);
+  assert.deepEqual(names(checks), ['oxlint (1 file)', 'agent facts', 'typecheck']);
 });
 
 test('a rewritten branch is checked from where it left origin/main', () => {
@@ -102,6 +94,12 @@ test('a rewritten branch is checked from where it left origin/main', () => {
 
   const { checks } = plan(replaced);
   assert.equal(lintedFiles(checks), 'main/src/second.ts');
+});
+
+test('deleting a module type checks without linting it', () => {
+  fs.rmSync(path.join(repo, 'frontend/src/gone.ts'));
+  commit('delete');
+  assert.deepEqual(names(plan(ZERO).checks), ['typecheck']);
 });
 
 test('a docs-only push and a branch deletion check nothing', () => {
@@ -118,7 +116,7 @@ test('without origin/main a new branch checks everything', () => {
 
   const { checks } = plan(ZERO);
   assert.equal(checks[0], 'oxlint (whole tree): node scripts/oxlint.mjs');
-  assert.equal(checks.length, 7);
+  assert.deepEqual(names(checks), ['oxlint (whole tree)', 'agent facts', 'typecheck']);
 });
 
 test('an uncommitted edit to a checked file refuses the push', () => {

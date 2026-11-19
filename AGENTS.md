@@ -18,7 +18,7 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   `PANE_DIR=~/.pane_test pnpm dev` (not `electron-dev`: its watcher overwrites
   the bundled preload). Build the local CLI with `pnpm --filter runpane build`.
 - `pnpm run setup` installs a pre-push hook (`scripts/pre-push.mjs`) that
-  lints the pushed files and type checks the workspaces they reach in seconds;
+  lints the pushed files and runs `pnpm typecheck` in a few seconds;
   `git push --no-verify` skips it.
 - Before a push: `pnpm check:fast` (type check, lint, offline links when
   lychee is installed, and the unit tests your changes reach), plus any other

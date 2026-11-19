@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // The pre-push hook (scripts/git-hooks/pre-push, installed by `pnpm run setup`).
-// It lints the files the pushed commits change and type checks the workspaces
-// they reach, all at once, in a few seconds. CI still runs every check.
+// It lints the files the pushed commits change and, when they touch code or
+// config, runs the type check CI runs (`pnpm typecheck`), side by side, in a few
+// seconds. CI still runs every check.
 //
 // Git passes one line per pushed ref on stdin:
 //   <local ref> <local sha> <remote ref> <remote sha>
@@ -18,34 +19,8 @@ const ZERO = /^0+$/;
 // Past this many files, lint the whole tree: Windows caps a command line at 32K.
 const MAX_LINT_FILES = 300;
 const LINTABLE = /\.(?:[cm]?[jt]sx?)$/;
-const TYPED = /\.(?:[cm]?[jt]sx?|json)$/;
-// The type checks CI runs (each workspace's `typecheck` script, and the
-// renderer tests' types), with an incremental cache kept per worktree in
-// node_modules/.cache, so a small push rechecks little. The renderer tests use
-// the frontend's TypeScript 7 compiler, which takes seconds where 5 takes 30.
-const TS5 = (workspace) => `${workspace}/node_modules/typescript/bin/tsc`;
-const TS7 = 'node_modules/@typescript/native/bin/tsc';
-const tsc = (compiler, project, cache) => ({
-  command: process.execPath,
-  args: [compiler, '--noEmit', '-p', project, '--incremental', '--tsBuildInfoFile', `node_modules/.cache/pane-pre-push/${cache}.tsbuildinfo`],
-});
-const PROJECTS = {
-  main: tsc(TS5('main'), 'main', 'main'),
-  frontend: tsc(TS7, 'frontend', 'frontend'),
-  'frontend node config': tsc(TS7, 'frontend/tsconfig.node.json', 'frontend-node'),
-  'renderer tests': tsc(TS7, 'tests/renderer/tsconfig.json', 'renderer'),
-  runpane: tsc(TS5('packages/runpane'), 'packages/runpane', 'runpane'),
-};
-// A change under one of these paths type checks the listed projects. A change
-// to a root manifest or lockfile type checks all of them.
-const REACHES = [
-  ['main/', ['main']],
-  ['frontend/', ['frontend', 'frontend node config', 'renderer tests']],
-  ['tests/renderer/', ['renderer tests']],
-  ['packages/runpane/', ['runpane']],
-  ['shared/', ['main', 'frontend', 'renderer tests']],
-];
-const ROOT_FILES = new Set(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']);
+// A change to one of these can change what the type check reports.
+const TYPED = /(?:\.(?:[cm]?[jt]sx?|json)|^pnpm-lock\.yaml)$/;
 
 const dryRun = process.argv.includes('--dry-run');
 
@@ -112,21 +87,15 @@ changed = [...new Map(changed.map((file) => [file.path, file])).values()];
 const present = changed.filter((file) => !file.deleted).map((file) => file.path);
 const lintFiles = present.filter((file) => LINTABLE.test(file));
 const lintAll = everything || lintFiles.length > MAX_LINT_FILES;
-const projects = new Set(everything ? Object.keys(PROJECTS) : []);
-for (const file of changed) {
-  if (ROOT_FILES.has(file.path)) Object.keys(PROJECTS).forEach((name) => projects.add(name));
-  if (!TYPED.test(file.path)) continue;
-  for (const [prefix, names] of REACHES) {
-    if (file.path.startsWith(prefix)) names.forEach((name) => projects.add(name));
-  }
-}
+// Deleted files count: removing a module can break the files that import it.
+const typecheck = everything || changed.some((file) => TYPED.test(file.path));
 
 // The tools read the disk, so an uncommitted edit to a checked file would be
 // checked in place of the pushed one.
 const dirty = (git(['status', '--porcelain', '-z', '--untracked-files=no']) ?? '')
   .split('\0').filter(Boolean).map((entry) => entry.slice(3));
 const checkedDirty = dirty.filter((file) => (lintAll ? LINTABLE.test(file) : lintFiles.includes(file))
-  || (TYPED.test(file) && REACHES.some(([prefix, names]) => file.startsWith(prefix) && names.some((name) => projects.has(name)))));
+  || (typecheck && TYPED.test(file)));
 if (checkedDirty.length > 0) {
   refuse(`these files have uncommitted changes, and the checks would read them instead of what you are pushing:\n  ${checkedDirty.join('\n  ')}\nCommit or stash them, then push again.`);
 }
@@ -146,8 +115,9 @@ if (lintAll || lintFiles.length > 0) {
   checks.push({ name: 'agent facts', command: process.execPath, args: ['scripts/check-agent-names.mjs'] });
 }
 // Format: oxfmt --check on the changed files goes here once the repo has a formatter.
-for (const name of Object.keys(PROJECTS).filter((project) => projects.has(project))) {
-  checks.push({ name: `typecheck ${name}`, ...PROJECTS[name] });
+if (typecheck) {
+  // The whole repository: bun check takes a few seconds, and it is CI's own command.
+  checks.push({ name: 'typecheck', command: 'pnpm', args: ['run', '--silent', 'typecheck'] });
 }
 
 if (checks.length === 0) {
@@ -156,7 +126,7 @@ if (checks.length === 0) {
 }
 if (dryRun) {
   for (const check of checks) {
-    console.log(`${check.name}: node ${check.args.join(' ')}`);
+    console.log(`${check.name}: ${check.command === process.execPath ? 'node' : check.command} ${check.args.join(' ')}`);
   }
   process.exit(0);
 }
@@ -164,7 +134,8 @@ if (dryRun) {
 const started = Date.now();
 const results = await Promise.all(checks.map((check) => new Promise((resolve) => {
   const checkStarted = Date.now();
-  const child = spawn(check.command, check.args, { cwd: root });
+  // pnpm is a .cmd shim on Windows, which needs a shell; file names only reach node.
+  const child = spawn(check.command, check.args, { cwd: root, shell: process.platform === 'win32' && check.command === 'pnpm' });
   let output = '';
   child.stdout.on('data', (chunk) => { output += chunk; });
   child.stderr.on('data', (chunk) => { output += chunk; });

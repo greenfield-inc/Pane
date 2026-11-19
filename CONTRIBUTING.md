@@ -21,10 +21,10 @@ have pnpm 10, `corepack enable` provides the version pinned in `package.json`.
    ```
    Setup warns that it can't link `node_modules/.bin/runpane` (the local CLI
    isn't built yet) and lists ignored build scripts. Both are harmless.
-   The pre-push hook lints the files a push changes and type checks the
-   workspaces they reach, in a few seconds (the first run fills a cache and
-   takes longer). It keeps a pre-push hook you already have and prints the line
-   to add to it. `git push --no-verify` skips it.
+   The pre-push hook lints the files a push changes and, when they touch code
+   or config, runs `pnpm typecheck`, in a few seconds. It keeps a pre-push
+   hook you already have and prints the line to add to it.
+   `git push --no-verify` skips it.
 3. Create a branch:
    ```bash
    git checkout -b feature/your-feature-name
