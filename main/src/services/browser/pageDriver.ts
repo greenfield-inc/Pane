@@ -334,11 +334,19 @@ export class PageDriver {
   private async navigateNow(target: { url: string } | { history: 'back' | 'forward' | 'reload' }): Promise<void> {
     this.refuseWhileDialog();
     if ('url' in target) {
-      await this.contents.loadURL(target.url).catch((cause: unknown) => {
-        // A load that a newer navigation replaced (ERR_ABORTED) still leaves the tab on a page.
-        if (cause instanceof Error && /ERR_ABORTED/.test(cause.message)) return;
+      const before = this.contents.getURL();
+      const load = () => this.contents.loadURL(target.url).then(() => true, (cause: unknown) => {
+        // Another navigation replaced this one (ERR_ABORTED, -3): a waking tab loading its saved page, or the page's own redirect.
+        if (cause instanceof Error && /ERR_ABORTED|\(-3\)/.test(cause.message)) return false;
         throw new PaneError('ERR_BROWSER_NAVIGATION_FAILED', `The page at ${target.url} did not load: ${cause instanceof Error ? cause.message : String(cause)}.`, 'Check the URL, or call browser_snapshot to see what the tab shows.');
       });
+      if (await load()) return;
+      // A waking tab's own reload of its old page replaced this one: once it settles, load the agent's
+      // URL again. A redirect or a page's own navigation is left as it is, so nothing loads twice.
+      if (this.contents.isLoading()) await this.nextLoad();
+      const landed = this.contents.getURL();
+      const freshPage = before === '' || before === 'about:blank';
+      if (landed !== target.url && (freshPage || landed === before)) await load();
       return;
     }
     const history = this.contents.navigationHistory;

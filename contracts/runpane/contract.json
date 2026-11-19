@@ -1007,7 +1007,7 @@
     {
       "name": "browser open",
       "mcpName": "browser_open",
-      "summary": "Pane's browser, shared with the person, signed in as them. Open a URL in a browser tab beside you, in a split, owned by you.",
+      "summary": "Pane's browser, shared with the person, signed in as them. Open a URL in a browser tab beside you, in a split, owned by you. Its page stays alive while the person looks elsewhere; you can drive up to 4 tabs this way, and one idle 15 minutes goes to sleep.",
       "usage": [
         "runpane browser open --url <url> [--json] [--pane-dir <path>]"
       ],
@@ -1027,7 +1027,7 @@
     {
       "name": "browser tabs",
       "mcpName": "browser_tabs",
-      "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, and any pending dialog.",
+      "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether an agent holds it or it is asleep, and files you downloaded.",
       "usage": [
         "runpane browser tabs [--json] [--pane-dir <path>]"
       ],
@@ -6421,7 +6421,7 @@
         "Usage:",
         "  runpane browser open --url <url> [--json] [--pane-dir <path>]",
         "",
-        "Pane's browser, shared with the person, signed in as them. Open a URL in a browser tab beside you, in a split, owned by you. Reuses your own tab when one is already on that origin. Pass the URL here; don't open a blank tab and then navigate. Close the tabs you opened with browser_close when you are done.",
+        "Pane's browser, shared with the person, signed in as them. Open a URL in a browser tab beside you, in a split, owned by you. Its page stays alive while the person looks elsewhere; you can drive up to 4 tabs this way, and one idle 15 minutes goes to sleep. Reuses your own tab when one is already on that origin. Pass the URL here; don't open a blank tab and then navigate. Close the tabs you opened with browser_close when you are done.",
         "",
         "Options:",
         "  --url <url>                    An http or https URL",
@@ -6432,7 +6432,7 @@
         "Usage:",
         "  runpane browser tabs [--json] [--pane-dir <path>]",
         "",
-        "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, and any pending dialog. Use an id with --tab when the Pane has more than one browser tab.",
+        "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether an agent holds it or it is asleep, and files you downloaded. Use an id with --tab when the Pane has more than one browser tab.",
         "",
         "Options:",
         "  --json                         Print machine-readable output",
@@ -21241,7 +21241,15 @@
         },
         "showing": {
           "type": "boolean",
-          "description": "Whether its page is live now. A tab that is not showing comes forward on your next call."
+          "description": "Whether its page is live now. A tab whose page is not live loads it in the background on your next call; it never comes forward."
+        },
+        "held": {
+          "type": "boolean",
+          "description": "An agent holds it: its page stays alive while hidden, until 15 minutes pass with no agent action."
+        },
+        "asleep": {
+          "type": "boolean",
+          "description": "Its hold ended, so its page reloads from its URL on the next call."
         },
         "dialog": {
           "$ref": "#/jsonSchemas/browserDialog"
@@ -29343,7 +29351,7 @@
       },
       "browser open": {
         "name": "browser open",
-        "summary": "Pane's browser, shared with the person, signed in as them. Open a URL in a browser tab beside you, in a split, owned by you.",
+        "summary": "Pane's browser, shared with the person, signed in as them. Open a URL in a browser tab beside you, in a split, owned by you. Its page stays alive while the person looks elsewhere; you can drive up to 4 tabs this way, and one idle 15 minutes goes to sleep.",
         "details": "Reuses your own tab when one is already on that origin. Pass the URL here; don't open a blank tab and then navigate. Close the tabs you opened with browser_close when you are done.",
         "requiresPaneDaemon": true,
         "mutates": true,
@@ -29379,7 +29387,7 @@
       },
       "browser tabs": {
         "name": "browser tabs",
-        "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, and any pending dialog.",
+        "summary": "Pane's browser, shared with the person, signed in as them. List this Pane's browser tabs: id, URL, title, who opened it, who is driving, any pending dialog, whether an agent holds it or it is asleep, and files you downloaded.",
         "details": "Use an id with --tab when the Pane has more than one browser tab.",
         "requiresPaneDaemon": true,
         "mutates": false,

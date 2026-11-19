@@ -24,7 +24,7 @@ opened one tab, or when the Pane has one; with several, the call fails with
 | Tool | Command | What it does |
 | --- | --- | --- |
 | `browser_open` | `runpane browser open --url <url>` | Opens a tab beside the agent, in a split, owned by it; reuses the agent's tab on the same origin |
-| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog, files the agent downloaded |
+| `browser_tabs` | `runpane browser tabs` | The Pane's browser tabs: id, URL, title, who opened it, who is driving, any open dialog, files the agent downloaded, and whether an agent holds it or it is asleep |
 | `browser_close` | `runpane browser close` | Closes a tab the agent opened |
 | `browser_snapshot` | `runpane browser snapshot` | The page as an accessibility tree with refs (`e12`), plus URL and title. On a long page, text is left out before controls |
 | `browser_screenshot` | `runpane browser screenshot [--full-page]` | A PNG in the Pane's scratch folder; MCP clients get the image itself |
@@ -94,10 +94,9 @@ Any input of yours on the page revokes the agent's refs from before: a call that
 and fails with `ERR_BROWSER_PERSON_DRIVING` after 4 minutes. With DevTools open on a tab, an agent's actions on it fail with
 `ERR_BROWSER_DEVTOOLS_OPEN`.
 
-## Where a tab must be
+## Where a tab's page runs
 
-Each desktop draws its own copy of a tab, and a tab's page exists only while the tab shows in a
-Pane window. A call goes to the copy you watch:
+Each desktop draws its own copy of a tab. A call goes to the copy you watch:
 
 - **On a linked computer.** When you watch this Pane from another of your computers, linked in
   **Settings › Your computers**, the call runs on that computer's copy: snapshots, clicks and
@@ -107,14 +106,36 @@ Pane window. A call goes to the copy you watch:
   computer until the tab closes; the screenshot is saved on the agent's computer. A `localhost`
   URL loads through that computer's tunnel for the port, and fails with `ERR_BROWSER_URL_REFUSED`
   when the port has none.
-- **On the agent's computer.** Otherwise the call uses the tab here, bringing it forward in its
-  Pane and waiting up to 5 seconds for its page.
+- **On the agent's computer.** Otherwise the call uses the tab here. When the tab is not in view,
+  its page loads in the background and the tab never comes forward. With no Pane window (a
+  headless host), Pane loads the page in a hidden window, where it can't open popups or hand
+  links to other apps, since nobody is there to approve them.
 
-When no copy shows the tab, the call fails: with `ERR_BROWSER_NOT_SHOWING` when the window here
-shows another Pane, and with `ERR_BROWSER_NOT_LINKED` when Pane runs here without a window. A
+When the page doesn't load within 5 seconds, the call fails with `ERR_BROWSER_NOT_SHOWING`, or
+`ERR_BROWSER_NOT_LINKED` on a host with no window. A
 computer that views this one over Tailscale, SSH or a manual URL without being linked can't run
 browser tools; link it. A call from an agent on another computer through `runpane workspace`
 fails with `ERR_BROWSER_LOCAL_ONLY`.
+
+## Background tabs
+
+An agent holds each tab it calls, so the tab's page stays alive while you look at another tab or
+Pane: a half-filled form, the scroll position and the page's own state stay as they were. One
+agent can drive its held tabs at the same time.
+
+- **Up to 4 per agent.** Holding a fifth puts the one idle longest to sleep, and the result's note
+  names it.
+- **Sleep after 15 minutes.** A held tab with no agent action for 15 minutes goes to sleep: its
+  page unloads and `browser_tabs` shows it `asleep`. The next agent call reloads it from its URL
+  and its note says so; selecting the tab yourself reloads it too.
+- **When the agent goes.** Closing the agent's tab, or archiving its Pane, puts its held tabs to
+  sleep at once.
+- **Tabs nobody holds** unload when hidden, as before.
+
+A held page costs memory but next to no energy while it waits. Measured on a Mac with four held,
+hidden pages (three small test pages and a GitHub pull request page): about 70 MB each for the
+small pages and 100 MB for the GitHub page, 320 MB in all, with no CPU use and an energy impact of
+0.0 while idle.
 
 ## Links
 
