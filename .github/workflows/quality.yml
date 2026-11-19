@@ -6,8 +6,7 @@ on:
   # Stacked and integration PRs need the same gates before they reach main.
   pull_request:
   # The merge queue's runs. Each merge group runs every job on its exact merge
-  # commit, so nothing reaches main without the full suite. The queue is a
-  # repository setting (RUNBOOK.md, "Merge queue").
+  # commit. The queue is a repository setting (RUNBOOK.md, "Merge queue").
   merge_group:
     types: [ checks_requested ]
   workflow_dispatch:

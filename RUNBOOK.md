@@ -271,9 +271,12 @@ pnpm's junctions on Windows. To drop a bad entry, delete it with
 ### Merge queue
 
 `Code Quality` also runs on the merge queue's `merge_group` events, so the
-queue can hold every merge to `main` until the full suite passes on the exact
-merge commit. In a merge group, Detect changed areas diffs no paths and its
-manifest skips nothing, so every job runs. No release or
+queue can hold every merge to `main` until every `Code Quality` job passes on
+the exact merge commit. In a merge group, Detect changed areas diffs no paths
+and its manifest skips nothing, so every job runs. That covers every lane in
+`scripts/ci-test-inventory.mjs` except the Linux package build's packaged-app
+tests, which run in `linux-package-build.yml` on pull requests that touch
+packaging, and the files its `NOT_IN_CI` list names. No release or
 deploy workflow runs: their push triggers name `main`, `nightly`, `release` or
 tags, never the queue's `gh-readonly-queue/main/*` branches. `CI result` is a
 `Code Quality` job and the only required check, so no other workflow needs the
