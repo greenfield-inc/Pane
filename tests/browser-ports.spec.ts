@@ -1,7 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { bundleFixture } from './fixtures/bundle';
 import type { ListeningPortsSnapshot } from '../shared/types/listeningPorts';
-import type {} from './fixtures/browser-ports';
 
 const snapshot = (...ports: number[]): ListeningPortsSnapshot => ({
   host: 'devbox',

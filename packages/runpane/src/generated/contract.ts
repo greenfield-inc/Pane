@@ -916,7 +916,7 @@ export const RUNPANE_CONTRACT = {
     {
       "name": "devices close",
       "mcpName": "device_close",
-      "summary": "Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. The device stays warm for 10 minutes.",
+      "summary": "Release this Pane's device (or, with --platform, only that one) and stop the commands device_run started. A device Pane booted stays warm for 10 minutes, then shuts down.",
       "usage": [
         "runpane devices close [--platform <ios|android>] [--json] [--pane-dir <path>]"
       ],
@@ -6328,7 +6328,7 @@ export const RUNPANE_CONTRACT = {
         "Usage:",
         "  runpane devices close [--json] [--pane-dir <path>]",
         "",
-        "Ends the lease so another Pane can use the device. It shuts down 10 minutes later unless a Pane opens it again.",
+        "Ends the lease so another Pane can use the device. If Pane booted it, it shuts down 10 minutes later unless a Pane opens it again; a device the person booted keeps running.",
         "",
         "Options:",
         "  --json                         Print machine-readable output",
@@ -29700,8 +29700,8 @@ export const RUNPANE_CONTRACT = {
       },
       "devices close": {
         "name": "devices close",
-        "summary": "Release this Pane's device and stop the commands device_run started. The device stays warm for 10 minutes.",
-        "details": "Ends the lease so another Pane can use the device. It shuts down 10 minutes later unless a Pane opens it again.",
+        "summary": "Release this Pane's device and stop the commands device_run started. A device Pane booted stays warm for 10 minutes, then shuts down.",
+        "details": "Ends the lease so another Pane can use the device. If Pane booted it, it shuts down 10 minutes later unless a Pane opens it again; a device the person booted keeps running.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [

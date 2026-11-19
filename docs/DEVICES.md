@@ -110,9 +110,13 @@ Booted simulators are heavy, so Pane keeps few of them:
   to 60 seconds, then fails with `ERR_DEVICE_BUSY` naming the holder; **Take over** in the
   device tab moves the lease. When a device passes to another Pane, Pane uninstalls the apps
   the last Pane installed, without a reboot.
-- **Idle shutdown.** A lease that idles out shuts down a device Pane made or booted at once;
-  a device you booted yourself keeps running. After `device_close` it stays warm for 10
-  minutes. A running `device_run` command counts as use. The helpers stop when nothing is booted.
+- **Shutdown.** Pane shuts down only the devices it booted (for an agent's `device_open` or the
+  tab's **Boot**); a device you booted yourself, in Simulator, Android Studio or before Pane
+  opened it, keeps running. A device Pane booted shuts down when its lease idles out, 10
+  minutes after `device_close` (it stays warm for the next open until then), at once when its
+  Pane is archived, and when Pane quits, on this machine and on a linked Mac. After a crash or
+  force quit, Pane shuts down what it had booted a few seconds after it next starts. A running
+  `device_run` command counts as use. The helpers stop when nothing Pane booted or holds runs.
 - **Erase and delete.** Archiving the last Pane that used one of Pane's devices erases it;
   Pane's devices unused for 7 days are deleted. Pane never deletes your devices or runtimes.
 - **SimSlim.** With [simslim](https://github.com/MobAI-App/simslim) installed
@@ -138,12 +142,17 @@ sized to the tab, with its frame rate under the phone; Android shows frames. The
 | Rotate | ⌘→ | Turns the device a quarter turn |
 | Closed, Half open, Open | | Folds a foldable; shown only when the device has a hinge |
 | Screenshot to chat | ⌘S | Takes a full-resolution PNG and puts it in front of this Pane's agent, unsent: in a chat tab's message box, or as the file's path at a terminal agent's prompt. The card that follows offers Copy, Save and Mark up |
-| Record | ⌘R | Starts and stops a screen recording (MP4, saved with Pane's device files). It keeps going while you look at another tab and stops on its own after 10 minutes. A terminal agent gets its path at the prompt; a chat tab does not get recordings |
+| Record | ⌘R | Starts and stops a screen recording (MP4, saved with Pane's device files). It keeps going while you look at another tab and stops on its own after 10 minutes. The note under the phone says what ended it (you, the limit, an agent's `record stop`, or the device stopping) and where the video is. A terminal agent gets its path at the prompt; a chat tab does not get recordings |
 | Mark up | | Freezes the screen so you can draw on it, then sends or copies the result |
 | Logs | | Shows the log live, with a filter: on iOS the apps you installed, on Android the whole logcat. **To chat** sends the selected or matching lines |
 | More | | Copy screenshot, Save screenshot, Restart, Shut down |
 
-With the tab focused, typing goes to the device and the scroll wheel scrolls it.
+With the tab focused, typing goes to the device and the scroll wheel scrolls it. Taps and keys
+reach the device in the order you made them, also over a slow link to another computer.
+
+A device that stops says why over its screen: **You shut it down**, **Shut down after 10
+minutes idle**, **Shut down when Pane quit**, **The agent closed it** (its `device_close`), or
+that it shut down outside Pane (from Simulator, or a crash).
 
 While an agent's `device_act` runs, the phone is outlined and the line under it says the agent
 is driving. **Take over** makes you the driver: the agent's `device_act`, `device_run` and
@@ -153,7 +162,8 @@ whose caller gives up never runs. Screenshots and recordings are deleted when th
 
 ## Phones and the browser app
 
-The device tab shows on the phone apps and in the browser app as frames, about two a second.
+The device tab shows on the phone apps, in the browser app and on a desktop switched to another
+computer as frames, about two a second and right after each tap, each sized to the tab.
 The browser app has the same rail; the native app has tap and Home. The live stream stays on
 the desktop. Chat tabs on the desktop and in the browser app show the device card; the native
 app shows an **Open** row.

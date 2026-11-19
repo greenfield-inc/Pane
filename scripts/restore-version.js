@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
+
+
 const { execSync } = require('child_process');
 
 // In CI environment, skip restoration since it's not needed

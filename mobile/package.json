@@ -9,8 +9,7 @@
     "build:ios": "pnpm run sync && xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -configuration Debug -derivedDataPath /tmp/pane-mobile-ios build CODE_SIGNING_ALLOWED=NO",
     "build:android": "pnpm run sync && cd android && ./gradlew assembleDebug",
     "test": "vitest run",
-    "typecheck": "node ../node_modules/@typescript/native/bin/tsc --noEmit",
-    "lint:eslint": "eslint src scripts --ext .ts,.mjs"
+    "typecheck": "node ../node_modules/@typescript/native/bin/tsc --noEmit"
   },
   "dependencies": {
     "@capacitor/android": "8.5.1",
@@ -23,10 +22,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "8.5.1",
-    "@eslint/js": "9.31.0",
-    "eslint": "9.31.0",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.37.0",
     "vitest": "3.2.6"
   }
 }

@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { ConfigManager } from './configManager';
 import { PaneChatManager } from './paneChatManager';
 import type { SessionManager } from './sessionManager';

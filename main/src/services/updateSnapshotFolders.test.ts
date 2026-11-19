@@ -13,7 +13,7 @@ function sourceFiles(directory: string): string[] {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const file = path.join(directory, entry.name);
     if (entry.isDirectory()) return ['node_modules', 'dist', 'generated'].includes(entry.name) ? [] : sourceFiles(file);
-    return /\.ts$/.test(entry.name) && !/\.test\.ts$/.test(entry.name) ? [file] : [];
+    return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [file] : [];
   });
 }
 

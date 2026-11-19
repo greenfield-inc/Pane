@@ -646,7 +646,7 @@ export function RemotePwaApp() {
         }
       }
       return activeRuntimeRef.current === runtime ? runtime : null;
-    } catch (error) {
+    } catch {
       if (activeRuntimeRef.current !== runtime) return null;
       const state = runtime.getStatus();
       updateConnection({ connectionStatus: state.status, lastError: state.lastError });

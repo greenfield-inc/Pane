@@ -141,8 +141,7 @@ pnpm test:ci:minimal
 
 `pnpm typecheck` checks `frontend`, `mobile` and `native` with TypeScript 7
 (the `@typescript/native` alias), and `main` and `packages/runpane` with their
-own `typescript` 5.x, which also builds them. ESLint and editors use the 5.x
-package.
+own `typescript` 5.x, which also builds them. Editors use the 5.x package.
 
 To test approvals' timers without waiting, start a dev build with
 `PANE_APPROVALS_STALE_AFTER_MS` (3 days), `PANE_APPROVALS_PUSH_AFTER_MS` (about
@@ -252,10 +251,10 @@ builds ignore the variable.
 
 - TypeScript throughout; no explicit `any` (use a specific type, or `unknown`
   with narrowing).
-- `pnpm lint` runs Oxlint, the remaining ESLint rules, the advisory anti-slop
-  scan, the boundary-decoder conformance check and Knip. Blocking lint is the floor for new code. See
-  [docs/lint/anti-slop.md](docs/lint/anti-slop.md) and
-  [docs/lint/oxlint-overlap.md](docs/lint/oxlint-overlap.md).
+- `pnpm lint` runs Oxlint, the boundary-decoder conformance check, the
+  agent-facts check and Knip; `pnpm lint:code` runs all but Knip. Blocking lint
+  is the floor for new code. See [docs/lint/oxlint.md](docs/lint/oxlint.md) and
+  [docs/lint/anti-slop.md](docs/lint/anti-slop.md).
 - Two-space indentation. `camelCase` for variables and functions, `PascalCase`
   for React components and types, `kebab-case` for other filenames.
 - There is no formatter or commit hook; follow the surrounding code.
