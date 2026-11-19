@@ -9,6 +9,7 @@ import { SkeletonSwap } from '../../ui/Skeleton';
 import { useNow } from '../../notify/useNow';
 import { relativeAge } from '../../notify/notifyFormat';
 import { ATTACHMENT_KIND_ICON, attachmentFileName, isWebTarget } from '../page/TodoAttach';
+import { ATTACHMENT_FRAME_SANDBOX, openAttachmentCopy } from '../page/attachmentPage';
 import { splitTabLabel } from '../page/TodoSplit';
 import { attachmentTabs, splitItemKey, type TodoSplitItem } from '../page/splitTabs';
 import { PhoneFileSkeleton } from '../TodoSkeletons';
@@ -77,7 +78,7 @@ function FileTab({ item, label, active, onPick }: { item: TodoSplitItem; label: 
 
 /**
  * Open ↗: a web address in the browser, and a page from the computer in a new tab of its own (the
- * phone can't reach the computer's file, so it opens the copy read here).
+ * phone can't reach the computer's file, so it opens the copy read here, framed with no scripts).
  */
 function OpenOutside({ attachment }: { attachment: TodoAttachment }) {
   const open = () => {
@@ -87,27 +88,13 @@ function OpenOutside({ attachment }: { attachment: TodoAttachment }) {
       api.openUrl(attachment.target);
       return;
     }
-    // Opened now, inside the tap, so the browser doesn't block it; filled once the file is read.
-    const tab = window.open('', '_blank');
-    void api.readDoc(attachment.target).then((doc) => {
-      const page = docAsPage(doc);
-      if (!tab) return;
-      if (page) tab.location.href = URL.createObjectURL(page);
-      else tab.close();
-    }).catch(() => tab?.close());
+    openAttachmentCopy(() => api.readDoc(attachment.target), attachment.label);
   };
   return (
     <button type="button" onClick={open} aria-label={`Open ${attachment.label}`} title="Open" className={PHONE_ICON_BUTTON} data-testid="phone-files-open">
       <ExternalLink className="h-[18px] w-[18px]" aria-hidden="true" />
     </button>
   );
-}
-
-/** A read document as a file the browser can show on its own. */
-function docAsPage(doc: AutopilotDocument): Blob | null {
-  if (doc.kind === 'html' && doc.html !== undefined) return new Blob([doc.html], { type: 'text/html' });
-  if (doc.kind === 'text') return new Blob([doc.text], { type: 'text/plain' });
-  return null;
 }
 
 function AttachmentBody({ attachment, machine, from }: { attachment: TodoAttachment; machine: string; from?: number }) {
@@ -160,7 +147,7 @@ function SandboxedPage({ html, title }: { html: string; title: string }) {
   const scheme = useDarkTheme() ? 'dark' : 'light';
   const page = html.replace(/^(\s*<!doctype[^>]*>)?/iu, (doctype) => `${doctype}<meta name="color-scheme" content="${scheme}">`);
   // A new frame per scheme: changing a frame's srcdoc would add a step to the browser's history, and back would land in the frame.
-  return <iframe key={scheme} title={title} srcDoc={page} sandbox="" style={{ colorScheme: scheme }} className="min-h-0 w-full flex-1 border-0" data-testid="phone-files-page" data-scheme={scheme} />;
+  return <iframe key={scheme} title={title} srcDoc={page} sandbox={ATTACHMENT_FRAME_SANDBOX} style={{ colorScheme: scheme }} className="min-h-0 w-full flex-1 border-0" data-testid="phone-files-page" data-scheme={scheme} />;
 }
 
 /** A file from the to-do's machine: a page (no scripts), text, an image, or why it can't show. */
