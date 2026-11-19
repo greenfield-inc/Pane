@@ -535,6 +535,21 @@ describe('browser tabs: streaming a page to another screen', () => {
     expect(page?.sent).toContain('Page.screencastFrameAck');
   });
 
+  it('acks each frame a screen reads, so Chromium keeps painting between reads', async () => {
+    const fixture = setup([browserTab('persons', 'pane-a')], { holds });
+    await fixture.registry.invokeRemote('browser:watch', ['persons', 'phone-1', phone], { caller: undefined });
+    let seq = (await frame(fixture, 'persons', 0)).frame?.seq ?? 0;
+    const acks = () => (fixture.pages.get('persons')?.sent ?? []).filter(method => method === 'Page.screencastFrameAck').length;
+    // Each frame paints while no read waits; the next read takes it and acks it.
+    for (const data of ['b25l', 'dHdv']) {
+      paint(fixture, 'persons', data);
+      const read = await frame(fixture, 'persons', seq);
+      expect(read.frame?.data).toBe(`data:image/jpeg;base64,${data}`);
+      seq = read.frame?.seq ?? seq;
+    }
+    expect(acks()).toBe(2);
+  });
+
   it('pauses the screencast while an agent takes a screenshot, never capturing twice at once', async () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')], { holds });
     await fixture.registry.invokeRemote('browser:watch', ['mine', 'phone-1', phone], { caller: undefined });
