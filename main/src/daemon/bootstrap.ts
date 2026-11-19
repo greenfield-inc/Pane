@@ -622,11 +622,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       ticking = true;
       // Round 9: the wake check reads the wall clock each tick (no timer per to-do), so a snooze that came due
       // while Pane was closed or the Mac slept wakes on the first tick after; it waits for launch resume below.
-      void todoService.fastTick()
-        .then(() => todoService.wakeTick())
-        .then(() => todoService.loadTick())
-        .then(() => todoService.supervisorPass())
-        .catch(error => logger.warn('[Todos] tick failed', error))
+      // Each stage catches its own failure, so one can't stop wakes, the load gate or the supervisor (F-4).
+      const stage = (name: string, run: () => Promise<void>) => () => run().catch(error => logger.warn(`[Todos] ${name} failed`, error));
+      void stage('tick', () => todoService.fastTick())()
+        .then(stage('wake check', () => todoService.wakeTick()))
+        .then(stage('load check', () => todoService.loadTick()))
+        .then(stage('supervisor pass', () => todoService.supervisorPass()))
         .finally(() => { ticking = false; });
     }, 2_000);
     todoService.prune();

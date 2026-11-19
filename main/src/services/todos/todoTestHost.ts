@@ -41,6 +41,8 @@ export class FakeHost implements TodoHost {
   async isPanelDown(id: string) { return this.down.has(id); }
   async typeIntoTab(panelId: string, text: string): Promise<TypeResult> { this.typed.push({ panelId, text }); return 'delivered'; }
   async resumePanel(id: string) { this.resumed.push(id); this.down.delete(id); return true; }
+  restarted: string[] = [];
+  async restartPanel(id: string) { this.restarted.push(id); return true; }
   async pausePanels(ids: string[]) { this.paused.push(ids); }
   isPanelProtected() { return false; }
   usageLimitUntil() { return null; }

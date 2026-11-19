@@ -99,7 +99,10 @@ A to-do's orchestrator asks its requester first, with
   `runpane todos comment T-n --escalate "<why>"` and the question comes to
   you.
 - When the requester is you, or the requesting Session is gone, the question
-  comes to you as an approval linked to the to-do.
+  comes to you as an approval linked to the to-do. Your answer, picked or
+  typed, is typed into the tab that asked as `[From the person, via To-dos
+  T-n] Answer to your question: …`, or into the to-do's orchestrator when the
+  question came from outside a tab.
 
 The requester also gets one line when the to-do asks for review, is done, is
 dropped, or is stuck.
@@ -295,7 +298,9 @@ The thread under the to-do reads top to bottom, like an issue's activity:
   agent's tool steps here.
 - **Comment cards** hold your messages and the requester's, with their
   replies under them. Under each message you send is "Delivered to …" or
-  "Waiting for the agent to finish its turn".
+  "Waiting for the agent to finish its turn". When its tab was closed before
+  the message went, or the tab won't start again after three tries, the
+  thread says "Couldn't reach <tab>: …" and the message stays undelivered.
 - **Approval cards**: questions about the to-do are approvals linked to it.
   They show here and in Approvals, labelled with the to-do; answering in
   either place answers both. An agent links a question with `--todo T-n` on
@@ -466,8 +471,11 @@ wakes it and delivers them at once.
   the menu. It is in Approvals and the floating strip like any card, covers
   the to-do's split, and opens full screen on the phone.
 
-**Waking early.** Wake now, R on a snoozed row, `runpane todos wake`, Resume
-and Start all wake it as its time arriving would; the thread logs who woke it.
+**Waking early.** Wake now, R on a snoozed row and `runpane todos wake` wake
+it as its time arriving would: a Just remind me to-do raises its reminder card,
+and one set to start its agents starts them. Start and Resume always start its
+agents (through the load gate), even on a Just remind me to-do. The thread logs
+who woke it.
 Stop, Done and Drop clear the snooze (held comments stay in the thread,
 undelivered). Snoozing it again changes the time and note.
 
@@ -505,7 +513,7 @@ answered, or you comment. A turn on its own doesn't count.
 | --- | --- |
 | 10 minutes | Types a reminder into the orchestrator's tab: `[From Pane, To-dos] T-12 "…" is in progress and nothing has moved for 10 minutes. Carry it on, ask for review with runpane todos review T-12, ask with runpane todos ask T-12, or say why it can't move.` |
 | 20 minutes | A second reminder. |
-| 30 minutes | Restarts the orchestrator in place, in its same conversation, and sends a third message saying so. While the load gate holds, the restart waits and the to-do reads Queued. |
+| 30 minutes | Restarts the orchestrator in place: stops its agent and starts it again in its same conversation, then sends a third message saying so. While the load gate holds, the restart waits and the to-do reads Queued. If the agent doesn't start again, the thread says "Pane couldn't restart the orchestrator" and the card follows 10 minutes later. |
 | 40 minutes, or 10 minutes after a restart with no progress | Raises a card linked to the to-do: "T-12 has been stuck for 40 minutes. The orchestrator was reminded twice and restarted once." with **Restart its agents**, **Stop it** and **I'll look**. The to-do reads Waiting on you and the ladder stops until you answer. |
 
 An orchestrator whose process stopped, whose tab is gone, or that has been
@@ -548,6 +556,9 @@ readers. Each machine runs its own gate on its own load.
 **What waits.** Everything Pane starts for a to-do goes through the gate:
 creating its Session and orchestrator, Start, Resume, Reopen, supervisor
 restarts, launch resume, and resuming a stopped tab to deliver an answer.
+A queued start that fails (its agent won't launch, say) goes back in the
+queue with the reason in its thread; after three failed tries it returns to
+To do, saying why, for you to Start again.
 Reminders are only typing, so they still go out. The To-dos list shows one
 line under Queued, such as "devbox is busy: memory pressure high for 3 min",
 and every change of gate state is logged.
@@ -608,7 +619,9 @@ upgrade (`main/src/database/todosSchema.ts`):
 Approvals gain a `todo_id` column. All of it is additive (`reply_to` is added
 to databases from earlier to-do builds when they open), so an older Pane
 opening the same database still starts. The snooze columns are added the same way. Done and dropped to-dos, their
-attachments and activity are deleted 30 days after they close.
+attachments and activity are deleted 30 days after they close. A parent stays
+while any of its sub-to-dos stays, so the family goes together once the last
+of them is 30 days closed.
 
 ## From the CLI
 
@@ -664,8 +677,8 @@ start a dev build with an isolated `PANE_DIR` and:
   pass in seconds. Unpackaged builds only; a packaged Pane ignores it.
 
 Journeys run in an isolated Pane with the scripted agent:
-`tests/todos.spec.ts` and `tests/todos-page.spec.ts`
-(`playwright.chat-tabs.config.ts`). The page frame, the thread and the web
+`tests/todos.spec.ts`, `tests/todos-page.spec.ts` and
+`tests/todos-snooze.spec.ts` (`playwright.chat-tabs.config.ts`). The page frame, the thread and the web
 app also run on the renderer alone with fixture to-dos, in CI:
 `tests/todos-page-frame.spec.ts`, `tests/todos-thread.spec.ts` and
 `tests/remote-pwa-todos.spec.ts` (`playwright.ci.minimal.config.ts`). `tests/todos-real.spec.ts` runs real

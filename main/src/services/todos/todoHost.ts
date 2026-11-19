@@ -55,6 +55,15 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
     };
   };
 
+  /** Pauses the tabs' processes, keeping their conversations. */
+  const pauseTabs = async (panelIds: string[]): Promise<void> => {
+    const mark = { at: new Date().toISOString(), by: 'auto' as const };
+    const chats = panelIds.filter(panelId => panelManager.getPanel(panelId)?.type === 'chat');
+    const terminals = panelIds.filter(panelId => panelManager.getPanel(panelId)?.type === 'terminal');
+    if (terminals.length > 0) await terminalPanelManager.pausePanels(terminals, mark);
+    if (chats.length > 0) await getChatTabManager().pause(chats, mark);
+  };
+
   return {
     machineName: () => thisMachineName(),
 
@@ -119,13 +128,15 @@ export function createTodoHost(services: AppServices, commandRegistry: PaneComma
       return result?.action === 'resumed' || result?.action === 'already-running';
     },
 
-    async pausePanels(panelIds: string[]): Promise<void> {
-      const mark = { at: new Date().toISOString(), by: 'auto' as const };
-      const chats = panelIds.filter(panelId => panelManager.getPanel(panelId)?.type === 'chat');
-      const terminals = panelIds.filter(panelId => panelManager.getPanel(panelId)?.type === 'terminal');
-      if (terminals.length > 0) await terminalPanelManager.pausePanels(terminals, mark);
-      if (chats.length > 0) await getChatTabManager().pause(chats, mark);
+    // Pause stops the agent's process and keeps its conversation; the explicit Resume that follows starts it
+    // again there. Resume on a running tab alone does nothing ("already-running"), so that never counts.
+    async restartPanel(panelId: string): Promise<boolean> {
+      await pauseTabs([panelId]);
+      const result = decodeOptionalBoundary(await commandRegistry.invoke('runpane:panels:resume', [{ panelId }]), resumeResultSchema);
+      return result?.action === 'resumed';
     },
+
+    pausePanels: pauseTabs,
 
     isPanelProtected(panelId: string): boolean {
       const paneId = panelManager.getPanel(panelId)?.sessionId;

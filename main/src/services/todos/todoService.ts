@@ -78,6 +78,8 @@ export interface TodoHost {
   isPanelDown(panelId: string): Promise<boolean>;
   typeIntoTab(panelId: string, text: string): Promise<TypeResult>;
   resumePanel(panelId: string): Promise<boolean>;
+  /** Stops a running tab's agent and starts it again in its same conversation; true only when it really started again. */
+  restartPanel(panelId: string): Promise<boolean>;
   /** Pauses the tabs' processes, keeping their conversations. */
   pausePanels(panelIds: string[]): Promise<void>;
   /** A pinned or focused Pane holds the tab. */
@@ -111,6 +113,10 @@ interface OutboxEntry {
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const SETTLE_MS = 10_000;
+/** Restart tries for a down tab with a message waiting, before the to-do says it couldn't reach it. */
+const RESUME_TRIES = 3;
+/** Tries for a queued first start that fails, before the to-do goes back to To do. */
+const START_TRIES = 3;
 /** Round 9: agents a wake check starts per tick, as launch resume restarts three at a time. */
 const WAKES_PER_TICK = 3;
 /** A gap this long between wake checks means the Mac slept through it. */
@@ -185,6 +191,8 @@ export class TodoService extends EventEmitter {
   private readonly outbox: OutboxEntry[] = [];
   private flushing: Promise<void> | null = null;
   private flushAgain: Promise<void> | null = null;
+  private readonly resumeFailures = new Map<string, number>();
+  private readonly startFailures = new Map<number, number>();
   /** Raw mid-turn since, and last seen mid-turn, per tab: settled into Working after 10 s. */
   private readonly activity = new Map<string, { since: number | null; lastSeen: number | null }>();
   private readonly settled = new Set<string>();
@@ -840,18 +848,24 @@ export class TodoService extends EventEmitter {
     const id = randomUUID();
     this.event(todo, `Asked you: ${question}`);
     void this.host.ask({ id, title: question, context, choices: [], todo, kind: 'question', askerPanelId })
-      .then(result => this.onQuestionAnswered(todo.number, result))
+      .then(result => this.onQuestionAnswered(todo.number, result, askerPanelId))
       .catch(error => this.host.log(`[Todos] ${todo.ref} question failed`, error));
     return id;
   }
 
-  private onQuestionAnswered(number: number, result: NotifyResult): void {
+  /**
+   * The person answered a to-do question. Pane's own waiter took the answer, so the queue types it
+   * nowhere: send it to the tab that asked, or, when no tab asked (the CLI), to the to-do's orchestrator.
+   */
+  private onQuestionAnswered(number: number, result: NotifyResult, askerPanelId: string | undefined): void {
     const todo = this.store.get(number);
     if (!todo) return;
     const answer = 'answer' in result ? result.answer : 'reply' in result ? result.reply : 'approved' in result ? (result.approved ? 'Approved' : 'Denied') : null;
     if (answer === null) return;
     this.progress(todo);
     this.event(todo, `You answered: ${answer}`, 'person', 'you');
+    const to = askerPanelId ?? this.orchestratorOf(todo.parentNumber !== null ? this.store.get(todo.parentNumber) ?? todo : todo);
+    if (to) this.enqueue({ panelId: to, text: personMessageText(todo, `Answer to your question: ${answer}`), todoNumber: number, resumeIfDown: true });
     this.changed();
   }
 
@@ -1083,24 +1097,59 @@ export class TodoService extends EventEmitter {
       if (entry.activityId !== undefined && this.holdsComments(entry.todoNumber)) continue;
       if (tried.has(entry.panelId)) continue;
       tried.add(entry.panelId);
-      if (await this.host.isPanelDown(entry.panelId)) {
-        if (!entry.resumeIfDown || !this.gate.allowsStart()) continue;
-        // Resume before delivery: the asker's tab is down after a restart.
-        await this.host.resumePanel(entry.panelId);
-        continue;
+      // One tab that can't take a message never stops the others, or the ticks after delivery (F-4).
+      try {
+        await this.deliver(entry);
+      } catch (error) {
+        this.host.log(`[Todos] delivery to ${entry.panelId} failed`, error instanceof Error ? error : String(error));
+        this.resumeFailed(entry, 'it failed to restart');
       }
-      if (this.host.isMidTurn(entry.panelId) || await this.host.hasUnsentText(entry.panelId)) continue;
-      const result = await this.host.typeIntoTab(entry.panelId, entry.text);
-      if (result === 'busy') continue;
-      this.outbox.splice(this.outbox.indexOf(entry), 1);
-      if (entry.activityId !== undefined && result === 'delivered') this.store.markDelivered(entry.activityId, this.now());
-      if (result === 'delivered') for (const id of entry.heldIds ?? []) this.store.markDelivered(id, this.now());
-      if (result !== 'delivered') {
-        const todo = this.store.get(entry.todoNumber);
-        if (todo) this.event(todo, `Couldn't reach ${this.host.panel(entry.panelId)?.name ?? 'the tab'}: ${result === 'gone' ? 'its tab closed' : 'it takes no typed messages'}`);
-      }
-      if (entry.activityId !== undefined || entry.heldIds !== undefined) this.changed();
     }
+  }
+
+  private async deliver(entry: OutboxEntry): Promise<void> {
+    if (!this.host.panel(entry.panelId)) {
+      this.settleUndelivered(entry, 'its tab closed');
+      return;
+    }
+    if (await this.host.isPanelDown(entry.panelId)) {
+      if (!entry.resumeIfDown || !this.gate.allowsStart()) return;
+      // Resume before delivery: the asker's tab is down after a restart.
+      if (await this.host.resumePanel(entry.panelId)) this.resumeFailures.delete(entry.panelId);
+      else this.resumeFailed(entry, 'it would not restart');
+      return;
+    }
+    if (this.host.isMidTurn(entry.panelId) || await this.host.hasUnsentText(entry.panelId)) return;
+    const result = await this.host.typeIntoTab(entry.panelId, entry.text);
+    if (result === 'busy') return;
+    if (result !== 'delivered') {
+      this.settleUndelivered(entry, result === 'gone' ? 'its tab closed' : 'it takes no typed messages');
+      return;
+    }
+    this.outbox.splice(this.outbox.indexOf(entry), 1);
+    if (entry.activityId !== undefined) this.store.markDelivered(entry.activityId, this.now());
+    for (const id of entry.heldIds ?? []) this.store.markDelivered(id, this.now());
+    if (entry.activityId !== undefined || entry.heldIds !== undefined) this.changed();
+  }
+
+  /** A tab that fails to restart keeps its message for a few tries, then the to-do says it couldn't reach it. */
+  private resumeFailed(entry: OutboxEntry, why: string): void {
+    const failures = (this.resumeFailures.get(entry.panelId) ?? 0) + 1;
+    this.resumeFailures.set(entry.panelId, failures);
+    if (failures < RESUME_TRIES) return;
+    this.resumeFailures.delete(entry.panelId);
+    this.settleUndelivered(entry, why);
+  }
+
+  /** Takes a message Pane can't deliver off the queue and says so on its to-do, once (a relaunch rebuilds it from the chat). */
+  private settleUndelivered(entry: OutboxEntry, why: string): void {
+    const index = this.outbox.indexOf(entry);
+    if (index >= 0) this.outbox.splice(index, 1);
+    const todo = this.store.get(entry.todoNumber);
+    if (!todo) return;
+    const line = `Couldn't reach ${this.host.panel(entry.panelId)?.name ?? 'the tab'}: ${why}`;
+    if (this.store.activity(todo.number).at(-1)?.body !== line) this.event(todo, line);
+    this.changed();
   }
 
   /** Undelivered messages waiting on a tab, for tests and the page. */
@@ -1191,17 +1240,34 @@ export class TodoService extends EventEmitter {
     } else if (paused.length === 0 && queued.length > 0 && this.gate.mayStartQueued(now)) {
       this.gate.noteQueuedStart(now);
       const next = queued[0];
-      this.store.update(next.number, { loadHold: null, loadHoldSince: null }, now);
+      // The hold stays until the launch succeeds (launch clears it), so a failed start is never left untracked (F-5).
       try {
         await this.launch(next.number, null);
+        this.startFailures.delete(next.number);
         this.event(next, 'Load came down: started');
       } catch (error) {
         this.host.log(`[Todos] ${next.ref} start failed`, error instanceof Error ? error : String(error));
+        this.queuedStartFailed(next, error instanceof Error ? error.message : String(error), now);
       }
       this.changed();
     }
     if (this.gate.mayShed(now)) await this.shedOne(open, now);
     await this.finishShedding(now);
+  }
+
+  /** A queued start that failed goes to the back of the queue; after a few tries it returns to To do, saying why. */
+  private queuedStartFailed(todo: TodoRecord, why: string, now: number): void {
+    const failures = (this.startFailures.get(todo.number) ?? 0) + 1;
+    if (failures < START_TRIES && !todo.sessionId) {
+      this.startFailures.set(todo.number, failures);
+      this.store.update(todo.number, { loadHold: 'queued', loadHoldSince: now }, now);
+      this.event(todo, `Couldn't start: ${why} · Pane tries again when load allows`);
+      return;
+    }
+    this.startFailures.delete(todo.number);
+    const back: TodoPatch = todo.sessionId ? { state: 'stopped', loadHold: null, loadHoldSince: null } : { state: 'todo', startedAt: null, loadHold: null, loadHoldSince: null };
+    this.store.update(todo.number, back, now);
+    this.event(todo, `Couldn't start after ${failures} ${failures === 1 ? 'try' : 'tries'}: ${why} · Start it again when ready`);
   }
 
   private async resumeFromLoad(todo: TodoRecord): Promise<void> {
@@ -1373,14 +1439,22 @@ export class TodoService extends EventEmitter {
         this.store.update(todo.number, { ...stalls, episodeReminders: todo.episodeReminders + 1 }, todo.updatedAt);
         this.event(todo, `Quiet ${quietMinutes}m: Pane reminded the orchestrator (${action.rung} of 2)`);
         break;
-      case 'restart':
+      case 'restart': {
+        // Never over the person's draft or a turn that just started: the next pass looks again.
+        if (this.host.isMidTurn(orchestrator) || await this.host.hasUnsentText(orchestrator)) return;
         this.ladderLog.push({ at: now, kind: 'restart' });
         this.lastRestartAt.set(todo.number, now);
         this.store.update(todo.number, { ...stalls, episodeRestarts: todo.episodeRestarts + 1 }, todo.updatedAt);
-        await this.host.resumePanel(orchestrator);
+        // A live but quiet agent is stopped and started again; Resume alone leaves it running (F-7).
+        const restarted = await this.restartTab(orchestrator);
+        if (!restarted) {
+          this.event(todo, `Quiet ${quietMinutes}m: Pane couldn't restart the orchestrator`);
+          break;
+        }
         this.enqueue({ panelId: orchestrator, text: reminderText(todo, quietMinutes, true), todoNumber: todo.number, resumeIfDown: true });
         this.event(todo, action.why === 'down' ? 'The orchestrator was down or hung: Pane restarted it in its same conversation' : `Quiet ${quietMinutes}m: Pane restarted the orchestrator in its same conversation`);
         break;
+      }
       case 'queue_restart':
         this.store.update(todo.number, { ...stalls, loadHold: 'queued', loadHoldSince: now }, todo.updatedAt);
         this.event(todo, 'Restart queued: the machine is busy');
@@ -1400,6 +1474,16 @@ export class TodoService extends EventEmitter {
     this.changed();
   }
 
+  /** Starts a down tab again, or stops and starts a running one, in its same conversation. */
+  private async restartTab(panelId: string): Promise<boolean> {
+    try {
+      return await this.host.isPanelDown(panelId) ? await this.host.resumePanel(panelId) : await this.host.restartPanel(panelId);
+    } catch (error) {
+      this.host.log(`[Todos] restart of ${panelId} failed`, error instanceof Error ? error : String(error));
+      return false;
+    }
+  }
+
   private async onStuckAnswered(number: number, result: NotifyResult): Promise<void> {
     const todo = this.store.get(number);
     if (!todo) return;
@@ -1410,7 +1494,7 @@ export class TodoService extends EventEmitter {
       return;
     }
     if (pick === 'Restart its agents') {
-      for (const tab of this.tabsOf(todo)) await this.host.resumePanel(tab);
+      for (const tab of this.tabsOf(todo)) await this.restartTab(tab);
       const orchestrator = this.orchestratorOf(todo);
       if (orchestrator) this.enqueue({ panelId: orchestrator, text: restartText([{ todo, groups: this.attachmentGroups(todo) }], 'supervisor'), todoNumber: number, resumeIfDown: true });
       this.event(todo, 'You restarted its agents', 'person', 'you');

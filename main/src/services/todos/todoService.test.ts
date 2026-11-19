@@ -285,6 +285,41 @@ describe('TodoService', () => {
       expect(host.typedInto('s1-orch').at(-1)).toBe('[From the person, via To-dos T-2] hi boss\n\nReply in the to-do\u2019s chat with runpane todos comment T-2 "\u2026": the person reads that chat, not this tab.');
     });
 
+    it('a message to a tab closed before delivery leaves the queue with one line, and never stops the others or the next tick (F-4)', async () => {
+      const closed = await service.create({ title: 'Closed tab' }, person);
+      const other = await service.create({ title: 'Open tab' }, person);
+      host.midTurn.add('s1-orch');
+      await service.comment(closed.number, 'are you there?', person);
+      host.midTurn.delete('s1-orch');
+      host.panels.delete('s1-orch');
+      host.down.add('s1-orch');
+      host.resumePanel = async () => { throw new Error('No tab s1-orch'); };
+      await service.comment(other.number, 'carry on', person);
+      await service.fastTick();
+      await service.fastTick();
+      expect(service.queuedFor('s1-orch')).toEqual([]);
+      expect(host.typedInto('s2-orch').at(-1)).toContain('carry on');
+      const lines = () => service.detail(closed.number).activity.filter(row => row.body === "Couldn't reach the tab: its tab closed");
+      expect(lines()).toHaveLength(1);
+      // A relaunch rebuilds the message from the chat; it settles again without a second line.
+      const again = new TodoService(new TodoStore(db), host, () => now);
+      await expect(again.fastTick()).resolves.toBeUndefined();
+      expect(again.queuedFor('s1-orch')).toEqual([]);
+      expect(lines()).toHaveLength(1);
+    });
+
+    it('keeps a message for a tab that fails to restart for three tries, then says so and moves on (F-4)', async () => {
+      const todo = await service.create({ title: 'Will not start' }, person);
+      host.down.add('s1-orch');
+      let tries = 0;
+      host.resumePanel = async () => { tries += 1; throw new Error('resume failed'); };
+      await service.comment(todo.number, 'wake up', person);
+      for (let i = 0; i < 6; i += 1) await service.flush();
+      expect(tries).toBe(3);
+      expect(service.queuedFor('s1-orch')).toEqual([]);
+      expect(service.detail(todo.number).activity.at(-1)?.body).toBe("Couldn't reach orchestrator: it failed to restart");
+    });
+
     it('resumes a down tab before delivering to it', async () => {
       const todo = await service.create({ title: 'Down' }, person);
       host.down.add('s1-orch');
@@ -311,6 +346,31 @@ describe('TodoService', () => {
       expect(host.typedInto('s1-orch').at(-1)).toBe('[From Billing rewrite orchestrator, via To-dos T-1] EUR');
       await service.comment(todo.number, 'I don’t know', { kind: 'agent', panelId: 'tA' }, { escalate: true });
       expect(host.cards[0]).toMatchObject({ kind: 'question', title: 'Which currency?', askerPanelId: 's1-orch' });
+    });
+
+    it('types your answer to a todos ask question into the tab that asked, once, as an answer or a typed reply (F-3)', async () => {
+      const todo = await service.create({ title: 'Ask me' }, person);
+      host.panels.set('w1', { name: 'implementer', sessionId: 's1', orchestrator: false });
+      await service.ask(todo.number, 'EUR or USD?', { kind: 'agent', panelId: 'w1' });
+      host.cards[0].answer({ answer: 'EUR' });
+      await settle();
+      await service.flush();
+      expect(host.typedInto('w1')).toEqual(['[From the person, via To-dos T-1] Answer to your question: EUR']);
+      await service.ask(todo.number, 'Which bank?', { kind: 'agent', panelId: 'w1' });
+      host.cards[1].answer({ reply: 'The usual one' });
+      await settle();
+      await service.flush();
+      expect(host.typedInto('w1').at(-1)).toBe('[From the person, via To-dos T-1] Answer to your question: The usual one');
+      expect(host.typedInto('w1')).toHaveLength(2);
+    });
+
+    it('sends the answer to the to-do’s orchestrator when the question came from no tab (F-3)', async () => {
+      const todo = await service.create({ title: 'From the CLI' }, person);
+      await service.ask(todo.number, 'Ship it?', { kind: 'agent' });
+      host.cards[0].answer({ answer: 'Yes' });
+      await settle();
+      await service.flush();
+      expect(host.typedInto('s1-orch').at(-1)).toBe('[From the person, via To-dos T-1] Answer to your question: Yes');
     });
 
     it('asks you directly when you are the requester or the requester’s Session is gone', async () => {
@@ -425,6 +485,26 @@ describe('TodoService', () => {
       expect(service.require(queued.number)).toMatchObject({ loadHold: null, sessionId: 's2' });
     });
 
+    it('keeps a queued first start whose launch fails queued and retried, then puts it back in To do saying why (F-5)', async () => {
+      await holdGate();
+      const queued = await service.create({ title: 'Waits' }, person);
+      let tries = 0;
+      const create = host.createSession.bind(host);
+      host.createSession = async () => { tries += 1; throw new Error('the agent failed to start'); };
+      host.load = { cpuPercent: 5, memory: 'ok' };
+      for (let i = 0; i <= 13 && tries === 0; i += 1) { await service.loadTick(); now += 10_000; }
+      expect(tries).toBe(1);
+      expect(service.require(queued.number)).toMatchObject({ state: 'in_progress', sessionId: null, loadHold: 'queued' });
+      expect(service.detail(queued.number).activity.at(-1)?.body).toBe("Couldn't start: the agent failed to start · Pane tries again when load allows");
+      for (let i = 0; i <= 60 && tries < 3; i += 1) { await service.loadTick(); now += 10_000; }
+      expect(tries).toBe(3);
+      expect(service.require(queued.number)).toMatchObject({ state: 'todo', sessionId: null, loadHold: null });
+      expect(service.detail(queued.number).activity.at(-1)?.body).toBe("Couldn't start after 3 tries: the agent failed to start · Start it again when ready");
+      host.createSession = create;
+      await service.start(queued.number, person, { anyway: true });
+      expect(service.require(queued.number).sessionId).toBe('s2');
+    });
+
     it('Start anyway starts at once and marks it Never pause', async () => {
       await holdGate();
       const todo = await service.create({ title: 'Urgent', startNow: false }, person);
@@ -469,6 +549,31 @@ describe('TodoService', () => {
   });
 
   describe('launch resume', () => {
+    it('at the 30-minute rung stops and starts a live quiet orchestrator again, not a Resume that does nothing (F-7)', async () => {
+      const todo = await service.create({ title: 'Quiet' }, person);
+      for (let minute = 0; minute <= 40 && host.restarted.length === 0; minute += 1) {
+        now += 60_000;
+        await service.fastTick();
+        await service.supervisorPass();
+      }
+      expect(host.restarted).toEqual(['s1-orch']);
+      expect(host.resumed).toEqual([]);
+      expect(service.detail(todo.number).activity.some(row => /Quiet \d+m: Pane restarted the orchestrator in its same conversation/.test(row.body))).toBe(true);
+    });
+
+    it('says the restart failed when the tab didn’t start again, and holds off while the person has a draft (F-7)', async () => {
+      const todo = await service.create({ title: 'Quiet' }, person);
+      host.unsent.add('s1-orch');
+      for (let minute = 0; minute < 35; minute += 1) { now += 60_000; await service.supervisorPass(); }
+      expect(host.restarted).toEqual([]);
+      host.unsent.delete('s1-orch');
+      host.restartPanel = async id => { host.restarted.push(id); return false; };
+      now += 60_000;
+      await service.supervisorPass();
+      expect(host.restarted).toEqual(['s1-orch']);
+      expect(service.detail(todo.number).activity.at(-1)?.body).toMatch(/^Quiet \d+m: Pane couldn't restart the orchestrator$/);
+    });
+
     it('restarts in-progress and accepted to-dos’ agents in place; waiting, stopped and to-do items stay down', async () => {
       const running = await service.create({ title: 'Running' }, person);
       const accepted = await service.create({ title: 'Accepted' }, person);
