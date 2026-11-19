@@ -114,6 +114,9 @@ test('R11–R17 thread behaviour', async ({ page }) => {
 });
 
 test('R19 500 rows: render time (median of 5) and top-level items', async ({ page }) => {
+  // Five fresh opens of a 500-row page plus a scroll pass: on a loaded shared runner that alone nears 30 s.
+  // The budgets below are what this test checks, not its wall time.
+  test.setTimeout(90_000);
   const times: number[] = [];
   for (let run = 0; run < 5; run += 1) {
     await open(page, 'long', 'light-rounded');
