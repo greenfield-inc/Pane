@@ -117,9 +117,9 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
   app.context().on('page', leaveDialogs);
   try {
     await dismissDialogs(page);
-    // A loaded test machine can raise Pane's own "Memory is tight" card over the window at any time.
-    await page.addLocatorHandler(page.getByText('Memory is tight', { exact: true }).first(), async () => {
-      await page.getByRole('button', { name: 'Not now', exact: true }).first().click();
+    // A loaded test machine can raise Pane's own machine health cards (memory, disk) over the window at any time.
+    await page.addLocatorHandler(page.getByRole('button', { name: /Review in Resources/ }).first(), async () => {
+      await page.getByRole('button', { name: 'Not now', exact: true }).locator('visible=true').first().click();
     });
     // And the first-run "Which agent do you use?" card, once the app finishes starting.
     await page.addLocatorHandler(page.getByText('Which agent do you use?', { exact: true }).first(), async () => {
