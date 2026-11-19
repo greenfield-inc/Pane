@@ -1173,5 +1173,3 @@ function App() {
 }
 
 export default App;
-
-;{ const seededTypeError: number = "x"; void seededTypeError; }

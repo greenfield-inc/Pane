@@ -1898,5 +1898,3 @@ if (launchRemoteSetup) {
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow;
 }
-
-;{ const seededTypeError: number = "x"; void seededTypeError; }

@@ -145,5 +145,3 @@ window.paneTerminal = {
 fit.fit();
 lastSize = { cols: terminal.cols, rows: terminal.rows };
 post({ type: 'ready', ...lastSize });
-
-;{ const seededTypeError: number = "x"; void seededTypeError; }

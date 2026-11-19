@@ -95,5 +95,3 @@ export default defineConfig(({ command }) => ({
     },
   }
 }));
-
-;{ const seededTypeError: number = "x"; void seededTypeError; }
