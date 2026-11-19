@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { describe, expect, it, vi } from 'vitest';
@@ -208,11 +208,13 @@ describe('browser tools: what an agent may load and upload', () => {
     const fixture = setup([browserTab('mine', 'pane-a', 'claude-a')]);
     writeFileSync(path.join(fixture.worktree, 'report.pdf'), 'pdf');
     writeFileSync(path.join(fixture.worktree, '.env'), 'SECRET=1');
+    writeFileSync(path.join(fixture.worktree, '.npmrc'), '//registry:_authToken=1');
     mkdirSync(path.join(fixture.worktree, '.ssh'));
     writeFileSync(path.join(fixture.worktree, '.ssh', 'config'), 'Host x');
     const outside = path.join(os.tmpdir(), `pane-outside-${Date.now()}.txt`);
     writeFileSync(outside, 'x');
-    for (const file of [outside, '.env', '.ssh/config', '../etc']) {
+    symlinkSync(outside, path.join(fixture.worktree, 'escape.txt'));
+    for (const file of [outside, '.env', '.ssh/config', '../etc', 'escape.txt', '.npmrc']) {
       expect(await code(call(fixture, 'upload', { ref: 'e1', paths: [file] }))).toBe('ERR_BROWSER_PATH_REFUSED');
     }
     await call(fixture, 'snapshot', {});

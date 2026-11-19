@@ -71,7 +71,7 @@ export async function runVerb(page: PageDriver, contents: BrowserPageContents, r
       const outcome: VerbOutcome = { url: reading.url, title: reading.title, snapshot: reading.snapshot };
       if (reading.truncated) {
         outcome.truncated = true;
-        outcome.note = 'The page is long, so the snapshot was cut off. Scroll, or use browser_evaluate to read a part of it.';
+        outcome.note = 'The page is long, so text past the limit was left out; every control on the page still has a ref. Use browser_evaluate to read a part of the text.';
       }
       return outcome;
     }

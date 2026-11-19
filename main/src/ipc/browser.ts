@@ -81,7 +81,7 @@ const PERSON_WAIT_MS = 4 * 60_000;
 /** The person drives until this long after their last touch on a page an agent was driving. */
 export const TOUCH_HOLD_MS = 750;
 /** Password-like and key files browser_upload never sends. */
-const CREDENTIAL_FILE = /(^\.env(\..*)?$)|(\.(pem|key|p12|pfx)$)|(^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$)/i;
+const CREDENTIAL_FILE = /(^\.env(\..*)?$)|(\.(pem|key|p12|pfx|kdbx)$)|(^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$)|(^\.(npmrc|netrc|pypirc|git-credentials|pgpass)$)|(^credentials(\.json)?$)/i;
 
 const tabField = boundary.optional(boundary.string);
 const refField = boundary.optional(boundary.string);
@@ -402,7 +402,9 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (write && devToolsOpen(contents)) {
       throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', `DevTools is open on tab ${tab.id}, and agents don't act on a page while the person inspects it. Nothing ran.`, 'Ask the person to close DevTools on that tab, then try again.');
     }
+    refuseNonWebPage(contents, 'shows');
     const outcome = await runVerb(driverFor(tab.id, contents), contents, request);
+    refuseNonWebPage(contents, 'is now on');
     if (outcome.cursor) host.showCursor(tab.id, outcome.cursor.x, outcome.cursor.y);
     return outcome;
   }
@@ -616,6 +618,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     if (write && devToolsOpen(contents)) {
       throw new PaneError('ERR_BROWSER_DEVTOOLS_OPEN', 'DevTools is open on that tab, and agents don\'t act on a page while the person inspects it. Nothing ran.', 'Ask the person to close DevTools on that tab, then try again.');
     }
+    refuseNonWebPage(contents, 'shows');
     const driver = driverFor(message.panelId, contents);
     if (write && driver.personDriving(TOUCH_HOLD_MS)) return { personDriving: true };
     return answerWithin(key, (async () => {
@@ -638,6 +641,7 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
       }
       try {
         const { image, cursor, ...rest } = await runVerb(driver, contents, request);
+        refuseNonWebPage(contents, 'is now on');
         if (cursor) host.showCursor(message.panelId, cursor.x, cursor.y);
         const outcome: PaneCommandValue = { ...rest, url: remapLoopbackPort(rest.url, tunnels) };
         if (image) {
@@ -664,6 +668,14 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     await setDriverFromChip(id, who);
     return { success: true };
   });
+}
+
+/** Agents read and act only on http(s) pages (and a blank one): never a file: or chrome: page in a tab. */
+function refuseNonWebPage(contents: BrowserPageContents, verb: 'shows' | 'is now on'): void {
+  let protocol = '';
+  try { protocol = new URL(contents.getURL()).protocol; } catch { protocol = ''; }
+  if (protocol === 'http:' || protocol === 'https:' || contents.getURL() === 'about:blank' || contents.getURL() === '') return;
+  throw new PaneError('ERR_BROWSER_URL_REFUSED', `The tab ${verb} a ${protocol || 'non-web'} page, and agents read and act only on http and https pages.${verb === 'is now on' ? ' The call ran; nothing more will on that page.' : ' Nothing ran.'}`, 'Load an http or https page with browser_navigate, or use another tab.');
 }
 
 function devToolsOpen(contents: BrowserPageContents): boolean {

@@ -28,6 +28,9 @@ function pageScript(limit: number) {
   const STRUCTURE = 'a[href],area[href],button,input,select,textarea,summary,option,img,iframe,h1,h2,h3,h4,h5,h6,nav,main,form,dialog,table,ul,ol,header,footer,article,[role],[contenteditable],[aria-label],[tabindex]';
   let generation = 0;
   let refs = new Map<string, Entry>();
+  // Ref numbers count up for the life of the document and are never reused, so a ref from an
+  // older snapshot (another agent's, or one before a takeover) can only miss, never hit another element.
+  let counter = 0;
 
   function inputRole(input: HTMLInputElement): string {
     switch (input.type) {
@@ -191,18 +194,29 @@ function pageScript(limit: number) {
     const lines: string[] = [];
     let size = 0;
     let truncated = false;
-    let counter = 0;
+    // Past the text budget, the walk keeps listing controls with refs (and drops text) up to a hard cap,
+    // so everything on a long page stays actionable.
+    let textFull = false;
+    const hardLimit = limit + Math.round(limit / 4);
+    // Elements with a shadow root somewhere inside: their text is never collapsed into one line.
+    const shadowAncestors = new Set<Element>();
+    for (const host of Array.from(document.querySelectorAll('*'))) {
+      if (!host.shadowRoot) continue;
+      for (let parent = host.parentElement; parent && !shadowAncestors.has(parent); parent = parent.parentElement) shadowAncestors.add(parent);
+    }
     // The last line, when it is text: the next text at the same depth joins it.
     let openText: { depth: number; text: string } | null = null;
     const push = (depth: number, line: string) => {
       if (truncated) return;
       openText = null;
       const text = `${'  '.repeat(Math.min(depth, 20))}- ${line}`;
-      if (size + text.length + 1 > limit) { truncated = true; return; }
+      if (size + text.length + 1 > hardLimit) { truncated = true; return; }
       lines.push(text);
       size += text.length + 1;
+      if (size > limit) textFull = true;
     };
     const pushText = (depth: number, text: string) => {
+      if (textFull) return;
       if (openText && openText.depth === depth && lines.length > 0) {
         const joined = `${openText.text} ${text}`;
         const previous = lines.pop() ?? '';
@@ -214,7 +228,7 @@ function pageScript(limit: number) {
       push(depth, `text: ${quote(text, 2_000)}`);
       openText = { depth, text };
     };
-    const walk = (node: Node, depth: number) => {
+    const walk = (node: Node, depth: number, inFrame: boolean) => {
       if (truncated) return;
       if (node.nodeType === Node.TEXT_NODE) {
         const text = clean(node.textContent);
@@ -232,7 +246,8 @@ function pageScript(limit: number) {
         const value = INTERACTIVE.has(role) ? valueOf(node) : undefined;
         let line = role + (name ? ` ${quote(name)}` : '');
         for (const state of states(node, role)) line += ` [${state}]`;
-        if (INTERACTIVE.has(role) || role === 'heading' || role === 'img' || role === 'dialog') {
+        // Inside a frame, positions are the frame's, so its elements are listed without refs.
+        if (!inFrame && (INTERACTIVE.has(role) || role === 'heading' || role === 'img' || role === 'dialog')) {
           counter += 1;
           const ref = `e${counter}`;
           refs.set(ref, { el: node, role, name });
@@ -247,31 +262,31 @@ function pageScript(limit: number) {
         if (role === 'combobox' && tag === 'select') return;
       }
       // A run of text with nothing to act on or name inside (a paragraph, a code block) reads as one line.
-      if (!role && !node.shadowRoot && !node.querySelector(STRUCTURE)) {
+      if (!role && !node.shadowRoot && !shadowAncestors.has(node) && !node.querySelector(STRUCTURE)) {
         const text = textOf(node);
         if (text) pushText(depth, text);
         return;
       }
       const root = node.shadowRoot;
-      for (const child of Array.from((root ?? node).childNodes)) walk(child, childDepth);
+      for (const child of Array.from((root ?? node).childNodes)) walk(child, childDepth, inFrame);
       if (node instanceof HTMLIFrameElement) {
         try {
           const doc = node.contentDocument;
-          if (doc?.body) walk(doc.body, childDepth);
+          if (doc?.body) walk(doc.body, childDepth, true);
           else push(childDepth, 'iframe (another site; not read)');
         } catch {
           push(childDepth, 'iframe (another site; not read)');
         }
       }
     };
-    if (document.body) walk(document.body, 0);
-    return { snapshot: lines.join('\n'), truncated, url: location.href, title: document.title };
+    if (document.body) walk(document.body, 0, false);
+    return { snapshot: lines.join('\n'), truncated: truncated || textFull, url: location.href, title: document.title };
   }
 
   /** The element behind a ref, or why it can't be used. */
   function lookup(ref: string): Element | { stale: string } {
     const entry = refs.get(ref);
-    if (!entry) return { stale: generation === 0 ? 'No snapshot was taken on this page yet.' : `There is no ${ref} in the last snapshot.` };
+    if (!entry) return { stale: generation === 0 ? 'No snapshot was taken on this page yet.' : `${ref} is not in the latest snapshot (a newer snapshot or a takeover replaced it).` };
     if (!entry.el.isConnected) return { stale: `${ref} has left the page.` };
     const role = roleOf(entry.el);
     if (role !== entry.role || nameOf(entry.el, role) !== entry.name) return { stale: `${ref} was ${entry.role} "${entry.name}" and the page has changed it.` };
@@ -361,10 +376,16 @@ function pageScript(limit: number) {
     return { met: true };
   }
 
-  return { snapshot, point, focus, select, mark, scrollBy, check };
+  /** The person took over: every ref handed out so far stops working. */
+  function revoke(): true {
+    refs = new Map();
+    return true;
+  }
+
+  return { snapshot, point, focus, select, mark, scrollBy, check, revoke };
 }
 
 /** One call on the page script, with JSON arguments; the first call in a document defines it. */
-export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check', ...args: PageArgument[]): string {
+export function pageCall(method: 'snapshot' | 'point' | 'focus' | 'select' | 'mark' | 'scrollBy' | 'check' | 'revoke', ...args: PageArgument[]): string {
   return `(globalThis.__paneBrowser ??= (${pageScript.toString()})(${SNAPSHOT_CHAR_LIMIT})).${method}(${args.map(arg => JSON.stringify(arg ?? null)).join(', ')})`;
 }

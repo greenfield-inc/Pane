@@ -51,6 +51,19 @@ function browser(pane: IsolatedPane, from: Caller | undefined, verb: string, arg
   });
 }
 
+/** The ref a snapshot gave an element, by its role and name (`textbox "Email"`). Refs count up across snapshots. */
+function refIn(snapshot: string | undefined, label: string): string {
+  const ref = new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\n]*\\[ref=(e\\d+)\\]`).exec(snapshot ?? '')?.[1];
+  if (!ref) throw new Error(`No ref for ${label} in the snapshot:\n${snapshot ?? ''}`);
+  return ref;
+}
+
+/** Snapshots the agent's tab and returns a finder for its refs. */
+async function refs(pane: IsolatedPane, from: Caller): Promise<(label: string) => string> {
+  const reading = await browser(pane, from, 'snapshot');
+  return label => refIn(reading.snapshot, label);
+}
+
 async function shot(page: Page, name: string): Promise<void> {
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
 }
@@ -103,24 +116,25 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     const opened = await browser(pane, agent, 'open', ['--url', `${origin}/`]);
     expect(opened).toMatchObject({ ok: true, reused: false });
     const read = await browser(pane, agent, 'snapshot');
-    expect(read.snapshot).toContain('textbox "Email" [ref=e2]');
-    expect(await browser(pane, agent, 'type', ['--ref', 'e2', '--text', 'ada@example.com'])).toMatchObject({ ok: true });
-    await browser(pane, agent, 'type', ['--ref', 'e3', '--text', 'hunter22']);
-    await browser(pane, agent, 'select', ['--ref', 'e4', '--values', '["Canada"]']);
-    await browser(pane, agent, 'click', ['--ref', 'e5']);
+    expect(read.snapshot).toMatch(/textbox "Email" \[ref=e\d+\]/);
+    const form = (label: string) => refIn(read.snapshot, label);
+    expect(await browser(pane, agent, 'type', ['--ref', form('textbox "Email"'), '--text', 'ada@example.com'])).toMatchObject({ ok: true });
+    await browser(pane, agent, 'type', ['--ref', form('textbox "Password"'), '--text', 'hunter22']);
+    await browser(pane, agent, 'select', ['--ref', form('combobox "Country"'), '--values', '["Canada"]']);
+    await browser(pane, agent, 'click', ['--ref', form('button "Create account"')]);
     // The tab shows who drives while the agent's calls run.
     await expect(page.getByTestId('browser-driver-chip')).toContainText('is driving');
     await shot(page, 'j1-agent-driving');
     const after = await browser(pane, agent, 'snapshot');
     expect(after.snapshot).toContain('Welcome, ada@example.com (ca)');
     // J8: the password is dots in the snapshot, never its value.
-    expect(after.snapshot).toContain('textbox "Password" [ref=e3]: "••••••••"');
+    expect(after.snapshot).toMatch(/textbox "Password" \[ref=e\d+\]: "••••••••"/);
     expect(after.snapshot).not.toContain('hunter22');
     const screenshot = await browser(pane, agent, 'screenshot');
     expect(screenshot).toMatchObject({ ok: true, mimeType: 'image/png' });
 
     // J3: a confirm() is held; nothing else runs until it is answered.
-    const clicked = await browser(pane, agent, 'click', ['--ref', 'e6']);
+    const clicked = await browser(pane, agent, 'click', ['--ref', refIn(after.snapshot, 'button "Delete account"')]);
     expect(clicked.dialog).toEqual({ type: 'confirm', message: 'Delete everything?' });
     expect((await browser(pane, agent, 'snapshot')).code).toBe('ERR_BROWSER_DIALOG_PENDING');
     await browser(pane, agent, 'dialog', ['--accept']);
@@ -129,11 +143,11 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     // J5: evaluate, and upload from the worktree only.
     writeFileSync(path.join(agent.worktree, 'avatar.png'), 'png');
     writeFileSync(path.join(agent.worktree, '.env'), 'SECRET=1');
-    await browser(pane, agent, 'snapshot');
-    expect(await browser(pane, agent, 'upload', ['--ref', 'e7', '--paths', '["avatar.png"]'])).toMatchObject({ ok: true });
+    const avatar = (await refs(pane, agent))('button "Avatar"');
+    expect(await browser(pane, agent, 'upload', ['--ref', avatar, '--paths', '["avatar.png"]'])).toMatchObject({ ok: true });
     expect(await browser(pane, agent, 'wait', ['--text', 'Picked avatar.png'])).toMatchObject({ ok: true });
-    expect((await browser(pane, agent, 'upload', ['--ref', 'e7', '--paths', '[".env"]'])).code).toBe('ERR_BROWSER_PATH_REFUSED');
-    expect((await browser(pane, agent, 'upload', ['--ref', 'e7', '--paths', '["/etc/hosts"]'])).code).toBe('ERR_BROWSER_PATH_REFUSED');
+    expect((await browser(pane, agent, 'upload', ['--ref', avatar, '--paths', '[".env"]'])).code).toBe('ERR_BROWSER_PATH_REFUSED');
+    expect((await browser(pane, agent, 'upload', ['--ref', avatar, '--paths', '["/etc/hosts"]'])).code).toBe('ERR_BROWSER_PATH_REFUSED');
     const big = await browser(pane, agent, 'evaluate', ['--expression', '"x".repeat(100000)']);
     expect(big).toMatchObject({ ok: true, truncated: true });
 
@@ -148,8 +162,7 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
     expect(await browser(pane, agent, 'navigate', ['--reload'])).toMatchObject({ ok: true, title: 'Next' });
     expect((await browser(pane, agent, 'wait', ['--text', 'never there', '--timeout-ms', '800'])).code).toBe('ERR_BROWSER_WAIT_TIMEOUT');
     expect(await browser(pane, agent, 'open', ['--url', `${origin}/`])).toMatchObject({ ok: true, reused: true });
-    await browser(pane, agent, 'snapshot');
-    await browser(pane, agent, 'type', ['--ref', 'e2', '--text', 'grace@example.com']);
+    await browser(pane, agent, 'type', ['--ref', (await refs(pane, agent))('textbox "Email"'), '--text', 'grace@example.com']);
     await browser(pane, agent, 'press', ['--key', 'Enter']);
     expect(await browser(pane, agent, 'wait', ['--text', 'Welcome, grace@example.com'])).toMatchObject({ ok: true });
 
@@ -166,21 +179,25 @@ test('agents drive a Pane\'s browser tabs: act, hand over to the person, answer 
 
     // J2: the person clicks into the page while the agent drives: they drive until they stop, and
     // the agent's refs go stale.
-    await browser(pane, agent, 'snapshot');
+    let email = (await refs(pane, agent))('textbox "Email"');
     const box = await page.locator('webview').last().boundingBox();
     if (!box) throw new Error('The browser tab has no page on screen.');
     const touch = { x: box.x + box.width / 2, y: box.y + 200 };
-    await browser(pane, agent, 'click', ['--ref', 'e2']);
+    await browser(pane, agent, 'click', ['--ref', email]);
     // Input within 300 ms of the agent's own counts as the agent's; the person comes a moment later.
     await page.waitForTimeout(500);
-    await page.mouse.click(touch.x, touch.y);
-    expect((await browser(pane, agent, 'click', ['--ref', 'e2'])).code).toBe('ERR_BROWSER_STALE_REF');
-    await browser(pane, agent, 'snapshot');
-    expect(await browser(pane, agent, 'click', ['--ref', 'e2'])).toMatchObject({ ok: true });
+    // A synthetic click into a webview that lacks focus can miss it; retry until Pane sees the person.
+    await expect(async () => {
+      await page.mouse.click(touch.x, touch.y);
+      await expect(page.getByTestId('browser-agent-overlay').last()).toHaveAttribute('data-driving', 'person', { timeout: 600 });
+    }).toPass({ timeout: 15_000 });
+    expect((await browser(pane, agent, 'click', ['--ref', email])).code).toBe('ERR_BROWSER_STALE_REF');
+    email = (await refs(pane, agent))('textbox "Email"');
+    expect(await browser(pane, agent, 'click', ['--ref', email])).toMatchObject({ ok: true });
     // Take over holds until Hand to: the agent's next call waits, then runs.
     await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Take over' }).click();
-    await browser(pane, agent, 'snapshot');
-    const waiting = browser(pane, agent, 'click', ['--ref', 'e2']);
+    email = (await refs(pane, agent))('textbox "Email"');
+    const waiting = browser(pane, agent, 'click', ['--ref', email]);
     await expect(page.getByTestId('browser-driver-chip')).toContainText("You're driving · Claude is waiting");
     await shot(page, 'j2-person-driving');
     await page.getByTestId('browser-driver-chip').getByRole('button', { name: 'Hand to Claude' }).click();
