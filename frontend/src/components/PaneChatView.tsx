@@ -20,7 +20,8 @@ import { SwitchToChatPaletteEntry } from './panels/SwitchToChat';
 import { PanelContainer } from './panels/PanelContainer';
 import { DropOverlay } from './panels/DropOverlay';
 import { SessionWorkspacePanels } from './SessionWorkspacePanels';
-import { SessionTodosTab } from './todos/SessionTodosTab';
+import { SessionTodosTab, showSessionTodo } from './todos/SessionTodosTab';
+import { SessionTodosSidebar } from './todos/SessionTodosSidebar';
 import { SessionTileLayout, type SessionTileContext } from './SessionTileLayout';
 import { Button } from './ui/Button';
 import { SessionWorkspaceSkeleton } from './SessionWorkspaceSkeleton';
@@ -814,6 +815,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
           />}
             todosContent={<SessionTodosTab sessionId={view.session.id} inChat={view.panel.id} />}
             todosWaiting={todosWaiting}
+            sidebarTodosContent={showTodosTab => <SessionTodosSidebar sessionId={view.session.id} onOpen={number => { showSessionTodo(view.session.id, number); showTodosTab(); }} />}
             changesContent={<SessionChangesPanel overview={overview} error={overviewError} onRetry={onRetry} />} />
         </SessionProvider>
       </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ListTodo, Plus } from 'lucide-react';
 import { create } from 'zustand';
 import { todoRef } from '../../../../shared/types/todos';
+import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { useSessionTodoEntries, useSessionTodoScope } from '../../stores/todosStore';
 import { countsAsWaiting, selectNotifyItems, useNotifyStore } from '../../stores/notifyStore';
@@ -51,6 +52,11 @@ const useTabMemory = create<TabMemoryState>((set) => ({
   tabs: {},
   update: (sessionId, patch) => set(state => ({ tabs: { ...state.tabs, [sessionId]: { ...(state.tabs[sessionId] ?? FRESH), ...patch } } })),
 }));
+
+/** Opens to-do `number` in a Session's To-dos tab, as a click on its row there would (T-37: the sidebar's To-dos). */
+export function showSessionTodo(sessionId: string, number: number, machineId: string = LOCAL_MACHINE_ID): void {
+  useTabMemory.getState().update(sessionId, { view: { kind: 'todo', number }, selected: `${machineId}:${number}` });
+}
 
 /** Under this width the rows drop T-n and the agent chip, keeping the title, the reason and the time. */
 const NARROW_TAB_PX = 440;

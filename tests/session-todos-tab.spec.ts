@@ -37,8 +37,10 @@ function record(number: number, title: string, extra: Partial<TodoRecord> = {}):
   };
 }
 
-function row(todo: TodoRecord, status: TodoStatus): TodoListRow {
-  return { todo, status, machine: 'This Mac', projectName: 'billing', sessionName: todo.title };
+function row(todo: TodoRecord, status: TodoStatus, subCounts?: TodoListRow['subCounts']): TodoListRow {
+  const made: TodoListRow = { todo, status, machine: 'This Mac', projectName: 'billing', sessionName: todo.title };
+  if (subCounts) made.subCounts = subCounts;
+  return made;
 }
 
 const worker = (name: string) => ({ panelId: `${name}-panel`, name });
@@ -49,7 +51,7 @@ function rows(answered = false): TodoListRow[] {
     row(record(15, 'Pick the dunning email cadence', { assignee: worker('planner'), updatedAt: NOW - 12 * MIN }),
       answered ? { status: 'working', reason: 'planner is writing the cadence into the plan' } : waiting),
     row(record(14, 'Ship receipt PDFs', { assignee: worker('implementer'), updatedAt: NOW - 2 * MIN, summary: 'Render every paid invoice as a PDF receipt, attach it to the receipt email and offer it on the billing page.' }),
-      { status: 'working', reason: 'PR #7 · QA running, 2 of 3 done' }),
+      { status: 'working', reason: 'PR #7 · QA running, 2 of 3 done' }, { done: 2, total: 5 }),
     row(record(16, 'Onboarding email copy', { assignee: worker('writer'), updatedAt: NOW - 6 * MIN }), { status: 'working', reason: 'drafting the welcome email' }),
     row(record(18, 'Tidy the receipt template', { state: 'todo', agent: null, startedAt: null, sessionId: null, updatedAt: NOW - DAY }), { status: 'idle', reason: 'not started', idleReason: 'not_started' }),
     row(record(19, 'Check how the receipt PDF launch went', {
@@ -315,6 +317,87 @@ for (const dark of [false, true]) {
     await still(page, `option1-narrow-${theme}`);
   });
 }
+
+// T-37: the Session's right sidebar has To-dos beside Files and Changes: each requested to-do with its live status,
+// sub-to-do progress and approvals waiting on you; a click opens it in the split's To-dos tab.
+const sidebar = (page: Page) => page.getByRole('complementary', { name: /^Session / });
+const sidebarTodosTab = (page: Page) => sidebar(page).getByRole('tab', { name: /^To-dos/ });
+const sidebarRow = (page: Page, number: number) => page.locator(`[data-testid="sidebar-todo-row"][data-todo="${number}"]`);
+const sidebarRows = (page: Page) => page.getByTestId('sidebar-todo-row').evaluateAll(nodes => nodes.map(node => [Number(node.getAttribute('data-todo')), node.getAttribute('data-status')]));
+
+async function showSidebarTodos(page: Page) {
+  await page.getByRole('button', { name: 'Show details' }).click();
+  await sidebarTodosTab(page).click();
+  await expect(sidebarTodosTab(page)).toHaveAttribute('aria-selected', 'true');
+}
+
+async function sidebarStill(page: Page, name: string) {
+  if (!SHOTS) return;
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${SHOTS}/${name}.png` });
+}
+
+for (const dark of [false, true]) {
+  const theme = dark ? 'dark' : 'light';
+
+  test(`the sidebar's To-dos lists requested to-dos with status, sub-to-do progress and approvals (${theme})`, async ({ page }) => {
+    await open(page, { dark });
+    await page.getByRole('button', { name: 'Show details' }).click();
+    await expect(sidebar(page).getByRole('tab')).toHaveText(['Files', 'Changes', /^To-dos/]);
+    await expect(sidebarTodosTab(page)).toHaveAccessibleName('To-dos, 1 waiting on you');
+    await sidebarTodosTab(page).click();
+    // Open ones in the To-dos screen's status order, then the ones done this week; the one closed ten days ago is not here.
+    expect(await sidebarRows(page)).toEqual([[15, 'waiting'], [14, 'working'], [16, 'working'], [18, 'idle'], [19, 'snoozed'], [12, 'done'], [13, 'done'], [11, 'done']]);
+    await expect(sidebarRow(page, 14).getByTestId('sidebar-todo-progress')).toHaveText('2/5');
+    await expect(sidebarRow(page, 15).getByTestId('sidebar-todo-progress')).toHaveCount(0);
+    await expect(sidebarRow(page, 15).getByTestId('sidebar-todo-waiting')).toHaveText('1');
+    await expect(sidebarRow(page, 14).getByTestId('sidebar-todo-waiting')).toHaveCount(0);
+    await sidebarStill(page, `t37-sidebar-${theme}`);
+
+    // Live: the question answered, T-15 works again and the counts go.
+    await page.evaluate(({ notify, list }) => {
+      window.__paneTestElectronMock.emitNotifySnapshot(notify);
+      window.__paneTestElectronMock.setTodosSnapshot(list);
+    }, { notify: approvals(true), list: snapshot(true) });
+    await expect(sidebarRow(page, 15)).toHaveAttribute('data-status', 'working');
+    await expect(sidebarRow(page, 15).getByTestId('sidebar-todo-waiting')).toHaveCount(0);
+    await expect(sidebarTodosTab(page)).toHaveAccessibleName('To-dos');
+  });
+
+  test(`a Session that requested no to-dos says so quietly in the sidebar (${theme})`, async ({ page }) => {
+    await open(page, { dark, session: DOCS });
+    await showSidebarTodos(page);
+    await expect(page.getByTestId('sidebar-todos-empty')).toHaveText('No to-dos requested from this Session yet.');
+    await sidebarStill(page, `t37-sidebar-empty-${theme}`);
+  });
+
+  test(`at a 1000 px window the sidebar's rows fit (${theme})`, async ({ page }) => {
+    await open(page, { dark, width: 1000 });
+    await showSidebarTodos(page);
+    await expect(sidebarRow(page, 14)).toContainText('Ship receipt PDFs');
+    const spill = await page.getByTestId('sidebar-todos').evaluate((list) => {
+      const right = list.getBoundingClientRect().right;
+      return [...list.querySelectorAll<HTMLElement>('*')].filter(node => node.getBoundingClientRect().right > right + 1).length;
+    });
+    expect(spill).toBe(0);
+    await sidebarStill(page, `t37-sidebar-narrow-${theme}`);
+  });
+}
+
+test('a to-do clicked in the sidebar opens in the split\'s To-dos tab', async ({ page }) => {
+  await open(page);
+  // The split shows Overview, so the click has to bring To-dos forward.
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await showSidebarTodos(page);
+  await sidebarRow(page, 14).click();
+  await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '14');
+  await expect(page.locator('[data-panel-group-id]').getByRole('tab', { name: /^To-dos/ })).toHaveAttribute('aria-selected', 'true');
+  // Back from it, the split's list has the same to-do selected; another click opens that one.
+  await page.getByTestId('todo-page-back').click();
+  await expect(selectedRow(page)).toHaveAttribute('data-todo', '14');
+  await sidebarRow(page, 16).click();
+  await expect(page.getByTestId('todo-page')).toHaveAttribute('data-todo', '16');
+});
 
 test('⌘-click on a row opens the to-do on the To-dos screen, and ↗ opens To-dos grouped by Requested by', async ({ page }) => {
   await open(page);
