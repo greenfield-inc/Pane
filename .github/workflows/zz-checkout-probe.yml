@@ -1,0 +1,55 @@
+# Throwaway probe for P10 (blobless checkout). Reverted before the PR is ready.
+name: Checkout probe
+
+on:
+  pull_request:
+    paths: [ '.github/workflows/zz-checkout-probe.yml' ]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: ${{ matrix.os }} ${{ matrix.mode }} ${{ matrix.rep }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-2022 ]
+        mode: [ shallow, blobless, full ]
+        rep: [ 1, 2 ]
+    steps:
+    - name: Checkout shallow
+      if: matrix.mode == 'shallow'
+      uses: actions/checkout@v7
+
+    - name: Checkout blobless
+      if: matrix.mode == 'blobless'
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+        filter: blob:none
+
+    - name: Checkout full
+      if: matrix.mode == 'full'
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: History operations
+      shell: bash
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        t() { local s=$(date +%s%N); "$@" > /dev/null 2>&1; local rc=$?; echo "$(( ($(date +%s%N) - s) / 1000000 )) ms rc=$rc: $*"; }
+        echo "is-shallow: $(git rev-parse --is-shallow-repository)"
+        echo "promisor: $(git config remote.origin.promisor || echo unset)"
+        echo "partialclonefilter: $(git config remote.origin.partialclonefilter || echo unset)"
+        git --version
+        git count-objects -vH
+        t git merge-base "$BASE_SHA" HEAD
+        t git diff --name-only "$BASE_SHA" HEAD
+        t git diff --quiet "$BASE_SHA" HEAD -- .github/workflows/native-android.yml scripts/ci-native-fingerprint.sh
+        t git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
+        git count-objects -vH
