@@ -39,14 +39,19 @@ test('each message copies as Markdown, and its icon confirms', async ({ page }) 
   await expect(message).toHaveAttribute('data-state', 'copied');
   expect(await clipboard(page)).toBe('Why does pnpm test fail?');
 
-  await page.getByRole('button', { name: 'Copy response' }).first().click();
+  const response = page.getByRole('button', { name: 'Copy response' }).first();
+  await response.click();
+  await expect(response).toHaveAttribute('data-state', 'copied');
   // D-182: the agent's text only, without its activity lines.
   expect(await clipboard(page)).toBe('The `a.test.ts` suite imports a file that moved. Change the import:\n\n```ts\nimport { a } from "./lib/a";\n```');
 });
 
 test('the whole conversation copies with speaker labels', async ({ page }) => {
   await open(page);
-  await page.getByRole('button', { name: 'Copy conversation' }).click();
+  const copy = page.getByRole('button', { name: 'Copy conversation' });
+  await copy.click();
+  // The conversation loads before it is written, so wait for the button to confirm.
+  await expect(copy).toHaveAttribute('data-state', 'copied');
   const conversation = await clipboard(page);
   expect(conversation.startsWith('**You:**\n\nWhy does pnpm test fail?\n\n**Claude:**\n\n')).toBe(true);
   expect(conversation).toContain('- Ran `pnpm test` (failed)');
@@ -57,6 +62,8 @@ test('the whole conversation copies with speaker labels', async ({ page }) => {
 test('a code block keeps its own copy button, for the code alone', async ({ page }) => {
   await open(page);
   await page.locator('.chat-code').hover();
-  await page.getByRole('button', { name: 'Copy code' }).click();
+  const code = page.getByRole('button', { name: 'Copy code' });
+  await code.click();
+  await expect(code).toHaveAttribute('data-state', 'copied');
   expect(await clipboard(page)).toBe('import { a } from "./lib/a";');
 });
