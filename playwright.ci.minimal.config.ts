@@ -76,6 +76,7 @@ const BROWSER_SPECS = [
   'shortcut-sheet.spec.ts',
   'shortcuts-settings.spec.ts',
   'sidebar-compact.spec.ts',
+  'sidebar-resize.spec.ts',
   'sidebar-session-status.spec.ts',
   'smoke.spec.ts',
   'split-groups.spec.ts',
