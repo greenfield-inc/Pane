@@ -46,3 +46,25 @@ test('a host on an older Pane gets the page\'s own copy, and says so', async ({ 
   await openConnectedRemotePwa(page, { browserPanels: [{ title: 'Browser', url: '' }], activePanelIndex: 2 });
   await expect(page.getByText('MacBook Pro is on an older Pane. Showing your own copy.')).toBeVisible();
 });
+
+test('a tap on a phone takes control first, then clicks where it lands', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const page = await context.newPage();
+  const host = await openConnectedRemotePwa(page, {
+    browserPanels: [{ title: 'Sign up', url: 'http://localhost:5173/signup' }],
+    activePanelIndex: 2,
+    browserStream: {},
+  });
+  const stream = page.getByTestId('browser-stream');
+  await expect(stream.getByText(/Loading the page/)).toHaveCount(0);
+  const box = await stream.boundingBox();
+  if (!box) throw new Error('The stream has no box.');
+  const inputs = () => host.browserStream?.calls.filter(call => call.channel === 'browser:input').map(call => call.args[2]) ?? [];
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  // The first tap only takes control: an empty batch, no click.
+  await expect.poll(() => JSON.stringify(inputs())).toBe('[[]]');
+  await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+  // Then a tap is a mouse press and release at the page point under the finger.
+  await expect.poll(() => JSON.stringify(inputs().flat())).toMatch(/"kind":"mouse","action":"down","x":400(\.\d+)?,"y":300.*"kind":"mouse","action":"up"/);
+  await context.close();
+});
