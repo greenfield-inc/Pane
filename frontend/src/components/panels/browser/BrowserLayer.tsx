@@ -4,6 +4,8 @@ import { usePanelStore } from '../../../stores/panelStore';
 import { panelApi } from '../../../services/panelApi';
 import { PanelErrorBoundary } from '../PanelErrorBoundary';
 import { reportShownTabs, type WatchedTab } from './browserWatch';
+import { StreamedBrowserPanel } from './stream/StreamedBrowserPanel';
+import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
 
 const BrowserPanel = lazy(() => import('./BrowserPanel'));
 
@@ -67,6 +69,8 @@ export const BrowserLayer = memo(function BrowserLayer() {
   useSyncExternalStore(subscribe, () => version);
   const panelsBySession = usePanelStore(state => state.panels);
   const [, relayout] = useState(0);
+  // On a desktop showing another computer's Pane, tabs stream from that computer (S3).
+  const remote = useRemoteRuntimeState().connectionState.mode === 'remote';
 
   useEffect(() => {
     const onHeld = (event: Event) => {
@@ -144,7 +148,9 @@ export const BrowserLayer = memo(function BrowserLayer() {
           <div key={id} style={style} aria-hidden={!visible} inert={!visible ? true : undefined} data-browser-page={id} data-browser-page-visible={visible}>
             <PanelErrorBoundary panelId={panel.id}>
               <Suspense fallback={null}>
-                <BrowserPanel panel={panel} isActive={visible} />
+                {remote
+                  ? <StreamedBrowserPanel panel={panel} isActive={visible} ownCopy={() => <BrowserPanel panel={panel} isActive={visible} />} />
+                  : <BrowserPanel panel={panel} isActive={visible} />}
               </Suspense>
             </PanelErrorBoundary>
           </div>

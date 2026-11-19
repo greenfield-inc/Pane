@@ -948,6 +948,12 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     void driver.listen().catch(() => undefined);
   }
 
+  /** A closed tab, as a screen still showing it reads it. */
+  function goneView(): PaneCommandValue {
+    const view: BrowserTabView = { version: 0, url: '', title: '', loading: false, canGoBack: false, canGoForward: false, pointer: 'default', downloads: [], host: host.name(), stopped: 'gone' };
+    return JSON.parse(JSON.stringify(view));
+  }
+
   function tabView(tabId: string, tab: ToolPanel): BrowserTabView {
     const state = tabState(tab);
     const page = host.page(tabId);
@@ -983,13 +989,13 @@ export function registerBrowserHandlers(services: BrowserServices, commandRegist
     const id = decodeOptionalBoundary(panelId, boundary.string);
     const after = decodeOptionalBoundary(afterValue, boundary.number) ?? 0;
     const tab = id ? host.tab(id) : undefined;
-    if (!id || !tab) return { version: 0, stopped: 'gone' };
+    if (!id || !tab) return goneView();
     const page = host.page(id);
     if (page && !page.isDestroyed()) followPage(id, page);
     const view = viewOf(id);
     await waitFor(view.waiters, VIEW_WAIT_MS, () => view.version > after || host.tab(id) === undefined);
     const now = host.tab(id);
-    return now ? JSON.parse(JSON.stringify(tabView(id, now))) : { version: 0, stopped: 'gone' };
+    return now ? JSON.parse(JSON.stringify(tabView(id, now))) : goneView();
   });
 
   return () => clearInterval(sweeper);

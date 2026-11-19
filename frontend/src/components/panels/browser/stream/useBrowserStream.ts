@@ -1,0 +1,88 @@
+import { useEffect, useRef, useState } from 'react';
+import type { BrowserFrame, BrowserTabView } from '../../../../../../shared/types/browserStream';
+import { isOlderHost, type BrowserStreamClient } from './streamClient';
+
+/** Why the stream shows no live frames: the host can't be reached, has no stream, or the tab sleeps or went. */
+export type StreamStop = 'unreachable' | 'older' | 'asleep' | 'gone';
+
+export interface BrowserStream {
+  frame?: BrowserFrame;
+  view?: BrowserTabView;
+  stop?: StreamStop;
+}
+
+/** Retries after a failed read back off from 500 ms to 5 s. */
+const RETRY_MIN_MS = 500;
+const RETRY_MAX_MS = 5_000;
+
+/**
+ * A browser tab streamed from its host while `on`: the newest frame (one read on its way at a
+ * time, so frames come as fast as the link carries them and a still page costs nothing) and the
+ * tab's state. A failed read keeps the last frame and reports why.
+ */
+export function useBrowserStream(client: BrowserStreamClient, panelId: string, on: boolean): BrowserStream & { wake(): void } {
+  const [stream, setStream] = useState<BrowserStream>({});
+  const wakeRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    if (!on) return;
+    let cancelled = false;
+    let seq = 0;
+    let version = 0;
+    let frameRetry = RETRY_MIN_MS;
+    let viewRetry = RETRY_MIN_MS;
+    let timer: number | undefined;
+    const sleep = (ms: number) => new Promise<void>(resolve => { timer = window.setTimeout(resolve, ms); });
+    const older = (error: Error | undefined) => error !== undefined && isOlderHost(error);
+    const frames = async () => {
+      while (!cancelled) {
+        if (document.visibilityState !== 'visible') { await sleep(500); continue; }
+        try {
+          const answer = await client.frame(panelId, seq);
+          if (cancelled) return;
+          frameRetry = RETRY_MIN_MS;
+          if ('frame' in answer) {
+            seq = answer.frame.seq;
+            setStream(current => ({ ...current, frame: answer.frame, stop: undefined }));
+          } else if ('stopped' in answer) {
+            setStream(current => ({ ...current, stop: answer.stopped }));
+            await sleep(2_000);
+          } else {
+            setStream(current => (current.stop === 'unreachable' ? { ...current, stop: undefined } : current));
+          }
+        } catch (cause) {
+          if (cancelled) return;
+          const error = cause instanceof Error ? cause : undefined;
+          setStream(current => ({ ...current, stop: older(error) ? 'older' : 'unreachable' }));
+          if (older(error)) return;
+          await sleep(frameRetry);
+          frameRetry = Math.min(frameRetry * 2, RETRY_MAX_MS);
+        }
+      }
+    };
+    const views = async () => {
+      while (!cancelled) {
+        try {
+          const view = await client.view(panelId, version);
+          if (cancelled) return;
+          viewRetry = RETRY_MIN_MS;
+          version = view.version;
+          setStream(current => ({ ...current, view }));
+        } catch (cause) {
+          if (cancelled) return;
+          if (older(cause instanceof Error ? cause : undefined)) { setStream(current => ({ ...current, stop: 'older' })); return; }
+          await sleep(viewRetry);
+          viewRetry = Math.min(viewRetry * 2, RETRY_MAX_MS);
+        }
+      }
+    };
+    wakeRef.current = () => { seq = 0; setStream(current => ({ ...current, stop: undefined })); };
+    void frames();
+    void views();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      wakeRef.current = () => undefined;
+    };
+  }, [client, panelId, on]);
+  return { ...stream, wake: () => wakeRef.current() };
+}

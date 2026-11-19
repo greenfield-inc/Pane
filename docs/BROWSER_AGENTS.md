@@ -106,8 +106,15 @@ a hidden window and reloads once from its URL.
 When the page doesn't load within 5 seconds, the call fails with `ERR_BROWSER_NOT_SHOWING`. A call
 from an agent on another computer through `runpane workspace` fails with `ERR_BROWSER_LOCAL_ONLY`.
 
-Another computer showing this Pane still draws its own copy of the tab, with its own sign-ins.
-Agent calls never run on that copy, so it doesn't show what an agent does.
+Another desktop showing this Pane (switched to this computer, or in All machines) draws the
+tab as a live stream of that one page, over whichever route it reaches this computer (relay,
+Tailscale or the same network). You drive it there with the mouse, wheel and keyboard: the pointer
+changes shape over links, text you copy lands on that desktop's clipboard, and paste sends that
+desktop's clipboard. Keys with Cmd or Ctrl stay Pane's shortcuts, except select all, copy, cut and
+undo. The page's dialogs and file pickers open on that desktop, and downloads save on this
+computer with a notice there. When this computer can't be reached, the last frame stays dimmed
+until it is back. A desktop showing a computer on an older Pane draws its own copy, as before, and
+says so.
 
 ### Streaming to other screens
 

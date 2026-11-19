@@ -15,7 +15,7 @@ const shown = new Map<string, WatchedTab>();
 let timer: ReturnType<typeof setInterval> | undefined;
 
 function send(panelId: string, tab: WatchedTab | null): void {
-  const report = tab ? { kind: 'desktop', onScreen: document.visibilityState === 'visible', width: tab.width, height: tab.height } : null;
+  const report = tab ? { kind: 'desktop', onScreen: document.visibilityState === 'visible', width: tab.width, height: tab.height, scale: window.devicePixelRatio || 1 } : null;
   void window.electronAPI?.invoke('browser:watch', panelId, VIEWER_ID, report)?.catch(() => undefined);
 }
 
