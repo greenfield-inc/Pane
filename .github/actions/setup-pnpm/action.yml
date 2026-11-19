@@ -55,7 +55,7 @@ runs:
       run: pnpm install --frozen-lockfile --ignore-scripts ${{ steps.cache.outputs.cache-hit == 'true' && '--offline' || '' }}
 
     - name: Save node_modules
-      if: inputs.install == 'true' && inputs.save == 'true' && runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true' && (github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
+      if: inputs.install == 'true' && inputs.save == 'true' && runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: actions/cache/save@v5
       with:
         path: |
