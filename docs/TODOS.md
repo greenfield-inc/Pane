@@ -324,7 +324,7 @@ answered themselves. A comment on a snoozed to-do is held until it wakes.
 **Images.** An image you paste, drop or pick in a comment or reply shows
 under its words as a thumbnail; other files show as chips. An image attached
 to the to-do itself (a file dropped on the split or on the details'
-Attachments, or an agent's `runpane todos attach T-n shot.png`) shows inline
+Files, or an agent's `runpane todos attach T-n shot.png`) shows inline
 too: its line never folds away. A file dropped anywhere on the thread goes to
 the composer. Clicking a thumbnail opens the image in the split, fitted;
 click it again for its actual size. Thumbnails show on the web app too, which

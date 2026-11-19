@@ -66,7 +66,11 @@ function todos(): TodosMockOptions {
       // A to-do on another machine, read through it: its files are on devbox.
       30: base(t30, { machineId: 'devbox', machine: 'devbox', attachments: [{ attachments: [remotePlan] }] }),
     },
-    docs: { '/tmp/t25/plan.md': { kind: 'text', path: '/tmp/t25/plan.md', text: '# Invoice PDFs: plan\n\nRender, store, email.\n' } },
+    docs: {
+      '/tmp/t25/plan.md': { kind: 'text', path: '/tmp/t25/plan.md', text: '# Invoice PDFs: plan\n\nRender, store, email.\n' },
+      // Its worker's Pane was archived: main finds no file there (D-442).
+      '/tmp/t25/decisions.md': { kind: 'missing', path: '/tmp/t25/decisions.md', message: 'There is no file at /tmp/t25/decisions.md any more.' },
+    },
   };
 }
 
@@ -340,3 +344,12 @@ for (const dark of [false, true]) {
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/remote-files-${theme}.png` });
   });
 }
+
+test('a file that is gone says it isn\'t on its machine anymore, with nothing to open (D-442)', async ({ page }) => {
+  await open(page);
+  await openTodo(page, 12);
+  await tab(page, 'Decisions').click();
+  await expect(page.getByTestId('todo-split')).toContainText('Decisions isn\'t on This Mac anymore');
+  await expect(page.getByTestId('todo-split')).not.toContainText('There is no file at');
+  await expect(page.getByTestId('autopilot-doc-missing')).toHaveCount(0);
+});

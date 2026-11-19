@@ -112,7 +112,11 @@ export function FittedImage({ src, label }: { src: string; label: string }) {
 const DOC_LINES = [38, 0, 92, 86, 71, 0, 88, 94, 63, 0, 45, 90, 82, 57, 0, 91, 76];
 
 /** A document tab: an HTML file renders as a page; any other file shows as text. */
-export function AutopilotDocument({ path, label }: { path: string; label: string }) {
+/**
+ * `goneLine` replaces the missing-file message when the file isn't there at all (a to-do's attachment whose Pane
+ * was archived, D-442): one line, and nothing to open outside.
+ */
+export function AutopilotDocument({ path, label, goneLine }: { path: string; label: string; goneLine?: string }) {
   const [content, setContent] = useState<AutopilotDocumentContent | null>(null);
   useEffect(() => {
     let live = true;
@@ -123,6 +127,10 @@ export function AutopilotDocument({ path, label }: { path: string; label: string
     return () => { live = false; };
   }, [path]);
 
+  // `readDocument` words a file that isn't there this way; too large or not allowed reads differently.
+  if (content?.kind === 'missing' && goneLine && content.message.startsWith('There is no file at ')) {
+    return <p className="m-auto max-w-sm text-center text-[13px] text-text-secondary" role="status" data-testid="autopilot-doc-gone">{goneLine}</p>;
+  }
   if (content?.kind === 'missing') {
     return (
       <div className="m-auto max-w-sm text-center text-[13px] text-text-secondary" role="status" data-testid="autopilot-doc-missing">

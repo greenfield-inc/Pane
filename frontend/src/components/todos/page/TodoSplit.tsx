@@ -205,7 +205,7 @@ function SplitAttachment({ detail, attachment, from }: { detail: TodoDetail; att
         {web
           ? <AutopilotWebPage key={attachment.target} src={attachment.target} title={attachment.label} />
           : here
-            ? <AutopilotDocument key={attachment.target} path={attachment.target} label={attachment.label} />
+            ? <AutopilotDocument key={attachment.target} path={attachment.target} label={attachment.label} goneLine={`${attachment.label} isn't on ${attachment.machine ?? detail.machine} anymore`} />
             : <MachineDocument key={attachment.target} item={{ machineId }} path={attachment.target} label={attachment.label} machine={attachment.machine ?? detail.machine} />}
       </div>
     </div>
