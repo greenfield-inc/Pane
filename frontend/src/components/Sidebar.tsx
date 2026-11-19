@@ -32,7 +32,6 @@ import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkey
 import { useRemoteRuntimeState } from '../hooks/useRemoteRuntimeState';
 import { useConnectionPresence } from '../hooks/useConnectionPresence';
 import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
-import { SidebarResizeHandle } from './SidebarResizeHandle';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { getRemoteFooterStatus } from '../utils/remoteRuntimePresentation';
 import { getHostingSummary } from '../utils/machineList';
@@ -128,7 +127,6 @@ interface SidebarProps {
   /** Opens Remote Access with this Tailscale machine's password field. */
   onMachinePasswordRequest: (machineName: string) => void;
   width: number;
-  onResize: (e: React.MouseEvent) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   /** Title-bar slot the toggle and menu render into; null keeps them in the sidebar header. */
@@ -157,7 +155,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onShortcutsClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
+export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRemoteSettingsClick, onMachinePasswordRequest, width, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onShortcutsClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   // Maximize spreads the sidebar over the main area; minimize collapses it to its rail (P4).
   const shellRef = useRef<HTMLDivElement>(null);
@@ -979,7 +977,6 @@ export function Sidebar({ maximized = false, onAboutClick, onSettingsClick, onRe
         className="pane-sidebar-shell bg-surface-secondary text-text-primary h-full flex flex-col relative flex-shrink-0"
         style={{ width: maximized ? '100%' : `${width}px` }}
       >
-        <SidebarResizeHandle onResize={onResize} />
         {maximized && (
           <div className="absolute right-2 top-1 z-20">
             <RestoreRegionButton onRestore={() => setMaximizedRegion(null)} />
