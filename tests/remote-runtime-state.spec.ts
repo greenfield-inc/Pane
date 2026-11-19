@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 declare global {
   interface Window {
@@ -19,7 +19,7 @@ for (const channel of ['connection', 'host'] as const) {
         return snapshot;
       };
     });
-    await page.goto('/');
+    await gotoApp(page);
     await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Remote inactive', exact: true })).toBeVisible();
     await page.evaluate(async channel => {
@@ -33,13 +33,19 @@ for (const channel of ['connection', 'host'] as const) {
         await window.electronAPI.remoteDaemon.updateClientState({ mode: 'remote', activeProfileId: 'remote-fixture' });
       }
     }, channel);
-    const label = channel === 'host' ? 'Remote host live' : 'Connected to remote runtime';
-    await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
+    // On a remote, the rail button is the machine switcher; its mark is solid only while connected.
+    const label = channel === 'host' ? 'Remote host live' : 'Agents run on Fixture remote. Switch machine';
+    const expectPushedState = async () => {
+      const button = page.getByRole('button', { name: label, exact: true });
+      await expect(button).toBeVisible();
+      if (channel === 'connection') await expect(button.getByTestId('machine-mark')).toHaveAttribute('data-presence', 'solid');
+    };
+    await expectPushedState();
     await page.evaluate(async () => {
       window.__releaseRemoteSnapshot();
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     });
-    await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible();
+    await expectPushedState();
     await page.screenshot({ path: testInfo.outputPath(`${channel}-still-current.png`) });
   });
 }

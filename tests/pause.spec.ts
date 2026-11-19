@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 
 const iso = new Date(0).toISOString();
@@ -43,7 +43,7 @@ async function open(page: Page) {
       },
     });
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await gotoApp(page);
 }
 
 const pauseCalls = async (page: Page): Promise<string> => (await page.evaluate(() => window.localStorage.getItem('pause-calls'))) ?? '[]';

@@ -15,6 +15,17 @@ async function openBrowserPanel(page: Page, url = ''): Promise<void> {
   await page.addScriptTag({ content: fixture });
 }
 
+/** Sends a guest event to the tab's `<webview>` once the panel listens for it, the guest now reporting `url`. */
+async function guestEvent(page: Page, type: string, url: string, { canGoBack, fields = {} }: { canGoBack?: boolean; fields?: { isMainFrame: boolean; errorCode: number; errorDescription: string } } = {}): Promise<void> {
+  const webview = page.locator('webview');
+  await expect.poll(() => webview.evaluate((element, event) => window.portsTest.listensTo(element, event), type)).toBe(true);
+  await webview.evaluate((element, event) => {
+    Object.assign(element, { getURL: () => event.url });
+    if (event.canGoBack !== undefined) Object.assign(element, { canGoBack: () => event.canGoBack, canGoForward: () => false });
+    element.dispatchEvent(Object.assign(new Event(event.type), event.fields));
+  }, { type, url, canGoBack, fields });
+}
+
 const answerPortsList = (page: Page, ports: ListeningPortsSnapshot) => page.evaluate(value => window.portsTest.answerPortsList(value), ports);
 const answerConnectionState = (page: Page, mode: 'local' | 'remote') => page.evaluate(value => window.portsTest.answerConnectionState(value), mode);
 const emitPorts = (page: Page, ports: ListeningPortsSnapshot) => page.evaluate(value => window.portsTest.emitPorts(value), ports);
@@ -157,6 +168,16 @@ test.describe('a remote desktop loading a host page', () => {
   });
 });
 
+test('a page that loads after its skeleton shows still follows the page\'s own navigation', async ({ page }) => {
+  await openBrowserPanel(page, 'http://localhost:5173/login');
+  await expect(page.locator('[data-skeleton="visible"]')).toBeAttached();
+  await loadConfig(page, 'local');
+
+  await guestEvent(page, 'did-navigate', 'http://localhost:5173/settings', { canGoBack: true });
+  await expect(page.getByPlaceholder('Enter a URL (e.g. localhost:3000)')).toHaveValue('http://localhost:5173/settings');
+  await expect(page.getByTitle('Back')).toBeEnabled();
+});
+
 test('Open in your browser hands the tab\'s address to the OS, and says why when it cannot', async ({ page }) => {
   await openBrowserPanel(page, 'http://localhost:5173/login');
   await loadConfig(page, 'local');
@@ -166,18 +187,12 @@ test('Open in your browser hands the tab\'s address to the OS, and says why when
   await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['http://localhost:5173/login']);
 
   // A link clicked inside the page moves the tab without a new address being typed.
-  await page.locator('webview').evaluate(webview => {
-    Object.assign(webview, { getURL: () => 'http://localhost:5173/settings', canGoBack: () => true, canGoForward: () => false });
-    webview.dispatchEvent(new Event('did-navigate'));
-  });
+  await guestEvent(page, 'did-navigate', 'http://localhost:5173/settings', { canGoBack: true });
   await open.click();
   await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally.at(-1))).toBe('http://localhost:5173/settings');
 
   // A page that fails to load never sends did-navigate, but the tab shows its address.
-  await page.locator('webview').evaluate(webview => {
-    Object.assign(webview, { getURL: () => 'http://localhost:5174/' });
-    webview.dispatchEvent(Object.assign(new Event('did-fail-load'), { isMainFrame: true, errorCode: -102, errorDescription: 'ERR_CONNECTION_REFUSED' }));
-  });
+  await guestEvent(page, 'did-fail-load', 'http://localhost:5174/', { fields: { isMainFrame: true, errorCode: -102, errorDescription: 'ERR_CONNECTION_REFUSED' } });
   await open.click();
   await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally.at(-1))).toBe('http://localhost:5174/');
 
@@ -193,17 +208,11 @@ test('Open in your browser opens a local .html page, and says why when it cannot
   await page.getByTitle('Open in your browser').click();
   await expect.poll(() => page.evaluate(() => window.portsTest.openedLocally)).toEqual(['file:///Users/me/status.html browser-1']);
 
-  await page.locator('webview').evaluate(webview => {
-    Object.assign(webview, { getURL: () => 'file:///Users/me/notes.txt', canGoBack: () => true, canGoForward: () => false });
-    webview.dispatchEvent(new Event('did-navigate'));
-  });
+  await guestEvent(page, 'did-navigate', 'file:///Users/me/notes.txt', { canGoBack: true });
   await page.getByTitle("Can't open in your browser: Only .html and .htm files open in your browser").click();
   await expect(page.getByText("Pane can't open this page in your browser: Only .html and .htm files open in your browser.")).toBeVisible();
 
-  await page.locator('webview').evaluate(webview => {
-    Object.assign(webview, { getURL: () => 'file://server/share/page.html' });
-    webview.dispatchEvent(new Event('did-navigate'));
-  });
+  await guestEvent(page, 'did-navigate', 'file://server/share/page.html');
   await page.getByTitle("Can't open in your browser: This file is on server, not this computer").click();
   await expect(page.getByText("Pane can't open this page in your browser: This file is on server, not this computer.")).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.portsTest.openedLocally)).toHaveLength(1);
@@ -238,10 +247,7 @@ test('on a remote desktop, Open in your browser waits for a forwarded port', asy
   await expect.poll(() => page.evaluate(() => window.portsTest.openedExternally)).toEqual(['http://localhost:5173/']);
 
   // The tab moves to a port the host doesn't forward: the button names that port, not the page before it.
-  await page.locator('webview').evaluate(webview => {
-    Object.assign(webview, { getURL: () => 'http://localhost:5173/' });
-    webview.dispatchEvent(new Event('did-navigate'));
-  });
+  await guestEvent(page, 'did-navigate', 'http://localhost:5173/');
   await page.getByPlaceholder('Enter a URL (e.g. localhost:3000)').fill('localhost:5174');
   await page.keyboard.press('Enter');
   await page.getByTitle("Can't open in your browser: Port 5174 on devbox isn't forwarded to this computer").click();

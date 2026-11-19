@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 test('sidebar drops cleared Git metadata after the host resynchronizes sessions', async ({page}) => {
   const pane = {id: 'status-pane', name: 'Local pane name', projectId: 1,
@@ -11,7 +11,7 @@ test('sidebar drops cleared Git metadata after the host resynchronizes sessions'
     initialSessions: [{...pane, gitStatus: {state: 'ahead', ahead: 1, prTitle: 'Old pull request title', prNumber: 123, prState: 'OPEN'}}],
     initialUiState: {expandedProjects: [1], repositoriesSectionExpanded: true},
   });
-  await page.goto('/');
+  await gotoApp(page);
   await expect(page.getByText('Old pull request title', {exact: true})).toBeVisible();
   await page.evaluate(nextPane => {
     // SAFETY: installElectronApiMock installs these test-only external IPC controls.

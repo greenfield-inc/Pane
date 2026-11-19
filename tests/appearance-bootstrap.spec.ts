@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
 import { readTerminalTheme } from './terminalXterm';
 import type { AppearanceConfig } from '../shared/types/appearance';
+import type { DiffManifest } from '../shared/types/gitDiff';
 
 type AppearanceMock = {
   getBackgroundColorWrites: () => Array<{ theme: string; color: string }>;
@@ -161,6 +162,14 @@ test('terminal palette and rendered diff follow a System slot flip', async ({ pa
     'diff --git a/example.ts b/example.ts', 'index 1111111..2222222 100644', '--- a/example.ts', '+++ b/example.ts',
     '@@ -1 +1 @@', '-export const value = 1;', '+export const value = 2;',
   ].join('\n');
+  const changedFile = { path: 'example.ts', kind: 'modified' as const, additions: 1, deletions: 1, isBinary: false };
+  const manifest: DiffManifest = {
+    scope: { kind: 'session' },
+    files: [changedFile],
+    resolvedBase: { kind: 'comparison-base', ref: 'main', hash: '1111111111111111111111111111111111111111' },
+    resolvedTarget: { kind: 'working-tree' },
+    stats: { additions: 1, deletions: 1, filesChanged: 1 },
+  };
   await page.emulateMedia({ colorScheme: 'light' });
   await installElectronApiMock(page, {
     initialConfig: { appearanceMode: 'system', theme: 'light-rounded', systemLightTheme: 'folio', systemDarkTheme: 'forge' },
@@ -169,7 +178,8 @@ test('terminal palette and rendered diff follow a System slot flip', async ({ pa
       id: 1, session_id: session.id, execution_sequence: 1, after_commit_hash: '2222222', commit_message: 'Change example',
       timestamp: now, stats_additions: 1, stats_deletions: 1, stats_files_changed: 1, author: 'Pane', comparison_branch: 'origin/main', history_source: 'branch',
     }],
-    initialCombinedDiff: { diff, stats: { additions: 1, deletions: 1, filesChanged: 1 }, changedFiles: ['example.ts'] },
+    diffManifests: { session: manifest },
+    fileDiffs: { 'session:example.ts': { file: changedFile, patch: diff, status: 'changed' } },
     initialTerminalStates: { 'appearance-terminal': { scrollbackBuffer: 'ready\r\n' } },
   });
   await page.goto('/');
@@ -186,7 +196,7 @@ test('terminal palette and rendered diff follow a System slot flip', async ({ pa
   const terminalBackground = () => readTerminalTheme(terminalSurface).then((theme) => theme.background ?? '');
   await expect.poll(terminalBackground).not.toBe('');
   const lightBackground = await terminalBackground();
-  await page.getByRole('button', { name: /^Open diff for example\.ts$/ }).click();
+  await page.getByRole('option', { name: /^Open diff for example\.ts,/ }).click();
   await expect(page.getByText('example.ts', { exact: true }).last()).toBeVisible();
   const lightDiffColor = await page.getByText('export const value = 2;', { exact: false }).last().evaluate((element) => getComputedStyle(element).color);
 

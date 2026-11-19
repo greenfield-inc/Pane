@@ -1,7 +1,7 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { installElectronApiMock } from './electronApiMock';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
 
 /**
  * Evidence screenshots for the 15 batch themes (neon, editorial, retro,
@@ -262,7 +262,7 @@ async function openSession(page: Page, theme: string, opts: { highContrast?: boo
     initialUiState: { expandedProjects: [project.id] },
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('html')).toHaveClass(new RegExp(`\\b${theme}\\b`));
   if (highContrast) await expect(page.locator('html')).toHaveClass(/\bhigh-contrast\b/);
@@ -372,7 +372,7 @@ test('appearance picker shows all 15 themes, grouped by family', async ({ page }
     initialPanels: panels,
     activeProjectId: project.id,
   });
-  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await gotoApp(page);
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 15_000 });
   const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
   if (await collapse.isVisible().catch(() => false)) await collapse.click();

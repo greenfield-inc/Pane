@@ -1,58 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
-import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import { installElectronApiMock } from './electronApiMock';
-
-const projects = [
-  {
-    id: 1,
-    name: 'Alpha',
-    path: '/tmp/alpha',
-    active: true,
-    created_at: '2026-01-01T00:00:00.000Z',
-    updated_at: '2026-01-01T00:00:00.000Z',
-  },
-  {
-    id: 2,
-    name: 'Beta',
-    path: '/tmp/beta',
-    active: false,
-    created_at: '2026-01-02T00:00:00.000Z',
-    updated_at: '2026-01-02T00:00:00.000Z',
-  },
-];
-
-function session(
-  id: string,
-  name: string,
-  projectId: number,
-  overrides: JsonObject = {},
-) {
-  return {
-    id,
-    name,
-    projectId,
-    worktreePath: `/tmp/${id}`,
-    prompt: '',
-    status: 'stopped',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    lastActivity: '2026-01-01T00:00:00.000Z',
-    output: [],
-    jsonMessages: [],
-    permissionMode: 'ignore',
-    toolType: 'none',
-    archived: false,
-    isHidden: false,
-    isFavorite: false,
-    ...overrides,
-  };
-}
-
-async function collapseSidebar(page: Page) {
-  const collapse = page.getByRole('button', { name: 'Collapse sidebar' });
-  await expect(collapse).toBeVisible({ timeout: 10_000 });
-  await collapse.click();
-  await expect(page.getByRole('navigation', { name: 'Compact sidebar' })).toBeVisible();
-}
+import { expect, test } from '@playwright/test';
+import { installElectronApiMock, gotoApp } from './electronApiMock';
+import { collapseSidebar, projects, session } from './sidebarCompactFixture';
 
 test.describe('compact sidebar', () => {
   for (const [theme, layout] of [['night-owl', 'single'], ['light', 'single'], ['night-owl', 'two-row'], ['light', 'two-row']]) {
@@ -69,7 +17,7 @@ test.describe('compact sidebar', () => {
         ],
         initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true, pinnedSectionExpanded: true },
       });
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await gotoApp(page);
       await expect(page.locator('html')).toHaveClass(new RegExp(theme));
       const pane = page.getByRole('button', { name: title, exact: true });
       const label = page.getByTestId('sidebar').getByText(title, { exact: true });
@@ -133,7 +81,7 @@ test.describe('compact sidebar', () => {
       initialProjects: projects,
       initialConfig: { theme: 'night-owl' },
     });
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     const projectsToggle = page.getByRole('button', { name: 'Projects', exact: true });
     await expect(projectsToggle).toBeVisible();
     await page.screenshot({ path: 'tmp/verify/sidebar-affordances/projects.png' });
@@ -169,7 +117,7 @@ test.describe('compact sidebar', () => {
         initialProjects: projects,
         initialConfig: { theme: 'night-owl' },
       });
-      await page.goto('/', { waitUntil: 'domcontentloaded' });
+      await gotoApp(page);
       await collapseSidebar(page);
       const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true });
       await expect(expand).toHaveCount(1);
@@ -213,7 +161,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     const pinnedToggle = page.getByRole('button', { name: 'Pinned', exact: true });
     // The pinned row also shows its project name, so match the project header.
@@ -252,7 +200,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     await page.getByRole('button', { name: longPaneTitle, exact: true }).hover();
     const tooltip = page.getByRole('tooltip');
@@ -285,7 +233,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     const repositoryButton = page.getByRole('button', { name: /project Alpha/ });
     await repositoryButton.click();
@@ -300,11 +248,12 @@ test.describe('compact sidebar', () => {
     await expect(fullSidebarPane).toHaveCSS('outline-style', 'none');
     await expect(fullSidebarPane).toHaveCSS('box-shadow', 'none');
     // A pointer press shows shading only, but keyboard focus keeps a visible ring:
-    // the rows are the one way to reach a Pane without a mouse.
+    // the rows are the one way to reach a Pane without a mouse. Sidebar rows are a
+    // keyboard list, so their ring is 1px.
     await page.keyboard.press('Tab');
     await fullSidebarPane.focus();
     await expect(fullSidebarPane).toHaveCSS('outline-style', 'solid');
-    await expect(fullSidebarPane).toHaveCSS('outline-width', '2px');
+    await expect(fullSidebarPane).toHaveCSS('outline-width', '1px');
     await fullSidebarPane.evaluate(element => element.blur());
     await page.mouse.move(640, 360);
     await page.screenshot({
@@ -340,7 +289,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await collapseSidebar(page);
 
     const regularPane = page.getByTestId('compact-repository-pane-regular');
@@ -390,7 +339,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await collapseSidebar(page);
 
     await page.getByTestId('compact-repository-pane-regular').click({ button: 'right' });
@@ -442,7 +391,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await collapseSidebar(page);
 
     await page.getByTestId('compact-repository-pane-regular').hover();
@@ -486,7 +435,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
 
     // The icon renders beside the row's button, so scope to the innermost row container.
     const row = (name: string) => page.locator('div')
@@ -517,7 +466,7 @@ test.describe('compact sidebar', () => {
       },
     });
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await gotoApp(page);
     await expect(page.getByRole('button', { name: 'Projects', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /^(Expand|Collapse) project Alpha$/ })).toHaveCount(0);
     await collapseSidebar(page);
@@ -547,69 +496,4 @@ test.describe('compact sidebar', () => {
     });
   });
 
-  test('uses repository expansion, shared filtering, and stable control sizing', async ({ page }) => {
-    await page.setViewportSize({ width: 640, height: 360 });
-    const extraSessions = Array.from({ length: 8 }, (_, index) =>
-      session(`extra-${index}`, `Extra ${index}`, 1, {
-        createdAt: `2026-01-${String(index + 10).padStart(2, '0')}T00:00:00.000Z`,
-      }));
-
-    await installElectronApiMock(page, {
-      initialConfig: { theme: 'night-owl' },
-      initialProjects: projects,
-      initialSessions: [
-        session('pinned', 'Pinned work', 1, {
-          isFavorite: true,
-          favoritePinnedAt: '2026-01-03T00:00:00.000Z',
-        }),
-        session('regular', 'Regular work', 1),
-        session('beta', 'Beta work', 2),
-        session('hidden', 'Hidden work', 1, { isHidden: true }),
-        ...extraSessions,
-      ],
-      initialUiState: {
-        expandedProjects: [1],
-        pinnedSectionExpanded: false,
-        repositoriesSectionExpanded: true,
-      },
-    });
-
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await collapseSidebar(page);
-
-    await expect(page.getByTestId('compact-pinned-toggle')).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.getByTestId('compact-pinned-pane-pinned')).toHaveCount(0);
-    await expect(page.getByTestId('compact-repository-1')).toBeVisible();
-    await expect(page.getByTestId('compact-repository-pane-pinned')).toBeVisible();
-    await expect(page.getByTestId('compact-repository-pane-regular')).toBeVisible();
-    await expect(page.getByTestId('compact-repository-pane-beta')).toHaveCount(0);
-    await expect(page.getByTestId('compact-repository-pane-hidden')).toHaveCount(0);
-
-    await page.getByTestId('compact-repositories-toggle').click();
-    await expect(page.getByTestId('compact-repositories-toggle')).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.getByTestId('compact-repository-1')).toHaveCount(0);
-
-    await page.getByTestId('compact-repositories-toggle').click();
-    await page.getByTestId('compact-pinned-toggle').click();
-    await expect(page.getByTestId('compact-pinned-pane-pinned')).toBeVisible();
-
-    const itemSizes = await page.locator('[data-compact-rail-item]').evaluateAll(elements =>
-      elements.map(element => {
-        const rect = element.getBoundingClientRect();
-        return { width: rect.width, height: rect.height };
-      }));
-    expect(itemSizes.length).toBeGreaterThan(10);
-    expect(itemSizes.every(({ width, height }) => width === 36 && height === 36)).toBe(true);
-
-    const paneChatSize = await page.getByTestId('compact-pane-chat').boundingBox();
-    expect(paneChatSize?.width).toBe(36);
-    expect(paneChatSize?.height).toBe(36);
-    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
-    await page.getByTestId('compact-repository-1').scrollIntoViewIfNeeded();
-    await page.mouse.move(320, 180);
-    await page.screenshot({
-      path: 'test-results/compact-sidebar-short-repositories.png',
-      clip: { x: 0, y: 0, width: 180, height: 360 },
-    });
-  });
 });
